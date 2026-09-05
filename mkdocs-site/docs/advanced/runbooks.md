@@ -38,7 +38,7 @@ When Prometheus triggers a **HighErrorRate** alert (HTTP 5xx > 5%):
 2. Identify the source of the 5xx errors. Common causes include:
    - External provider failures (e.g., OpenAI API down).
    - Database connection limits exhausted.
-3. If an external provider is down, the Circuit Breaker should open automatically and fail fast. Monitor the logs for "Circuit breaker OPEN" messages.
+3. If an external provider is down, the Circuit Breaker should open automatically and fail fast. Monitor the logs for `Circuit <name>: CLOSED -> OPEN` (or `Circuit <name>: HALF_OPEN -> OPEN` when a probe fails) warnings.
 4. Scale up the `api` or `worker` services if the load is overwhelming the components.
 
 ### Handling API Latency Alerts
@@ -55,7 +55,7 @@ BaselithCore uses circuit breakers to protect against cascading failures from ex
 
 - **Symptoms of an Open Circuit:** Immediate failures without waiting for a timeout when calling the affected service.
 - **Resolution:**
-    - Circuit breakers will automatically transition to "HALF-OPEN" state after the configured timeout period and probe the external service.
+    - Circuit breakers will automatically transition to the `HALF_OPEN` state after the configured timeout period and probe the external service.
     - If the service is healthy again, the circuit breaker resets to "CLOSED".
     - If issues persist, check the provider's status page.
 
@@ -98,7 +98,10 @@ managed Postgres with continuous backup.
 2. `./scripts/restore-db.sh <backup.sql.gz>` (Compose) or pipe the dump into
    `psql` against the managed instance.
 3. Run Alembic migrations if the dump predates the current schema:
-   `baselith db upgrade` (or `alembic upgrade head`).
+   `alembic upgrade head`, or simply start the API — with
+   `DB_MIGRATIONS_ON_STARTUP=true` (the default) the lifespan runs the upgrade
+   itself. `baselith db status` reports connectivity and migration state
+   (the `db` command only has `status` and `reset`).
 4. Verify readiness: `GET /health/ready` returns 200.
 
 ## Routine Maintenance

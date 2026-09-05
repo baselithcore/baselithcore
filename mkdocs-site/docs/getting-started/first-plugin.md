@@ -9,11 +9,11 @@ In this tutorial, we'll build a complete plugin that adds a new agent to the sys
 
 ## Objective
 
-We'll create a plugin called `weather-agent` that:
+We'll create a plugin called `weather_agent` that:
 
-- Responds to weather-related queries
-- Exposes dedicated API endpoints
-- Integrates with the orchestrator
+- Answers weather-related queries through the configured LLM
+- Routes those queries via an intent pattern and a flow handler
+- Exposes a dedicated API endpoint
 
 ---
 
@@ -22,9 +22,10 @@ We'll create a plugin called `weather-agent` that:
 By completing this tutorial, you will:
 
 - Understand the plugin scaffolding process
-- Implement intent patterns and flow handlers
-- Create a specialized agent with external API integration
-- Expose custom REST endpoints
+- Implement an agent that respects the framework lifecycle
+- Inject the LLM service into the agent instead of resolving it globally
+- Register an intent pattern and a flow handler with the orchestrator
+- Expose a custom REST endpoint
 - Write tests for your plugin
 
 ---
@@ -34,168 +35,253 @@ By completing this tutorial, you will:
 Use the CLI to generate the base structure:
 
 ```bash
-baselith plugin create weather-agent --type agent
+baselith plugin create weather_agent --type agent
 ```
+
+!!! tip "Use an underscore in the directory name"
+    The loader imports a plugin as `plugins.<directory-name>` verbatim, so `weather_agent` can be imported from tests with a plain `from plugins.weather_agent.agent import ...`. A hyphenated directory (`weather-agent`) still loads at runtime, but cannot be imported with an `import` statement. Keep the manifest `name` identical to the directory name.
 
 This creates the following structure:
 
 ```text
-plugins/weather-agent/
-├── manifest.json      # Metadata manifest (CLI scaffold default)
-├── __init__.py         # Export plugin
-├── plugin.py           # Main plugin class
-├── agent.py            # Agent logic
-└── README.md           # Documentation
+plugins/weather_agent/
+├── manifest.json       # Metadata manifest
+├── __init__.py         # Exports the plugin class
+├── plugin.py           # Plugin class (capabilities)
+└── agent.py            # Agent logic
 ```
+
+The generator derives class names by splitting the plugin name on `-` and `_`, so `weather_agent` yields `WeatherAgentPlugin` and `WeatherAgentAgent`. The listings below shorten the agent class to `WeatherAgent` — replace the generated files with them as you go.
 
 ---
 
-### 2a. Metadata Manifest
+## 2. Metadata Manifest
 
-The current CLI scaffold creates a `manifest.json` file by default. The framework supports both `manifest.json` and `manifest.yaml`; YAML is preferred when you maintain the manifest by hand or package the plugin for distribution.
+The CLI scaffold writes a `manifest.json`. The framework also accepts `manifest.yaml` / `manifest.yml` (checked first); YAML is convenient when you maintain the manifest by hand or package the plugin for distribution.
 
-```json title="plugins/weather-agent/manifest.json"
+```json title="plugins/weather_agent/manifest.json"
 {
-    "name": "weather-agent",
-    "version": "1.0.0",
-    "description": "Specialized agent for weather information",
-    "author": "Your Name",
-    "tags": ["weather", "agent"]
+    "name": "weather_agent",
+    "version": "0.3.0",
+    "description": "Answers weather questions with the configured LLM",
+    "author": "Baselith User",
+    "tags": ["agent", "weather"],
+    "category": "AI",
+    "icon": "bot",
+    "readiness": "alpha",
+    "environment_variables": []
 }
 ```
 
+The scaffold fills in `version`, `category`, `icon`, `readiness` and an empty `environment_variables` list; edit `description` and `tags` to taste. `Plugin.metadata` reads this file from the plugin directory automatically, so nothing in code repeats it.
+
 !!! tip "YAML vs JSON"
     If you later convert the manifest to `manifest.yaml`, the loader and registry will continue to work without code changes.
-
-### 2b. Plugin implementation
-
-Modify `plugin.py` to define capabilities. The metadata is now automatically loaded!
-
-```python title="plugins/weather-agent/plugin.py"
-from typing import Any, Dict, List
-from core.plugins import AgentPlugin
-from .agent import WeatherAgent
-
-class WeatherAgentPlugin(AgentPlugin):
-    """Plugin for weather queries with dedicated agent."""
-
-    async def initialize(self, config: Dict[str, Any]) -> None:
-        """Initialize the plugin with configuration."""
-        self.config = config
-
-    def create_agent(self, **kwargs) -> WeatherAgent:
-        return WeatherAgent(
-            agent_id="weather-agent",
-            config=self.config
-        )
-
-    def get_agents(self) -> List[Any]:
-        return [self.create_agent()]
-
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
-        """Define patterns that activate this plugin."""
-        return [
-            {
-                "name": "weather",
-                "patterns": [
-                    "weather", "temperature", "forecast",
-                    "rain", "sunny", "climate", "hot", "cold"
-                ],
-                "priority": 100
-            }
-        ]
-
-    def get_routers(self) -> List[Any]:
-        from .router import router
-        return [router]
-```
 
 ---
 
 ## 3. Implement the Agent
 
-Create the agent logic in `agent.py`:
+Replace `agent.py` with the agent logic. The agent receives its LLM service through the constructor — it never looks it up globally — and follows the framework lifecycle via `LifecycleMixin`:
 
-```python title="plugins/weather-agent/agent.py"
-from typing import Optional, Dict, Any
-import logging
-from core.lifecycle import LifecycleMixin, AgentState
-from core.orchestration.protocols import AgentProtocol
-from core.di import ServiceRegistry
+```python title="plugins/weather_agent/agent.py"
+"""Weather agent implementation."""
+
+from typing import Any
+
 from core.interfaces import LLMServiceProtocol
+from core.lifecycle import AgentState, LifecycleMixin
+from core.observability.logging import get_logger
+from core.orchestration.protocols import AgentProtocol
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
 
 class WeatherAgent(LifecycleMixin, AgentProtocol):
-    """Agent for weather queries."""
+    """Answers weather questions through the injected LLM service."""
 
-    def __init__(self, agent_id: str, config: Optional[Dict[str, Any]] = None):
+    name = "weather-agent"
+
+    def __init__(
+        self,
+        agent_id: str,
+        service: LLMServiceProtocol,
+        config: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__()
         self.agent_id = agent_id
+        self.service = service
         self.config = config or {}
-        self.api_key = self.config.get("api_key", "")
-        # Resolve the LLM service from the DI registry. The framework registers
-        # LLMServiceProtocol during startup (see core/api/lifespan.py).
-        self.llm = ServiceRegistry.get(LLMServiceProtocol)
+        self.default_city = self.config.get("default_city", "Rome")
 
     async def _do_startup(self) -> None:
-        logger.info(f"Weather Agent {self.agent_id} starting up...")
+        logger.info(f"Weather agent {self.agent_id} starting up...")
 
-    async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def _do_shutdown(self) -> None:
+        logger.info(f"Weather agent {self.agent_id} shutting down...")
+
+    async def execute(self, input: str, context: dict[str, Any] | None = None) -> str:
         if self.state != AgentState.READY:
-            return "Agent not ready."
+            return f"Agent not ready (State: {self.state})"
 
-        # Implementation of weather logic...
-        return f"The weather in the requested city is sunny (simulated)."
+        prompt = (
+            "You are a concise weather assistant. If the question names no "
+            f"city, assume {self.default_city}.\n\nQuestion: {input}"
+        )
+        return await self.service.generate_response(prompt)
+
+
+__all__ = ["WeatherAgent"]
+```
+
+Key points:
+
+- `LifecycleMixin` starts every agent in `AgentState.UNINITIALIZED`. Until `await agent.startup()` has run — it calls your `_do_startup()` hook and moves the state to `READY` — `execute()` returns the "not ready" message.
+- `service` is anything that satisfies `LLMServiceProtocol`: the real `LLMService` at runtime, a fake in tests.
+- `name` is the key the plugin registry stores the agent under.
+
+---
+
+## 4. Plugin Class and Flow Handler
+
+Replace `plugin.py`. The plugin creates the agent in `initialize()` with the shared LLM service, starts it, and registers an intent pattern plus a flow handler for the `weather` intent:
+
+```python title="plugins/weather_agent/plugin.py"
+"""WeatherAgent plugin implementation."""
+
+from typing import Any
+
+from core.plugins.agent_plugin import AgentPlugin
+from core.services.llm import get_llm_service
+
+from .agent import WeatherAgent
+
+
+class WeatherFlowHandler:
+    """Routes the ``weather`` intent to the agent."""
+
+    def __init__(self, agent: WeatherAgent) -> None:
+        self._agent = agent
+
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        answer = await self._agent.execute(query, context)
+        return {"response": answer, "intent": "weather"}
+
+
+class WeatherAgentPlugin(AgentPlugin):
+    """Plugin providing the WeatherAgent."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._agent: WeatherAgent | None = None
+
+    async def initialize(self, config: dict[str, Any]) -> None:
+        """Create the agent with the shared LLM service and start it."""
+        await super().initialize(config)
+        self._agent = self.create_agent(get_llm_service())
+        await self._agent.startup()
+
+    async def shutdown(self) -> None:
+        if self._agent is not None:
+            await self._agent.shutdown()
+        await super().shutdown()
+
+    def create_agent(self, service: Any, **kwargs: Any) -> WeatherAgent:
+        """Factory method for the agent."""
+        return WeatherAgent(
+            agent_id="weather-agent",
+            service=service,
+            config=self._config,
+        )
+
+    def get_agents(self) -> list[Any]:
+        return [self._agent] if self._agent is not None else []
+
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
+        """Keywords that route a query to the ``weather`` intent."""
+        return [
+            {
+                "name": "weather",
+                "patterns": ["weather", "temperature", "forecast", "rain", "sunny"],
+                "description": "Questions about current or upcoming weather.",
+                "priority": 100,
+            }
+        ]
+
+    def get_flow_handlers(self) -> dict[str, Any]:
+        """Map the ``weather`` intent to its handler."""
+        if self._agent is None:
+            return {}
+        return {"weather": WeatherFlowHandler(self._agent)}
+
+    def get_routers(self) -> list[Any]:
+        from .router import router
+
+        return [router]
+```
+
+How the pieces fit:
+
+- `create_agent(self, service, **kwargs)` is the abstract factory declared by `AgentPlugin`. Nothing in the core calls it for you: the plugin calls it itself, here with `get_llm_service()` — the process-wide LLM service configured from `.env`.
+- `get_intent_patterns()` returns dictionaries keyed by `name`. The registry stores each under its intent name; the orchestrator's intent classifier matches `patterns` as lower-cased substrings of the query and passes `description` to LLM-based classification.
+- `get_flow_handlers()` maps an intent name to a handler exposing `async handle(query, context) -> dict`. When the classifier picks `weather`, the orchestrator invokes that handler and reads the `response` key of the returned dictionary.
+
+Update `__init__.py` to export the renamed class:
+
+```python title="plugins/weather_agent/__init__.py"
+"""weather_agent plugin."""
+
+from .plugin import WeatherAgentPlugin
+
+__all__ = ["WeatherAgentPlugin"]
 ```
 
 ---
 
----
+## 5. Add API Endpoints
 
-## 4. Add API Endpoints
+The agent scaffold does not create a router; add `router.py` yourself:
 
-Create a simple router in `router.py`:
+```python title="plugins/weather_agent/router.py"
+"""Weather plugin API endpoints."""
 
-```python title="plugins/weather-agent/router.py"
 from fastapi import APIRouter
-from pydantic import BaseModel
 
 router = APIRouter(prefix="/weather", tags=["Weather"])
 
+
 @router.get("/status")
-async def get_status():
+async def get_status() -> dict[str, str]:
     return {"status": "ok", "service": "weather"}
 ```
 
----
-
-The endpoint will be available at `/api/weather-agent/weather/status`.
+Plugin routers are mounted under `get_router_prefix()`, which defaults to `/api/<manifest name>`, plus the router's own prefix — so this route lives at `/api/weather_agent/weather/status`.
 
 ---
 
-## 5. Configure the Plugin
+## 6. Configure the Plugin
 
-Add configuration in `configs/plugins.yaml`:
+`configs/plugins.yaml` is a flat mapping: each top-level key is a plugin name (the directory name, the manifest name, or either with `-`/`_` swapped) and its value is handed as-is to `initialize(config)`:
 
 ```yaml title="configs/plugins.yaml"
-plugins:
-  weather-agent:
-    enabled: true
-    config:
-      api_key: "${WEATHER_API_KEY}"  # From .env
-      default_city: "Rome"
+weather_agent:
+  enabled: true
+  default_city: Milan
 ```
 
-And in `.env`:
+There is no `plugins:` wrapper, no `config:` sub-key and no `${VAR}` interpolation — values are literal. Read them with `self.get_config("default_city")` or, as above, by passing the whole mapping to the agent.
 
-```env
-WEATHER_API_KEY=your-api-key-here
+Secrets never go in `plugins.yaml`. Put them in a plugin-local `plugins/weather_agent/.env`. When the plugin loads, keys in the plugin's own `WEATHER_AGENT_` namespace (or listed verbatim in the manifest's `environment_variables`) are exported to `os.environ` without overriding variables that are already set, and every key is merged into the plugin config under its lower-cased name:
+
+```env title="plugins/weather_agent/.env"
+WEATHER_AGENT_API_KEY=your-api-key-here
 ```
+
+`self.get_config("weather_agent_api_key")` then returns it. Framework-global settings are refused from a plugin `.env`.
 
 ---
 
-## 6. Test the Plugin
+## 7. Test the Plugin
 
 ### Verify Loading
 
@@ -203,14 +289,20 @@ WEATHER_API_KEY=your-api-key-here
 baselith plugin list
 ```
 
-Expected output:
+The command prints a Rich table (`Local Plugin Status`) with one row per directory under `plugins/`. The `Config` column shows `✓` when the plugin appears in `configs/plugins.yaml` with `enabled: true`:
 
 ```text
-Loaded Plugins:
-  ✅ weather-agent (v1.0.0) - Specialized agent for weather information
+                              Local Plugin Status
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┓
+┃   Status   ┃ Plugin Name   ┃ Version ┃ Type  ┃ Readiness ┃ Config ┃ Components ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━┩
+│ ✅ Active  │ weather_agent │ 0.3.0   │ Agent │ alpha     │   ✓    │ Agent      │
+└────────────┴───────────────┴─────────┴───────┴───────────┴────────┴────────────┘
 ```
 
 ### Test via Chat
+
+Start the server with `baselith run` and send a query containing one of the patterns. The classifier resolves the `weather` intent and the orchestrator calls the flow handler, which delegates to the agent:
 
 ```bash
 curl -X POST http://localhost:8000/chat \
@@ -229,41 +321,73 @@ This hits the router defined above. Plugin routers are mounted at
 `/api/{plugin-name}` plus the router's own prefix, so the `/status` route lives at:
 
 ```bash
-curl http://localhost:8000/api/weather-agent/weather/status
+curl http://localhost:8000/api/weather_agent/weather/status
 ```
 
 ---
 
-## 7. Add Tests
+## 8. Add Tests
 
-Create tests in `tests/unit/plugins_tests/test_weather_agent_plugin.py`:
+Keep unit tests next to the plugin, as `plugins/example-plugin/tests/` does, and inject a fake LLM service: `ServiceRegistry` is only populated while the application lifespan runs, so a test must never resolve services globally. Remember to start the agent — before `startup()` it is `UNINITIALIZED` and `execute()` refuses to run:
 
-```python title="tests/unit/plugins_tests/test_weather_agent_plugin.py"
+```python title="plugins/weather_agent/tests/test_agent.py"
+"""Unit tests for the weather agent."""
+
 import pytest
+
 from plugins.weather_agent.agent import WeatherAgent
+from plugins.weather_agent.plugin import WeatherAgentPlugin
+
+
+class FakeLLM:
+    """Stands in for the LLM service - no network, deterministic output."""
+
+    async def generate_response(self, prompt, model=None, json=False):
+        return "Sunny, 24 C"
+
 
 @pytest.fixture
-def agent():
-    return WeatherAgent(agent_id="test-key")
+async def agent():
+    agent = WeatherAgent(
+        agent_id="weather-test", service=FakeLLM(), config={"default_city": "Milan"}
+    )
+    await agent.startup()
+    yield agent
+    await agent.shutdown()
 
-class TestWeatherAgent:
-    async def test_execute(self, agent):
-        response = await agent.execute("What's the weather?")
-        assert "sunny" in response.lower()
+
+async def test_execute_uses_llm(agent):
+    response = await agent.execute("What's the weather like?")
+    assert "sunny" in response.lower()
+
+
+async def test_not_ready_before_startup():
+    agent = WeatherAgent(agent_id="weather-test", service=FakeLLM())
+    response = await agent.execute("Any rain today?")
+    assert response.startswith("Agent not ready")
+
+
+def test_plugin_metadata_and_routes():
+    plugin = WeatherAgentPlugin()
+    assert plugin.metadata.name == "weather_agent"
+    assert plugin.get_router_prefix() == "/api/weather_agent"
+    assert plugin.get_intent_patterns()[0]["name"] == "weather"
 ```
 
-Run the tests:
+Run the tests from the repository root:
 
 ```bash
-pytest tests/unit/plugins_tests/test_weather_agent_plugin.py -v
+python -m pytest plugins/weather_agent/tests -v --no-cov
 ```
+
+`asyncio_mode = auto` in `pytest.ini` runs the async fixture and tests without extra markers; `--no-cov` skips the repository-wide coverage gate, which is meant for the full `tests/` suite.
 
 ---
 
 ## Common Pitfalls
 
 !!! warning "API Key Security"
-    Never hardcode API keys in code. Always use environment variables and the configuration system.
+    Never hardcode API keys in code or in `configs/plugins.yaml`. Use the plugin-local `.env` (namespaced keys) or the process environment.
 
 !!! warning "Blocking I/O"
     Always use `httpx` (async) instead of `requests` (blocking) for HTTP calls.
@@ -277,12 +401,12 @@ pytest tests/unit/plugins_tests/test_weather_agent_plugin.py -v
 
 You created a complete plugin that:
 
-- [x] Defines metadata and capabilities
-- [x] Implements a specialized agent
-- [x] Registers patterns for the intent classifier
-- [x] Provides both sync and stream handlers
-- [x] Exposes dedicated API endpoints
-- [x] Is configurable via YAML
+- [x] Defines metadata in a manifest
+- [x] Implements a lifecycle-aware agent with an injected LLM service
+- [x] Registers an intent pattern for the classifier
+- [x] Provides a flow handler for the `weather` intent
+- [x] Exposes a dedicated API endpoint
+- [x] Is configurable via `configs/plugins.yaml`
 - [x] Includes tests
 
 ---

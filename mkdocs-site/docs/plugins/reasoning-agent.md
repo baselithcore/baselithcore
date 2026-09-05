@@ -26,14 +26,25 @@ Most conversational agents and simple RAG (Retrieval-Augmented Generation) appli
 
 ### 1. Enable the Plugin
 
-Enable the plugin in `configs/plugins.yaml`:
+Enable the plugin in `configs/plugins.yaml` (it ships disabled):
 
 ```yaml
 reasoning_agent:
   enabled: true
-  max_steps: 5          # How deep the tree can go
-  branching_factor: 3   # How many alternative thoughts to generate per step
+  max_steps: 5          # Maximum tree depth (default 5)
+  branching_factor: 3   # Thoughts generated per expansion (default 3)
 ```
+
+`ReasoningAgentPlugin.get_flow_handlers()` builds the handler as
+`ReasoningFlowHandler(agent, config_provider=self.get_config)`, so the two
+tuning keys are read from this entry through the plugin's
+`get_config(key, default)`. For every request the handler resolves each value
+in this order:
+
+1. the `max_steps` / `branching_factor` key in the request `context` dict;
+2. the `reasoning_agent:` entry in `configs/plugins.yaml`;
+3. the built-in defaults, `5` and `3` (also used when the config value is
+   `None` or the lookup raises).
 
 ### 2. Triggering the Agent
 
@@ -61,7 +72,7 @@ print(result["tree_visualization"]) # Shows the branching paths evaluated
 
 ## Technical Details
 
-The Reasoning Agent utilizes the **Monte Carlo Tree Search (MCTS)** patterns implemented in `core/reasoning` to navigate the thought space. It evaluates each "thought" using a reward function that can be LLM-based or heuristic-based.
+`ReasoningAgent` wraps `core.reasoning.tot.TreeOfThoughtsAsync`. `solve()` forwards the request as `tot_engine.solve(problem=..., k=branching_factor, max_steps=max_steps, tools=[sandbox])` (the `tools` list is empty when no `SandboxService` was injected) and does not override the engine's `strategy` argument, so the search runs with the engine default, `"mcts"` — Monte Carlo Tree Search over the thought tree (`"bfs"` is the alternative). Each generated thought is scored by an LLM call built from `THOUGHT_EVALUATION_PROMPT`; sibling evaluations are fanned out concurrently and routed through the shared `ThoughtCache`, so identical thoughts reuse an earlier score, and a failed evaluation scores `0.0`. The result dict carries `best_solution`, `steps` (the path from the root to the best leaf) and `tree_visualization` (a Mermaid export of the whole tree).
 
 !!! tip "Sandbox Integration"
-    For technical tasks, provided a `SandboxService` to the agent. It will attempt to verify its reasoning by running code simulations in a secure environment.
+    For technical tasks, provide a `SandboxService` to the agent — `ReasoningAgentPlugin.create_agent()` does so automatically when `core.services.sandbox.service` is importable. The sandbox is handed to the ToT engine in its `tools` list, which the engine can use during thought execution.

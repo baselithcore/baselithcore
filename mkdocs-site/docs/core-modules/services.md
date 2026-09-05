@@ -1436,41 +1436,48 @@ SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 
 ## Optimizer
 
-LLM-driven performance tuning for agents (`core/optimization/optimizer.py`).
+LLM-driven prompt tuning for agents (`core/optimization/optimizer.py`).
+`PromptOptimizer` takes the `FeedbackCollector` it mines for negative feedback
+(the LLM service is resolved lazily through `get_llm_service()`) and an
+optional `tune_evaluator` consulted by the auto-tune eval gate
+(`BASELITH_OPTIMIZER_EVAL_GATE=true`; with the gate enabled and no evaluator,
+applications are refused — fail closed).
 
 ```python
-from core.optimization.optimizer import HyperParameterOptimizer, TuneResult
+from core.optimization.optimizer import PromptOptimizer, TuneResult
 
-optimizer = HyperParameterOptimizer(llm_service=llm)
+optimizer = PromptOptimizer(feedback_collector=collector)
 
-# Dry-run: get suggestion without applying
-result: TuneResult = await optimizer.auto_tune(agent_id="summarizer-v2")
-print(result.suggestion)   # {"temperature": 0.3, "max_tokens": 512, ...}
-print(result.applied)      # False (dry_run=True by default)
+# Dry-run: get suggestion without applying.
+# Returns None when the LLM service is unavailable or the agent has no
+# negative feedback (score < 0.6) to learn from.
+result: TuneResult | None = await optimizer.auto_tune(agent_id="summarizer-v2")
+if result is not None:
+    print(result.suggestion)   # refined system-prompt text (str)
+    print(result.applied)      # False (dry_run=True by default)
 
-# Auto-apply via callback
-async def apply_config(agent_id: str, suggestion: dict) -> bool:
-    agent = get_agent(agent_id)
-    agent.update_config(suggestion)
+# Auto-apply via callback: async (agent_id, new_prompt) -> bool
+async def apply_prompt(agent_id: str, new_prompt: str) -> bool:
+    await prompt_store.save(agent_id, new_prompt)   # your persistence
     return True
 
 result = await optimizer.auto_tune(
     agent_id="summarizer-v2",
-    apply_fn=apply_config,
+    apply_fn=apply_prompt,
     dry_run=False,
 )
 print(result.applied)            # True
-print(optimizer.get_history())   # [{agent_id, suggestion, timestamp}, ...]
+print(optimizer.get_history())   # [{agent_id, suggestion, applied, dry_run}, ...]
 ```
 
 ### `TuneResult` Fields
 
-| Field            | Type    | Description                         |
-| ---------------- | ------- | ----------------------------------- |
-| `agent_id`       | `str`   | Agent that was tuned                |
-| `suggestion`     | `dict`  | LLM-generated parameter suggestions |
-| `applied`        | `bool`  | Whether the suggestion was applied  |
-| `previous_score` | `float` | Performance score before tuning     |
+| Field            | Type    | Description                            |
+| ---------------- | ------- | -------------------------------------- |
+| `agent_id`       | `str`   | Agent that was tuned                   |
+| `suggestion`     | `str`   | LLM-generated system-prompt refinement |
+| `applied`        | `bool`  | Whether the suggestion was applied     |
+| `previous_score` | `float` | Performance score before tuning        |
 
 ### Optimization Loop (event-driven)
 
@@ -1481,7 +1488,7 @@ from core.optimization import OptimizationLoop
 
 loop = OptimizationLoop(
     feedback_collector=collector,
-    apply_fn=apply_config,
+    apply_fn=apply_prompt,
     threshold=0.5,     # trigger when score < 0.5
     dry_run=False,     # actually apply suggestions
 )
@@ -1586,14 +1593,31 @@ Timeouts are enforced via `asyncio.wait_for()`. If no response is received withi
 All services follow the protocol pattern:
 
 ```python
-# core/interfaces/llm.py
+# core/interfaces/services.py
 class LLMServiceProtocol(Protocol):
-    async def generate(self, prompt: str, **kwargs) -> LLMResponse: ...
-    async def stream(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]: ...
+    async def generate_response(
+        self, prompt: str, model: str | None = None, json: bool = False
+    ) -> str: ...
 
-# Implementation
-class LLMService(LLMServiceProtocol):
-    async def generate(self, prompt: str, **kwargs) -> LLMResponse:
+    async def generate_response_stream(
+        self, prompt: str, model: str | None = None
+    ) -> AsyncIterator[str]: ...
+
+
+# Implementation (core/services/llm/service.py) — satisfies the protocol
+# structurally and accepts additional optional tuning parameters
+class LLMService:
+    async def generate_response(
+        self,
+        prompt: str,
+        model: str | None = None,
+        json: bool = False,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        task_category: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         # Concrete implementation
         ...
 ```
@@ -1638,12 +1662,16 @@ QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
 QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
 VECTORSTORE_TIMEOUT_SECONDS=30.0
 
-# Vision
-VISION_MODEL=gpt-4o-mini
+# Vision — VISION_PROVIDER picks the provider; the model is per provider
+VISION_PROVIDER=openai
+VISION_OPENAI_MODEL=gpt-4o
+VISION_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+VISION_GOOGLE_MODEL=gemini-2.0-flash
+VISION_OLLAMA_MODEL=llava
 
-# Voice
+# Voice — there is no language setting; pass language= per call to
+# VoiceService.speech_to_text(audio_data=..., language="it")
 VOICE_PROVIDER=google
-VOICE_LANGUAGE=it-IT
 VOICE_ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 VOICE_ELEVENLABS_STABILITY=0.5
 VOICE_ELEVENLABS_SIMILARITY_BOOST=0.75

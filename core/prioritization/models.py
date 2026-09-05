@@ -83,7 +83,7 @@ class DependencyGraph:
         return self._tasks.get(task_id)
 
     def get_ready_tasks(self) -> list[Task]:
-        """Get all tasks whose dependencies are satisfied."""
+        """Get tasks not yet started (``PENDING``/``READY``) whose dependencies are satisfied."""
         completed = {
             tid for tid, t in self._tasks.items() if t.status == TaskStatus.COMPLETED
         }
@@ -91,7 +91,8 @@ class DependencyGraph:
         return [
             task
             for task in self._tasks.values()
-            if task.status == TaskStatus.PENDING and task.is_ready(completed)
+            if task.status in (TaskStatus.PENDING, TaskStatus.READY)
+            and task.is_ready(completed)
         ]
 
     def get_dependents(self, task_id: str) -> set[str]:

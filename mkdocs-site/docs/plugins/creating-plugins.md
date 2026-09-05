@@ -21,15 +21,18 @@ baselith plugin create --interactive  # Launch the wizard
 Expected output:
 
 ```text
-✅ Created plugins/my-plugin/
-  ├── manifest.json
-  ├── __init__.py
-  ├── plugin.py
-  ├── agent.py
-  └── README.md
+✅ Created plugin at plugins/my-plugin
+
+Files created:
+  - plugins/my-plugin/manifest.json
+  - plugins/my-plugin/__init__.py
+  - plugins/my-plugin/plugin.py
+  - plugins/my-plugin/agent.py
 ```
 
-This command creates a complete plugin skeleton with all necessary files based on the selected type.
+This command creates a plugin skeleton with the files required for the selected type
+(the `router` type emits `router.py` instead of `agent.py`; `graph` emits only
+`manifest.json`, `__init__.py` and `plugin.py`). A `README.md` is not generated.
 
 !!! info "Scaffold Output"
     The current CLI scaffold still emits `manifest.json`. The framework also supports `manifest.yaml`, which remains the preferred format for manually curated or packaged plugins.
@@ -62,11 +65,17 @@ Backstage will use the official framework skeleton to generate a production-read
 
 ## 2. Declare Metadata
 
-Every plugin must declare metadata. The **Registry** supports three ways to define metadata, in order of preference:
+Every plugin must declare its metadata in a manifest file next to `plugin.py`. The
+loader looks for, in order of preference:
 
-1. **`manifest.yaml`** (Recommended): Clean and readable YAML.
+1. **`manifest.yaml`** (Recommended): Clean and readable YAML (`manifest.yml` is
+   accepted too).
 2. **`manifest.json`**: Standard JSON format.
-3. **`plugin.py`**: Embedded `PLUGIN_METADATA` dictionary (now safely parsed via AST).
+
+A directory without one of these is skipped at discovery. There is no Python-side
+alternative: `Plugin.metadata` is a `cached_property` that reads the manifest and
+returns a `PluginMetadata`, so `self.metadata.name` / `self.metadata.version` are
+available without declaring anything in code.
 
 ### 2a. The Manifest File (Recommended)
 
@@ -98,16 +107,25 @@ Alternatively, use `manifest.json`:
 ```
 
 ```python title="plugins/my-plugin/plugin.py"
-from pathlib import Path
+from typing import Any
+
 from core.plugins import AgentPlugin
+
 from .agent import MyAgent
 
+
 class MyPlugin(AgentPlugin):
-    async def initialize(self, config: dict) -> None:
-        self.config = config
+    async def initialize(self, config: dict[str, Any]) -> None:
+        await super().initialize(config)  # stores config, marks the plugin initialized
+
+    def create_agent(self, service: Any, **kwargs) -> MyAgent:
+        return MyAgent(agent_id="my-plugin-agent", config=self._config)
 
     # ... rest of implementation ...
 ```
+
+`AgentPlugin` already extends `Plugin`, so subclass the mixin alone — `class
+MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 
 ### Metadata Fields
 
@@ -125,17 +143,19 @@ class MyPlugin(AgentPlugin):
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 
 !!! danger "Name must equal the directory name"
-    The manifest `name` is the plugin's **canonical key** — the loader keys lifecycle
-    state, the registry, and route mounting by it, while `configs/plugins.yaml` entries
-    and `plugin_dependencies` reference the **directory name**. These must be the same
-    string. If they differ (e.g. dir `weather_agent` with `name: weather-agent`, or dir
-    `baselithbot` with `name: BaselithBot`), auto-activation and dependency resolution
-    fail with `instance not found` / `KeyError`.
+    The manifest `name` is the plugin's **canonical key** — the loader, the lifecycle
+    manager, the registry and route mounting all use it. `configs/plugins.yaml` lookup
+    is the one place with slack: it tries the manifest name, the directory name, and
+    the directory name with `-`/`_` swapped, so dir `weather_agent` with
+    `name: weather-agent` still finds its config entry. Anything else (dir
+    `baselithbot` with `name: BaselithBot`, or two different words) does not resolve:
+    the config entry is never matched and the plugin runs as if it had none.
 
     What the directory uses *is* the rule: dir `weather_agent` → `name: weather_agent`;
-    dir `example-plugin` → `name: example-plugin`. Just keep them byte-identical. Prefer
-    lowercase; avoid CamelCase. If a multi-word plugin declares `plugin_dependencies`
-    against it, the dependency key must also match this exact string.
+    dir `example-plugin` → `name: example-plugin`. Keep them byte-identical and
+    lowercase — static/SPA assets are only mounted for names matching
+    `^[a-z0-9][a-z0-9._-]{0,63}$`. If another plugin declares `plugin_dependencies`
+    against yours, the dependency key must be this exact string.
 
 ---
 
@@ -177,13 +197,17 @@ The orchestrator discovers agents and routes requests based on intent patterns:
 
 ```python title="plugins/my-plugin/plugin.py"
 class MyPlugin(AgentPlugin):
-    # ... metadata and initialize ...
+    # ... initialize ...
 
-    def get_agents(self) -> list:
-        """Register the agents provided by this plugin."""
-        return [self.create_agent()]
+    def create_agent(self, service: Any, **kwargs) -> MyAgent:
+        """Required factory (abstract on ``AgentPlugin``); ``service`` is the chat service."""
+        return MyAgent(agent_id="my-plugin-agent", config=self._config)
 
-    def get_intent_patterns(self) -> list:
+    def get_agents(self) -> list[Any]:
+        """Agent objects to register at load time (a list, not a dict of classes)."""
+        return [MyAgent(agent_id="my-plugin-agent", config=self._config)]
+
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         """
         Define patterns that trigger this plugin's intents.
         """
@@ -221,9 +245,9 @@ class MyPlugin(AgentPlugin):
 
 | Field      | Type        | Description                                         |
 | ---------- | ----------- | --------------------------------------------------- |
-| `name`     | `str`       | Unique intent identifier                            |
+| `name`     | `str`       | Unique intent identifier — entries without it are silently dropped |
 | `patterns` | `list[str]` | Keywords or phrases that trigger this intent        |
-| `priority` | `int`       | Routing priority (higher = preferred). Default: 100 |
+| `priority` | `int`       | Routing priority (higher = preferred). Default: 0   |
 
 ### Registration Hooks
 
@@ -236,7 +260,7 @@ The `Plugin` interface provides several hooks for registering components:
 | `get_intent_patterns` | `list` | NLP patterns for routing |
 | `get_ui_tabs` | `list` | Navigation items for the Admin UI |
 | `get_mcp_tools` | `list` | Tools for Model Context Protocol |
-| `get_flow_handlers` | `dict` | Execution logic for intents |
+| `get_flow_handlers` | `dict` | Intent name → handler object with `async handle(query, context)` (or an async callable with that signature) |
 | `get_entity_types` | `list` | Knowledge Graph node types |
 
 !!! tip "Routing"
@@ -252,32 +276,58 @@ Expose custom API endpoints by returning FastAPI routers:
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+
 class QueryRequest(BaseModel):
     query: str
 
-router = APIRouter(prefix="/my-plugin", tags=["My Plugin"])
+
+# No prefix here: the plugin prefix (/api/my-plugin) is added at mount time.
+router = APIRouter(tags=["My Plugin"])
+
 
 @router.get("/status")
 async def status():
     return {"status": "ok"}
+
+
+@router.post("/process")
+async def process(request: QueryRequest):
+    return {"processed": request.query}
 ```
 
-In your `plugin.py`:
+In your `plugin.py`, add the `RouterPlugin` mixin and implement its abstract
+`create_router()` (`get_routers()` defaults to `[self.create_router()]`; override it
+only to expose several routers):
 
-```python
-    def get_routers(self) -> list:
+```python title="plugins/my-plugin/plugin.py"
+from fastapi import APIRouter
+
+from core.plugins import AgentPlugin, RouterPlugin
+
+
+class MyPlugin(AgentPlugin, RouterPlugin):
+    # ... agent methods ...
+
+    def create_router(self) -> APIRouter:
         from .router import router
-        return [router]
+
+        return router
 ```
 
 ### Automatic API Registration
 
-When a plugin implements `create_router()`, endpoints are automatically:
+When a plugin implements `create_router()`, its endpoints are automatically:
 
-* Registered at `/api/{plugin-name}/*`
+* Mounted under `get_router_prefix()` — `/api/{plugin-name}` by default. The prefix
+  is passed verbatim to `include_router`, and any `prefix=` set on the `APIRouter`
+  is appended after it: `APIRouter(prefix="/my-plugin")` would end up at
+  `/api/my-plugin/my-plugin/status`, so leave the router prefix empty.
 * Included in OpenAPI documentation
-* Protected by framework authentication (if enabled)
 * Tagged for easy discovery in Swagger UI
+
+Routes are not authenticated by default: add
+`dependencies=[Depends(require_user)]` (from `core.middleware`) to the `APIRouter`
+to require an authenticated user, as `plugins/example-plugin/router.py` does.
 
 **Accessing endpoints:**
 
@@ -288,7 +338,8 @@ curl http://localhost:8000/api/my-plugin/status
 # Direct processing
 curl -X POST http://localhost:8000/api/my-plugin/process \
   -H "Content-Type: application/json" \
-  -d '{"query": "test"}' ```
+  -d '{"query": "test"}'
+```
 
 ---
 
@@ -297,24 +348,39 @@ curl -X POST http://localhost:8000/api/my-plugin/process \
 Define plugin-specific configuration in `configs/plugins.yaml`:
 
 ```yaml title="configs/plugins.yaml"
-plugins:
-  my-plugin:
-    enabled: true
-    config:
-      custom_setting: "value"
-      api_timeout: 30
-      max_retries: 3
+my-plugin:
+  enabled: true
+  custom_setting: "value"
+  api_timeout: 30
+  max_retries: 3
 ```
+
+The file is a **flat mapping keyed by plugin name**: there is no `plugins:` wrapper
+and no `config:` sub-key (a nested layout is never matched, and the plugin runs as if
+it had no entry). The whole entry — `enabled` included — is passed to
+`initialize(config)`. Values are literal; there is no `${VAR}` interpolation, so
+secrets go in the plugin-local `.env` described below.
 
 ### Configuration Access
 
-Access configuration in the plugin's initializing logic or the agent:
+Access configuration through `get_config()` after `super().initialize()` has stored
+it, and hand the agent what it needs:
+
+```python
+class MyPlugin(AgentPlugin):
+    async def initialize(self, config: dict[str, Any]) -> None:
+        await super().initialize(config)
+        self.timeout = self.get_config("api_timeout", 10)
+
+    def create_agent(self, service: Any, **kwargs) -> MyAgent:
+        return MyAgent(agent_id="my-plugin-agent", config=self._config)
+```
 
 ```python
 class MyAgent(LifecycleMixin, AgentProtocol):
     def __init__(self, agent_id: str, config: Optional[Dict[str, Any]] = None):
         super().__init__()
-        self.timeout = config.get("api_timeout", 10)
+        self.timeout = (config or {}).get("api_timeout", 10)
 ```
 
 !!! warning "State that must outlive a request cannot live in memory"
@@ -438,7 +504,8 @@ def register_parser(subparsers, formatter_class):
 
 ### Usage
 
-Once the plugin is enabled, your command becomes available globally:
+Once the file exists, your command becomes available globally — the scan picks up
+every `plugins/<dir>/cli.py`, whether or not the plugin is enabled:
 
 ```bash
 baselith my-feature "Test Name"
@@ -454,9 +521,9 @@ baselith my-feature "Test Name"
 curl http://localhost:8000/api/my-plugin/status
 
 # Test via chat orchestration
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "keyword1 something"}'
+  -d '{"query": "keyword1 something"}'
 ```
 
 ### Test via Web UI
@@ -466,9 +533,11 @@ curl -X POST http://localhost:8000/api/chat \
 3. Verify the plugin handler is invoked
 
 !!! tip "Debug Mode"
-    Enable debug logging to see intent classification:
+    Enable debug logging to see intent classification (`CORE_LOG_LEVEL` sets the core
+    logger level, `LOG_LEVEL_CONSOLE` the console handler; both default to `INFO`):
     ```bash
-    export LOG_LEVEL=DEBUG
+    export CORE_LOG_LEVEL=DEBUG
+    export LOG_LEVEL_CONSOLE=DEBUG
     baselith run
     ```
 
@@ -476,34 +545,61 @@ curl -X POST http://localhost:8000/api/chat \
 
 ## 9. Add Unit Tests
 
-Create comprehensive tests for your agents:
+Keep tests inside the plugin, as `plugins/example-plugin/tests/` does, and load the
+plugin through the real `PluginLoader` — a hyphenated directory such as
+`plugins/my-plugin/` is not importable as `plugins.my_plugin` until the loader has
+registered it:
 
-```python title="tests/plugins/test_my_plugin.py"
+```python title="plugins/my-plugin/tests/test_plugin.py"
+from pathlib import Path
+
 import pytest
-from plugins.my_plugin.agent import MyAgent
+from fastapi import FastAPI
 
-class TestMyPlugin:
-    @pytest.fixture
-    def agent(self):
-        """Create agent instance."""
-        return MyAgent(agent_id="test-agent")
+from core.plugins import PluginLoader, PluginRegistry
 
-    async def test_execute(self, agent):
-        """Test agent execution."""
-        await agent.initialize() # If LifecycleMixin is used
-        result = await agent.execute("test query", {})
-        assert result is not None
-        assert isinstance(result, str)
+PLUGIN_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+async def plugin():
+    """Load the plugin exactly as the runtime does."""
+    loader = PluginLoader(PLUGIN_DIR.parent, PluginRegistry())
+    plugin = await loader.load_plugin(PLUGIN_DIR, config={"api_timeout": 5})
+    assert plugin is not None
+    yield plugin
+    await plugin.shutdown()
+
+
+async def test_config_is_applied(plugin):
+    assert plugin.is_initialized()
+    assert plugin.get_config("api_timeout") == 5
+
+
+async def test_agent_executes(plugin):
+    agent = plugin.create_agent(service=None)
+    await agent.startup()  # LifecycleMixin: state becomes READY
+    result = await agent.execute("test query", {})
+    assert isinstance(result, str)
+
+
+async def test_routes_are_mounted_under_plugin_prefix(plugin):
+    app = FastAPI()
+    for router in plugin.get_routers():
+        app.include_router(router, prefix=plugin.get_router_prefix())
+    assert "/api/my-plugin/status" in app.openapi()["paths"]
 ```
+
+The async fixture relies on `asyncio_mode = auto` from the repository `pytest.ini`.
 
 ### Run Tests
 
 ```bash
-# Run all plugin tests
-pytest tests/plugins/test_my_plugin.py -v
+# Run the plugin's tests
+python -m pytest plugins/my-plugin/tests -v
 
 # Run with coverage
-pytest tests/plugins/test_my_plugin.py --cov=plugins.my_plugin
+python -m pytest plugins/my-plugin/tests --cov=plugins/my-plugin
 ```
 
 ---
@@ -558,25 +654,6 @@ python scripts/migrate_plugins.py plugins/my-legacy-plugin
 ```
 
 This will automatically extract the metadata from your Python file, generate a `manifest.yaml` (preferred), and remove the obsolete `metadata` method from your code.
-
-### 2. Embedded Metadata (AST Parsing)
-
-!!! warning "Strongly Recommended: Use a Manifest"
-    While embedded metadata is supported for convenience, **using a separate manifest file (`manifest.yaml` or `manifest.json`) is strongly recommended** for better performance, clarity, and compatibility with the Marketplace automated validation tools.
-
-If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
-
-```python title="plugins/my-plugin/plugin.py"
-PLUGIN_METADATA = {
-    "name": "my-plugin",
-    "version": "1.1.0",
-    "description": "Example using embedded metadata",
-    "required_resources": ["internet"]
-}
-
-class MyPlugin(AgentPlugin):
-    # ... implementation ...
-```
 
 ---
 
@@ -657,11 +734,14 @@ After creating your plugin:
     **Symptom**: `/api/my-plugin/*` returns 404
 
     **Common causes**:
-    - `create_router()` not implemented in `router.py`
+    - `create_router()` not implemented on the plugin class
     - Router not returning `APIRouter` instance
     - Plugin not implementing `RouterPlugin` mixin
+    - A `prefix=` on the `APIRouter` doubling the path
+      (`/api/my-plugin/my-plugin/...`)
 
-    **Solution**: Verify plugin inherits `RouterPlugin` and returns router
+    **Solution**: Verify plugin inherits `RouterPlugin`, returns the router, and
+    leaves the router prefix empty
 
 ??? failure "New SKILL.md not visible to the catalog"
     **Symptom**: A freshly added `skills/<name>/SKILL.md` is not returned by

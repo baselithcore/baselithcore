@@ -78,8 +78,16 @@ export class RateLimitError extends BaselithApiError {
 export class ServerError extends BaselithApiError {}
 
 interface Envelope {
+  /** Legacy envelope (pre-0.29 servers). */
   error?: { code?: string; message?: string; type?: string; request_id?: string };
+  /** RFC 9457 problem+json members (current servers). */
+  type?: string;
+  title?: string;
+  status?: number;
   detail?: unknown;
+  instance?: string;
+  code?: string;
+  request_id?: string;
 }
 
 /** Build the most specific {@link BaselithApiError} for a response. */
@@ -100,6 +108,15 @@ export function errorFromResponse(
       errorType = env.error.type;
       message = env.error.message ?? message;
       requestId = env.error.request_id ?? requestId;
+    } else if (env.code !== undefined || env.title !== undefined || env.type !== undefined) {
+      // RFC 9457 application/problem+json (current server format)
+      code = env.code;
+      errorType = env.type;
+      message =
+        (typeof env.detail === 'string' && env.detail ? env.detail : undefined) ??
+        env.title ??
+        message;
+      requestId = env.request_id ?? requestId;
     } else if (env.detail !== undefined) {
       message = typeof env.detail === 'string' ? env.detail : JSON.stringify(env.detail);
     }

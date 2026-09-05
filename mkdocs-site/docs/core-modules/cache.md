@@ -11,7 +11,9 @@ core/cache/
 ├── ttl_cache.py       # Backward-compat re-export of TTLCache
 ├── redis_cache.py     # RedisTTLCache — Redis-backed async cache + async pools
 ├── redis_sync.py      # Shared bounded pools for the *synchronous* client
-└── semantic_cache.py  # SemanticLLMCache — vector-similarity LLM cache
+├── semantic_cache.py  # SemanticLLMCache — vector-similarity LLM cache
+├── single_flight.py   # SingleFlight / RedisSingleFlight — miss coalescing
+└── metrics.py         # CacheMetricsCollector — hit/miss/eviction analytics
 ```
 
 ---
@@ -52,8 +54,11 @@ it in:
 ```python
 from core.cache import RedisTTLCache
 from core.cache.redis_cache import create_redis_client
+from core.config.cache import get_redis_cache_config
 
-client = create_redis_client()  # reads REDIS_URL / cache config
+# url is required (keyword-only decode_responses=False); clients share one
+# bounded pool per (url, decode_responses)
+client = create_redis_client(get_redis_cache_config().url)
 cache: RedisTTLCache = RedisTTLCache(
     client,
     prefix="baselith",       # keyword-only; defaults to the configured cache_prefix
@@ -67,8 +72,18 @@ value = await cache.get("key")
 Configure via `.env`:
 
 ```bash
-REDIS_URL=redis://localhost:6379
+CACHE_REDIS_URL=redis://localhost:6379/1
 ```
+
+`RedisTTLCache`, `create_redis_client` and the shared pools read
+`RedisCacheConfig` (`core/config/cache.py`, `get_redis_cache_config()`):
+`url` ← `CACHE_REDIS_URL` (default `redis://redis:6379/1`), `cache_prefix`
+(default `baselithcore:cache`), `cache_ttl` (default `3600.0` s) and the pool
+bounds (`max_connections` default `50`). `StorageConfig.cache_redis_url`
+(`core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with a
+different fallback (`redis://localhost:6379/1`) and is what
+`core/bootstrap/lazy_init.py` and `core/chat/dependencies.py` use for the
+bootstrap client — set the variable and both agree.
 
 ### XFetch probabilistic early refresh
 
@@ -169,7 +184,7 @@ and return something `np.asarray` can consume.
 
 - **`SingleFlight`** — in-process: only the first caller for a key runs the
   factory; concurrent callers share the result (or exception). Wired into
-  `LLMService.generate_response` miss handling, `SemanticCache.get_or_compute`
+  `LLMService.generate_response` miss handling, `SemanticLLMCache.get_or_compute`
   and `CachedEmbedder.encode`.
 - **`RedisSingleFlight`** — **cross-worker**: elects one owner per key via a
   Redis `SET NX EX` lock; other workers poll with exponential backoff,
@@ -311,9 +326,12 @@ implementations without changing business logic:
 
 ```python
 # Swap from in-memory to Redis behind the same protocol
+from core.config import get_storage_config
+from core.config.cache import get_redis_cache_config
+
 cache: CacheProtocol = (
-    RedisTTLCache(create_redis_client())
-    if settings.REDIS_URL
+    RedisTTLCache(create_redis_client(get_redis_cache_config().url))
+    if get_storage_config().cache_backend == "redis"  # CACHE_BACKEND
     else TTLCache(ttl=300)
 )
 ```

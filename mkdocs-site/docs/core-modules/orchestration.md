@@ -21,12 +21,23 @@ core/orchestration/
 ├── contract.py              # AgentContract / ContractValidator
 ├── autonomy.py              # AutonomyPolicy / AutonomyUpgradeGate
 ├── task_classifier.py       # TaskClassifier (agentic vs deterministic)
+├── adaptive.py              # AdaptiveController — fast/slow (SwiftSage) path routing
+├── parallel.py              # ParallelToolExecutor — LLMCompiler-style concurrent tool calls
 ├── budget_context.py        # ContextVar-based ambient LoopBudget
-├── checkpoint.py            # Durable checkpoint model + store + manager
+├── checkpoint.py            # Durable checkpoint model + CheckpointStore contract + manager
+├── checkpoint_memory.py     # InMemoryCheckpointStore (re-exported by checkpoint.py)
 ├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
+├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── recovery.py              # Crash recovery: re-enter interrupted runs via process(resume=True)
+├── run_events.py            # Structured per-run_id AgentEvent stream (stream_run_events)
+├── run_events_bridge.py     # Redis bridge fanning run events out across replicas
+├── guard_pipeline.py        # Guardrails pipeline: input validation in, output filtering out
+├── guard_groundedness.py    # Opt-in groundedness rail (BASELITH_OUTPUT_GROUNDEDNESS)
 ├── stream_guard.py          # Streamed-chunk guarding: holdback redaction + moderation
+├── modality_router.py       # Attachment modality detection (magic bytes → MIME → extension)
+├── tool_output.py           # Deterministic head/tail truncation of tool output
 ├── mixins/                  # intent / handlers / execution mixins
 └── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
@@ -132,6 +143,8 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         loop_limits: LoopLimits | None = None,
         agent_contract: AgentContract | None = None,
         autonomy_policy: AutonomyPolicy | None = None,
+        checkpoint_store: "CheckpointStore" | None = None,
+        skill_service: "SkillService" | None = None,
     ) -> None: ...
 
     async def process(
@@ -139,8 +152,18 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         query: str,
         context: dict[str, Any] | None = None,
         intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
-        """Run a query through the orchestration pipeline."""
+        """Run a query through the orchestration pipeline.
+
+        run_id: stable id for durable checkpointing — required to ``resume``
+            a prior run; auto-generated for a fresh run when a
+            ``checkpoint_store`` is configured.
+        resume: with ``run_id`` and a configured store, reload the prior
+            checkpoint and continue — completed tool steps replay from the
+            store instead of re-executing.
+        """
 
     def process_stream(
         self,

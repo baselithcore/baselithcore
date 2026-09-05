@@ -3,9 +3,11 @@ title: Client SDKs
 description: Typed client libraries and OpenAPI-based code generation
 ---
 
-BaselithCore ships typed first-party SDKs — **Python** (`baselith-sdk`) and
-**TypeScript** (`baselith-sdk`) — and exports a complete OpenAPI schema from
-which clients in any language can be generated. The SDKs wrap the REST API
+BaselithCore ships typed first-party SDKs — **Python** (`sdk/python`, package
+`baselith-sdk` 0.1.0) and **TypeScript** (`sdk/typescript`, package
+`baselith-sdk` 0.1.0) — and exports an OpenAPI schema from which clients in
+any language can be generated. Neither package is published to PyPI or npm:
+install them from the repository checkout. The SDKs wrap the REST API
 documented in [REST API](rest.md) with retries, idempotency keys, streaming, and
 a typed error hierarchy. Both expose the same surface: `chat`, `chat_stream`,
 `submit_feedback`, `health`, `readiness`.
@@ -17,7 +19,8 @@ a typed error hierarchy. Both expose the same surface: `chat`, `chat_stream`,
 ### Install
 
 ```bash
-pip install baselith-sdk
+# from the repository root
+pip install ./sdk/python          # or: pip install -e ./sdk/python
 ```
 
 ### Quick start
@@ -73,7 +76,7 @@ Pass exactly one credential:
 | `base_url`     | —       | API base URL (required)                       |
 | `api_key`      | `None`  | API key (`x-api-key`)                          |
 | `bearer_token` | `None`  | Bearer/OIDC token                             |
-| `tenant_id`    | `None`  | Sent as `X-Tenant-ID`                          |
+| `tenant_id`    | `None`  | Sent as `X-Tenant-ID` (not read by the server — see below) |
 | `api_version`  | `"v1"`  | Path prefix; `None` calls unversioned paths   |
 | `timeout`      | `30.0`  | Per-request timeout (seconds)                 |
 | `max_retries`  | `2`     | Retries on 429/5xx with backoff + jitter      |
@@ -82,11 +85,27 @@ Pass exactly one credential:
 Versioned data endpoints (`/v1/chat`, `/v1/feedback`, …) are used by default;
 liveness probes (`/health`, `/health/ready`) are always called unversioned.
 
+!!! note "`tenant_id` is informational"
+    The server derives the tenant from the **authenticated identity**
+    (`core/middleware/tenant.py`) and never reads `X-Tenant-ID`; the header
+    only helps proxies and logs. The `tenant_id` field of the chat body
+    (`ChatRequest.tenant_id`) is accepted for compatibility but is not read
+    by the chat route either — there is no request-level tenant override.
+
 ### Error handling
 
 Every API failure raises a subclass of `BaselithAPIError`, each carrying
-`status_code`, `code`, `message`, and `request_id` parsed from the
-[error envelope](rest.md#error-envelope):
+`status_code`, `code`, `message`, `error_type`, `request_id` and the raw
+`body`, parsed from the server's RFC 9457
+[problem document](rest.md#error-envelope):
+
+- `code` — the stable `code` member (e.g. `not_found`, `rate_limited`)
+- `message` — `detail`, falling back to `title`
+- `error_type` — the `type` URN (`urn:baselith:error:<code>`)
+- `request_id` — the `request_id` member, else the `X-Request-ID` header
+
+The legacy `{"error": {...}}` envelope and FastAPI's bare `{"detail": ...}`
+shape are still recognised for older servers.
 
 | Exception             | When                                |
 | --------------------- | ----------------------------------- |
@@ -118,7 +137,9 @@ browsers, and edge runtimes.
 ### Install
 
 ```bash
-npm install baselith-sdk
+# build from the repository checkout, then install the folder into your project
+cd sdk/typescript && npm install && npm run build
+npm install /path/to/baselithcore/sdk/typescript
 ```
 
 ### Quick start
@@ -151,23 +172,30 @@ Pass `apiKey` (`x-api-key`) or `bearerToken` (`Authorization: Bearer`, works wit
 [OIDC SSO](../core-modules/auth.md#federated-sso-openid-connect) tokens). Failures
 throw a subclass of `BaselithApiError` (`AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `RateLimitError`, `ServerError`) with
-`statusCode` / `code` / `requestId`; network failures throw `ApiConnectionError`.
+`statusCode` / `code` / `errorType` / `requestId` / `body`, parsed from the
+same RFC 9457 problem document as the Python SDK (`message` = `detail`
+falling back to `title`, `errorType` = `type`); network failures throw
+`ApiConnectionError`.
 
 ---
 
 ## OpenAPI schema
 
-The server exposes its schema live at `GET /openapi.json`, and the repo ships a
-checked-in snapshot plus an exporter:
+The server exposes its schema live at `GET /openapi.json` (while docs are
+enabled), and the repo ships a checked-in snapshot plus an exporter:
 
 ```bash
 python scripts/export_openapi.py            # -> sdk/openapi.json
 python scripts/export_openapi.py out.json   # custom path
 ```
 
-The exporter only *constructs* the app (no network/DB), so it runs anywhere.
-The snapshot is the source of truth used to verify the hand-written SDK against
-the server contract.
+The exporter only *constructs* the app (no network/DB, lifespan not run), so it
+runs anywhere — but for the same reason the routers the `api_routers` plugin
+mounts at startup (`/prompts`, `/chat/ws`, `/agent/*`, `/webhooks`,
+`/privacy`, `/compliance`, `/runs`, `/approvals`) are **absent** from
+`sdk/openapi.json`. The snapshot is the contract the hand-written SDKs are
+verified against (`chat`, `feedback` and `health` are all in it); fetch the
+live `/openapi.json` from a running server when you need the full surface.
 
 ### Code generation (any language)
 

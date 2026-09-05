@@ -47,3 +47,36 @@ def test_trusted_host_middleware_blocks_unlisted_hosts(monkeypatch):
 
     assert allowed.status_code == 200
     assert blocked.status_code == 400
+
+
+def test_publish_uses_marketplace_api_key_env(monkeypatch):
+    """`--key` > MARKETPLACE_API_KEY > stored credentials when publishing."""
+    from core.cli.commands.plugin import marketplace as mp
+
+    calls: dict[str, object] = {}
+
+    class _Creds:
+        async def load_api_key(self):
+            return "stored-key"
+
+        async def load_token(self):
+            return None
+
+    class _Publisher:
+        async def publish(self, path, admin_key=None, auth_token=None):
+            calls["admin_key"] = admin_key
+            return {"success": True, "url": "https://hub.example/plugins/x"}
+
+    monkeypatch.setattr(mp, "CredentialsManager", _Creds)
+    monkeypatch.setattr(mp, "PluginPublisher", _Publisher)
+    monkeypatch.setenv("MARKETPLACE_API_KEY", "env-key")
+
+    mp.publish_plugin_cmd("plugins/example-plugin")
+    assert calls["admin_key"] == "env-key"
+
+    mp.publish_plugin_cmd("plugins/example-plugin", key="flag-key")
+    assert calls["admin_key"] == "flag-key"
+
+    monkeypatch.delenv("MARKETPLACE_API_KEY")
+    mp.publish_plugin_cmd("plugins/example-plugin")
+    assert calls["admin_key"] == "stored-key"

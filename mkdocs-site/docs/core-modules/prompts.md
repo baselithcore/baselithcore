@@ -142,7 +142,7 @@ fallback_template=None, label="production", subject=None)` works as follows:
 - **Provenance** — registry renders emit the `prompt.render` span, so LLM
   spans are attributable to the exact prompt name/version/checksum.
 
-Four framework prompts are catalog-served today:
+Five framework prompts are catalog-served today:
 
 | Prompt name | Call site |
 |-------------|-----------|
@@ -150,6 +150,7 @@ Four framework prompts are catalog-served today:
 | `react_native_system` | `core/reasoning/react_native.py` (native tool-calling loop) |
 | `intent_classification` | `core/orchestration/intent_classifier.py` (`build_classification_prompt`) |
 | `swarm_decomposition` | `core/orchestration/handlers/swarm_agents.py` (`build_decomposition_prompt`) |
+| `loop_goal_hardening` | `core/loops/goal.py` (`harden_goal`, pre-flight goal questionnaire) |
 
 !!! note "Literal braces survive"
     Catalog templates use `{{ var }}` placeholders; the renderer matches

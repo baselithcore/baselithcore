@@ -19,8 +19,10 @@ Open it at `http://localhost:8000/console`.
 
 ## Authentication
 
-Enter an API key in the **Connection** panel (sidebar). It is stored in the
-browser (`localStorage`) and sent as the `X-API-Key` header on every request.
+Enter an API key in the **Connection** panel (sidebar). It is kept in the
+browser's `sessionStorage` — scoped to the tab and discarded when it closes —
+and sent as the `X-API-Key` header on every request; once stored it is never
+written back into the DOM.
 The console surfaces auth failures clearly — a `403 insufficient_scope` means the
 key is authenticated but lacks the [capability scope](../core-modules/auth.md#capability-scopes-fine-grained-authorization)
 the action needs (e.g. `webhooks:write`).
@@ -39,6 +41,8 @@ and requires `WEBHOOKS_ENABLED=true`. You can:
 
 The console is plain ES modules under `core/static/frontend/js/` (an `api`
 client, a tiny DOM helper, and one module per view), served via the `/static`
-mount; `core/routers` exposes `/console` (and any sub-path) as the SPA entry so
-client-side routing works on refresh. No bundler is involved — edit a module and
-reload.
+mount. The routes live in the `api_routers` plugin
+(`plugins/api_routers/console.py`): `/console` and `/console/{full_path:path}`
+both return `core/static/frontend/index.html`, so client-side routing works on
+refresh. `core/routers/console.py` is only a backward-compatible shim that
+re-exports that router. No bundler is involved — edit a module and reload.

@@ -122,6 +122,33 @@ class TestRagWorkflowHandler:
         assert handler._workflow.score_documents.called
 
     @pytest.mark.asyncio
+    async def test_handle_runs_feedback_step_when_scheduled(self, mock_service):
+        """score_documents scheduling apply_feedback makes handle() run it."""
+        handler = RagWorkflowHandler(mock_service)
+        handler._workflow = MagicMock()
+        for name in (
+            "load_history",
+            "check_precheck_cache",
+            "retrieve_documents",
+            "build_context",
+            "check_cache",
+            "generate_answer",
+            "apply_feedback",
+        ):
+            setattr(handler._workflow, name, AsyncMock())
+
+        async def scored(state):
+            state.next_action = "apply_feedback"
+
+        handler._workflow.score_documents = AsyncMock(side_effect=scored)
+        handler._workflow.validate_input.side_effect = lambda state: None
+        handler._workflow.classify_intent.side_effect = lambda state: None
+
+        await handler.handle("test query", context={})
+
+        handler._workflow.apply_feedback.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_handle_guardrail_block(self, mock_service):
         handler = RagWorkflowHandler(mock_service)
         handler._workflow = MagicMock()

@@ -19,7 +19,7 @@ flowchart TB
     subgraph Network["Network Layer"]
         N1[HTTPS / TLS 1.3]
         N2[Rate Limiting]
-        N3[IP Whitelisting]
+        N3[Trusted Host Validation]
     end
 
     subgraph Auth["Authentication Layer"]
@@ -59,43 +59,57 @@ Authentication verifies **who you are**. The framework supports multiple strateg
 
 JWT is the recommended method for web applications and APIs. Tokens are cryptographically signed and contain verifiable claims.
 
-```python
-from core.auth import create_access_token, verify_token
-from datetime import timedelta
+The `AuthManager` singleton (`core/auth/manager.py`) owns the `JWTHandler`;
+`AuthManager.create_token` is `async` because it stamps the user's current
+token epoch into the claim set (see [Incident Response](#incident-response)),
+and `JWTHandler.verify_token` is `async` because it consults the Redis
+blacklist.
 
-# Create token after login
-token = create_access_token(
-    user_id="user-123",
-    roles=["user", "admin"],
-    tenant_id="tenant-abc",  # Important for multi-tenancy
-    expires_delta=timedelta(hours=1)
+```python
+from core.auth import AuthRole, InvalidTokenError, TokenExpiredError, get_auth_manager
+
+auth = get_auth_manager()
+
+# Mint an access token after the user has authenticated
+token = await auth.create_token(
+    "user-123",
+    roles={AuthRole.USER, AuthRole.ADMIN},
+    tenant_id="tenant-abc",  # reserved claim: the isolation boundary
+    lifetime=3600,           # seconds; overrides the handler default (1 h)
 )
 # Result: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
-# Verify token in subsequent request
+# Verify it on a later request
 try:
-    payload = verify_token(token)
-    print(payload["user_id"])  # "user-123"
-    print(payload["roles"])    # ["user", "admin"]
+    user = await auth.jwt.verify_token(token, expected_type="access")
+    print(user.user_id)    # "user-123"
+    print(user.roles)      # {AuthRole.USER, AuthRole.ADMIN}
+    print(user.tenant_id)  # "tenant-abc"
 except TokenExpiredError:
-    # Token expired, request refresh
-    pass
+    ...  # expired: rotate the refresh token
 except InvalidTokenError:
-    # Invalid or tampered token
-    pass
+    ...  # tampered, revoked, wrong key, or a refresh token on the access path
 ```
+
+`verify_token` returns an `AuthUser` (`core/auth/types.py`); the decoded
+payload is kept on `user.metadata`. `tenant_id`, `exp` and `act` are
+**reserved claims**: they are stripped from `extra_claims`, so pass them as the
+first-class parameters shown above or they are silently dropped.
 
 **JWT Token Structure:**
 
-| Claim       | Description                 | Example             |
-| ----------- | --------------------------- | ------------------- |
-| `sub`       | User ID                     | `user-123`          |
-| `roles`     | User roles                  | `["user", "admin"]` |
-| `tenant_id` | Tenant affiliation          | `tenant-abc`        |
-| `exp`       | Expiration (Unix timestamp) | `1672531200`        |
-| `iat`       | Issued at                   | `1672527600`        |
-| `iss`       | Issuer (optional)           | `baselith-core`     |
-| `aud`       | Audience (optional)         | `api.myapp.com`     |
+| Claim       | Description                                                                 | Example             |
+| ----------- | --------------------------------------------------------------------------- | ------------------- |
+| `sub`       | User ID                                                                     | `user-123`          |
+| `roles`     | User roles                                                                  | `["user", "admin"]` |
+| `scopes`    | Explicit capability scopes (optional; role-derived scopes are computed at check time) | `["chat:read"]` |
+| `tenant_id` | Tenant affiliation                                                          | `tenant-abc`        |
+| `jti`       | Token id — the key the revocation blacklist is written under               | `3f9a1c2b7d4e6a01`  |
+| `tv`        | Token epoch — bumped per user to strand every outstanding token at once     | `3`                 |
+| `exp`       | Expiration (Unix timestamp)                                                 | `1672531200`        |
+| `iat`       | Issued at                                                                   | `1672527600`        |
+| `iss`       | Issuer (optional)                                                           | `baselith-core`     |
+| `aud`       | Audience (optional)                                                         | `api.myapp.com`     |
 
 Issuer and audience validation defaults from `APP_BASE_URL`, and `JWT_STRICT_VALIDATION` switches on by itself once `AUTH_REQUIRED=true` and both claims resolve — at that point every token carries them, so requiring them costs nothing. Set `JWT_ISSUER`/`JWT_AUDIENCE` explicitly to override. Without the binding, any two deployments sharing a `SECRET_KEY` (e.g. a staging value copy-pasted to prod) accept each other's tokens; with no `APP_BASE_URL` to derive from, startup logs a warning naming exactly what to set.
 
@@ -112,36 +126,55 @@ first rotation), and access-token verification adds no extra Redis lookups.
 
 For server-to-server integrations or scripts, use API Keys. They're simpler but less flexible than JWT.
 
+Keys are **operator-minted**: there is no generator endpoint. Mint a random
+token, put it in the environment, and `APIKeyValidator`
+(`core/auth/api_keys.py`) registers it at startup with the role its variable
+implies:
+
+| Variable          | Role(s) granted                                  | Format                                   |
+| ----------------- | ------------------------------------------------ | ---------------------------------------- |
+| `API_KEYS_USER`   | `user`                                           | comma-separated keys                     |
+| `API_KEYS_ADMIN`  | `admin` + `user`                                 | comma-separated keys                     |
+| `API_KEYS_JOB`    | `service` (also satisfies `job` routes)          | comma-separated keys                     |
+| `API_KEYS_SCOPED` | `scoped` — **no** role-derived scopes, only the listed ones | `key1=chat:read\|chat:write,key2=webhooks:write` |
+
+Clients send the key as `X-API-Key: <key>` (or `Authorization: ApiKey <key>`).
+The same validator is available for runtime registration and for checks
+outside the HTTP path:
+
 ```python
-from core.auth import validate_api_key, generate_api_key
+from core.auth import AuthRole, get_auth_manager
 
-# Generate API Key for a user
-api_key = generate_api_key(
-    user_id="user-123",
-    name="Production Integration",
-    scopes=["read", "write"]
+auth = get_auth_manager()
+
+# Register a least-privilege key minted by a provisioning job
+auth.api_keys.register_key(
+    api_key,                      # the random secret you generated (see below)
+    user_id="reporting-service",
+    roles={AuthRole.SCOPED},      # authorization comes only from the scopes
+    scopes={"chat:read"},
+    expires_at=None,              # or a timezone-aware datetime
 )
-# Result: "sk_live_xxxxxxxxxxxxxxxxxxxxx"
 
-# Validation in an endpoint
-@router.get("/api/data")
-async def get_data(api_key: str = Header(..., alias="X-API-Key")):
-    key_info = await validate_api_key(api_key)
-
-    if not key_info:
-        raise HTTPException(401, "Invalid API key")
-
-    if "read" not in key_info.scopes:
-        raise HTTPException(403, "Insufficient permissions")
-
-    return await fetch_data(key_info.user_id)
+# Validation — what the X-API-Key path does on every request
+user = await auth.api_keys.validate_key(api_key)   # AuthUser | None
+if user is None:
+    raise HTTPException(401, "Authentication required.")
+if not user.has_scope("chat:read"):
+    raise HTTPException(403, "Insufficient scope")
 ```
 
+`validate_key` returns `None` for an unknown key, an expired one, and one
+that was revoked with `await auth.api_keys.revoke_key(key)` — revocation
+writes a persistent Redis tombstone, so it reaches every worker and survives a
+restart (re-trusting the same value needs an explicit `reinstate_key`).
+
 !!! tip "API Key Best Practices"
-    - Use prefixes to identify type: `sk_live_`, `sk_test_`
-    - Never show complete API key after creation
-    - Implement periodic key rotation
-    - Log every use for audit
+    - Never show the complete key after creation; the validator only ever
+      stores a SHA-256 digest
+    - Prefer `API_KEYS_SCOPED` for automation that needs one capability
+    - Rotate periodically: register the new key, `revoke_key` the old one
+    - Every authenticated request is already audit-logged (`AUDIT | AUTH`)
 
 !!! warning "Keys must be random tokens, not passwords"
     Configured keys are indexed by a **SHA-256** hash (`core/auth/api_keys.py`),
@@ -155,65 +188,119 @@ async def get_data(api_key: str = Header(..., alias="X-API-Key")):
 
 ## Authorization
 
-Authorization verifies **what you can do**. Use the role and permission system.
+Authorization verifies **what you can do**. Roles are the coarse gate;
+capability **scopes** (`resource:action`) are the fine-grained one.
 
 ### Role-Based Access Control (RBAC)
 
+`AuthRole` (`core/auth/types.py`) is a `str` enum:
+
+| Role        | Meaning                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `ANONYMOUS` | Unauthenticated; `AuthUser.is_authenticated` is `False`                                   |
+| `USER`      | Base user (the default when a token carries no roles)                                     |
+| `ADMIN`     | Administrator; `AuthUser.is_admin()`                                                      |
+| `SERVICE`   | Service-to-service identity; also satisfies `job` routes                                  |
+| `GUEST`     | Read-only access to dashboards                                                            |
+| `JOB`       | Automated job/scheduler access                                                            |
+| `SCOPED`    | Pure capability identity: grants nothing on its own, only its explicit scopes apply       |
+
+On FastAPI routes, use the dependencies from `core.middleware.security`
+(re-exported by `core.middleware`). Each one authenticates the request,
+applies the per-role rate limit, binds the tenant context, and returns the
+**role** that matched (`"anonymous"` on an auth-disabled deployment):
+
 ```python
-from core.auth import require_roles, AuthRole, get_current_user
+from fastapi import APIRouter, Depends
 
-# Available roles
-class AuthRole:
-    USER = "user"           # Base user
-    ADMIN = "admin"         # Administrator
-    SUPERADMIN = "superadmin"  # Global administrator
-    SERVICE = "service"     # Service account
+from core.middleware import require_admin, require_admin_or_job, require_user
 
-# Decorator to protect endpoints
-@router.post("/admin/users")
-@require_roles([AuthRole.ADMIN])
-async def create_user(
-    user_data: UserCreate,
-    current_user = Depends(get_current_user)
-):
+router = APIRouter()
+
+
+@router.post("/admin/users", dependencies=[Depends(require_admin)])
+async def create_user(user_data: UserCreate):
     """Only admins can create new users."""
-    # current_user contains authenticated user info
-    logger.info(f"User {current_user.id} creating new user")
     return await user_service.create(user_data)
+
+
+@router.post("/index", dependencies=[Depends(require_admin_or_job)])
+async def reindex():
+    """Admin or automation identities."""
+    ...
+
+
+@router.get("/me")
+async def me(role: str = Depends(require_user)):
+    return {"role": role}
 ```
 
-### Permission-Based Access
-
-For more granular controls, use permissions:
+Outside the router (a tool gate, a service method), the same check is the
+`require_auth` decorator on the manager. It reads the identity from a `user`
+or `current_user` keyword argument and raises `InsufficientPermissionsError`;
+`roles` means *any of*:
 
 ```python
-from core.auth import require_permissions
+from core.auth import AuthRole, AuthUser, get_auth_manager
 
-@router.delete("/documents/{doc_id}")
-@require_permissions(["documents:delete"])
-async def delete_document(doc_id: str):
-    """Requires specific document deletion permission."""
-    return await document_service.delete(doc_id)
+auth = get_auth_manager()
+
+
+@auth.require_auth(roles={AuthRole.ADMIN})
+async def delete_tenant(tenant_id: str, *, user: AuthUser) -> None:
+    ...
+```
+
+### Scope-Based Access
+
+Scopes (`core/auth/scopes.py`) are `resource:action` strings — `chat:read`,
+`memory:write`, `webhooks:write`, `plugins:manage`, `mcp:invoke`, … (the full
+set is `KNOWN_SCOPES`). An identity's effective scopes are the ones its roles
+imply (`ROLE_SCOPES`) plus any explicit grant from a scoped API key or a JWT
+`scopes` claim; `"*"` and `"resource:*"` wildcards are honoured.
+
+```python
+from core.auth import AuthUser, get_auth_manager
+
+auth = get_auth_manager()
+
+
+# Decorator form: same ``user`` / ``current_user`` kwarg convention as require_auth
+@auth.require_scopes("webhooks:write")
+async def create_webhook(payload: dict, *, user: AuthUser):
+    ...
+
+
+# Chokepoint form: raises InsufficientScopeError (unauthenticated counts as missing)
+auth.enforce_scopes(user, "chat:read", "memory:read", require_all=True)
 ```
 
 ### Programmatic Checks
 
-For conditional logic:
+For conditional logic, ask the `AuthUser` directly:
 
 ```python
-from core.auth import has_permission, has_role
+from core.auth import AuthRole, scope_satisfied
+
 
 async def process_request(user, request):
-    if has_role(user, AuthRole.ADMIN):
-        # Admin logic
+    if user.has_role(AuthRole.ADMIN):
         return await admin_processing(request)
 
-    if has_permission(user, "premium:features"):
-        # Premium logic
+    if user.has_scope("chat:write"):
         return await premium_processing(request)
+
+    # Same check against an arbitrary grant set (wildcard-aware)
+    if scope_satisfied(user.effective_scopes(), "webhooks:write"):
+        ...
 
     return await standard_processing(request)
 ```
+
+`has_scopes(*scopes, require_all=True)` checks several at once. For an RFC 8693
+agent-delegated token (`act.client_id` present) `effective_scopes()` returns
+**only** the explicit scopes — the exchange narrowed them, and re-expanding the
+user's roles would undo that.
 
 ---
 
@@ -226,16 +313,18 @@ Input validation prevents numerous attacks. **Never trust user input**.
 All inputs must pass through Pydantic models:
 
 ```python
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
+
 
 class ChatInput(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
-    session_id: str | None = Field(None, pattern=r'^[a-zA-Z0-9\-]+$')
+    session_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9\-]+$")
 
-    @validator('message')
-    def sanitize_message(cls, v):
+    @field_validator("message")
+    @classmethod
+    def sanitize_message(cls, v: str) -> str:
         # Remove control characters
-        return ''.join(c for c in v if c.isprintable() or c in '\n\t')
+        return "".join(c for c in v if c.isprintable() or c in "\n\t")
 ```
 
 ### Guardrails (LLM Input Protection)
@@ -243,32 +332,48 @@ class ChatInput(BaseModel):
 For LLM inputs, use Guardrails to prevent prompt injection:
 
 ```python
+from fastapi import HTTPException
+
 from core.guardrails import InputGuard
 
-guard = InputGuard()
+guard = InputGuard()  # GuardrailsConfig from the environment by default
 
-async def process_user_input(user_input: str):
-    result = await guard.process(user_input)
 
-    if not result.is_safe:
+async def process_user_input(user_input: str) -> str:
+    # validate() is the synchronous regex layer; validate_async() runs it
+    # first and, when it passes, asks the LLM for a SAFE/MALICIOUS verdict.
+    result = await guard.validate_async(user_input)
+
+    if not result.is_valid:
         logger.warning(
             "Blocked malicious input",
-            reason=result.block_reason,
-            risk_score=result.risk_score
+            reason=result.blocked_reason,
+            patterns=result.detected_patterns,
         )
         raise HTTPException(400, "Invalid input detected")
 
-    # Sanitized input safe to pass to LLM
-    safe_input = result.sanitized_content
-    return await llm.generate(safe_input)
+    # On success sanitized_input carries the text to hand to the model
+    return await llm.generate_response(result.sanitized_input)
 ```
 
-**What Guardrails Check:**
+`InputValidationResult` has four fields: `is_valid`, `blocked_reason`,
+`detected_patterns` (each entry is prefixed with the layer that fired —
+`injection:`, `code:`, `custom:`, or `llm_guardrail`) and `sanitized_input`.
 
-- **Prompt Injection**: Attempts to override system instructions
-- **Jailbreak Attempts**: Known jailbreak patterns
-- **PII Detection**: Sensitive personal data
-- **Malicious Patterns**: SQL injection, XSS, etc.
+**What the input guard checks** (`GuardrailsConfig`, all on by default):
+
+- **Length**: inputs over `max_input_length` (10 000 chars) are rejected
+- **Prompt injection / jailbreak**: known override and DAN-style patterns
+  (`block_injection_patterns`)
+- **Code execution attempts**: shell/eval-style payloads
+  (`block_code_execution`)
+- **Custom patterns**: operator-supplied regexes
+- **LLM verdict**: `validate_async` only, skipped when `llm_detection` is off;
+  a failed LLM call falls back to the regex result
+
+PII and harmful-content filtering happen on the **output** side
+(`OutputGuard`), and both guards run automatically on every
+`Orchestrator.process` call while `BASELITH_ORCHESTRATOR_GUARDRAILS` is on.
 
 ### Indirect Prompt Injection (External Content)
 
@@ -459,7 +564,7 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 - Internal services are segmented across dedicated Docker networks.
 - TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
 - The observability overlay ships **no default Grafana credential**: `docker-compose.observability.yml` requires `GRAFANA_ADMIN_PASSWORD` (compose aborts when unset) instead of falling back to `admin`/`admin` — a reachable Grafana on the default credential is an instant takeover of every dashboard and datasource.
-- `REDIS_PASSWORD` (optional, strongly recommended) arms `--requirepass` on the FalkorDB/Redis service in both compose files — via the `command` line in `docker-compose.yml` and via the image's `REDIS_ARGS` in `docker-compose.prod.yml`, so the FalkorDB graph module keeps loading. When set, point `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL` at `redis://:<password>@…`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues, and rate-limit counters.
+- `REDIS_PASSWORD` (optional, strongly recommended) arms `--requirepass` on the FalkorDB/Redis service in both compose files through the image's `REDIS_ARGS` environment variable — never a `command:` override, which would bypass the FalkorDB entrypoint and stop the graph module from loading. The healthcheck picks the password up the same way. When set, point `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL` at `redis://:<password>@…`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues, and rate-limit counters.
 
 The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment. The default single-host `docker-compose.yml` applies the same rule — the Docker-in-Docker daemon needs `privileged: true` (root-equivalent on the compose host), so it lives in the opt-in `docker-compose.sandbox.yml` overlay and joins the stack only via `docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d`. See [Deployment › Opt-in sandbox overlay](deployment.md#opt-in-sandbox-overlay-single-host).
 
@@ -471,14 +576,19 @@ the repository's **Security → Code scanning** tab.
 | Layer | Tool | What it covers |
 | ----- | ---- | -------------- |
 | SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
-| SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
+| SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token); report pass for every severity, then a blocking `--severity ERROR --error` pass |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
 
-CodeQL and Trivy run in **report mode** — they publish findings without failing
-the build, so security signal is visible without blocking delivery. Tighten to
-blocking once the baseline is clean.
+CodeQL runs in **report mode** — it publishes findings without failing the
+build. Semgrep and Trivy each run **twice**: a report-only pass that feeds the
+Security tab (Semgrep without `--error`; Trivy `--scanners vuln,secret,misconfig
+--exit-code 0`, uploaded as SARIF), then a blocking pass — Semgrep
+`--severity ERROR --error`, Trivy `--scanners vuln --severity HIGH,CRITICAL
+--exit-code 1` for anything not accepted in `.trivyignore.yaml`. A new
+HIGH/CRITICAL dependency CVE is therefore a red build, the same posture as
+`pip-audit`; IaC and secret findings stay visible without gating.
 
 <!-- markdownlint-disable MD046 -->
 <!-- The tables below sit inside an mkdocs admonition, so they are indented by
@@ -920,35 +1030,47 @@ The framework provides protections for main OWASP vulnerabilities:
 
 ## Security Audit Logging
 
-Log all security events for compliance and incident response:
+Security events go through the audit logger (`core/observability/audit.py`),
+not the application logger. `get_audit_logger()` returns the process-wide
+`AuditLogger`, which fans each `AuditEvent` out to its sinks — a
+`LoggerAuditSink` by default; add the hash-chained `SQLiteAuditSink`
+(`core/observability/audit_chain.py`) with `add_sink(...)` when the trail has
+to be evidence rather than telemetry.
 
 ```python
-from core.observability import security_logger
+from core.observability import AuditEventType, audit_emit, get_audit_logger
 
-# Successful login
-security_logger.info(
-    "user.login.success",
-    user_id=user.id,
-    ip_address=request.client.host,
-    user_agent=request.headers.get("user-agent")
-)
+audit = get_audit_logger()
 
-# Failed attempt
-security_logger.warning(
-    "user.login.failed",
-    username=credentials.username,
+# Authentication outcome: AUTH_LOGIN on success, AUTH_FAILED otherwise
+await audit.log_auth(
+    success=False,
+    user_id="user-123",
     ip_address=request.client.host,
-    failure_reason="invalid_password"
+    user_agent=request.headers.get("user-agent"),  # extra kwargs land in details
 )
 
 # Administrative action
-security_logger.audit(
-    "admin.user.deleted",
-    actor_id=admin.id,
-    target_id=deleted_user.id,
-    action="user_deletion"
+await audit.log(
+    AuditEventType.ADMIN_ACTION,
+    user_id=admin.user_id,
+    tenant_id=admin.tenant_id,
+    resource=f"user:{deleted_user_id}",
+    action="user_deletion",
+    ip_address=request.client.host,
 )
+
+# From synchronous code: scheduled fire-and-forget on the running loop
+audit_emit(AuditEventType.CONFIG_CHANGE, user_id=admin.user_id, action="rotate_keys")
 ```
+
+`log_api_request(method, path, ...)` and `log_chat(query, ...)` are the other
+convenience wrappers; the framework itself already emits `AUTH_FAILED` when a
+protected route is reached without a valid identity (`enforce_auth`),
+`TOOL_INVOKE`/`TOOL_BLOCKED` from the orchestration enforcement chokepoint, and
+the `PRIVACY_*` and `INCIDENT_*` families from their subsystems. A sink that
+raises never breaks the request path — the error is logged and the remaining
+sinks still receive the event.
 
 ---
 
@@ -961,8 +1083,8 @@ Before go-live, verify every point:
 - [x] JWT secret key is at least 256 bits long
 - [x] Tokens have reasonable expiration (1-24h)
 - [x] Refresh token implemented for long sessions
-- [x] Rate limiting on login endpoint (5 attempts/minute)
-- [x] Admin account lockout after 5 failed attempts
+- [x] Failed-auth throttle per source IP left on (`AUTH_FAILURE_LIMIT_PER_MINUTE=20`)
+- [x] Admin Basic-auth lockout after 5 failed attempts in 60 s (15 min lock)
 - [x] `APP_BASE_URL` set, so `JWT_ISSUER`/`JWT_AUDIENCE` bind tokens to this deployment
 - [x] `JWT_STRICT_VALIDATION` on (automatic when `AUTH_REQUIRED=true` and both claims resolve)
 - [x] `JWT_KEYS` + `JWT_ACTIVE_KID` configured, so the signing key can be rotated without ending every session
@@ -1253,18 +1375,6 @@ plugin declaring `setup_app_middleware` reached `exec_module` with
 `BASELITH_REQUIRE_PLUGIN_SIGNATURES` entirely bypassed. See [Plugins ›
 App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
 
-!!! note "Follow-ups not yet shipped"
-    A signed marketplace registry (per-plugin Ed25519 publisher signatures
-    shipped in 0.27 — `BASELITH_REQUIRE_PLUGIN_SIGNATURES` +
-    `BASELITH_PLUGIN_TRUST_ROOTS`; the registry index itself is not yet
-    signed), a JSON job serializer for the task queue, per-tenant scoping of
-    the privacy DSR endpoints, converting the CSRF/plugin-activation
-    `BaseHTTPMiddleware` to pure ASGI, and a pre-auth IP rate limiter remain
-    planned. Treat them as operational compensating controls until delivered.
-    Native Qdrant auth/TLS config shipped since then — see
-    [Configuration › Services](../core-modules/config.md#services-config-llm-vectorstore-chat)
-    (`QDRANT_API_KEY` / `QDRANT_HTTPS` / `VECTORSTORE_TIMEOUT_SECONDS`).
-
 ---
 
 ## Incident Response
@@ -1277,13 +1387,34 @@ In case of suspected breach:
 4. **Remediation**: Fix the vulnerability
 5. **Documentation**: Document incident for future prevention
 
-```python
-# Revoke all user tokens
-await token_service.revoke_all_user_tokens(user_id)
+Revocation has three radii, all on the `AuthManager`:
 
-# Force re-login for everyone
-await session_service.invalidate_all_sessions()
+```python
+from core.auth import get_auth_manager
+
+auth = get_auth_manager()
+
+# One token: blacklist its jti in Redis until it expires
+await auth.revoke_token(compromised_token)
+
+# One user, every outstanding access token: bump the epoch stamped into them.
+# False means the epoch store was unreachable and the sessions are still live.
+ended: bool = await auth.revoke_user_tokens(user_id)
+
+# One API key: persistent Redis tombstone, survives restarts
+await auth.api_keys.revoke_key(leaked_api_key)
 ```
+
+`revoke_user_tokens` wraps `auth.jwt.bump_user_epoch(user_id)`; tokens minted
+through `AuthManager.create_token` carry the epoch (`tv` claim), so any token
+issued before the bump is refused on its next verification. Refresh tokens are
+revoked in their own store — presenting an already-rotated one revokes its
+whole family (see [JWT](#jwt-json-web-token)).
+
+**Everyone at once** is a key rotation, not an API call: with a `JWT_KEYS`
+ring, add a new `kid`, point `JWT_ACTIVE_KID` at it, and drop the old entry once
+its tokens have expired; without a ring, roll `SECRET_KEY` and every session
+ends immediately.
 
 ---
 

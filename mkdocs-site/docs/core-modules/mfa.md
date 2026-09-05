@@ -107,7 +107,7 @@ them for non-login checks such as verifying an enrollment confirmation code.
 | `verify_totp(secret, code, ...)`           | Verify a code with clock-skew tolerance.               |
 | `verify_totp_matched_counter(...)`         | Like `verify_totp`, returns the matched time-step counter (what a replay guard records). |
 | `TOTPGuard` / `InMemoryTOTPGuard`          | Replay + brute-force guard protocol and its single-process default. |
-| `provisioning_uri(secret, account, issuer)`| Build the `otpauth://` QR-enrollment URI.              |
+| `provisioning_uri(secret, account_name, issuer, *, period, digits, algorithm)` | Build the `otpauth://` QR-enrollment URI (keyword-only `period`/`digits`/`algorithm` default to `30`/`6`/`"sha1"`). |
 | `generate_recovery_codes(count)`           | Mint single-use recovery codes (plaintext, show once). |
 | `hash_recovery_code(code)`                 | SHA-256 hash for storage at rest.                      |
 | `verify_recovery_code(code, hashes)`       | Constant-time match; returns the consumed hash.        |

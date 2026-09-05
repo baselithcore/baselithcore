@@ -87,14 +87,14 @@ async def handle_request(query: str):
     intent = await intent_classifier.classify(query)
 
     # 2. Find appropriate plugin/handler
-    handler = plugin_registry.get_handler(intent)
+    handler = plugin_registry.get_flow_handler(intent)
 
     # 3. Execute with context
-    context = await memory.get_context(session_id)
-    result = await handler.execute(query, context)
+    context = {"recent_history": await memory.get_context_async(max_tokens=2000)}
+    result = await handler.handle(query, context)
 
     # 4. Update memory and return
-    await memory.update(session_id, result)
+    await memory.remember(result["response"])
     return result
 ```
 
@@ -214,13 +214,15 @@ model = os.getenv("DEFAULT_MODEL")  # NO!
 
 ### Configuration Modules
 
-| Module         | File            | Content                    |
-| -------------- | --------------- | -------------------------- |
-| **Base**       | `base.py`       | Fundamental configurations |
-| **Services**   | `services.py`   | LLM, VectorStore, Vision   |
-| **Resilience** | `resilience.py` | Circuit breaker, retry     |
-| **Storage**    | `storage.py`    | Database connections       |
-| **Security**   | `security.py`   | Auth, CORS, rate limiting  |
+| Module          | File             | Content                                                                        |
+| --------------- | ---------------- | ------------------------------------------------------------------------------ |
+| **Base**        | `base.py`        | Fundamental configurations (`CoreConfig`)                                      |
+| **Services**    | `services.py`    | LLM and chat (`LLMConfig`, `ChatConfig`)                                       |
+| **VectorStore** | `vectorstore.py` | Vector backend (`VectorStoreConfig`)                                           |
+| **Multimodal**  | `multimodal.py`  | Vision, voice, fine-tuning (`VisionConfig`, `VoiceConfig`, `FineTuningConfig`) |
+| **Resilience**  | `resilience.py`  | Circuit breaker, retry (`ResilienceConfig`)                                    |
+| **Storage**     | `storage.py`     | Database connections (`StorageConfig`)                                         |
+| **Security**    | `security.py`    | Auth, CORS, rate limiting (`SecurityConfig`)                                   |
 
 ---
 

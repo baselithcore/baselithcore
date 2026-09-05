@@ -11,16 +11,17 @@ The `core/planning` module enables agents to handle complex goals by breaking th
 
 - **Hierarchical Planning**: Decomposes high-level goals into step-by-step plans
 - **Budget Constraints**: Enforces limits on steps, tokens, and tool calls
-- **Dynamic Adaptation**: Re-plans when steps fail or context changes
+- **Dependency-Aware Execution**: `Plan.get_next_steps()` yields the pending steps whose dependencies have completed
 - **LLM & Heuristic Modes**: Supports both LLM-driven complex planning and fast heuristic fallbacks
 
 ## Architecture
 
 The planning system consists of:
 
-1. **TaskPlanner**: The main entry point for creating and managing plans.
+1. **TaskPlanner**: The main entry point — `create_plan()` builds a `Plan` and `validate_plan()` checks it for unknown dependencies or an empty step list. There is no re-plan API.
 2. **TaskDecomposer**: specialized component for breaking down complex tasks.
 3. **PlanningBudget**: Value objects defining resource constraints.
+4. **plan_to_workflow**: Adapter (`core/planning/adapter.py`) that turns a `Plan` into a `WorkflowDefinition` for the workflow engine.
 
 ## Usage
 
@@ -70,6 +71,38 @@ print(plan.metadata.get("budget"))
 !!! note "Effective step cap"
     `create_plan` clamps `max_steps` to `min(max_steps, budget.max_steps)`
     before planning, so the budget always wins when it is stricter.
+
+### Plan → Workflow
+
+`plan_to_workflow` converts a `Plan` into a validated `WorkflowDefinition` so
+the [workflow engine](workflows.md) can execute it (`name` defaults to
+`plan.goal`):
+
+```python
+from core.planning import TaskPlanner, plan_to_workflow
+
+planner = TaskPlanner(llm_service=llm_service)
+plan = await planner.create_plan("Research and summarize global warming trends")
+
+workflow = plan_to_workflow(plan, name="research", default_agent_id="researcher")
+```
+
+- A `START` node is created, then one `WorkflowNode` per step (id
+  `step_<step.id>`, label = the step description, `config` carrying
+  `plan_step_id`, `action` and the step `parameters`).
+- The node type comes from `step.action` via `ACTION_MAP`: `analyze` /
+  `execute` / `validate` → `AGENT`, `transform` → `TRANSFORM`, `check` /
+  `condition` → `CONDITION`, `tool` → `TOOL`, `human` → `HUMAN`,
+  `parallel` → `PARALLEL`; anything else defaults to `AGENT`.
+- `AGENT` nodes take `parameters["agent_id"]`, falling back to
+  `default_agent_id` (`"planner-agent"`); `TOOL` nodes read
+  `parameters["tool_id"]` and `CONDITION` nodes `parameters["expression"]`.
+- Edges follow `dependencies`: steps with none hang off `START`, an unknown
+  dependency id is logged (the step attaches to `START` if none resolved),
+  and steps with no successors are wired to `END`.
+- `workflow.metadata["source"]` is `"plan_adapter"` and the plan's `metadata`
+  (including any `budget`) is copied to `metadata["plan"]`. Validation
+  issues are logged as warnings, not raised.
 
 ## Planning Budget
 
@@ -178,4 +211,4 @@ for the approval matrix and [Human-in-the-Loop](human.md) for the channel.
     Always provide a `PlanningBudget` for user-facing agents to prevent excessive costs. Start with conservative limits (e.g., 10 steps) and increase as needed.
 
 !!! warning "Handle Failures"
-    Plans can fail. Implement a retry loop that feeds the error back to the planner to generate a corrected plan.
+    Plans can fail, and `TaskPlanner` does not re-plan on its own — `create_plan` is its only entry point. To recover, mark the failed step `StepStatus.FAILED` (`core.planning.planner`) so `get_next_steps()` stops scheduling its dependants, then call `create_plan` again with the error described in `context`.

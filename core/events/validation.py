@@ -59,8 +59,9 @@ class DeadLetterQueue:
         for entry in dlq.get_all():
             print(f"Failed: {entry.event_name} - {entry.error}")
 
-        # Retry mechanism
-        await dlq.retry_all(event_bus)
+        # Retry mechanism: replay and drop entries oldest-first
+        while (entry := dlq.pop()) is not None:
+            await event_bus.emit(entry.event_name, entry.data)
     """
 
     def __init__(self, max_size: int = 1000) -> None:
@@ -122,6 +123,11 @@ class DeadLetterQueue:
             "by_event": by_event,
             "by_handler": by_handler,
         }
+
+
+class EventValidationError(ValueError):
+    """Raised by ``EventBus.emit`` when validation is enabled and the payload
+    does not match the schema registered for the event."""
 
 
 class EventSchemaRegistry:
@@ -227,6 +233,7 @@ __all__ = [
     "DeadLetterEntry",
     "DeadLetterQueue",
     "EventSchemaRegistry",
+    "EventValidationError",
     "get_dead_letter_queue",
     "get_schema_registry",
 ]

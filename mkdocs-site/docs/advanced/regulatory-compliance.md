@@ -23,11 +23,11 @@ turning on a coherent set and having startup verify it.
 | ------- | ---------- | ----- | ----- |
 | **Art. 5** | Prohibited practices | `core/compliance/prohibited.py` — the eight practices, screened and audited at registration | `tests/unit/core/compliance/test_classification.py` |
 | **Art. 6 + Annex I/III** | Risk classification, incl. the Art. 6(3) derogation and its profiling exception | `core/compliance/classification.py` | `test_classification.py` |
-| **Art. 9** | Risk management system | `core/compliance/risk_management.py` — lifecycle risk file; a risk closes only when treated, accepted by a named person **and** verified; `review()` refuses while risks are open | `test_artefacts.py` |
+| **Art. 9** | Risk management system | `core/compliance/risk_management.py` — lifecycle risk file; a risk closes only when treated, accepted by a named person **and** verified; `RiskManagementService.review()` (`artefact_services.py`) refuses while risks are open | `test_artefacts.py` |
 | **Art. 10(2)(f)/(g)** | Bias examination of data sets | `core/evaluation/fairness.py` + the **Bias Examination Gate** in CI (`scripts/run_fairness_evals.py` over `evals/fairness/`) — an empty dataset directory fails the job | `test_fairness.py`, `test_fairness_gate.py` |
 | **Art. 11 + Annex IV** | Technical documentation | `core/compliance/annex_iv.py` — nine sections, drafted from the registry, completeness checked | `test_registry_and_documents.py` |
 | **Art. 12** | Automatic recording of events | `core/observability/audit.py` + `audit_chain.py` | `tests/unit/core/observability/test_audit_chain.py` |
-| **Art. 13** | Transparency and instructions for use | `core/compliance/instructions.py` — the sixteen Art. 13(3) elements, drafted from the registry/risk file/Art. 72 plan; `issue()` refuses while any is empty | `test_artefacts.py` |
+| **Art. 13** | Transparency and instructions for use | `core/compliance/instructions.py` — the sixteen Art. 13(3) elements, drafted from the registry/risk file/Art. 72 plan; `InstructionsService.issue()` (`artefact_services.py`) refuses while any is empty | `test_artefacts.py` |
 | **Art. 14** | Human oversight | `core/human/interaction.py`, checkpoints + `/approvals` API | `tests/unit/core/human/` |
 | **Art. 15** | Accuracy, robustness, cybersecurity | `core/evaluation/`, `core/guardrails/`, `core/resilience/`, `core/security/` | across those suites |
 | **Art. 17** | Quality management system | ❌ **Organisational** — not a code artefact. |  — |
@@ -129,6 +129,9 @@ from core.observability.audit_setup import get_durable_audit_sink
 report = evaluate_profile(ComplianceProfile.AI_ACT_HIGH_RISK)
 print(report.to_dict())
 
-# Is the audit trail intact?
-print(get_durable_audit_sink().verify_chain().to_dict())
+# Is the audit trail intact? The durable sink only exists when AUDIT_DB_PATH
+# is set (get_durable_audit_sink() returns None otherwise).
+sink = get_durable_audit_sink()
+if sink is not None:
+    print(sink.verify_chain().to_dict())
 ```

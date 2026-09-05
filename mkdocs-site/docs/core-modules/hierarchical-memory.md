@@ -84,12 +84,19 @@ Get a formatted context string optimized for LLM prompts:
 ```python
 context_str = memory.get_context(max_tokens=2000)
 # Returns:
-# ## Recent Context
+# ## Recent Context            <- STM, most recent first
 # - User asked for better performance
 # ...
-# ## Long-term Knowledge
+# ## Background                <- last 5 MTM items, most recent first
+# - Earlier the user profiled the query planner
+# ...
+# ## Long-term Knowledge       <- last 3 LTM summaries
 # - [Summary] Previous discussions focused on database latency...
 ```
+
+STM always gets priority; the `## Background` and `## Long-term Knowledge`
+sections are opened only while more than 20 tokens of budget remain, and each
+section stops at the first line that would overflow `max_tokens`.
 
 ## Configuration
 
@@ -100,19 +107,26 @@ from core.memory.hierarchy import HierarchyConfig, TierConfig
 
 config = HierarchyConfig(
     stm=TierConfig(max_items=10),
-    mtm=TierConfig(max_items=20),
+    mtm=TierConfig(max_items=50, ttl_seconds=86400),
     auto_consolidate=True
 )
 ```
 
-| Setting                      | Default | Description                                   |
-| ---------------------------- | ------- | --------------------------------------------- |
-| `stm.max_items`              | 10      | Max items in STM before consolidation         |
-| `mtm.max_items`              | 20      | Max items in MTM before compression           |
-| `auto_consolidate`           | True    | Automatically move items when limits exceeded |
-| `stm.auto_promote_threshold` | 0.5     | Min importance for STM→MTM promotion          |
-| `mtm.ttl_seconds`            | 86400   | MTM item time-to-live (swept on maintenance)  |
-| `ltm.ttl_seconds`            | 604800  | LTM item time-to-live (swept on maintenance)  |
+| Setting                      | Default | Description                                            |
+| ---------------------------- | ------- | ------------------------------------------------------ |
+| `stm.max_items`              | 10      | Max items in STM before consolidation                  |
+| `stm.ttl_seconds`            | None    | STM items never expire by TTL                          |
+| `mtm.max_items`              | 50      | Max items in MTM before compression                    |
+| `mtm.ttl_seconds`            | 86400   | MTM item time-to-live (swept on maintenance)           |
+| `ltm.max_items`              | 500     | Capacity of the in-memory LTM cache (`deque(maxlen)`) |
+| `ltm.ttl_seconds`            | 604800  | LTM item time-to-live (swept on maintenance)           |
+| `auto_consolidate`           | True    | Automatically move items when limits exceeded          |
+| `stm.auto_promote_threshold` | 0.5     | Min importance for STM→MTM promotion                   |
+
+`TierConfig` itself has no per-tier defaults beyond
+`auto_promote_threshold=0.5` and `ttl_seconds=None` — overriding a tier
+replaces the whole `TierConfig`, so restate `ttl_seconds` (as above for MTM)
+if you want to keep the TTL.
 
 ## Advanced Operations
 

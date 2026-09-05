@@ -50,10 +50,12 @@ async def upload_document(file: UploadFile):
 ```text
 core/task_queue/
 ├── __init__.py     # public API: get_queue_redis_connection, get_queue,
-│                   #             enqueue_task, schedule_task, CronExpression
+│                   #             enqueue_task, schedule_task, CronExpression,
+│                   #             get_dead_letter_queue
 ├── scheduler.py    # TaskScheduler, get_task_scheduler, enqueue_task, schedule_task
 ├── status.py       # TaskTracker, TaskStatus, TaskInfo, get_task_tracker, helpers
 ├── monitor.py      # WorkerMonitor, WorkerInfo, QueueInfo, get_worker_monitor
+├── dead_letter.py  # DeadLetterQueue, DeadLetterRecord, get_dead_letter_queue, dead_letter_handler
 ├── cron.py         # CronExpression — pure-stdlib 5-field cron parser
 ├── worker.py       # Worker process entry point
 └── jobs/           # Job definitions (incl. agent_run.py — async agent runs)
@@ -68,6 +70,7 @@ from core.task_queue import (
     enqueue_task,                # immediate enqueue (tenant-aware)
     schedule_task,               # delayed enqueue
     CronExpression,              # 5-field cron parser (see below)
+    get_dead_letter_queue,       # -> DeadLetterQueue (see Dead-Letter Queue)
 )
 ```
 

@@ -70,8 +70,10 @@ wiring needed.
 
 Retention is not just available on demand — it is **enforced** by a background
 sweep when `PRIVACY_RETENTION_DAYS > 0` (and `PRIVACY_ENABLED`). The lifespan
-starts a `RetentionScheduler` that runs `purge_expired(retention_days)` once
-shortly after startup, then daily; sweep failures are logged and never kill the
+constructs `RetentionScheduler(retention_days * 86400)` — the horizon is
+converted to **seconds**, matching `purge_expired(older_than_seconds)` — and
+the scheduler runs that sweep once shortly after startup, then daily
+(`interval_seconds=86400`); sweep failures are logged and never kill the
 loop. With `PRIVACY_RETENTION_DAYS=0` (the default) nothing runs — retention is
 opt-in. Deployments preferring external orchestration can instead leave the
 scheduler off and drive `POST /privacy/retention/sweep` from a cron job.
@@ -257,6 +259,8 @@ Every request is audit-logged with the subject id and affected record counts.
 | ------------------------ | ------- | ---------------------------------------- |
 | `PRIVACY_ENABLED`        | `false` | Enable the DSR subsystem and admin API   |
 | `PRIVACY_RETENTION_DAYS` | `0`     | Retention horizon in days; `>0` starts the background sweep (0 = no auto-purge) |
+| `PRIVACY_CONSENT_DB_PATH` | `None` | Path of the durable Art. 7 consent log (`SQLiteConsentStore`); unset keeps the in-memory store |
+| `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `None` | Path of the durable Art. 22 register (`SQLiteAutomatedDecisionStore`); unset keeps the in-memory store |
 
 !!! note "Wiring real stores"
     The relational store is wired by default via `PostgresDataProvider` (see

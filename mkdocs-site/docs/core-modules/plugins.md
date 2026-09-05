@@ -21,6 +21,8 @@ core/plugins/
 ├── app_setup.py          # Sync pre-discovery for app-level middleware hooks
 ├── integrity.py          # SHA-256 integrity verification / signing policy
 ├── declarative.py        # SKILL.md declarative skill loader
+├── skills_service.py     # SkillService — registry-backed catalog + gated activation
+├── skill_scripts.py      # Sandboxed runner for a skill's bundled .py helpers
 ├── result.py             # SkillResult envelope (ok/fail/partial)
 ├── load_gates.py         # Compatibility/config gates before init
 ├── lifecycle.py          # Lifecycle management
@@ -134,7 +136,7 @@ class MyPlugin(Plugin, RouterPlugin):
         return router
 
     def get_router_prefix(self) -> str:
-        return "/my-plugin"  # Default: /<plugin-name>
+        return "/my-plugin"  # Default: "/api/<plugin-name>" (f"/api/{self.metadata.name}")
 ```
 
 !!! warning "Reserved route namespaces"
@@ -282,22 +284,31 @@ internal maps with a lock).
 ## PluginLoader
 
 The `PluginLoader` handles discovering and loading plugins from the filesystem.
+It is constructed with the plugins directory and the `PluginRegistry` that
+loaded plugins are registered into — `PluginLoader(plugins_dir, registry,
+lifecycle_manager=None)`; the optional `lifecycle_manager` receives state
+transitions.
 
 ```python
 from pathlib import Path
-from core.plugins import PluginLoader
+from core.plugins import PluginLoader, PluginRegistry
 
-loader = PluginLoader(plugins_dir=Path("plugins"))
+registry = PluginRegistry()
+loader = PluginLoader(Path("plugins"), registry)
 
-# Discover plugin directories (no import side effects)
+# Discover plugin directories (no import side effects) -> list[Path]
 plugin_dirs = loader.discover_plugins()
 
-# Load all plugins in the directory
-plugins = await loader.load_all_plugins()
+# Load every discovered plugin with dependency resolution -> int (number loaded)
+loaded_count = await loader.load_all_plugins()
 
-# Load a single plugin from its directory
+# Load a single plugin from its directory -> Plugin | None
 plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 ```
+
+`load_all_plugins(configs=None)` takes an optional map of plugin name → config
+dict and returns **how many** plugins loaded, not the instances — those are in
+the registry.
 
 ### Plugin Signing & Integrity
 
@@ -365,18 +376,22 @@ use the current one.
 ### Load-time Admission Gates
 
 After a plugin is instantiated and before `initialize()` is called, the loader
-runs two admission gates (`core/plugins/load_gates.py`). Both are **warn-only by
+runs two admission gates — `compat_gate(plugin, available_versions)` and
+`config_gate(plugin, config)` in `core/plugins/load_gates.py`, thin wrappers
+that run the checks below and apply the enforcement flags. Both are **warn-only by
 default** — they log problems but still load the plugin, so existing deployments
 are unaffected — and only *skip* an offending plugin when their matching
 enforcement flag is set.
 
-**Version compatibility** (`check_plugin_compatibility`) checks the plugin's
+**Version compatibility** (`check_plugin_compatibility`,
+`core/plugins/version.py`) checks the plugin's
 declared `min_core_version` / `max_core_version` against the running core version
 (`core._version.__version__`) and each entry in `plugin_dependencies` (a map of
 plugin name → version constraint such as `">=0.1.0"`) against the versions of the
 plugins actually present.
 
-**Config schema validation** (`validate_plugin_config`) validates the
+**Config schema validation** (`validate_plugin_config`,
+`core/plugins/config_validation.py`) validates the
 user-supplied config against the JSON Schema returned by the plugin's
 `get_config_schema()` (Draft 7). A plugin that declares no schema is a no-op.
 Validation runs in both the single-plugin path and `load_all_plugins`, giving
@@ -571,9 +586,12 @@ from core.plugins import get_metrics_collector
 
 collector = get_metrics_collector()
 
-# Per-plugin metrics as a dict (None if the plugin has no recorded metrics)
+# Per-plugin metrics as a nested dict (None if the plugin has no recorded metrics)
 stats = collector.get_plugin_metrics("weather-agent")
-print(stats["load_count"], stats["avg_load_time_ms"], stats["failure_count"])
+if stats:
+    print(stats["lifecycle_counts"]["load"], stats["lifecycle_counts"]["failure"])
+    print(stats["timing"]["load"]["avg_ms"])
+    print(stats["current_state"]["state"], stats["errors"]["last_error"])
 
 # Aggregate views
 all_metrics = collector.get_all_metrics()
@@ -581,10 +599,16 @@ system = collector.get_system_metrics()
 summary = collector.get_performance_summary()
 ```
 
-The collector tracks lifecycle counts (`load_count`, `reload_count`, `enable_count`,
-`disable_count`, `failure_count`), load/reload timings, time-in-state, and an error
-history. The underlying per-plugin record is `PluginMetrics`, serialized via
-`to_dict()`.
+`get_plugin_metrics()` and `get_all_metrics()` return `PluginMetrics.to_dict()`,
+which nests the record under fixed keys: `lifecycle_counts` (`load`, `reload`,
+`enable`, `disable`, `failure`), `timing` (`load` with `total_ms` / `avg_ms` /
+`min_ms` / `max_ms`, `reload` with `total_ms` / `avg_ms`), `state_duration`
+(`active_ms`, `disabled_ms`, `failed_ms`), `errors` (`last_error`,
+`last_error_timestamp`, `total_errors`, `recent_errors` — the last five),
+`current_state` (`state`, `entered_at`, `duration_ms`) and `resources`
+(`memory_bytes`, `cpu_percent` — placeholders, reported as `None`). The flat
+attribute names (`load_count`, `avg_load_time_ms`, `failure_count`, …) exist
+only on the `PluginMetrics` dataclass itself, not in the dict.
 
 ---
 
@@ -663,8 +687,8 @@ process. What a `.env` may then set is decided by a single shared policy
     `GIT_SSH_COMMAND`, `NODE_OPTIONS` and the next library's `*_ENDPOINT` were
     all silently settable. "Only your own namespace leaves the plugin" is a
     closed policy and does not have that hole. The denylist is retained as a
-    second line of defence, so a namespace that shadows a framework prefix (a
-    plugin directory named `baselith-x` derives `BASELITH_X_`) still cannot
+    second line of defence, so a namespace that shadows a framework prefix (for
+    example, a plugin directory named `baselith-x` would derive `BASELITH_X_`) still cannot
     reopen a control.
 
 Refused keys are logged with the remedy; existing process/config values are
@@ -707,7 +731,8 @@ The denylist (`is_protected_env_key`) covers:
   `SECRETS_`, `RATE_LIMIT_`, `CORS_`, `CSRF_`, `OTEL_`, `SENTRY_` (the last two
   because their `*_ENDPOINT`/`*_DSN` reroute traces and errors to an
   attacker-chosen collector).
-- **Auth / exposure toggles** — `SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`,
+- **Deployment identity and auth / exposure toggles** — `SECRET_KEY`,
+  `APP_BASE_URL`, `APP_ENV`, `ENVIRONMENT`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`,
   `TRUSTED_HOSTS`, `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, plus
   the HTTP-surface controls `SECURITY_HEADERS_ENABLED`,
   `CONTENT_SECURITY_POLICY`, `X_FRAME_OPTIONS`, `MAX_REQUEST_SIZE_BYTES`,
@@ -882,7 +907,7 @@ and integrity/signing requirements.
 | `SkillLoadError` | Frontmatter or content failed validation |
 | `SkillSandboxError` | Path escapes the configured roots |
 | `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope); `render_catalog(query=)` BM25-pre-filters large catalogs |
-| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
+| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers — defined in `core/plugins/skill_scripts.py`, re-exported from `core.plugins` (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
 | `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
 
 The loader resolves and pins every root, so a malicious symlink or

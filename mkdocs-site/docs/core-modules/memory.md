@@ -577,8 +577,15 @@ await memory.compress_old_memories(days_threshold=7)
 
 `AgentMemory` is configured through constructor arguments
 (`similarity_threshold`, `short_term_limit`, `working_memory_limit`,
-`provider`, `embedder`, `context_folder`) — there are no dedicated
-`MEMORY_*` environment variables.
+`provider`, `graph_provider`, `embedder`, `context_folder`). The only
+dedicated `MEMORY_*` environment variables are the runtime knobs on
+`MemoryRuntimeConfig` (`core/config/memory.py`, env prefix `MEMORY_`, read via
+`get_memory_runtime_config()`):
+
+| Env var | Default | Purpose |
+| ------- | ------- | ------- |
+| `MEMORY_CONTEXT_FOLDING_ENABLED` | `false` | Wire a `ContextFolder` into every `AgentMemory` (older turns LLM-summarized instead of hard-truncated) — see [Proactive Context Folding](#proactive-context-folding-agentfold) |
+| `MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` | `2000` | Fold only when the assembled context exceeds this many characters; below it the verbatim fast-path runs with no LLM call |
 
 The optional [Supermemory](supermemory.md) layer is configured separately via
 `SUPERMEMORY_*` variables (see the [Configuration](config.md) page), and the

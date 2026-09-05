@@ -61,7 +61,7 @@ graph TB
 
 **Core Services:**
 
-- **Backend**: FastAPI server handling HTTP requests and agent orchestration
+- **API** (`api` service): FastAPI server handling HTTP requests and agent orchestration
 - **FalkorDB**: Unified storage for knowledge graph, caching, and task queue (Redis-compatible)
 - **PostgreSQL**: Relational database for structured data persistence
 - **Qdrant**: Vector database for embeddings and semantic search (optional)
@@ -74,8 +74,6 @@ graph TB
 The `docker-compose.prod.yml` file defines the entire infrastructure, including reverse proxy and observability.
 
 ```yaml title="docker-compose.prod.yml"
-version: '3.8'
-
 services:
   # Main service: API Backend
   api:
@@ -90,10 +88,10 @@ services:
       - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
-      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
@@ -123,14 +121,26 @@ services:
       timeout: 10s
       retries: 3
 
-  # FalkorDB (Cache, Queue, and GraphDB)
+  # Cache and Message Queue
+  # Graph Database and Cache (Redis compatible)
   falkordb:
     # Pinned: a `latest` re-pull silently changes the data plane.
     image: falkordb/falkordb:v4.20.4
-    # Optional --requirepass, via REDIS_ARGS (not a command override) so the
-    # image's entrypoint keeps loading the FalkorDB graph module.
+    container_name: baselith-falkordb
+    # REDIS_PASSWORD is optional but strongly recommended: without it any
+    # container on app_net (and any host process via the loopback publish)
+    # has full RW access to cache, queues, and rate-limit counters. When set,
+    # point CACHE_REDIS_URL etc. at redis://:<password>@falkordb:6379.
+    # Passed via REDIS_ARGS (not a command override) so the image's default
+    # entrypoint keeps loading the FalkorDB graph module.
     environment:
       - REDIS_ARGS=${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    # Publish to host loopback so a natively-deployed app (running on the host,
+    # not in a container) can reach the cache/graph at 127.0.0.1. Bound to
+    # 127.0.0.1 only — not exposed on any external interface. Harmless for the
+    # all-in-container deployment (services still talk over app_net).
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - falkordb_data:/data
     networks:
@@ -154,6 +164,12 @@ services:
   # Relational Database
   postgres:
     image: postgres:16-alpine
+    # Publish to host loopback so a natively-deployed app (running on the host,
+    # not in a container) can reach Postgres at 127.0.0.1. Bound to 127.0.0.1
+    # only — not exposed on any external interface. Harmless for the
+    # all-in-container deployment (services still talk over app_net).
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     environment:
       - POSTGRES_DB=${DB_NAME:-baselithcore}
       - POSTGRES_USER=${DB_USER:-baselithcore}
@@ -166,6 +182,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # `cap_drop: ALL` alone does not work for this image: its entrypoint starts
+    # as root, prepares (and chowns) the data directory, then drops to the
+    # `postgres` user via gosu. Without these five, first boot fails in initdb
+    # and the container restart-loops — the hardening looks applied while the
+    # database never comes up. This is the minimal set for that sequence; the
+    # dangerous ones (SYS_ADMIN, NET_RAW, SYS_PTRACE …) stay dropped.
+    cap_add:
+      - CHOWN           # chown the PGDATA volume on first boot
+      - DAC_OVERRIDE    # read/write it before the ownership change lands
+      - FOWNER          # chmod 0700 PGDATA as required by initdb
+      - SETGID          # gosu: drop to the postgres group
+      - SETUID          # gosu: drop to the postgres user
     restart: unless-stopped
     deploy:
       resources:
@@ -237,8 +265,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # NET_BIND_SERVICE alone is not enough: the master process starts as root
+    # and `user nginx;` (deploy/nginx/nginx.conf) makes it fork its workers as
+    # an unprivileged user, which needs SETUID/SETGID. Without them nginx exits
+    # at startup with "setgid(101) failed (1: Operation not permitted)".
     cap_add:
-      - NET_BIND_SERVICE
+      - NET_BIND_SERVICE  # bind :80 as a non-root worker
+      - SETGID            # master -> worker privilege drop
+      - SETUID
     tmpfs:
       - /var/cache/nginx
       - /var/run
@@ -252,12 +286,12 @@ services:
 
   # === Observability Stack ===
   jaeger:
-    image: jaegertracing/all-in-one:1.52
+    image: jaegertracing/all-in-one:1.76.0
     container_name: baselith-jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "127.0.0.1:16686:16686"  # Bound to localhost — access via SSH tunnel in production
+      - "127.0.0.1:16686:16686"
     networks:
       - obs_net
     security_opt:
@@ -267,11 +301,12 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.47.0
+    image: prom/prometheus:v3.5.5
     container_name: baselith-prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - ./deploy/prometheus/slo-rules.yml:/etc/prometheus/slo-rules.yml:ro
       - prometheus_data:/prometheus
     networks:
       - app_net
@@ -302,7 +337,7 @@ networks:
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `docker-compose.yml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `docker-compose.sandbox.yml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
     Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files and `ollama/ollama:0.33.2` in the default stack — a `latest` re-pull must not silently change the data plane or the local LLM runtime. The default stack also adds healthchecks for Qdrant (TCP connect probe — the image ships no curl) and Ollama (`ollama ls`), and `api`/`worker` now gate on `condition: service_healthy` for all four dependencies instead of `service_started`.
-    Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). The default compose appends it to the `redis-server` command; the production compose passes it via the FalkorDB image's `REDIS_ARGS` so the graph module keeps loading. When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379`.
+    Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). Both compose files pass it through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
 
 ### Uvicorn Runtime Flags
 
@@ -342,7 +377,7 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
 
 ### Service Explanation
 
-#### Backend Service
+#### API Service (`api`)
 
 The FastAPI application server that:
 
@@ -440,15 +475,20 @@ mounts.
 ### Starting the System
 
 ```bash
-# Create environment file
-cp .env.example .env.production
-# Edit .env.production with your values
+# Fill in the production env file. Both api and worker read it via
+# `env_file: configs/.env.production`; the preflight requires DB_HOST,
+# DB_PASSWORD, SECRET_KEY (>= 32 chars), SANDBOX_DOCKER_HOST and SANDBOX_CERTS_DIR.
+$EDITOR configs/.env.production
 
 # Run preflight checks (required vars, sandbox certs, external daemon reachability)
 ./scripts/prod-preflight.sh
 
-# Start all services
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# Point every docker compose command below at the production stack
+export COMPOSE_FILE=docker-compose.prod.yml
+
+# Start all services. --env-file feeds compose interpolation
+# (DB_PASSWORD, SANDBOX_DOCKER_HOST, SANDBOX_CERTS_DIR, REDIS_PASSWORD, SENTRY_DSN)
+docker compose --env-file configs/.env.production up -d
 
 # Verify status
 docker compose ps
@@ -480,13 +520,21 @@ One of the system's strengths is horizontal scalability to handle increasing loa
     anyway — a duplicate bootstrap is wasted load, a missing one is missing
     indices.
 
-### Horizontal Scaling (Backend)
+### Horizontal Scaling (API)
 
-Launch multiple backend instances to distribute load. The load balancer (Nginx, Traefik, or cloud LB) distributes requests.
+Launch multiple API instances to distribute load. The load balancer (Nginx, Traefik, or cloud LB) distributes requests.
+
+!!! warning "`--scale` and fixed container names"
+    `docker-compose.prod.yml` pins `container_name: baselith-core-api` on `api`
+    (and `baselith-core-worker` on `worker`), and Compose refuses to scale a
+    service with a fixed container name. To run several replicas on one host,
+    drop `container_name` from the service in an override file and add the
+    extra upstreams to `deploy/nginx/nginx.conf`; for real horizontal scaling
+    use the [Helm chart](kubernetes.md).
 
 ```bash
-# Start 3 backend instances
-docker compose up --scale backend=3 -d
+# Start 3 API instances (after removing container_name from the api service)
+docker compose up --scale api=3 -d
 ```
 
 !!! tip "Statelessness"
@@ -505,7 +553,7 @@ docker compose up --scale backend=3 -d
 docker stats
 
 # Check request distribution
-docker compose logs backend | grep "Request completed"
+docker compose logs api | grep "Request completed"
 ```
 
 ### Worker Scaling
@@ -513,7 +561,7 @@ docker compose logs backend | grep "Request completed"
 Workers process async tasks (embeddings, LLM batches, etc.). Scale based on queue depth.
 
 ```bash
-# Start 5 parallel workers
+# Start 5 parallel workers (same container_name caveat as the API above)
 docker compose up --scale worker=5 -d
 ```
 
@@ -634,7 +682,7 @@ Before going live, verify every point:
 - [ ] HTTPS configured with valid certificate
 - [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
 - [ ] CORS configured for authorized domains only
-- [ ] API documentation disabled or restricted (`ENABLE_API_DOCS=false`)
+- [ ] API documentation disabled or restricted (`DOCS_ENABLED=false`; when unset, `/docs`, `/redoc` and the OpenAPI schema are switched off automatically once the environment resolves to production)
 - [ ] Strong JWT secret (256-bit minimum); `PyJWT >= 2.10.1` pinned
 - [ ] `MAX_REQUEST_SIZE_BYTES` set for workload (default 10 MiB; raise only for endpoints that legitimately accept large bodies)
 - [ ] No `BaseHTTPMiddleware` in the stack — pure ASGI only (see [Security › Security Headers](../advanced/security.md#security-headers))
@@ -657,7 +705,7 @@ Before going live, verify every point:
 
 ### Performance
 
-- [ ] Database connection pooling (`DATABASE_POOL_SIZE=20`)
+- [ ] Database connection pooling (`DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE=20`)
 - [ ] Redis persistence enabled
 - [ ] LLM cache active for repeated prompts
 - [ ] Indexes created on frequently queried columns (run `alembic upgrade head` — includes migration `003_interactions_feedback_indexes` with `CONCURRENTLY` to avoid locking writers)
@@ -678,9 +726,9 @@ Before going live, verify every point:
 
 ## Production Configuration
 
-Complete example of `.env.production`:
+Complete example of `configs/.env.production` (the file both `api` and `worker` load through `env_file`):
 
-```env title=".env.production"
+```env title="configs/.env.production"
 # Environment
 APP_ENV=production
 ENVIRONMENT=production
@@ -694,6 +742,7 @@ LOG_MASKING_ENABLED=true
 SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
 ALLOW_ORIGINS=["https://baselith.ai","https://app.baselith.ai"]
 AUTH_REQUIRED=true
+DOCS_ENABLED=false
 MAX_REQUEST_SIZE_BYTES=10485760
 
 # Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address)
@@ -720,8 +769,11 @@ GRAPH_DB_URL=redis://falkordb:6379
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o-mini
 LLM_OPENAI_API_KEY=${OPENAI_API_KEY:-}
-LLM_BUDGET_ENABLED=true
-LLM_BUDGET_MAX_TOKENS=500000
+# Per-run token cap that stops runaway agent loops. Aliases: COST_CONTROL_ENABLED /
+# LLM_BUDGET_ENABLED and AGENT_MAX_TOKENS / LLM_BUDGET_MAX_TOKENS. The default is
+# 10000 — raise it deliberately per workload; a huge value disables the guard.
+COST_CONTROL_ENABLED=true
+AGENT_MAX_TOKENS=10000
 
 # Rate Limiting
 API_KEY_ENABLED=true
@@ -766,7 +818,7 @@ A BaselithCore instance reaches the plugin marketplace in **client mode**. The o
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MARKETPLACE_API_KEY` | — | Publisher API key sent by the CLI/CI when running `baselith plugin marketplace publish` |
-| `MARKETPLACE_CENTRAL_URL` | `https://marketplace.baselithcore.xyz` | Override only if you mirror the marketplace internally |
+| `MARKETPLACE_CENTRAL_URL` | `https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json` | Registry index URL (`PluginConfig.REGISTRY_URL`; `PLUGIN_REGISTRY_URL` / `REGISTRY_URL` are aliases). Override only if you mirror the marketplace internally |
 
 See the [Publishing to the Marketplace](../plugins/marketplace.md#publishing) guide for the end-to-end workflow.
 
@@ -797,19 +849,19 @@ openssl rand -base64 24
 
 ```bash
 # Check logs
-docker compose logs backend --tail 50
+docker compose logs api --tail 50
 
-# Verify database connectivity
-docker compose exec backend python -c "from core.db import engine; print(engine.url)"
+# Verify infrastructure connectivity (Redis, DB, LLM) from inside the container
+docker compose exec api baselith doctor
 
 # Check environment variables
-docker compose exec backend env | grep DATABASE
+docker compose exec api env | grep -E '^(DB_|CACHE_REDIS_URL|QUEUE_REDIS_URL|GRAPH_DB_URL)'
 ```
 
 **Common Solutions:**
 
-- **Database unreachable** -> Verify `DATABASE_URL` and postgres is running
-- **Redis unreachable** -> Verify `REDIS_URL`
+- **Database unreachable** -> Verify `DB_HOST` / `DB_PASSWORD` (or `DATABASE_URL`) and that `postgres` is healthy
+- **Redis unreachable** -> Verify `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` (including the `REDIS_PASSWORD` embedded in them)
 - **Port already in use** -> Change port in docker-compose
 - **Missing dependencies** -> Rebuild image: `docker compose build --no-cache`
 
@@ -830,15 +882,15 @@ baselith queue status
 baselith cache stats
 
 # Check database connections
-docker compose exec postgres psql -U multiagent -c "SELECT count(*) FROM pg_stat_activity;"
+docker compose exec postgres psql -U baselithcore -d baselithcore -c "SELECT count(*) FROM pg_stat_activity;"
 ```
 
 **Solutions:**
 
-- **High CPU** → Scale backend (`--scale backend=N`)
+- **High CPU** → Scale the API (`--scale api=N`, see [Horizontal Scaling](#horizontal-scaling-api))
 - **Long queue** → Scale workers (`--scale worker=N`)
 - **High cache miss rate** → Increase TTL or cache size
-- **Database connection pool exhausted** → Increase `DATABASE_POOL_SIZE`
+- **Database connection pool exhausted** → Increase `DB_POOL_MAX_SIZE`
 
 ### 502/503 Errors
 
@@ -846,10 +898,10 @@ docker compose exec postgres psql -U multiagent -c "SELECT count(*) FROM pg_stat
 
 **Solutions:**
 
-1. Verify backend is running: `docker compose ps`
+1. Verify the `api` container is running: `docker compose ps`
 2. Increase `proxy_read_timeout` for long LLM requests
 3. Check health endpoint: `curl http://localhost:8000/health`
-4. Review backend logs: `docker compose logs backend --tail 100`
+4. Review API logs: `docker compose logs api --tail 100`
 5. Verify nginx configuration: `sudo nginx -t`
 
 ### Database Connection Issues
@@ -860,14 +912,14 @@ docker compose exec postgres psql -U multiagent -c "SELECT count(*) FROM pg_stat
 
 ```bash
 # Check active connections
-docker compose exec postgres psql -U multiagent -c \
+docker compose exec postgres psql -U baselithcore -d baselithcore -c \
   "SELECT count(*), state FROM pg_stat_activity GROUP BY state;"
 ```
 
 **Solutions:**
 
 - Increase PostgreSQL `max_connections` in `postgresql.conf`
-- Reduce application `DATABASE_POOL_SIZE`
+- Reduce application `DB_POOL_MAX_SIZE`
 - Investigate connection leaks in application code
 - Enable connection pooling with PgBouncer
 
@@ -903,22 +955,22 @@ find "${BACKUP_DIR}" -name "backup_*.sql.gz" -mtime +30 -delete
 Redis AOF provides automatic persistence. Manual snapshots:
 
 ```bash
-# Trigger manual snapshot
-docker compose exec redis redis-cli BGSAVE
+# Trigger manual snapshot (add -a "$REDIS_PASSWORD" when --requirepass is armed)
+docker compose exec falkordb redis-cli BGSAVE
 
 # Copy RDB file
-docker compose cp redis:/data/dump.rdb ./backups/redis/
+docker compose cp falkordb:/data/dump.rdb ./backups/redis/
 ```
 
 ### Application State Backups
 
 ```bash
 # Backup plugin configurations
-docker compose exec backend tar czf - /app/configs \
+docker compose exec api tar czf - /app/configs \
   > backups/configs_$(date +%Y%m%d).tar.gz
 
 # Backup uploaded files (if any)
-docker compose exec backend tar czf - /app/uploads \
+docker compose exec api tar czf - /app/uploads \
   > backups/uploads_$(date +%Y%m%d).tar.gz
 ```
 
@@ -937,28 +989,36 @@ down even though the pod keeps serving. See
 
 ### Prometheus Metrics
 
-Add Prometheus to `docker-compose.prod.yml`:
-
-```yaml
-prometheus:
-  image: prom/prometheus:latest
-  volumes:
-    - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    - prometheus_data:/prometheus
-  ports:
-    - "9090:9090"
-  restart: unless-stopped
-```
+Prometheus is already part of `docker-compose.prod.yml` (`prom/prometheus:v3.5.5`,
+no host port published — reach the UI over `app_net` or an SSH tunnel). It loads
+the repository's `prometheus.yml` plus the rule files mounted from
+`deploy/prometheus/` (`alert-rules.yml`, `slo-rules.yml`) and scrapes the API
+container directly:
 
 ```yaml title="prometheus.yml"
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - '/etc/prometheus/alert-rules.yml'
+  - '/etc/prometheus/slo-rules.yml'
 
 scrape_configs:
-  - job_name: 'multiagent'
+  - job_name: 'baselith-core'
     static_configs:
-      - targets: ['backend:9090']
+      - targets: ['api:8000']
+    metrics_path: /metrics
+    scrape_interval: 10s
+    # basic_auth:
+    #   username: admin
+    #   password_file: /etc/prometheus/secrets/admin_password
 ```
+
+`GET /metrics` requires admin basic auth by default (`METRICS_AUTH_REQUIRED=true`).
+Either uncomment `basic_auth` and mount the admin password as a file into the
+Prometheus container, or set `METRICS_AUTH_REQUIRED=false` on the `api` service
+when the scrape network is private (for example, restricted by a NetworkPolicy).
 
 ### Grafana Dashboards
 

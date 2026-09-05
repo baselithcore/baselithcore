@@ -2,9 +2,9 @@
 Context-Aware Task Prioritization and Queue Management.
 
 Implements intelligent resource scheduling for asynchronous job
-execution. Dynamically re-orders tasks based on urgency, tenant
-priority, and system load, ensuring that critical agent operations
-are processed with optimal latency.
+execution. Orders tasks by a weighted score of urgency, importance,
+effort, deadline proximity and dependency fan-out (see ``TaskPrioritizer``),
+so critical agent operations are processed with optimal latency.
 """
 
 import heapq
@@ -81,13 +81,22 @@ class PriorityQueue:
             Task or None if queue empty
         """
         while self._heap:
-            _, task_id = heapq.heappop(self._heap)
+            neg_priority, task_id = heapq.heappop(self._heap)
             task = self.graph.get_task(task_id)
 
-            if task and task.status == TaskStatus.READY:
-                task.status = TaskStatus.IN_PROGRESS
-                logger.debug(f"Dequeued task {task_id}")
-                return task
+            if not task or task.status != TaskStatus.READY:
+                continue
+
+            # ``reprioritize()`` pushes a fresh entry instead of rewriting the
+            # heap; an entry whose priority no longer matches the current score
+            # is stale and is discarded here (lazy deletion).
+            current = self._scores.get(task_id)
+            if current is not None and -neg_priority != current.total:
+                continue
+
+            task.status = TaskStatus.IN_PROGRESS
+            logger.debug(f"Dequeued task {task_id}")
+            return task
 
         return None
 
@@ -151,7 +160,8 @@ class PriorityQueue:
         new_score = self._calculate_score(task)
         self._scores[task_id] = new_score
 
-        # Re-add to heap if ready (will be re-prioritized on next dequeue)
+        # Push a fresh heap entry; the superseded one is dropped lazily by
+        # ``dequeue()`` because its priority no longer matches ``_scores``.
         if task.status == TaskStatus.READY:
             heapq.heappush(self._heap, (-new_score.total, task_id))
 

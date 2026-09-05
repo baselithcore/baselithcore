@@ -91,7 +91,7 @@ Complete implementation of agentic design patterns: Reflection, Reasoning (ToT),
 
 ### :material-memory: Multi-Tier Memory
 
-Three-tier memory system: Context (short-term), Graph (knowledge representation), Vector (semantic search).
+Three-tier memory hierarchy — STM (short-term working memory), MTM (mid-term, topic-segmented summaries) and LTM (long-term, compressed and provider-backed) — with automatic consolidation between tiers.
 
 </div>
 
@@ -472,7 +472,7 @@ The framework is organized into over 30 specialized modules across several core 
 
     ```bash
     git clone https://github.com/baselithcore/baselithcore.git
-    cd baselith-core
+    cd baselithcore
     pip install -e .
     ```
 
@@ -483,9 +483,10 @@ The framework is organized into over 30 specialized modules across several core 
     cp .env.example .env
 
     # Edit required variables in .env:
-    # - OLLAMA_API_BASE=http://localhost:11434
-    # - OPENAI_API_KEY=your_key_here
-    # - REDIS_URL=redis://localhost:6379/0
+    # - LLM_PROVIDER=ollama              (or openai / anthropic / huggingface / gemini)
+    # - LLM_API_BASE=http://localhost:11434   (endpoint of the default provider)
+    # - LLM_API_KEY=your_key_here        (cloud providers)
+    # - CACHE_REDIS_URL=redis://localhost:6379/1
     ```
 
 === "3. Verification"
@@ -495,17 +496,23 @@ The framework is organized into over 30 specialized modules across several core 
     baselith doctor
     ```
 
-    **Expected Output:**
+    **Expected Output** (a Rich table with one row per check):
     ```text
-    ╭──────────────────────────────────────────╮
-    │ Baselith-Core Diagnostics              │
-    ╰──────────────────────────────────────────╯
-     Checking system health...
+    ┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+    ┃  Status  ┃ Component     ┃ Message                            ┃ Details/Resolution  ┃
+    ┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+    │ ✅ PASS  │ Environment   │ Found config at .env               │                     │
+    │ ✅ PASS  │ LLM Provider  │ Ollama connected (localhost:11434) │                     │
+    │ ✅ PASS  │ Redis (Cache) │ Connected (localhost:6379)         │                     │
+    │ ✅ PASS  │ Qdrant        │ Connected (localhost:6333)         │                     │
+    │ ✅ PASS  │ PostgreSQL    │ Connected (localhost:5432)         │                     │
+    │ ✅ PASS  │ GraphDB       │ Connected (localhost:6379)         │                     │
+    │ ✅ PASS  │ Plugins       │ 11 plugin(s) found                 │                     │
+    └──────────┴───────────────┴────────────────────────────────────┴─────────────────────┘
 
-    ✅ Python version OK (3.12+)
-    ✅ Dependencies installed
-    ✅ Redis connection OK
-    ✅ LLM provider configured
+    Results: 7 passed
+
+    ✅ System ready! Run: baselith run
     ```
 
 === "4. Launch"

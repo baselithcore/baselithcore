@@ -13,8 +13,12 @@ The `core/reasoning` module implements advanced reasoning patterns.
 | **ReAct**            | Reasoning + Acting    | `react.py`           |
 | **Chain-of-Thought** | Sequential reasoning  | `cot.py`             |
 | **Reflection**       | Generate-Critique     | `self_correction.py` |
-| **Plan-and-Execute** | Fixed planning        | `patterns.py`        |
 | **Tree-of-Thoughts** | Parallel exploration  | `tot/`               |
+
+`AgentPattern.PLAN_AND_EXECUTE` exists in `patterns.py` only as a registry and
+selector label — there is no plan-and-execute engine in `core/reasoning`. The
+planning side lives in [Planning](planning.md) (`TaskPlanner`,
+`plan_to_workflow`).
 
 ### Pattern Comparison Matrix
 
@@ -374,7 +378,7 @@ from core.reasoning.patterns import PatternSelector
 
 selector = PatternSelector()
 result = selector.select("Calculate the ROI of a $10k investment over 5 years.")
-print(f"Chosen Pattern: {result.pattern}")
+print(f"Chosen Pattern: {result.pattern.value}")
 # Chosen Pattern: chain_of_thought
 ```
 
@@ -394,7 +398,9 @@ if assessment.use_agent:
     print("Agent recommended:", assessment.reason)
 else:
     print("Pipeline sufficient:", assessment.reason)
-    # Output: Pipeline sufficient: simple CRUD/notification operation
+    # Output: Pipeline sufficient: Plain pipeline sufficient (1 pipeline signal(s) detected, no strong agent signal).
+    print(assessment.signals)
+    # ['simple CRUD/notification operation']
 ```
 
 ---
@@ -518,8 +524,9 @@ result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
     - **`max_steps`** — tree depth cap; each extra level adds latency and cost.
     - **`iterations`** — MCTS rollout budget; bounds total work so a run can never spin unconditionally.
 
-The default search depth, branching factor, and beam width also come from the
-`ReasoningConfig` (env prefix `TOT_`) — see [Configuration](#configuration).
+`solve()` is tuned **only** through these arguments. `ReasoningConfig` (env
+prefix `TOT_`) is not read by the ToT engine — see
+[Configuration](#configuration) for what it does govern.
 
 #### Deadline and convergence bounds on async MCTS
 
@@ -597,20 +604,37 @@ When `max_corrections` is omitted it falls back to `ReasoningConfig.self_correct
 
 ## Integration with Orchestrator
 
-Reasoning patterns are exposed as Flow Handlers:
+The `reasoning_agent` plugin (`plugins/reasoning_agent/plugin.py`) exposes the
+engine to the orchestrator through `ReasoningFlowHandler`. Per-request
+`context` keys override the plugin config (`configs/plugins.yaml` →
+`reasoning_agent:`), which overrides the defaults (`max_steps=5`,
+`branching_factor=3`):
 
 ```python
-# plugins/reasoning/handlers.py
-from core.reasoning import TreeOfThoughts
+# plugins/reasoning_agent/plugin.py (abridged)
+class ReasoningFlowHandler:
+    def __init__(self, agent, config_provider=None):
+        self.agent = agent                       # ReasoningAgent (wraps TreeOfThoughtsAsync)
+        self._config_provider = config_provider  # (key, default) -> value
 
-class ReasoningHandler:
-    def __init__(self, plugin):
-        self.tot = TreeOfThoughts()
-        self.depth = plugin.config.get("depth", 3)
-
-    async def handle(self, query: str, context: dict) -> str:
-        result = await self.tot.solve(query, k=3, max_steps=self.depth)
-        return result["best_solution"]
+    async def handle(self, query: str, context: dict) -> dict:
+        max_steps = context.get("max_steps", self._setting("max_steps", 5))
+        branching_factor = context.get(
+            "branching_factor", self._setting("branching_factor", 3)
+        )
+        result = await self.agent.solve(
+            problem_description=query,
+            max_steps=max_steps,
+            branching_factor=branching_factor,
+        )
+        return {
+            "type": "reasoning_result",
+            "content": result.get("best_solution", "No solution found."),
+            "metadata": {
+                "steps": result.get("steps", []),
+                "tree_visualization": result.get("tree_visualization", ""),
+            },
+        }
 ```
 
 ---
@@ -633,8 +657,8 @@ Expected metrics for each pattern on medium complexity problems.
 
 | Metric            | Typical Value | Configuration        |
 | ----------------- | ------------- | -------------------- |
-| Latency           | 15-30 seconds | branching=3, depth=3 |
-| Token Usage       | 5000-15000    | beam_width=5         |
+| Latency           | 15-30 seconds | k=3, max_steps=3     |
+| Token Usage       | 5000-15000    | iterations=30        |
 | Cost (GPT-4)      | $0.10-$0.30   |                      |
 | Success (complex) | 90-95%        | With good evaluator  |
 
@@ -681,15 +705,16 @@ print(f"Answer: {answer}")
 
 ## Configuration
 
-Reasoning settings live in `ReasoningConfig` (`core/config/reasoning.py`) under the
-`TOT_` env prefix:
+`ReasoningConfig` (`core/config/reasoning.py`, env prefix `TOT_`) is consumed
+by exactly two components:
+
+| Setting | Default | Read by |
+| ------- | ------- | ------- |
+| `TOT_SELF_CORRECTION_MAX_ITERATIONS` | `2` | `SelfCorrector` when `max_corrections` is omitted |
+| `TOT_THOUGHT_CACHE_MAXSIZE` | `1000` | `get_thought_cache()` on first call (`ThoughtCache` max entries) |
+| `TOT_THOUGHT_CACHE_TTL` | `1800.0` | `get_thought_cache()` on first call (`ThoughtCache` TTL, seconds) |
 
 ```env title=".env"
-TOT_MAX_DEPTH=3
-TOT_BRANCHING_FACTOR=3
-TOT_BEAM_WIDTH=3
-TOT_STRATEGY=bfs            # "bfs" or "dfs"
-
 # Self-correction
 TOT_SELF_CORRECTION_MAX_ITERATIONS=2
 
@@ -697,3 +722,11 @@ TOT_SELF_CORRECTION_MAX_ITERATIONS=2
 TOT_THOUGHT_CACHE_MAXSIZE=1000
 TOT_THOUGHT_CACHE_TTL=1800.0
 ```
+
+!!! warning "Declared but not read: `TOT_MAX_DEPTH`, `TOT_BRANCHING_FACTOR`, `TOT_BEAM_WIDTH`, `TOT_STRATEGY`"
+    These fields exist on `ReasoningConfig` (defaults `3`, `3`, `3`, `"bfs"`;
+    `TOT_STRATEGY` accepts only `bfs`/`dfs`) but **no engine reads them**.
+    `TreeOfThoughts.solve()` takes depth, branching and strategy exclusively
+    from its own arguments (`max_steps=5`, `k=3`, `strategy="mcts"` or
+    `"bfs"`, `iterations`), so setting these variables has no effect on a
+    search.

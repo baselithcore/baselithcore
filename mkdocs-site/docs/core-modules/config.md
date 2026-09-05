@@ -41,8 +41,9 @@ core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, ChatConfig, Vision/Voice (re-exports VectorStoreConfig)
+├── services.py           # LLMConfig, ChatConfig (re-exports VectorStoreConfig, VisionConfig, VoiceConfig)
 ├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
+├── multimodal.py         # VisionConfig, VoiceConfig, FineTuningConfig
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
@@ -748,7 +749,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SecurityConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
     secret_key: SecretStr | None = None
     auth_required: bool = True

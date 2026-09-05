@@ -6,7 +6,7 @@
 # External Secrets Operator / Vault / sealed-secrets and reference it below.
 
 image:
-  repository: ghcr.io/baselithcore/baselith-core
+  repository: ghcr.io/baselithcore/baselithcore
   tag: "0.29.0"
 
 autoscaling:

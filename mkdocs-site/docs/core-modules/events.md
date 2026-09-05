@@ -46,10 +46,12 @@ This approach eliminates direct coupling between components, allowing for a more
 ```text
 core/events/
 ├── __init__.py
-├── bus.py            # Main event bus
-├── listener.py       # Event listener
-├── names.py          # Event names constants
-└── types.py          # Event types
+├── _singleton.py     # get_event_bus() / reset_event_bus() global accessor
+├── bus.py            # EventBus
+├── listener.py       # EventListener (aggregated metrics)
+├── names.py          # EventNames constants
+├── types.py          # Event, EventStats, handler type aliases
+└── validation.py     # EventSchemaRegistry, DeadLetterQueue
 ```
 
 ---
@@ -63,18 +65,69 @@ from core.events import get_event_bus, EventNames
 
 bus = get_event_bus()
 
-# Subscribe
-@bus.on(EventNames.FLOW_COMPLETED)
+# Subscribe — decorator form; higher priority runs first (default 0)
+@bus.on(EventNames.FLOW_COMPLETED, priority=10)
 async def on_flow_complete(data: dict):
     print(f"Flow {data['intent']} completed in {data['duration_ms']}ms")
 
-# Emit
-await bus.emit(EventNames.FLOW_COMPLETED, {
-    "intent": "weather",
-    "duration_ms": 150,
-    "success": True
-})
+# Subscribe — functional form; returns an unsubscribe callable
+unsubscribe = bus.subscribe(EventNames.FLOW_COMPLETED, on_flow_complete)
+unsubscribe()
+
+# Emit — returns the number of handlers invoked
+await bus.emit(
+    EventNames.FLOW_COMPLETED,
+    {"intent": "weather", "duration_ms": 150, "success": True},
+    source="orchestrator",       # optional; stored on the Event record
+    correlation_id="req-42",     # optional; for tracing related events
+)
 ```
+
+Handlers may be `async` or plain functions (sync handlers run in the default
+executor). Wildcard subscriptions — `"agent.*"`, `"*.failed"`, `"*"` — work
+while `EVENT_ENABLE_WILDCARDS` is on.
+
+### Delivery semantics
+
+`emit()` resolves the matching handlers, appends the `Event` to the history
+ring-buffer, and then runs **every handler concurrently** with
+`asyncio.gather(..., return_exceptions=True)`. There is no internal queue:
+
+- With the default `wait=True`, the `await` returns once all handlers have
+  finished — or been cancelled by `EVENT_HANDLER_TIMEOUT`. A handler that
+  raises is logged (and captured in the DLQ when enabled) but never
+  propagates to the emitter or to the other handlers.
+- With `wait=False`, each handler coroutine is wrapped in a tracked
+  background task and `emit()` returns immediately.
+
+`emit_sync(name, data, **kwargs)` is the escape hatch for non-async code:
+inside a running loop it schedules `emit()` as a tracked task and returns `0`;
+with no loop it runs `asyncio.run(emit(...))`. The orchestrator emits
+`FLOW_COMPLETED` this way.
+
+### History, dead-letter queue and schemas
+
+- **History** — `bus.get_history(event_name=None, limit=10)` returns the most
+  recent `Event` records (`name`, `data`, `timestamp`, `source`,
+  `correlation_id`) from a ring-buffer sized by `EVENT_MAX_HISTORY`;
+  `bus.stats` exposes `events_published`, `events_handled`,
+  `handlers_registered` and `errors`.
+- **Dead-letter queue** — with `EVENT_ENABLE_DLQ=true` a handler that raises
+  or times out is captured as a `DeadLetterEntry` (`event_name`, `data`,
+  `error`, `handler_name`, `timestamp`, `retry_count`) in a
+  `DeadLetterQueue` bounded by `EVENT_DLQ_MAX_SIZE`. Reach it via
+  `bus.dead_letter_queue` or the process-wide `get_dead_letter_queue()`;
+  inspect with `get_all()` / `get_by_event(name)` / `stats()`, drain with
+  `pop()` / `clear()`. There is no built-in retry — replaying an entry is
+  the caller's decision.
+- **Schemas** — `EventSchemaRegistry` (`get_schema_registry()`, attached as
+  `bus.schema_registry` when `EVENT_ENABLE_VALIDATION=true`) maps event names
+  to Pydantic models: `register(event_name, schema)`,
+  `validate(event_name, data) -> (is_valid, error)`, `has_schema`,
+  `get_schema`, `registered_events`. When the registry is attached, `emit()`
+  validates every payload that has a registered schema and raises
+  `EventValidationError` (no handler runs) on a mismatch; events without a
+  schema pass through untouched.
 
 ---
 
@@ -165,7 +218,7 @@ async def auto_generate_report(data):
 | Event                  | Emitter           | Data                         |
 | ---------------------- | ----------------- | ---------------------------- |
 | `FLOW_STARTED`         | Orchestrator      | intent, query                |
-| `FLOW_COMPLETED`       | Orchestrator      | intent, duration_ms, success |
+| `FLOW_COMPLETED`       | Orchestrator      | intent, query, response, context, duration_ms, success, run_id — on failure: intent, duration_ms, success=False, error, run_id |
 | `EVALUATION_COMPLETED` | EvaluationService | score, quality, feedback     |
 | `EXPERIENCE_RECORDED`  | ContinuousLearner | action, reward               |
 | `PLUGIN_LOADED`        | PluginRegistry    | name, action                 |
@@ -276,7 +329,9 @@ async def single_handler(data):
 
 ### Backpressure
 
-If subscribers are slow, the event queue can grow:
+There is no queue to absorb slow subscribers. With the default `wait=True`
+the emitter itself waits for the slowest handler (bounded only by
+`EVENT_HANDLER_TIMEOUT`):
 
 ```python
 from core.events import get_event_bus
@@ -288,21 +343,23 @@ bus = get_event_bus()
 async def slow_processor(data):
     await asyncio.sleep(5)  # Heavy processing
 
-# If you emit events faster than they are processed,
-# memory will grow
+# Every emit blocks for ~5s — the hot path pays for the handler
 for i in range(1000):
-    await bus.emit("heavy_task", {"id": i})  # Potential problem!
+    await bus.emit("heavy_task", {"id": i})
 ```
 
-**Solution**: Use the task queue for heavy processing instead of synchronous events:
+`wait=False` detaches the handlers into background tasks so the emitter no
+longer blocks — but a burst then fans out into an unbounded number of
+concurrent tasks. **Solution**: keep handlers short and hand heavy work to the
+task queue:
 
 ```python
-from core.task_queue import enqueue
+from core.task_queue import enqueue_task
 
 @bus.on("heavy_task")
 async def enqueue_heavy_task(data):
-    # Enqueue instead of executing directly
-    await enqueue("process_heavy_task", task_id=data["id"])
+    # enqueue_task(func, *args, queue="default", **kwargs) -> job id (sync call)
+    enqueue_task(process_heavy_task, data["id"])
 ```
 
 ### Best Practices
@@ -333,14 +390,22 @@ EVENT_ENABLE_VALIDATION=false
 # Enable dead-letter queue for failed handlers
 EVENT_ENABLE_DLQ=false
 
+# Dead-letter queue capacity (oldest entries are dropped beyond it)
+EVENT_DLQ_MAX_SIZE=1000
+
 # Max seconds a single handler may run before it is cancelled (default 30)
 EVENT_HANDLER_TIMEOUT=30.0
 ```
 
+The values above are the defaults from `core/config/events.py`
+(`EventsConfig`); `.env.example` ships none of the `EVENT_*` keys, so an
+untouched deployment runs with exactly these settings.
+
 **Important Parameters**:
 
 - `EVENT_MAX_HISTORY`: Ring-buffer size for event history. Prevents unbounded memory growth.
-- `EVENT_ENABLE_DLQ`: When enabled, failed or timed-out handlers are forwarded to the dead-letter queue for inspection.
+- `EVENT_ENABLE_VALIDATION`: Attaches an `EventSchemaRegistry` to the bus; `emit()` then rejects payloads that fail a registered schema with `EventValidationError`.
+- `EVENT_ENABLE_DLQ`: When enabled, failed or timed-out handlers are forwarded to the dead-letter queue for inspection; `EVENT_DLQ_MAX_SIZE` caps it.
 - `EVENT_HANDLER_TIMEOUT`: Hard deadline per handler. Any handler that does not complete within this window is cancelled and its error is recorded (and sent to the DLQ if enabled). Increase for handlers that perform legitimate long I/O; keep it low for latency-sensitive flows.
 
 !!! warning "Handler timeout"

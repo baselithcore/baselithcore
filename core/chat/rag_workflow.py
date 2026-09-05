@@ -283,6 +283,8 @@ class RagWorkflowHandler:
             return self._to_result(state)
 
         await wf.score_documents(state)
+        if state.next_action == "apply_feedback":
+            await wf.apply_feedback(state)
         await wf.build_context(state)
         await wf.check_cache(state)
 

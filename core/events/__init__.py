@@ -31,6 +31,7 @@ from core.events.validation import (
     DeadLetterEntry,
     DeadLetterQueue,
     EventSchemaRegistry,
+    EventValidationError,
     get_dead_letter_queue,
     get_schema_registry,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "DeadLetterEntry",
     "DeadLetterQueue",
     "EventSchemaRegistry",
+    "EventValidationError",
     "get_dead_letter_queue",
     "get_schema_registry",
 ]

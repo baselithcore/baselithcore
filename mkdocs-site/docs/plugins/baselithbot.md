@@ -29,14 +29,19 @@ primitives exposed through `core.plugins`, `core.services.vision`,
 - **20-tab React dashboard** under `plugins/baselithbot/ui/` — served
   from the compiled bundle in `ui/dist/`. All tab anchor GETs return
   200 against a test client.
-- **74 tests** — 63 unit + 11 `@pytest.mark.slow` integration
-  (cron-scheduler lifecycle, SessionManager LRU eviction, replay-store
-  SQLite persistence).
+- **345 tests** collected from `tests/plugins/baselithbot/` and
+  `tests/unit/plugins_tests/test_baselithbot_*.py` — 334 unit + 11
+  `@pytest.mark.slow` integration (cron-scheduler lifecycle, SessionManager
+  LRU eviction, replay-store SQLite persistence).
 - **Packaging**: wheel ≈ 644 KB, 204 files. `ui/src/`,
   `ui/node_modules/`, `__pycache__`, and `*.pyc` artifacts are excluded
-  via `[tool.setuptools.exclude-package-data]`. The wheel ships only
-  `ui/dist/**`, `docs/**`, `manifest.yaml`, `catalog-info.yaml`, and
-  `logobg-baselithbot500.png`.
+  via `[tool.setuptools.exclude-package-data]`, as is the runtime
+  `.state/` directory. Besides the Python packages, the only data files
+  that ship are those matched by `[tool.setuptools.package-data]`:
+  `manifest.yaml`, `assets/*` (`logobg-baselithbot500.png`), `ui/dist/**`,
+  `docs/**` and the `skills/**` YAML/JSON descriptors. No
+  `catalog-info.yaml` is bundled — the Backstage entity is generated live by
+  the exporter (see [Backstage Integration](backstage.md)).
 - **CI gates**: `ruff check`, `scripts/check_architecture_boundaries.py`,
   `scripts/check_official_plugin_typing.py` — all green.
 - **Security**: dashboard writes are fail-closed (503 without
@@ -110,9 +115,13 @@ Two env vars gate the dashboard API:
 | `BASELITHBOT_DASHBOARD_TOKEN`          | Shared bearer token required on every write endpoint.                |
 | `BASELITHBOT_DASHBOARD_ALLOW_INSECURE` | `1` to open writes without a token (local dev only — logs warning).  |
 
-Provider secrets live in `plugins/baselithbot/.state/provider_keys.enc.json`
-(Fernet-encrypted; the `.secret_key` next to it is auto-generated on
-first boot and git-ignored). The dashboard never echoes plaintext —
+Provider secrets are written **at runtime** — nothing is shipped — to
+`provider_keys.enc.json` inside the plugin's `.state/` directory
+(`plugins/baselithbot/.state/`, created on first use, git-ignored via
+`plugins/*/.state/` and excluded from the wheel). The file is
+Fernet-encrypted with the master key from `BASELITHBOT_SECRET_KEY`; when
+that variable is unset a key is generated once and persisted next to it as
+`.state/.secret_key` (mode `0600`). The dashboard never echoes plaintext —
 only `***<last4>` previews.
 
 ### Post-write verification (computer-use)
@@ -227,7 +236,7 @@ git push --force-with-lease \
     git@github.com:baselithcore/plugin-baselithbot.git \
     baselithbot-split:main
 git branch -D baselithbot-split
-# 4. In the standalone repo: tag + `baselith marketplace publish .`
+# 4. In the standalone repo: tag + `baselith plugin marketplace publish .`
 # (or use the Backstage Scaffolder path).
 ```
 

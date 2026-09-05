@@ -29,8 +29,9 @@ explicit, so an overdue obligation is detectable rather than silently missed.
   no effect until enabled.
 - **Sacred Core.** Domain-agnostic infrastructure, so it lives in `core/`.
 - **Storage-agnostic.** `IncidentStore` is a Protocol with an in-memory
-  reference implementation; register a durable store (e.g. Postgres) for
-  production, exactly like other subsystems.
+  reference implementation and a bundled SQLite store (selected per regime by
+  the `*_DB_PATH` settings below); register your own durable store (e.g.
+  Postgres) for production, exactly like other subsystems.
 - **Auditable.** Every transition emits an `AUDIT | INCIDENT | …` log line.
 - **Significance gate.** Only incidents flagged `significant` carry reporting
   deadlines; others are recorded for the incident-handling trail
@@ -163,10 +164,16 @@ easiest to get wrong:
 | **Death** of a person | **10 days** (Art. 73(4)) |
 | Every other serious incident | **15 days** (Art. 73(2)) |
 
-When several categories apply, the **shortest** deadline governs. Art. 73(2)/(4)
-also require reporting *immediately* once the causal link to the AI system is
-established (or even suspected) — ahead of the outer deadline — which is why
-`record_causal_link()` exists as its own auditable step.
+When several categories apply, the **shortest** deadline governs. These
+triggers are `open_incident` keyword arguments: `categories=` (a list of
+`SeriousIncidentCategory`) and `widespread_infringement=True` for the
+Art. 73(3) path. `serious=False` (default `True`) records the incident with
+**no** reporting clock — `milestones()` is empty. The remaining record fields
+are `severity=` (default `IncidentSeverity.HIGH`), `affected_persons=`,
+`deployer=`, `member_state=`, `description=`, `details=` and `became_aware_at=`.
+Art. 73(2)/(4) also require reporting *immediately* once the causal link to
+the AI system is established (or even suspected) — ahead of the outer
+deadline — which is why `record_causal_link()` exists as its own auditable step.
 
 The Art. 3(49) categories are modelled as `SeriousIncidentCategory`:
 `DEATH`, `SERIOUS_HEALTH_HARM`, `CRITICAL_INFRASTRUCTURE_DISRUPTION`,
@@ -181,6 +188,10 @@ incident = await svc.open_incident(
     "Triage model mis-ranked a critical case",
     ai_system_id="triage-v3",              # ties back to the AI system registry
     categories=[SeriousIncidentCategory.SERIOUS_HEALTH_HARM],
+    widespread_infringement=False,         # True -> the 2-day Art. 73(3) horizon
+    serious=True,                          # default; False records without a clock
+    affected_persons=1,
+    deployer="regional-hospital-network",
     member_state="IT",
     description="Under-triage of a sepsis presentation.",
 )
@@ -283,7 +294,7 @@ maximum.
 | `MilestoneKind` / `ReportingMilestone` | The three obligations with due/submitted/overdue.  |
 | `IncidentService`                   | Open, advance, list, and detect overdue milestones.  |
 | `IncidentStore` / `InMemoryIncidentStore` | Persistence Protocol + reference store.        |
-| `get_incident_service()`            | Shared service over an in-memory store.              |
+| `get_incident_service()`            | Shared service (durable when `INCIDENT_DB_PATH` is set). |
 
 **DORA**
 
@@ -294,7 +305,7 @@ maximum.
 | `DoraIncidentStatus` / `DoraMilestoneKind` | Lifecycle states and the three obligations.    |
 | `DoraIncidentService`               | Open, classify, advance, list, detect overdue milestones. |
 | `DoraIncidentStore` / `InMemoryDoraIncidentStore` | Persistence Protocol + reference store.  |
-| `get_dora_incident_service()`       | Shared service over an in-memory store.              |
+| `get_dora_incident_service()`       | Shared service (durable when `DORA_DB_PATH` is set). |
 
 **EU AI Act**
 
@@ -302,7 +313,7 @@ maximum.
 | ----------------------------------- | ---------------------------------------------------- |
 | `AiActSeriousIncident`              | Serious-incident record + category-derived `milestones()`. |
 | `SeriousIncidentCategory`           | The Art. 3(49) categories that set the horizon.      |
-| `report_deadline_days()`            | The 2/10/15-day derivation, usable standalone.       |
+| `report_deadline_days(categories, *, widespread_infringement=False)` | The 2/10/15-day derivation, usable standalone. Import it from `core.incidents.ai_act` — it is **not** re-exported from `core.incidents`. |
 | `AiActIncidentStatus` / `AiActMilestoneKind` | Lifecycle states and the two report obligations. |
 | `AiActIncidentService`              | Open, advance, list, detect overdue milestones.      |
 | `AiActIncidentStore` / `InMemoryAiActIncidentStore` | Persistence Protocol + reference store. |
@@ -320,8 +331,11 @@ maximum.
 | `BreachStore` / `InMemoryBreachStore` | Persistence Protocol + reference store.            |
 | `get_breach_service()`              | Shared service (durable when `GDPR_BREACH_DB_PATH` is set). |
 
-All symbols are re-exported from `core.incidents`. `ReportingMilestone` and
-`IncidentSeverity` are shared across the regimes.
+Every symbol above except `report_deadline_days` is re-exported from
+`core.incidents`, alongside the per-regime `*NotFoundError` exceptions
+(`IncidentNotFoundError`, `DoraIncidentNotFoundError`,
+`AiActIncidentNotFoundError`, `BreachNotFoundError`). `ReportingMilestone`
+and `IncidentSeverity` are shared across the regimes.
 
 ## One event, several clocks
 
@@ -344,9 +358,11 @@ Every transition across all four regimes is also written to the
 
 ## Operational notes
 
-- **Anchor `detected_at` to actual awareness.** The regulatory clock starts when
-  the entity *became aware*, not when the record was created — pass an explicit
-  `detected_at` when backfilling.
+- **Anchor the awareness timestamp to actual awareness.** The regulatory clock
+  starts when the entity *became aware*, not when the record was created —
+  when backfilling pass an explicit `detected_at=` (NIS2 and DORA
+  `open_incident`) or `became_aware_at=` (AI Act `open_incident`, GDPR
+  `record_breach`).
 - **Poll `overdue_milestones()`** from a scheduled job and route hits to your
   alerting channel so a deadline cannot pass unnoticed.
 - **Register a durable store** before relying on this in production; the default

@@ -18,9 +18,24 @@ core/lifecycle/
 
 Base class for any component that requires explicit initialization and
 teardown. It implements the public `startup()` / `shutdown()` template
-methods, which manage an `AgentState` machine
-(`UNINITIALIZED → STARTING → READY → STOPPING → STOPPED`) and call the
-override hooks `_do_startup()` / `_do_shutdown()`:
+methods, which manage an `AgentState` machine and call the override hooks
+`_do_startup()` / `_do_shutdown()`. `AgentState` (`core/lifecycle/protocols.py`)
+has nine values — `UNINITIALIZED`, `STARTING`, `READY`, `RUNNING`, `PAUSED`,
+`STOPPING`, `STOPPED`, `ERROR`, `RECOVERING` — and the mixin drives them as
+follows:
+
+- `startup()` runs only from `UNINITIALIZED`, `STOPPED` or `ERROR` (otherwise
+  it logs a warning and returns): `→ STARTING → READY`, or `→ ERROR` when
+  `_do_startup()` raises.
+- `shutdown()`: `→ STOPPING → STOPPED` (a failing `_do_shutdown()` is logged
+  and the transition still completes).
+- `pause()` moves `RUNNING → PAUSED`, `resume()` moves `PAUSED → RUNNING`.
+  Nothing in the mixin moves `READY → RUNNING` — a subclass that wants the
+  pause/resume pair must enter `RUNNING` itself via the mixin's
+  `_transition_state()`.
+- `health_check()` reports healthy in `READY`, `RUNNING` and `PAUSED`, and
+  unhealthy in `ERROR`. `RECOVERING` is declared but never entered by the
+  mixin.
 
 ```python
 from core.lifecycle.mixins import LifecycleMixin
@@ -114,9 +129,9 @@ except LifecycleError as exc:
 
 To optimize startup time and memory footprint, the framework supports **Lazy Resource Initialization**. Instead of starting all core services (PostgreSQL, Redis, Vector Database, LLM providers) at once, the system analyzes the requirements of enabled plugins:
 
-1. **Requirement Analysis**: The `ResourceAnalyzer` performs static analysis of plugin code to identify dependencies on specific core services (e.g., `postgres`, `vectorstore`, `llm`).
-2. **On-Demand Factory Registration**: Core services are registered as "Lazy Factories" in the `ServiceRegistry`.
-3. **Just-In-Time Startup**: A service is only initialized the first time a plugin that requires it is activated.
+1. **Requirement Analysis**: `ResourceAnalyzer` (`core/plugins/resource_analyzer.py`) performs static analysis of plugin code to identify dependencies on core resources — the `ResourceType` values `llm`, `vectorstore`, `graph`, `postgres`, `redis`, `memory`, `evaluation`, `evolution`.
+2. **On-Demand Factory Registration**: the API lifespan registers one async initializer per required resource from `core/bootstrap/lazy_init.py` (`RESOURCE_FACTORIES`: `initialize_postgres`, `initialize_vectorstore`, `initialize_llm`, `initialize_graph`, `initialize_redis`, `initialize_memory`, `initialize_hierarchical_memory`, `initialize_evaluation`, `initialize_evolution`) into the `LazyServiceRegistry` (`core/di/lazy_registry.py`, `get_lazy_registry()`) via `register_factory(resource, factory)`. This is a separate registry from the plain DI container in `core/di/container.py` — `ServiceRegistry.register(interface, implementation)` and `DependencyContainer.register(interface, factory, lifetime)` carry no lazy semantics.
+3. **Just-In-Time Startup**: `await get_lazy_registry().get_or_create("postgres")` runs the factory at most once (async- and thread-safe), caches the instance, and hands it back on every later call; `shutdown_all()` tears the initialized ones down during lifespan shutdown.
 
 This mechanism ensures that a "headless" core or a core with minimal plugins remains extremely lightweight.
 
@@ -124,9 +139,12 @@ This mechanism ensures that a "headless" core or a core with minimal plugins rem
 
 ## FastAPI Integration
 
-The lifecycle is integrated with FastAPI's lifespan system. Components that
-subclass `LifecycleMixin` are driven via their `startup()` / `shutdown()`
-methods inside the lifespan context:
+Nothing in `core/` calls `LifecycleMixin.startup()` for you. The API lifespan
+(`core/api/lifespan.py`) drives the **plugin interface** — the loader calls
+`plugin.initialize(config)` when a plugin is loaded and the lifespan calls
+`plugin.shutdown()` on teardown — plus the lazy registry's `shutdown_all()`.
+A `LifecycleMixin` component is started and stopped by whoever owns it. In
+your own application, wire it into the lifespan explicitly:
 
 ```python
 from contextlib import asynccontextmanager
@@ -141,7 +159,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
-!!! tip "Plugin Lifecycle"
-    Plugins can hook into the lifecycle by registering a `LifecycleMixin`
-    subclass in their `plugin.py`. The framework drives it via `startup()`
-    before serving and `shutdown()` on teardown.
+!!! tip "Plugin-owned components"
+    A plugin that owns a `LifecycleMixin` subclass must `await` its
+    `startup()` itself — typically lazily, on first use — and call its
+    `shutdown()` from the plugin's own `shutdown()`. That is how the shipped
+    `baselithbot` plugin does it: `BaselithbotAgent(LifecycleMixin)`
+    (`plugins/baselithbot/browser/agent.py`) is started in
+    `get_or_start_agent()` (`plugins/baselithbot/plugin.py`) with
+    `await new_agent.startup()`, and the plugin's `shutdown()` awaits
+    `self._agent.shutdown()` before calling `super()`.

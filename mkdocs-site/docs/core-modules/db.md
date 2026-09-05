@@ -1,5 +1,7 @@
 # Database Layer
 
+<!-- markdownlint-disable MD046 -->
+
 The `core/db/` module manages persistent feedback and interaction data and
 owns the shared PostgreSQL connection pools (sync and async). It exposes a
 **function-based API** built on `psycopg` 3 — there are no repository
@@ -176,9 +178,11 @@ uses for its document rollup.
 
 ### Caching on the RAG hot path
 
-`ChatAgent.apply_feedback` (`core/chat/mixins/retrieval_scoring.py`) calls this
-rollup on **every** retrieval request while `FEEDBACK_BOOST_ENABLED` is `true`
-(the default), and each call scans up to `FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT`
+`RetrievalScoringMixin.apply_feedback` (`core/chat/mixins/retrieval_scoring.py`,
+mixed into `RetrievalPipeline`) calls this rollup each time the feedback step
+runs — `score_documents` schedules it (`next_action = "apply_feedback"`) while
+`FEEDBACK_BOOST_ENABLED` is `true` (the default) — and each call scans up to
+`FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT`
 rows and aggregates them in Python. Recomputing that per request is pure
 overhead, so the result is memoised:
 

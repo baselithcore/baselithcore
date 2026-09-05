@@ -185,6 +185,34 @@ def test_error_status_maps_to_exception(status, exc):
     assert ei.value.message == "boom"
 
 
+def test_problem_json_error_document_is_parsed() -> None:
+    """RFC 9457 problem+json (current server format) maps code/detail/request_id."""
+    from baselith_sdk.errors import NotFoundError, error_from_response
+
+    body = {
+        "type": "urn:baselith:error:not_found",
+        "title": "Not Found",
+        "status": 404,
+        "detail": "no such run",
+        "instance": "/runs/42",
+        "code": "not_found",
+        "request_id": "req-9",
+    }
+    err = error_from_response(404, body)
+    assert isinstance(err, NotFoundError)
+    assert err.code == "not_found"
+    assert err.error_type == "urn:baselith:error:not_found"
+    assert err.message == "no such run"
+    assert err.request_id == "req-9"
+
+    # title is the fallback when detail is missing
+    err2 = error_from_response(
+        500, {"title": "Internal Server Error", "code": "internal_error"}
+    )
+    assert err2.code == "internal_error"
+    assert err2.message == "Internal Server Error"
+
+
 def test_error_envelope_parsing_populates_code():
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(

@@ -33,11 +33,11 @@ docker compose up -d
 
 # View logs
 docker compose logs -f api
+```
 
 !!! tip "Performance Tip: Native Ollama"
     While `ollama` is provided in the Docker stack for convenience (CI/CD, headless Linux), running the **[Ollama Native App](https://ollama.com/)** is significantly faster on macOS (Metal) and Windows/Linux with dedicated GPUs.
     To use a native instance, simply disable the `ollama` service in `docker-compose.yml` and set `LLM_API_BASE=http://host.docker.internal:11434` in your `.env`.
-```
 
 ---
 
@@ -128,7 +128,7 @@ baselith-core/
 │   ├── services/           # Core services (LLM, VectorStore)
 │   └── ...
 ├── plugins/                # Your plugins (extend here)
-│   ├── marketplace/        # Example: marketplace plugin
+│   ├── example-plugin/     # Reference plugin structure
 │   └── ...
 ├── configs/                # Configuration files
 │   └── plugins.yaml        # Plugin configuration
@@ -253,8 +253,8 @@ BaselithCore unifies all system and library logs. During development, logs are b
 # View real-time system logs
 baselith run
 
-# View logs for a specific plugin
-baselith plugin logs my-plugin --follow
+# Show the last 100 entries for a plugin from the logs/ directory (optionally by level)
+baselith plugin logs my-plugin --lines 100 --level ERROR
 
 # Filter logs by level or keyword
 baselith run | grep "ERROR"
@@ -272,34 +272,28 @@ CORE_LOG_FORMAT=text  # Use 'json' for production-style parsing
 ### Tracing with Jaeger
 
 ```bash
-# Start Jaeger
-docker run -d -p 16686:16686 -p 6831:6831/udp jaegertracing/all-in-one
+# Start Jaeger (plus Prometheus and Grafana). Publishes the OTLP gRPC
+# collector on 127.0.0.1:4317 and the Jaeger UI on 127.0.0.1:16686.
+docker compose -f docker-compose.observability.yml up -d
+```
 
-# Configure in .env
-TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+Then point the exporter at the collector in `.env`:
+
+```env title=".env"
 TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 ```
 
 Access the Jaeger UI at `http://localhost:16686`.
 
+!!! note "gRPC, not HTTP"
+    The exporter speaks OTLP over gRPC, so `TELEMETRY_OTEL_ENDPOINT` must target port `4317` (the default), not the `4318` HTTP port. If you run Jaeger by hand instead of the compose file, publish that port: `docker run -d -e COLLECTOR_OTLP_ENABLED=true -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one`.
+
 ---
 
-## 8. Frontend Development (Optional)
+## 8. Admin Console (Optional)
 
-If you're developing with the frontend:
-
-```bash
-# Navigate to frontend directory
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-The frontend will be available at `http://localhost:5173` (or the port shown in the terminal).
+The framework serves its own web console — chat, health probes, and webhook management — at `http://localhost:8000/console`. It is a dependency-free single-page app bundled with the backend, so there is nothing to install or build. See the [Admin Console](console.md) guide.
 
 ---
 
@@ -313,9 +307,6 @@ curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $BASELITH_TOKEN" \
   -d '{"query": "Explain quantum computing", "conversation_id": "test-123"}'
-
-# Using Python
-python scripts/test_chat.py "Explain quantum computing"
 ```
 
 ### Monitoring System Metrics

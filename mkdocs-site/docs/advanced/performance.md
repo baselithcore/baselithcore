@@ -34,19 +34,22 @@ Optimize when:
 
 The framework implements lazy loading to minimize startup time and memory usage.
 
-### Plugin Lazy Loading
+### Plugin Loading
 
-Plugins are **scanned** at startup (AST metadata only), but **imported** only upon first use:
+Plugins are **discovered** at startup in lazy-import mode (manifest metadata
+only, no module import). What happens next depends on `PLUGIN_AUTO_LOAD`
+(`core/api/lifespan.py`):
 
-```python
-# At startup: fast scan of available plugins (~50ms for 20 plugins)
-# Each plugin is loaded ONLY when it receives the first request
-
-# This means:
-# - Fast startup
-# - Memory used only for actively used plugins
-# - Rarely used plugins do not impact performance
-```
+- `PLUGIN_AUTO_LOAD=true` (the default): every plugin marked `enabled: true` in
+  `configs/plugins.yaml` is **activated during startup**, so its routers and
+  handlers are mounted before the first request lands. Plugins left disabled in
+  the config stay discovered-but-unloaded and cost nothing until an admin
+  enables them at runtime through the admin plugin API
+  (`POST /api/plugins/{plugin_name}/enable`, `core/plugins/api.py`).
+- `PLUGIN_AUTO_LOAD=false`: startup stops at discovery. Every plugin endpoint is
+  404 until the plugin is enabled through that same admin call — faster boot,
+  but the activation cost moves to the first operator action instead of
+  disappearing.
 
 **Configuration:**
 
@@ -66,12 +69,15 @@ Heavy services (LLM clients, DB connections) are initialized on-demand via the
 
 ```python
 from core.di import get_lazy_registry
-from core.interfaces import LLMServiceProtocol
 
 registry = get_lazy_registry()
 
-# The resource is created ONLY on first access, then memoized
-llm = await registry.get_or_create(LLMServiceProtocol)
+# Factories are registered under string keys — "postgres", "vectorstore", "llm",
+# "graph", "redis", "memory", "hierarchical_memory", "evaluation", "evolution"
+# (RESOURCE_FACTORIES in core/bootstrap/lazy_init.py). The API lifespan registers
+# the ones the installed plugins declare; get_or_create() raises KeyError for a
+# key without a factory. The resource is created ONLY on first access, then memoized.
+llm = await registry.get_or_create("llm")
 ```
 
 **Benefits:**
@@ -88,14 +94,16 @@ Caching is the most effective tool for improving performance. The framework offe
 
 ### In-process Cache (`TTLCache`)
 
-`TTLCache` (`core/cache/local_cache.py`) is an async-safe, in-memory cache with a
-per-instance default TTL:
+`TTLCache` (`core/cache/local_cache.py`) is an async-safe, in-memory LRU cache
+with a per-instance TTL:
 
 ```python
 from core.cache import TTLCache
 
-# default_ttl is set at construction (seconds); maxsize bounds memory
-cache: TTLCache[str, dict] = TTLCache(default_ttl=300, maxsize=1000)
+# ttl is in seconds and maxsize bounds memory; both fall back to CacheConfig
+# (ttl_default=300.0, maxsize_default=256) when omitted. metrics_name labels
+# this instance in the cache metrics collector (default "ttl_cache").
+cache: TTLCache[str, dict] = TTLCache(maxsize=1000, ttl=300, metrics_name="user_profiles")
 
 # Set / get (get returns None on miss or expiry)
 await cache.set("user:123:profile", user_data)
@@ -115,8 +123,10 @@ instance, not per call:
 
 ```python
 from core.cache import RedisTTLCache, create_redis_client
+from core.config.cache import get_redis_cache_config
 
-client = create_redis_client()
+# The URL is required; pools are shared per (url, decode_responses) pair
+client = create_redis_client(get_redis_cache_config().url)  # CACHE_REDIS_URL
 cache: RedisTTLCache[str, dict] = RedisTTLCache(
     client,
     prefix="api",
@@ -230,7 +240,12 @@ embeddings = await embed_batch(documents)  # 5-10x faster
 Use streaming for long responses. User sees first tokens immediately:
 
 ```python
-async for chunk in llm.stream("Explain relativity"):
+from core.services.llm import get_llm_service
+
+llm = get_llm_service()
+
+# generate_response_stream(prompt, model=None, system_prompt=None, ...)
+async for chunk in llm.generate_response_stream("Explain relativity"):
     yield chunk  # Send immediately to client
 ```
 
@@ -349,11 +364,11 @@ Before going to production:
     Set memory limits for caches and buffers. Without limits, the entire system can crash.
 
 ```python
-# Example: limit in-memory cache size
-from cachetools import LRUCache
+# Example: bound an in-process cache
+from core.cache import TTLCache
 
-# Max 1000 entries, oldest are evicted
-local_cache = LRUCache(maxsize=1000)
+# Max 1000 entries (LRU eviction), each expiring after 300 seconds
+local_cache: TTLCache[str, object] = TTLCache(maxsize=1000, ttl=300)
 ```
 
 ---

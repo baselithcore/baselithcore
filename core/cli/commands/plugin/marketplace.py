@@ -6,6 +6,7 @@ Baselith Marketplace.
 """
 
 import asyncio
+import os
 
 from rich.console import Console
 from rich.table import Table
@@ -127,7 +128,7 @@ def install_plugin_cmd(plugin_id: str, version: str | None = None, force: bool =
 
         # Use version if provided, otherwise 'main'
         branch = version or "main"
-        result = await installer.install(plugin, branch=branch)
+        result = await installer.install(plugin, branch=branch, force=force)
 
         if result.status.value == "success":
             console.print(
@@ -332,7 +333,10 @@ def publish_plugin_cmd(path: str, key: str | None = None):
 
     async def _run():
         manager = CredentialsManager()
-        admin_key = key or await manager.load_api_key()
+        # Resolution order: --key, MARKETPLACE_API_KEY, stored credentials.
+        admin_key = (
+            key or os.environ.get("MARKETPLACE_API_KEY") or await manager.load_api_key()
+        )
         auth_token = await manager.load_token()
 
         if not admin_key and not auth_token:

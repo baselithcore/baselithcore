@@ -170,8 +170,10 @@ streaming path:
 - Both helpers **fail open on infrastructure errors**: a quota-store outage
   degrades to unmetered service with a warning, never to an outage of its
   own. The budget rejection itself (`CostBudgetExceededError`) always
-  propagates, and the LLM span records
-  `gen_ai.baselith.error=tenant_cost_budget_exceeded`.
+  propagates. On the generation path the LLM span records
+  `gen_ai.baselith.error=tenant_cost_budget_exceeded`; on the streaming path
+  the gate runs before the span's error handling, so the rejection propagates
+  without that attribute.
 
 ## Identity USD cost budgets
 

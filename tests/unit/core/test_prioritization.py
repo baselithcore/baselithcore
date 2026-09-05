@@ -235,6 +235,32 @@ class TestPriorityQueue:
         assert len(newly_ready) == 1
         assert newly_ready[0].id == "t2"
 
+    def test_get_ready_tasks_lists_queued_ready_tasks(self):
+        """Ready (unblocked, not started) tasks are visible with their scores."""
+        queue = PriorityQueue()
+        queue.enqueue(Task(id="a", name="A", urgency=0.9))
+        queue.enqueue(Task(id="b", name="B", dependencies=["a"]))
+
+        ready = queue.get_ready_tasks()
+
+        assert [task.id for task, _ in ready] == ["a"]
+        assert ready[0][1] is queue.get_score("a")
+
+        queue.dequeue()
+        assert queue.get_ready_tasks() == []
+
+    def test_reprioritize_lowering_score_reorders_dequeue(self):
+        """A stale heap entry must not win after the task was demoted."""
+        queue = PriorityQueue()
+        queue.enqueue(Task(id="hi", name="hi", urgency=1.0, importance=1.0))
+        queue.enqueue(Task(id="lo", name="lo", urgency=0.1, importance=0.1))
+
+        queue.reprioritize("hi", urgency=0.0, importance=0.0)
+
+        assert queue.dequeue().id == "lo"
+        assert queue.dequeue().id == "hi"
+        assert queue.dequeue() is None
+
     def test_reprioritize(self):
         """Reprioritization updates score."""
         queue = PriorityQueue()

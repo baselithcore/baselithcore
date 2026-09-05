@@ -14,14 +14,19 @@ anyio task and break streaming and cancellation.
 ```mermaid
 graph TB
     subgraph MW["core/middleware"]
+        Metrics[HTTPMetricsMiddleware]
         ReqId[RequestIdMiddleware]
-        Size[RequestSizeLimitMiddleware]
-        Cost[CostControlMiddleware]
-        StaticCache[StaticCacheMiddleware]
-        Gzip[SmartGzipMiddleware]
         SecHdr[SecurityHeadersMiddleware]
-        Tenant[TenantMiddleware]
+        Size[RequestSizeLimitMiddleware]
+        CSRF[CSRFOriginMiddleware]
         Quota[QuotaMiddleware]
+        PlugCtx[PluginContextMiddleware]
+        Tenant[TenantMiddleware]
+        PlugAct[PluginActivationMiddleware]
+        Idem[IdempotencyMiddleware]
+        Gzip[SmartGzipMiddleware]
+        StaticCache[StaticCacheMiddleware]
+        Cost[CostControlMiddleware]
     end
 
     subgraph Deps["Auth dependencies"]
@@ -36,21 +41,26 @@ graph TB
 
 ```text
 core/middleware/
-├── __init__.py        # Public exports
-├── observability.py   # RequestIdMiddleware
+├── __init__.py            # Public exports
+├── observability.py       # RequestIdMiddleware
+├── http_metrics.py        # HTTPMetricsMiddleware (pure ASGI, RED metrics; outermost)
 ├── security.py            # SecurityManager, auth dependencies
 │                          #   (re-exports RateLimiter + the two ASGI middlewares)
-├── rate_limiter.py         # RateLimiter (Redis Lua fixed-window + fallback)
-├── _admin_lockout.py       # AdminLockoutMixin (admin Basic-auth lockout state)
+├── rate_limiter.py        # RateLimiter (Redis Lua fixed-window + fallback)
+├── _admin_lockout.py      # AdminLockoutMixin (admin Basic-auth lockout state)
+├── _admin_credentials.py  # PBKDF2 admin-password check + verified-credential cache
+├── _security_env.py       # Environment helpers for the security middleware
 ├── security_headers.py    # RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
-├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
-├── optimization.py    # StaticCacheMiddleware, SmartGzipMiddleware
-├── csrf.py            # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
-├── plugin_activation.py  # PluginActivationMiddleware (pure ASGI)
-├── plugin_context.py  # PluginContextMiddleware (pure ASGI)
-├── tenant.py          # TenantMiddleware
-└── quota.py           # QuotaMiddleware
+├── cost_control.py        # CostControlMiddleware, CostController, cost_controller
+├── optimization.py        # StaticCacheMiddleware, SmartGzipMiddleware
+├── idempotency.py         # IdempotencyMiddleware (pure ASGI, Idempotency-Key replay)
+├── csrf.py                # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
+├── plugin_activation.py   # PluginActivationMiddleware (pure ASGI)
+├── plugin_context.py      # PluginContextMiddleware (pure ASGI)
+├── _plugin_route.py       # Per-request memo of the plugin route match (shared by the two above)
+├── tenant.py              # TenantMiddleware
+└── quota.py               # QuotaMiddleware
 ```
 
 ---
@@ -68,10 +78,16 @@ from core.middleware import (
     require_user, require_admin, require_admin_or_job,
     verify_admin_password, verify_admin_password_async, check_admin_lockout,
     record_admin_failure, clear_admin_failures,
+    # CSRF / idempotency
+    CSRFOriginMiddleware, IdempotencyMiddleware,
+    # Plugin activation + plugin context (request → owning plugin)
+    PluginActivationMiddleware, PluginContextMiddleware,
     # Tenant
     TenantMiddleware,
     # Quotas
     QuotaMiddleware,
+    # HTTP RED metrics
+    HTTPMetricsMiddleware,
 )
 ```
 
@@ -95,26 +111,31 @@ adds, in order:
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
-| `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request |
-| `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); see the note below |
-| `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** |
+| `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
-| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before other middleware runs (just inside SecurityHeaders) |
+| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot) |
+| `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** — a single cheap header compare that rejects before a quota unit is consumed, an idempotency lock taken or a plugin route matched |
+| `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); added after CSRF so it runs outermost of the two; see the note below |
+| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work |
 | `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP — registered near-outermost so they land on **every** response, including short-circuits from the inner guards |
-| `RequestIdMiddleware` | `observability.py` | Registered **last** → **outermost**: propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it |
+| `RequestIdMiddleware` | `observability.py` | Propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it and every inner log line can bind it |
+| `HTTPMetricsMiddleware` | `http_metrics.py` | Registered **last** → **outermost**: RED metrics measuring true end-to-end latency and capturing every response status |
 
 !!! note "Outermost ordering"
-    `RequestIdMiddleware` is registered **last**, making it the **outermost**
-    layer: every response — including error responses short-circuited by inner
-    middleware — carries an `X-Request-ID`. `SecurityHeadersMiddleware` sits
-    just inside it, so CSP/HSTS/nosniff also land on responses emitted by the
-    inner guards (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights),
-    and `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
-    rejected before any other middleware does work.
+    `HTTPMetricsMiddleware` is registered **last**, making it the **outermost**
+    layer: it times every request end to end and records every status,
+    including error responses short-circuited by inner middleware.
+    `RequestIdMiddleware` sits just inside it, so every response carries an
+    `X-Request-ID`; `SecurityHeadersMiddleware` just inside that, so
+    CSP/HSTS/nosniff also land on responses emitted by the inner guards
+    (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights); and
+    `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
+    rejected before any other middleware does work. Neither of the two
+    outermost layers ever short-circuits a request.
 
 !!! warning "`TRUSTED_HOSTS` is empty by default"
     Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
@@ -134,6 +155,21 @@ adds, in order:
 `core/middleware/observability.py`. Reads an incoming `X-Request-ID` header (or
 generates a UUID), sets the `request_id` contextvar, binds it to the structured
 logging context, and echoes it back on the response.
+
+---
+
+## HTTPMetricsMiddleware
+
+`core/middleware/http_metrics.py`. The outermost layer; emits the RED
+(Rate / Errors / Duration) signals for the HTTP server to the Prometheus
+registry scraped at `/metrics`: `http_requests_total{method, route, status}`,
+`http_request_duration_seconds{method, route}` and
+`http_requests_in_progress{method, route}`. The `route` label is the matched
+path *template* (e.g. `/api/plugins/{plugin_name}`) read from the scope the
+router mutates in place — never the raw URL — so per-id paths collapse into one
+series; unmatched requests bucket under `__unmatched__` and unusual verbs under
+`OTHER`, keeping the label set bounded regardless of traffic. See
+[HTTP RED metrics](../advanced/observability.md#http-red-metrics-automatic).
 
 ---
 
@@ -384,7 +420,7 @@ async def chat(...): ...
 
 | Dependency | Allowed roles | Used by |
 | ---------- | ------------- | ------- |
-| `require_user` | `user`, `admin`, `job` | Chat, feedback ingestion |
+| `require_user` | `user`, `admin`, `job`, `scoped` | Chat, feedback ingestion |
 | `require_admin` | `admin` | Status, feedback listing, plugin management |
 | `require_admin_or_job` | `admin`, `job` | Indexing, Backstage exporters |
 
@@ -394,6 +430,14 @@ applies a per-role rate limit before returning the resolved role string. The
 authenticated `AuthUser` is attached to `request.state.user`; the tenant context
 is set to the user's tenant and the user context to the user's id (both
 identity-derived, never from a request header).
+
+`scoped` identities (least-privilege API keys) are admitted only at the coarse
+`require_user` gate so that capability-enforced routes (webhooks, compliance,
+privacy — which call `enforce_scopes`) can adjudicate them by their explicit
+scopes; the `SCOPED` role carries no role-derived scopes, so such a key is
+authorized only where its own scopes cover the requirement. The control-plane
+dependencies `require_admin` / `require_admin_or_job` deliberately omit
+`scoped`.
 
 Every `401` carries the same fixed detail (`"Authentication required."`) — the
 rejection reason is written to the audit log (sanitized) and never to the

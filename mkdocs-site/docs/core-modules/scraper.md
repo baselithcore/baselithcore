@@ -79,14 +79,17 @@ async for page, data in scraper.scrape_many(urls, concurrency=3):
 
 The scraper uses a registry of specialized extractors to structure the raw HTML.
 
-| Extractor         | Key            | Description                                    |
-| ----------------- | -------------- | ---------------------------------------------- |
-| `TextExtractor`   | `text`         | Main content extraction (markdown-like)        |
-| `LinkExtractor`   | `links`        | List of all absolute URLs found on the page    |
-| `ImageExtractor`  | `images`       | List of image URLs and alt text                |
-| `MetaExtractor`   | `metadata`     | Page title, description, and OpenGraph tags    |
-| `SchemaExtractor` | `schema_org`   | Structured data in JSON-LD or Microdata format |
-| `CssExtractor`    | `css_selector` | Custom extraction via CSS selectors            |
+| Extractor              | Key            | Description                                    |
+| ---------------------- | -------------- | ---------------------------------------------- |
+| `TextExtractor`        | `text`         | Main content extraction (markdown-like)        |
+| `LinkExtractor`        | `links`        | List of all absolute URLs found on the page    |
+| `ImageExtractor`       | `images`       | List of image URLs and alt text                |
+| `MetadataExtractor`    | `metadata`     | Page title, description, and OpenGraph tags    |
+| `SchemaOrgExtractor`   | `schema_org`   | Structured data in JSON-LD or Microdata format |
+| `CssSelectorExtractor` | `css_selector` | Custom extraction via CSS selectors            |
+
+All six classes are importable from `plugins.web_scraper.extractors`; the `Key`
+column is each extractor's `name` attribute.
 
 ---
 
@@ -115,17 +118,26 @@ from core.config.scraper import ScraperConfig
 config = ScraperConfig(
     cache_enabled=True,
     rate_limit_enabled=True,
-    requests_per_minute=20,
-    user_agent="BaselithBot/1.0"
+    rate_limit_requests=20,          # max requests per period (default: 10)
+    rate_limit_period_seconds=60.0,  # period length in seconds (default: 1.0)
+    user_agent="BaselithBot/1.0",
 )
 
 scraper = Scraper(config=config)
 ```
 
-**Environment Variables**:
+!!! warning "Unknown fields are silently ignored"
+    `ScraperConfig` is declared with `extra="ignore"`, so a misspelled or
+    non-existent keyword (for example `requests_per_minute=20`) does not raise
+    — it is dropped and the default stays in force. The throttle is expressed
+    as `rate_limit_requests` per `rate_limit_period_seconds`, applied per
+    domain when `rate_limit_per_domain=True` (the default).
+
+**Environment Variables** (prefix `SCRAPER_`, one per field):
 
 - `SCRAPER_USER_AGENT`: Custom User-Agent string.
-- `SCRAPER_CACHE_TTL`: Cache duration in seconds (default: 3600).
+- `SCRAPER_CACHE_TTL_SECONDS`: Cache duration in seconds (default: `3600`).
+- `SCRAPER_RATE_LIMIT_REQUESTS` / `SCRAPER_RATE_LIMIT_PERIOD_SECONDS`: Throttle window (default: `10` requests per `1.0` second).
 - `SCRAPER_DEFAULT_FETCHER`: Set to `playwright` for global JS rendering.
 - `SCRAPER_RATE_LIMIT_ENABLED`: Global toggle for throttle.
 
