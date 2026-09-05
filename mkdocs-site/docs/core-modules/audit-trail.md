@@ -58,6 +58,8 @@ original log line *and* emits a structured event:
 | Event type | Source |
 | ---------- | ------ |
 | `auth.failed` | `core/middleware/security.py` — unauthorized / forbidden |
+| `plugin.load` | `core/plugins/loader.py` — a plugin finished `initialize()` (`resource` is `plugin:<name>`, `details` carry its version and directory) |
+| `plugin.unload` | `core/plugins/registry.py` — `unregister()` removed a plugin and ran its `shutdown()` |
 | `privacy.export` / `privacy.erase` / `privacy.rectify` / `privacy.restrict` / `privacy.object` / `privacy.retention` | `core/privacy/service.py` — one event per data-subject request (`resource` is the subject id; `action` is `export`, `erase`, `rectify`, `restrict`/`release`, `object` or `retention_sweep`) |
 | `privacy.consent` | `core/privacy/consent.py` — `action="grant"` on `ConsentService.grant`, `action="withdraw"` on `withdraw` (`details.purpose` names the processing purpose) |
 | `transparency.mark` | `core/transparency/service.py` |

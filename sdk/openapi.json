@@ -1,6 +1,71 @@
 {
   "components": {
     "schemas": {
+      "ApprovalDecision": {
+        "description": "Reviewer decision payload for a paused run.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approver": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "approved"
+        ],
+        "title": "ApprovalDecision",
+        "type": "object"
+      },
+      "AsyncRunRequest": {
+        "description": "Submission payload for an async agent run.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "query": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "AsyncRunRequest",
+        "type": "object"
+      },
       "ChatRequest": {
         "additionalProperties": false,
         "description": "Request model for the agent.\nContains the user query and, optionally, the conversation_id.\nThe `stream` flag is accepted for compatibility, but the dedicated\nstreaming endpoint is `/chat/stream`.",
@@ -101,6 +166,142 @@
         "title": "CreateTenantRequest",
         "type": "object"
       },
+      "CreateWebhookRequest": {
+        "description": "Payload to register a webhook endpoint.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "event_types": {
+            "description": "Event types to subscribe to; ['*'] for all",
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "url": {
+            "description": "HTTPS endpoint that will receive events",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "CreateWebhookRequest",
+        "type": "object"
+      },
+      "CreateWebhookResponse": {
+        "description": "Registration result. The signing ``secret`` is returned only once.",
+        "properties": {
+          "endpoint": {
+            "additionalProperties": true,
+            "title": "Endpoint",
+            "type": "object"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "secret"
+        ],
+        "title": "CreateWebhookResponse",
+        "type": "object"
+      },
+      "DraftInstructionsRequest": {
+        "description": "Draft Art. 13 instructions from the records already on file.",
+        "properties": {
+          "monitoring_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitoring Plan Id"
+          },
+          "provider_contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Contact"
+          },
+          "risk_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk File Id"
+          },
+          "system_id": {
+            "minLength": 1,
+            "title": "System Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system_id"
+        ],
+        "title": "DraftInstructionsRequest",
+        "type": "object"
+      },
+      "ForkRequest": {
+        "description": "Fork a run from the state recorded at ``version``.",
+        "properties": {
+          "new_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Run Id"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ForkRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -112,6 +313,62 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LabelIn": {
+        "description": "Payload for promoting a label to a version.",
+        "properties": {
+          "version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "LabelIn",
+        "type": "object"
+      },
+      "LifecycleRequest": {
+        "description": "Move a registered system to a new lifecycle stage.",
+        "properties": {
+          "stage": {
+            "minLength": 1,
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage"
+        ],
+        "title": "LifecycleRequest",
+        "type": "object"
+      },
+      "ObservationRequest": {
+        "description": "A production measurement against a post-market monitoring plan.",
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "metric": {
+            "minLength": 1,
+            "title": "Metric",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "metric",
+          "value"
+        ],
+        "title": "ObservationRequest",
         "type": "object"
       },
       "PluginActionResponse": {
@@ -253,6 +510,55 @@
         "title": "PluginStatusResponse",
         "type": "object"
       },
+      "PromptVersionIn": {
+        "description": "Payload for registering one prompt version.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "template": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Template",
+            "type": "string"
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Variables",
+            "type": "array"
+          },
+          "version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "template"
+        ],
+        "title": "PromptVersionIn",
+        "type": "object"
+      },
       "PublishRequest": {
         "description": "Body for ``POST /api/backstage/publish``.",
         "properties": {
@@ -322,6 +628,161 @@
           "plugin_path"
         ],
         "title": "PublishRequest",
+        "type": "object"
+      },
+      "RegisterSystemRequest": {
+        "description": "Declare an AI system for the registry.",
+        "properties": {
+          "annex_i_product": {
+            "default": false,
+            "title": "Annex I Product",
+            "type": "boolean"
+          },
+          "annex_iii_areas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Annex Iii Areas",
+            "type": "array"
+          },
+          "art6_derogations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Art6 Derogations",
+            "type": "array"
+          },
+          "deployers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deployers",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "generates_synthetic_content": {
+            "default": false,
+            "title": "Generates Synthetic Content",
+            "type": "boolean"
+          },
+          "gpai_systemic_risk": {
+            "default": false,
+            "title": "Gpai Systemic Risk",
+            "type": "boolean"
+          },
+          "human_oversight_contacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Human Oversight Contacts",
+            "type": "array"
+          },
+          "intended_purpose": {
+            "default": "",
+            "title": "Intended Purpose",
+            "type": "string"
+          },
+          "interacts_with_humans": {
+            "default": false,
+            "title": "Interacts With Humans",
+            "type": "boolean"
+          },
+          "is_gpai_model": {
+            "default": false,
+            "title": "Is Gpai Model",
+            "type": "boolean"
+          },
+          "member_states": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member States",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "performs_profiling": {
+            "default": false,
+            "title": "Performs Profiling",
+            "type": "boolean"
+          },
+          "prohibited_practices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prohibited Practices",
+            "type": "array"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name"
+          },
+          "role": {
+            "default": "provider",
+            "title": "Role",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.0.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RegisterSystemRequest",
+        "type": "object"
+      },
+      "RetentionRequest": {
+        "description": "Retention sweep horizon.",
+        "properties": {
+          "older_than_days": {
+            "minimum": 0.0,
+            "title": "Older Than Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "older_than_days"
+        ],
+        "title": "RetentionRequest",
+        "type": "object"
+      },
+      "SubjectRequest": {
+        "description": "Identify the data subject for an export or erasure.",
+        "properties": {
+          "subject_id": {
+            "minLength": 1,
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_id"
+        ],
+        "title": "SubjectRequest",
         "type": "object"
       },
       "Tenant": {
@@ -395,6 +856,18 @@
       }
     },
     "securitySchemes": {
+      "ApiKeyAuth": {
+        "description": "Operator-minted key from API_KEYS_USER / _ADMIN / _JOB / _SCOPED.",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      },
+      "BearerAuth": {
+        "bearerFormat": "JWT",
+        "description": "Access token issued by core.auth (AuthManager.create_token).",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "HTTPBasic": {
         "scheme": "basic",
         "type": "http"
@@ -900,6 +1373,89 @@
           "admin",
           "tenants"
         ]
+      }
+    },
+    "/agent/async": {
+      "post": {
+        "description": "Enqueue an agent run; returns the task id to poll (or subscribe).",
+        "operationId": "submit_async_run_agent_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AsyncRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Async Run Agent Async Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Async Run"
+      }
+    },
+    "/agent/status/{task_id}": {
+      "get": {
+        "description": "Current TaskTracker record for the run (404 when unknown).",
+        "operationId": "async_run_status_agent_status__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Async Run Status Agent Status  Task Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Async Run Status"
       }
     },
     "/api/backstage/entities": {
@@ -1592,6 +2148,173 @@
         ]
       }
     },
+    "/approvals": {
+      "get": {
+        "description": "List runs durably paused awaiting a reviewer decision.",
+        "operationId": "list_pending_approvals_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Pending Approvals Approvals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Pending Approvals",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/approvals/{run_id}/decision": {
+      "post": {
+        "description": "Record an approve/deny decision on a paused run.\n\nThe decision is consumed by the approval gate on the next resume: the run\ncontinues (approved) or aborts with a denial (denied).",
+        "operationId": "decide_approvals__run_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Approvals  Run Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Decide",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/approvals/{run_id}/resume": {
+      "post": {
+        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.",
+        "operationId": "resume_approvals__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resume Approvals  Run Id  Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Resume",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/chat": {
       "post": {
         "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
@@ -1664,6 +2387,1305 @@
           }
         },
         "summary": "Chat Stream"
+      }
+    },
+    "/compliance/audit/verify": {
+      "get": {
+        "description": "Verify the audit trail's hash chain (AI Act Art. 12 evidence integrity).",
+        "operationId": "verify_audit_chain_compliance_audit_verify_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify Audit Chain Compliance Audit Verify Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Audit Chain",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/automated-decisions": {
+      "get": {
+        "description": "List Art. 22 decision-making activities and their safeguard posture.",
+        "operationId": "list_automated_decisions_compliance_automated_decisions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "non_compliant_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Non Compliant Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Automated Decisions Compliance Automated Decisions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Automated Decisions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/automated-decisions/{activity_id}/subject-information": {
+      "get": {
+        "description": "The Art. 15(1)(h) disclosure to hand a data subject on request.",
+        "operationId": "subject_information_compliance_automated_decisions__activity_id__subject_information_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "activity_id",
+            "required": true,
+            "schema": {
+              "title": "Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Subject Information Compliance Automated Decisions  Activity Id  Subject Information Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subject Information",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/documentation": {
+      "get": {
+        "description": "List Annex IV technical documentation, with the missing sections named.",
+        "operationId": "list_documentation_compliance_documentation_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Documentation Compliance Documentation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documentation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/documentation/draft": {
+      "post": {
+        "description": "Draft an Annex IV document from a registered system's known facts.",
+        "operationId": "draft_documentation_compliance_documentation_draft_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Documentation Compliance Documentation Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Documentation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/dpia": {
+      "get": {
+        "description": "List DPIAs. ``blocked_only`` returns those that may not start processing.",
+        "operationId": "list_dpia_compliance_dpia_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blocked_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Blocked Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Dpia Compliance Dpia Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dpia",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/dpia/{assessment_id}/complete": {
+      "post": {
+        "description": "Mark a DPIA complete, refusing while Art. 35(7) elements are missing.\n\nCompleting does not by itself unlock processing: with a high residual risk,\nArt. 36(1) prior consultation is still owed and ``may_start_processing``\nstays false.",
+        "operationId": "complete_dpia_compliance_dpia__assessment_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Complete Dpia Compliance Dpia  Assessment Id  Complete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Dpia",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/dpia/{assessment_id}/prior-consultation": {
+      "post": {
+        "description": "Record the Art. 36(1) consultation of the supervisory authority.",
+        "operationId": "record_prior_consultation_compliance_dpia__assessment_id__prior_consultation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Prior Consultation Compliance Dpia  Assessment Id  Prior Consultation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Prior Consultation",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/fria": {
+      "get": {
+        "description": "List Art. 27 FRIAs, with the missing statutory elements named.",
+        "operationId": "list_fria_compliance_fria_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Fria Compliance Fria Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fria",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/instructions": {
+      "get": {
+        "description": "List Art. 13 instructions, with the missing elements named.",
+        "operationId": "list_instructions_compliance_instructions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Instructions Compliance Instructions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/instructions/draft": {
+      "post": {
+        "description": "Draft Art. 13 instructions from the registry, risk file and Art. 72 plan.",
+        "operationId": "draft_instructions_endpoint_compliance_instructions_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftInstructionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Instructions Endpoint Compliance Instructions Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Instructions Endpoint",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/instructions/{instructions_id}": {
+      "get": {
+        "description": "Fetch one set of instructions, rendered for the deployer.",
+        "operationId": "get_instructions_compliance_instructions__instructions_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instructions_id",
+            "required": true,
+            "schema": {
+              "title": "Instructions Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Instructions Compliance Instructions  Instructions Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/instructions/{instructions_id}/issue": {
+      "post": {
+        "description": "Mark instructions as issued to deployers.\n\nRefused while Art. 13(3) elements are missing: instructions that omit the\nlimitations or the oversight measures leave the deployer unable to perform\nits own Art. 26 duties.",
+        "operationId": "issue_instructions_compliance_instructions__instructions_id__issue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instructions_id",
+            "required": true,
+            "schema": {
+              "title": "Instructions Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Issue Instructions Compliance Instructions  Instructions Id  Issue Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/pending-registration": {
+      "get": {
+        "description": "Systems owing an Art. 49 EU-database registration that has not happened.",
+        "operationId": "pending_registration_compliance_pending_registration_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pending Registration Compliance Pending Registration Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pending Registration",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/post-market": {
+      "get": {
+        "description": "List Art. 72 monitoring plans, flagging overdue reviews.",
+        "operationId": "list_post_market_compliance_post_market_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Post Market Compliance Post Market Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Post Market",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/post-market/{plan_id}/observe": {
+      "post": {
+        "description": "Record a production measurement against a plan and evaluate its threshold.",
+        "operationId": "record_observation_compliance_post_market__plan_id__observe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Observation Compliance Post Market  Plan Id  Observe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Observation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/post-market/{plan_id}/review": {
+      "post": {
+        "description": "Record a plan review, resetting the Art. 72(1) cadence.",
+        "operationId": "review_plan_compliance_post_market__plan_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Plan Compliance Post Market  Plan Id  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Plan",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/profile": {
+      "get": {
+        "description": "Check the running configuration against the declared profile.\n\nRead-only: reports gaps with the article behind each, and never switches a\nsubsystem on.",
+        "operationId": "compliance_profile_compliance_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Compliance Profile Compliance Profile Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Compliance Profile",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/risk-management": {
+      "get": {
+        "description": "List Art. 9 risk files, with missing elements and open risks named.",
+        "operationId": "list_risk_files_compliance_risk_management_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Risk Files Compliance Risk Management Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Risk Files",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/risk-management/{file_id}": {
+      "get": {
+        "description": "Fetch one Art. 9 risk file, rendered as Annex IV section 5.",
+        "operationId": "get_risk_file_compliance_risk_management__file_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Risk File Compliance Risk Management  File Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Risk File",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/risk-management/{file_id}/review": {
+      "post": {
+        "description": "Record an Art. 9(1) systematic review.\n\nRefused while risks remain open \u2014 a review signed over untreated,\nunverified or unaccepted risks records something that did not happen.",
+        "operationId": "review_risk_file_compliance_risk_management__file_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Risk File Compliance Risk Management  File Id  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Risk File",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/ropa": {
+      "get": {
+        "description": "List the GDPR Art. 30 register, with the missing elements named.",
+        "operationId": "list_ropa_compliance_ropa_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Ropa Compliance Ropa Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ropa",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/summary": {
+      "get": {
+        "description": "Inventory roll-up: counts by category, and the open Art. 49 duties.",
+        "operationId": "inventory_summary_compliance_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Inventory Summary Compliance Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Inventory Summary",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/systems": {
+      "get": {
+        "description": "List registered AI systems, optionally filtered by risk category.",
+        "operationId": "list_systems_compliance_systems_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "risk_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Systems Compliance Systems Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Systems",
+        "tags": [
+          "compliance"
+        ]
+      },
+      "post": {
+        "description": "Register a system: screens Art. 5, derives the Art. 6 risk category.\n\nA declared prohibited practice yields a ``PROHIBITED`` record rather than a\nrejection \u2014 inventorying a banned system is a prerequisite to retiring it.\nSet ``COMPLIANCE_BLOCK_PROHIBITED_PRACTICES`` to refuse instead.",
+        "operationId": "register_system_compliance_systems_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterSystemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register System Compliance Systems Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register System",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/systems/{system_id}": {
+      "get": {
+        "description": "Fetch one registered system with the obligations its category carries.",
+        "operationId": "get_system_compliance_systems__system_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get System Compliance Systems  System Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get System",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/systems/{system_id}/lifecycle": {
+      "post": {
+        "description": "Move a system to a new lifecycle stage, stamping the relevant date.",
+        "operationId": "advance_lifecycle_compliance_systems__system_id__lifecycle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Advance Lifecycle Compliance Systems  System Id  Lifecycle Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance Lifecycle",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/compliance/systems/{system_id}/reclassify": {
+      "post": {
+        "description": "Re-derive the Art. 6 category after the system's facts changed.",
+        "operationId": "reclassify_system_compliance_systems__system_id__reclassify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reclassify System Compliance Systems  System Id  Reclassify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reclassify System",
+        "tags": [
+          "compliance"
+        ]
       }
     },
     "/console": {
@@ -2013,6 +4035,320 @@
         ]
       }
     },
+    "/privacy/erase": {
+      "post": {
+        "description": "Erase all data held for a subject (right to erasure).",
+        "operationId": "erase_subject_privacy_erase_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Erase Subject Privacy Erase Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Erase Subject",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/privacy/export": {
+      "post": {
+        "description": "Export all data held for a subject (right to access / portability).",
+        "operationId": "export_subject_privacy_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Subject Privacy Export Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Subject",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/privacy/providers": {
+      "get": {
+        "description": "List the registered data providers (requires ``privacy:manage``).",
+        "operationId": "list_providers_privacy_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Providers Privacy Providers Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Providers",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/privacy/retention/sweep": {
+      "post": {
+        "description": "Purge records older than the horizon across retention-aware providers.",
+        "operationId": "retention_sweep_privacy_retention_sweep_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retention Sweep Privacy Retention Sweep Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retention Sweep",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/prompts": {
+      "get": {
+        "description": "List registered prompts with their versions and labels.",
+        "operationId": "list_prompts_prompts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Prompts Prompts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Prompts",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/prompts/{name}/labels/{label}": {
+      "post": {
+        "description": "Point ``label`` at an existing version of ``name`` (durable promote).",
+        "operationId": "promote_label_prompts__name__labels__label__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Promote Label Prompts  Name  Labels  Label  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Promote Label",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/prompts/{name}/versions": {
+      "post": {
+        "description": "Register (and persist) a new version of ``name``.",
+        "operationId": "register_version_prompts__name__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptVersionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Version Prompts  Name  Versions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Register Version",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
     "/reindex": {
       "post": {
         "description": "Performs an incremental indexing of local documents (synchronous operation).\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)",
@@ -2034,6 +4370,221 @@
         "summary": "Reindex",
         "tags": [
           "indexing"
+        ]
+      }
+    },
+    "/runs/{run_id}/events": {
+      "get": {
+        "description": "Stream a run's structured events as Server-Sent Events.\n\nFrames are ``event: <type>`` + ``data: <AgentEvent JSON>``; the stream\ncloses after a terminal event (final answer, error, or durable approval\npause). Subscribe **before** starting/resuming the run \u2014 events are\nfan-out only, not replayed (the checkpoint trajectory is the durable\nrecord).",
+        "operationId": "run_events_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Run Events",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/fork": {
+      "post": {
+        "description": "Fork a run from its state at a version into a fresh resumable run.\n\nThe fork keeps the recorded steps up to that version, so resuming it\nreplays them without re-executing side effects and continues live from\nthe fork point.",
+        "operationId": "fork_runs__run_id__fork_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Fork Runs  Run Id  Fork Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Fork",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/history": {
+      "get": {
+        "description": "Version-ascending snapshot summaries for a run.\n\nEmpty history for a known run means snapshots are not being recorded\n(``ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`` is off).",
+        "operationId": "state_history_runs__run_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response State History Runs  Run Id  History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "State History",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/history/{version}": {
+      "get": {
+        "description": "The full checkpoint state exactly as recorded at ``version``.",
+        "operationId": "state_at_version_runs__run_id__history__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response State At Version Runs  Run Id  History  Version  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "State At Version",
+        "tags": [
+          "runs"
         ]
       }
     },
@@ -2571,6 +5122,222 @@
         "summary": "Status",
         "tags": [
           "status"
+        ]
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "description": "List webhook endpoints for the tenant (requires ``webhooks:read``).",
+        "operationId": "list_webhooks_webhooks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Webhooks Webhooks Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Webhooks",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Register a webhook endpoint (requires ``webhooks:write``).",
+        "operationId": "create_webhook_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWebhookResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/webhooks/deliveries": {
+      "get": {
+        "description": "List delivery records for the tenant, cursor-paginated (``webhooks:read``).\n\nReturns ``deliveries`` plus an opaque ``next_cursor`` (and ``has_more``) to\nfetch the following page; pass it back as the ``cursor`` query parameter.",
+        "operationId": "list_deliveries_webhooks_deliveries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Deliveries Webhooks Deliveries Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Deliveries",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/webhooks/deliveries/{delivery_id}/replay": {
+      "post": {
+        "description": "Re-attempt a failed delivery (requires ``webhooks:write``).",
+        "operationId": "replay_delivery_webhooks_deliveries__delivery_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Replay Delivery Webhooks Deliveries  Delivery Id  Replay Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Delivery",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/webhooks/{endpoint_id}": {
+      "delete": {
+        "description": "Delete a webhook endpoint (requires ``webhooks:write``).",
+        "operationId": "delete_webhook_webhooks__endpoint_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Webhook Webhooks  Endpoint Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Webhook",
+        "tags": [
+          "webhooks"
         ]
       }
     }

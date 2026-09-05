@@ -9,6 +9,7 @@ from typing import Any
 from core.observability.logging import get_logger
 from core.utils.logsafe import sanitize_log_value
 
+from ._audit import audit_plugin_load
 from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from ._resolve import safe_plugin_path, sort_by_dependencies
@@ -264,6 +265,7 @@ class PluginLoader:
                 meta = plugin_instance.metadata
                 safe_meta = sanitize_log_value(f"{meta.name} v{meta.version}")
                 logger.info(f"Loaded plugin: {safe_meta}")
+                audit_plugin_load(meta.name, version=meta.version, path=str(plugin_dir))
 
             return plugin_instance
 

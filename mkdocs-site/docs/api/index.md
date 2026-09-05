@@ -52,7 +52,7 @@ The framework automatically exposes an OpenAPI 3.1 specification, dynamically ge
 
 - **Request schema**: All required parameters, body, and headers
 - **Response schema**: Return data structure for each endpoint
-- **Authentication**: `HTTPBasic` is the only declared security scheme (the admin/Basic routes and `/metrics`). The API-key / Bearer gate is a FastAPI dependency, so it is enforced but **not** declared in the spec
+- **Authentication**: three declared schemes — `HTTPBasic` (admin/Basic routes and `/metrics`), `ApiKeyAuth` (`X-API-Key`) and `BearerAuth` (JWT). The API-key / Bearer gate is a FastAPI dependency, so the schemes are declared for the Authorize dialog but carry no per-operation `security` requirement: enforcement lives in `require_user` / `require_admin` / `require_admin_or_job`
 - **Validation errors**: the `422` `HTTPValidationError` response FastAPI adds to body-taking operations. The body actually emitted — for every error — is an RFC 9457 problem document, see [REST API › Error Envelope](rest.md#error-envelope)
 
 ### Interactive Documentation Access
@@ -68,7 +68,7 @@ Swagger UI is the most complete **interactive** interface. It allows you to:
 - **Explore** all endpoints organized by router tag (`status`, `indexing`, `feedback`, `admin`, `tenants`, `Plugin Management`, `Backstage Integration`, `A2A Discovery`, …; untagged routers such as chat appear under `default`)
 - **Test** APIs directly from the browser without Postman or curl
 - **See** complete JSON schemas with real-time validation
-- **Authenticate** once with the "Authorize" button — HTTP Basic (admin credentials) only, since that is the sole scheme the spec declares
+- **Authenticate** once with the "Authorize" button — HTTP Basic (admin credentials), `ApiKeyAuth` (`X-API-Key`) or `BearerAuth` (JWT)
 
 **When to use it**:
 
@@ -78,10 +78,10 @@ Swagger UI is the most complete **interactive** interface. It allows you to:
 
 !!! tip "Quick Test"
     1. Open `http://localhost:8000/docs`
-    2. Click "Authorize" in the top right and enter the admin Basic credentials (`ADMIN_USER` / `ADMIN_PASS`) — this covers the Basic-auth routes such as `GET /admin/data`
+    2. Click "Authorize" in the top right and fill the scheme you need: `HTTPBasic` (`ADMIN_USER` / `ADMIN_PASS`) for the Basic routes such as `GET /admin/data`, `ApiKeyAuth` for an `X-API-Key` from `API_KEYS_*`, or `BearerAuth` for a JWT
     3. Expand an endpoint, click "Try it out", modify the example JSON and "Execute"
 
-    Swagger UI cannot attach an `X-API-Key` / `Authorization: Bearer` header because that scheme is not declared, so call API-key routes such as `POST /chat` with curl or a [client SDK](sdk.md) instead — or run locally with `AUTH_REQUIRED=false` and no API keys configured, where user routes admit anonymous calls.
+    The three schemes are declared globally, not per operation, so Swagger sends the credential you filled in on every request; the route's own dependency decides whether it is enough. Running locally with `AUTH_REQUIRED=false` and no API keys configured, user routes admit anonymous calls.
 
 #### ReDoc
 
@@ -107,7 +107,8 @@ ReDoc provides highly readable **static documentation**. Optimized for:
 Raw OpenAPI schema in JSON format, served only while the docs are enabled
 (see [Security](#security-in-documentation)). The live schema is built after
 startup, so it includes the routers the `api_routers` plugin mounts at
-lifespan (`/prompts`, `/webhooks`, …), unlike a spec exported offline. Useful for:
+lifespan (`/prompts`, `/webhooks`, …) exactly as that deployment's feature
+flags leave them. Useful for:
 
 - **Import** into external tools (Postman, Insomnia, Paw)
 - **Generation** of automatic client SDKs
@@ -131,14 +132,17 @@ baselith docs generate
 
 This prints `Found N endpoints` and writes, under `./mkdocs-site/docs/api/specs/`:
 
-- `openapi.json` - the maintained artefact (currently `0.29.0`, 54 paths)
+- `openapi.json` - the maintained artefact (currently `0.29.0`)
 - `openapi.yaml` - the same schema, written only when PyYAML is installed
 
 No Postman collection is generated; import `openapi.json` into Postman directly.
-The command constructs the app without running its lifespan, so routers the
-`api_routers` plugin mounts at startup (`/prompts`, `/chat/ws`, `/agent/*`,
-`/webhooks`, `/privacy`, `/compliance`, `/runs`, `/approvals`) are not in the
-exported files — fetch the live `/openapi.json` if you need them.
+`baselith docs generate` constructs the app without running its lifespan, so
+routers the `api_routers` plugin mounts at startup (`/prompts`, `/chat/ws`,
+`/agent/*`, `/webhooks`, `/privacy`, `/compliance`, `/runs`, `/approvals`) are
+missing from what it writes. `python scripts/export_openapi.py` includes them —
+it mounts those routers explicitly with every feature gate opened — and is what
+produces the committed `sdk/openapi.json` and the specs under
+`mkdocs-site/docs/api/specs/` (101 paths).
 
 ### Plugin Documentation
 

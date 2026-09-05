@@ -96,11 +96,39 @@ def test_agent_property_success(chat_service):
         # checkpoint_store comes from the factory: a real store by default
         # (ORCHESTRATOR_CHECKPOINT_ENABLED defaults to on), None only when
         # explicitly disabled.
+        # memory_manager is None unless CHAT_MEMORY_ENABLED is set.
         mock_orch_cls.assert_called_once_with(
             plugin_registry=chat_service.plugin_registry,
             checkpoint_store=ANY,
+            memory_manager=None,
         )
         assert chat_service.agent == agent
+
+
+def test_agent_receives_memory_when_enabled(chat_service):
+    """With CHAT_MEMORY_ENABLED the orchestrator gets an AgentMemory instance."""
+    from core.memory.manager import AgentMemory
+
+    mock_orch_cls = MagicMock()
+    chat_service.config.memory_enabled = True
+    with patch("core.orchestration.Orchestrator", mock_orch_cls):
+        _ = chat_service.agent
+
+    memory = mock_orch_cls.call_args.kwargs["memory_manager"]
+    assert isinstance(memory, AgentMemory)
+
+
+def test_agent_without_memory_survives_broken_memory_backend(chat_service):
+    """A failing AgentMemory degrades to no memory instead of failing the chat."""
+    mock_orch_cls = MagicMock()
+    chat_service.config.memory_enabled = True
+    with (
+        patch("core.orchestration.Orchestrator", mock_orch_cls),
+        patch("core.memory.manager.AgentMemory", side_effect=RuntimeError("no store")),
+    ):
+        _ = chat_service.agent
+
+    assert mock_orch_cls.call_args.kwargs["memory_manager"] is None
 
 
 def test_agent_import_error(chat_service):

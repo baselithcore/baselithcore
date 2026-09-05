@@ -32,6 +32,7 @@ core/plugins/
 ├── version.py            # Version management
 ├── lookup.py             # Plugin lookup utilities
 ├── registration.py       # Registration logic
+├── _audit.py             # plugin.load / plugin.unload audit events
 └── resource_analyzer.py  # AST-based static analysis (helpers in _ast_utils.py)
 ```
 

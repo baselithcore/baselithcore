@@ -189,13 +189,14 @@ python scripts/export_openapi.py            # -> sdk/openapi.json
 python scripts/export_openapi.py out.json   # custom path
 ```
 
-The exporter only *constructs* the app (no network/DB, lifespan not run), so it
-runs anywhere — but for the same reason the routers the `api_routers` plugin
-mounts at startup (`/prompts`, `/chat/ws`, `/agent/*`, `/webhooks`,
-`/privacy`, `/compliance`, `/runs`, `/approvals`) are **absent** from
-`sdk/openapi.json`. The snapshot is the contract the hand-written SDKs are
-verified against (`chat`, `feedback` and `health` are all in it); fetch the
-live `/openapi.json` from a running server when you need the full surface.
+The exporter *constructs* the app (no network/DB connections are opened) and
+then mounts the routers the `api_routers` plugin adds at startup (`/prompts`,
+`/chat/ws`, `/agent/*`, `/webhooks`, `/privacy`, `/compliance`, `/runs`,
+`/approvals`) with every feature gate opened, so `sdk/openapi.json` describes
+the full server surface rather than the subset a bare `create_app()` exposes.
+It runs anywhere and its output is deterministic, which is what the
+`openapi_drift` CI job diffs against. A running deployment still serves only
+the routers **its** flags enable.
 
 ### Code generation (any language)
 

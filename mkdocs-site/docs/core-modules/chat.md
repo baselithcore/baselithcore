@@ -90,6 +90,23 @@ registry = PluginRegistry()
 chat = ChatService(plugin_registry=registry)
 ```
 
+### Long-term memory (`CHAT_MEMORY_ENABLED`, default `false`)
+
+The `Orchestrator` that `ChatService` builds takes an optional
+`memory_manager`. It is `None` unless `CHAT_MEMORY_ENABLED=true`, in which case
+the service constructs an `AgentMemory` (`core/memory/manager.py`) and the loop
+recalls past interactions before answering and writes the exchange back
+afterwards. That costs an embedding and a store round-trip per request, which
+is why it is opt-in; conversation history (the last turns replayed into the
+prompt) is a separate, always-on mechanism described under
+[Conversation History](#conversation-history). If `AgentMemory` cannot be
+constructed the service logs a warning and continues without memory rather than
+failing the request.
+
+```env
+CHAT_MEMORY_ENABLED=true
+```
+
 ---
 
 ## RAG Workflow

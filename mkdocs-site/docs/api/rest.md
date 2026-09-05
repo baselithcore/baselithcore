@@ -677,9 +677,11 @@ The framework's own `api_routers` plugin also mounts, at application startup,
 the [prompt-catalog admin API](#prompt-catalog-administration) (`/prompts`),
 the [WebSocket chat channel](#websocket-chat-ws-chatws) (`/chat/ws`), the
 async agent runs (`POST /agent/async`, `GET /agent/status/{task_id}`) and the
-feature-gated routers below. None of them has a `/v1` alias, and because they
-are registered at lifespan they are absent from a spec exported without running
-the app (see [Client SDKs › OpenAPI schema](sdk.md#openapi-schema)).
+feature-gated routers below. None of them has a `/v1` alias. They are
+registered at lifespan, so `baselith docs generate` misses them;
+`scripts/export_openapi.py` mounts them explicitly and the committed
+`sdk/openapi.json` therefore includes them (see
+[Client SDKs › OpenAPI schema](sdk.md#openapi-schema)).
 
 ### Feature-gated routers
 

@@ -174,9 +174,9 @@ The GraphDB module implements strict logical isolation for multi-tenant deployme
 | `GRAPH_DB_TIMEOUT` | `2.0`                    | Redis socket timeout in seconds (minimum 0.1)  |
 | `GRAPH_CACHE_TTL`  | `3600`                   | TTL in seconds for cached read-only results    |
 
-Defaults come from `core/config/storage.py`. `.env.example` ships the same
-URL, name and timeout but sets `GRAPH_DB_ENABLED=false`, so a deployment
-built from it must switch the graph on explicitly.
+Defaults come from `core/config/storage.py`; `.env.example` ships the same
+values, so a deployment built from it starts with the graph on and pointed at
+the local FalkorDB/Redis instance.
 
 ---
 

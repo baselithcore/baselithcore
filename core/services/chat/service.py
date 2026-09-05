@@ -214,6 +214,7 @@ class ChatService:
                 self._agent = Orchestrator(
                     plugin_registry=self.plugin_registry,
                     checkpoint_store=get_default_checkpoint_store(),
+                    memory_manager=self._build_memory_manager(),
                 )
                 logger.info("ChatService bound to core.orchestration.Orchestrator")
             except ImportError as e:
@@ -222,6 +223,25 @@ class ChatService:
                 ) from e
 
         return self._agent
+
+    def _build_memory_manager(self) -> Any | None:
+        """Long-term memory for the orchestrator, or ``None`` when disabled.
+
+        Gated by ``CHAT_MEMORY_ENABLED`` (default ``false``): with it on, the
+        loop recalls past interactions before answering and writes the exchange
+        back afterwards, at the cost of an embedding and store round-trip per
+        request. A construction failure degrades to no memory rather than
+        failing the chat request.
+        """
+        if not getattr(self.config, "memory_enabled", False):
+            return None
+        try:
+            from core.memory.manager import AgentMemory
+
+            return AgentMemory()
+        except Exception as e:  # pragma: no cover - optional dependency path
+            logger.warning(f"Chat memory disabled: AgentMemory unavailable ({e})")
+            return None
 
     def handle_chat(self, req: ChatRequest) -> ChatResponse:
         """
