@@ -20,3 +20,8 @@ d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-
 5a7f30479d1d6eb14b5b87441b7f43a06f5dec68:tests/unit/core/services/vision/test_media_service.py:generic-api-key:47
 4a8f19977276e5de6a00188176f281de8d171513:mkdocs-site/docs/api/rest.md:curl-auth-header:325
 4a8f19977276e5de6a00188176f281de8d171513:tests/unit/core/guardrails/test_code_review.py:generic-api-key:58
+
+# Triaged false positives (2026-09-05): two more curl examples in the REST
+# docs using the same "your-...-api-key" placeholder convention as above.
+2cccc127c9cbab30603705ffcd746360e1d27ce2:mkdocs-site/docs/api/rest.md:curl-auth-header:458
+2cccc127c9cbab30603705ffcd746360e1d27ce2:mkdocs-site/docs/api/rest.md:curl-auth-header:528
