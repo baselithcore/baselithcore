@@ -192,6 +192,12 @@ class Agent(Generic[OutputT]):
         response_format = self._response_format()
         current = prompt
         tool_calls_made: list[str] = []
+        # Accumulated across rounds, not per round: a loop that rebuilt the
+        # prompt from the latest round alone would drop everything the earlier
+        # tool calls established, so the model keeps re-requesting work whose
+        # answer it was already given — and the loop runs until
+        # ``max_iterations`` instead of converging.
+        tool_blocks: list[str] = []
         retries_left = self.max_retries
         last_error: Exception | None = None
 
@@ -205,14 +211,13 @@ class Agent(Generic[OutputT]):
                 task_category=self.task_category,
             )
             if result.tool_calls:
-                blocks: list[str] = []
                 for call in result.tool_calls:
                     output = await self._execute_tool(call)
                     tool_calls_made.append(call.name)
-                    blocks.append(f"[{call.name}] -> {output}")
+                    tool_blocks.append(f"[{call.name}] -> {output}")
                 current = (
                     f"{prompt}\n\nTool results so far:\n"
-                    + "\n".join(blocks)
+                    + "\n".join(tool_blocks)
                     + "\n\nContinue. Use the tool results above; when you have "
                     "enough information, answer without calling more tools."
                 )
