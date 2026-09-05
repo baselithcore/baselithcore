@@ -5,6 +5,16 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.30.0](https://github.com/baselithcore/baselithcore/compare/v0.29.0...v0.30.0) (2026-09-05)
+
+
+### Features
+
+* add automated documentation consistency validation framework and CI workflow integration ([73d2acb](https://github.com/baselithcore/baselithcore/commit/73d2acb03967def964dc9bb68d888b682a7bffa3))
+* close docs-vs-code gaps the consistency gate surfaced ([697af9b](https://github.com/baselithcore/baselithcore/commit/697af9b9e27418456181f1f6f2539efb2d76bcec))
+* enable query-aware context assembly and implement token allocation tracking in LoopBudget ([46d1f93](https://github.com/baselithcore/baselithcore/commit/46d1f931f0c881c29c2fc77bde008e895728ff8f))
+* implement query-gated context selection using BM25, add text canonicalization, and refine search thresholding. ([67eec6a](https://github.com/baselithcore/baselithcore/commit/67eec6aa26752a56468f203a88406624cbae0abf))
+
 # [0.29.0](https://github.com/baselithcore/baselithcore/compare/v0.28.0...v0.29.0) (2026-09-04)
 
 
