@@ -191,8 +191,10 @@ Most programmatic endpoints accept either an `X-API-Key` header or an
 `Authorization: Bearer <token>` header. The `SecurityManager` resolves the
 caller's role (`user`, `admin`, `job` — a `service` identity is treated as
 `job` — or `scoped` for least-privilege keys, which only `require_user`
-admits) and applies per-role rate limits. HTTP Basic credentials are not
-read on these routes.
+admits) and applies per-role rate limits through the sliding-window
+[`RateLimiter`](../core-modules/middleware.md#ratelimiter) — the only limiter
+in the stack; no secondary per-route limiter is initialised at startup. HTTP
+Basic credentials are not read on these routes.
 
 ```bash
 curl -H "X-API-Key: your-api-key-here" \

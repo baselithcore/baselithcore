@@ -6,7 +6,6 @@ resource initialization, plugin loading, and rate limiter setup.
 """
 
 import asyncio
-import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,17 +13,6 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
-
-from core.observability.logging import get_logger
-
-try:
-    from fastapi_limiter import FastAPILimiter
-
-    FASTAPI_LIMITER_AVAILABLE = True
-except ImportError:
-    FastAPILimiter = None  # type: ignore[assignment, misc]
-    FASTAPI_LIMITER_AVAILABLE = False
-    logging.warning("⚠️ fastapi-limiter not available - rate limiting will be disabled")
 
 from core.api.startup_checks import (
     run_startup_health_checks,
@@ -36,6 +24,7 @@ from core.api.startup_checks import (
     warm_memory_embedder,
 )
 from core.config import get_app_config, get_storage_config
+from core.observability.logging import get_logger
 from core.plugins import PluginLoader, PluginRegistry
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 
@@ -46,7 +35,6 @@ _storage_config = get_storage_config()
 
 INDEX_BOOTSTRAP_BACKGROUND = getattr(_app_config, "index_bootstrap_background", False)
 POSTGRES_ENABLED = getattr(_storage_config, "postgres_enabled", False)
-CACHE_REDIS_URL = getattr(_storage_config, "cache_redis_url", "")
 
 # Strong references to fire-and-forget startup tasks so the event loop cannot
 # garbage-collect them before they finish (see RUF006 / asyncio docs).
@@ -369,34 +357,6 @@ async def lifespan(app: FastAPI):
     from core.api._recovery_startup import start_checkpoint_recovery
 
     await start_checkpoint_recovery(_BACKGROUND_TASKS)
-
-    if (
-        FASTAPI_LIMITER_AVAILABLE
-        and getattr(_storage_config, "cache_backend", "") == "redis"
-        and CACHE_REDIS_URL
-    ):
-        logger.info("🛡️ Initializing Distributed Rate Limiter (Redis)...")
-        try:
-            # Shared bounded pool (socket deadlines, health checks) rather
-            # than a private unbounded client: the limiter runs on every
-            # request, so its connection budget must be the cache's, not
-            # redis-py's default of "unlimited".
-            from core.cache.redis_cache import create_redis_client
-
-            redis_limiter = create_redis_client(CACHE_REDIS_URL, decode_responses=True)
-            await FastAPILimiter.init(redis_limiter)
-            logger.info("🛡️ Rate Limiter initialized.")
-        except Exception as exc:
-            logger.warning(
-                "🛡️ Rate Limiter initialization skipped: Redis unavailable (%s: %s).",
-                type(exc).__name__,
-                exc,
-            )
-    else:
-        if not FASTAPI_LIMITER_AVAILABLE:
-            logger.warning("🛡️ Rate Limiter skipped (fastapi-limiter not installed).")
-        else:
-            logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
 
     # === Eager auth/security singleton warmup + health checks ===
     # (core.api.startup_checks — also warms the async DB pool at startup)

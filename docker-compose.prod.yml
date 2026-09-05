@@ -182,7 +182,10 @@ services:
 
   # Reverse Proxy
   gateway:
-    image: nginx:alpine
+    # Pinned like the data-plane images: a floating `alpine` re-pull would
+    # silently change the edge (TLS/HTTP behaviour, module set). Bump
+    # deliberately, together with a re-run of `nginx -t` on nginx.conf.
+    image: nginx:1.31.5-alpine
     container_name: baselith-gateway
     ports:
       - "80:80"
