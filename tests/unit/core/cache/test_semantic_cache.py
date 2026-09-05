@@ -47,6 +47,70 @@ class TestSemanticLLMCache:
         assert await cache.get_exact("missing") is None
 
     @pytest.mark.asyncio
+    async def test_exact_tier_matches_canonical_variants_without_embedding(
+        self, cache, mock_embedder
+    ):
+        """Case, whitespace and accent variants hit the exact tier: no embedder call."""
+        mock_embedder.encode.return_value = np.array([0.1, 0.2, 0.3])
+        await cache.set("Perché Python?", "because")
+        calls_after_set = mock_embedder.encode.call_count
+
+        result, score = await cache.get_similar_with_score("perche   python?")
+
+        assert result == "because"
+        assert score == 1.0
+        assert mock_embedder.encode.call_count == calls_after_set
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_tier_hits_punctuation_variant_without_embedding(
+        self, cache, mock_embedder
+    ):
+        """A near-verbatim variant (punctuation differs, so the exact key
+        misses) is served by the n-gram fingerprint tier: no embedder call."""
+        mock_embedder.encode.return_value = np.array([0.1, 0.2, 0.3])
+        await cache.set("What is Python?", "because")
+        calls_after_set = mock_embedder.encode.call_count
+
+        result, score = await cache.get_similar_with_score("What is Python")
+
+        assert result == "because"
+        assert score == 1.0
+        assert mock_embedder.encode.call_count == calls_after_set
+        assert cache.stats["hits"] == 1
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_tier_rejects_reordered_prompt(
+        self, cache, mock_embedder
+    ):
+        """Same words, different order: fingerprint must NOT match; the
+        lookup falls through to the embedding tier (here orthogonal → miss)."""
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        await cache.set("Translate English to Italian", "A")
+        mock_embedder.encode.return_value = np.array([0.0, 1.0, 0.0])
+
+        result, _ = await cache.get_similar_with_score("Translate Italian to English")
+
+        assert result is None
+        # The embedding tier ran (second encode call) — fingerprint did not
+        # short-circuit with a wrong hit.
+        assert mock_embedder.encode.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_tier_can_be_disabled(self, mock_embedder):
+        cache = SemanticLLMCache(
+            maxsize=10, ttl=60, threshold=0.8, fingerprint_enabled=False
+        )
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        await cache.set("What is Python?", "because")
+
+        # Orthogonal query vector: only a fingerprint hit could serve this.
+        mock_embedder.encode.return_value = np.array([0.0, 1.0, 0.0])
+        result, _ = await cache.get_similar_with_score("What is Python")
+
+        assert result is None
+        assert mock_embedder.encode.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_get_similar_hit(self, cache, mock_embedder):
         # Setup: cache an entry with vector [1, 0, 0]
         prompt1 = "hello world"

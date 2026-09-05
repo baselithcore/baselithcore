@@ -15,6 +15,7 @@ from typing import Any
 from core.observability.logging import get_logger
 from core.utils.concurrency import run_inference
 from core.utils.similarity import cosine_similarity_many
+from core.utils.text_canon import canonical_key
 
 from .embedding_compat import encode_flexible
 from .hybrid_search import BM25Index, HybridSearcher, ScoredHit, bm25_doc_stats
@@ -38,8 +39,12 @@ _FUSE_OFFLOAD_THRESHOLD = 64
 
 
 def _normalize_content(text: str) -> str:
-    """Whitespace-normalized, lowercased key for near-duplicate dedup."""
-    return " ".join(text.lower().split())
+    """Canonical key for near-duplicate dedup.
+
+    Accent, case, punctuation and whitespace variants of the same note share
+    a key (see :func:`core.utils.text_canon.canonical_key`).
+    """
+    return canonical_key(text)
 
 
 class HierarchySearchMixin:

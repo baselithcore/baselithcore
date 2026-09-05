@@ -109,9 +109,15 @@ class SearchMixin:
         limit: int = 5,
         memory_type: MemoryType | None = None,
         include_working: bool = True,
+        min_score: float | None = None,
     ) -> list[MemoryItem]:
         """
         Search for memories relevant to the given query across working and long-term memory.
+
+        Every tier is gated by the same relevance threshold: working memory
+        already filters at ``similarity_threshold``; provider (long-term) hits
+        are held to it too, so a weak vector-store neighbour is not injected
+        into the prompt as noise.
 
         Args:
             query: Natural language or keyword query.
@@ -119,12 +125,15 @@ class SearchMixin:
             limit: Maximum number of results to return.
             memory_type: Single memory category to search in (alternative to memory_types).
             include_working: Whether to include active context in the search.
+            min_score: Relevance gate applied to every hit. ``None`` (default)
+                uses ``similarity_threshold``; pass ``0.0`` for ungated recall.
 
         Returns:
             A list of relevant MemoryItem entries, sorted by similarity.
         """
         if memory_type:
             memory_types = [memory_type]
+        threshold = self.similarity_threshold if min_score is None else min_score
 
         results: list[tuple[MemoryItem, float]] = []
 
@@ -166,6 +175,7 @@ class SearchMixin:
                     query,
                     memory_type=type_filter,
                     limit=limit,
+                    min_score=threshold,
                     query_vector=provider_vector,
                 )
                 return [
@@ -183,6 +193,9 @@ class SearchMixin:
         for sub in await asyncio.gather(*tasks):
             results.extend(sub)
 
+        # Post-filter as well: a provider may ignore ``min_score`` (or score on
+        # a scale it does not threshold), and the gate must hold regardless.
+        results = [(item, score) for item, score in results if score >= threshold]
         results.sort(key=lambda x: x[1], reverse=True)
         seen = set()
         unique_items = []

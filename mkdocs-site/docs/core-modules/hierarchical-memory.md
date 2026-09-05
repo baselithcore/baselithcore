@@ -98,6 +98,22 @@ STM always gets priority; the `## Background` and `## Long-term Knowledge`
 sections are opened only while more than 20 tokens of budget remain, and each
 section stops at the first line that would overflow `max_tokens`.
 
+By default `## Background` holds the 5 most recent MTM items and `## Long-term
+Knowledge` the 3 most recent LTM summaries — pure recency, the current request
+plays no part. Pass `query=` to **gate those two sections by relevance**
+instead: BM25 keyword hits for the query lead each section and recent items
+only backfill what is left, so an old-but-pertinent note is not crowded out by
+newer unrelated ones (and unrelated recent ones stop spending the budget). STM
+stays most-recent-first either way — it *is* the immediate context. The
+lookup is a static keyword match (pure CPU, no embedder call), so
+`get_context` remains synchronous.
+
+```python
+context_str = memory.get_context(max_tokens=2000, query="kubernetes rollout")
+# ## Background now leads with the MTM note about the kubernetes rollout,
+# even if it is older than the last five items.
+```
+
 ## Configuration
 
 Configure the hierarchy via `HierarchyConfig`:
@@ -150,9 +166,12 @@ Consolidation applies the declarative `TierConfig` knobs
   metadata clears `stm.auto_promote_threshold` are promoted to MTM; the rest
   are evicted. Defaults (importance 0.5, threshold 0.5) promote everything, so
   callers that never set importance see no behavior change.
-- **Write-side dedup** — an item whose whitespace/case-normalized content
-  already exists in MTM (the same key hybrid recall uses) is dropped at
-  promotion time instead of accumulating.
+- **Write-side dedup** — an item whose *canonical* content already exists in
+  MTM (the same key hybrid recall uses for read-side dedup) is dropped at
+  promotion time instead of accumulating. The key is
+  `core.utils.text_canon.canonical_key`: NFKC-normalized, accent-stripped,
+  casefolded, punctuation- and whitespace-insensitive — `"Café aperto!"` and
+  `"cafe  aperto"` are one memory.
 - **TTL enforcement** — `ttl_seconds` per tier is enforced: expired items are
   swept during consolidation/compression, or on demand via
   `memory.purge_expired()` (returns per-tier eviction counts). Provider-backed
@@ -204,5 +223,7 @@ Each tier uses a different search strategy:
 | **LTM** | `provider.search()` (vector DB, e.g. Qdrant)   | Keyword matching on in-memory cache |
 
 When an embedder is available, `add()` automatically caches the embedding alongside the memory item in STM and MTM. This avoids re-computing embeddings at recall time and enables sub-millisecond semantic search on in-memory tiers.
+
+The BM25 tokenizer canonicalizes before splitting (`core.utils.text_canon.canonicalize`, then a Unicode-aware `\w+` split): accented words index whole (`"perché"` → `perche`, not `perch`), an unaccented query still matches an accented memory, and CJK text is indexed instead of being dropped as non-ASCII.
 
 The BM25 keyword pass of hybrid recall is memoized: per-document token statistics are cached (keyed by content, so mutations can never serve stale stats) and the whole index is reused when the corpus is unchanged between recalls — scoring stays bit-identical to a fresh build. Memory consolidation embeds items in a single batched `encode()` call rather than one model call per item. Past a 64-item corpus the fusion pass (tokenization + BM25 scoring + RRF — pure CPU) is offloaded to the dedicated inference executor instead of running inline on the event loop; and every embedder call goes through `core.memory.embedding_compat.encode_flexible`, so a sync embedder runs in a worker thread instead of blocking the loop (or silently degrading recall to keyword search).

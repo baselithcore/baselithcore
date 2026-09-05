@@ -201,3 +201,18 @@ async def test_ltm_deque_maxlen_preserved_after_sweep():
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+class TestDedupKeyCanonicalization:
+    """Write-side dedup keys on canonical content: accents, case, punctuation
+    and whitespace variants of the same note collapse to one item."""
+
+    def test_accent_and_punctuation_variants_are_duplicates(self) -> None:
+        from core.memory.lifecycle import drop_duplicates
+        from core.memory.types import MemoryItem, MemoryType
+
+        existing = [MemoryItem("Café aperto!", MemoryType.SHORT_TERM)]
+        candidate = MemoryItem("cafe  aperto", MemoryType.SHORT_TERM)
+        unique, dropped = drop_duplicates([(candidate, [])], existing)
+        assert unique == []
+        assert dropped == 1

@@ -491,6 +491,8 @@ REDIS_SOCKET_CONNECT_TIMEOUT=2            # TCP connect deadline
 SEMANTIC_CACHE_MAXSIZE=1000               # Entries per tenant
 SEMANTIC_CACHE_TTL=3600
 SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
+SEMANTIC_CACHE_FINGERPRINT_ENABLED=true   # n-gram fingerprint tier before the embedding scan
+SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8  # Min Jaccard of word n-gram fingerprints (0.0-1.0)
 ```
 
 !!! note "`RedisCacheConfig.url` is redacted on every dump"

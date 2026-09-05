@@ -11,7 +11,10 @@ core/cache/
 ├── ttl_cache.py       # Backward-compat re-export of TTLCache
 ├── redis_cache.py     # RedisTTLCache — Redis-backed async cache + async pools
 ├── redis_sync.py      # Shared bounded pools for the *synchronous* client
-├── semantic_cache.py  # SemanticLLMCache — vector-similarity LLM cache
+├── semantic_cache.py  # SemanticLLMCache — exact → fingerprint → embedding LLM cache
+├── semantic_embedding.py   # PromptEmbeddingMixin — lazy embedder + embedding memo
+├── semantic_maintenance.py # EntryMaintenanceMixin — TTL purge + LRU eviction
+├── fingerprint.py     # Word n-gram fingerprints + Jaccard (static-lookup tier)
 ├── single_flight.py   # SingleFlight / RedisSingleFlight — miss coalescing
 └── metrics.py         # CacheMetricsCollector — hit/miss/eviction analytics
 ```
@@ -140,6 +143,39 @@ print(response, score)  # ("RAG stands for...", 0.96)
 ```
 
 The semantic cache uses the same embedding model as the VectorStore, ensuring consistency. It features **asynchronous embedding generation** to prevent blocking the event loop and implements a **multi-tenant LRU (Least Recently Used) eviction policy** based on both access time and frequency (hits).
+
+### Lookup tiers
+
+Every read (`get_similar`, `get_similar_with_score`, `get_or_compute`) walks
+three tiers, cheapest first, and stops at the first hit:
+
+| Tier | Key | Cost | Catches |
+| ---- | --- | ---- | ------- |
+| **Exact** | SHA-256 of the *canonicalized* prompt (`core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded, whitespace collapsed) plus kwargs | hash lookup | `"Perché Python?"` vs `"perche   python?"` |
+| **Fingerprint** | Set of canonical word unigrams + bigrams (`core/cache/fingerprint.py`), Jaccard ≥ `fingerprint_threshold` | set algebra over the tenant's entries, **no embedder call** | punctuation / filler / accent variants: `"What is Python?"` vs `"What is Python"` |
+| **Embedding** | L2-normalized prompt embedding, cosine ≥ `threshold` | one encode (tens of ms) + one matrix-vector product | paraphrases: `"Explain RAG to me"` vs `"What is RAG?"` |
+
+The fingerprint tier is the cache's *static lookup*: a deterministic address
+computed from the text alone, checked before any model runs — the same
+"cheap lookup before expensive computation" split that lookup-based
+conditional memory applies inside a model. Bigrams keep word order in play,
+so `"translate English to Italian"` and `"translate Italian to English"`
+share every unigram but no bigram and fall through to the embedding tier
+instead of colliding. A fingerprint hit returns its Jaccard score in the
+`(response, score)` tuple; an exact hit returns `1.0`.
+
+```python
+cache = SemanticLLMCache(
+    threshold=0.85,             # embedding tier (cosine)
+    fingerprint_threshold=0.8,  # fingerprint tier (Jaccard)
+    fingerprint_enabled=True,   # set False to skip straight to the embedding scan
+)
+```
+
+Config defaults come from `SemanticCacheConfig`
+(`SEMANTIC_CACHE_FINGERPRINT_ENABLED=true`,
+`SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8`); constructor arguments override
+them per instance.
 
 !!! tip "Multi-Tenant Isolation"
     All LLM caching mechanisms (both exact-match `TTLCache` and `SemanticLLMCache`) automatically namespace their keys with the current `tenant_id` to prevent cross-tenant data leakage.
