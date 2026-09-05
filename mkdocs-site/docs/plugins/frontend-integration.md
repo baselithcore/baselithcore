@@ -3,6 +3,8 @@ title: Frontend Integration
 description: Ship static assets or a built dashboard with a plugin and expose them to a host frontend
 ---
 
+<!-- docs-consistency: skip routes -->
+
 The **Frontend Integration** surface lets a plugin ship its own static assets — JavaScript, CSS, images, or a compiled single-page app — and describe them to whatever frontend the operator runs, **without touching `core/`**. The framework serves the files and publishes a machine-readable manifest; rendering is the host frontend's job.
 
 !!! info "What the framework does — and does not — do"

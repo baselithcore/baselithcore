@@ -579,7 +579,7 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
 
 !!! note "Reload is REST-only"
     Hot-reload is exposed via this REST API only; there is **no**
-    `baselith plugin reload` CLI command.
+    `reload` subcommand under `baselith plugin`.
 
 ### `GET /api/plugins/frontend-manifest`
 

@@ -781,6 +781,41 @@ async def test_real_api():
 
 ## CI/CD Integration
 
+### Docs ↔ code consistency gate
+
+`CLAUDE.md` says code and docs ship together. Two scripts make the
+mechanical half of that rule enforceable:
+
+- `scripts/check_docs_consistency.py` scans every page under
+  `mkdocs-site/docs/` and verifies each provable claim against the
+  repository: `from core… import` lines in Python fences really import,
+  `core/…`/`plugins/…`/`tests/…` paths exist, relative `.md` links resolve,
+  `NAME=` lines in env fences and `` `PREFIX_NAME` `` tokens name a real
+  setting (aliases and `env_prefix` fields are derived from the config
+  classes), `baselith <cmd> <sub>` chains exist in the CLI tree and, with
+  `--routes`, every `METHOD /path` is served by the app (feature gates are
+  opened while the app is built, so gated routers count too).
+- `scripts/check_docs_sync.py` lists the `core/` modules a change touched and
+  fails when their documentation page was not edited in the same change. A
+  commit whose message carries `[docs-sync: skip]` (with the reason) opts a
+  range out explicitly.
+
+Where they run:
+
+| Stage | Command | Scope |
+| ----- | ------- | ----- |
+| pre-commit hook `docs-consistency` | `python scripts/check_docs_consistency.py --fast` | paths, links, env, CLI |
+| CI job `docs_consistency` | `python scripts/check_docs_consistency.py --routes` | everything, imports and routes included |
+| CI job `docs_consistency` (pull requests) | `python scripts/check_docs_sync.py origin/<base>` | changed `core/` modules ↔ pages |
+| unit suite | `tests/unit/test_docs_consistency.py` | the checker itself, plus the real docs tree (`slow`) |
+
+Tutorial scaffolds (`plugins/my-plugin/…`, `plugins/weather_agent/…`) and
+files the reader is told to create are allow-listed in the script; a page
+that documents another service's endpoints opts out of one check with an
+HTML comment, for example `<!-- docs-consistency: skip routes -->`. When the
+gate fires, fix the page or the code — never silence it to make a build
+green.
+
 ### GitHub Actions
 
 Tests run in the `python_test` job of `.github/workflows/ci.yml` on a Python

@@ -929,5 +929,5 @@ baselith queue status
     ```
 
 !!! note "Hot-reload is REST-only"
-    There is no `baselith plugin reload` CLI command. Plugin hot-reload is
+    There is no `reload` subcommand under `baselith plugin`. Plugin hot-reload is
     exposed through the REST API (`POST /api/plugins/{name}/reload`).

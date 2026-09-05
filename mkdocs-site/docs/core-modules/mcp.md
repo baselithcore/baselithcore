@@ -119,7 +119,8 @@ IDEs.
       `-32003` and the limiter's own `Retry-After` / `RateLimit-*` headers.
     - **Protected-resource metadata (RFC 9728)** — while auth is required the
       router also serves an *unauthenticated*
-      `GET /.well-known/oauth-protected-resource{path}` (plus the bare
+      `GET /.well-known/oauth-protected-resource/mcp` — the metadata path
+      suffixed with `MCP_HTTP_PATH` (plus the bare
       `/.well-known/oauth-protected-resource` alias) publishing this
       resource's identifier and its `authorization_servers`. That list comes
       from `MCP_HTTP_AUTHORIZATION_SERVERS` (comma-separated), falling back to

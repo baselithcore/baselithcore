@@ -1,5 +1,7 @@
 # Publishing plugins via Backstage
 
+<!-- docs-consistency: skip routes -->
+
 Modern publishing workflow that submits a plugin **directly to the
 marketplace hub** (`marketplace.baselithcore.xyz`) via the Backstage
 Scaffolder. Supersedes the manual `git init` / `baselith plugin
