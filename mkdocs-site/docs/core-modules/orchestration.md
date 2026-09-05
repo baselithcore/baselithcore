@@ -528,8 +528,8 @@ by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
 | Symbol | Purpose |
 |--------|---------|
 | `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`, `max_seconds`) |
-| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `token_pressure()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
-| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens` and `elapsed_seconds`) |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
+| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`, `context_tokens` and `elapsed_seconds`) |
 | `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens` / `max_seconds`) |
 
 Defaults: 25 iterations, 50 tool calls, USD 0.50, **no token cap**
@@ -584,6 +584,33 @@ of the token cap consumed (`0.0` when no cap). Poll it to compact context
 if budget.token_pressure() > 0.8:
     context["recent_history"] = memory_manager.get_context(max_tokens=1000)
 ```
+
+**Where the budget went: recall vs reasoning.** `context_tokens` records the
+size of the context block assembled for the request — recalled memories plus
+recent history — and `context_share()` reports it as a fraction of the tokens
+the request actually spent. `inject_memory_context` records it automatically;
+the value rides on every `LoopBudgetSnapshot`, so it reaches callers in the
+reply's `budget` field with no extra wiring.
+
+```python
+snap = budget.snapshot()
+snap.context_tokens      # e.g. 640 — tokens of injected memory context
+budget.context_share()   # e.g. 0.21 — a fifth of the request went to recall
+```
+
+This is **measurement, not accounting**: `record_context_tokens` deliberately
+does not charge `tokens` or `max_tokens`. The injected block travels inside the
+prompt of the LLM calls that `record_tokens` already counts, so charging it
+again would double-bill and could abort a request that never exceeded its real
+budget. Two consequences worth knowing before you tune on the number:
+
+- The block is measured **once** but re-sent in **every** iteration's prompt,
+  so on a multi-step run its true cost is higher than `context_tokens`;
+  `context_share()` clamps at `1.0` rather than reporting a ratio above one.
+- A share that is persistently high with flat answer quality means the budget
+  is going to static recall that the model is not using — tighten
+  `similarity_threshold` on `recall`, or lower the `_CONTEXT_TOKENS` allowance.
+  A share near zero on knowledge-heavy traffic means the opposite.
 
 A breach raises `BudgetExceededError`, which `ExecutionMixin` catches
 and converts into a structured failure reply with `budget_exceeded` and

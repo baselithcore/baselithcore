@@ -10,6 +10,7 @@ Split out of :mod:`core.orchestration.mixins.execution` for the module size cap.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
@@ -24,6 +25,19 @@ logger = get_logger(__name__)
 _CONTEXT_TOKENS = 2000
 _CONTEXT_TOKENS_UNDER_PRESSURE = 1000
 _TOKEN_PRESSURE_THRESHOLD = 0.8
+
+
+def _accepts_query(fn: Any) -> bool:
+    """Whether ``fn`` takes a ``query`` keyword (query-aware context assembly).
+
+    ``HierarchicalMemory.get_context`` gates its Background and Long-term
+    sections by relevance to the current request when given one; managers
+    whose signature predates that keyword are called as before.
+    """
+    try:
+        return "query" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # builtins, C callables, mocks
+        return False
 
 
 def enforce_tenant_isolation(context: dict[str, Any]) -> None:
@@ -84,7 +98,14 @@ async def inject_memory_context(
             )
         else:
             memories = await memory_manager.recall(query, limit=5)
-            recent_history = memory_manager.get_context(max_tokens=context_tokens)
+            get_context = memory_manager.get_context
+            # Hand the request to a query-aware manager so its Background and
+            # Long-term sections are gated by relevance rather than recency.
+            recent_history = (
+                get_context(max_tokens=context_tokens, query=query)
+                if _accepts_query(get_context)
+                else get_context(max_tokens=context_tokens)
+            )
 
         # Flatten for prompt context
         context["memory_context"] = "\n".join([f"- {m.content}" for m in memories])
@@ -92,10 +113,28 @@ async def inject_memory_context(
         # Context Folding integration: recent conversation history, possibly folded.
         context["recent_history"] = recent_history
 
+        # Record how much of the request's budget went to static recall rather
+        # than dynamic reasoning. Measurement only — never charged against the
+        # token cap (see LoopBudget.record_context_tokens).
+        _record_context_allocation(budget, context["memory_context"], recent_history)
+
         # Also expose the manager itself to agents
         context["memory_manager"] = memory_manager
     except Exception as e:
         logger.warning(f"Memory recall failed: {e}")
+
+
+def _record_context_allocation(
+    budget: LoopBudget, memory_context: str, recent_history: str
+) -> None:
+    """Label the budget with the size of the context assembled for this request."""
+    try:
+        from core.utils.tokens import estimate_tokens
+
+        total = estimate_tokens(memory_context) + estimate_tokens(recent_history)
+        budget.record_context_tokens(total)
+    except Exception as e:  # pragma: no cover - measurement must never fail a run
+        logger.debug(f"Context allocation measurement skipped: {e}")
 
 
 def annotate_modality(context: dict[str, Any]) -> None:

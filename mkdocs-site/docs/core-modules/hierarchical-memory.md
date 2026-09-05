@@ -114,6 +114,15 @@ context_str = memory.get_context(max_tokens=2000, query="kubernetes rollout")
 # even if it is older than the last five items.
 ```
 
+The orchestrator does this for you: `inject_memory_context`
+(`core/orchestration/mixins/_context_assembly.py`) inspects the manager's
+`get_context` signature and passes the current request as `query=` whenever the
+keyword is accepted, so a query-aware manager is gated by relevance while a
+manager whose signature predates the keyword is called exactly as before. The
+size of the assembled block is then recorded on the request's `LoopBudget` as
+`context_tokens` — see
+[Where the budget went](orchestration.md#loopbudget-iteration-cost-token-cap).
+
 ## Configuration
 
 Configure the hierarchy via `HierarchyConfig`:
