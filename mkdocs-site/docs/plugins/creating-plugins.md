@@ -138,7 +138,7 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `tags`                  | No       | Keywords for categorization and search                       |
 | `category`              | No       | Primary category (e.g., `ai`, `security`, `utility`)         |
 | `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
-| `environment_variables` | No       | Required environment variables, reported by `baselith doctor`. Also **widens the plugin `.env` allowlist** to these exact keys, for names the plugin does not own (`SLACK_SIGNING_SECRET`); framework-protected keys can never be declared this way. See [the policy](../core-modules/plugins.md#two-gates-namespace-allowlist-then-protected-key-denylist) |
+| `environment_variables` | No       | Required environment variables, reported by `baselith doctor` — a list of names, or a list of mappings with `name`, `description` and `required` (only the names are used). Also **widens the plugin `.env` allowlist** to these exact keys, for names the plugin does not own (`SLACK_SIGNING_SECRET`); framework-protected keys can never be declared this way. See [the policy](../core-modules/plugins.md#two-gates-namespace-allowlist-then-protected-key-denylist) |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 

@@ -50,6 +50,7 @@ logger = get_logger(__name__)
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
     goal TEXT NOT NULL,
     start_url TEXT,
     max_steps INTEGER,
@@ -147,6 +148,18 @@ class TaskReplayStore:
         self._pending_step_writes = 0
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            # Upgrade a pre-tenancy DB: SQLite has no ADD COLUMN IF NOT EXISTS,
+            # so attempt it and swallow the duplicate-column error. The tenant
+            # index is created only after this step, never inside ``_SCHEMA``:
+            # on a pre-tenancy file the column does not exist yet and the
+            # ``executescript`` above would abort the whole open.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE runs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
+            except sqlite3.OperationalError:
+                pass
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_tenant ON runs(tenant_id)")
             self._conn.commit()
 
     def close(self) -> None:
@@ -204,13 +217,14 @@ class TaskReplayStore:
         goal: str,
         start_url: str | None,
         max_steps: int,
+        tenant_id: str = "default",
     ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO runs "
-                "(run_id, goal, start_url, max_steps, status, started_at) "
-                "VALUES (?, ?, ?, ?, 'running', ?)",
-                (run_id, goal, start_url, max_steps, time.time()),
+                "(run_id, tenant_id, goal, start_url, max_steps, status, started_at) "
+                "VALUES (?, ?, ?, ?, ?, 'running', ?)",
+                (run_id, tenant_id, goal, start_url, max_steps, time.time()),
             )
             self._conn.commit()
             self._pending_step_writes = 0
@@ -277,15 +291,15 @@ class TaskReplayStore:
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
-    def list_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def list_runs(self, *, limit: int = 50, tenant_id: str = "default") -> list[dict[str, Any]]:
         self._flush_for_reader()
         with self._reader_lock:
             rows = self._reader_conn.execute(
                 "SELECT r.run_id, r.goal, r.start_url, r.max_steps, r.status, r.started_at, "
                 "r.completed_at, r.final_url, r.error, "
                 "(SELECT COUNT(*) FROM steps s WHERE s.run_id = r.run_id) AS step_count "
-                "FROM runs r ORDER BY r.started_at DESC LIMIT ?",
-                (max(1, int(limit)),),
+                "FROM runs r WHERE r.tenant_id = ? ORDER BY r.started_at DESC LIMIT ?",
+                (tenant_id, max(1, int(limit))),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -294,6 +308,7 @@ class TaskReplayStore:
         run_id: str,
         *,
         include_screenshots: bool = True,
+        tenant_id: str = "default",
     ) -> dict[str, Any] | None:
         """Return a run with all its steps.
 
@@ -311,7 +326,8 @@ class TaskReplayStore:
         self._flush_for_reader()
         with self._reader_lock:
             run_row = self._reader_conn.execute(
-                "SELECT * FROM runs WHERE run_id=?", (run_id,)
+                "SELECT * FROM runs WHERE run_id=? AND tenant_id=?",
+                (run_id, tenant_id),
             ).fetchone()
             if run_row is None:
                 return None
@@ -366,17 +382,23 @@ class TaskReplayStore:
         run["steps"] = steps
         return run
 
-    def get_run_step_screenshot(self, run_id: str, step_index: int) -> str | None:
+    def get_run_step_screenshot(
+        self, run_id: str, step_index: int, *, tenant_id: str = "default"
+    ) -> str | None:
         """Decrypt + return the screenshot for one step (None if missing).
 
         Companion to ``get_run(include_screenshots=False)``: lets UIs hydrate
         the active step only instead of shipping every screenshot up front.
+        Scoped to the tenant via the owning run, so one tenant can never fetch
+        another's captured screenshots by guessing a run_id.
         """
         self._flush_for_reader()
         with self._reader_lock:
             row = self._reader_conn.execute(
-                "SELECT screenshot_b64 FROM steps WHERE run_id=? AND step_index=?",
-                (run_id, step_index),
+                "SELECT screenshot_b64 FROM steps WHERE run_id=? AND step_index=? "
+                "AND EXISTS (SELECT 1 FROM runs WHERE runs.run_id = steps.run_id "
+                "AND runs.tenant_id = ?)",
+                (run_id, step_index, tenant_id),
             ).fetchone()
         if row is None:
             return None
@@ -425,8 +447,12 @@ class TaskReplayStore:
     async def afinish_run(self, **kwargs: Any) -> None:
         await asyncio.to_thread(self.finish_run, **kwargs)
 
-    async def aget_run_step_screenshot(self, run_id: str, step_index: int) -> str | None:
-        return await asyncio.to_thread(self.get_run_step_screenshot, run_id, step_index)
+    async def aget_run_step_screenshot(
+        self, run_id: str, step_index: int, *, tenant_id: str = "default"
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.get_run_step_screenshot, run_id, step_index, tenant_id=tenant_id
+        )
 
 
 __all__ = ["TaskReplayStore"]

@@ -102,7 +102,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin s
 | `dependencies`          | ❌        | Legacy list of required plugin **names**; prefer `plugin_dependencies` |
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
-| `environment_variables` | ❌        | Required environment variables                   |
+| `environment_variables` | ❌        | Required environment variables: names, or mappings with `name`, `description`, `required` |
 | `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs — see [What is hashed](#integrity) for the exact surface. The manifest itself is **excluded**, so the publisher can inject this field after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 The class in `plugin.py` carries no identity of its own: `name`, `version` and every other

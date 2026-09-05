@@ -1,0 +1,1 @@
+import{j as e}from"./index-Bc9-2oy3.js";function c({title:d,description:s,actions:r,eyebrow:a}){return e.jsxs("div",{className:"page-header",children:[e.jsxs("div",{children:[a&&e.jsx("div",{className:"eyebrow",children:a}),e.jsx("h1",{children:d}),s&&e.jsx("p",{children:s})]}),r&&e.jsx("div",{className:"actions",children:r})]})}export{c as P};

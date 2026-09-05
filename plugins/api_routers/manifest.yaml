@@ -1,7 +1,9 @@
 name: api-routers
 version: 0.1.0
-description: Default FastAPI routers for chat, admin, feedback, tenant, indexing,
-  metrics, status, and console
+description: Opt-in HTTP routers mounted through the plugin contract - prompt catalog,
+  WebSocket chat, async runs, and feature-gated webhooks, privacy (DSR), compliance,
+  approvals and run controls. The core chat and admin routers are mounted by the app
+  factory.
 author: Baselith
 tags:
 - api

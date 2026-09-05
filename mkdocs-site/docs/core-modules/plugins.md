@@ -676,7 +676,9 @@ process. What a `.env` may then set is decided by a single shared policy
 2. **Namespace allowlist** (`classify_plugin_env_key`) — only keys prefixed with
    the plugin's own `<DIRNAME>_` namespace (`document-sources` →
    `DOCUMENT_SOURCES_`), plus the exact keys its manifest declares in
-   `environment_variables`, are exported to `os.environ`.
+   `environment_variables` — as a list of names, or as mappings with `name`,
+   `description` and `required`, of which only the names count — are
+   exported to `os.environ`.
 
 !!! danger "Why an allowlist, not just a denylist"
     A `.env` sits **outside** the integrity-hashed surface by design — operators

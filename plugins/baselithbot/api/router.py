@@ -22,6 +22,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from plugins.baselithbot.api.ui_api import create_dashboard_router, get_event_bus
+from plugins.baselithbot.control.tenant import tenant_from_request
 from plugins.baselithbot.inbound import InboundAuthError, InboundEvent, verify_inbound_request
 from plugins.baselithbot.inbound.parsers import (
     parse_discord_interaction,
@@ -80,6 +81,13 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
         client_host = request.client.host if request.client else "unknown"
         if not _RUN_RATE_LIMIT.consume(f"run:{client_host}"):
             raise HTTPException(status_code=429, detail="rate limit exceeded")
+        # Tenant the run belongs to — resolved from the caller's bearer (baselithbot
+        # uses DashboardAuth, not the central chokepoint, so resolve explicitly).
+        # Fail closed: when central auth is active but the caller has no resolvable
+        # tenant, refuse rather than file the run under a shared/default tenant.
+        tenant_id = await tenant_from_request(request)
+        if tenant_id is None:
+            raise HTTPException(status_code=401, detail="authenticated tenant required")
         agent = await plugin.get_or_start_agent()
         run_id = req.run_id or f"run-{uuid4().hex[:12]}"
         started_at = time.time()
@@ -98,6 +106,7 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
         )
         plugin.replay.start_run(
             run_id=run_id,
+            tenant_id=tenant_id,
             goal=req.goal,
             start_url=req.start_url,
             max_steps=req.max_steps,

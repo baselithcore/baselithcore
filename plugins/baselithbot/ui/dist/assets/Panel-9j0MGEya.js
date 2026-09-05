@@ -1,0 +1,1 @@
+import{j as e}from"./index-Bc9-2oy3.js";function c({title:n,tag:s,children:a,padded:r=!0,className:l}){return e.jsxs("section",{className:["panel",r?"padded":"",l??""].filter(Boolean).join(" "),children:[(n||s)&&e.jsxs("div",{className:"panel-header",children:[e.jsx("h2",{children:n}),s&&e.jsx("span",{className:"tag",children:s})]}),a]})}export{c as P};

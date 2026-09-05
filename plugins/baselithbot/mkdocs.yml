@@ -1,0 +1,57 @@
+site_name: BaselithBot — Autonomous Multi-Channel Agent
+site_description: >-
+  OpenClaw-style autonomous browser + OS-level Computer Use agent with
+  human-in-the-loop approvals, time-travel replay, 24 messaging channel
+  adapters, a Live Canvas (A2UI) surface, voice, cron scheduling, node
+  pairing, an MCP tool surface, and a 20-page React control-plane
+  dashboard.
+
+# Rendered by the Backstage TechDocs generator (techdocs-core provides the
+# Material theme + Backstage addons). The catalog Component's
+# `backstage.io/techdocs-ref` annotation is emitted automatically by the core
+# BackstageProvider because this mkdocs.yml exists — no catalog-info.yaml.
+plugins:
+  - techdocs-core
+
+nav:
+  - Overview: index.md
+  - Getting started: getting-started.md
+  - User guide:
+      - Overview dashboard: guide/overview.md
+      - Run Task: guide/run-task.md
+      - Sessions: guide/sessions.md
+      - Channels: guide/channels.md
+      - Skills: guide/skills.md
+      - Cron: guide/cron.md
+      - Nodes: guide/nodes.md
+      - Models: guide/models.md
+      - Agents: guide/agents.md
+      - Workspaces: guide/workspaces.md
+      - Metrics: guide/metrics.md
+      - Canvas: guide/canvas.md
+      - Computer Use: guide/computer-use.md
+      - Desktop Task: guide/desktop-task.md
+      - Stealth: guide/stealth.md
+      - Audit Log: guide/audit-log.md
+      - Approvals: guide/approvals.md
+      - Replay: guide/replay.md
+      - Live Logs: guide/logs.md
+      - Doctor: guide/doctor.md
+  - Reference:
+      - Architecture: reference/architecture.md
+      - Configuration: reference/configuration.md
+      - API: reference/api.md
+      - Security & RBAC: reference/security.md
+      - Multi-tenancy: reference/tenancy.md
+  - Operations:
+      - Runbook & troubleshooting: operations/runbook.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true

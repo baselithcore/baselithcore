@@ -1,15 +1,15 @@
 id: baselithbot
 entry_point: plugin:BaselithbotPlugin
 name: baselithbot
-version: 1.0.0
+version: 1.0.2
 description: Autonomous multi-channel agent with OpenClaw-style skills, stealth browsing,
   desktop control, canvas (A2UI), voice, cron scheduling and secret-managed model
   routing. Composes browser-agent, vision, and MCP subsystems.
-author: gippo-ai
+author: BaselithCore Team
 repository: https://github.com/baselithcore/plugin-baselithbot
 homepage: https://docs.baselithcore.xyz/plugins/baselithbot
 license: AGPL-3.0-only
-readiness: beta
+readiness: stable
 icon: assets/logobg-baselithbot500.png
 category: agent
 min_core_version: 0.7.0
@@ -52,4 +52,4 @@ python_dependencies:
 - cryptography>=42.0.0
 plugin_dependencies:
   browser_agent: '>=0.1.0'
-integrity_sha256: 1453be057a0bb41ffb5b2bfc34d3230ef30bb0f8a61f7c996480f934e41e20e6
+integrity_sha256: 01b2d0dc80417f9028ddc6417972b37f5ff784d45dce083c8816cc355cd01fa9

@@ -9,6 +9,36 @@ from pathlib import Path
 from typing import Any
 
 
+def _normalize_env_declarations(declared: Any) -> list[str]:
+    """Coerce ``environment_variables`` to the plain key list consumers expect.
+
+    Manifests use two shapes in the wild: the documented list of names
+    (``[FOO_TOKEN, FOO_URL]``) and a richer list of mappings carrying operator
+    documentation (``[{name: FOO_TOKEN, description: ..., required: true}]``).
+    Every consumer (the loader's env namespacing, the CLI deps report) wants
+    the names, and the rich form previously reached ``str.upper()`` as a dict
+    and aborted plugin load with ``AttributeError``. Normalizing once here
+    keeps both shapes valid and every consumer on one type.
+
+    Entries that are neither a string nor a mapping with a ``name`` are
+    dropped: a malformed declaration must not break plugin loading.
+    """
+    if not declared:
+        return []
+    keys: list[str] = []
+    for entry in declared:
+        if isinstance(entry, str):
+            name = entry
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "")
+        else:
+            continue
+        name = name.strip()
+        if name:
+            keys.append(name)
+    return keys
+
+
 class PluginMetadata:
     """
     Identity and dependency container for a plugin.
@@ -112,7 +142,7 @@ class PluginMetadata:
         self.icon = icon
         self.screenshots = screenshots or []
         self.category = category
-        self.environment_variables = environment_variables or []
+        self.environment_variables = _normalize_env_declarations(environment_variables)
         self.readiness = readiness
         # Platform-infrastructure marker (auth, …): hidden from user-facing nav,
         # tabs default to admin-only. See constructor docstring.
