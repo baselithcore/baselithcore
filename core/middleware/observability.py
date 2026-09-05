@@ -4,6 +4,7 @@ Observability Middleware.
 Provides middleware for request ID tracking and logging context binding.
 """
 
+import re
 import uuid
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -11,9 +12,23 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from core.observability.logging import bind_context
 from core.observability.setup import request_id_ctx
 
+# Accepted shape for a caller-supplied ``X-Request-ID``. Correlation ids in the
+# wild are UUIDs, ULIDs, trace ids or short opaque tokens — a bounded ASCII
+# token covers all of them. Anything else (CR/LF, whitespace, ``;``, non-ASCII,
+# an 8 KiB blob) is replaced by a fresh UUID: the incoming value is echoed on
+# the response, bound into every log line for the request and copied into the
+# RFC 9457 ``request_id`` member, so an unvalidated header is a log-injection /
+# header-injection primitive and an unbounded per-request allocation.
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
 
 class RequestIdMiddleware:
-    """Pure ASGI middleware that propagates ``X-Request-ID`` headers."""
+    """Pure ASGI middleware that propagates ``X-Request-ID`` headers.
+
+    An incoming id is honoured only when it matches ``_REQUEST_ID_RE``;
+    otherwise (missing or unsafe) a UUID4 is generated. Either way the id is
+    bound to ``request_id_ctx`` + the structlog context and echoed back.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -29,7 +44,10 @@ class RequestIdMiddleware:
             if name == b"x-request-id":
                 incoming_id = value.decode("latin-1")
                 break
-        request_id = incoming_id or str(uuid.uuid4())
+        if _REQUEST_ID_RE.fullmatch(incoming_id):
+            request_id = incoming_id
+        else:
+            request_id = str(uuid.uuid4())
 
         token = request_id_ctx.set(request_id)
         encoded_id = request_id.encode("latin-1")

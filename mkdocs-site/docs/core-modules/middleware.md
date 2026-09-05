@@ -46,7 +46,7 @@ core/middleware/
 ├── http_metrics.py        # HTTPMetricsMiddleware (pure ASGI, RED metrics; outermost)
 ├── security.py            # SecurityManager, auth dependencies
 │                          #   (re-exports RateLimiter + the two ASGI middlewares)
-├── rate_limiter.py        # RateLimiter (Redis Lua fixed-window + fallback)
+├── rate_limiter.py        # RateLimiter (Redis Lua sliding-window + fallback)
 ├── _admin_lockout.py      # AdminLockoutMixin (admin Basic-auth lockout state)
 ├── _admin_credentials.py  # PBKDF2 admin-password check + verified-credential cache
 ├── _security_env.py       # Environment helpers for the security middleware
@@ -156,6 +156,14 @@ adds, in order:
 generates a UUID), sets the `request_id` contextvar, binds it to the structured
 logging context, and echoes it back on the response.
 
+An incoming id is honoured only when it is a bounded ASCII token —
+`[A-Za-z0-9._-]{1,128}` (UUIDs, ULIDs, trace ids, short opaque tokens all
+fit). Anything else — CR/LF, whitespace, `;`, non-ASCII, an 8 KiB blob — is
+replaced by a fresh UUID4. The value is echoed on the response, bound into
+every log line for the request and copied into the RFC 9457 `request_id`
+member, so an unvalidated header would be a log-/header-injection primitive
+and an unbounded per-request allocation.
+
 ---
 
 ## HTTPMetricsMiddleware
@@ -208,8 +216,21 @@ Injects baseline headers in the `send` wrapper so
 streaming responses are unaffected. Always sets `X-Content-Type-Options`,
 `X-Frame-Options`, `Referrer-Policy`, and `X-XSS-Protection`. When
 `security_headers_enabled` is on it adds a strict default Content-Security-Policy
-(overridable via config), an optional `Permissions-Policy`, and HSTS when
-`enable_hsts` is set. The header list is pre-encoded once per process.
+(overridable via config), an optional `Permissions-Policy`, the cross-origin
+isolation pair `Cross-Origin-Opener-Policy` (default
+`same-origin-allow-popups`, so OAuth/SSO popups opened *by* the console keep
+working) and `Cross-Origin-Resource-Policy` (default `same-origin`; use
+`same-site` for split api/app subdomains that embed assets from this host —
+CORS-approved `fetch` calls from `ALLOW_ORIGINS` are exempt by design), and
+HSTS when `enable_hsts` is set. Either cross-origin header is omitted when its
+config value is empty. The header list is pre-encoded once per process.
+
+Responses to **credentialed** requests (an `Authorization` or `X-API-Key`
+header present) additionally get `Cache-Control: no-store` unless the route
+set its own directive (OWASP REST Security: an authenticated response is for
+that caller only and must not land in a browser, proxy or CDN cache).
+Anonymous responses are untouched, so static assets and the SPA entry point
+keep the caching that `StaticCacheMiddleware` / `SPAStaticFiles` chose.
 
 The strict default CSP is `script-src 'self'` with
 `img-src 'self' data: blob: https:` — `blob:` so a bundled SPA can render an
@@ -462,14 +483,31 @@ authenticated routes brute-forceable).
 
 ### RateLimiter
 
-A distributed fixed-window limiter keyed by `role:credential`/IP, backed by
-Redis with an in-memory fallback when Redis is unavailable. It lives in
+A distributed **sliding-window** limiter keyed by `role:credential`/IP, backed
+by Redis with an in-memory fallback when Redis is unavailable. It lives in
 `core/middleware/rate_limiter.py` (re-exported from `security` for backward
-compatibility) and runs a single atomic Lua script per check (`INCR` +
-first-hit `EXPIRE` — one round trip, no TTL race), emits the
-`security_events_total` Prometheus counter, and raises `429` over the limit.
-The module exposes a lazy `rate_limiter` proxy that resolves the shared
-instance on access.
+compatibility), emits the `security_events_total` Prometheus counter, and
+raises `429` over the limit. The module exposes a lazy `rate_limiter` proxy
+that resolves the shared instance on access.
+
+A plain fixed window admits up to **2x** the limit across a boundary (N
+requests at t=59s, N more at t=61s). The limiter instead keeps one counter per
+window *index* (`floor(now / window)`) and weights the previous window by how
+much of it still overlaps the trailing `window` seconds:
+
+```text
+estimate = previous * (window - elapsed) / window + current
+```
+
+`estimate > limit` rejects, so the boundary burst is refused while steady
+traffic at the limit is admitted. Both counters are bumped/read in **one**
+atomic Lua round trip (`INCR` the current window with a first-hit `EXPIRE` of
+two windows, `GET` the previous one) — the same per-request Redis cost as the
+old fixed window. The two keys carry a Redis Cluster hash tag
+(`{prefix:identifier}:index`) so a multi-key script is valid on a cluster.
+`Retry-After` / `RateLimit-Reset` are solved from the same model: the time at
+which one more request would fit under the limit, inside the current window
+or, when it is already full, after the rollover.
 
 The in-memory fallback prunes expired entries **amortized**: at most one O(n)
 sweep per 100 checks, and only once the map exceeds 1000 entries. The

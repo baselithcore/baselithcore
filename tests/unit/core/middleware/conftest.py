@@ -26,6 +26,8 @@ def mock_security_config():
     config.frame_options = "DENY"
     config.content_security_policy = "default-src 'self'"
     config.permissions_policy = None
+    config.cross_origin_opener_policy = "same-origin-allow-popups"
+    config.cross_origin_resource_policy = "same-origin"
     config.enable_hsts = False
     config.hsts_max_age = 31536000
     return config

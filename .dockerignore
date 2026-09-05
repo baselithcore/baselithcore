@@ -16,6 +16,11 @@ __pycache__/
 *.p12
 *.pfx
 deploy/sandbox/client-certs/
+# Operator-edited env templates. docker-compose loads them from the HOST via
+# `env_file:` and the app never reads configs/.env.* at runtime, so nothing in
+# the image needs them — and a filled-in .env.production must not end up in a
+# layer that gets pushed to a registry.
+configs/.env*
 
 # === Virtual env ===
 venv/

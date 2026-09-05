@@ -246,6 +246,17 @@ class SecurityConfig(BaseSettings):
         ),
         alias="PERMISSIONS_POLICY",
     )
+    # Cross-origin isolation pair (OWASP Secure Headers). COOP severs the
+    # window.opener link with cross-origin windows; "same-origin-allow-popups"
+    # keeps OAuth/SSO popups opened by the console working. CORP blocks no-cors
+    # subresource loads (<img>, <script>) of our responses from foreign origins
+    # (CORS-approved fetches from ALLOW_ORIGINS are exempt); "" omits either.
+    cross_origin_opener_policy: str | None = Field(
+        default="same-origin-allow-popups", alias="CROSS_ORIGIN_OPENER_POLICY"
+    )
+    cross_origin_resource_policy: str | None = Field(
+        default="same-origin", alias="CROSS_ORIGIN_RESOURCE_POLICY"
+    )
 
     # === Request body size limit (bytes) ===
     # Protects against memory-exhaustion DoS from oversized POST/PUT bodies.

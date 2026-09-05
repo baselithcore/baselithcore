@@ -33,6 +33,15 @@ containerPort: 8000
 # (the chart does when webConcurrency > 1).
 webConcurrency: 1
 
+# Peers whose X-Forwarded-For / X-Forwarded-Proto uvicorn trusts
+# (`--forwarded-allow-ips`; comma-separated IPs or CIDRs). Empty keeps the
+# image default (127.0.0.1), which behind an ingress controller makes every
+# request appear to come from the controller: per-IP rate limits, the
+# failed-auth throttle and the admin lockout then collapse into one shared
+# bucket. Set it to the ingress controller's pod CIDR, or "*" only when
+# networkPolicy.ingressFrom already restricts who can reach the pod.
+forwardedAllowIps: ""
+
 service:
   type: ClusterIP
   port: 80

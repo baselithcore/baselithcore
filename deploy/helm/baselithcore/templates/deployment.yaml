@@ -64,6 +64,10 @@ spec:
               value: {{ .Values.containerPort | quote }}
             - name: WEB_CONCURRENCY
               value: {{ .Values.webConcurrency | quote }}
+            {{- with .Values.forwardedAllowIps }}
+            - name: FORWARDED_ALLOW_IPS
+              value: {{ . | quote }}
+            {{- end }}
             {{- if gt (int .Values.webConcurrency) 1 }}
             # With >1 uvicorn worker /metrics must aggregate across processes,
             # otherwise each scrape reads a single worker's registry.

@@ -93,6 +93,9 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      # Trust X-Forwarded-* from the gateway network (pinned subnet below), so
+      # per-IP rate limits / admin lockout see the real client, not nginx.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -326,6 +329,11 @@ volumes:
 
 networks:
   app_net:
+    # Fixed subnet so FORWARDED_ALLOW_IPS above can trust the gateway by
+    # network; override APP_NET_SUBNET on collision, keeping both in step.
+    ipam:
+      config:
+        - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}
   obs_net:
 ```
 
@@ -345,15 +353,25 @@ The production image's entrypoint runs Uvicorn with proxy-aware and shutdown fla
 
 ```bash
 uvicorn backend:app --host "$HOST" --port "$PORT" \
-    --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
+    --proxy-headers --no-server-header \
+    --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
     --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
 ```
 
 - **`--proxy-headers --forwarded-allow-ips`** — trust `X-Forwarded-For` only from
   your load balancer / reverse proxy. **Set `FORWARDED_ALLOW_IPS` to the LB
-  address**: without it every request appears to originate from the proxy IP, and
-  per-IP rate limiting and admin lockout collapse into a single shared bucket.
+  address** (IPs or CIDRs, comma-separated): without it every request appears
+  to originate from the proxy IP, and per-IP rate limiting, the failed-auth
+  throttle and the admin lockout collapse into a single shared bucket. The
+  production compose pins `app_net` to a fixed subnet (`APP_NET_SUBNET`,
+  default `172.28.0.0/24`) and trusts it by default; the Helm chart exposes the
+  same knob as `forwardedAllowIps` (set it to the ingress controller's pod
+  CIDR).
+- **`--no-server-header`** — drop the `Server: uvicorn` banner. The bundled
+  nginx replaces it at the edge, but a pod behind a cloud LB / ingress that
+  passes upstream headers through would otherwise advertise the exact server
+  stack to every caller.
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
   SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
   pod drains cleanly instead of being force-killed.
@@ -639,8 +657,11 @@ server {
         proxy_connect_timeout 10s;
     }
 
-    # SSE / chat streaming: disable proxy buffering to preserve token-by-token delivery
-    location /chat/stream {
+    # SSE / chat streaming: disable proxy buffering to preserve token-by-token
+    # delivery. Regex so the versioned alias /v1/chat/stream is covered too —
+    # a plain prefix location would let it fall through to `location /` and
+    # its shorter read timeout.
+    location ~ ^/(v1/)?chat/stream$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -745,9 +766,10 @@ AUTH_REQUIRED=true
 DOCS_ENABLED=false
 MAX_REQUEST_SIZE_BYTES=10485760
 
-# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address)
+# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address or
+# CIDR; the production compose defaults it to the app_net subnet)
 WEB_CONCURRENCY=4
-FORWARDED_ALLOW_IPS=127.0.0.1
+FORWARDED_ALLOW_IPS=172.28.0.0/24
 GRACEFUL_SHUTDOWN_TIMEOUT=25
 
 # Database
@@ -786,6 +808,11 @@ SENTRY_DSN=${SENTRY_DSN}
 
 !!! danger "Secrets Security"
     **NEVER commit `.env.production` to Git!** Add to `.gitignore`. Use secret managers (Vault, AWS Secrets Manager, etc.) in enterprise environments.
+
+    The file is also **kept out of the Docker build context**: `.dockerignore`
+    excludes `configs/.env*`, so a filled-in template on the build host is never
+    baked into an image layer. Compose injects it from the host via `env_file:`;
+    the application itself never reads `configs/.env.*` at runtime.
 
 ### Environment naming
 

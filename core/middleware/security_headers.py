@@ -247,6 +247,17 @@ class SecurityHeadersMiddleware:
                         self.config.permissions_policy.encode("latin-1"),
                     )
                 )
+            # Cross-origin isolation pair (OWASP Secure Headers Project). Read
+            # with ``getattr``/``isinstance`` so a partial config double (tests,
+            # legacy stubs) omitting the fields simply emits neither header.
+            coop = getattr(self.config, "cross_origin_opener_policy", None)
+            if isinstance(coop, str) and coop:
+                headers.append((b"cross-origin-opener-policy", coop.encode("latin-1")))
+            corp = getattr(self.config, "cross_origin_resource_policy", None)
+            if isinstance(corp, str) and corp:
+                headers.append(
+                    (b"cross-origin-resource-policy", corp.encode("latin-1"))
+                )
             if self.config.enable_hsts:
                 hsts = (
                     f"max-age={self.config.hsts_max_age}; includeSubDomains"
@@ -261,12 +272,21 @@ class SecurityHeadersMiddleware:
     def _is_docs_path(self, path: str) -> bool:
         return any(path == p or path.startswith(p + "/") for p in self._DOCS_PATHS)
 
+    @staticmethod
+    def _carries_credential(headers: list[tuple[bytes, bytes]]) -> bool:
+        """True when the request authenticates via ``Authorization``/``X-API-Key``."""
+        for name, value in headers:
+            if name in (b"authorization", b"x-api-key") and value.strip():
+                return True
+        return False
+
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         baseline = self._build_headers(docs=self._is_docs_path(scope.get("path", "")))
+        credentialed = self._carries_credential(scope.get("headers") or [])
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
@@ -275,6 +295,12 @@ class SecurityHeadersMiddleware:
                 for k, v in baseline:
                     if k not in existing:
                         response_headers.append((k, v))
+                # A response earned with a credential is for that caller only:
+                # keep it out of every cache (browser, proxy, CDN) unless the
+                # route set its own directive (OWASP REST Security: no-store on
+                # authenticated responses). Anonymous responses are untouched.
+                if credentialed and b"cache-control" not in existing:
+                    response_headers.append((b"cache-control", b"no-store"))
                 message["headers"] = response_headers
             await send(message)
 

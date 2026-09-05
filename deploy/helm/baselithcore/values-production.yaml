@@ -19,6 +19,12 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 2
 
+# uvicorn trusts X-Forwarded-* only from these peers. Use the ingress
+# controller's pod CIDR (cluster-specific — this is a placeholder); leaving it
+# unset makes every request look like it came from the controller and
+# collapses per-IP rate limiting / admin lockout into a single bucket.
+forwardedAllowIps: "10.244.0.0/16"
+
 resources:
   requests:
     cpu: "500m"
