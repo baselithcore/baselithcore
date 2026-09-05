@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -27,9 +26,12 @@ from typing import Any
 
 import numpy as np
 
+from core.cache.fingerprint import best_fingerprint_match, ngram_fingerprint
+from core.cache.semantic_embedding import PromptEmbeddingMixin
+from core.cache.semantic_maintenance import EntryMaintenanceMixin
 from core.context import get_current_tenant_id
 from core.observability.logging import get_logger
-from core.utils.concurrency import run_inference
+from core.utils.text_canon import canonicalize
 
 logger = get_logger(__name__)
 
@@ -43,9 +45,11 @@ class CacheEntry:
     embedding: np.ndarray
     timestamp: float = field(default_factory=time.time)
     hits: int = 0
+    # Canonical word n-grams of ``prompt`` (see core.cache.fingerprint).
+    fingerprint: frozenset[str] = field(default_factory=frozenset)
 
 
-class SemanticLLMCache:
+class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
     """
     Semantic cache for LLM responses using embedding similarity.
 
@@ -53,7 +57,11 @@ class SemanticLLMCache:
     that are semantically similar to cached prompts, reducing LLM calls
     even when prompts are phrased differently.
 
+    Lookup order on every read: exact canonical key → word n-gram
+    fingerprint (Jaccard, no embedder) → embedding cosine scan.
+
     Features:
+    - Word n-gram fingerprint tier for near-verbatim prompt variants
     - Embedding-based similarity matching
     - Configurable similarity threshold
     - TTL expiration
@@ -81,6 +89,8 @@ class SemanticLLMCache:
         ttl: float | None = None,
         threshold: float | None = None,
         embedder: Any = None,
+        fingerprint_enabled: bool | None = None,
+        fingerprint_threshold: float | None = None,
     ) -> None:
         """
         Initialize SemanticLLMCache.
@@ -90,6 +100,10 @@ class SemanticLLMCache:
             ttl: Time-to-live in seconds for cache entries
             threshold: Minimum cosine similarity for cache hit (0.0-1.0)
             embedder: Embedder instance (creates default if None)
+            fingerprint_enabled: Enable the n-gram fingerprint tier between
+                the exact key and the embedding scan (config default: on)
+            fingerprint_threshold: Minimum Jaccard similarity of word n-gram
+                fingerprints for a fingerprint-tier hit (0.0-1.0)
         """
         from core.config.cache import get_semantic_cache_config
 
@@ -98,6 +112,16 @@ class SemanticLLMCache:
         _maxsize = maxsize if maxsize is not None else config.maxsize
         _ttl = ttl if ttl is not None else config.ttl
         _threshold = threshold if threshold is not None else config.threshold
+        _fp_enabled = (
+            fingerprint_enabled
+            if fingerprint_enabled is not None
+            else config.fingerprint_enabled
+        )
+        _fp_threshold = (
+            fingerprint_threshold
+            if fingerprint_threshold is not None
+            else config.fingerprint_threshold
+        )
 
         if _maxsize <= 0:
             raise ValueError("maxsize must be positive")
@@ -105,10 +129,14 @@ class SemanticLLMCache:
             raise ValueError("ttl must be positive")
         if not 0.0 <= _threshold <= 1.0:
             raise ValueError("threshold must be between 0.0 and 1.0")
+        if not 0.0 <= _fp_threshold <= 1.0:
+            raise ValueError("fingerprint_threshold must be between 0.0 and 1.0")
 
         self._maxsize = _maxsize
         self._ttl = _ttl
         self._threshold = _threshold
+        self._fingerprint_enabled = _fp_enabled
+        self._fingerprint_threshold = _fp_threshold
 
         self._entries: dict[
             str, dict[str, CacheEntry]
@@ -144,106 +172,15 @@ class SemanticLLMCache:
             f"SemanticCache initialized: maxsize={maxsize}, ttl={ttl}, threshold={threshold}"
         )
 
-    def _get_embedder(self) -> Any:
-        """Lazy load the embedder model using config for model selection."""
-        if self._embedder is None:
-            try:
-                from core.config import get_voice_config
-                from core.nlp import get_embedder
-
-                model_name = get_voice_config().embedding_model
-                self._embedder = get_embedder(model_name)
-            except Exception as e:
-                logger.warning(f"Failed to load embedder: {e}")
-                raise
-        return self._embedder
-
-    # Bounded LRU for query embeddings: hot/repeated prompts skip the
-    # sentence-transformer inference (tens of ms) entirely.
-    _EMBEDDING_MEMO_MAX = 256
-
-    async def _compute_embedding(self, text: str) -> np.ndarray:
-        """Compute (or recall) the normalized embedding for a text."""
-        memo = self._embedding_memo
-        cached = memo.get(text)
-        if cached is not None:
-            memo.move_to_end(text)
-            return cached
-
-        embedder = self._get_embedder()
-        # The production embedder (core.nlp.CachedEmbedder) exposes an async
-        # encode; awaiting it here is what keeps the cache alive. A sync
-        # embedder is offloaded to the dedicated inference pool rather than the
-        # default executor, which serves latency-critical short tasks.
-        if inspect.iscoroutinefunction(embedder.encode):
-            raw = await embedder.encode(text, convert_to_numpy=True)
-        else:
-            raw = await run_inference(
-                lambda: embedder.encode(text, convert_to_numpy=True)
-            )
-
-        embedding = np.asarray(raw, dtype=np.float32)
-        # Normalize for cosine similarity
-        norm = np.linalg.norm(embedding)
-        if norm > 0:
-            embedding = embedding / norm
-
-        memo[text] = embedding
-        memo.move_to_end(text)
-        while len(memo) > self._EMBEDDING_MEMO_MAX:
-            memo.popitem(last=False)
-        return embedding
-
     def _hash_prompt(self, prompt: str, **kwargs) -> str:
-        """Generate a hash key for exact match lookup."""
+        """Generate a hash key for exact match lookup.
+
+        The prompt is canonicalized first (accents, case, whitespace) so a
+        surface variant hits the exact tier instead of paying an embedding.
+        """
         # Include kwargs in hash for potential future variations (e.g., model_id)
-        hash_input = prompt + str(sorted(kwargs.items()))
+        hash_input = canonicalize(prompt) + str(sorted(kwargs.items()))
         return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:16]
-
-    # Full expiry sweeps run at most this often per tenant (same cadence as
-    # ``TTLCache.PURGE_INTERVAL``); per-entry read checks keep results exact.
-    _PURGE_INTERVAL_SECONDS = 60.0
-
-    def _is_expired(self, entry: CacheEntry, now: float | None = None) -> bool:
-        """True when the entry's sliding TTL has elapsed."""
-        return ((now if now is not None else time.time()) - entry.timestamp) > self._ttl
-
-    def _purge_expired(self, tenant_id: str, *, force: bool = False) -> None:
-        """Remove expired entries for a tenant (interval-gated unless forced)."""
-        if tenant_id not in self._entries:
-            return
-
-        now = time.time()
-        if (
-            not force
-            and (now - self._last_purge.get(tenant_id, 0.0))
-            < self._PURGE_INTERVAL_SECONDS
-        ):
-            return
-        self._last_purge[tenant_id] = now
-        expired = [
-            h for h, e in self._entries[tenant_id].items() if self._is_expired(e, now)
-        ]
-        for h in expired:
-            del self._entries[tenant_id][h]
-        if expired:
-            self._matrix_cache.pop(tenant_id, None)
-
-    def _evict_lru(self, tenant_id: str) -> None:
-        """Evict least recently used entry for a specific tenant."""
-        if tenant_id not in self._entries or not self._entries[tenant_id]:
-            return
-
-        # Find entry with oldest timestamp and lowest hits
-        oldest_hash = min(
-            self._entries[tenant_id].keys(),
-            key=lambda k: (
-                self._entries[tenant_id][k].timestamp,
-                -self._entries[tenant_id][k].hits,
-            ),
-        )
-        del self._entries[tenant_id][oldest_hash]
-        self._matrix_cache.pop(tenant_id, None)
 
     async def set(self, prompt: str, response: str, **kwargs) -> None:
         """
@@ -275,6 +212,7 @@ class SemanticLLMCache:
                 prompt=prompt,
                 response=response,
                 embedding=embedding,
+                fingerprint=ngram_fingerprint(prompt),
             )
             self._matrix_cache.pop(tenant_id, None)
 
@@ -316,6 +254,48 @@ class SemanticLLMCache:
             entry.timestamp = time.time()  # Update access time
             self._hits += 1
             return entry.response
+
+    async def _fingerprint_lookup(
+        self, prompt: str, tenant_id: str
+    ) -> tuple[str, float] | None:
+        """Static-lookup tier: word n-gram Jaccard over the tenant's entries.
+
+        Runs between the exact key and the embedding scan. Pure set algebra
+        under the lock — no embedder round trip — so a near-verbatim variant
+        (punctuation, filler, accents) is served in microseconds instead of the
+        tens of milliseconds an encode costs. Word order still matters through
+        the bigrams, so reorderings fall through to the embedding tier.
+        """
+        if not self._fingerprint_enabled:
+            return None
+        query_fingerprint = ngram_fingerprint(prompt)
+        if not query_fingerprint:
+            return None
+        now = time.time()
+        async with self._lock:
+            entries = self._entries.get(tenant_id)
+            if not entries:
+                return None
+            match = best_fingerprint_match(
+                query_fingerprint,
+                (
+                    (entry, entry.fingerprint)
+                    for entry in entries.values()
+                    if not self._is_expired(entry, now)
+                ),
+                threshold=self._fingerprint_threshold,
+            )
+            if match is None:
+                return None
+            entry, score = match
+            entry.hits += 1
+            entry.timestamp = now
+            self._hits += 1
+        logger.info(
+            f"🧠 Fingerprint cache hit (jaccard={score:.3f}) for tenant {tenant_id}: "
+            f"'{prompt[:30]}...' \u2192 '{entry.prompt[:30]}...'"
+        )
+        return entry.response, score
 
     async def get(self, key: str) -> str | None:
         """Support standard CacheProtocol get (same as get_exact)."""
@@ -406,6 +386,11 @@ class SemanticLLMCache:
         exact = await self.get_exact(prompt, **kwargs)
         if exact:
             return exact, 1.0
+
+        # Static-lookup tier next: canonical word n-grams, no embedder.
+        fingerprint_hit = await self._fingerprint_lookup(prompt, tenant_id)
+        if fingerprint_hit is not None:
+            return fingerprint_hit
 
         try:
             query_embedding = await self._compute_embedding(prompt)

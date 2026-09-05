@@ -143,3 +143,42 @@ async def test_get_context():
     assert "fact 2" in context
     # Fact 1 should be first due to importance
     assert context.index("fact 1") < context.index("fact 2")
+
+
+async def test_recall_gates_provider_hits_by_similarity_threshold():
+    """The similarity threshold applies to every tier: a long-term provider
+    hit below it is dropped instead of being injected as prompt noise."""
+    from unittest.mock import AsyncMock
+
+    from core.memory.manager import AgentMemory
+    from core.memory.types import MemoryItem, MemoryType
+
+    provider = AsyncMock()
+    provider.search = AsyncMock(
+        return_value=[
+            MemoryItem("relevant fact", MemoryType.LONG_TERM, score=0.9),
+            MemoryItem("unrelated noise", MemoryType.LONG_TERM, score=0.3),
+        ]
+    )
+    memory = AgentMemory(provider=provider, similarity_threshold=0.7)
+
+    results = await memory.recall("fact", include_working=False)
+
+    assert [m.content for m in results] == ["relevant fact"]
+
+
+async def test_recall_min_score_zero_restores_ungated_provider_hits():
+    from unittest.mock import AsyncMock
+
+    from core.memory.manager import AgentMemory
+    from core.memory.types import MemoryItem, MemoryType
+
+    provider = AsyncMock()
+    provider.search = AsyncMock(
+        return_value=[MemoryItem("weak hit", MemoryType.LONG_TERM, score=0.3)]
+    )
+    memory = AgentMemory(provider=provider, similarity_threshold=0.7)
+
+    results = await memory.recall("hit", include_working=False, min_score=0.0)
+
+    assert [m.content for m in results] == ["weak hit"]

@@ -92,7 +92,7 @@ class MyHandler:
 # ❌ Wrong
 class MyHandler:
     def __init__(self):
-        self.llm = OpenAIService()  # NO! Hard dependency
+        self.llm = OpenAIProvider(api_key="sk-...")  # NO! Hard dependency
 ```
 
 ---
@@ -124,23 +124,30 @@ from core.interfaces import LLMServiceProtocol
 llm: LLMServiceProtocol = ServiceRegistry.get(LLMServiceProtocol)
 
 # ❌ Direct dependency
-from core.services.llm import OpenAIService
-llm = OpenAIService()  # NO! Tight coupling
+from core.services.llm.providers.openai_provider import OpenAIProvider
+llm = OpenAIProvider(api_key="sk-...")  # NO! Tight coupling
 ```
 
 ---
 
 ### V. Lifecycle Sovereignty
 
-Every Agent MUST respect the lifecycle `UNINITIALIZED → STARTING → READY → RUNNING → STOPPED`. The framework manages transitions and states; the agent fills in the implementation.
+Every Agent MUST respect the lifecycle defined by `AgentState` and driven by `LifecycleMixin`. The framework owns the transitions: `startup()` moves `UNINITIALIZED → STARTING → READY` around your `_do_startup()` hook (a failing hook lands in `ERROR`, from which `startup()` may be retried), `shutdown()` moves `STOPPING → STOPPED` around `_do_shutdown()`, and `pause()` / `resume()` toggle `RUNNING ↔ PAUSED`. The agent fills in the hooks and its own `execute()`; `AgentState` also reserves `RECOVERING`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> UNINITIALIZED
-    UNINITIALIZED --> STARTING: initialize()
-    STARTING --> READY: on_ready()
+    UNINITIALIZED --> STARTING: startup()
+    STARTING --> READY: _do_startup() ok
+    STARTING --> ERROR: _do_startup() raised
+    ERROR --> STARTING: startup()
     READY --> RUNNING: execute()
-    RUNNING --> STOPPED: shutdown()
+    RUNNING --> PAUSED: pause()
+    PAUSED --> RUNNING: resume()
+    READY --> STOPPING: shutdown()
+    RUNNING --> STOPPING: shutdown()
+    STOPPING --> STOPPED: _do_shutdown()
+    STOPPED --> STARTING: startup()
     STOPPED --> [*]
 ```
 
@@ -203,11 +210,12 @@ Never mix keyspaces of different natures.
 ### Plugins Touching the Core
 
 ```python
-# NO! Never modify core for a plugin
-# core/services/jira_service.py  # WRONG!
+# NO! Never add a module to core/services/ for a plugin's sake
+class JiraService:  # WRONG! Jira is a domain integration, not infrastructure
+    ...
 ```
 
-Solution: The plugin must contain the Jira logic.
+Solution: The plugin must contain the Jira logic (the class above is illustrative — no such module exists in the core).
 
 ---
 
@@ -237,11 +245,12 @@ Solution: Use `httpx` with `async/await`.
 ### Domain Logic in Core
 
 ```python
-# NO! Specific business logic
-# core/services/customer_support.py  # WRONG!
+# NO! Specific business logic under core/
+class CustomerSupportService:  # WRONG! Belongs in a plugin
+    async def triage_ticket(self, ticket: dict) -> str: ...
 ```
 
-Solution: Create a `customer-support` plugin.
+Solution: Create a `customer_support` plugin (the class above is illustrative — no such module exists in the core).
 
 ---
 

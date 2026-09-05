@@ -366,3 +366,39 @@ class TestPluginLoaderConfiguration:
         # The loader may raise an error or handle it gracefully
         # Either behavior is acceptable - just verify it doesn't crash on creation
         assert loader is not None
+
+
+async def test_load_plugin_emits_plugin_load_audit_event(tmp_path, monkeypatch):
+    """A plugin that finishes initialize() is recorded as `plugin.load`."""
+    from core.observability import audit as audit_module
+    from core.plugins.loader import PluginLoader
+    from core.plugins.registry import PluginRegistry
+
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        audit_module,
+        "audit_emit",
+        lambda event_type, **kw: events.append((event_type, kw)),
+    )
+
+    plugin_dir = tmp_path / "plugins" / "audited-plugin"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "manifest.yaml").write_text(
+        "name: audited-plugin\nversion: 1.2.3\ndescription: audited\n", encoding="utf-8"
+    )
+    (plugin_dir / "plugin.py").write_text(
+        "from typing import Any\n\nfrom core.plugins.interface import Plugin\n\n\n"
+        "class AuditedPlugin(Plugin):\n"
+        "    async def initialize(self, config: dict[str, Any]) -> None:\n"
+        "        await super().initialize(config)\n",
+        encoding="utf-8",
+    )
+
+    loader = PluginLoader(plugin_dir.parent, PluginRegistry())
+    plugin = await loader.load_plugin(plugin_dir)
+
+    assert plugin is not None
+    assert [e[0].value for e in events] == ["plugin.load"]
+    kwargs = events[0][1]
+    assert kwargs["resource"] == "plugin:audited-plugin"
+    assert kwargs["details"]["version"] == "1.2.3"

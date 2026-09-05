@@ -32,7 +32,9 @@ The manager class that handles:
 - **Registering new goals**.
 - **Updating progress safely**.
 - **Validating criteria**.
-- **Persisting goal state** (if persistence is enabled).
+- **Querying state** via `get()`, `get_active()` and `get_summary()`.
+
+The tracker is **in-memory only**: goals live in a dictionary on the `GoalTracker` instance and are lost when the process exits.
 
 ## Usage
 
@@ -84,4 +86,4 @@ else:
 
 - **Use for long-running tasks**: If an action is atomic and instantaneous, you don't need a Goal.
 - **Granularity**: Break down massive goals into sub-goals if possible, though the current plugin focuses on flat goal structures.
-- **Persistence**: Ensure your agent saves the state of the `GoalTracker` if it needs to survive restarts (the plugin provides the structure, but persistence depends on your agent's memory implementation).
+- **Persistence**: `GoalTracker` does not persist anything. If goals must survive a restart, serialise the `Goal` objects into your agent's own memory or storage layer and re-`add()` them on startup.

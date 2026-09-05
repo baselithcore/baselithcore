@@ -36,18 +36,24 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
+from core.utils.text_canon import canonicalize
+
 DEFAULT_BM25_K1: Final[float] = 1.5
 DEFAULT_BM25_B: Final[float] = 0.75
 DEFAULT_RRF_K: Final[int] = 60
 DEFAULT_BM25_WEIGHT: Final[float] = 0.5
 DEFAULT_DENSE_WEIGHT: Final[float] = 0.5
 
-_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]+")
+# ``\w`` is Unicode-aware: after canonicalization (accents stripped,
+# casefolded) an Italian or CJK memory tokenizes into whole words instead of
+# being truncated at the first non-ASCII byte ("perché" -> "perch") or
+# dropped entirely.
+_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\w+")
 
 
 def _tokenize(text: str) -> list[str]:
-    """Lowercase word-style tokenizer. Good-enough default for BM25."""
-    return [m.group(0).lower() for m in _TOKEN_RE.finditer(text)]
+    """Canonicalized word-style tokenizer. Good-enough default for BM25."""
+    return _TOKEN_RE.findall(canonicalize(text))
 
 
 def bm25_doc_stats(text: str) -> tuple[Counter[str], int]:

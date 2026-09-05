@@ -69,6 +69,15 @@ repos:
         entry: python scripts/check_file_size.py
         language: system
         pass_filenames: false
+      # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
+      # exist. Import and route verification (needs the app importable) runs in
+      # the CI job `docs_consistency`.
+      - id: docs-consistency
+        name: docs-consistency
+        entry: python scripts/check_docs_consistency.py --fast
+        language: system
+        pass_filenames: false
+        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|migrations/|\.env\.example|docker-compose|Dockerfile)
       # The two typing gates run in a pre-commit-managed venv (`language:
       # python`) instead of `language: system`. Two reasons:
       #   1. `system` resolves `python` from whatever PATH launched git — a GUI

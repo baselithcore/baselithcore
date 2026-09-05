@@ -19,20 +19,31 @@ core/services/evaluation/      # the service layer
 └── service.py                 # EvaluationService (RAG-metric LLM-as-a-Judge)
 
 core/evaluation/               # the evaluation toolkit
-├── __init__.py
-├── metrics.py                 # RAG metric implementations
-├── protocols.py               # Interface definitions
-├── judges.py                  # LLM judge wrappers
+├── __init__.py                # Public exports
+├── base.py                    # BaseLLMEvaluator
+├── protocols.py               # Evaluator protocol, EvaluationResult, QualityLevel
+├── judges.py                  # Relevance/Coherence/Faithfulness/CompositeEvaluator
+├── consensus.py               # ConsensusEvaluator (same question, several judges)
+├── metrics.py                 # DeepEval metric wrappers (gated on EvaluationConfig)
+├── service.py                 # event-driven EvaluationService (FLOW_COMPLETED listener)
 ├── prompt_eval.py             # PromptEvaluator / EvalCase
+├── bake_off.py                # run_bake_off multi-model comparison
 ├── trajectory.py              # trajectory-aware case evaluation
 ├── regression_runner.py       # CI replay runner
-└── base.py
+├── promotion.py               # promote_run / scrub_text
+├── red_team.py                # red-team corpus loader, runner, report
+├── fairness.py                # evaluate_fairness / FairnessReport / GroupOutcome
+└── data/golden_qa.json        # bundled golden QA set
 ```
 
-!!! note
+!!! note "Two classes named `EvaluationService`"
     `core/services/evaluation/` contains **only** `__init__.py` and
-    `service.py`. The metrics, protocols, and judges referenced below live in
-    the separate `core/evaluation/` package.
+    `service.py`: its `EvaluationService` is the DeepEval RAG-metric wrapper
+    shown under [Usage](#usage). The **event-driven**
+    `core.evaluation.service.EvaluationService` (re-exported from
+    `core.evaluation`) is a different class — see
+    [Integration with Optimization Loop](#integration-with-optimization-loop).
+    Everything else referenced on this page lives in `core/evaluation/`.
 
 ---
 
@@ -51,36 +62,69 @@ The service evaluates responses using 4 fundamental RAG metrics:
 
 ### Basic Evaluation Request
 
+The RAG-metric service wraps the `deepeval` package, which is an optional
+extra. Without it the service still constructs (logging a warning) but every
+call returns `{"error": "deepeval not installed", ...}`:
+
+```bash
+pip install "baselith-core[evaluation]"
+```
+
 ```python
 from core.services.evaluation.service import EvaluationService
 
+# use_openai=True (default) exports the configured OpenAI key for DeepEval
 evaluation = EvaluationService()
 
 # Evaluate a RAG response
 metrics = await evaluation.evaluate_rag_response(
     query="How does the caching work?",
     response="The system uses a Redis-based cache with TTL.",
-    retrieved_contexts=[
+    retrieved_context=[
         "Cache implementation uses Redis Enterprise.",
         "TTL is set to 3600 seconds by default."
     ],
     expected_output="Redis cache with a 1 hour TTL.",  # enables precision/recall
 )
 
-print(f"Faithfulness: {metrics['faithfulness']}")
-print(f"Precision:    {metrics['contextual_precision']}")
-print(f"Recall:       {metrics['contextual_recall']}")
+# Every metric is a dict {"score", "reason", "passed"} — or {"error": ...}
+# when that single metric failed. Pass/fail thresholds are fixed at 0.7.
+print(f"Faithfulness: {metrics['faithfulness']['score']}")
+print(f"Precision:    {metrics['contextual_precision']['passed']}")
+print(f"Recall:       {metrics['contextual_recall']['reason']}")
 ```
 
 ---
 
 ## Integration with Optimization Loop
 
-The evaluation service plays a critical role in the system's autonomous improvement capabilities. When an evaluation completes, it emits an event that the optimization system can intercept:
+The class that closes the loop is the **event-driven**
+`core.evaluation.service.EvaluationService` (exported from `core.evaluation`)
+— not the DeepEval wrapper above. It subscribes to `FLOW_COMPLETED`, judges
+each successful flow in a background task, and emits the verdict:
 
-**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_COMPLETED` → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+```python
+from core.evaluation import EvaluationService
 
-This allows the framework to dynamically detect when an agent's performance drops below a certain quality threshold and trigger automatic prompt evolution
+service = EvaluationService()   # evaluator defaults to CompositeEvaluator()
+service.start()                 # subscribes; a no-op unless EVAL_ENABLED=true
+# ...
+service.stop()                  # unsubscribes from FLOW_COMPLETED, flips the flag
+```
+
+**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_STARTED` → judge → `EVALUATION_COMPLETED` (or `EVALUATION_FAILED`) → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+
+- Flows are skipped when `success` is false, the intent is missing or starts
+  with `evaluation`, or the payload has no `query`/`response`.
+- Concurrency is bounded by `max_concurrent` (default `8`, a semaphore bound
+  to the running loop) so a burst of completed flows cannot fan out into
+  unbounded LLM-judge calls.
+- The `EVALUATION_COMPLETED` payload carries `intent`, `score`, `quality`,
+  `feedback`, `aspects`, `should_refine`, `metadata`, plus the evaluated
+  `response` and the originating `run_id` for the learning subsystems.
+
+This allows the framework to detect when an agent's performance drops below a
+quality threshold and trigger automatic prompt evolution.
 
 ---
 
@@ -490,6 +534,55 @@ prevent.
 ```bash
 python scripts/run_red_team_evals.py --report red-team-report.json
 ```
+
+---
+
+## Bias examination (group fairness)
+
+`core/evaluation/fairness.py` computes the standard group-fairness quantities
+over labelled outcomes — the measurement behind the AI Act Art. 10(2)(f)/(g)
+bias examination and the Art. 15 accuracy-across-groups obligation.
+`evaluate_fairness` takes aligned sequences and returns a `FairnessReport`
+holding one `GroupOutcome` per protected-attribute value:
+
+```python
+from core.evaluation import evaluate_fairness
+
+report = evaluate_fairness(
+    groups=["a", "a", "b", "b"],
+    predictions=[True, False, True, True],
+    labels=[True, False, True, False],     # optional ground truth
+    disparate_impact_threshold=0.8,        # FOUR_FIFTHS, the default
+    max_difference=0.1,                    # default
+)
+report.disparate_impact_ratio          # min / max selection rate
+report.demographic_parity_difference   # largest selection-rate gap
+report.equalized_odds_difference       # worse of the TPR and FPR gaps
+report.accuracy_difference             # Art. 15: largest accuracy gap
+report.violations()                    # breached thresholds, as strings
+report.passed                          # no configured threshold breached
+report.to_dict()                       # per-group counts and rates included
+```
+
+- `GroupOutcome` carries the confusion-matrix counts for its group plus
+  `selection_rate`, `true_positive_rate`, `false_positive_rate` and
+  `accuracy`.
+- Without `labels` only the label-free metrics (selection rate, demographic
+  parity, disparate impact) are meaningful; the rate-based gaps read as zero.
+- Mismatched sequence lengths raise `ValueError` — a silent `zip` would drop
+  samples and bias the very measurement being taken.
+- `passed` means *no configured threshold was breached*, not "the system is
+  fair": demographic parity and equalized odds cannot both hold when base
+  rates differ, so which criterion matters belongs in the Art. 9 risk file.
+  The `0.8` default is the US "four-fifths" rule of thumb with no standing
+  in EU law — justify your own threshold.
+
+The CI job **Bias Examination Gate** (`fairness` in `.github/workflows/ci.yml`)
+runs `scripts/run_fairness_evals.py --report fairness-report.json` over the
+JSON datasets in `evals/fairness/` (`name`, `protected_attribute`, the two
+thresholds, and `samples` of `group`/`prediction`/optional `label`). It is
+deterministic — no LLM, no API key, no network — a dataset breaching its
+thresholds fails the job, and an **empty dataset directory fails the gate**.
 
 ---
 

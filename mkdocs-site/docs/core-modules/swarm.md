@@ -37,6 +37,7 @@ Inspired by nature (ants, bees), the swarm coordinates specialized agents that:
 core/swarm/
 ├── __init__.py
 ├── colony.py           # Agent colony & Memory integration
+├── colony_ops.py       # ColonyOpsMixin: team formation, messaging, pheromone decay, self-healing
 ├── auction.py          # Task allocation via auction
 ├── pheromones.py       # Indirect communication
 ├── team_formation.py   # Dynamic team formation
@@ -177,11 +178,16 @@ passes it to `llm_service.generate_response(prompt, model=model_override)`.
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory and used to update the "World State" for Round N+1.
 
 ```python
+from core.orchestration.handlers.simulation_handler import SimulationHandler
+
 handler = SimulationHandler()
-# Simulate a 3-turn cyber-attack scenario
+# Simulate a 3-turn cyber-attack scenario. `context` is required: it is the
+# request context threaded into every sub-task so the per-request budget is
+# enforced across the rounds x sub-tasks fan-out.
 results = await handler.handle_simulation(
     query="Model a ransomware propagation in a distributed microservices environment",
-    rounds=3
+    context={},
+    rounds=3,
 )
 ```
 
@@ -193,11 +199,11 @@ The recommended way to use swarm features is through the Orchestrator with inten
 from core.orchestration import Orchestrator
 from core.memory.manager import AgentMemory
 from core.memory.graph_provider import SimpleGraphMemoryProvider
-from core.memory.providers import PostgresMemoryProvider
+from core.memory.providers import VectorMemoryProvider
 
 # Setup memory with graph support
 graph_provider = SimpleGraphMemoryProvider()
-memory_provider = PostgresMemoryProvider()
+memory_provider = VectorMemoryProvider(embedder=embedder_service)
 memory = AgentMemory(
     provider=memory_provider,
     graph_provider=graph_provider,

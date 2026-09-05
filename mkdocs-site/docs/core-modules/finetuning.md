@@ -54,9 +54,12 @@ from core.finetuning import (
    (if `auto_trigger` is enabled).
 3. **Dataset generation**: buffered `InteractionSample`s are written to an
    OpenAI-style instruction-tuning JSONL file under `output_dir`.
-4. **Pipeline trigger**: `FineTuningPipeline.start_training()` is invoked with a
-   `FineTuneConfig`, emitting `FINETUNING_TRIGGERED` / `FINETUNING_STARTED`
-   events.
+4. **Pipeline trigger**: `AutoFineTuningService` emits `FINETUNING_TRIGGERED`
+   (`samples_count`, `dataset_path`, `avg_score`, `timestamp`), then calls
+   `FineTuningPipeline.start_training()` with a `FineTuneConfig`. A returned
+   job id yields `FINETUNING_STARTED` (`job_id`, `samples_count`); an exception
+   yields `FINETUNING_FAILED` (`error`, `samples_count`). The pipeline itself
+   emits no events — all three come from the service.
 
 ## Usage
 
@@ -86,6 +89,7 @@ await service.add_sample_with_correction(
     query="...",
     original_response="...",
     corrected_response="...",
+    score=0.0,  # quality score recorded on the sample (default 0.0)
 )
 
 print(service.get_stats())

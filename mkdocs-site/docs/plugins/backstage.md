@@ -16,7 +16,7 @@ BaselithCore provides a native integration with [Backstage](https://backstage.io
 The integration consists of three primary components:
 
 1. **Backstage Entity Provider**: Dynamically generates a *complete, valid entity graph* — the `baselith-core` `System`, one `Component` per active plugin, and one `API` entity per plugin that exposes routers — so no catalog reference ever dangles.
-2. **Pattern Detection System**: Automatically scans plugin source code to identify and tag [Agentic Design Patterns](../../architecture/agentic-patterns.md) implemented in the code.
+2. **Pattern Detection System**: Automatically scans plugin source code to identify and tag [Agentic Design Patterns](../architecture/agentic-patterns.md) implemented in the code.
 3. **Software Templates**: A pre-configured Backstage Software Template for consistent and governed plugin creation.
 
 ---
@@ -296,8 +296,8 @@ The BaselithCore repository includes a pre-configured Backstage portal in the `b
 
 ### Prerequisites
 
-- **Node.js**: 18.x or 20.x
-- **Yarn**: 1.22.x (v1)
+- **Node.js**: 22.x or 24.x (`engines.node: "22 || 24"` in `backstage-portal/package.json`)
+- **Yarn**: 4.4.1 (pinned by `packageManager: yarn@4.4.1` in the same file)
 
 ### Running the Portal
 
@@ -383,7 +383,7 @@ catalog:
 
 ## 8. Production Deployment
 
-When deploying the Backstage portal to a production environment, use `app-config.production.yaml`, which **overrides** the dev defaults without fallback values — all variables must be explicitly set.
+When deploying the Backstage portal to a production environment, use `app-config.production.yaml`, which **overrides** the dev defaults. The BaselithCore-facing keys and the PostgreSQL connection carry no fallback values and must be set explicitly; only `APP_BASE_URL` and `BACKEND_BASE_URL` default to `http://localhost:7007`, which you must override behind a reverse proxy (both must be the same public origin).
 
 ### Required Environment Variables
 
@@ -395,12 +395,28 @@ When deploying the Backstage portal to a production environment, use `app-config
 | `POSTGRES_PORT` | PostgreSQL port (typically `5432`) |
 | `POSTGRES_USER` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | PostgreSQL password |
+| `APP_BASE_URL` | Public, browser-reachable origin of the portal (defaults to `http://localhost:7007`; set to the proxy's HTTPS URL in production) |
+| `BACKEND_BASE_URL` | URL the browser uses to reach the backend — must equal `APP_BASE_URL` (defaults to `http://localhost:7007`) |
 
 ### Production Config Structure
 
 `app-config.production.yaml` is automatically merged on top of `app-config.yaml` by Backstage at startup. It provides the production-grade overrides:
 
 ```yaml title="backstage-portal/app-config.production.yaml"
+app:
+  baseUrl: ${APP_BASE_URL:-http://localhost:7007}
+
+backend:
+  baseUrl: ${BACKEND_BASE_URL:-http://localhost:7007}
+  listen: ':7007'
+  database:
+    client: pg
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+
 proxy:
   endpoints:
     '/baselith-api':
@@ -411,10 +427,13 @@ proxy:
 baselith:
   baseUrl: ${BASELITH_BASE_URL}
   apiKey: ${BASELITH_API_KEY}
+
+catalog:
+  locations: []   # the entity provider ingests the live plugin ecosystem
 ```
 
 > [!WARNING]
-> Do not use fallback values (e.g. `${BASELITH_API_KEY:-12345678}`) in `app-config.production.yaml`. A missing variable should cause a startup failure rather than silently use an insecure default.
+> Do not add fallback values for `BASELITH_BASE_URL`, `BASELITH_API_KEY` or the database credentials (e.g. `${BASELITH_API_KEY:-12345678}`) in `app-config.production.yaml`. A missing variable should cause a startup failure rather than silently use an insecure default.
 
 ---
 
@@ -429,15 +448,15 @@ The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields 
 | `tags` | `metadata.tags` | Merged with category tag |
 | `author` | `spec.owner` | Emitted as a valid entity ref `group:default/<slug>` (any `<email>` suffix is dropped); falls back to `group:default/baselith-core-team` |
 | `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty; label values are sanitised to the Kubernetes charset |
-| `readiness` | `metadata.labels['baselith.ai/readiness']` | e.g. `stable`, `experimental` |
+| `readiness` | `spec.lifecycle` + `metadata.labels['baselith.ai/readiness']` | Lifecycle via `readiness_to_lifecycle` (see table below); the label keeps the raw value, e.g. `stable`, `experimental` |
 | `category` | `metadata.labels['baselith.ai/category']` | Kebab-cased |
-| `homepage` | `metadata.annotations['backstage.io/source-location']` + `metadata.links` | Only if non-empty |
+| `homepage` | `metadata.links` ("Homepage" entry) | Only if non-empty — `backstage.io/source-location` is derived from the repository layout, not from `homepage` (see annotations below) |
 | `license` | `metadata.annotations['baselith.ai/license']` | Only if non-empty |
 | `min_core_version` | `metadata.annotations['baselith.ai/min-core-version']` | Only if non-empty |
 | `plugin_dependencies` | `spec.dependsOn` | Each dep as a fully-qualified `component:default/<name>` ref |
 | `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty — backed by an emitted `API` entity of the same name. A mounted FastAPI sub-app (mount `name` = plugin name) is also detected and backed by an `API` entity even when `get_routers()` is empty. |
 | Detected patterns | `metadata.labels['baselith.ai/pattern-*']` | Value is always `"true"` |
-| `PluginState` | `spec.lifecycle` | See state-to-lifecycle table below |
+| live `PluginState` | `metadata.labels['baselith.ai/runtime-state']` | Lower-cased state value (`active`, `failed`, `disabled`, …); `unknown` when the lifecycle manager has no state for the plugin. Never feeds `spec.lifecycle` |
 
 All Components are emitted in the explicit `default` namespace (`metadata.namespace: default`), matching the fully-qualified refs above.
 
@@ -447,15 +466,36 @@ All Components are emitted in the explicit `default` namespace (`metadata.namesp
 | :--- | :--- |
 | `backstage.io/managed-by-location` | `url:{base_url}/api/backstage/entities` |
 | `backstage.io/managed-by-origin-location` | `url:{base_url}/api/backstage/entities` |
-| `backstage.io/techdocs-ref` | `dir:./plugins/{dir}` |
+| `backstage.io/source-location` | `{catalog_source_location}plugins/{dir}/` — the plugin's **directory**, which may differ from its registry name |
 | `baselith.ai/plugin-id` | The plugin's raw registry name (may differ from the sanitised `metadata.name`) |
 | `baselith.ai/health-url` | `{base_url}/health` |
 | `baselith.ai/plugin-api-url` | `{base_url}/api/plugins/{name}` |
 | `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{dir}/manifest.yaml` |
 
-### PluginState → Backstage lifecycle
+### Conditional annotations
 
-| Plugin State | Backstage lifecycle |
+| Annotation | Emitted when | Value |
+| :--- | :--- | :--- |
+| `backstage.io/techdocs-ref` | the plugin directory contains `mkdocs.yml` (or `mkdocs.yaml`) — omitted otherwise so the Docs tab is never broken | `{catalog_source_location}plugins/{dir}`; with `BASELITH_CATALOG_LOCAL_ROOT` set, `dir:.` and both `backstage.io/managed-by-location` / `managed-by-origin-location` annotations are rewritten to `file:{root}/plugins/{dir}/manifest.yaml` so TechDocs reads the docs from the portal backend's disk |
+| `baselith.ai/license` | manifest `license` non-empty | The license string |
+| `baselith.ai/min-core-version` | manifest `min_core_version` non-empty | The version constraint |
+| `baselith.ai/optional-resources` | manifest `optional_resources` non-empty | Comma-separated, sorted resource names |
+
+### `readiness` → `spec.lifecycle`
+
+`spec.lifecycle` is **maturity**, derived from the manifest `readiness` through `readiness_to_lifecycle` (`core/plugins/exporters/entity_model.py`):
+
+| Manifest `readiness` | Backstage lifecycle |
+| :--- | :--- |
+| `stable`, `ga`, `production` | `production` |
+| `deprecated` | `deprecated` |
+| anything else (`alpha`, `beta`, `experimental`, missing) | `experimental` |
+
+### PluginState → operational status (`get_health_status()`)
+
+The live `PluginState` is exported as the `baselith.ai/runtime-state` label (above). `BackstageProvider.get_health_status(plugin_name)` additionally maps it to a lifecycle-style string for operational views — this mapping never sets `spec.lifecycle`:
+
+| Plugin State | `get_health_status()` |
 | :--- | :--- |
 | `ACTIVE` | `production` |
 | `LOADING`, `INITIALIZING`, `LOADED`, `DISCOVERED` | `experimental` |

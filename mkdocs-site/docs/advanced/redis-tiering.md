@@ -46,8 +46,14 @@ Used by **FalkorDB** to store the system's Knowledge Graph. BaselithCore require
 ### Tier 0 Configuration
 
 ```env
-GRAPH_DB_URL=redis://localhost:6379/0
+GRAPH_DB_URL=redis://localhost:6379
+GRAPH_DB_NAME=agent_graph
+GRAPH_DB_TIMEOUT=2
 ```
+
+These are the `StorageConfig` defaults (mirrored in `.env.example`). A URL
+without a `/N` suffix selects Redis database `0`; `GRAPH_DB_ENABLED` gates the
+tier.
 
 ---
 
@@ -85,7 +91,7 @@ Dedicated to asynchronous process management and work queues.
 
 ### Tier 2 Content
 
-- **RQ (Redis Queue)**: Job definitions and queues (`default`, `high`, `low`)
+- **RQ (Redis Queue)**: Job definitions and queues (`default`, `documents`, `analysis` — `TaskQueueConfig.queues`)
 - **TaskTracker**: Task execution status (pending, running, failed, completed)
 
 ### Tier 2 Configuration
@@ -93,6 +99,9 @@ Dedicated to asynchronous process management and work queues.
 ```env
 QUEUE_REDIS_URL=redis://localhost:6379/2
 ```
+
+`TaskQueueConfig` reads `QUEUE_REDIS_URL` (the `StorageConfig` default above) and
+lets the more specific `TASK_QUEUE_REDIS_URL` override it.
 
 ### Note
 
@@ -106,19 +115,27 @@ Beyond separation via Database ID, the system implements granular isolation via 
 
 ### Key Structure
 
-```text
-{global_prefix}:{tenant_id}:{tier}:{entity_type}:{entity_id}
+The tenant-aware `RedisCache` (`core/optimization/caching.py`) builds every key
+as `{CACHE_REDIS_PREFIX}:{tenant_id}:{namespace}:{key}`, where `namespace` is
+the per-cache prefix (`embedding`, `search`, `learner`, …):
 
-Examples:
-baselithcore:tenant-123:cache:llm:prompt-hash-abc
-baselithcore:tenant-456:queue:job:doc-ingestion-789
-baselithcore:global:graph:entity:user-001
+```text
+baselithcore:tenant-123:embedding:<sha256-of-text>
+baselithcore:tenant-456:search:<query-hash>
 ```
 
 ### Rules
 
-1. **Global Prefix**: The cache prefix is configurable via `CACHE_REDIS_PREFIX` (`StorageConfig.cache_redis_prefix`, default `baselithcore`).
-2. **Tenant Isolation**: `SemanticLLMCache` partitions entries by `get_current_tenant_id()`. A fully transparent, framework-wide per-tenant key prefix across every tier is a **Roadmap** item.
+1. **Two prefixes, two settings.** `CACHE_REDIS_PREFIX`
+   (`StorageConfig.cache_redis_prefix`, default `baselithcore`) namespaces the
+   tenant-aware `RedisCache`, the graph query cache (`<prefix>:graph`) and the
+   NLP model cache. `REDIS_CACHE_PREFIX` (`RedisCacheConfig.cache_prefix`,
+   default `baselithcore:cache`) namespaces `RedisTTLCache`
+   (`core/cache/redis_cache.py`) and the rate-limiter, idempotency, JWT-blacklist
+   and API-key-denylist keys derived from it. Change both if you share one
+   Redis between deployments.
+2. **Tenant Isolation**: `RedisCache` and `SemanticLLMCache` partition entries by
+   `get_current_tenant_id()`; `RedisTTLCache` keys are not tenant-scoped.
 3. **Namespace Separation**: Never mix data of different nature in the same database.
 
 ---
@@ -187,6 +204,8 @@ from pydantic_settings import BaseSettings
 class StorageConfig(BaseSettings):
     # Tier 0: Graph
     graph_db_url: str = Field(default="redis://localhost:6379", alias="GRAPH_DB_URL")
+    graph_db_name: str = Field(default="agent_graph", alias="GRAPH_DB_NAME")
+    graph_db_timeout: float = Field(default=2.0, alias="GRAPH_DB_TIMEOUT", ge=0.1)
     graph_cache_ttl: int = Field(default=3600, alias="GRAPH_CACHE_TTL")
 
     # Tier 1: Cache

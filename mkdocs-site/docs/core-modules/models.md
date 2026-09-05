@@ -62,7 +62,8 @@ Agent output (`extra="allow"`): `answer` (str), optional `metadata`, `sources`
 
 ### `FeedbackRequest`
 
-Feedback on a generated answer (`extra="allow"` for legacy payloads):
+Feedback on a generated answer (`extra="ignore"` — unexpected keys are
+dropped rather than persisted):
 `query` (1–8000), `answer` (1–32000), `feedback` (`positive`|`negative`),
 optional `conversation_id`, `sources`, and `comment`.
 

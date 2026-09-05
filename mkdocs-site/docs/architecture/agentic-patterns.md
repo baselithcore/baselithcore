@@ -15,7 +15,7 @@ The **agentic patterns** are organized into 7 functional categories:
 | --- | ---------------------- | -------------- | ------------------- | ----------------------------------------- |
 | 1   | **Reflection**         | Control        | `core/reflection/`  | Self-evaluation and response refinement   |
 | 2   | **Guardrails**         | Control        | `core/guardrails/`  | Input/output protection (security)        |
-| 3   | **Goals**              | Control        | `plugins/goals/`    | Goal and sub-goal system                  |
+| 3   | **Goals**              | Control        | `plugins/goals/`    | Goal tracking with success criteria       |
 | 4   | **Planning**           | Logic          | `core/planning/`    | Task decomposition into steps             |
 | 5   | **Reasoning (ToT)**    | Logic          | `core/reasoning/`   | Chain/Tree-of-Thought reasoning           |
 | 6   | **Self-Correction**    | Logic          | `core/reasoning/`   | Auto-correction of errors                 |
@@ -154,29 +154,38 @@ safe_output = output.filtered_output
 
 **Module**: `plugins/goals/` (re-exported from `core/goals/` for backward compatibility)
 
-Goal and sub-goal system for complex tasks. Moved to `plugins/` per the Core Sacro Rule (domain logic lives in plugins).
+Goal tracking with progress and explicit success criteria. Moved to `plugins/` per the Core Sacro Rule (domain logic lives in plugins).
 
 ```python
 from plugins.goals import GoalTracker, Goal, GoalStatus
 
 tracker = GoalTracker()
 
-# Define main goal
+# Define a goal (id and title are required); criteria start unmet
 main_goal = Goal(
-    name="analyze_market",
-    description="Analyze market trends",
-    success_criteria=["data_collected", "trends_identified", "report_generated"]
+    id="analyze_market",
+    title="Analyze market trends",
+    success_criteria=["data_collected", "trends_identified", "report_generated"],
 )
+await tracker.add(main_goal)
 
-# Decompose into sub-goals
-await tracker.decompose(main_goal)
+# Report progress as work lands (0.0-1.0; the first update moves the goal to IN_PROGRESS)
+await tracker.update_progress("analyze_market", 0.5)
+main_goal.criteria_met["data_collected"] = True
 
-# Execute progressively
-while not tracker.is_complete():
-    next_goal = tracker.get_next()
-    result = await agent.execute(next_goal)
-    tracker.mark_complete(next_goal, result)
+# Close it out once every criterion is met, or record a failure with a reason
+if tracker.validate_criteria("analyze_market"):
+    await tracker.complete("analyze_market")
+else:
+    await tracker.fail("analyze_market", reason="report not generated")
+
+tracker.get_active()   # goals still IN_PROGRESS
+tracker.get_summary()  # {"total": ..., "completed": ..., "in_progress": ..., "failed": ...}
 ```
+
+`Goal.status` is a `GoalStatus` (`NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`,
+`FAILED`, `ABANDONED`); `tracker.get(goal_id)` returns the tracked `Goal` or
+`None`.
 
 !!! note "Backward Compatibility"
     `core/goals/` still works as a re-export shim — existing imports are not broken.
@@ -422,10 +431,9 @@ Connect to an external MCP server as a client and invoke its tools:
 ```python
 from core.mcp import MCPClient
 
-# Connect to an MCP server (a launchable script or custom command)
+# Connect to an MCP server (a launchable script or custom command).
+# Entering the context manager calls connect(); leaving it disconnects.
 async with MCPClient(server_script="path/to/server.py") as client:
-    await client.connect()
-
     tools = await client.list_tools()  # discover available tools
 
     # Execute a tool exposed by the server
@@ -562,20 +570,37 @@ Configurable personalities for agents.
 
 ```python
 from core.personas import Persona, PersonaManager
+from core.services.llm import get_llm_service
 
 manager = PersonaManager()
 
-# Define persona
+# Define persona (name and description are required; traits is a dict)
 expert = Persona(
     name="TechExpert",
-    traits=["technical", "precise", "detailed"],
-    tone="formal",
-    expertise=["software", "AI", "cloud"]
+    description="A senior engineer who answers with precise, well-sourced detail",
+    traits={"tone": "formal", "expertise": "software, AI, cloud"},
+    temperature=0.3,
 )
+await manager.register(expert)
+await manager.switch("TechExpert")
 
-# Apply to an agent
-agent.set_persona(expert)
+# Apply it: prepend the active persona's prefix to the prompt and pass its
+# sampling settings to the LLM call. This is exactly how PersonaEnsemble in
+# core/meta/ consumes personas; there is no agent.set_persona().
+active = await manager.get_active()
+llm = get_llm_service()
+answer = await llm.generate_response(
+    f"{active.get_prompt_prefix()}\n\nUser: {user_query}",
+    temperature=active.temperature,
+    max_tokens=active.max_tokens,
+)
 ```
+
+`get_prompt_prefix()` returns `system_prompt` when it is set, otherwise a
+sentence built from `name`, `description` and `traits`. Ready-made personas
+ship in `core.personas` (`HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`,
+`CREATIVE_WRITER`) and can seed the manager via
+`PersonaManager(default_persona=TECHNICAL_EXPERT)`.
 
 ---
 
@@ -708,13 +733,16 @@ if result.success and result.job:
 
 **Module**: `core/memory/`
 
-Multi-level memory system.
+Three-tier hierarchy (`MemoryTier`, defined in
+`core/memory/hierarchy_config.py` and re-exported from
+`core.memory.hierarchy`). Each tier carries a `TierConfig`
+(`max_items`, `auto_promote_threshold`, `ttl_seconds`).
 
-| Level      | Storage   | Use                         |
-| ---------- | --------- | --------------------------- |
-| L1 Context | In-memory | Current conversation        |
-| L2 Graph   | FalkorDB  | Relationships and knowledge |
-| L3 Vector  | Qdrant    | Semantic search             |
+| Tier    | `MemoryTier` value | Role                        | Default `TierConfig`  |
+| ------- | ------------------ | --------------------------- | --------------------- |
+| **STM** | `short_term`       | Working memory, in-context  | 10 items              |
+| **MTM** | `mid_term`         | Topic-segmented, summarized | 50 items, TTL 24 h    |
+| **LTM** | `long_term`        | Compressed, provider-backed | 500 items, TTL 7 days |
 
 ```python
 from core.memory import AgentMemory
@@ -764,19 +792,26 @@ finally:
 Distributed queues for asynchronous jobs.
 
 ```python
-from core.task_queue import enqueue, TaskTracker
+from core.task_queue import enqueue_task
+from core.task_queue.status import get_task_tracker
 
-# Enqueue task
-job_id = await enqueue(
-    "document_ingestion",
-    document_id=doc_id,
-    priority="high"
-)
 
-# Monitor status
-tracker = TaskTracker()
-status = await tracker.get_status(job_id)
+def ingest_document(document_id: str) -> None:
+    ...  # runs inside an RQ worker process
+
+
+# Enqueue a callable (sync API, returns the RQ job id). The current tenant_id
+# is stamped into the job meta; pick the target queue with ``queue=``.
+job_id = enqueue_task(ingest_document, doc_id, queue="default")
+
+# Monitor status (sync Redis read; the scheduler records "queued" at enqueue time)
+status = get_task_tracker().get_status(job_id)
+# -> {"status": "queued", "progress": 0.0, "message": "Queued in default", ...} or None
 ```
+
+`schedule_task(func, delay_seconds, *args, queue="default", **kwargs)` enqueues
+the same way after a delay. Both helpers are synchronous: call them from a
+thread or an executor if you are inside a hot async path.
 
 ---
 

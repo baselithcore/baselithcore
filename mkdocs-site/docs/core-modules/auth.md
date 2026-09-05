@@ -46,8 +46,8 @@ The public surface is unchanged: `create_token`, `create_refresh_token`,
 
 When a user authenticates, the system generates a pair of tokens:
 
-- **Access Token**: Short-lived (default 30m) token for API requests.
-- **Refresh Token**: Long-lived token for obtaining new access tokens. BaselithCore implements **Refresh Token Rotation**, where using a refresh token revokes it and issues a new pair.
+- **Access Token**: Short-lived token for API requests. Lifetime is `SecurityConfig.access_token_lifetime` — default `3600` s (1 h), env `AUTH_ACCESS_TOKEN_LIFETIME` (legacy alias `AUTH_SESSION_LIFETIME`), floor 60 s.
+- **Refresh Token**: Long-lived token for obtaining new access tokens — 7 days, the `JWTHandler` constructor default `refresh_lifetime=604800`; `AuthManager` does not pass it through, so there is no settings knob for it. BaselithCore implements **Refresh Token Rotation**, where using a refresh token revokes it and issues a new pair.
 
 ### Token Rotation Flow
 
@@ -214,8 +214,18 @@ When a token is revoked (e.g., during logout):
 2. The `jti` is stored in Redis with a TTL matching the token's remaining life.
 3. Subsequent verification attempts for this token will fail immediately.
 
-!!! important "Redis Dependency"
-    Token blacklisting requires an active Redis connection. If Redis is unavailable, the system fails closed (rejects tokens) if `STRICT_AUTHENTICATION` is enabled.
+!!! important "Redis dependency — fails closed"
+    Token blacklisting requires an active Redis connection, and there is no
+    setting that relaxes this. `verify_token` issues the `jti` blacklist,
+    family blacklist and user-epoch reads concurrently; a Redis error on the
+    blacklist reads **propagates**, `AuthManager._verify_bearer` treats it like
+    any other verification failure and resolves the bearer to the anonymous
+    identity, so protected routes answer **401** while Redis is down. Two
+    deliberate exceptions: a verification still held in the in-process cache
+    (≤5 s) keeps working, and the per-user **epoch** read degrades to "no
+    epoch" instead of raising (`core/auth/_token_epoch.py`) so token *minting*
+    never blocks on the cache. The API-key denylist is the opposite — Redis
+    read failures fall back to process-local state (`core/auth/api_keys.py`).
 
 !!! note "Already-expired tokens"
     `revoke_token` only blacklists tokens that still have remaining lifetime (`exp > now`). Tokens that are already expired are intentionally **not** added to the blacklist because `verify_token` always runs standard JWT expiration verification (`verify_exp=True`) before consulting the blacklist, so an expired token is rejected before the blacklist check. This avoids storing zero-TTL entries that Redis would immediately evict.
@@ -234,8 +244,9 @@ claim — the `jti` of the first token in its rotation lineage — and reuse of 
    blacklisted.
 2. When the victim (or the thief, again) presents the consumed token,
    `verify_token` recognizes the reuse and writes
-   `jwt_family_blacklist:{family}` to Redis (TTL = refresh lifetime — no
-   descendant can outlive that window).
+   `{cache_prefix}:jwt_family_blacklist:{family}` to Redis (`cache_prefix`
+   is `RedisCacheConfig.cache_prefix`, default `baselithcore:cache`; TTL =
+   refresh lifetime — no descendant can outlive that window).
 3. Every descendant in the lineage — including the thief's freshly rotated
    token — is rejected with *"Token family has been revoked"*.
 
@@ -248,14 +259,17 @@ Access-token verification performs no family lookups (no added latency).
 
 ## Role-Based Access Control (RBAC)
 
-BaselithCore uses a standard set of roles to control access to API endpoints and internal services:
+BaselithCore uses the `AuthRole` enum (`core/auth/types.py`) to control access to API endpoints and internal services:
 
-| Role        | Description                                                |
-| ----------- | ---------------------------------------------------------- |
-| `admin`     | Full system access, including configuration and user mgmt. |
-| `developer` | Ability to create agents, plugins, and manage workflows.   |
-| `user`      | Basic chat and query capabilities.                         |
-| `guest`     | Read-only access to public resources.                      |
+| Role        | Description                                                                 |
+| ----------- | --------------------------------------------------------------------------- |
+| `anonymous` | Unauthenticated caller; what `AuthManager.authenticate` returns on failure. |
+| `user`      | Basic chat and query capabilities.                                          |
+| `admin`     | Full system access, including configuration and user mgmt.                  |
+| `service`   | Service-to-service auth; also satisfies `job`-only routes.                  |
+| `guest`     | Read-only access to dashboards.                                             |
+| `job`       | Automated job/scheduler access.                                             |
+| `scoped`    | Pure capability identity: grants nothing by itself, authorization comes only from the explicit scopes attached to it (least-privilege scoped API keys). Never promoted to another role. |
 
 ### Enforcing Roles
 
@@ -774,8 +788,7 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | `JWT_ISSUER`           | `APP_BASE_URL` | `iss` claim added to tokens and validated on decode |
 | `JWT_AUDIENCE`         | `APP_BASE_URL` | `aud` claim added to tokens and validated on decode |
 | `JWT_STRICT_VALIDATION`| auto    | Rejects tokens missing `aud`/`iss`. Enabled automatically when `AUTH_REQUIRED=true` and both resolve |
-| `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                             |
-| `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                   |
+| `AUTH_ACCESS_TOKEN_LIFETIME` | `3600` | Access-token lifetime in **seconds** (min 60). Legacy alias `AUTH_SESSION_LIFETIME` is accepted for the same field |
 | `API_KEYS_SCOPED`      | -       | Least-privilege scoped keys: `key=scope\|scope,...` (see [Capability Scopes](#capability-scopes-fine-grained-authorization)) |
 | `OIDC_ENABLED`         | `false` | Enable federated SSO via an external OIDC provider           |
 | `OIDC_ISSUER`          | `None`  | OIDC issuer URL (validated as `iss`)                         |
@@ -783,6 +796,9 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | `OIDC_JWKS_URL`        | `None`  | Explicit JWKS endpoint (else discovered from the issuer)     |
 | `OIDC_ALGORITHMS`      | `RS256` | Accepted signing algorithms (comma-separated)               |
 | `OIDC_ROLE_MAP`        | -       | `idp_role:app_role,...` mapping to BaselithCore roles        |
+
+The refresh-token lifetime has no variable: `AuthManager` constructs
+`JWTHandler` without overriding its `refresh_lifetime=604800` (7 days) default.
 
 !!! warning "Security"
     Never deploy to production with a `SECRET_KEY` shorter than 32 characters or the default `admin` password. The system will issue a warning at startup if insecure defaults are detected.

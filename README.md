@@ -8,41 +8,49 @@
 
 # BaselithCore
 
-> **The Research-Backed Engine for Production-Grade Agentic AI.**
+> **Agents that survive production.** Durable execution, enforced budgets, and EU AI Act evidence — self-hosted, with no companion SaaS.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
-[![Plugin Exception](https://img.shields.io/badge/plugins-AGPL_exception-brightgreen.svg?style=for-the-badge)](LICENSE.exception)
-[![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
-[![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 6375/6381 | 79%](https://img.shields.io/badge/Tests-6375%2F6381%7C79%25-brightgreen.svg?style=for-the-badge)](tests/)
-[![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
+[![CI](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/baselith-core.svg?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
+[![Version 0.30.0](https://img.shields.io/badge/version-0.30.0-0b5394.svg?style=flat-square)](CHANGELOG.md)
+[![Tests: 6443 passing](https://img.shields.io/badge/tests-6443%20passing-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
+[![Coverage 79%](https://img.shields.io/badge/coverage-79%25-brightgreen.svg?style=flat-square)](https://docs.baselithcore.xyz/advanced/testing/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
+[![Your plugins: any licence](https://img.shields.io/badge/your%20plugins-any%20licence-brightgreen.svg?style=flat-square)](LICENSE.exception)
+[![Docs](https://img.shields.io/badge/docs-baselithcore.xyz-0b5394.svg?style=flat-square)](https://docs.baselithcore.xyz)
 
-[![EU AI Act toolkit](https://img.shields.io/badge/EU_AI_Act-Compliance_Toolkit-0b5394.svg?style=for-the-badge)](https://docs.baselithcore.xyz/advanced/regulatory-compliance/)
-[![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](https://docs.baselithcore.xyz/core-modules/world-model/)
-[![Swarm Intelligence](https://img.shields.io/badge/Swarm-Intelligence-indigo.svg?style=for-the-badge)](https://docs.baselithcore.xyz/core-modules/swarm/)
-[![Native MCP](https://img.shields.io/badge/Native-MCP-blue.svg?style=for-the-badge)](https://docs.baselithcore.xyz/core-modules/mcp/)
-[![Docker Ready](https://img.shields.io/badge/docker-ready-blue.svg?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/baselithcore/baselithcore/blob/main/Dockerfile-full)
-
----
-
-**BaselithCore** is a high-performance orchestration engine designed to transition agentic AI from experimental prototypes to resilient, production-ready infrastructure. Built on a modular architecture, it provides an agnostic foundation for engineering scalable multi-agent systems.
+BaselithCore is a Python orchestration engine for agentic AI. Execution state
+is checkpointed as a run proceeds, so an interrupted process resumes from its
+last completed step instead of replaying side effects. Every request carries a
+budget that caps iterations, tool calls, tokens and USD spend, and every step
+emits OpenTelemetry spans and Prometheus metrics with real cost attached. The
+audit trail a regulated deployment has to produce is written while the system
+runs, not reconstructed from logs afterwards.
 
 <div align="center">
 
-[**Quick Start**](#quick-start) | [**Documentation**](https://docs.baselithcore.xyz) | [**Architecture**](https://docs.baselithcore.xyz/architecture/) | [**Plugin System**](https://docs.baselithcore.xyz/plugins/)
+[**Quick start**](#quick-start) · [**Docs**](https://docs.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
+
+> **Writing a plugin? You keep your source.** The [plugin exception](LICENSE.exception)
+> lets any plugin that uses the framework as a library ship under any licence you
+> like, including a closed one. Same terms for everyone.
 
 ---
 
 ## Why BaselithCore
 
-- **Agents that survive production.** Durable execution with checkpoint/resume, replayable tool steps, state history and fork/rewind — a crash mid-run recovers without duplicating a single side effect.
+- **Agents that survive production.** Durable execution with checkpoint/resume, replayable tool steps, state history and fork/rewind — a `SIGKILL` mid-run recovers without repeating a single side effect.
 - **Everything included, nothing rented.** Evaluation suites, LLM-as-judge, red-teaming, OpenTelemetry tracing, Prometheus metrics with real USD cost, Helm/Terraform deployment — built in and self-hosted, with no companion SaaS to subscribe to.
-- **Brakes, not just horsepower.** Autonomy gating, durable human-in-the-loop approvals, per-request cost budgets, prompt-injection guardrails, sandboxed code execution — every seam fail-closed by default, plus opt-in EU AI Act / GDPR compliance primitives.
+- **Brakes, not just horsepower.** Autonomy gating, durable human-in-the-loop approvals, per-request cost budgets, prompt-injection guardrails, sandboxed code execution — every seam fail-closed by default, plus opt-in EU AI Act / GDPR / NIS2 / DORA primitives with evidence trails.
 
-Ten lines to a working multi-agent pipeline — typed, budgeted, observable:
+## Sixty seconds
+
+```bash
+pip install baselith-core
+```
 
 ```python
 from core.agent import Agent, Crew, Task
@@ -57,7 +65,11 @@ crew = Crew(agents=[researcher, writer], tasks=[
 report = (await crew.run(inputs={"topic": "vector databases"})).final
 ```
 
-## Architecture at a Glance
+Typed, budgeted and observable from the first line — the
+[quickstart](https://docs.baselithcore.xyz/getting-started/quickstart/) adds
+tools, structured output and a checkpoint store.
+
+## Architecture at a glance
 
 ```mermaid
 graph TD
@@ -99,17 +111,12 @@ graph TD
     A -.->|wrapped by| RES
 ```
 
-The full deep-dive lives in the [architecture docs](https://docs.baselithcore.xyz/architecture/overview/).
+Two rules hold the shape: `core/` stays domain-agnostic, and everything
+domain-specific is a plugin. The [architecture
+docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 
-## Core Philosophy
-
-1. **Sacred Core**: The `core/` directory contains exclusively agnostic logic — orchestration, infrastructure, utilities. No domain code, ever.
-2. **Plugin-First**: All business logic, integrations, and specialized capabilities live in **Plugins**, so secondary features never bloat the engine.
-3. **Agentic by Design**: The Agentic Design Patterns (Memory, Reflection, Tool Use, Planning, …) are baked into the orchestrator, not bolted on.
-
-## What's Inside
-
-Every capability ships production-hardened: typed, tested, observable, and fail-closed by default.
+<details>
+<summary><b>What's inside</b> — the full capability list</summary>
 
 | | |
 | :-- | :-- |
@@ -119,15 +126,17 @@ Every capability ships production-hardened: typed, tested, observable, and fail-
 | **Structured event streaming** | Per-run agent events in-process or over SSE, plus async run submission with completion webhooks → [Orchestration](https://docs.baselithcore.xyz/core-modules/orchestration/) |
 | **Cognitive layer** | MCTS, Tree-of-Thoughts, world model, swarm auctions & bounded handoffs → [Reasoning](https://docs.baselithcore.xyz/core-modules/reasoning/) · [Swarm](https://docs.baselithcore.xyz/core-modules/swarm/) |
 | **Governance & safety** | Autonomy gating, durable human-in-the-loop, plan approval, loop & tool budgets, layered guardrails, sandboxed code → [Autonomy & Safety](https://docs.baselithcore.xyz/core-modules/orchestration/) |
-| **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, hierarchical chunking, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) · [Services](https://docs.baselithcore.xyz/core-modules/services/) |
-| **Multimodal** | Vision, native PDF and audio content blocks, duplex realtime voice with barge-in → [Services](https://docs.baselithcore.xyz/core-modules/services/) · [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
-| **Interoperability** | Native dual-era MCP (server + client + declarative registry), A2A peer interop, AP2 signed-mandate commerce → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) · [World Model](https://docs.baselithcore.xyz/core-modules/world-model/) |
-| **Self-improvement, governed** | Skill evolution, prompt compilation and evolutionary search — every change eval-gated, audited and human-approvable → [Skill Evolution](https://docs.baselithcore.xyz/core-modules/skill-evolution/) · [Optimization](https://docs.baselithcore.xyz/core-modules/optimization/) |
+| **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, hierarchical chunking, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) |
+| **Multimodal** | Vision, native PDF and audio content blocks, duplex realtime voice with barge-in → [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
+| **Interoperability** | Native dual-era MCP (server + client + declarative registry), A2A peer interop, AP2 signed-mandate commerce → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) |
+| **Self-improvement, governed** | Skill evolution, prompt compilation and evolutionary search — every change eval-gated, audited and human-approvable → [Skill Evolution](https://docs.baselithcore.xyz/core-modules/skill-evolution/) |
 | **Evaluation & observability** | Trajectory eval in CI, multi-model bake-off, LLM-as-judge, red-team, OTel + Prometheus with USD cost metrics → [Evaluation](https://docs.baselithcore.xyz/core-modules/evaluation/) |
 | **Regulatory toolkit** | Opt-in EU AI Act / GDPR / NIS2 / DORA primitives with evidence trails → [Regulatory Compliance](https://docs.baselithcore.xyz/advanced/regulatory-compliance/) |
 | **Production deployment** | Docker, Helm, Terraform, SLO rules, typed SDKs → [Deployment](https://docs.baselithcore.xyz/advanced/deployment/) |
 
-## <span id="quick-start"></span> Quick Start
+</details>
+
+## <span id="quick-start"></span> Quick start
 
 ```bash
 pip install baselith-core       # core engine
@@ -135,37 +144,40 @@ docker compose up -d            # Redis, PostgreSQL, Qdrant (optional)
 baselith doctor                 # validate environment and configuration
 ```
 
-Optional capabilities (RAG, browser automation, OCR, extra model providers, vector backends, …) install as extras — see the [installation guide](https://docs.baselithcore.xyz/getting-started/installation/) for the full list, and the [quickstart](https://docs.baselithcore.xyz/getting-started/quickstart/) to build your first agent.
+Optional capabilities (RAG, browser automation, OCR, extra model providers,
+vector backends, …) install as extras — the [installation
+guide](https://docs.baselithcore.xyz/getting-started/installation/) has the
+full list.
 
-## Resources
+## Contributing
 
-| Resource                                                                             | Description                                           |
-| :----------------------------------------------------------------------------------- | :---------------------------------------------------- |
-| [**Official Website**](https://baselithcore.xyz)                                     | The core landing page for the BaselithCore framework. |
-| [**Official Documentation**](https://docs.baselithcore.xyz)                          | The official docs for the BaselithCore framework.     |
-| [**Architecture**](https://docs.baselithcore.xyz/architecture/overview/)             | Deep dive into the "Sacred Core" and design choices.  |
-| [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/architecture/)              | How to extend BaselithCore using the plugin system.   |
-| [**Agentic Patterns**](https://docs.baselithcore.xyz/architecture/agentic-patterns/) | Implementation of Agentic Design Patterns.            |
-| [**Regulatory Compliance**](https://docs.baselithcore.xyz/advanced/regulatory-compliance/) | AI Act, GDPR, NIS2 and DORA mapped article by article — gaps included. |
-| [**Deployment**](https://docs.baselithcore.xyz/advanced/deployment/)                 | Production-ready deployment strategies.               |
+Contributions are welcome, and the on-ramps are deliberately marked:
 
-## Contributing & License
+- [**good first issue**](https://github.com/baselithcore/baselithcore/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — scoped, with context and an acceptance check
+- [**help wanted**](https://github.com/baselithcore/baselithcore/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) — bigger pieces that need an owner
+- [**Discussions**](https://github.com/baselithcore/baselithcore/discussions) — questions, ideas, and what you built
 
-We welcome contributions that adhere to our code standards. Please review [CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
+PR has to pass, and the review turnaround you can expect.
+
+Version 0.30.0 ships **6,443 tests** at **79% branch coverage**, gated in CI at
+a 75% floor alongside strict typing, architecture-boundary and docs-consistency
+checks.
+
+## Licence
 
 BaselithCore is licensed under the **GNU Affero General Public License v3.0 only
-(AGPL-3.0-only)**. See [LICENSE](LICENSE) for full details.
+(AGPL-3.0-only)** — see [LICENSE](LICENSE).
 
-**Writing a plugin? You keep your source.** The
-[BaselithCore Plugin Exception](LICENSE.exception) grants an additional permission
-under AGPL section 7: a plugin that uses the framework as a library — rather than
-modifying it — may be licensed under any terms you choose, including closed ones,
-and section 13 never reaches it. The permission is offered to everyone on identical
-terms. Two conditions come with it: your plugin must carry the notice described in
-section 3(c), and patching files under `core/` makes it a modified framework rather
-than a plugin, in which case AGPL-3.0-only applies in full. See
-[Plugin packaging](https://docs.baselithcore.xyz/plugins/packaging/) for what the
-notice has to say.
+[LICENSE.exception](LICENSE.exception) grants an additional permission under
+AGPL section 7: a plugin that uses the framework as a library — rather than
+modifying it — may be licensed under any terms you choose, including closed
+ones, and section 13 never reaches it. The permission is offered to everyone on
+identical terms. Two conditions come with it: your plugin must carry the notice
+described in section 3(c), and patching files under `core/` makes it a modified
+framework rather than a plugin, in which case AGPL-3.0-only applies in full. See
+[plugin packaging](https://docs.baselithcore.xyz/plugins/packaging/) for what
+the notice has to say.
 
 ---
 Copyright © 2026 BaselithCore Team.

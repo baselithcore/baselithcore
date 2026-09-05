@@ -214,15 +214,23 @@ class TestAuditLoggerIntegration:
     async def test_audit_emit_schedules_on_the_running_loop(self, sink):
         import asyncio
 
+        from core.observability.audit import _pending_tasks
+
         reset_audit_logger()
         try:
             from core.observability.audit import set_audit_logger
 
             set_audit_logger(AuditLogger(sinks=[sink]))
             audit_emit(AuditEventType.TRANSPARENCY_MARK, action="mark")
-            # Fire-and-forget: yield once so the scheduled task can run.
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
+            # Wait for the scheduled task itself, not for a fixed number of
+            # event-loop turns. The write ends in `run_in_executor`, so it
+            # completes on a worker thread: no amount of `sleep(0)` can
+            # guarantee that thread has been scheduled, and the previous
+            # two-yield version failed as soon as the thread took ~5ms — a
+            # loaded CI runner, which is why it surfaced under xdist.
+            pending = list(_pending_tasks)
+            assert pending, "audit_emit should have scheduled a task"
+            await asyncio.gather(*pending)
             assert sink.count() == 1
         finally:
             reset_audit_logger()

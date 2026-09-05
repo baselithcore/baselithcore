@@ -241,8 +241,11 @@ await client.close()
     The constructor is `A2AClient(agent_card, config=None)` — retry/backoff
     settings live on `A2AClientConfig`, not as constructor kwargs. The only
     request method is `invoke(method, params=None, timeout=None)`; there is
-    no `request()` or `stream_request()`. Streaming (`message/stream`) is
-    declared in the protocol but not yet implemented server-side.
+    no `request()` or `stream_request()`. The **server** does serve
+    `message/stream` as SSE (see [Streaming](#streaming-messagestream)), but
+    `A2AClient` has no SSE consumer — read the `text/event-stream` response
+    with your own HTTP client, or call `A2AServer.dispatch_stream()` directly
+    when the peer is in-process.
 
 ### Request signing (HMAC)
 

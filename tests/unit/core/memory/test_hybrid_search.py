@@ -394,3 +394,20 @@ class TestSparseScoringEquivalence:
         assert [h.doc_id for h in hits] == ["rare"]
         # Exactly one document contains "needle"; nothing else may be scored.
         assert lengths_read == [idx._doc_ids.index("rare")]
+
+
+class TestUnicodeTokenization:
+    """The tokenizer canonicalizes before splitting: accented and non-Latin
+    text must index and match, not be silently truncated or dropped."""
+
+    def test_unaccented_query_matches_accented_document(self) -> None:
+        index = BM25Index()
+        index.index({"d1": "Perché la città è bella", "d2": "lazy dog naps"})
+        hits = index.search("perche citta")
+        assert [h.doc_id for h in hits] == ["d1"]
+
+    def test_cjk_text_is_indexed(self) -> None:
+        index = BM25Index()
+        index.index({"d1": "東京タワー", "d2": "lazy dog naps"})
+        hits = index.search("東京タワー")
+        assert [h.doc_id for h in hits] == ["d1"]

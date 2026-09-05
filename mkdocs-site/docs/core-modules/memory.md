@@ -198,6 +198,7 @@ core/memory/
 core/utils/
 ├── __init__.py        # Public exports
 ├── similarity.py      # Shared numpy-based cosine similarity
+├── text_canon.py      # canonicalize / canonical_key — Unicode canonicalization for keys
 └── tokens.py          # Token estimation (tiktoken + heuristic fallback)
 ```
 
@@ -278,9 +279,20 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
         limit: int = 5,
         memory_type: MemoryType | None = None,
         include_working: bool = True,
+        min_score: float | None = None,
     ) -> list[MemoryItem]: ...
 
     async def get_context_async(self, max_tokens: int = 2000) -> str: ...
+```
+
+`similarity_threshold` gates **every** tier of `recall`: working memory
+already filtered at it, and provider (long-term) hits are now held to the same
+bar — passed to `provider.search(min_score=...)` and re-checked on the
+returned scores, so a weak vector-store neighbour is not injected into the
+prompt as noise. `min_score` overrides the gate per call (`0.0` restores
+ungated recall).
+
+```python
 
     async def compress_old_memories(
         self,
@@ -577,8 +589,15 @@ await memory.compress_old_memories(days_threshold=7)
 
 `AgentMemory` is configured through constructor arguments
 (`similarity_threshold`, `short_term_limit`, `working_memory_limit`,
-`provider`, `embedder`, `context_folder`) — there are no dedicated
-`MEMORY_*` environment variables.
+`provider`, `graph_provider`, `embedder`, `context_folder`). The only
+dedicated `MEMORY_*` environment variables are the runtime knobs on
+`MemoryRuntimeConfig` (`core/config/memory.py`, env prefix `MEMORY_`, read via
+`get_memory_runtime_config()`):
+
+| Env var | Default | Purpose |
+| ------- | ------- | ------- |
+| `MEMORY_CONTEXT_FOLDING_ENABLED` | `false` | Wire a `ContextFolder` into every `AgentMemory` (older turns LLM-summarized instead of hard-truncated) — see [Proactive Context Folding](#proactive-context-folding-agentfold) |
+| `MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` | `2000` | Fold only when the assembled context exceeds this many characters; below it the verbatim fast-path runs with no LLM call |
 
 The optional [Supermemory](supermemory.md) layer is configured separately via
 `SUPERMEMORY_*` variables (see the [Configuration](config.md) page), and the
@@ -688,6 +707,18 @@ BM25 misses semantic neighbours. Fusing both catches both.
 Defaults: BM25 `k1=1.5`, `b=0.75`; RRF `k=60`; equal 0.5/0.5 weights.
 Tune per-domain (legal text favours BM25; general knowledge favours
 dense).
+
+### Tokenization
+
+Documents and queries are canonicalized before splitting
+(`core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded,
+whitespace collapsed) and then tokenized with a Unicode-aware `\w+`. The
+previous ASCII-only pattern truncated `"perché"` to `perch` and dropped CJK
+text entirely; now accented and non-Latin memories index as whole words and an
+unaccented query still matches an accented document. The same canonical form
+(plus punctuation removal, `canonical_key`) is the near-duplicate key used by
+memory-tier dedup and by the semantic cache's exact-match tier, so every
+text-keyed component agrees on what "the same text" means.
 
 ### Query cost
 

@@ -41,7 +41,11 @@ result.iterations        # LLM round-trips used
 - **Plain-Python tools** — pass sync or async callables; the JSON schema is
   inferred from type hints and the docstring (explicit
   `ToolDefinition`s are accepted too). The tool loop runs until the model
-  answers without tool calls, bounded by `max_iterations`.
+  answers without tool calls, bounded by `max_iterations`. Tool results
+  **accumulate across rounds** — every round's prompt carries the outputs of
+  all previous calls, not just the last one, so the model never re-requests
+  work it has already been given and multi-tool tasks converge instead of
+  running to the `max_iterations` cap.
 - **Streaming** — `agent.run_stream(prompt)` yields text chunks
   (text-only: `output_type`/tools are rejected on the stream path).
 - **The whole runtime underneath** — calls go through `LLMService`, so

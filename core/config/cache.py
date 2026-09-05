@@ -163,6 +163,24 @@ class SemanticCacheConfig(BaseSettings):
         description="Minimum similarity threshold (0.0-1.0)",
     )
 
+    fingerprint_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the word n-gram fingerprint lookup tier between the "
+            "exact-match key and the embedding similarity scan"
+        ),
+    )
+
+    fingerprint_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum Jaccard similarity of word n-gram fingerprints for a "
+            "fingerprint-tier hit (0.0-1.0)"
+        ),
+    )
+
 
 # Global instances
 _cache_config: CacheConfig | None = None

@@ -290,8 +290,16 @@ Bearer token and returns the user profile or an error dict.
 
 Higher-level helper over `CredentialsManager`:
 
-- `get_current_identity()` — loads the saved token and verifies it.
-- `sync_user_profile()` — verifies the token and caches the user profile.
+- `get_current_identity(auth_url=None)` — loads the saved token and verifies
+  it.
+- `login_with_github(github_token, hub_url=None)` — exchanges a GitHub token
+  (a PAT that can read the user's profile) for a marketplace JWT via the hub's
+  `/api/marketplace/plugins/auth/github/exchange` endpoint and persists the
+  JWT (plus the returned user profile) through `save_token`. The GitHub token
+  is used once for the exchange and never stored. Returns
+  `{"status": "success", "token", "user"}` or `{"status": "error", "message"}`.
+- `sync_user_profile(auth_url=None)` — verifies the token and caches the user
+  profile.
 
 ---
 
@@ -305,7 +313,7 @@ Marketplace URLs and cache behaviour come from `PluginConfig`
 | Official hub URL (publishing) | `OFFICIAL_MARKETPLACE_URL` (hardcoded source of truth) | `https://marketplace.baselithcore.xyz` |
 | Registry URL (discovery/install) | `MARKETPLACE_CENTRAL_URL`, `PLUGIN_REGISTRY_URL`, `REGISTRY_URL` | `…/api/marketplace/plugins/registry.json` |
 | Auth/IdP URL | `MARKETPLACE_AUTH_URL`, `PLUGIN_AUTH_URL`, `AUTH_URL` | `https://marketplace.baselithcore.xyz` |
-| Registry cache TTL (seconds) | — | `3600` |
+| Registry cache TTL (seconds) | `PLUGIN_REGISTRY_CACHE_TTL` | `3600` |
 | Plugins install directory | `PLUGIN_PLUGINS_PATH` | `plugins` |
 
 The registry/auth URLs may be overridden (e.g. for local mirrors), but the
@@ -323,8 +331,11 @@ publish endpoint always targets `OFFICIAL_MARKETPLACE_URL`.
     registries (on-prem/air-gapped) opt in via
     `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
 
-!!! tip "`MARKETPLACE_API_KEY`"
-    The `baselith plugin marketplace publish` command reads an API key from the
-    `--key` flag, the saved login credentials, or the `MARKETPLACE_API_KEY`
-    environment variable. It is consumed by the CLI publish flow rather than
-    being a field on `PluginConfig`.
+!!! tip "Publish credentials"
+    `baselith plugin marketplace publish` resolves its admin key in this
+    order: the `--key` flag, the `MARKETPLACE_API_KEY` environment variable
+    (handy in CI), then the credentials saved by `CredentialsManager`
+    (`load_api_key()` for a legacy admin key, `load_token()` for the login
+    JWT). The key is not a field on `PluginConfig`. Without any source the
+    command aborts and asks you to run `baselith plugin marketplace login` or
+    pass `--key`.

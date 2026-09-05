@@ -3,13 +3,15 @@ title: Plugin Packaging
 description: Package plugins for distribution
 ---
 
+<!-- markdownlint-disable-file MD046 -->
+
 **Plugin Packaging** is the process of preparing a plugin for distribution. A well-structured package ensures reliable installation, safe updates, and compatibility with different framework versions.
 
 !!! info "Why Package Plugins?"
     - **Distribution**: Share your plugin with other users
     - **Versioning**: Manage multiple versions systematically
-    - **Dependencies**: Declare and automatically manage dependencies
-    - **Validation**: Automatic structure and security verification
+    - **Dependencies**: Declare Python packages and plugin prerequisites in the manifest
+    - **Validation**: `baselith plugin validate` checks syntax, manifest, dependencies and environment before you publish
 
 ---
 
@@ -19,14 +21,15 @@ A plugin package requires a well-defined structure:
 
 ```text
 my-plugin-1.0.0/
+├── __init__.py          # Package marker (REQUIRED for marketplace publish)
 ├── plugin.py            # Entry point (REQUIRED)
-├── manifest.yaml        # Package metadata (REQUIRED)
-├── README.md            # Documentation (REQUIRED)
+├── manifest.yaml        # Package metadata (REQUIRED; .yml or .json also accepted)
+├── README.md            # Documentation (recommended)
 ├── CHANGELOG.md         # Version history (recommended)
 ├── agent.py             # Agent implementation (if agent plugin)
 ├── handlers.py          # Flow handlers (if applicable)
 ├── static/              # Frontend assets (if UI plugin)
-│   ├── components.js
+│   ├── main.js
 │   └── styles.css
 └── tests/               # Test suite (recommended)
     ├── __init__.py
@@ -36,16 +39,17 @@ my-plugin-1.0.0/
 
 ### Required Files
 
-| File            | Purpose                                | Validation                                  |
-| --------------- | -------------------------------------- | ------------------------------------------- |
-| `plugin.py`     | Entry point, Plugin class              | Must contain class inheriting from `Plugin` |
-| `manifest.yaml` | Version metadata, author, dependencies | Valid manifest schema                       |
-| `README.md`     | User documentation                     | Not empty                                   |
+| File            | Purpose                                | Validation                                                                                   |
+| --------------- | -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `plugin.py`     | Entry point, Plugin class              | Must contain a class extending `Plugin`, `AgentPlugin`, `RouterPlugin` or `GraphPlugin`      |
+| `manifest.yaml` | Identity, metadata, dependencies       | `name`, `version` and `description` present; parses as YAML (or JSON for `manifest.json`)   |
+| `__init__.py`   | Makes the plugin importable as a package | Required by the marketplace `PluginValidator` when publishing                              |
 
 ### Recommended Files
 
 | File               | Purpose             | Benefit                         |
 | ------------------ | ------------------- | ------------------------------- |
+| `README.md`        | User documentation  | Shown by `baselith plugin info` when present |
 | `CHANGELOG.md`     | Change history      | Users understand what changed   |
 | `tests/`           | Test suite          | Increases confidence and rating |
 | `python_dependencies` in `manifest.yaml` | Runtime dependencies | Declarative plugin installation |
@@ -67,11 +71,12 @@ tags:
   - utility
   - helper
 category: utility
+min_core_version: 0.29.0
 python_dependencies:
   - httpx>=0.25,<1.0
   - pydantic>=2.0
 plugin_dependencies:
-  core-utilities: ^1.0
+  core-utilities: ^1.0.0
 required_resources:
   - llm
 optional_resources:
@@ -87,16 +92,21 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin s
 | ----------------------- | -------- | ------------------------------------------------ |
 | `name`                  | ✅        | Unique plugin name (lowercase, hyphen-separated) |
 | `version`               | ✅        | SemVer version (e.g., "1.0.0")                   |
-| `description`           | ✅        | Brief description (max 200 characters)           |
-| `author`                | ✅        | Author name or organization                      |
-| `license`               | ✅        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
-| `min_core_version`      | ❌        | Minimum BaselithCore version (PEP 440)           |
-| `python_dependencies`   | ❌        | Pip-style package requirements                   |
-| `plugin_dependencies`   | ❌        | Required plugins with version constraints        |
+| `description`           | ✅        | Brief description                                |
+| `author`                | ❌        | Author name or organization                      |
+| `license`               | ❌        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
+| `min_core_version`      | ❌        | Minimum BaselithCore version — full SemVer `MAJOR.MINOR.PATCH` (e.g. `0.29.0`) |
+| `max_core_version`      | ❌        | Maximum BaselithCore version, same format        |
+| `python_dependencies`   | ❌        | Pip-style (PEP 440) package requirements         |
+| `plugin_dependencies`   | ❌        | Mapping of plugin name → version constraint      |
+| `dependencies`          | ❌        | Legacy list of required plugin **names**; prefer `plugin_dependencies` |
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
 | `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs — see [What is hashed](#integrity) for the exact surface. The manifest itself is **excluded**, so the publisher can inject this field after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+
+The class in `plugin.py` carries no identity of its own: `name`, `version` and every other
+field are read from the manifest next to it (`core/plugins/_metadata.py`).
 
 ### Dependencies
 
@@ -108,9 +118,24 @@ python_dependencies:
   - pydantic>=2.0
   - numpy~=1.24.0
 plugin_dependencies:
-  base-plugin: ^1.0
+  base-plugin: ^1.0.0
   helper-plugin: ~1.2.3
 ```
+
+Two different grammars apply:
+
+- `python_dependencies` entries are standard pip requirement strings (PEP 440):
+  bounded ranges (`>=1.0,<2.0`) and compatible-release specifiers (`~=1.24`) are fine.
+- `min_core_version`, `max_core_version` and every `plugin_dependencies` constraint are
+  parsed by `core/plugins/version.py`: a **full** `MAJOR.MINOR.PATCH` version with at most
+  one operator — `==`, `!=`, `>`, `>=`, `<`, `<=`, `^` (same major) or `~` (same
+  major.minor). `^1.0` or `>=1.0,<2.0` are rejected as invalid versions.
+
+!!! note "Warn-only by default"
+    Core-version bounds and `plugin_dependencies` are checked when the plugin loads
+    (`core/plugins/load_gates.py`). Problems are logged as warnings and the plugin still
+    loads unless `BASELITH_ENFORCE_PLUGIN_COMPAT=true` is set, in which case an
+    incompatible plugin is skipped.
 
 ---
 
@@ -205,58 +230,71 @@ changed — a UI-only or asset-only change still needs the manual run.
 
 ## Validation
 
-Before packaging, you can validate the plugin separately:
+`baselith plugin validate` takes the plugin **name** and looks for it under `./plugins/`
+in the current working directory — not a path:
 
 ```bash
-baselith plugin validate plugins/my-plugin/
+# Validates ./plugins/my-plugin
+baselith plugin validate my-plugin
+
+# Machine-readable report (exit code 1 when any check fails)
+baselith plugin validate my-plugin --format json
 ```
+
+The entry point may be `plugin.py` or, for a disabled plugin, `plugin.disabled`.
 
 ### Validation Checks
 
-1. **Structure**: Required files present
-2. **Manifest**: Valid JSON, required fields
-3. **Python Syntax**: Code syntactically correct
-4. **Imports**: No dangerous imports
-5. **Security**: No potentially harmful patterns
-6. **Dependencies**: Compatible with framework
+The report has one row per check (`core/cli/commands/plugin/local_validate.py`):
+
+1. **Python Syntax**: `plugin.py` parses (AST) without errors
+2. **Plugin Class**: a class whose bases include `Plugin`, `AgentPlugin`, `RouterPlugin` or `GraphPlugin` by name
+3. **Manifest Parse / Schema**: `manifest.yaml|yml|json` loads and declares `name`, `version`, `description`
+4. **Env Variables**: every entry of `environment_variables` is set in the validating shell
+5. **Python Deps**: every `python_dependencies` distribution is installed (presence only — the version specifier is not evaluated)
+6. **Plugin Deps**: every `plugin_dependencies` name exists as a directory under `plugins/`
+
+Checks 4–6 only run when the corresponding manifest key is non-empty. The validator does
+not import the plugin and performs no security or import scan.
 
 ### Fixing Common Errors
 
-**Error: "Invalid manifest.yaml"**
+**"Manifest Parse" failed**
 
 ```bash
-# Validate YAML
-python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('plugins/my-plugin/manifest.yaml').read_text())"
+# From inside the plugin directory: surface the YAML error
+python -c "import yaml; yaml.safe_load(open('manifest.yaml'))"
 ```
 
-**Error: "Missing required field: version"**
+**"Manifest Schema — Missing: version"**
 
-```json
-// Add missing field
-{
-  "name": "my-plugin",
-  "version": "1.0.0",  // <- Add this
-  ...
-}
+```yaml
+# Add the missing field
+name: my-plugin
+version: 1.0.0   # <- Add this
+description: Brief description
 ```
 
-**Error: "Dangerous import: subprocess"**
+**"Plugin Class — No class extending Plugin, AgentPlugin, RouterPlugin, GraphPlugin"**
 
-```python
-# ❌ Don't use
-import subprocess
-result = subprocess.run(cmd)
+The check matches base-class **names** in the source, so `class MyPlugin(Plugin)` and
+`class MyPlugin(core.plugins.Plugin)` both pass; an aliased import (`from core.plugins
+import Plugin as Base`) does not.
 
-# ✅ Use safe alternatives
-from core.utils import safe_shell_command
-result = await safe...shell_command(cmd, allowed_commands=["ls", "cat"])
-```
+**"Python Deps — Missing: httpx>=0.25,<1.0"**
+
+Install the package into the environment you validate from; the check asks
+`importlib.metadata` whether the distribution is present.
+
+**"Plugin Deps — Missing: base-plugin"**
+
+The named plugin must exist as `plugins/base-plugin/` next to yours.
 
 ---
 
 ## CI/CD Integration
 
-Automate packaging and publishing with CI/CD.
+Automate validation, signing and publishing with CI/CD.
 
 ### Authenticating a non-interactive pipeline
 
@@ -287,6 +325,12 @@ the PAT's own lifetime stays under your control. See
     below. Keep the raw GitHub Actions recipe if you need a fully
     air-gapped, Backstage-less release path.
 
+!!! note "Layout the CLI expects"
+    `baselith plugin validate` addresses the plugin by **name** under `./plugins/`, while
+    `sign` and `marketplace publish` take a **path**. The pipelines below therefore check
+    the plugin repository out as `plugins/my-plugin` inside the job workspace and install
+    the framework from PyPI to get the `baselith` CLI.
+
 ### GitHub Actions
 
 ```yaml title=".github/workflows/publish.yml"
@@ -302,29 +346,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: plugins/my-plugin
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - name: Install BaselithCore CLI
+        run: pip install baselith-core
 
       - name: Validate plugin
-        run: baselith plugin validate .
+        run: baselith plugin validate my-plugin
 
       - name: Run tests
-        run: pytest tests/
+        run: pytest plugins/my-plugin/tests
 
       - name: Sign plugin (write integrity_sha256)
-        run: baselith plugin sign .
+        run: baselith plugin sign plugins/my-plugin
 
       - name: Publish to marketplace
         env:
           MARKETPLACE_API_KEY: ${{ secrets.MARKETPLACE_API_KEY }}
         run: |
-          baselith plugin marketplace publish .
+          baselith plugin marketplace publish plugins/my-plugin
 ```
 
 ### GitLab CI
@@ -336,10 +382,16 @@ stages:
   - sign
   - publish
 
+default:
+  before_script:
+    - pip install baselith-core
+    # validate needs the plugin under ./plugins/<name>
+    - mkdir -p /tmp/ws/plugins && cp -r "$CI_PROJECT_DIR" /tmp/ws/plugins/my-plugin
+
 validate:
   stage: validate
   script:
-    - baselith plugin validate .
+    - cd /tmp/ws && baselith plugin validate my-plugin
 
 test:
   stage: test
@@ -384,16 +436,16 @@ Before publishing, verify:
 
 ### Metadata
 
-- [ ] `manifest.json` valid
+- [ ] `manifest.yaml` (or `manifest.json`) passes `baselith plugin validate`
 - [ ] Version incremented (SemVer)
 - [ ] Dependencies updated
-- [ ] `min_framework_version` correct
+- [ ] `min_core_version` correct (full `MAJOR.MINOR.PATCH`, not above the release you tested on)
 
 ### Security
 
 - [ ] No hardcoded secrets
-- [ ] No dangerous imports
 - [ ] Input validation on all endpoints
+- [ ] `integrity_sha256` refreshed with `baselith plugin sign`
 
 ---
 
@@ -401,54 +453,48 @@ Before publishing, verify:
 
 ### "Package too large"
 
-**Problem**: Package exceeds size limit.
+**Problem**: The archive built by `baselith plugin marketplace publish` is bigger than
+expected.
 
-**Solution**: Exclude unnecessary files:
-
-```json title="manifest.json"
-{
-  "exclude": [
-    "tests/",
-    "docs/",
-    "*.pyc",
-    "__pycache__/",
-    ".git/"
-  ]
-}
-```
+**Solution**: There is no `exclude` key in the manifest. The publisher zips the plugin
+directory itself and already skips dotfiles and dot-directories (`.git/`, `.env`, …),
+`__pycache__`, `node_modules`, `.ruff_cache`, `.mypy_cache`, `.pytest_cache`, `.state`,
+`build`, `dist` (except `ui/dist`), `*.egg-info`, `ui/src/`, and `*.pyc`/`*.pyo`. Anything
+else that should not ship — fixtures, sample data, local docs builds — must be removed
+from the tree or moved under one of those directories before publishing.
 
 ### "Dependency conflict"
 
-**Problem**: Two dependencies require incompatible versions.
+**Problem**: Two Python dependencies require incompatible versions.
 
-**Solution**: Use more flexible version ranges:
+**Solution**: Use more flexible version ranges in `python_dependencies` (a list of pip
+requirement strings — not a nested `dependencies.python` object):
 
-```json
-{
-  "dependencies": {
-    "python": [
-      "packageA>=1.0,<3.0",    // Wider range
-      "packageB>=2.0"
-    ]
-  }
-}
+```yaml
+python_dependencies:
+  - packageA>=1.0,<3.0   # Wider range
+  - packageB>=2.0
 ```
+
+Do not put Python packages in `dependencies`: that key is a legacy list of **plugin
+names**, and each entry is reported as an unmet plugin dependency.
 
 ### "Validation failed: missing entry point"
 
 **Problem**: `plugin.py` doesn't contain a valid Plugin class.
 
-**Solution**: Ensure `plugin.py` contains:
+**Solution**: Ensure `plugin.py` contains a class extending one of the framework bases:
 
 ```python
 from core.plugins import Plugin
 
+
 class MyPlugin(Plugin):
     """Main plugin class."""
-
-    name = "my-plugin"
-    version = "1.0.0"
 ```
+
+Identity is not declared on the class — `name`, `version` and the rest come from the
+manifest in the same directory, which must exist or the plugin fails to load.
 
 ---
 

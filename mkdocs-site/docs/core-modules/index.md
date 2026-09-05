@@ -35,6 +35,9 @@ description: Core modules of the BaselithCore Framework
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |
 | **Lifecycle Management**  | App and agent lifecycle coordination                             | [`core/lifecycle/`](lifecycle.md)                |
 | **Real-time PubSub**      | Event-driven communication via Redis                             | [`core/realtime/`](realtime.md)                  |
+| **Security & Encryption** | Field encryption at rest, pluggable secret resolution, unified SSRF guard | [`core/security/`](security.md)         |
+| **Feature Flags**         | Runtime feature flags with percentage rollout and a pluggable backend | [`core/feature_flags/`](feature-flags.md)   |
+| **Multi-Tenancy**         | Cross-tenant access guards and per-tenant encryption at rest     | [`core/tenancy/`](../advanced/multi-tenancy.md)  |
 | **Utilities**             | Shared cosine similarity (numpy), token estimation (tiktoken), and the stdlib-only [runtime-environment resolver](config.md#runtime-environment) every fail-closed control reads | `core/utils/`                                    |
 
 ### Orchestration & Execution
@@ -42,10 +45,13 @@ description: Core modules of the BaselithCore Framework
 | Module             | Description                                                          | Path                                        |
 | ------------------ | -------------------------------------------------------------------- | ------------------------------------------- |
 | **Orchestration**  | Intent classification, flow routing, RAG workflow handler            | [`core/orchestration/`](orchestration.md)   |
-| **Prioritization** | Priority resolution logic for orchestration and flow routing         | [`core/prioritization/`](prioritization.md) |
+| **Prioritization** | Weighted task scoring, dependency graph and priority queue           | [`core/prioritization/`](prioritization.md) |
 | **Workflows**      | Workflow builder, safe expression executor, plan-to-workflow adapter | [`core/workflows/`](workflows.md)           |
 | **Planning**       | Goal decomposition, dependency-aware step plans, budget constraints  | [`core/planning/`](planning.md)             |
 | **Plugin System**  | Plugin discovery and lifecycle                                       | [`core/plugins/`](plugins.md)               |
+| **Declarative Skills** | Versioned `SKILL.md` catalog surfaced with progressive disclosure | [`core/plugins/declarative.py`](skills.md) |
+| **Agent API**      | Typed one-import `Agent`: Pydantic-validated output, plain-Python tools, automatic retry | [`core/agent/`](agent.md) |
+| **Loop Engineering** | Verifier-owned iteration, futility detection, lesson compaction and escalation | [`core/loops/`](loops.md)      |
 | **Task Queue**     | Distributed task scheduling with RQ                                  | [`core/task_queue/`](task-queue.md)         |
 | **Chat & RAG**     | RAG-enabled chat workflows and historical context management         | [`core/chat/`](chat.md)                     |
 | **Prompt Registry** | Versioned prompt templates with labels, A/B selection, and tracing  | [`core/prompts/`](prompts.md)               |
@@ -58,7 +64,8 @@ description: Core modules of the BaselithCore Framework
 | **Hierarchical Memory** | Efficient STM/MTM/LTM context management        | [`core/memory/hierarchy.py`](hierarchical-memory.md) |
 | **Knowledge Graph**     | L2 Structured entity relationships via FalkorDB | [`core/graph/`](graph.md)                            |
 | **Services**            | LLM, VectorStore, Vision, Indexing, HITL        | [`core/services/`](services.md)                      |
-| **Storage Layer**       | Persistent volume and blob storage              | [`core/storage/`](storage.md)                        |
+| **Storage Layer**       | Typed Interaction/Feedback repositories with a PostgreSQL backend | [`core/storage/`](storage.md)      |
+| **Supermemory**         | Cloud-native `MemoryProvider` with fact extraction, user profiles and hybrid search | [`core/memory/supermemory_provider.py`](supermemory.md) |
 | **Database Layer**      | Relational database abstractions                | [`core/db/`](db.md)                                  |
 
 ### Agentic Intelligence & Reasoning
@@ -104,6 +111,7 @@ These capabilities are part of the framework ecosystem, but their canonical impl
 | **Learning Loop**     | Continuous learning and evolutionary improvement of prompts | [`core/learning/`](learning.md)         |
 | **Optimization Loop** | Feedback-driven automated prompt tuning                     | [`core/optimization/`](optimization.md) |
 | **Auto Fine-Tuning**  | Automatic fine-tuning based on feedback and experiences     | [`core/finetuning/`](finetuning.md)     |
+| **Skill Evolution**   | Pattern store, compiled declarative skills, validation gate with rollback | [`core/skill_evolution/`](skill-evolution.md) |
 
 ### Social & Integration
 
@@ -159,7 +167,6 @@ graph TD
         Docs[Document Sources]
         Routers[API Routers]
         Goals[Goals]
-        Marketplace[Marketplace]
     end
 ```
 

@@ -22,30 +22,33 @@ The system is designed for high-concurrency event delivery, allowing the fronten
 
 ## Publishing Events
 
-Use the `PubSubManager` to broadcast events to the system.
+Use the `PubSubManager` to broadcast events to the system. Every event is a
+[`RealtimeEvent`](#event-model-realtimeevent-eventtype) whose `type` is an
+`EventType` member.
 
 ```python
-from core.realtime.pubsub import PubSubManager
-from core.realtime.events import RealtimeEvent
+from core.realtime import EventType, PubSubManager, RealtimeEvent
 
 pubsub = PubSubManager(redis_url="redis://localhost:6379")
 
-# Broadcast a global alert
+# Announce a background job on the global channel
 await pubsub.publish(
     channel="global",
     event=RealtimeEvent(
-        type="system_alert",
-        data={"message": "System maintainance in 10 minutes"}
-    )
+        type=EventType.JOB_STARTED,
+        job_id="job-123",
+        payload={"type": "indexing", "incremental": True},
+    ),
 )
 
-# Send an update for a specific session
+# Free-form message for one session
 await pubsub.publish(
     channel="session-123",
     event=RealtimeEvent(
-        type="agent_typing",
-        data={"agent": "researcher"}
-    )
+        type=EventType.GENERIC_MESSAGE,
+        payload={"agent": "researcher", "text": "typing"},
+        channel="session-123",
+    ),
 )
 ```
 
@@ -96,9 +99,14 @@ The system allows async consumers to listen to multiple channels simultaneously.
 
 ```python
 async for message in pubsub.subscribe(["session-123", "alerts"]):
-    # message format: {"event": str, "data": str}
+    # message format: {"event": <EventType value>, "data": <RealtimeEvent JSON string>}
     print(f"Received {message['event']}: {message['data']}")
 ```
+
+`subscribe()` always adds `global` to the channel list, so a consumer sees
+global broadcasts alongside its own channels. Redis channel names carry the
+`events:` prefix (`events:global`, `events:session-123`); pass the bare name
+to both `publish()` and `subscribe()`.
 
 ---
 
@@ -119,17 +127,31 @@ sequenceDiagram
 
 ---
 
-## Common Event Types
+## Event model (`RealtimeEvent`, `EventType`)
 
-The framework uses the following standard event types:
+`RealtimeEvent` (`core/realtime/events.py`, re-exported from `core.realtime`)
+is the pydantic model every publisher sends; `publish()` serialises it with
+`model_dump_json()`, so anything in `payload` must be JSON-serialisable.
 
-| Type             | Description                                |
-| ---------------- | ------------------------------------------ |
-| `agent_status`   | Lifecycle changes (thinking, responding)   |
-| `task_progress`  | Updates on background job completion       |
-| `chat_message`   | New messages in a session                  |
-| `system_metric`  | Real-time CPU/Memory/Cost updates          |
-| `security_audit` | Alerts from guardrails or adversarial test |
+| Field     | Type             | Default    | Purpose                                                                                                   |
+| --------- | ---------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `type`    | `EventType`      | required   | Event category (the wire-value string, e.g. `"job_started"`, is coerced too)                              |
+| `job_id`  | `str \| None`    | `None`     | Tracking id for job events                                                                                |
+| `payload` | `dict[str, Any]` | `{}`       | Event detail                                                                                              |
+| `channel` | `str`            | `"global"` | Informational label carried inside the JSON; the Redis channel is the `channel` argument of `publish()`   |
+
+`event.to_sse_dict()` returns `{"event": type.value, "data": model_dump_json()}`
+— the same shape `subscribe()` yields.
+
+`EventType` is a `str` enum with five members:
+
+| Member            | Wire value      | Emitted by                                                                                        |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------- |
+| `JOB_STARTED`     | `job_started`   | The indexing job (`core/task_queue/jobs/indexing.py`) when a run begins — `payload={"type": "indexing", "incremental": …}` |
+| `JOB_PROGRESS`    | `job_progress`  | No core producer today; use it for incremental updates from your own jobs                         |
+| `JOB_COMPLETED`   | `job_completed` | The indexing job — `payload={"processed_docs": n}`                                                |
+| `JOB_FAILED`      | `job_failed`    | The indexing job — `payload={"error": str}` before the exception is re-raised                     |
+| `GENERIC_MESSAGE` | `message`       | Free-form notifications                                                                           |
 
 ---
 

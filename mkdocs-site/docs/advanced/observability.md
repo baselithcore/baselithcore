@@ -111,7 +111,7 @@ async def my_operation(data: dict):
 
 When you open the Jaeger UI (`http://localhost:16686`), you will see:
 
-1. **Service Dropdown**: Select the service (e.g., `backend`, `my-plugin`)
+1. **Service Dropdown**: Select the service — BaselithCore registers as `baselith-core` (the `service_name` the lifespan passes to `setup_telemetry()`)
 2. **Operation Dropdown**: Filter by specific operation
 3. **Timeline View**: Visualize the duration of each span
 
@@ -550,7 +550,7 @@ uvicorn backend:app --log-config log_config.yaml
 ```
 
 !!! note "CLI Synchronization"
-    The `baselith run` command uses the internal `get_log_config()` helper which is synchronized with your `.env` settings (`LOG_LEVEL` and `LOG_FORMAT`). `log_config.yaml` is reserved for manual overrides or complex custom deployments.
+    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
 
 ---
 
@@ -591,33 +591,35 @@ Recording rules expose the SLIs (`slo:http_error_ratio:rate5m/30m/1h/6h`,
 
 Validate after edits with `promtool check rules deploy/prometheus/slo-rules.yml`.
 
-Example rules provided:
+The shipped rules (`deploy/prometheus/alert-rules.yml`, group
+`baselith-core-alerts`):
 
-```yaml title="prometheus/alerts.yml"
+| Alert | Condition | For | Severity |
+|---|---|---|---|
+| `HighErrorRate` | 5xx share of `http_requests_total` > 5% | 2m | critical |
+| `HighApiLatency` | p95 of `http_request_duration_seconds` > 2s | 2m | warning |
+| `HighCpuUsage` | `process_cpu_seconds_total` rate > 80% | 5m | warning |
+| `HighMemoryUsage` | resident / virtual memory > 85% | 5m | warning |
+
+```yaml title="deploy/prometheus/alert-rules.yml (excerpt)"
 groups:
-  - name: baselith_core
+  - name: baselith-core-alerts
     rules:
-      # Alert if error rate exceeds 5%
       - alert: HighErrorRate
-        expr: |
-          sum(rate(http_requests_total{status=~"5.."}[5m]))
-          / sum(rate(http_requests_total[5m])) > 0.05
-        for: 5m
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "High error rate detected"
-          description: "Error rate is {{ $value | humanizePercentage }}"
+          summary: "High HTTP error rate on {{ $labels.instance }}"
 
-      # Alert if p95 latency exceeds 2 seconds
-      - alert: HighLatency
-        expr: |
-          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
-        for: 5m
+      - alert: HighApiLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "High latency detected"
+          summary: "High API Latency on {{ $labels.instance }}"
 ```
 
 ### Notification Integration
@@ -714,7 +716,7 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
     Avoid high cardinality labels (e.g., user_id in every metric). Use labels like `status`, `endpoint`, `method`.
 
 !!! warning "Log Verbosity"
-    In production use `LOG_LEVEL=WARNING` to reduce log volume. Tracing captures details anyway.
+    In production use `LOG_LEVEL_CONSOLE=WARNING` (and `LOG_LEVEL_FILE` to match) to reduce log volume. Tracing captures details anyway.
 
 !!! tip "Correlation IDs"
     Always propagate `request_id` and `trace_id` to correlate logs, metrics, and traces of the same request.

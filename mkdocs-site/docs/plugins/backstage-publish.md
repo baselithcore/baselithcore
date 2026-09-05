@@ -1,5 +1,7 @@
 # Publishing plugins via Backstage
 
+<!-- docs-consistency: skip routes -->
+
 Modern publishing workflow that submits a plugin **directly to the
 marketplace hub** (`marketplace.baselithcore.xyz`) via the Backstage
 Scaffolder. Supersedes the manual `git init` / `baselith plugin
@@ -19,7 +21,7 @@ and [`marketplace.md`](./marketplace.md).
 
 | Manual flow                                                       | Backstage flow                                                   |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Extract + `git init` + `git tag` + `baselith marketplace publish` | Form submit → `POST /api/backstage/publish` → marketplace hub    |
+| Extract + `git init` + `git tag` + `baselith plugin marketplace publish` | Form submit → `POST /api/backstage/publish` → marketplace hub |
 | Hand-edit `manifest.yaml` with `id`, `entry_point`, `repository`  | `fetch:template` renders overlay                                 |
 | Write `LICENSE`, `requirements.txt`                               | Skeleton ships them                                              |
 | Manually track release artifacts                                  | Marketplace hub records PENDING → LIVE; catalog registers mirror |
@@ -27,7 +29,7 @@ and [`marketplace.md`](./marketplace.md).
 
 ## Template assets
 
-All assets live under [`templates/backstage/`](../../templates/backstage/):
+All assets live under [`templates/backstage/`](https://github.com/baselithcore/baselithcore/tree/main/templates/backstage):
 
 | File                                                         | Purpose                                                  |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
@@ -61,7 +63,7 @@ catalog:
 
 1. **Plugin source** — slug, monorepo URL, `sourcePath` (e.g. `plugins/baselithbot`).
 2. **Release metadata** — version, license, entry point, author, readiness.
-3. **Marketplace submission (required)** — hub URL + framework host serving `/api/backstage/publish`. **Auth is the signed-in user's GitHub identity** — the Scaffolder forwards `${{ secrets.USER_OAUTH_TOKEN }}` so no static marketplace token is required.
+3. **Marketplace submission (required)** — the form asks for a hub URL (`marketplaceUrl`) and the framework host serving `/api/backstage/publish`. The hub URL is forwarded as `registry_url` and **ignored by the framework**: both the GitHub-token exchange and the submission always target the framework's `OFFICIAL_MARKETPLACE_URL`. **Auth is the signed-in user's GitHub identity** — the Scaffolder forwards `${{ secrets.USER_OAUTH_TOKEN }}` so no static marketplace token is required.
 4. **Mirror to GitHub (optional)** — enable only if you want a dedicated repo + CI workflow alongside the marketplace listing.
 
 ## Execution pipeline
@@ -69,9 +71,10 @@ catalog:
 1. `fetch:plain` pulls the plugin dir into the Scaffolder workspace.
 2. `fetch:template` renders the publish-skeleton overlay on top.
 3. **`http:backstage:request` → `POST /api/backstage/publish`** — framework
-   zips + submits the bundle to `{marketplaceUrl}/api/marketplace/plugins/submit`.
-   This is the canonical submission path (wraps
-   `core.marketplace.publisher.PluginPublisher.publish`).
+   zips + submits the bundle to
+   `{OFFICIAL_MARKETPLACE_URL}/api/marketplace/plugins/submit`; the
+   `registry_url` in the request body is ignored. This is the canonical
+   submission path (wraps `core.marketplace.publisher.PluginPublisher.publish`).
 4. *(optional)* `publish:github` mirrors the scaffolded bundle to a
    dedicated repo (only when `mirrorToGithub=true`).
 5. *(optional)* `catalog:register` registers the mirror in the Backstage
@@ -111,8 +114,14 @@ integrations:
 Required configuration on the framework host:
 
 ```bash
-# Drives exchange target for /api/backstage/publish.
-BASELITHCORE_OFFICIAL_MARKETPLACE_URL=https://marketplace.baselithcore.xyz
+# Hub used for both the GitHub-token exchange and the submission
+# (PluginConfig.OFFICIAL_MARKETPLACE_URL, env prefix PLUGIN_).
+# Default: https://marketplace.baselithcore.xyz
+PLUGIN_OFFICIAL_MARKETPLACE_URL=https://marketplace.baselithcore.xyz
+
+# Required: /api/backstage/publish is disabled (403) until this points at
+# the Scaffolder workspace mount; plugin_path must resolve inside it.
+PLUGIN_PUBLISH_WORKSPACE_ROOT=/path/to/scaffolder/workspace
 ```
 
 Required configuration on the marketplace hub:
@@ -138,7 +147,9 @@ the GitHub flow.
    - `version`: `1.0.0`
    - `license`: `MIT`
    - `entryPoint`: `plugin:BaselithbotPlugin`
-   - `marketplaceUrl`: `https://marketplace.baselithcore.xyz`
+   - `marketplaceUrl`: `https://marketplace.baselithcore.xyz` (required by
+     the form, but ignored by the framework — the submission always goes to
+     `PLUGIN_OFFICIAL_MARKETPLACE_URL`)
 3. Ensure you are signed in to Backstage with GitHub — the Scaffolder forwards
    your GitHub OAuth token to the framework. No explicit token secret.
 4. Click **Create**. The Scaffolder pipeline runs end-to-end:
@@ -170,8 +181,8 @@ baselith plugin marketplace publish .
 ```
 
 The `publish` command always targets the official marketplace hub; the
-target URL is fixed in the framework config (`OFFICIAL_MARKETPLACE_URL`),
-not passed on the command line.
+target URL is fixed in the framework config (`OFFICIAL_MARKETPLACE_URL`,
+env `PLUGIN_OFFICIAL_MARKETPLACE_URL`), not passed on the command line.
 
 The Scaffolder-driven flow is the preferred path, but the CLI remains a
 supported escape hatch documented in [`marketplace.md`](./marketplace.md).

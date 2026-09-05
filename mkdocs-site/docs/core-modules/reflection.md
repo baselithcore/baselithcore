@@ -30,9 +30,11 @@ core/reflection/
 └── protocols.py      # SelfEvaluator / Refiner protocols, EvaluationResult
 ```
 
-The reflection types (`EvaluationResult`, `QualityLevel`, the `Evaluator` protocol, and
-`BaseLLMEvaluator`) are defined in `core/evaluation/` and re-exported through
-`core.reflection.protocols`.
+The reflection types (`EvaluationResult`, `QualityLevel`, and the `Evaluator`
+protocol — aliased as `SelfEvaluator`) are defined in `core/evaluation/` and
+re-exported through `core.reflection.protocols`, which also defines `Refiner`.
+`BaseLLMEvaluator` is **not** re-exported there: import it from
+`core.evaluation.base` (or the `core.evaluation` package root).
 
 ---
 
@@ -91,7 +93,23 @@ print(result.aspects)      # {"relevance": ..., "accuracy": ..., ...}
 
 To add custom evaluation logic, implement the `SelfEvaluator` protocol (an
 `async evaluate(response, query, context)` returning an `EvaluationResult`) — or
-subclass `BaseLLMEvaluator` and override `get_prompt` / `_parse_response`.
+subclass `BaseLLMEvaluator`, implement the abstract
+`get_prompt(query, response, context)`, and optionally override
+`_parse_result(text) -> dict` to change how the judge's JSON reply is parsed
+(it must yield `score`, `feedback`, `should_refine` and optional `aspects`):
+
+```python
+from core.evaluation.base import BaseLLMEvaluator
+
+
+class ToneEvaluator(BaseLLMEvaluator):
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
+        return (
+            "Rate the tone of this answer from 0.0 to 1.0 and reply as JSON "
+            '{"score": ..., "feedback": ..., "should_refine": ...}.\n'
+            f"Question: {query}\nAnswer: {response}"
+        )
+```
 
 ### `EvaluationResult` fields
 

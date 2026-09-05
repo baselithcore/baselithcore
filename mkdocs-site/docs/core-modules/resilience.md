@@ -447,7 +447,7 @@ config = get_resilience_config()
 
 # Circuit Breaker
 print(config.cb_fail_max)             # 5
-print(config.cb_reset_timeout)        # 60.0
+print(config.cb_reset_timeout)        # 60
 
 # Rate Limiter (API level)
 print(config.api_rate_limit)          # 100
@@ -490,25 +490,25 @@ RESILIENCE_BULKHEAD_MAX_CONCURRENT=10
 
 BaselithCore uses these resilience patterns natively in its core providers to ensure production stability:
 
-- **LLM Providers**: OpenAI and Anthropic providers are protected by automatic retries and circuit breakers to handle API downtime and rate limits.
-- **VectorStore**: Qdrant operations use circuit breakers and retries to maintain search availability.
-- **Database**: Core DAOs for tenants, feedback, and documents implement retry logic with exponential backoff for relational persistence.
+- **LLM Providers**: the OpenAI, Anthropic and Gemini providers wrap each call in a named circuit breaker (`get_circuit_breaker("openai_provider")`, `"anthropic_provider"`, `"gemini_provider"`); `LLMService._generate_with_retry` and the structured-output path add `@retry` on top, and the fallback runtime skips any provider whose breaker is `OPEN`.
+- **VectorStore**: the Qdrant provider stacks `@get_circuit_breaker("vectorstore")` with `@retry(max_attempts=3, exponential_base=2.0)` on its operations.
+- **Database**: the feedback and documents DAOs (`core/db/feedback.py`, `core/db/documents.py`) and `TenantService` (`core/services/tenant/service.py`) wrap their queries in `@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)`.
 
 ---
 
 ## Metrics and Monitoring
 
-Patterns export metrics for Prometheus:
-
-```python
-# Exposed metrics
-circuit_breaker_state{name="llm"}  # 0=closed, 1=open, 2=half_open
-circuit_breaker_failures_total{name="llm"}
-rate_limiter_rejected_total{name="api"}
-bulkhead_active{name="compute"}
-bulkhead_queue_size{name="compute"}
-retry_attempts_total{name="external"}
-```
+`core/resilience` registers **no Prometheus metrics** of its own, and none of
+the `mas_*` series in `core/observability/metrics.py` describe breakers,
+retries, rate limiters or bulkheads. Circuit-breaker state is exposed
+programmatically instead: `CircuitBreaker.get_stats()` for one breaker
+(`name`, `state`, `failures`, `total_failures`, `successes`, `fail_max`,
+`reset_timeout`) and `all_circuit_breaker_stats()` for every registered breaker
+— see [Monitoring](#monitoring). The LLM fallback runtime reads
+`breaker.state` directly to skip providers whose circuit is `OPEN`. To chart
+breaker state, poll `all_circuit_breaker_stats()` from your own exporter, the
+way the [Task Queue page](task-queue.md#prometheus-example) does for queue
+depth.
 
 ---
 

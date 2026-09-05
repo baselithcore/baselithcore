@@ -25,7 +25,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.11.1  •  https://baselithcore.xyz
+  Multi-Agent, Plugin-First Framework  •  v0.30.0  •  https://baselithcore.xyz
 
 ╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
 │                                                                                                        │
@@ -155,7 +155,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.11.1     ││   Name       app      │
+│   Version   0.30.0     ││   Name       app      │
 │   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -202,8 +202,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.11.1  │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ -- Disabled  │ test-feature   │ 0.11.1  │ Agent  │ beta      │  WARN  │ Agent           │
+│ ✅ Active    │ auth           │ 0.29.0  │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ -- Disabled  │ test-feature   │ 0.29.0  │ Agent  │ beta      │  WARN  │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned   WARN = mismatch   — = not in plugins.yaml
@@ -356,11 +356,11 @@ baselith --format json plugin tree
 
 ```text
   Baselith Plugin Ecosystem
-├── ✅ auth v0.11.1  [security, core]
-├──  langchain v0.11.1
-├── ✅ rag v0.11.1  [ai, retrieval]
-│   ├── ✅ auth v0.11.1
-│   └──  langchain v0.11.1
+├── ✅ auth v0.29.0  [security, core]
+├──  langchain v0.29.0
+├── ✅ rag v0.29.0  [ai, retrieval]
+│   ├── ✅ auth v0.29.0
+│   └──  langchain v0.29.0
 └──  experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```
@@ -626,7 +626,7 @@ baselith shell
 
 **Features**:
 
-- Auto-loads `settings`, `LLMService`, and `QdrantStore`
+- Auto-loads `settings` (the core config), `LLMService` / `get_llm_service`, and `VectorStoreProtocol`; each import is best-effort, so anything that fails to import is left out and the prompt lists what was actually loaded
 - Ideal for quick testing of connections and logic
 
 ---
@@ -635,7 +635,7 @@ baselith shell
 
 ### `db status` - Database Status
 
-Show the connection status of all persistent data stores (Qdrant, Redis, GraphDB).
+Show the connection status of all persistent data stores (Redis, Qdrant, PostgreSQL, GraphDB).
 
 ```bash
 baselith db status
@@ -848,12 +848,17 @@ baselith docs generate
 **Output**:
 
 ```text
-✅ Scanning endpoints...
-✅ Found 47 endpoints across 8 plugins
+✅ Found 59 endpoints
 ✅ Generated: mkdocs-site/docs/api/specs/openapi.json
 ✅ Generated: mkdocs-site/docs/api/specs/openapi.yaml
-✅ Generated: mkdocs-site/docs/api/specs/postman_collection.json
+
+To import into Postman, use the generated openapi.json file.
 ```
+
+The endpoint count depends on the enabled feature flags. `openapi.yaml` is
+only written when PyYAML is installed; no Postman collection is produced.
+Run the command from the repository root — files are written under
+`./mkdocs-site/docs/api/specs/`.
 
 ---
 
@@ -924,5 +929,5 @@ baselith queue status
     ```
 
 !!! note "Hot-reload is REST-only"
-    There is no `baselith plugin reload` CLI command. Plugin hot-reload is
+    There is no `reload` subcommand under `baselith plugin`. Plugin hot-reload is
     exposed through the REST API (`POST /api/plugins/{name}/reload`).

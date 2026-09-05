@@ -124,6 +124,38 @@ class TestTools:
         assert specs[0].parameters["properties"]["city"]["type"] == "string"
 
     @pytest.mark.asyncio
+    async def test_multi_round_tool_results_accumulate(self):
+        """Results from earlier rounds survive into later prompts.
+
+        A multi-step loop that rebuilt the prompt from the latest round only
+        would hand the model an amnesiac context: it would keep re-requesting
+        work it had already been given the answer to.
+        """
+
+        async def record_step(step: int) -> str:
+            """Record that a step completed."""
+            return f"done-{step}"
+
+        def _call(step: int) -> LLMResult:
+            return LLMResult(
+                tool_calls=[
+                    ToolCall(id=str(step), name="record_step", arguments={"step": step})
+                ],
+                stop_reason="tool_use",
+            )
+
+        svc = _mock_service([_call(1), _call(2), _call(3), LLMResult(text="finished")])
+        agent = Agent(tools=[record_step], llm_service=svc, max_iterations=6)
+        result = await agent.run("run every step")
+
+        assert result.output == "finished"
+        assert result.tool_calls_made == ["record_step"] * 3
+        final_prompt = svc.generate.await_args_list[3].args[0]
+        assert "done-1" in final_prompt
+        assert "done-2" in final_prompt
+        assert "done-3" in final_prompt
+
+    @pytest.mark.asyncio
     async def test_sync_tool_supported(self):
         def add(a: int, b: int) -> int:
             """Add two integers."""

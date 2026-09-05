@@ -8,6 +8,7 @@ to provide continuous validation of system updates.
 """
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from core.events import EventBus, EventNames, get_event_bus
@@ -41,6 +42,7 @@ class EvaluationService:
         self._max_concurrent = max_concurrent
         # Created lazily so the semaphore binds to the running event loop.
         self._semaphore: asyncio.Semaphore | None = None
+        self._unsubscribe: Callable[[], None] | None = None
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Lazily build the concurrency limiter bound to the active loop."""
@@ -59,14 +61,17 @@ class EvaluationService:
             logger.info("EvaluationService disabled by config")
             return
 
-        self.event_bus.subscribe(EventNames.FLOW_COMPLETED, self._on_flow_completed)
+        self._unsubscribe = self.event_bus.subscribe(
+            EventNames.FLOW_COMPLETED, self._on_flow_completed
+        )
         self._running = True
         logger.info("EvaluationService started")
 
     def stop(self):
-        """Stop listening to events."""
-        # Note: EventBus doesn't support unsubscribe easily by method ref yet without storing the wrapper
-        # For now, we just flip the flag
+        """Stop listening to events and drop the FLOW_COMPLETED subscription."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
         self._running = False
         logger.info("EvaluationService stopped")
 

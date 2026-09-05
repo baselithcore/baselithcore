@@ -63,10 +63,12 @@ llm = ServiceRegistry.get(LLMServiceProtocol)
 
 ### IV. Agent Protocol
 
-All agents must implement `AgentProtocol` to be pluggable into the orchestrator.
+All agents must implement `AgentProtocol` (`core.orchestration.protocols`) to be pluggable into the orchestrator.
 
 ```python
-async def execute(self, input: str, context: Optional[dict] = None) -> str:
+from typing import Any
+
+async def execute(self, input: Any, context: dict[str, Any] | None = None) -> Any:
     # Logic here
     return result
 ```
@@ -75,7 +77,7 @@ async def execute(self, input: str, context: Optional[dict] = None) -> str:
 
 ## 4. Gold Standard Implementation
 
-Reference the [Gold Standard Example](/baselith-core/examples/baselith_standard_example.py) for the most complete implementation of these patterns.
+Reference the [Gold Standard Example](https://github.com/baselithcore/baselithcore/blob/main/examples/baselith_standard_example.py) (`examples/baselith_standard_example.py`) for the most complete implementation of these patterns.
 
 ### Key Features of a Gold Standard Agent
 
@@ -240,7 +242,7 @@ When reviewing code for Sacred Core compliance:
 When moving code from `core/` to `plugins/`:
 
 1. [ ] **Create plugin structure**: `plugins/my-plugin/`
-2. [ ] **Implement plugin interface**: `FlowHandlerMixin`, `LifecycleMixin`
+2. [ ] **Implement plugin interface**: the `FlowHandler` protocol (`core.orchestration.protocols`; subclass `BaseFlowHandler` for the shared plumbing) plus `LifecycleMixin`
 3. [ ] **Update imports** across codebase
 4. [ ] **Move tests**: `tests/unit/core/` → `tests/unit/plugins_tests/`
 5. [ ] **Update documentation** references

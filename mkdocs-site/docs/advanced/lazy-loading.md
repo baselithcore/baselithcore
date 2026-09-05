@@ -27,8 +27,13 @@ Even if only 1-2 plugins were active, **all 8 services** were initialized, consu
 The new lazy loading system:
 
 1. **Analyzes plugin requirements** before initializing services
-2. **Initializes only the services** that active plugins need
-3. **Defers initialization** until first use (on-demand)
+2. **Registers a factory only for the services** that enabled plugins declare
+   (required or optional) — everything else is never registered
+3. **Creates the required ones the lifespan cannot defer eagerly** — `postgres`,
+   `vectorstore`, `evaluation` and `evolution` are built at startup when a
+   plugin *requires* them (`core/api/lifespan.py`); every other required
+   resource (`llm`, `redis`, `graph`, `memory`, …) and every *optional* resource
+   is created on the first `get_or_create()` call
 4. **Respects dependencies** between services (e.g., memory requires vectorstore)
 
 ---
@@ -64,10 +69,21 @@ every plugin with `enabled: true`** in `configs/plugins.yaml`, so its routers, h
 and static mounts are wired before the first HTTP request. This is gated by
 `PLUGIN_AUTO_LOAD` (default `true`):
 
-| State in `plugins.yaml` | `PLUGIN_AUTO_LOAD=true` (default)        | `PLUGIN_AUTO_LOAD=false`                    |
-| ----------------------- | ---------------------------------------- | ------------------------------------------- |
-| `enabled: true`         | Activated eagerly at startup             | Activated on first request to its prefix    |
-| `enabled: false` / unset | Activated on first matching request (hot-reload controller) | Same — on-demand only |
+| State in `plugins.yaml`                        | `PLUGIN_AUTO_LOAD=true` (default)                                       | `PLUGIN_AUTO_LOAD=false`                 |
+| ---------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- |
+| `enabled: true`                                | Activated eagerly at startup                                            | Activated on first request to its prefix |
+| Entry present, `enabled` omitted               | Discovered; activated on first request to its prefix                    | Same — on-demand only                    |
+| `enabled: false`, or absent from a non-empty file | **Never auto-activated** — not discovered, and refused on request        | Same                                     |
+
+On-request activation (`PluginActivationMiddleware`) only applies to plugins that
+are in the enabled discovery set but not yet imported. `ResourceAnalyzer.discover_plugins`
+drops `enabled: false` entries (and, when the file is non-empty, any plugin absent
+from it), and `_activate_locked` (`core/api/_plugin_runtime.py`) refuses those
+plugins — even transitively as another plugin's dependency — logging
+`Refusing to auto-activate plugin <name>: not in the enabled discovery set
+(disabled or absent from config)`; the request gets a `503`. Enable the plugin
+in the config, or use the admin endpoint
+`POST /api/plugins/{plugin_name}/enable` (`core/plugins/api.py`).
 
 A plugin's declared `plugin_dependencies` are activated first, transitively. Because the
 loader keys lifecycle state by the **canonical plugin name** (the manifest `name`, which
@@ -119,16 +135,20 @@ You have two options to run in isolated mode:
 
 ### Available Resources
 
-| Resource      | Description              | Dependencies           |
-| ------------- | ------------------------ | ---------------------- |
-| `postgres`    | PostgreSQL database      | None                   |
-| `redis`       | Redis cache/queue        | None                   |
-| `llm`         | LLM service              | None                   |
-| `graph`       | FalkorDB graph database  | `redis`                |
-| `vectorstore` | Qdrant vector database   | `postgres`             |
-| `memory`      | Agent memory system      | `vectorstore`, `redis` |
-| `evaluation`  | Model evaluation service | `memory`, `llm`        |
-| `evolution`   | Self-improvement system  | `memory`, `evaluation` |
+The nine keys of `RESOURCE_FACTORIES` (`core/bootstrap/lazy_init.py`);
+dependencies come from `ResourceAnalyzer.DEFAULT_DEPENDENCIES`:
+
+| Resource              | Description                                  | Dependencies                                                   |
+| --------------------- | -------------------------------------------- | -------------------------------------------------------------- |
+| `postgres`            | PostgreSQL database                          | None                                                           |
+| `redis`               | Redis cache/queue                            | None                                                           |
+| `llm`                 | LLM service                                  | None                                                           |
+| `graph`               | FalkorDB graph database                      | `redis`                                                        |
+| `vectorstore`         | Qdrant vector database                       | `postgres`                                                     |
+| `memory`              | Agent memory system                          | `vectorstore`, `redis`                                         |
+| `hierarchical_memory` | `HierarchicalMemory` (STM → MTM → LTM)       | None declared — its factory resolves the LLM service and embedder itself |
+| `evaluation`          | Model evaluation service                     | `memory`, `llm`                                                |
+| `evolution`           | Self-improvement system                      | `memory`, `evaluation`                                         |
 
 ---
 
@@ -142,8 +162,11 @@ from core.interfaces import LLMServiceProtocol
 
 class MyPlugin(Plugin):
     async def initialize(self, config):
-        # Obtained lazily (initialized if not already done)
-        llm_service = ServiceRegistry.get(LLMServiceProtocol)
+        # The lifespan registers an async *factory* under LLMServiceProtocol;
+        # awaiting it resolves the service through the lazy registry
+        # (initialized on the first call, cached afterwards).
+        get_llm = ServiceRegistry.get(LLMServiceProtocol)
+        llm_service = await get_llm()
         result = await llm_service.generate_response(prompt="Hello world")
 ```
 
@@ -156,8 +179,10 @@ class MyPlugin(Plugin):
     async def some_method(self):
         lazy_registry = get_lazy_registry()
 
-        # Initializes the service on first access.
-        # get_or_create accepts a ResourceType/str key or a protocol type.
+        # Initializes the service on first access. Keys are the resource
+        # *names* the lifespan registered ("llm", "postgres", "vectorstore",
+        # ...); passing a protocol type raises KeyError because no factory is
+        # registered under it.
         llm_service = await lazy_registry.get_or_create("llm")
         result = await llm_service.generate_response(prompt="Hello world")
 ```
@@ -174,7 +199,10 @@ class MyPlugin(Plugin):
 | **Memory footprint** (1 plugin) | ~450MB         | ~180MB       | **60% reduction** |
 | **Docker image size**           | ~1.2GB         | ~800MB       | **33% smaller**   |
 
-### Example: Only Auth Plugin Active
+### Example: Only `browser_agent` Enabled
+
+`plugins/browser_agent/manifest.yaml` declares `required_resources: [llm]` and
+`optional_resources: [internet]`.
 
 #### Before (Eager Loading)
 
@@ -187,18 +215,22 @@ class MyPlugin(Plugin):
 ✅ Memory initialized
 ✅ Evaluation service initialized
 ✅ Evolution service initialized
-Loaded 1 plugin (auth)
 ```
 
 #### After (Lazy Loading)
 
 ```text
-Resource analysis: required=["postgres"], optional=["redis"]
-✅ Postgres initialized (required by auth)
-✅ Redis initialized (optional for auth)
-Skipped unused: ["vectorstore", "graph", "memory", "evaluation", "evolution", "llm"]
-Loaded 1 plugin (auth)
+📊 Resource analysis complete: 1 required, 1 optional
+   Required: ['llm']
+   Optional: ['internet']
+🔌 Discovered 1 plugins in lazy-import mode
 ```
+
+Only the `llm` factory is registered (`internet` has no entry in
+`RESOURCE_FACTORIES`), and nothing connects until the first
+`get_or_create("llm")`. The lazy registry never builds Postgres, Qdrant, Redis or
+the rest (independent subsystems such as the distributed rate limiter still open
+their own Redis connection when configured).
 
 ---
 
@@ -310,10 +342,13 @@ required_resources=["llm", "postgres"]
 
 **Cause**: Probably all plugins are enabled, so all services initialize anyway.
 
-**Verification**: Look for this log:
+**Verification**: Look for the analysis summary at startup:
 
 ```text
-Skipped unused resources: []  # Empty list = nothing skipped
+📊 Resource analysis complete: 6 required, 1 optional
+   Required: ['evaluation', 'graph', 'llm', 'memory', 'postgres', 'vectorstore']
 ```
+
+If the `Required:` line lists (almost) every resource, nothing is being skipped.
 
 **Solution**: Disable unused plugins in `configs/plugins.yaml`.

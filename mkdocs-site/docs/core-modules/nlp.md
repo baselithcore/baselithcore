@@ -67,17 +67,20 @@ python -m spacy download en_core_web_sm
 ```python
 from core.nlp.models import get_embedder, get_reranker
 
-# Load sentence-transformers embedder (cached)
+# Load sentence-transformers embedder (cached per model name)
 embedder = get_embedder("sentence-transformers/all-MiniLM-L6-v2")
-embeddings = embedder.encode(["text one", "text two"])
+# CachedEmbedder.encode is a coroutine: the blocking model call is
+# offloaded to the dedicated inference pool, so it must be awaited.
+embeddings = await embedder.encode(["text one", "text two"])
 
-# Load cross-encoder reranker (cached)
+# Load cross-encoder reranker (cached per model name); this is the plain
+# sentence-transformers CrossEncoder, whose predict() is synchronous
 reranker = get_reranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
 scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 ```
 
 !!! tip "Performance"
-    Both `get_spacy_pipeline()` and `get_embedder()` use `@lru_cache(maxsize=1)` — models are loaded once and reused across all requests. Thread-safe by design.
+    `get_embedder()` and `get_reranker()` are wrapped in `@functools.cache` (unbounded, one entry per `model_name`), so each model is loaded once and reused across all requests; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
 
 ### Embedding cache & miss coalescing
 
@@ -118,7 +121,7 @@ short and latency-critical: a burst of embedding or rerank work would fill the
 pool and leave them queued behind multi-second model calls.
 
 `core.utils.concurrency.run_inference` therefore dispatches to a dedicated
-`ThreadPoolExecutor`, used by `CachedEmbedder.encode_async` and by both
+`ThreadPoolExecutor`, used by the async `CachedEmbedder.encode` and by both
 cross-encoder rerank paths (`core/chat/reranking.py`,
 `core/memory/hierarchy_search.py`).
 

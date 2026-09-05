@@ -362,3 +362,30 @@ class TestReservedRoutePrefixes:
             self._discovery("nice-plugin", "/api/nice-plugin")
         )
         assert registry.match_plugin_route("/api/nice-plugin/task") == "nice-plugin"
+
+
+async def test_unregister_emits_plugin_unload_audit_event(monkeypatch):
+    """Removing a plugin records a `plugin.unload` audit event."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from core.observability import audit as audit_module
+    from core.plugins.registry import PluginRegistry
+
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        audit_module,
+        "audit_emit",
+        lambda event_type, **kw: events.append((event_type, kw)),
+    )
+
+    plugin = MagicMock()
+    plugin.metadata.name = "demo"
+    plugin.shutdown = AsyncMock()
+    registry = PluginRegistry()
+    registry._plugins["demo"] = plugin
+
+    await registry.unregister("demo")
+
+    assert [e[0].value for e in events] == ["plugin.unload"]
+    assert events[0][1]["resource"] == "plugin:demo"
+    assert events[0][1]["action"] == "unload"

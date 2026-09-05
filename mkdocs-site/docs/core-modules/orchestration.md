@@ -21,12 +21,23 @@ core/orchestration/
 ├── contract.py              # AgentContract / ContractValidator
 ├── autonomy.py              # AutonomyPolicy / AutonomyUpgradeGate
 ├── task_classifier.py       # TaskClassifier (agentic vs deterministic)
+├── adaptive.py              # AdaptiveController — fast/slow (SwiftSage) path routing
+├── parallel.py              # ParallelToolExecutor — LLMCompiler-style concurrent tool calls
 ├── budget_context.py        # ContextVar-based ambient LoopBudget
-├── checkpoint.py            # Durable checkpoint model + store + manager
+├── checkpoint.py            # Durable checkpoint model + CheckpointStore contract + manager
+├── checkpoint_memory.py     # InMemoryCheckpointStore (re-exported by checkpoint.py)
 ├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
+├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── recovery.py              # Crash recovery: re-enter interrupted runs via process(resume=True)
+├── run_events.py            # Structured per-run_id AgentEvent stream (stream_run_events)
+├── run_events_bridge.py     # Redis bridge fanning run events out across replicas
+├── guard_pipeline.py        # Guardrails pipeline: input validation in, output filtering out
+├── guard_groundedness.py    # Opt-in groundedness rail (BASELITH_OUTPUT_GROUNDEDNESS)
 ├── stream_guard.py          # Streamed-chunk guarding: holdback redaction + moderation
+├── modality_router.py       # Attachment modality detection (magic bytes → MIME → extension)
+├── tool_output.py           # Deterministic head/tail truncation of tool output
 ├── mixins/                  # intent / handlers / execution mixins
 └── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
@@ -132,6 +143,8 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         loop_limits: LoopLimits | None = None,
         agent_contract: AgentContract | None = None,
         autonomy_policy: AutonomyPolicy | None = None,
+        checkpoint_store: "CheckpointStore" | None = None,
+        skill_service: "SkillService" | None = None,
     ) -> None: ...
 
     async def process(
@@ -139,8 +152,18 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         query: str,
         context: dict[str, Any] | None = None,
         intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
-        """Run a query through the orchestration pipeline."""
+        """Run a query through the orchestration pipeline.
+
+        run_id: stable id for durable checkpointing — required to ``resume``
+            a prior run; auto-generated for a fresh run when a
+            ``checkpoint_store`` is configured.
+        resume: with ``run_id`` and a configured store, reload the prior
+            checkpoint and continue — completed tool steps replay from the
+            store instead of re-executing.
+        """
 
     def process_stream(
         self,
@@ -505,8 +528,8 @@ by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
 | Symbol | Purpose |
 |--------|---------|
 | `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`, `max_seconds`) |
-| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `token_pressure()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
-| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens` and `elapsed_seconds`) |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
+| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`, `context_tokens` and `elapsed_seconds`) |
 | `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens` / `max_seconds`) |
 
 Defaults: 25 iterations, 50 tool calls, USD 0.50, **no token cap**
@@ -561,6 +584,33 @@ of the token cap consumed (`0.0` when no cap). Poll it to compact context
 if budget.token_pressure() > 0.8:
     context["recent_history"] = memory_manager.get_context(max_tokens=1000)
 ```
+
+**Where the budget went: recall vs reasoning.** `context_tokens` records the
+size of the context block assembled for the request — recalled memories plus
+recent history — and `context_share()` reports it as a fraction of the tokens
+the request actually spent. `inject_memory_context` records it automatically;
+the value rides on every `LoopBudgetSnapshot`, so it reaches callers in the
+reply's `budget` field with no extra wiring.
+
+```python
+snap = budget.snapshot()
+snap.context_tokens      # e.g. 640 — tokens of injected memory context
+budget.context_share()   # e.g. 0.21 — a fifth of the request went to recall
+```
+
+This is **measurement, not accounting**: `record_context_tokens` deliberately
+does not charge `tokens` or `max_tokens`. The injected block travels inside the
+prompt of the LLM calls that `record_tokens` already counts, so charging it
+again would double-bill and could abort a request that never exceeded its real
+budget. Two consequences worth knowing before you tune on the number:
+
+- The block is measured **once** but re-sent in **every** iteration's prompt,
+  so on a multi-step run its true cost is higher than `context_tokens`;
+  `context_share()` clamps at `1.0` rather than reporting a ratio above one.
+- A share that is persistently high with flat answer quality means the budget
+  is going to static recall that the model is not using — tighten
+  `similarity_threshold` on `recall`, or lower the `_CONTEXT_TOKENS` allowance.
+  A share near zero on knowledge-heavy traffic means the opposite.
 
 A breach raises `BudgetExceededError`, which `ExecutionMixin` catches
 and converts into a structured failure reply with `budget_exceeded` and

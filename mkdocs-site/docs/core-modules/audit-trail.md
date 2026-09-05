@@ -58,12 +58,18 @@ original log line *and* emits a structured event:
 | Event type | Source |
 | ---------- | ------ |
 | `auth.failed` | `core/middleware/security.py` — unauthorized / forbidden |
-| `privacy.export` / `privacy.erase` / `privacy.retention` | `core/privacy/service.py` |
+| `plugin.load` | `core/plugins/loader.py` — a plugin finished `initialize()` (`resource` is `plugin:<name>`, `details` carry its version and directory) |
+| `plugin.unload` | `core/plugins/registry.py` — `unregister()` removed a plugin and ran its `shutdown()` |
+| `privacy.export` / `privacy.erase` / `privacy.rectify` / `privacy.restrict` / `privacy.object` / `privacy.retention` | `core/privacy/service.py` — one event per data-subject request (`resource` is the subject id; `action` is `export`, `erase`, `rectify`, `restrict`/`release`, `object` or `retention_sweep`) |
+| `privacy.consent` | `core/privacy/consent.py` — `action="grant"` on `ConsentService.grant`, `action="withdraw"` on `withdraw` (`details.purpose` names the processing purpose) |
 | `transparency.mark` | `core/transparency/service.py` |
 | `incident.open` / `incident.milestone` / `incident.close` | `core/incidents/service.py` |
 | `tool.invoke` / `tool.blocked` | `core/orchestration/enforcement.py` — every tool invocation gated by `enforce_tool_invocation` |
 | `self_modify.propose` | `core/skill_evolution/service.py` — a skill synthesis proposal enters the gate; `core/optimization/evolution/evolve.py` — an evolutionary mutation is accepted into the archive |
 | `self_modify.apply` / `self_modify.reject` | `core/skill_evolution/gating.py` (skill gate decisions), `core/optimization/tune_gate.py` (auto-tune eval gate) and `core/optimization/compile.py` (prompt-compilation landing) |
+| `self_modify.rollback` | `core/skill_evolution/service.py` — a skill passed the eval gate but the `self_modify` autonomy approval was refused; the write is rolled back and audited with `success=False` (`action="skill_evolution.approval_rollback"`, `details.reason`, `details.rolled_back`) |
+| `compliance.register` | `core/compliance/registry.py` — `action="register"` when an AI system enters the register (`success=False` for an Art. 5 prohibited category), `action="lifecycle"` on `advance_lifecycle` |
+| `compliance.assessment` | `core/compliance/prohibited.py` (`art5_screening`, `success=False` when prohibited), `core/compliance/registry.py` (`reclassify`), `core/compliance/artefact_services.py` (`risk_management`, `instructions_for_use`, `dpia`), `core/compliance/documents.py` (`annex_iv_documentation`, `fria`, `ropa_entry`), `core/compliance/post_market_service.py` (`post_market_plan`, `post_market_observation`), `core/compliance/review_sweep.py` (`compliance_review_sweep`) |
 | `payment.executed` / `payment.failed` | `core/world_model/payments.py` — every `execute_payment` outcome: `executed` for a captured charge, `failed` for a decline or an executor error (`resource` is the merchant id, `action` the intent id; `details` carry `transaction_id`, `amount_cents`, `status`, `psp`). See [World Model — AP2 Payment Execution](world-model.md#ap2-payment-execution-execute_payment) |
 
 Successful per-request authentication is deliberately **not** emitted as an

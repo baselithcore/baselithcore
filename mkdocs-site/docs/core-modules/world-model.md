@@ -72,7 +72,7 @@ if risk["level"].value >= 4:  # RiskLevel.HIGH
 # 5. Plan a rollback
 planner = RollbackPlanner()
 planner.record_action(deploy, state)
-rollback = planner.create_rollback(deploy, checkpoint_state=state)
+rollback = planner.create_rollback(deploy, state_before=state)
 if rollback.can_rollback:
     log.info("Rollback is feasible.")
 ```

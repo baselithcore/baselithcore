@@ -99,6 +99,34 @@ jobs:
           pip install pyyaml
           python scripts/check_eval_baseline.py
 
+  docs_consistency:
+    name: Docs ↔ Code Consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install locked dependencies
+        run: |
+          uv export --frozen --extra test --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-test.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-test.txt
+          uv pip install --system --no-deps -e .
+      - name: Docs claims vs code (imports, paths, links, env, CLI, routes)
+        run: python scripts/check_docs_consistency.py --routes
+      - name: Changed core modules have their docs page touched
+        if: github.event_name == 'pull_request'
+        run: python scripts/check_docs_sync.py "origin/${{ github.base_ref }}"
+
   openapi_drift:
     # The checked-in sdk/openapi.json (and its mkdocs copy) must match what
     # create_app() actually serves — schema drift fails the build instead of
@@ -564,7 +592,7 @@ jobs:
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
     # required checks in branch protection.
-    needs: [architecture_boundaries, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
+    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
     strategy:
       fail-fast: false
       matrix:

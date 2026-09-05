@@ -153,6 +153,31 @@ class TestEventBus:
 
         assert received == ["before"]
 
+    @pytest.mark.asyncio
+    async def test_emit_rejects_payload_failing_registered_schema(self):
+        """With validation on, emit() raises and no handler runs."""
+        from pydantic import BaseModel
+
+        from core.events import EventSchemaRegistry, EventValidationError
+
+        class UserCreated(BaseModel):
+            user_id: str
+
+        registry = EventSchemaRegistry()
+        registry.register("user.created", UserCreated)
+        bus = EventBus(enable_validation=True, schema_registry=registry)
+        received = []
+        bus.subscribe("user.created", lambda data: received.append(data))
+
+        with pytest.raises(EventValidationError):
+            await bus.emit("user.created", {"wrong": 1})
+        assert received == []
+
+        assert await bus.emit("user.created", {"user_id": "u1"}) == 1
+        assert received == [{"user_id": "u1"}]
+        # events without a registered schema are never rejected
+        assert await bus.emit("other.event", {"anything": True}) == 0
+
     def test_event_history(self):
         """Event history tracking."""
         bus = EventBus(max_history=5)

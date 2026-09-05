@@ -63,11 +63,16 @@ class LoopBudgetSnapshot:
     cost_usd: float
     tokens: int = 0
     elapsed_seconds: float = 0.0
+    #: Tokens of assembled context (recalled memory + recent history) injected
+    #: into the request. A *label on a subset* of ``tokens``, not an extra
+    #: charge — see :meth:`LoopBudget.record_context_tokens`.
+    context_tokens: int = 0
 
     def __str__(self) -> str:
         return (
             f"iter={self.iterations} tool_calls={self.tool_calls} "
             f"cost_usd={self.cost_usd:.4f} tokens={self.tokens} "
+            f"context_tokens={self.context_tokens} "
             f"elapsed={self.elapsed_seconds:.1f}s"
         )
 
@@ -81,6 +86,7 @@ class LoopBudget:
     tool_calls: int = 0
     cost_usd: float = 0.0
     tokens: int = 0
+    context_tokens: int = 0
     # Monotonic start time; basis for the wall-clock deadline.
     started_at: float = field(default_factory=time.monotonic)
 
@@ -139,6 +145,35 @@ class LoopBudget:
         if cap is not None and self.tokens > cap:
             raise BudgetExceededError("max_tokens", self.snapshot())
 
+    def record_context_tokens(self, count: int) -> None:
+        """Record tokens of assembled context injected into the request.
+
+        Deliberately **not** charged against ``tokens`` or ``max_tokens``: the
+        injected block travels inside the prompt of the LLM calls that
+        ``record_tokens`` already counts, so charging it here would double-bill
+        and could abort a request that never exceeded its real budget. This is
+        an *allocation* measurement — how much of the budget went to static
+        recall instead of dynamic reasoning — and it is what makes the
+        memory-vs-computation trade-off tunable with data rather than guesses.
+
+        Negative or zero counts are ignored.
+        """
+        if count <= 0:
+            return
+        self.context_tokens += count
+
+    def context_share(self) -> float:
+        """Fraction of the request's tokens attributable to injected context.
+
+        ``0.0`` before the first LLM call (nothing to compare against) and
+        clamped to ``1.0``: the context block rides along in *every*
+        iteration's prompt while it is measured once, so on a multi-step run
+        the raw ratio can exceed one.
+        """
+        if self.tokens <= 0:
+            return 0.0
+        return min(self.context_tokens / self.tokens, 1.0)
+
     def token_pressure(self) -> float:
         """Fraction of the token cap consumed, in ``[0, 1]``.
 
@@ -158,4 +193,5 @@ class LoopBudget:
             cost_usd=self.cost_usd,
             tokens=self.tokens,
             elapsed_seconds=self.elapsed_seconds(),
+            context_tokens=self.context_tokens,
         )

@@ -7,6 +7,8 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
+from typing import Any
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
@@ -54,6 +56,46 @@ def _build_agent_card(app_config: AppConfig) -> AgentCard:
         version=__version__,
         agentCapabilities=AgentCapabilities(streaming=True),
     )
+
+
+def _declare_security_schemes(app: FastAPI) -> None:
+    """Advertise the credential types the auth dependencies actually accept.
+
+    ``require_user`` / ``require_admin`` / ``require_admin_or_job`` read the
+    ``X-API-Key`` header or an ``Authorization: Bearer`` token inside the
+    dependency, so FastAPI cannot infer a scheme from the signature and Swagger
+    UI would offer HTTP Basic only. Declaring both in
+    ``components.securitySchemes`` makes them selectable in the Authorize dialog
+    without asserting a per-operation requirement, so public routes stay public.
+    """
+    base_openapi = app.openapi
+
+    def openapi_with_schemes() -> dict[str, Any]:
+        schema = base_openapi()
+        schemes = schema.setdefault("components", {}).setdefault("securitySchemes", {})
+        schemes.setdefault(
+            "ApiKeyAuth",
+            {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": (
+                    "Operator-minted key from API_KEYS_USER / _ADMIN / _JOB / _SCOPED."
+                ),
+            },
+        )
+        schemes.setdefault(
+            "BearerAuth",
+            {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "Access token issued by core.auth (AuthManager.create_token).",
+            },
+        )
+        return schema
+
+    app.openapi = openapi_with_schemes  # type: ignore[method-assign]
 
 
 def create_app() -> FastAPI:
@@ -314,5 +356,7 @@ def create_app() -> FastAPI:
     from core.api.errors import install_error_handlers
 
     install_error_handlers(app)
+
+    _declare_security_schemes(app)
 
     return app

@@ -1,11 +1,14 @@
 """Typed exception hierarchy for the BaselithCore SDK.
 
 Errors raised by the client map HTTP failures onto Python exceptions and parse
-the server's standardized error envelope::
+the server's RFC 9457 ``application/problem+json`` document::
 
-    {"error": {"code": "...", "message": "...", "type": "...", "request_id": "..."}}
+    {"type": "urn:baselith:error:not_found", "title": "Not Found", "status": 404,
+     "detail": "...", "instance": "/path", "code": "not_found", "request_id": "..."}
 
 so callers get a stable ``code`` and a ``request_id`` for support correlation.
+The legacy ``{"error": {...}}`` envelope and FastAPI's ``{"detail": ...}``
+shape are still recognised for older servers.
 """
 
 from __future__ import annotations
@@ -98,8 +101,10 @@ def error_from_response(
 ) -> BaselithAPIError:
     """Build the most specific :class:`BaselithAPIError` for a response.
 
-    Parses the standardized envelope when present, falling back to a plain
-    string body or the status reason.
+    Parses the RFC 9457 problem document emitted by the server (``code``,
+    ``detail``/``title``, ``type``, ``request_id`` at the top level), the
+    legacy ``{"error": {...}}`` envelope, or FastAPI's ``{"detail": ...}``
+    shape, falling back to a plain string body or the status reason.
     """
     code: str | None = None
     error_type: str | None = None
@@ -107,11 +112,21 @@ def error_from_response(
 
     if isinstance(body, dict):
         err = body.get("error")
-        if isinstance(err, dict):
+        if isinstance(err, dict):  # legacy envelope
             code = err.get("code")
             error_type = err.get("type")
             message = err.get("message") or message
             request_id = err.get("request_id") or request_id
+        elif "code" in body or "title" in body or "type" in body:  # problem+json
+            code = body.get("code")
+            error_type = body.get("type")
+            detail = body.get("detail")
+            message = (
+                (detail if isinstance(detail, str) and detail else None)
+                or body.get("title")
+                or message
+            )
+            request_id = body.get("request_id") or request_id
         elif "detail" in body:  # FastAPI HTTPException shape
             detail = body["detail"]
             message = detail if isinstance(detail, str) else str(detail)

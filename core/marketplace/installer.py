@@ -90,10 +90,16 @@ class PluginInstaller:
             raise ValueError("Plugin git_url must include a valid host")
 
     async def install(
-        self, plugin: MarketplacePlugin, branch: str = "main"
+        self, plugin: MarketplacePlugin, branch: str = "main", *, force: bool = False
     ) -> InstallResult:
         """
         Install a plugin from its git repository.
+
+        Args:
+            plugin: Marketplace entry to install (must carry a ``git_url``).
+            branch: Git ref to clone (``--version`` on the CLI), default ``main``.
+            force: Remove an existing installation at the destination before
+                cloning instead of returning ``ALREADY_INSTALLED``.
         """
         if not plugin.git_url:
             return InstallResult(
@@ -113,11 +119,14 @@ class PluginInstaller:
             )
 
         if plugin_dest.exists():
-            return InstallResult(
-                status=InstallStatus.ALREADY_INSTALLED,
-                plugin_id=plugin.id,
-                destination=plugin_dest,
-            )
+            if not force:
+                return InstallResult(
+                    status=InstallStatus.ALREADY_INSTALLED,
+                    plugin_id=plugin.id,
+                    destination=plugin_dest,
+                )
+            logger.info(f"Overwriting existing plugin at {plugin_dest} (--force)")
+            shutil.rmtree(plugin_dest)
 
         logger.info(f"Installing plugin {plugin.name} from {plugin.git_url}")
 

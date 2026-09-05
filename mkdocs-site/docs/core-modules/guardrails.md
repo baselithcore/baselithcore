@@ -391,9 +391,11 @@ async def safe_chat(user_input: str) -> str:
 
 ## Prometheus Metrics
 
-The orchestrator guard pipeline instruments every layer it runs
-(`core/observability/metrics.py`, emitted from
-`core/orchestration/guard_pipeline.py`):
+The orchestrator guard pipeline instruments every layer it runs. The metrics
+are defined in `core/observability/metrics.py`; the input and PII/moderation
+layers emit them from `core/orchestration/guard_pipeline.py`, while the
+`output_groundedness` layer emits its own from
+`core/orchestration/guard_groundedness.py`:
 
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
@@ -469,7 +471,7 @@ It is already wired into the framework's untrusted-content boundaries:
 
 | Boundary | Location | `source` label |
 |----------|----------|----------------|
-| External MCP tool results | `core/mcp/client.py` (`MCPClient.call_tool`) | `mcp_tool:<name>` |
+| External MCP tool results | `core/mcp/client_operations.py` (`OperationsMixin.call_tool`, mixed into `MCPClient`) | `mcp_tool:<name>` |
 | Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
 | Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
 | Every tool observation (opt-in) | `core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop and the parallel executor | `<tool name>` |

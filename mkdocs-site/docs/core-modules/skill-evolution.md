@@ -125,10 +125,15 @@ see [Loop Engineering › Priming](loops.md#priming-the-first-attempt-primingpy)
 A synthesized skill changes the system's **own future behavior**, so the
 propose→gate cycle is governed like any high-stakes action:
 
-- **Audit trail.** `evolve()` records `self_modify.propose` when a
-  proposal enters the gate; `SkillGate.review` records
-  `self_modify.apply` / `self_modify.reject` with the score, previous
-  best, version and (for vector validators) the fitness breakdown. See
+- **Audit trail.** `evolve()` records a `self_modify.propose` event with
+  `action="skill_evolution.propose"` (and the source pattern ids in
+  `details.source_patterns`) when a proposal enters the gate;
+  `SkillGate.review` records `self_modify.apply` / `self_modify.reject`
+  events with `action="skill_evolution.gate"` carrying the score, previous
+  best, version and (for vector validators) the fitness breakdown. A skill
+  that passed the gate but was refused by the human-approval step is
+  recorded as `self_modify.rollback` with
+  `action="skill_evolution.approval_rollback"`. See
   [Audit Trail](audit-trail.md#self-modification-self_modify).
 - **Human approval.** Pass `autonomy_policy=` (and optionally
   `human_intervention=`) to `evolve()`: an eval-accepted skill

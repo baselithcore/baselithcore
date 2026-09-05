@@ -68,6 +68,9 @@ The remaining extras cover narrower capabilities:
 | `memory`       | Supermemory long-term memory backend                                     |
 | `qdrant`       | Qdrant vector store backend (`VECTORSTORE_PROVIDER=qdrant`, the default). Not needed when using `pgvector` — the PostgreSQL backend has no extra Python dependency |
 | `computer_use` | Screen capture and input control (`mss`, `pyautogui`, `Pillow`)          |
+| `pii`          | Presidio NER-based PII redaction engine (`BASELITH_PII_ENGINE=presidio`); the regex redaction in `core/guardrails/` needs no extra |
+| `bedrock`      | Anthropic provider served through AWS Bedrock (`anthropic[bedrock]`, `LLM_ANTHROPIC_BACKEND=bedrock`) |
+| `vertex`       | Anthropic provider served through Google Vertex AI (`anthropic[vertex]`, `LLM_ANTHROPIC_BACKEND=vertex`) |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
 
 Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.
@@ -159,14 +162,15 @@ MARKETPLACE_CENTRAL_URL=https://marketplace.baselithcore.xyz/api/marketplace/plu
 # URL for official authentication and portal
 MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
 
-!!! note "Security Restriction"
-    For security reasons, the plugin **publishing** destination is hardcoded to the official marketplace and cannot be overridden by `MARKETPLACE_CENTRAL_URL`.
-    Marketplace plugin installation accepts only `https` repository URLs; non-HTTPS sources are rejected by the installer.
-
 # === Security ===
 SECRET_KEY=your-secret-key-change-in-production
 ALLOW_ORIGINS=["*"]
 ```
+
+!!! note "Security Restriction"
+    For security reasons, the plugin **publishing** destination is hardcoded to the official marketplace and cannot be overridden by `MARKETPLACE_CENTRAL_URL`.
+    A plaintext `http://` registry URL is refused unless it points at a loopback host or you set `BASELITH_MARKETPLACE_ALLOW_HTTP=true` on a trusted network; a registry host that resolves to a private or internal address additionally needs `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
+    The plugin `git_url` handed to the installer must always be `https://` — there is no override for that.
 
 ---
 
@@ -250,23 +254,34 @@ Run the diagnostic command:
 baselith doctor
 ```
 
-Expected output:
+The command runs seven checks — `Environment`, `LLM Provider`, `Redis (Cache)`, `Qdrant` (reported as `Vector Store` when `VECTORSTORE_PROVIDER` is not `qdrant`), `PostgreSQL`, `GraphDB` and `Plugins` — and renders them as a Rich table. Expected output with everything running:
 
 ```text
-✅ BaselithCore Health Check
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+╭──────────────────────────╮
+│  🩺 Baselith-Core Doctor │
+│    System Diagnostics    │
+╰──────────────────────────╯
 
-✅ Python version: 3.12+ (OK)
-✅ Dependencies: All installed
-✅ Redis (Cache): Connected (localhost:6379)
-✅ Qdrant: Connected (localhost:6333)
-✅ GraphDB: Connected (localhost:6379)
-✅ LLM Provider: Ollama (llama3.2)
-✅ Configuration: Valid
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃  Status  ┃ Component     ┃ Message                            ┃ Details/Resolution  ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ ✅ PASS  │ Environment   │ Found config at .env               │                     │
+│ ✅ PASS  │ LLM Provider  │ Ollama connected (localhost:11434) │                     │
+│ ✅ PASS  │ Redis (Cache) │ Connected (localhost:6379)         │                     │
+│ ✅ PASS  │ Qdrant        │ Connected (localhost:6333)         │                     │
+│ ✅ PASS  │ PostgreSQL    │ Connected (localhost:5432)         │                     │
+│ ✅ PASS  │ GraphDB       │ Connected (localhost:6379)         │                     │
+│ ✅ PASS  │ Plugins       │ 11 plugin(s) found                 │                     │
+└──────────┴───────────────┴────────────────────────────────────┴─────────────────────┘
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Status: Ready ✅
+Results: 7 passed
+
+✅ System ready! Run: baselith run
+
+⏱  Completed in 0.42s
 ```
+
+A failing `GraphDB` or `Plugins` check is reported as `⚠️ WARN` and does not block startup; any other failure is `❌ FAIL`, prints its resolution hint in the last column, and makes the command exit non-zero. Add `--json` for machine-readable output.
 
 ---
 
@@ -287,11 +302,11 @@ Status: Ready ✅
 ??? failure "LLM provider not configured"
     Verify the configuration in `.env`:
     ```bash
-    # For Ollama
-    curl <http://localhost:11434/api/tags>
+    # For Ollama (curl defaults to http://)
+    curl localhost:11434/api/tags
 
     # For OpenAI
-    echo $OPENAI_API_KEY
+    echo $LLM_API_KEY
     ```
 
 ??? failure "Import errors"

@@ -119,7 +119,8 @@ IDEs.
       `-32003` and the limiter's own `Retry-After` / `RateLimit-*` headers.
     - **Protected-resource metadata (RFC 9728)** — while auth is required the
       router also serves an *unauthenticated*
-      `GET /.well-known/oauth-protected-resource{path}` (plus the bare
+      `GET /.well-known/oauth-protected-resource/mcp` — the metadata path
+      suffixed with `MCP_HTTP_PATH` (plus the bare
       `/.well-known/oauth-protected-resource` alias) publishing this
       resource's identifier and its `authorization_servers`. That list comes
       from `MCP_HTTP_AUTHORIZATION_SERVERS` (comma-separated), falling back to
@@ -582,7 +583,8 @@ work cancelled rather than left running.
 
 ```plaintext
 core/mcp/
-├── __init__.py                 # exports: MCPServer, MCPClient, MCPToolAdapter, MCPToolError
+├── __init__.py                 # exports: MCPClient, MCPConnectionPool, MCPServer, MCPToolAdapter,
+│                               #   MCPToolError, make_mcp_tool_fns, mount_configured_servers, report_progress
 ├── client.py                   # MCPClient (consume tools; stdio + HTTP)
 ├── client_handshake.py         # client-side era probe (server/discover → modern?)
 ├── client_operations.py        # tools / resources calls + MRTR retry loop
@@ -590,6 +592,7 @@ core/mcp/
 ├── client_errors.py            # MCPToolError
 ├── cache.py                    # client-side ttlMs / cacheScope cache
 ├── pool.py                     # MCPConnectionPool (many servers at once)
+├── declarative.py              # MCP_SERVERS registry: mount_configured_servers, make_mcp_tool_fns
 ├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
 ├── http_client_transport.py    # Streamable HTTP client transport
 ├── server.py                   # MCPServer (registration API) + create_default_server
@@ -606,7 +609,8 @@ core/mcp/
 ├── progress.py                 # report_progress() for handlers
 ├── http_transport.py           # Streamable HTTP server router + SessionStore + RFC 9728
 ├── http_authz.py               # admission gate: origin, auth, mcp:invoke, rate limit
-├── handlers.py                 # JSON-RPC dispatch, initialize, tools/*
+├── handlers.py                 # JSON-RPC dispatch, initialize, server/discover
+├── tool_handlers.py            # tools/list + tools/call (tool-error taxonomy, MRTR input_required)
 ├── resource_handlers.py        # resources/* (concrete + templates)
 ├── prompt_handlers.py          # prompts/*
 ├── completion.py               # completion/complete
@@ -617,11 +621,12 @@ core/mcp/
 └── types.py                    # MCPTool, MCPResource, MCPResourceTemplate, MCPPrompt
 ```
 
-The package exports five public symbols:
+The package exports eight public symbols:
 
 ```python
 from core.mcp import (
-    MCPServer, MCPClient, MCPToolAdapter, MCPToolError, report_progress,
+    MCPClient, MCPConnectionPool, MCPServer, MCPToolAdapter, MCPToolError,
+    make_mcp_tool_fns, mount_configured_servers, report_progress,
 )
 ```
 
@@ -639,9 +644,11 @@ from core.mcp import (
 
 ## MCP Client
 
-`MCPClient` connects to an external MCP server by launching it as a local
-subprocess (Python `.py` or Node `.js` script, or a custom command). It is best
-used as an async context manager so the child process is always torn down.
+`MCPClient` connects to an external MCP server either by launching it as a
+local subprocess over **stdio** (Python `.py` or Node `.js` script, or a custom
+command) or by talking to a remote **Streamable HTTP** endpoint (`url=`). It is
+best used as an async context manager so the child process / HTTP session is
+always torn down.
 
 ```python
 from core.mcp import MCPClient
@@ -656,13 +663,37 @@ async with MCPClient("./tools/weather_server.py") as client:
 # Or pass an explicit command instead of a script path
 async with MCPClient(command=["python", "-m", "my_pkg.server"]) as client:
     ...
+
+# Or connect to a remote server over Streamable HTTP
+async with MCPClient(
+    url="https://host/mcp",
+    http_headers={"Authorization": "Bearer <token>"},
+) as client:
+    ...
 ```
 
-The constructor signature is `MCPClient(server_script=None, command=None)`.
+The constructor signature is
+`MCPClient(server_script=None, command=None, url=None, http_headers=None,
+input_provider=None, client_capabilities=None)`:
+
+- `server_script` / `command` — a local stdio server; `command` overrides
+  `server_script` and is subject to the [command allowlist](#command-allowlist).
+- `url` — the Streamable HTTP endpoint of a remote server; takes precedence
+  over script/command. Remote hosts pass through the SSRF guard
+  (`MCP_ALLOW_INTERNAL_ENDPOINTS`, see [Configuration](#configuration)).
+  `http_headers` are static headers sent on every HTTP request (e.g.
+  `{"Authorization": "Bearer <token>"}`).
+- `input_provider` — async callback fulfilling an `InputRequests` map
+  (elicitation / sampling / roots) so multi round-trip requests complete
+  transparently. Without one the client declares no such capability and a
+  server may not ask.
+- `client_capabilities` — capabilities advertised on every modern request;
+  derived from `input_provider` when omitted.
+
 `connect()` establishes the protocol era and returns an `MCPServerInfo`; you
-can also pass `server_script` / `command` / `env` directly to `connect()` to
-override the constructor values. Beyond tools, the client also exposes
-`list_resources()` and `read_resource(uri)`.
+can also pass `server_script` / `command` / `env` / `url` directly to
+`connect()` to override the constructor values. Beyond tools, the client also
+exposes `list_resources()` and `read_resource(uri)`.
 
 ### Era detection
 
@@ -708,7 +739,7 @@ it.
 To manage several servers at once, use `MCPConnectionPool`:
 
 ```python
-from core.mcp.client import MCPConnectionPool
+from core.mcp import MCPConnectionPool
 
 async with MCPConnectionPool() as pool:
     await pool.add_server("weather", "./weather_server.py")
@@ -977,29 +1008,46 @@ Two resources are exposed as well: `mcp://docs/navigation` and
 
 ## LLM Integration
 
-Wire MCP tools into a generation loop by listing the server's tools and routing
-the model's tool calls back through the client:
+Wire MCP tools into a generation loop by listing the server's tools, converting
+them to the shape `LLMService.generate` expects, and routing the model's tool
+calls back through the client. `list_tools()` returns `MCPToolInfo`
+(`name`, `description`, `input_schema`), while `generate(tools=...)` takes
+`LLMToolSpec`, whose JSON-Schema field is `parameters` — pass the MCP objects
+straight through and the provider mapping fails on the missing attribute:
 
 ```python
 from core.mcp import MCPClient
-from core.services.llm import get_llm_service
+from core.services.llm import LLMToolSpec, ToolChoice, get_llm_service
 
 llm = get_llm_service()
 
 async with MCPClient("./tools/web_server.py") as mcp:
-    tools = await mcp.list_tools()   # list[MCPToolInfo]
+    tools = [
+        LLMToolSpec(
+            name=info.name,
+            description=info.description,
+            parameters=info.input_schema or {"type": "object"},
+        )
+        for info in await mcp.list_tools()   # list[MCPToolInfo]
+    ]
 
-    response = await llm.generate(
+    response = await llm.generate(          # LLMResult
         prompt="Search information on Python 3.12",
         tools=tools,
-        tool_choice="auto",
+        tool_choice=ToolChoice(mode="auto"),
     )
 
     if response.tool_calls:
-        for call in response.tool_calls:
+        for call in response.tool_calls:    # ToolCall(id, name, arguments)
             result = await mcp.call_tool(call.name, call.arguments)
             # feed `result` back into the conversation
 ```
+
+For the ReAct loop the conversion is already done for you: `make_mcp_tool_fns`
+(see [Declarative external server registry](#declarative-external-server-registry-mcp_servers))
+turns the same `MCPToolInfo` list into `ToolDefinition`s — schema mapped to
+`parameters`, tagged with the server's autonomy category — ready for a tool
+registry.
 
 ---
 
@@ -1028,12 +1076,23 @@ MCP_REQUEST_STATE_SECRET=                # REQUIRED for multi-replica MRTR
 MCP_REQUEST_STATE_TTL_SECONDS=300
 MCP_TASK_TTL_MS=3600000
 MCP_TASK_POLL_INTERVAL_MS=1000
+MCP_ALLOWED_COMMANDS=python,python3,node,npx,uvx,uv,deno,bun,bunx
 # Declarative external server registry (JSON object; see MCP Client above).
 # Stdio commands stay behind MCP_ALLOWED_COMMANDS.
 MCP_SERVERS=
 ```
 
-!!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"
-    Because the transport is stdio-subprocess, there is no server URL to
-    configure and no client-side retry setting. The only client tunable is
-    `MCP_CLIENT_REQUEST_TIMEOUT`.
+### Client transports and tunables
+
+The client speaks two transports: **stdio** (spawn a local server via
+`server_script` / `command`) and **Streamable HTTP** (`MCPClient(url=...)`, or
+`url` on an `MCPServerSpec` entry in `MCP_SERVERS`). There is no global
+`MCP_SERVER_URL` — a remote endpoint is always named per client or per
+`MCP_SERVERS` entry — and no `MCP_MAX_RETRIES`: tool calls are never
+auto-retried. The client-side settings on `MCPConfig` are:
+
+| Env var | Default | Purpose |
+| ------- | ------- | ------- |
+| `MCP_CLIENT_REQUEST_TIMEOUT` | `30.0` | Total per-request deadline (seconds) when waiting on an external server |
+| `MCP_ALLOW_INTERNAL_ENDPOINTS` | `false` | Let the SSRF guard on the HTTP client accept private/loopback/link-local hosts — trusted local development only |
+| `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Executable basenames `MCPClient` may spawn for stdio servers (see [Command Allowlist](#command-allowlist)) |

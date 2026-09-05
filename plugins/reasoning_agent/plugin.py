@@ -4,6 +4,7 @@ Reasoning Agent Plugin.
 Exposes the Tree of Thoughts engine to the BaselithCore orchestration layer.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 from core.plugins import AgentPlugin
@@ -59,7 +60,7 @@ class ReasoningAgentPlugin(AgentPlugin):
         """Return flow handler for reasoning intent."""
         return {
             "reasoning": ReasoningFlowHandler(
-                self.create_agent(None)
+                self.create_agent(None), config_provider=self.get_config
             )  # Helper to create agent lazy or we need access to service
         }
 
@@ -79,20 +80,39 @@ class ReasoningAgentPlugin(AgentPlugin):
 class ReasoningFlowHandler:
     """Handles visual workflow execution for reasoning nodes."""
 
-    def __init__(self, agent: ReasoningAgent):
+    def __init__(
+        self,
+        agent: ReasoningAgent,
+        config_provider: Callable[[str, Any], Any] | None = None,
+    ):
         """
         Initialize flow handler.
 
         Args:
             agent: The ReasoningAgent instance.
+            config_provider: ``(key, default) -> value`` lookup into the plugin
+                config (``configs/plugins.yaml`` ``reasoning_agent:`` entry).
+                Request ``context`` keys still take precedence per call.
         """
         self.agent = agent
+        self._config_provider = config_provider
+
+    def _setting(self, key: str, default: Any) -> Any:
+        if self._config_provider is None:
+            return default
+        try:
+            value = self._config_provider(key, default)
+        except Exception:
+            return default
+        return default if value is None else value
 
     async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """Handle reasoning request."""
-        # Extract params from context if available, otherwise defaults
-        max_steps = context.get("max_steps", 5)
-        branching_factor = context.get("branching_factor", 3)
+        # Per-request context overrides the plugin config, which overrides defaults
+        max_steps = context.get("max_steps", self._setting("max_steps", 5))
+        branching_factor = context.get(
+            "branching_factor", self._setting("branching_factor", 3)
+        )
 
         result = await self.agent.solve(
             problem_description=query,

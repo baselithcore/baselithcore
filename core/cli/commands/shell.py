@@ -2,6 +2,8 @@
 Shell command - Interactive REPL.
 """
 
+from typing import Any
+
 from core.cli.ui import console, print_header
 
 
@@ -10,7 +12,7 @@ def run_shell() -> int:
     print_header("💻 Baselith-Core Shell", "Interactive Python REPL")
 
     # Pre-load common components
-    context = {}
+    context: dict[str, Any] = {}
     with console.status("[bold blue]Loading core context...", spinner="dots"):
         try:
             from core.config import get_core_config
@@ -20,16 +22,17 @@ def run_shell() -> int:
             pass
 
         try:
-            from core.services.llm.provider import LLMService  # type: ignore
+            from core.services.llm.service import LLMService, get_llm_service
 
             context["LLMService"] = LLMService
+            context["get_llm_service"] = get_llm_service
         except Exception:
             pass
 
         try:
-            from core.services.vectorstore.qdrant import QdrantStore  # type: ignore
+            from core.services.vectorstore.interfaces import VectorStoreProtocol
 
-            context["QdrantStore"] = QdrantStore
+            context["VectorStoreProtocol"] = VectorStoreProtocol
         except Exception:
             pass
 

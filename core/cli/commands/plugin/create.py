@@ -3,6 +3,7 @@ Plugin creation logic.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +143,7 @@ def _create_from_template(name: str, plugin_type: str) -> int:
         return 1
 
     # Generate class name from plugin name
-    class_name = "".join(word.capitalize() for word in name.split("-"))
+    class_name = "".join(word.capitalize() for word in re.split(r"[-_]", name) if word)
 
     print_step(f"Creating {plugin_type} plugin '{name}'...")
 

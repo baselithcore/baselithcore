@@ -99,7 +99,6 @@ package-dir = { "baselithbot" = "." }
 [tool.setuptools.package-data]
 baselithbot = [
   "manifest.yaml",
-  "catalog-info.yaml",
   "assets/*",
   "ui/dist/**/*",
   "docs/**/*",

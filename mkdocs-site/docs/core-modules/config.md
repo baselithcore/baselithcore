@@ -41,8 +41,9 @@ core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, ChatConfig, Vision/Voice (re-exports VectorStoreConfig)
+├── services.py           # LLMConfig, ChatConfig (re-exports VectorStoreConfig, VisionConfig, VoiceConfig)
 ├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
+├── multimodal.py         # VisionConfig, VoiceConfig, FineTuningConfig
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
@@ -490,6 +491,8 @@ REDIS_SOCKET_CONNECT_TIMEOUT=2            # TCP connect deadline
 SEMANTIC_CACHE_MAXSIZE=1000               # Entries per tenant
 SEMANTIC_CACHE_TTL=3600
 SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
+SEMANTIC_CACHE_FINGERPRINT_ENABLED=true   # n-gram fingerprint tier before the embedding scan
+SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8  # Min Jaccard of word n-gram fingerprints (0.0-1.0)
 ```
 
 !!! note "`RedisCacheConfig.url` is redacted on every dump"
@@ -748,7 +751,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SecurityConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
     secret_key: SecretStr | None = None
     auth_required: bool = True

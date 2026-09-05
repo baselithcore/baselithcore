@@ -25,6 +25,7 @@ from core.events.types import (
 from core.events.validation import (
     DeadLetterQueue,
     EventSchemaRegistry,
+    EventValidationError,
 )
 from core.observability.logging import get_logger
 
@@ -228,6 +229,13 @@ class EventBus:
             Number of handlers invoked
         """
         data = data or {}
+
+        if self._schema_registry is not None:
+            is_valid, error = self._schema_registry.validate(event_name, data)
+            if not is_valid:
+                raise EventValidationError(
+                    f"Event '{event_name}' rejected by its schema: {error}"
+                )
 
         from core.context import get_current_tenant_id, get_current_user_id
 

@@ -103,9 +103,13 @@ async def get(self, key: K) -> Optional[V]:
 from core.cache.metrics import get_metrics_collector
 
 collector = get_metrics_collector()
+
+# get_metrics() returns CacheMetrics | None — None until a cache with that
+# metrics_name has been created (use get_or_create_metrics() to force it)
 metrics = collector.get_metrics("ttl_cache")
-print(f"Hit rate: {metrics.hit_rate:.2%}")
-print(f"Total requests: {metrics.total_requests}")
+if metrics is not None:
+    print(f"Hit rate: {metrics.hit_rate:.2%}")
+    print(f"Total requests: {metrics.total_requests}")
 
 # Get system-wide summary
 summary = collector.get_summary()
@@ -126,22 +130,27 @@ print(f"Overall hit rate: {summary['overall_hit_rate']:.2%}")
 
 **Problem:** Multiple core modules were constructing independent Redis clients for the same URL, which duplicated connection-pool setup and increased socket churn.
 
-**Solution:** `create_redis_client()` now reuses a shared `redis.asyncio.ConnectionPool` per URL while still returning separate `Redis` client objects:
+**Solution:** `create_redis_client(url, *, decode_responses=False)` now reuses a shared `redis.asyncio.ConnectionPool` per `(url, decode_responses)` pair while still returning separate `Redis` client objects. `decode_responses` is a connection-level setting in redis-py, so a `str`-decoding caller and a `bytes` caller on the same URL each get their own bounded pool rather than clobbering one another:
 
 ```python
-_shared_pools: dict[str, ConnectionPool] = {}
+_shared_pools: dict[tuple[str, bool], ConnectionPool] = {}
 _shared_pools_lock = Lock()
 
-def create_redis_client(url: str) -> Redis:
+def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
+    pool_key = (url, decode_responses)
+
     with _shared_pools_lock:
-        pool = _shared_pools.get(url)
+        pool = _shared_pools.get(pool_key)
         if pool is None:
             pool = ConnectionPool.from_url(
                 url,
-                max_connections=cfg.max_connections,
-                health_check_interval=cfg.health_check_interval,
+                max_connections=config.max_connections,
+                health_check_interval=config.health_check_interval,
+                socket_timeout=config.socket_timeout,
+                socket_connect_timeout=config.socket_connect_timeout,
+                decode_responses=decode_responses,
             )
-            _shared_pools[url] = pool
+            _shared_pools[pool_key] = pool
 
     return Redis(connection_pool=pool)
 ```
@@ -186,11 +195,17 @@ def get_chat_service(plugin_registry: Optional[Any] = None) -> ChatService:
 
 **Problem:** The async streaming path was bridging a synchronous iterator with `run_in_executor()` for every streamed chunk, adding scheduler overhead and unnecessary thread-pool traffic.
 
-**Solution:** The service now consumes the orchestrator's native async stream end-to-end:
+**Solution:** `ChatService.handle_chat_stream_async()` now hands back the orchestrator's native async stream end-to-end instead of wrapping the sync iterator:
 
 ```python
-async for chunk in agent.process_stream_async(request):
-    yield chunk
+async def handle_chat_stream_async(self, req: ChatRequest) -> AsyncIterator[str]:
+    ...
+    context = {
+        "conversation_id": req.conversation_id,
+        "rag_only": req.rag_only,
+        "kb_label": req.kb_label,
+    }
+    return self.agent.process_stream(req.query, context)
 ```
 
 **Benefits:**
@@ -697,7 +712,6 @@ with Progress(
 
 - `baselith cache clear` - Spinner during Redis flush
 - `baselith db reset` - Progress bar for collection deletion
-- `baselith queue flush` - Progress indicator for queue operations
 
 **Benefits:**
 
@@ -927,11 +941,14 @@ async def long_running_operation(items):
 Monitor these metrics in production:
 
 ```python
-# Check pool state periodically
-pool = _get_pool()
-print(f"Pool size: {pool.size}")
-print(f"Available connections: {pool.available}")
-print(f"Waiting connections: {pool.waiting}")
+from core.db import get_pool_stats
+
+# psycopg_pool counters per pool role (primary / primary_async / replica /
+# replica_async); pools that were never built are absent. Never opens a pool,
+# so it is safe to poll from a health surface.
+for role, stats in get_pool_stats().items():
+    print(f"{role}: size={stats['pool_size']} "
+          f"available={stats['pool_available']} waiting={stats['requests_waiting']}")
 ```
 
 Alert if:
@@ -1014,8 +1031,8 @@ python scripts/benchmark.py
 python -m cProfile -o output.prof scripts/benchmark.py
 python -m pstats output.prof
 
-# Monitor in production
-baselith doctor --performance
+# Monitor in production (machine-readable output for CI/CD)
+baselith doctor --json
 ```
 
 The built-in benchmark script covers these hot paths:

@@ -3,6 +3,10 @@ Flow Handlers for the Example Plugin.
 
 This module defines handlers that are executed when specific intents
 are detected by the intent recognition system.
+
+The runtime invokes every registered flow handler as ``handler(query, context)``
+(or ``handler.handle(query, context)`` when the value is an object), and awaits
+the result when it is a coroutine — see ``core/plugins/registration.py``.
 """
 
 from typing import Any
@@ -16,12 +20,15 @@ class ExampleFlowHandler:
     that should be triggered by specific user intents.
     """
 
-    async def handle_greeting(self, context: dict[str, Any]) -> dict[str, Any]:
+    async def handle_greeting(
+        self, query: str, context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
-        Handle the 'greeting' intent.
+        Handle the 'example_greeting' intent.
 
         Args:
-            context: Context containing user query, identifying info, etc.
+            query: The user query that triggered the intent.
+            context: Request context (user identity, conversation data, ...).
 
         Returns:
             Result dictionary to be processed by the response generator.
@@ -31,14 +38,18 @@ class ExampleFlowHandler:
             "response": f"Hello, {user_name}! I am the Example Flow Handler.",
             "status": "success",
             "action": "greet",
+            "query": query,
         }
 
-    async def handle_complex_task(self, context: dict[str, Any]) -> dict[str, Any]:
+    async def handle_complex_task(
+        self, query: str, context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
-        Handle a more complex task.
+        Handle the 'example_complex' intent.
 
         Args:
-            context: Task context
+            query: The user query that triggered the intent.
+            context: Task context (for example an ``item_id`` to process).
 
         Returns:
             Task result
@@ -49,13 +60,5 @@ class ExampleFlowHandler:
         return {
             "response": f"Processed complex task for item {item_id}",
             "status": "completed",
-            "data": {"processed": True, "id": item_id},
+            "data": {"processed": True, "id": item_id, "query": query},
         }
-
-    def __call__(self, intent_name: str, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Callable interface for simple routing within the handler.
-        """
-        # This is just an example pattern; the actual signature depends
-        # on how the core system invokes handlers.
-        return {"handled_by": "ExampleFlowHandler", "intent": intent_name}

@@ -20,6 +20,7 @@ from typing import Any
 
 from core.observability.logging import get_logger
 
+from ._audit import audit_plugin_unload
 from .health import HealthMixin
 from .interface import Plugin
 from .lookup import RESERVED_ROUTE_SEGMENTS, LookupMixin
@@ -333,6 +334,7 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
             del self._plugins[plugin_name]
 
             logger.info(f"Unregistered plugin: {plugin_name}")
+            audit_plugin_unload(plugin_name)
 
     # --- Thread-Safe Mixin Overrides ---
     # These methods provide a thread-safe entry point to logic defined in Mixins.

@@ -361,6 +361,14 @@ class ChatConfig(BaseSettings):
     )
 
     # If True, streams the response tokens back to the client in real-time.
+    memory_enabled: bool = Field(
+        default=False,
+        description=(
+            "Give the chat Orchestrator an AgentMemory so runs recall past "
+            "interactions and write new ones back. Off by default: it adds an "
+            "embedding + store round-trip per request."
+        ),
+    )
     streaming_enabled: bool = Field(
         default=True, description="Enable streaming responses"
     )

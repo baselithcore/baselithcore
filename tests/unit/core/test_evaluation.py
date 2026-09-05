@@ -86,3 +86,21 @@ class TestEvaluationService:
 
         assert call_args[0][0][0] == EventNames.EVALUATION_STARTED
         assert call_args[1][0][0] == EventNames.EVALUATION_COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_service_stop_unsubscribes_from_bus(monkeypatch):
+    """stop() releases the FLOW_COMPLETED subscription taken by start()."""
+    from core.events import EventBus
+
+    monkeypatch.setattr(
+        "core.config.evaluation.evaluation_config.enabled", True, raising=False
+    )
+    bus = EventBus()
+    service = EvaluationService(event_bus=bus, evaluator=CompositeEvaluator([]))
+
+    service.start()
+    assert len(bus._get_handlers(EventNames.FLOW_COMPLETED)) == 1
+
+    service.stop()
+    assert len(bus._get_handlers(EventNames.FLOW_COMPLETED)) == 0

@@ -12,6 +12,8 @@ logging shim and by the plugin integrity/signature gates, and an eager
 from typing import TYPE_CHECKING, Any
 
 _EXPORTS: dict[str, str] = {
+    "canonical_key": "core.utils.text_canon",
+    "canonicalize": "core.utils.text_canon",
     "cosine_similarity": "core.utils.similarity",
     "cosine_similarity_many": "core.utils.similarity",
     "estimate_tokens": "core.utils.tokens",
@@ -22,6 +24,8 @@ _EXPORTS: dict[str, str] = {
 }
 
 __all__ = [
+    "canonical_key",
+    "canonicalize",
     "cosine_similarity",
     "cosine_similarity_many",
     "estimate_tokens",
@@ -36,6 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
     from core.utils.logsafe import sanitize_log_value
     from core.utils.media import sniff_audio_type, sniff_document_type
     from core.utils.similarity import cosine_similarity, cosine_similarity_many
+    from core.utils.text_canon import canonical_key, canonicalize
     from core.utils.tokens import estimate_tokens
 
 

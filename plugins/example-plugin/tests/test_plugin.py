@@ -1,136 +1,136 @@
-"""Tests for the example plugin."""
+"""Tests for the example plugin.
+
+Run with: ``python -m pytest --import-mode=importlib plugins/example-plugin/tests -q``
+(``--import-mode=importlib`` because the plugin directory has a hyphen and an
+``__init__.py``, which the default import mode cannot walk).
+
+The plugin package is loaded through ``PluginLoader`` (the directory name
+contains a hyphen, so it is not importable with a plain ``import`` statement).
+``initialize`` is skipped at load time because the example plugin opens a
+PostgreSQL pool in ``initialize()``; the initialization test patches that out.
+"""
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
-from plugins.example_plugin.plugin import ExampleAgent, ExamplePlugin
+import pytest
 
 from core.plugins import PluginLoader, PluginRegistry
 
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+PLUGINS_ROOT = PLUGIN_DIR.parent
 
-def test_example_plugin_metadata():
-    """Test plugin metadata."""
-    plugin = ExamplePlugin()
+
+async def _load_plugin():
+    registry = PluginRegistry()
+    loader = PluginLoader(PLUGINS_ROOT, registry)
+    plugin = await loader.load_plugin(PLUGIN_DIR, initialize=False)
+    assert plugin is not None
+    return plugin
+
+
+async def test_example_plugin_metadata():
+    plugin = await _load_plugin()
 
     assert plugin.metadata.name == "example-plugin"
-    assert plugin.metadata.version == "0.1.0"
+    assert plugin.metadata.version
     assert plugin.metadata.description
     assert plugin.metadata.dependencies == []
 
 
-def test_example_plugin_initialization():
-    """Test plugin initialization."""
-    plugin = ExamplePlugin()
-    config = {"test_key": "test_value"}
+async def test_example_plugin_initialization(monkeypatch: pytest.MonkeyPatch):
+    plugin = await _load_plugin()
+    persistence = __import__(
+        f"{type(plugin).__module__.rsplit('.', 1)[0]}.persistence",
+        fromlist=["init_pool", "ensure_schema", "close_pool"],
+    )
+    monkeypatch.setattr(persistence, "init_pool", AsyncMock())
+    monkeypatch.setattr(persistence, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(persistence, "close_pool", AsyncMock())
 
-    plugin.initialize(config)
-
+    await plugin.initialize({"test_key": "test_value"})
     assert plugin.is_initialized()
     assert plugin.get_config("test_key") == "test_value"
 
+    await plugin.shutdown()
+    assert not plugin.is_initialized()
 
-def test_example_agent_creation():
-    """Test agent creation."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
+
+async def test_example_agent_creation():
+    plugin = await _load_plugin()
 
     agent = plugin.create_agent(service=None)
 
-    assert isinstance(agent, ExampleAgent)
     assert agent.name == "example-agent"
+    assert await agent.handle_request("test query") == (
+        "Example agent received: test query"
+    )
 
 
-def test_example_agent_handle_request():
-    """Test agent request handling."""
-    agent = ExampleAgent()
-
-    response = agent.handle_request("test query")
-
-    assert "test query" in response
-    assert "Example agent received" in response
-
-
-def test_example_router_creation():
-    """Test router creation."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
+async def test_example_router_creation():
+    plugin = await _load_plugin()
 
     router = plugin.create_router()
 
-    assert router.prefix == "/api/example"
+    # The plugin-level prefix (``/api/example-plugin`` by default) is applied by
+    # the runtime when the router is mounted; the router itself has none.
+    assert router.prefix == ""
     assert "example" in router.tags
+    assert {route.path for route in router.routes} >= {"/hello", "/config", "/echo"}
 
 
-def test_example_entity_types():
-    """Test entity type registration."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
+async def test_example_entity_and_relationship_types():
+    plugin = await _load_plugin()
 
     entity_types = plugin.register_entity_types()
-
-    assert len(entity_types) == 2
-    assert any(et["type"] == "example_task" for et in entity_types)
-    assert any(et["type"] == "example_note" for et in entity_types)
-
-
-def test_example_relationship_types():
-    """Test relationship type registration."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
-
     rel_types = plugin.register_relationship_types()
 
-    assert len(rel_types) == 2
-    assert any(rt["type"] == "EXAMPLE_DEPENDS_ON" for rt in rel_types)
-    assert any(rt["type"] == "EXAMPLE_RELATES_TO" for rt in rel_types)
+    assert {et["type"] for et in entity_types} == {"example_task", "example_note"}
+    assert {rt["type"] for rt in rel_types} == {
+        "EXAMPLE_DEPENDS_ON",
+        "EXAMPLE_RELATES_TO",
+    }
 
 
-def test_example_intent_patterns():
-    """Test intent pattern registration."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
+async def test_example_intent_patterns_use_name_key():
+    plugin = await _load_plugin()
 
     intents = plugin.get_intent_patterns()
 
-    assert len(intents) == 2
-    assert any(i["name"] == "example_hello" for i in intents)
-    assert any(i["name"] == "example_help" for i in intents)
+    assert {i["name"] for i in intents} == {"example_hello", "example_help"}
+    assert all(i["patterns"] for i in intents)
 
 
-def test_plugin_loading():
-    """Test plugin loading through loader."""
+async def test_example_flow_handlers_follow_runtime_contract():
+    plugin = await _load_plugin()
+
+    handlers = plugin.get_flow_handlers()
+    greeting = handlers["example_greeting"]
+    complex_task = handlers["example_complex"]
+
+    result = await greeting("hi", {"user_name": "Ada"})
+    assert result["response"] == "Hello, Ada! I am the Example Flow Handler."
+
+    result = await complex_task("process", {"item_id": 42})
+    assert result["data"] == {"processed": True, "id": 42, "query": "process"}
+
+
+async def test_plugin_registration(monkeypatch: pytest.MonkeyPatch):
     registry = PluginRegistry()
-    loader = PluginLoader(Path("plugins/"), registry)
+    loader = PluginLoader(PLUGINS_ROOT, registry)
+    plugin = await loader.load_plugin(PLUGIN_DIR, initialize=False)
+    assert plugin is not None
 
-    # Load the example plugin
-    plugin_dir = Path("plugins/example-plugin")
-    if plugin_dir.exists():
-        plugin = loader.load_plugin(plugin_dir, {"test": "config"})
-
-        assert plugin is not None
-        assert plugin.metadata.name == "example-plugin"
-        assert plugin.is_initialized()
-
-
-def test_plugin_registration():
-    """Test plugin registration in registry."""
-    registry = PluginRegistry()
-    plugin = ExamplePlugin()
-    plugin.initialize({})
+    # The registry refuses plugins that were not initialized first.
+    persistence = __import__(
+        f"{type(plugin).__module__.rsplit('.', 1)[0]}.persistence",
+        fromlist=["init_pool", "ensure_schema"],
+    )
+    monkeypatch.setattr(persistence, "init_pool", AsyncMock())
+    monkeypatch.setattr(persistence, "ensure_schema", AsyncMock())
+    await plugin.initialize({})
 
     registry.register(plugin)
 
-    assert len(registry) == 1
     assert "example-plugin" in registry
-    assert registry.get("example-plugin") == plugin
-
-
-def test_plugin_shutdown():
-    """Test plugin shutdown."""
-    plugin = ExamplePlugin()
-    plugin.initialize({})
-
-    assert plugin.is_initialized()
-
-    plugin.shutdown()
-
-    assert not plugin.is_initialized()
+    assert registry.get("example-plugin") is plugin

@@ -177,3 +177,49 @@ class TestWallClockDeadline:
         b = LoopBudget()
         b.started_at -= 2.0
         assert b.snapshot().elapsed_seconds >= 2.0
+
+
+class TestContextAllocation:
+    """Context tokens are labelled, not double-charged: the injected memory
+    block is already inside the LLM call's input tokens, so the counter
+    measures *how the budget is allocated*, never how much is spent."""
+
+    def test_context_tokens_default_zero(self) -> None:
+        assert LoopBudget().snapshot().context_tokens == 0
+
+    def test_record_context_tokens_accumulates(self) -> None:
+        b = LoopBudget()
+        b.record_context_tokens(120)
+        b.record_context_tokens(80)
+        assert b.snapshot().context_tokens == 200
+
+    def test_record_context_tokens_ignores_nonpositive(self) -> None:
+        b = LoopBudget()
+        b.record_context_tokens(0)
+        b.record_context_tokens(-5)
+        assert b.context_tokens == 0
+
+    def test_record_context_tokens_does_not_charge_the_token_cap(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_tokens=100))
+        b.record_context_tokens(500)  # far over the cap — must not raise
+        assert b.tokens == 0
+        assert b.token_pressure() == 0.0
+
+    def test_context_share_is_zero_before_any_llm_call(self) -> None:
+        b = LoopBudget()
+        b.record_context_tokens(500)
+        assert b.context_share() == 0.0
+
+    def test_context_share_is_context_over_total_tokens(self) -> None:
+        b = LoopBudget()
+        b.record_context_tokens(250)
+        b.record_tokens(1000)
+        assert b.context_share() == pytest.approx(0.25)
+
+    def test_context_share_clamped_to_one(self) -> None:
+        # The context block rides along in every iteration's prompt, so the
+        # measured share can exceed the single-pass total; report 1.0, not >1.
+        b = LoopBudget()
+        b.record_context_tokens(2000)
+        b.record_tokens(500)
+        assert b.context_share() == 1.0

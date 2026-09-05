@@ -12,8 +12,14 @@ core/chat/
 ├── workflow_retrieval.py   # Retrieval logic (Mixin-based)
 ├── workflow_response.py    # Response assembly
 ├── workflow_validation.py  # Guard-rail validation
+├── workflows.py            # Workflow Protocols — abstract component contracts
+├── guardrails.py           # Input validation and safety checks for queries
 ├── context.py              # Context building: sources, docs, history
 ├── prompt.py               # Prompt templates
+├── prompt_engine.py        # PromptEngine — 4-layer prompt architecture
+├── prompts/                # Prompt assets (conversation_system.md)
+├── response.py             # LLM response processing/formatting helpers
+├── feedback.py             # apply_feedback_boost — feedback-based score adjustment
 ├── reranking.py            # Cross-encoder document reranking
 ├── streaming.py            # Streaming response support
 ├── history.py              # Conversation history management
@@ -22,6 +28,7 @@ core/chat/
 ├── agent_state.py          # Typed shared loop state (AgentState)
 ├── precheck.py             # Pre-retrieval answer cache keys (opt-in)
 └── mixins/                 # Modular retrieval behaviour (Mixin pattern)
+    ├── _doc_match_index.py # Inverted index for explicit document mentions
     ├── retrieval_search.py
     ├── retrieval_scoring.py
     ├── retrieval_precheck.py
@@ -83,32 +90,51 @@ registry = PluginRegistry()
 chat = ChatService(plugin_registry=registry)
 ```
 
+### Long-term memory (`CHAT_MEMORY_ENABLED`, default `false`)
+
+The `Orchestrator` that `ChatService` builds takes an optional
+`memory_manager`. It is `None` unless `CHAT_MEMORY_ENABLED=true`, in which case
+the service constructs an `AgentMemory` (`core/memory/manager.py`) and the loop
+recalls past interactions before answering and writes the exchange back
+afterwards. That costs an embedding and a store round-trip per request, which
+is why it is opt-in; conversation history (the last turns replayed into the
+prompt) is a separate, always-on mechanism described under
+[Conversation History](#conversation-history). If `AgentMemory` cannot be
+constructed the service logs a warning and continues without memory rather than
+failing the request.
+
+```env
+CHAT_MEMORY_ENABLED=true
+```
+
 ---
 
 ## RAG Workflow
 
 The RAG pipeline is implemented natively as an **Orchestrator-compatible
 `FlowHandler`** (`RagWorkflowHandler` in `core/chat/rag_workflow.py`) driving a
-typed `AgentState` through explicit steps — conditional branching, audit
-steps, and extensibility without any external graph framework.
+typed `AgentState` through explicit steps — conditional early exits
+(guardrail rejection, pre-retrieval cache hit, clarification request,
+answer-cache hit) and extensibility without any external graph framework.
+`RagWorkflowHandler.handle` runs the `RagWorkflow` steps in this order:
 
 ```mermaid
 graph TD
-    A[User Query] --> B[Retrieve Documents]
-    B --> C[Score & Rerank]
-    C --> D{Score > 0.9?}
-    D -- Yes --> F[Generate Answer]
-    D -- No --> E[Audit Agent]
-    E --> F
-    F --> G[Validate Response]
-    G --> H[Return with Sources]
-```
-
-### Conditional Audit Logic
-
-```python
-# The audit step is skipped automatically when similarity score > 0.9
-# Controlled by workflow_planner.py — no configuration needed
+    A[User Query] --> B[validate_input / classify_intent]
+    B -- state.done --> Z[Return]
+    B --> C[load_history]
+    C --> D{check_precheck_cache hit?}
+    D -- Yes --> Z
+    D -- No --> E[retrieve_documents]
+    E -- clarification_reason --> Y[request_clarification] --> Z
+    E --> F[score_documents]
+    F --> G[build_context]
+    G --> H{check_cache hit?}
+    H -- Yes --> Z
+    H -- No --> I[plan_backlog]
+    I --> J[generate_answer]
+    J --> K[finalize_answer]
+    K --> L[Return with Sources]
 ```
 
 ### Backlog Planner
@@ -281,7 +307,11 @@ trimmed turns plus a formatted history/summary string) and `append_turn`:
 ```python
 from core.services.chat.utils.history import ChatHistoryManager
 
-history = ChatHistoryManager(cache)  # cache is a CacheProtocol; built by the dependency factory
+history = ChatHistoryManager(
+    cache,                  # CacheProtocol | None; built by the dependency factory
+    max_turns=6,            # required keyword — the factory passes CHAT_MEMORY_MAX_TURNS (default 6)
+    summary_enabled=False,  # opt-in rolling summary (summary_max_turns=8, summary_max_chars=800)
+)
 
 # Load prior turns for a conversation -> (turns, history_text)
 turns, history_text = await history.load("conv-123")

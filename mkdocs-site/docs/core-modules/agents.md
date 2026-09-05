@@ -16,6 +16,7 @@ plugins/
 │   └── plugin.py          # BrowserAgentPlugin
 ├── coding_agent/
 │   ├── agent.py           # Auto-debug coding agent
+│   ├── prompts.py         # System/task prompt templates
 │   ├── tools.py           # Coding tool definitions and adapters
 │   ├── types.py           # CodeLanguage, CodingResult, CodeExecutionResult
 │   └── plugin.py          # CodingAgentPlugin
@@ -25,8 +26,11 @@ core/agents/
 ├── browser_agent.py       # Backward-compatible shim
 ├── browser_tools.py       # Backward-compatible shim
 ├── browser_types.py       # Backward-compatible shim
-├── coding/
-│   └── __init__.py        # Backward-compatible shim
+├── coding/                # Backward-compatible shim package
+│   ├── __init__.py
+│   ├── agent.py           # -> plugins.coding_agent.agent
+│   ├── prompts.py         # -> plugins.coding_agent.prompts
+│   └── types.py           # -> plugins.coding_agent.types
 └── coding_tools.py        # Backward-compatible shim
 ```
 

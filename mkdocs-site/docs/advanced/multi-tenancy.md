@@ -354,10 +354,16 @@ A different tenant's encryptor fails the GCM authentication and raises
 
 ## Strict Mode
 
-For environments with high security requirements, you can enable **strict tenant isolation** (`strict_tenant_isolation` on the app config):
+**Strict tenant isolation** (`AppConfig.strict_tenant_isolation`) is **on by
+default** (`STRICT_TENANT_ISOLATION=true`). Set it to `false` only if you need
+the permissive fallback:
 
 ```env
+# default — no need to set it
 STRICT_TENANT_ISOLATION=true
+
+# permissive mode: missing context falls back to the "default" tenant
+STRICT_TENANT_ISOLATION=false
 ```
 
 In strict mode:
@@ -371,7 +377,7 @@ In strict mode:
 ```python
 from core.context import get_current_tenant_id
 
-# Without tenant context, with strict_tenant_isolation enabled
+# Without tenant context, with the default strict_tenant_isolation=True
 tenant_id = get_current_tenant_id()
 # Raises: TenantContextError(
 #     "Strict tenant isolation enabled: No tenant context found in current contextvar."
@@ -379,7 +385,9 @@ tenant_id = get_current_tenant_id()
 ```
 
 !!! tip "Recommendation"
-    Enable strict mode in production to prevent accidental security bugs.
+    Leave strict mode on in production; it is the default precisely so that a
+    code path that forgot to set the tenant context fails loudly instead of
+    silently reading or writing the `"default"` tenant.
 
 ---
 
@@ -398,7 +406,7 @@ from core.services.tenant.service import get_tenant_service
 
 tenant_service = get_tenant_service()
 
-@router.post("/api/admin/tenants")
+@router.post("/admin/tenants")
 @auth.require_auth({AuthRole.ADMIN})  # auth = AuthManager instance
 async def create_tenant(tenant_id: str, name: str):
     """
@@ -413,12 +421,12 @@ async def create_tenant(tenant_id: str, name: str):
 ### List / Get Tenants
 
 ```python
-@router.get("/api/admin/tenants")
+@router.get("/admin/tenants")
 @auth.require_auth({AuthRole.ADMIN})
 async def list_tenants(limit: int = 100, offset: int = 0):
     return await tenant_service.list_tenants(limit=limit, offset=offset)
 
-@router.get("/api/admin/tenants/{tenant_id}")
+@router.get("/admin/tenants/{tenant_id}")
 @auth.require_auth({AuthRole.ADMIN})
 async def get_tenant(tenant_id: str):
     return await tenant_service.get_tenant(tenant_id)

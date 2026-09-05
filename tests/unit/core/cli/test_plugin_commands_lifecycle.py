@@ -96,6 +96,20 @@ class TestPluginCreateInteractive:
         assert (tmp_path / "plugins" / "my-new-plugin" / "plugin.py").exists()
         assert (tmp_path / "plugins" / "my-new-plugin" / "manifest.json").exists()
 
+    def test_create_class_name_splits_on_dash_and_underscore(
+        self, tmp_path, monkeypatch
+    ):
+        """Underscore directory names get the same CamelCase class as dashed ones."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "plugins").mkdir()
+
+        from core.cli.commands.plugin.create import create_plugin
+
+        assert create_plugin("weather_agent", "agent") == 0
+        plugin_py = (tmp_path / "plugins" / "weather_agent" / "plugin.py").read_text()
+        assert "class WeatherAgentPlugin" in plugin_py
+        assert "Weather_agent" not in plugin_py
+
     def test_create_duplicate(self, tmp_path, monkeypatch):
         """Test creating a plugin with an existing name fails."""
         monkeypatch.chdir(tmp_path)

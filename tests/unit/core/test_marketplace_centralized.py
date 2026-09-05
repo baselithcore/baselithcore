@@ -119,6 +119,47 @@ async def test_installer_already_installed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_installer_force_removes_existing_install(tmp_path, monkeypatch):
+    """``force=True`` wipes the existing directory before cloning."""
+    installer = PluginInstaller()
+    installer.plugins_dir = tmp_path
+
+    plugin_dir = tmp_path / "test-plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "stale.txt").write_text("old")
+
+    plugin = MarketplacePlugin(
+        id="test.plugin",
+        name="test-plugin",
+        author="Baselith",
+        version="1.0.0",
+        git_url="https://example.com/org/test-plugin.git",
+    )
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            plugin_dir.mkdir(exist_ok=True)
+            (plugin_dir / "manifest.yaml").write_text(
+                "name: test-plugin\nversion: 1.0.0\ndescription: t\n"
+            )
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    monkeypatch.setattr(
+        "core.marketplace.installer.asyncio.create_subprocess_exec", _fake_exec
+    )
+
+    result = await installer.install(plugin, force=True)
+
+    assert result.status.value != "already_installed"
+    assert not (plugin_dir / "stale.txt").exists()
+
+
+@pytest.mark.asyncio
 async def test_installer_rejects_path_traversal(tmp_path):
     installer = PluginInstaller()
     installer.plugins_dir = tmp_path

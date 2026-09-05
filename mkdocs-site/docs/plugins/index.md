@@ -123,13 +123,16 @@ Submit plugins to the marketplace hub via the Scaffolder.
 
 ```text
 plugins/my-plugin/
+├── manifest.yaml      # Identity and requirements (required; .yml/.json accepted)
 ├── plugin.py          # Entry point (required)
 ├── agent.py           # Agent logic
 ├── handlers.py        # Flow handlers
 ├── router.py          # API endpoints
 ├── static/            # Frontend assets
-└── README.md          # Documentation
+└── README.md          # Documentation (optional)
 ```
+
+A directory without a manifest is skipped at discovery and never loaded.
 
 ### Capability Mixins
 
