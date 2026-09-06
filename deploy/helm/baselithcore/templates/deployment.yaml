@@ -1,3 +1,4 @@
+{{- $probeHost := include "baselithcore.probeHost" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -94,23 +95,20 @@ spec:
           # than livenessProbe's window no longer CrashLoops the pod.
           startupProbe:
             httpGet:
-              path: {{ .Values.startupProbe.path }}
-              port: http
+              {{- include "baselithcore.probeHttpGet" (dict "path" .Values.startupProbe.path "host" $probeHost) | nindent 14 }}
             periodSeconds: {{ .Values.startupProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.livenessProbe.path }}
-              port: http
+              {{- include "baselithcore.probeHttpGet" (dict "path" .Values.livenessProbe.path "host" $probeHost) | nindent 14 }}
             initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
           readinessProbe:
             httpGet:
-              path: {{ .Values.readinessProbe.path }}
-              port: http
+              {{- include "baselithcore.probeHttpGet" (dict "path" .Values.readinessProbe.path "host" $probeHost) | nindent 14 }}
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
@@ -123,7 +121,7 @@ spec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) }}
+          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
@@ -135,8 +133,11 @@ spec:
             - name: prometheus-multiproc
               mountPath: /tmp/prometheus
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) }}
+      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumes }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
@@ -147,6 +148,9 @@ spec:
         - name: prometheus-multiproc
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

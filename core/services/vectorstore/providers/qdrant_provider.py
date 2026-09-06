@@ -4,6 +4,7 @@ Qdrant provider implementation.
 
 from collections.abc import Sequence
 from typing import Any
+from uuid import UUID
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
@@ -340,10 +341,14 @@ class QdrantProvider:
         try:
             tenant_id = kwargs.pop("tenant_id", None)
 
+            # qdrant's point-id type also admits UUID, and list is invariant:
+            # a list[int | str] is not a list[int | str | UUID].
+            ids: list[int | str | UUID] = list(point_ids)
+
             if tenant_id:
                 scroll_filter = Filter(
                     must=[
-                        HasIdCondition(has_id=point_ids),
+                        HasIdCondition(has_id=ids),
                         FieldCondition(
                             key="tenant_id", match=MatchValue(value=tenant_id)
                         ),
@@ -383,9 +388,11 @@ class QdrantProvider:
         try:
             wait = kwargs.get("wait", True)
 
+            # See retrieve(): list is invariant, so widen the element type.
+            ids: list[int | str | UUID] = list(point_ids)
             await self.client.delete(
                 collection_name=collection_name,
-                points_selector=point_ids,
+                points_selector=ids,
                 wait=wait,
             )
             logger.debug(f"Deleted {len(point_ids)} points from '{collection_name}'")

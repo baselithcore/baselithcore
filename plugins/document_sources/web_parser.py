@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from .utils import normalize_text
 from .web_constants import (
     BLOCK_TAGS,
+    DROP_ATTRS,
     DROP_TAGS,
     HEADING_TAGS,
     MAIN_SELECTORS,
@@ -166,10 +167,11 @@ def parse_page(
     for tag in DROP_TAGS:
         for node in soup.find_all(tag):
             node.decompose()
-    for node in soup.find_all(attrs={"aria-hidden": "true"}):
-        node.decompose()
-    for node in soup.find_all(attrs={"role": "navigation"}):
-        node.decompose()
+    # `name` is passed positionally: bs4's attrs-only overload requires it, and
+    # find_all(attrs=...) alone matches the overload that wants attrs=None.
+    for attrs in DROP_ATTRS:
+        for node in soup.find_all(None, attrs):
+            node.decompose()
 
     # Collect links before further processing
     links = collect_links(

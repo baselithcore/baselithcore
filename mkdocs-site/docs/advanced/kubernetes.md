@@ -21,10 +21,12 @@ deploy/terraform/            # Terraform module (deploys the chart)
 | Pod hardening | non-root (uid 1000), read-only rootfs, all caps dropped, `RuntimeDefault` seccomp |
 | SA token | `automountServiceAccountToken: false` on the ServiceAccount and both pod specs — the app never calls the Kubernetes API, so no pod carries a projected token (`serviceAccount.automountToken` to opt back in) |
 | Spread | `topologySpreadConstraints` across nodes |
-| Config / secrets | `ConfigMap` (non-secret) + `Secret` (chart-managed or external) via `envFrom` |
+| Config / secrets | `ConfigMap` (non-secret) + `Secret` (chart-managed or external) via `envFrom`. The pre-deploy migration hook gets its own hook-scoped copies (`-migrate-config` / `-migrate-secrets`, hook weight `-5`, deleted once the Job succeeds): Helm applies ordinary resources *after* its hooks, so a Job reading the release ConfigMap could never start on a first install |
+| Host validation | `TRUSTED_HOSTS` is derived from `ingress.hosts` plus the in-cluster Service names — `APP_ENV=production` with an empty list is a hard startup abort. The probes carry a matching `Host` header (`probeHost`, defaulting to the Service FQDN), because `TrustedHostMiddleware` answers **400** to the kubelet, which addresses the pod by IP. Setting `config.TRUSTED_HOSTS` by hand therefore also requires setting `probeHost`; the chart refuses to render otherwise |
+| Writable paths | `readOnlyRootFilesystem: true` leaves only the `/tmp` mount writable. Anything persisting inside the image tree — a plugin's data directory, a Hugging Face cache under `/app/models` — needs `extraVolumes` / `extraVolumeMounts`, or it fails at boot |
 | Metrics | optional `ServiceMonitor` scraping `/metrics` |
 | Network | optional `NetworkPolicy` (`networkPolicy.enabled`). Ingress defaults to any pod in the namespace; narrow it with `networkPolicy.ingressFrom`. **Egress is the half that matters for an agent runtime** and is a separate opt-in (`networkPolicy.egress.enabled`): with outbound unrestricted, a prompt-injected agent or a hostile tool result reaches whatever the pod network routes to, cloud metadata included. Enabling it is deny-by-default outbound, so list what the pod legitimately needs in `networkPolicy.egress.rules` (DNS is kept open separately); `values.yaml` carries a worked example |
-| Workers | optional `core.task_queue` worker `Deployment`. It ships **no** liveness probe: an RQ worker that hangs mid-job keeps its process alive, so the kubelet never restarts it and the queue stops draining silently. Supply one through `worker.livenessProbe` (rendered verbatim; `values.yaml` carries a working candidate based on the RQ heartbeat registry, commented out) after validating it against your own deployment — a probe that cannot reach Redis restarts healthy workers |
+| Workers | optional `core.task_queue` worker `Deployment` running `baselith queue worker`. It ships **no** liveness probe: an RQ worker that hangs mid-job keeps its process alive, so the kubelet never restarts it and the queue stops draining silently. Supply one through `worker.livenessProbe` (rendered verbatim; `values.yaml` carries a working candidate based on the RQ heartbeat registry, commented out) after validating it against your own deployment — a probe that cannot reach Redis restarts healthy workers |
 
 ## Quick start
 
@@ -37,6 +39,13 @@ helm upgrade --install baselithcore deploy/helm/baselithcore \
 
 `values-production.yaml` is a ready-to-edit overlay (ingress, TLS via
 cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
+
+!!! warning "Sizing"
+    The default `resources.limits.memory` (1Gi) covers an API pod with the
+    embedder stack disabled or already cached. Give `/app/models` a volume and
+    the plugins that own an embedder download and load real models at boot —
+    several GB — and the pod is OOMKilled mid-startup. Size the limit against
+    the plugins you actually enable.
 
 !!! note "Image name"
     `values.yaml` and `values-production.yaml` default `image.repository` to

@@ -104,6 +104,14 @@ tmpVolumes:
 # in-flight requests drain before SIGKILL.
 terminationGracePeriodSeconds: 45
 
+# Host header sent on the three probes. TRUSTED_HOSTS mounts Starlette's
+# TrustedHostMiddleware, which 400s any request whose Host it does not know —
+# and the kubelet addresses the pod by IP, so without a Host header the probes
+# fail and the pod never becomes ready. Left empty the chart uses the first
+# ingress host, which is right whenever it also derived TRUSTED_HOSTS. Set this
+# explicitly whenever you set config.TRUSTED_HOSTS yourself.
+probeHost: ""
+
 # Covers slow cold starts (plugin activation, embedder warmup): up to
 # periodSeconds * failureThreshold = 300s before the pod is restarted.
 # Liveness/readiness only start once this succeeds.
@@ -141,8 +149,11 @@ affinity: {}
 worker:
   enabled: false
   replicaCount: 1
+  # `baselith worker` is not a command: the CLI rejects it with
+  # "invalid choice: 'worker'". The RQ consumer lives under the queue group.
   command:
     - baselith
+    - queue
     - worker
   # Optional liveness probe, rendered verbatim into the worker container when
   # set. Leave empty and the worker has none: a hung RQ worker then keeps
@@ -214,6 +225,21 @@ secrets:
 
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []
+
+# Extra volumes / mounts, rendered verbatim into the api and worker pods.
+# `readOnlyRootFilesystem: true` leaves only the /tmp mount writable, so any
+# component that persists under the image tree (a plugin's own data directory,
+# a Hugging Face cache under /app/models) needs a volume here or it fails at
+# boot. Mount durable state on a PVC; caches can be an emptyDir.
+#   extraVolumes:
+#     - name: plugin-data
+#       persistentVolumeClaim:
+#         claimName: baselithcore-plugin-data
+#   extraVolumeMounts:
+#     - name: plugin-data
+#       mountPath: /app/data
+extraVolumes: []
+extraVolumeMounts: []
 
 # ServiceMonitor for the Prometheus Operator (scrapes /metrics).
 serviceMonitor:

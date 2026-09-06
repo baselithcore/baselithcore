@@ -196,7 +196,9 @@ def create_app() -> FastAPI:
     # We allow credentials for specific listed origins, but disable them for '*'.
     use_wildcard = "*" in allow_origins_list
 
-    cors_params = {
+    # Annotated: the mixed bool/list values otherwise infer as dict[str, object],
+    # which no longer matches CORSMiddleware's per-parameter types once splatted.
+    cors_params: dict[str, Any] = {
         "allow_credentials": not use_wildcard,
         "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": [

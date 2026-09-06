@@ -1,5 +1,5 @@
 name: document-sources
-version: 0.1.0
+version: 0.1.1
 description: Filesystem, web, OCR (MinerU/Tesseract) and document ingestion sources
   for indexing workflows
 author: Baselith
@@ -21,4 +21,4 @@ python_dependencies:
 - mineru[pipeline]>=3.4.4,<4
 optional_resources:
 - internet
-integrity_sha256: 55f9112af14d781b9326e63cfd74b579aa83a3f1b55b6a736a563c5003c59e17
+integrity_sha256: d64d16d156781402b582289acb8abba405000252d98086ebef7829d28327c587

@@ -100,10 +100,30 @@ def ensure_parent_packages(plugin_name: str, plugin_dir: Path) -> None:
     pkg.__path__ = [str(plugin_dir)]
     pkg.__package__ = pkg_fqn
     sys.modules[pkg_fqn] = pkg
+    _bind_on_parent(plugin_name, pkg)
 
     init_py = plugin_dir / "__init__.py"
     if init_py.exists():
         _install_reexport_hook(pkg, pkg_fqn, plugin_dir, init_py)
+
+
+def _bind_on_parent(plugin_name: str, pkg: types.ModuleType) -> None:
+    """Bind ``plugins.<name>`` as an attribute of the ``plugins`` package.
+
+    Python's import machinery always does this for a really-imported submodule,
+    and anything that resolves a dotted path by walking attributes relies on
+    it — ``monkeypatch.setattr("plugins.<name>.<module>.<attr>", ...)`` most of
+    all. Registering only ``sys.modules[fqn]`` leaves such a lookup failing
+    with ``module 'plugins' has no attribute '<name>'`` for every test that
+    runs after the synthetic registration.
+    """
+    parent = sys.modules.get("plugins")
+    if parent is None or hasattr(parent, plugin_name):
+        # Never rebind: whatever is already there was put there by a real
+        # import, and swapping it would hand callers a second instance of a
+        # module that owns process-global state.
+        return
+    setattr(parent, plugin_name, pkg)
 
 
 __all__ = ["ensure_parent_packages"]

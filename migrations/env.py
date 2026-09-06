@@ -93,6 +93,14 @@ async def run_async_migrations() -> None:
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
+        # MUST commit explicitly. `AsyncConnection.connect()` opens an implicit
+        # transaction, and alembic's `context.begin_transaction()` joins that
+        # one instead of starting (and committing) its own. Without this the
+        # block exits, SQLAlchemy rolls the connection back, and every
+        # migration is silently discarded: `alembic upgrade head` prints each
+        # "Running upgrade ..." line and exits 0 while `alembic_version` is
+        # never created and no DDL lands.
+        await connection.commit()
 
     await connectable.dispose()
 

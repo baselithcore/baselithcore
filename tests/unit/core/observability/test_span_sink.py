@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from core.observability import span_sink as span_sink_module
 from core.observability.span_sink import (
     SpanRecord,
     emit_span,
@@ -20,6 +21,23 @@ from core.observability.span_sink import (
     unregister_span_sink,
 )
 from core.observability.tracing import Tracer
+
+
+@pytest.fixture(autouse=True)
+def _isolated_registry() -> Any:
+    """Run each test against an empty sink registry.
+
+    The registry is process-global, and anything that builds the app registers
+    a sink into it. A test asserting `has_span_sinks() is False` would then
+    depend on running before every such test — true until the first module
+    that constructs the app is collected alongside this one.
+    """
+    saved = list(span_sink_module._span_sinks)
+    span_sink_module._span_sinks.clear()
+    try:
+        yield
+    finally:
+        span_sink_module._span_sinks[:] = saved
 
 
 @pytest.fixture

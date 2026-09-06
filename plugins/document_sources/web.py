@@ -285,8 +285,15 @@ class WebDocumentSource:
                 if not await self._url_allowed(current):
                     return None
                 response = await self._client.get(current)
-                if response.is_redirect and response.has_redirect_location:
-                    current = str(response.next_request.url)
+                # `next_request` is typed Optional even when
+                # has_redirect_location is True, so bind it before use.
+                next_request = response.next_request
+                if (
+                    response.is_redirect
+                    and response.has_redirect_location
+                    and next_request is not None
+                ):
+                    current = str(next_request.url)
                     continue
                 response.raise_for_status()
                 return response.text, str(response.url)
