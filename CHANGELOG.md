@@ -5,6 +5,13 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+## [0.31.1](https://github.com/baselithcore/baselithcore/compare/v0.31.0...v0.31.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **image:** refresh the base digest and take setuptools from PyPI ([de9058f](https://github.com/baselithcore/baselithcore/commit/de9058fd3de60b80abf2f4f17f8a8329a43ed0fb))
+
 # [0.31.0](https://github.com/baselithcore/baselithcore/compare/v0.30.0...v0.31.0) (2026-09-06)
 
 
