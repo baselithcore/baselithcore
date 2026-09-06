@@ -7,7 +7,7 @@ for storage backends (MemoryProvider) and context synthesis (ContextProvider).
 """
 
 from abc import ABC, abstractmethod
-from typing import Protocol
+from typing import Any, Protocol
 
 from .types import MemoryItem, MemoryType
 
@@ -61,7 +61,7 @@ class ContextProvider(ABC):
     """
 
     @abstractmethod
-    async def get_context(self, query: str, **kwargs) -> str:
+    async def get_context(self, query: str, **kwargs: Any) -> str:
         """Retrieve relevant context string for a query."""
         pass
 

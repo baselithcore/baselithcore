@@ -12,7 +12,7 @@ import os
 import random
 from collections.abc import Sequence
 from threading import Lock
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 import orjson
 
@@ -128,10 +128,11 @@ class RedisTTLCache(Generic[K, V]):
         # orjson returns bytes directly (~5-10x faster than json on the large
         # payloads stored here) and redis-py accepts bytes. Unlike cache keys,
         # values don't need digest stability, so no sort-keys option is set.
-        return orjson.dumps(value, default=_json_default)
+        payload: bytes = orjson.dumps(value, default=_json_default)
+        return payload
 
     def _deserialize_value(self, data: bytes) -> V:
-        return orjson.loads(data)
+        return cast(V, orjson.loads(data))
 
     def _xfetch_expired(self, pttl_ms: Any) -> bool:
         """Probabilistic early-expiry decision for a live entry.
@@ -172,7 +173,7 @@ class RedisTTLCache(Generic[K, V]):
             try:
                 await self._client.delete(redis_key)
             except Exception:
-                pass
+                logger.debug("redis_cache_corrupt_entry_delete_failed", exc_info=True)
             return None
 
     async def set(self, key: K, value: V) -> None:
@@ -210,7 +211,9 @@ class RedisTTLCache(Generic[K, V]):
                 try:
                     await self._client.delete(redis_key)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "redis_cache_corrupt_entry_delete_failed", exc_info=True
+                    )
                 results.append(None)
 
         return results

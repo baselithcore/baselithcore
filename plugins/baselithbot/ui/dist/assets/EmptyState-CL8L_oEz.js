@@ -1,0 +1,1 @@
+import{j as s}from"./index-Bc9-2oy3.js";function i({title:t,description:e,action:r}){return s.jsxs("div",{className:"empty",children:[s.jsx("strong",{children:t}),e&&s.jsx("div",{className:"muted",children:e}),r&&s.jsx("div",{style:{marginTop:12},children:r})]})}export{i as E};

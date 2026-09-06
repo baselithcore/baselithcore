@@ -430,7 +430,7 @@ class ResourceAnalyzer:
         visited = set()
         visiting = set()
 
-        def visit(resource: str):
+        def visit(resource: str) -> None:
             """
             Recursively visit resources resolving dependencies.
 

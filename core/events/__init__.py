@@ -18,8 +18,20 @@ Usage:
     await bus.emit("agent.completed", {"agent_id": "123", "result": "success"})
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from core.events.bus import EventBus, get_event_bus, reset_event_bus
+from core.events.durable import DEFAULT_CONSUMER_GROUP, DurableEventBridge
 from core.events.names import EventNames
+from core.events.stream import (
+    DEFAULT_STREAM_MAXLEN,
+    EventStream,
+    InMemoryEventStream,
+    StreamRecord,
+    StreamStats,
+)
 from core.events.types import (
     AsyncHandler,
     Event,
@@ -36,6 +48,9 @@ from core.events.validation import (
     get_schema_registry,
 )
 
+if TYPE_CHECKING:
+    from core.events.listener import EventListener
+
 __all__ = [
     # Types
     "Event",
@@ -49,6 +64,14 @@ __all__ = [
     "reset_event_bus",
     # Names
     "EventNames",
+    # Durable stream
+    "DEFAULT_CONSUMER_GROUP",
+    "DEFAULT_STREAM_MAXLEN",
+    "DurableEventBridge",
+    "EventStream",
+    "InMemoryEventStream",
+    "StreamRecord",
+    "StreamStats",
     # Validation & DLQ
     "DeadLetterEntry",
     "DeadLetterQueue",
@@ -60,7 +83,7 @@ __all__ = [
 
 
 # Lazy import for listener to avoid circular imports
-def get_event_listener():
+def get_event_listener() -> EventListener:
     """Get or create the global event listener."""
     from core.events.listener import EventListener
 

@@ -93,6 +93,9 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      # Trust X-Forwarded-* from the gateway network (pinned subnet below), so
+      # per-IP rate limits / admin lockout see the real client, not nginx.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -326,6 +329,11 @@ volumes:
 
 networks:
   app_net:
+    # Fixed subnet so FORWARDED_ALLOW_IPS above can trust the gateway by
+    # network; override APP_NET_SUBNET on collision, keeping both in step.
+    ipam:
+      config:
+        - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}
   obs_net:
 ```
 
@@ -336,7 +344,7 @@ networks:
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `docker-compose.yml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `docker-compose.sandbox.yml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
-    Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files and `ollama/ollama:0.33.2` in the default stack — a `latest` re-pull must not silently change the data plane or the local LLM runtime. The default stack also adds healthchecks for Qdrant (TCP connect probe — the image ships no curl) and Ollama (`ollama ls`), and `api`/`worker` now gate on `condition: service_healthy` for all four dependencies instead of `service_started`.
+    Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. The default stack also adds healthchecks for Qdrant (TCP connect probe — the image ships no curl) and Ollama (`ollama ls`), and `api`/`worker` now gate on `condition: service_healthy` for all four dependencies instead of `service_started`.
     Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). Both compose files pass it through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
 
 ### Uvicorn Runtime Flags
@@ -345,15 +353,25 @@ The production image's entrypoint runs Uvicorn with proxy-aware and shutdown fla
 
 ```bash
 uvicorn backend:app --host "$HOST" --port "$PORT" \
-    --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
+    --proxy-headers --no-server-header \
+    --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
     --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
 ```
 
 - **`--proxy-headers --forwarded-allow-ips`** — trust `X-Forwarded-For` only from
   your load balancer / reverse proxy. **Set `FORWARDED_ALLOW_IPS` to the LB
-  address**: without it every request appears to originate from the proxy IP, and
-  per-IP rate limiting and admin lockout collapse into a single shared bucket.
+  address** (IPs or CIDRs, comma-separated): without it every request appears
+  to originate from the proxy IP, and per-IP rate limiting, the failed-auth
+  throttle and the admin lockout collapse into a single shared bucket. The
+  production compose pins `app_net` to a fixed subnet (`APP_NET_SUBNET`,
+  default `172.28.0.0/24`) and trusts it by default; the Helm chart exposes the
+  same knob as `forwardedAllowIps` (set it to the ingress controller's pod
+  CIDR).
+- **`--no-server-header`** — drop the `Server: uvicorn` banner. The bundled
+  nginx replaces it at the edge, but a pod behind a cloud LB / ingress that
+  passes upstream headers through would otherwise advertise the exact server
+  stack to every caller.
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
   SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
   pod drains cleanly instead of being force-killed.
@@ -639,8 +657,11 @@ server {
         proxy_connect_timeout 10s;
     }
 
-    # SSE / chat streaming: disable proxy buffering to preserve token-by-token delivery
-    location /chat/stream {
+    # SSE / chat streaming: disable proxy buffering to preserve token-by-token
+    # delivery. Regex so the versioned alias /v1/chat/stream is covered too —
+    # a plain prefix location would let it fall through to `location /` and
+    # its shorter read timeout.
+    location ~ ^/(v1/)?chat/stream$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -680,7 +701,7 @@ Before going live, verify every point:
 - [ ] `APP_ENV=production` and `ENVIRONMENT=production` set consistently (`prod`/`prd`/`live` also resolve to production; an unrecognised name is hardened as production — see [Environment naming](#environment-naming))
 - [ ] Secrets in environment variables (never in code)
 - [ ] HTTPS configured with valid certificate
-- [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
+- [ ] Rate limiting active (enforced by `SecurityManager` through the sliding-window `RateLimiter`; `RATE_LIMIT_FAIL_MODE` resolved for the Redis backend)
 - [ ] CORS configured for authorized domains only
 - [ ] API documentation disabled or restricted (`DOCS_ENABLED=false`; when unset, `/docs`, `/redoc` and the OpenAPI schema are switched off automatically once the environment resolves to production)
 - [ ] Strong JWT secret (256-bit minimum); `PyJWT >= 2.10.1` pinned
@@ -745,9 +766,10 @@ AUTH_REQUIRED=true
 DOCS_ENABLED=false
 MAX_REQUEST_SIZE_BYTES=10485760
 
-# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address)
+# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address or
+# CIDR; the production compose defaults it to the app_net subnet)
 WEB_CONCURRENCY=4
-FORWARDED_ALLOW_IPS=127.0.0.1
+FORWARDED_ALLOW_IPS=172.28.0.0/24
 GRACEFUL_SHUTDOWN_TIMEOUT=25
 
 # Database
@@ -786,6 +808,11 @@ SENTRY_DSN=${SENTRY_DSN}
 
 !!! danger "Secrets Security"
     **NEVER commit `.env.production` to Git!** Add to `.gitignore`. Use secret managers (Vault, AWS Secrets Manager, etc.) in enterprise environments.
+
+    The file is also **kept out of the Docker build context**: `.dockerignore`
+    excludes `configs/.env*`, so a filled-in template on the build host is never
+    baked into an image layer. Compose injects it from the host via `env_file:`;
+    the application itself never reads `configs/.env.*` at runtime.
 
 ### Environment naming
 

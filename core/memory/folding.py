@@ -179,7 +179,7 @@ Summary:"""
                 if len(result) > self.config.summary_max_chars:
                     result = result[: self.config.summary_max_chars - 3] + "..."
                 self._store_summary(cache_key, result)
-                return result
+                return str(result)
             except Exception as e:
                 logger.warning(f"LLM folding failed: {e}")
 

@@ -29,6 +29,28 @@ and committed automatically.
 Additive changes (new optional params with safe defaults, new routes, new env
 vars, new flags) are **not** breaking.
 
+### Enforcement: the public API surface gate
+
+The first bullet above is enforced, not just declared. `scripts/check_public_api.py`
+snapshots every literal `__all__` under `core/` into
+`scripts/public_api_baseline.json` and fails on any drift — the Python-surface
+twin of the OpenAPI drift gate:
+
+- a **removed** symbol is reported as `BREAKING`: stage it through the
+  deprecation process below and refresh the baseline only in the change that
+  carries the `BREAKING CHANGE:` footer;
+- an **added** symbol only needs `--update-baseline`, so every addition to the
+  public surface is a conscious, reviewable line in the diff.
+
+```bash
+python scripts/check_public_api.py            # gate (pre-commit + CI)
+python scripts/check_public_api.py --list     # surface + packages without a literal __all__
+python scripts/check_public_api.py --update-baseline
+```
+
+Only literal `__all__` lists are read (AST, no imports); a package that builds
+its exports dynamically is not covered and is named by `--list`.
+
 ## Deprecation process
 
 Breaking changes are staged, never abrupt:

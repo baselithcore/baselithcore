@@ -189,8 +189,12 @@ These rules are no longer documentation-only. The framework now enforces them th
 
 - `python scripts/check_architecture_boundaries.py`
 - `python scripts/check_official_plugin_typing.py`
-- `python scripts/check_core_resilience_typing.py`
+- `python scripts/check_core_strict_typing.py`
 - `python scripts/check_file_size.py`
+- `python scripts/check_exception_hygiene.py`
+- `python scripts/check_public_api.py`
+- `python scripts/check_sdk_contract.py`
+- `python scripts/check_perf_budget.py` (scheduled perf run)
 
 These checks are wired into CI and pre-commit for the supported slices of the codebase.
 
@@ -219,6 +223,97 @@ python scripts/check_file_size.py --update-baseline
 
 The baseline is **empty**: every source file is at or under the cap, so any
 entry appearing there is a regression to fix rather than debt to record.
+
+#### The core strict-typing ratchet
+
+The repo-wide `mypy core/` run is deliberately lenient (`disallow_untyped_defs`
+and `warn_return_any` are off): a big-bang switch to strict mode across the
+whole tree would never land. `scripts/check_core_strict_typing.py` is the
+ratchet that gets there one package at a time. Every package in its
+`STRICT_CORE_PACKAGES` allowlist is checked with `--disallow-untyped-defs`,
+`--disallow-incomplete-defs`, `--warn-return-any`, `--no-implicit-optional`
+and `--check-untyped-defs` (with `--follow-imports=silent`, so calls into other
+core packages carry their real types) on every commit and in the
+`type_check_core_strict` CI job.
+
+- a package **enters** the allowlist once it passes, and never leaves — an
+  entry that starts failing is a regression in that package, not a reason to
+  drop the entry. Every package a request touches on the way in and out is
+  already covered: `core.api`, `core.auth`, `core.config`, `core.db`,
+  `core.cache`, `core.chat`, `core.memory`, `core.middleware`,
+  `core.observability`, `core.orchestration`, `core.plugins`, `core.di`,
+  `core.services.llm` and `core.services.vectorstore`, alongside the rest of
+  the allowlist;
+- `python scripts/check_core_strict_typing.py --candidates` runs the strict
+  flags on every package not yet listed and prints the ones that already pass,
+  so growing the list is a one-line change;
+- `--warn-unused-ignores` is deliberately not part of the flag set: whether a
+  `type: ignore` on a third-party call is "unused" depends on whether that
+  library is installed, and the CI job runs with stubs only. `--warn-return-any`
+  *is* in the set and is sensitive to the same difference in the opposite
+  direction — a call into an uninstalled library returns `Any` — so verify a
+  new entry against a stubs-only environment, not just a full developer one:
+
+  ```bash
+  uv venv /tmp/gate && uv pip install --python /tmp/gate/bin/python \
+      mypy==2.3.0 redis==5.3.1 types-requests types-setuptools \
+      pydantic pydantic-settings
+  /tmp/gate/bin/python scripts/check_core_strict_typing.py
+  ```
+
+- a parent package that is only partly covered (`core.services`) is never
+  listed by `--candidates`; its subpackages are listed instead, because the
+  parent as a whole will not go green.
+
+The ratchet superseded the earlier file-level `check_core_resilience_typing.py`
+gate; `core.resilience` is allowlisted as a whole package.
+
+#### Exception policy and the silent-handler ratchet
+
+**Fail loud; degrade only where documented, and never invisibly.** A broad
+handler that swallows the error without a trace turns a production incident
+into "it just returned nothing":
+
+```python
+# ❌ NO — the failure is unobservable
+try:
+    owner = registry.get_flow_handler_owner(intent)
+except Exception:
+    return None
+
+# ✅ YES — degrade, but leave a trace
+try:
+    owner = registry.get_flow_handler_owner(intent)
+except Exception:
+    logger.debug("flow_handler_owner_lookup_failed", exc_info=True)
+    return None
+```
+
+The rules, in order of preference:
+
+1. **Catch the narrowest exception** the call can actually raise.
+2. **Re-raise** (or wrap in a typed `core.exceptions` error) unless the caller
+   is documented as best-effort.
+3. **Best-effort paths log** — `logger.debug(..., exc_info=True)` at minimum
+   — or emit a metric; a hot path may use `debug` so the trace is there when
+   an operator raises the log level.
+4. A deliberate silent degradation carries an explicit, mandatory reason on
+   the `except` line: `except Exception:  # silent-ok: metrics never block`.
+
+`scripts/check_exception_hygiene.py` enforces this as a ratchet. A handler is
+*silent* when it catches `Exception`/`BaseException` (or is a bare `except:`)
+and its body contains no call, `raise`, `await` or `yield`.
+`scripts/exception_hygiene_baseline.json` freezes today's per-file counts:
+
+- a **new** silent handler fails the build — log it, narrow it, re-raise, or
+  mark it `silent-ok: <reason>`;
+- a baselined file may shrink but never grow;
+- once a file reaches zero its entry must be deleted.
+
+```bash
+python scripts/check_exception_hygiene.py --list             # every site
+python scripts/check_exception_hygiene.py --update-baseline  # after fixing sites
+```
 
 ### Architecture Validation Checklist
 

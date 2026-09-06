@@ -8,7 +8,7 @@ value stashed on the ASGI ``scope`` instead of scanning the route prefixes twice
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from starlette.types import Scope
 
@@ -25,7 +25,7 @@ def matched_plugin_route(scope: Scope, registry: Any, path: str) -> str | None:
     """
     cached = scope.get(_SCOPE_KEY, _UNSET)
     if cached is not _UNSET:
-        return cached  # type: ignore[return-value]
+        return cast("str | None", cached)
     try:
         matched = registry.match_plugin_route(path)
     except Exception:

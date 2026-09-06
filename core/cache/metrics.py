@@ -167,7 +167,7 @@ class CacheMetricsCollector:
     to provide system-wide cache performance insights.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metrics collector with empty registry."""
         self._metrics: dict[str, CacheMetrics] = {}
         logger.debug("CacheMetricsCollector initialized")

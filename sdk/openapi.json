@@ -876,7 +876,7 @@
   },
   "info": {
     "title": "Baselith-Core",
-    "version": "0.30.0"
+    "version": "0.31.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1698,7 +1698,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Frontend Manifest Api Plugins Frontend Manifest Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1715,7 +1719,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get All Metrics Api Plugins Metrics All Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1735,7 +1743,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get System Metrics Api Plugins Metrics System Overview Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1755,7 +1767,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Performance Metrics Api Plugins Metrics System Performance Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1775,7 +1791,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset All Metrics Api Plugins Metrics System Reset Delete",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1806,7 +1826,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Plugin Metrics Api Plugins Metrics  Plugin Name  Delete",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1845,7 +1869,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Metrics Api Plugins Metrics  Plugin Name  Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -1977,7 +2005,11 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Dependents Api Plugins  Plugin Name  Dependents Get",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"

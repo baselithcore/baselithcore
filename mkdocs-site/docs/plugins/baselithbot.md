@@ -10,7 +10,7 @@ desktop-control (`pyautogui` + `mss` vision failover), a live Canvas
 (A2UI) surface, multi-channel chat adapters, cron scheduling, a 20-tab
 React dashboard, and an MCP tool registry.
 
-Version **1.0.0** (beta readiness). Plugin lives at
+Version **1.0.2** (stable readiness). Plugin lives at
 [`plugins/baselithbot/`](https://github.com/baselithcore/plugin-baselithbot).
 
 ## Why a plugin (Sacred Core compliance)
@@ -22,7 +22,7 @@ framework. `core/` stays domain-agnostic; `baselithbot` composes
 primitives exposed through `core.plugins`, `core.services.vision`,
 `core.observability.logging`, and the plugin registry.
 
-## Status at release (v1.0.0)
+## Status at release (v1.0.2)
 
 - **95** FastAPI routes mounted under `/baselithbot/` (main router + the
   `/dash` dashboard subrouter).

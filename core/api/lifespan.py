@@ -6,25 +6,14 @@ resource initialization, plugin loading, and rate limiter setup.
 """
 
 import asyncio
-import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import yaml
 from fastapi import FastAPI
-
-from core.observability.logging import get_logger
-
-try:
-    from fastapi_limiter import FastAPILimiter
-
-    FASTAPI_LIMITER_AVAILABLE = True
-except ImportError:
-    FastAPILimiter = None  # type: ignore[assignment, misc]
-    FASTAPI_LIMITER_AVAILABLE = False
-    logging.warning("⚠️ fastapi-limiter not available - rate limiting will be disabled")
 
 from core.api.startup_checks import (
     run_startup_health_checks,
@@ -36,6 +25,7 @@ from core.api.startup_checks import (
     warm_memory_embedder,
 )
 from core.config import get_app_config, get_storage_config
+from core.observability.logging import get_logger
 from core.plugins import PluginLoader, PluginRegistry
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 
@@ -46,7 +36,6 @@ _storage_config = get_storage_config()
 
 INDEX_BOOTSTRAP_BACKGROUND = getattr(_app_config, "index_bootstrap_background", False)
 POSTGRES_ENABLED = getattr(_storage_config, "postgres_enabled", False)
-CACHE_REDIS_URL = getattr(_storage_config, "cache_redis_url", "")
 
 # Strong references to fire-and-forget startup tasks so the event loop cannot
 # garbage-collect them before they finish (see RUF006 / asyncio docs).
@@ -54,7 +43,7 @@ _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     FastAPI Lifecycle:
     - initializes DB
@@ -112,14 +101,14 @@ async def lifespan(app: FastAPI):
 
     try:
         raw_config_path = os.environ.get("PLUGIN_CONFIG_PATH", "configs/plugins.yaml")
-        config_path = Path(raw_config_path).resolve()
+        config_path = Path(raw_config_path).resolve()  # noqa: ASYNC240 - one-shot config read at startup, before the server accepts traffic
         cwd = Path.cwd().resolve()
         if not config_path.is_relative_to(cwd):
             raise ValueError(
                 f"PLUGIN_CONFIG_PATH must resolve inside {cwd}; got {config_path}"
             )
         if config_path.exists():
-            with open(config_path) as f:
+            with open(config_path) as f:  # noqa: ASYNC230 - one-shot config read at startup, before the server accepts traffic
                 plugin_configs = yaml.safe_load(f) or {}
             logger.info(f"📄 Loaded plugin configurations from {config_path}")
         else:
@@ -130,6 +119,11 @@ async def lifespan(app: FastAPI):
     analyzer = None
     try:
         from core.bootstrap.lazy_init import RESOURCE_FACTORIES
+        from core.config import get_storage_config
+        from core.db.schema import (
+            init_core_schema_best_effort,
+            should_run_core_schema_init,
+        )
         from core.di.lazy_registry import get_lazy_registry
         from core.plugins.resource_analyzer import ResourceAnalyzer
 
@@ -158,6 +152,18 @@ async def lifespan(app: FastAPI):
             core_storage: Any = await lazy_registry.get_or_create("postgres")
             app.state.core_storage = core_storage
             core_resources_initialized.add("postgres")
+        elif should_run_core_schema_init(
+            required_resources, postgres_enabled=get_storage_config().postgres_enabled
+        ):
+            # `chat_feedback`, `interactions`, `feedback` and `tenants` are
+            # core's tables, not a plugin's. Without this, a deployment whose
+            # enabled plugins list Postgres as merely *optional* booted healthy
+            # with no schema at all, and the first core write returned 500.
+            logger.info(
+                "🗄️ Initializing core Postgres schema (no plugin requires it)..."
+            )
+            if await init_core_schema_best_effort():
+                core_resources_initialized.add("postgres")
 
         if "vectorstore" in required_resources:
             logger.info("📦 Initializing Qdrant (required by plugins)...")
@@ -168,7 +174,7 @@ async def lifespan(app: FastAPI):
 
         if "llm" in required_resources or "llm" in optional_resources:
 
-            async def get_llm():
+            async def get_llm() -> Any:
                 """
                 Dependency for retrieving the LLM service instance.
 
@@ -210,6 +216,14 @@ async def lifespan(app: FastAPI):
 
     set_hot_reload_controller(hot_reload_controller)
     logger.info("🔄 Hot-reload controller initialized")
+
+    # Declared plugin capabilities: the SSRF guard screens the *address*, these
+    # screen which plugin may reach it, read a secret, or invoke a tool. Default
+    # mode is `warn`, so a deployment that has not migrated its manifests
+    # behaves exactly as before.
+    from core.plugins.guards import install_plugin_guards
+
+    install_plugin_guards(plugin_registry)
 
     # === Backstage Software Catalog integration ===
     _backstage_base_url = os.environ.get(
@@ -369,34 +383,6 @@ async def lifespan(app: FastAPI):
     from core.api._recovery_startup import start_checkpoint_recovery
 
     await start_checkpoint_recovery(_BACKGROUND_TASKS)
-
-    if (
-        FASTAPI_LIMITER_AVAILABLE
-        and getattr(_storage_config, "cache_backend", "") == "redis"
-        and CACHE_REDIS_URL
-    ):
-        logger.info("🛡️ Initializing Distributed Rate Limiter (Redis)...")
-        try:
-            # Shared bounded pool (socket deadlines, health checks) rather
-            # than a private unbounded client: the limiter runs on every
-            # request, so its connection budget must be the cache's, not
-            # redis-py's default of "unlimited".
-            from core.cache.redis_cache import create_redis_client
-
-            redis_limiter = create_redis_client(CACHE_REDIS_URL, decode_responses=True)
-            await FastAPILimiter.init(redis_limiter)
-            logger.info("🛡️ Rate Limiter initialized.")
-        except Exception as exc:
-            logger.warning(
-                "🛡️ Rate Limiter initialization skipped: Redis unavailable (%s: %s).",
-                type(exc).__name__,
-                exc,
-            )
-    else:
-        if not FASTAPI_LIMITER_AVAILABLE:
-            logger.warning("🛡️ Rate Limiter skipped (fastapi-limiter not installed).")
-        else:
-            logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
 
     # === Eager auth/security singleton warmup + health checks ===
     # (core.api.startup_checks — also warms the async DB pool at startup)

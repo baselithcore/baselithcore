@@ -15,7 +15,8 @@ the unit suite; run it explicitly against a deployed target:
       --host http://localhost:8000 --headless -u 50 -r 10 -t 30s
 
 Set ``BASELITH_API_KEY`` for authenticated paths; without it only the public
-health probe is exercised meaningfully.
+health probe is exercised meaningfully. Set ``BASELITH_PERF_SKIP_CHAT=true``
+where no LLM provider is reachable, so chat failures do not swamp the run.
 """
 
 from __future__ import annotations
@@ -27,6 +28,15 @@ from locust import HttpUser, between, task
 
 _API_KEY = os.getenv("BASELITH_API_KEY", "")
 _API_PREFIX = os.getenv("BASELITH_API_PREFIX", "/v1")
+# `/chat` needs a reachable LLM provider. Where there is none — the scheduled CI
+# smoke run has no model server — every chat request fails, which drowns the
+# signal from the paths that *can* succeed and makes a failure budget
+# meaningless. Set BASELITH_PERF_SKIP_CHAT=true there.
+_SKIP_CHAT = os.getenv("BASELITH_PERF_SKIP_CHAT", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 class BaselithUser(HttpUser):
@@ -48,6 +58,8 @@ class BaselithUser(HttpUser):
 
     @task(10)
     def chat(self) -> None:
+        if _SKIP_CHAT:
+            return
         self.client.post(
             f"{_API_PREFIX}/chat",
             json={

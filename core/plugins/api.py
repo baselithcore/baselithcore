@@ -89,7 +89,7 @@ def get_controller() -> HotReloadController:
 
 
 @router.get("/", response_model=PluginListResponse)
-async def list_plugins():
+async def list_plugins() -> PluginListResponse:
     """
     List all plugins with their current state.
 
@@ -141,7 +141,7 @@ async def list_plugins():
 
 
 @router.get("/{plugin_name}", response_model=dict[str, Any])
-async def get_plugin_info(plugin_name: str):
+async def get_plugin_info(plugin_name: str) -> dict[str, Any]:
     """
     Get detailed information about a specific plugin.
 
@@ -198,7 +198,7 @@ async def get_plugin_info(plugin_name: str):
 @router.post("/{plugin_name}/enable", response_model=PluginActionResponse)
 async def enable_plugin(
     plugin_name: str, request: PluginEnableRequest, http_request: Request
-):
+) -> PluginActionResponse:
     """
     Enable a disabled plugin.
 
@@ -232,7 +232,9 @@ async def enable_plugin(
 
 
 @router.post("/{plugin_name}/disable", response_model=PluginActionResponse)
-async def disable_plugin(plugin_name: str, http_request: Request):
+async def disable_plugin(
+    plugin_name: str, http_request: Request
+) -> PluginActionResponse:
     """
     Disable an active plugin.
 
@@ -267,7 +269,7 @@ async def disable_plugin(plugin_name: str, http_request: Request):
 @router.post("/{plugin_name}/reload", response_model=PluginActionResponse)
 async def reload_plugin(
     plugin_name: str, request: PluginReloadRequest, http_request: Request
-):
+) -> PluginActionResponse:
     """
     Reload a plugin (hot-reload).
 
@@ -301,7 +303,7 @@ async def reload_plugin(
 
 
 @router.post("/reload-all", response_model=dict[str, Any])
-async def reload_all_plugins(http_request: Request):
+async def reload_all_plugins(http_request: Request) -> dict[str, Any]:
     """
     Reload all active plugins.
 
@@ -333,7 +335,7 @@ async def reload_all_plugins(http_request: Request):
 
 
 @router.get("/status/overview", response_model=PluginStatusResponse)
-async def get_plugin_status():
+async def get_plugin_status() -> PluginStatusResponse:
     """
     Get overview of plugin system status.
 
@@ -351,7 +353,7 @@ async def get_plugin_status():
 
 
 @router.get("/{plugin_name}/dependents")
-async def get_plugin_dependents(plugin_name: str):
+async def get_plugin_dependents(plugin_name: str) -> dict[str, Any]:
     """
     Get list of plugins that depend on this plugin.
 
@@ -383,7 +385,7 @@ async def get_plugin_dependents(plugin_name: str):
 
 
 @router.get("/metrics/{plugin_name}")
-async def get_plugin_metrics(plugin_name: str):
+async def get_plugin_metrics(plugin_name: str) -> dict[str, Any]:
     """
     Get detailed metrics for a specific plugin.
 
@@ -406,7 +408,7 @@ async def get_plugin_metrics(plugin_name: str):
 
 
 @router.get("/metrics/system/overview")
-async def get_system_metrics():
+async def get_system_metrics() -> dict[str, Any]:
     """
     Get system-wide plugin metrics.
 
@@ -418,7 +420,7 @@ async def get_system_metrics():
 
 
 @router.get("/metrics/system/performance")
-async def get_performance_metrics():
+async def get_performance_metrics() -> dict[str, Any]:
     """
     Get performance summary for all plugins.
 
@@ -430,7 +432,7 @@ async def get_performance_metrics():
 
 
 @router.get("/metrics/all")
-async def get_all_metrics():
+async def get_all_metrics() -> dict[str, Any]:
     """
     Get metrics for all tracked plugins.
 
@@ -442,7 +444,9 @@ async def get_all_metrics():
 
 
 @router.delete("/metrics/{plugin_name}")
-async def reset_plugin_metrics(plugin_name: str, http_request: Request):
+async def reset_plugin_metrics(
+    plugin_name: str, http_request: Request
+) -> dict[str, Any]:
     """
     Reset metrics for a specific plugin.
 
@@ -465,7 +469,7 @@ async def reset_plugin_metrics(plugin_name: str, http_request: Request):
 
 
 @router.delete("/metrics/system/reset")
-async def reset_all_metrics(http_request: Request):
+async def reset_all_metrics(http_request: Request) -> dict[str, Any]:
     """
     Reset all plugin metrics.
 

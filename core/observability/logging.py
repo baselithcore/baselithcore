@@ -181,7 +181,8 @@ def configure_logging(
                         record.msg = ast.literal_eval(record.msg)
                     except Exception:
                         pass
-            return super().format(record)
+            formatted: str = super().format(record)
+            return formatted
 
     formatter = UnifiedFormatter(
         processor=final_renderer,

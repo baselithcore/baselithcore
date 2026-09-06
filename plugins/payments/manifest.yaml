@@ -6,4 +6,14 @@ tags:
 - payments
 - ap2
 - psp
+# Declared capabilities. The mock PSP adapter reaches no network at all; a real
+# adapter replacing it must add its provider's host here, and will be refused
+# under BASELITH_PLUGIN_PERMISSIONS=enforce until it does.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
 integrity_sha256: e0c54f30accfbe7f702ec99f1b1e6d9632ebbd2402de697bf149e8786805171e

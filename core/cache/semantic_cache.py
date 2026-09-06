@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -172,7 +173,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             f"SemanticCache initialized: maxsize={maxsize}, ttl={ttl}, threshold={threshold}"
         )
 
-    def _hash_prompt(self, prompt: str, **kwargs) -> str:
+    def _hash_prompt(self, prompt: str, **kwargs: Any) -> str:
         """Generate a hash key for exact match lookup.
 
         The prompt is canonicalized first (accents, case, whitespace) so a
@@ -182,7 +183,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
         hash_input = canonicalize(prompt) + str(sorted(kwargs.items()))
         return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:16]
 
-    async def set(self, prompt: str, response: str, **kwargs) -> None:
+    async def set(self, prompt: str, response: str, **kwargs: Any) -> None:
         """
         Cache a prompt-response pair.
 
@@ -220,7 +221,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
                 f"Cached response for prompt: '{prompt[:50]}...' for tenant {tenant_id}"
             )
 
-    async def get_exact(self, prompt: str, **kwargs) -> str | None:
+    async def get_exact(self, prompt: str, **kwargs: Any) -> str | None:
         """
         Get cached response for exact prompt match.
 
@@ -304,7 +305,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
     async def get_or_compute(
         self,
         prompt: str,
-        factory: Any,
+        factory: Callable[[], Awaitable[str]],
         *,
         threshold: float | None = None,
         **kwargs: Any,
@@ -339,7 +340,8 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             await self.set(prompt, value, **kwargs)
             return value
 
-        return await self._single_flight.do(key, fill)
+        filled: str = await self._single_flight.do(key, fill)
+        return filled
 
     async def delete(self, key: str) -> None:
         """Support standard CacheProtocol delete."""
@@ -351,7 +353,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
                     self._matrix_cache.pop(tenant_id, None)
 
     async def get_similar(
-        self, prompt: str, threshold: float | None = None, **kwargs
+        self, prompt: str, threshold: float | None = None, **kwargs: Any
     ) -> str | None:
         """
         Find cached response for semantically similar prompt.
@@ -367,7 +369,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
         return res
 
     async def get_similar_with_score(
-        self, prompt: str, threshold: float | None = None, **kwargs
+        self, prompt: str, threshold: float | None = None, **kwargs: Any
     ) -> tuple[str | None, float]:
         """
         Find cached response with similarity score.

@@ -12,6 +12,7 @@ integration environment, not this hermetic gate.
 """
 
 import os
+import warnings
 
 import pytest
 import schemathesis
@@ -63,9 +64,16 @@ def _build_schema():
     try:
         from core.api.factory import create_app
 
-        return schemathesis.openapi.from_asgi(
-            "/openapi.json", _NoLifespan(create_app())
-        )
+        # Building the app emits configuration warnings (weak key, short
+        # retention, ...). Python records those in each module's
+        # __warningregistry__ and never repeats them, so a later test using
+        # `pytest.warns` on the same warning sees nothing. catch_warnings()
+        # restores the filter state and invalidates those registries on exit.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return schemathesis.openapi.from_asgi(
+                "/openapi.json", _NoLifespan(create_app())
+            )
     finally:
         for key, value in saved.items():
             if value is None:

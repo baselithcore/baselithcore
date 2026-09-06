@@ -6,6 +6,8 @@ values used by WebDocumentSource.
 
 from __future__ import annotations
 
+from typing import Any
+
 # HTML tags to remove during parsing
 DROP_TAGS: frozenset[str] = frozenset(
     {
@@ -23,6 +25,15 @@ DROP_TAGS: frozenset[str] = frozenset(
         "video",
         "audio",
     }
+)
+
+# Attribute selectors for nodes dropped during parsing: decorative or
+# navigational chrome that would otherwise pollute the extracted body.
+# Typed dict[str, Any] because bs4 declares `attrs` as Dict[str, Union[...]]
+# and Dict is invariant in its value type — a bare dict[str, str] is rejected.
+DROP_ATTRS: tuple[dict[str, Any], ...] = (
+    {"aria-hidden": "true"},
+    {"role": "navigation"},
 )
 
 # CSS selectors for finding main content

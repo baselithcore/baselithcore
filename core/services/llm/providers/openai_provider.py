@@ -162,7 +162,7 @@ class OpenAIProvider:
     # breaker stays: failure isolation, not retry.
     @get_circuit_breaker("openai_provider")
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Execute a standard chat completion request.
@@ -232,7 +232,7 @@ class OpenAIProvider:
         tools: list[LLMToolSpec] | None = None,
         tool_choice: ToolChoice | None = None,
         response_format: ResponseFormat | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResult:
         """
         Generate using OpenAI's native function-calling / structured outputs.
@@ -401,7 +401,7 @@ class OpenAIProvider:
     # would also duplicate already-yielded chunks.
     @get_circuit_breaker("openai_provider")
     async def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> AsyncIterator[tuple[str, int]]:
         """
         Execute a streaming completion request.

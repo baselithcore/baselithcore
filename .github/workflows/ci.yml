@@ -94,6 +94,10 @@ jobs:
         run: python scripts/check_architecture_boundaries.py
       - name: Check 500-line file size cap
         run: python scripts/check_file_size.py
+      - name: Check silent-exception ratchet
+        run: python scripts/check_exception_hygiene.py
+      - name: Check public API surface drift
+        run: python scripts/check_public_api.py
       - name: Check eval-corpus ratchet
         run: |
           pip install pyyaml
@@ -166,6 +170,10 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
+      - name: SDK contract vs OpenAPI
+        # Every route the hand-written clients call must exist in the committed
+        # spec, and both clients must call the same set.
+        run: python scripts/check_sdk_contract.py --list && python scripts/check_sdk_contract.py
       - name: Test Python SDK
         run: |
           pip install -e sdk/python pytest==8.3.4
@@ -302,8 +310,8 @@ jobs:
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
           python scripts/check_official_plugin_typing.py
 
-  type_check_core_resilience:
-    name: Type Check Core Resilience
+  type_check_core_strict:
+    name: Type Check Core Strict (ratchet)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -316,10 +324,10 @@ jobs:
           python-version: '3.12'
       - name: Install uv
         run: pip install uv==0.12.0
-      - name: Type Check Core Resilience
+      - name: Type Check Core Strict
         run: |
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
-          python scripts/check_core_resilience_typing.py
+          python scripts/check_core_strict_typing.py
 
   plugin_integrity:
     name: Plugin Integrity
@@ -592,7 +600,7 @@ jobs:
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
     # required checks in branch protection.
-    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
+    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness]
     strategy:
       fail-fast: false
       matrix:
@@ -682,6 +690,9 @@ jobs:
       attestations: write    # actions/attest-build-provenance
     outputs:
       new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      # Consumed by `release_image` below, which needs the version to tag the
+      # container image with (no leading `v` — the image job strips one anyway).
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -776,3 +787,31 @@ jobs:
           print-hash: true
           # PEP 740: publish sigstore attestations for every dist file.
           attestations: true
+
+  release_image:
+    # The container image half of a release, and the reason it is invoked from
+    # HERE rather than left to its own `release: published` trigger: that event
+    # is raised by semantic-release using GITHUB_TOKEN, and GitHub does not
+    # start workflow runs from it (recursion guard). The image workflow had
+    # therefore never run once across five releases, while the Helm chart's
+    # default image.repository already pointed at ghcr.io/baselithcore/
+    # baselithcore. Calling it inside this run needs no extra event and no
+    # extra token.
+    name: Release Container Image
+    needs: [release]
+    if: needs.release.outputs.new_release_published == 'true'
+    uses: ./.github/workflows/release-image.yml
+    # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
+    # the image job needs are declared here. GITHUB_TOKEN itself is passed
+    # automatically — no `secrets: inherit`, since that is the only secret the
+    # called workflow reads (GHCR login).
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # keyless cosign + SLSA provenance
+      attestations: write # actions/attest-build-provenance
+    with:
+      # The git TAG, so the image job checks out the bumped tree rather than
+      # the pre-release SHA that started this run. `v` is stripped again on the
+      # other side to form the image tag.
+      tag: v${{ needs.release.outputs.new_release_version }}

@@ -27,7 +27,7 @@ class LifecycleMixin:
                 pass
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._state: AgentState = AgentState.UNINITIALIZED
         self._hooks: AgentHooks = AgentHooks()
         self._shutdown_event = asyncio.Event()

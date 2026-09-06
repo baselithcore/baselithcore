@@ -175,7 +175,7 @@ class ManagedSkillWriter:
         if not expected or not skill_path.exists():
             return False
         actual = hashlib.sha256(skill_path.read_bytes()).hexdigest()
-        return actual == expected
+        return actual == str(expected)
 
     def _skill_dir(self, name: str) -> Path:
         if not _NAME_RE.fullmatch(name):

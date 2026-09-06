@@ -6,6 +6,7 @@ Generates hypotheses for unknown or incomplete information.
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -47,7 +48,7 @@ class HypothesisGenerator:
     - Assumption identification
     """
 
-    def __init__(self, llm_service=None):
+    def __init__(self, llm_service: Any | None = None) -> None:
         """
         Initialize generator.
 
@@ -57,7 +58,7 @@ class HypothesisGenerator:
         self._llm_service = llm_service
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:

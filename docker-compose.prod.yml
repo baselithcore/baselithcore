@@ -18,6 +18,13 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      # uvicorn trusts X-Forwarded-For / -Proto only from these peers. The
+      # image default (127.0.0.1) never matches the nginx gateway, whose
+      # address on app_net is dynamic — so every request looked like it came
+      # from the proxy and the per-IP rate limits, the failed-auth throttle
+      # and the admin lockout all shared ONE bucket. app_net is pinned to a
+      # known subnet below so the whole gateway network can be named here.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -175,7 +182,10 @@ services:
 
   # Reverse Proxy
   gateway:
-    image: nginx:alpine
+    # Pinned like the data-plane images: a floating `alpine` re-pull would
+    # silently change the edge (TLS/HTTP behaviour, module set). Bump
+    # deliberately, together with a re-run of `nginx -t` on nginx.conf.
+    image: nginx:1.31.5-alpine
     container_name: baselith-gateway
     ports:
       - "80:80"
@@ -251,4 +261,10 @@ volumes:
 
 networks:
   app_net:
+    # Fixed subnet so FORWARDED_ALLOW_IPS (api service above) can trust the
+    # gateway by network. Override APP_NET_SUBNET if it collides with an
+    # existing network on the host; keep the two values in step.
+    ipam:
+      config:
+        - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}
   obs_net:

@@ -28,7 +28,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
+      # Deliberately NOT the release ServiceAccount: that one is an ordinary
+      # resource Helm applies after its hooks, so referencing it here makes the
+      # first install fail with "serviceaccount not found" until the Job's
+      # deadline expires. The Job never calls the Kubernetes API anyway.
+      automountServiceAccountToken: false
       restartPolicy: Never
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -39,11 +43,15 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           command: ["alembic", "upgrade", "head"]
+          # Hook-scoped copies (migrations-env.yaml), created at hook-weight -5.
+          # The release's own ConfigMap/Secret do not exist yet on a first
+          # install, and an envFrom that cannot resolve leaves the pod stuck
+          # until activeDeadlineSeconds kills the install.
           envFrom:
             - configMapRef:
-                name: {{ include "baselithcore.fullname" . }}-config
+                name: {{ include "baselithcore.migrationConfigName" . }}
             - secretRef:
-                name: {{ include "baselithcore.secretName" . }}
+                name: {{ include "baselithcore.migrationSecretName" . }}
                 optional: true
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}

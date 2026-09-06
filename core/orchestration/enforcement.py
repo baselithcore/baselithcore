@@ -103,7 +103,9 @@ async def enforce_tool_invocation(
     Fail-closed order:
 
     1. **Contract** — ``contract_validator.check_tool_call`` rejects tools that
-       violate the agent's ``allowed_tools`` / ``must_not`` capabilities.
+       violate the agent's ``allowed_tools`` / ``must_not`` capabilities, and
+       ``core.plugins.access.check_tool_permitted`` rejects one outside the
+       bound plugin's declared ``permissions.tools``.
     2. **Autonomy** — ``enforce_approval`` requires human approval for tools
        whose ``category`` needs it at the active autonomy level, and fails
        closed when no approval channel is available.
@@ -125,6 +127,9 @@ async def enforce_tool_invocation(
 
     Raises:
         ContractViolationError: Tool not permitted by the agent contract.
+        ToolNotPermittedError: Tool outside the bound plugin's declared
+            ``permissions.tools`` set (only under
+            ``BASELITH_PLUGIN_PERMISSIONS=enforce``).
         ApprovalRequiredError: Approval required but unavailable or denied.
         BudgetExceededError: Tool-call or cost cap exceeded.
         ValueError: Unknown autonomy category.
@@ -135,6 +140,14 @@ async def enforce_tool_invocation(
         validator = context.get("contract_validator")
         if validator is not None:
             validator.check_tool_call(tool_name)
+        # Declared plugin capability, when a plugin is bound to this call. Sits
+        # next to the contract check because both answer "may this tool run at
+        # all?", before the approval and budget questions of *whether it
+        # should*. Imported lazily: orchestration must stay usable without the
+        # plugin machinery loaded.
+        from core.plugins.access import check_tool_permitted
+
+        check_tool_permitted(tool_name)
         policy = context.get("autonomy_policy")
         if policy is not None:
             # The checkpoint manager (when configured) makes the gate durable:

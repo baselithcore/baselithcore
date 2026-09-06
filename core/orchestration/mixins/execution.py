@@ -73,6 +73,7 @@ class ExecutionMixin:
         try:
             owner = registry.get_flow_handler_owner(intent)
         except Exception:
+            logger.debug("flow_handler_owner_lookup_failed", exc_info=True)
             return None
         return set_plugin_context(owner) if owner else None
 

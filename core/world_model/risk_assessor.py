@@ -231,7 +231,7 @@ class RiskAssessor:
             True if safe to proceed
         """
         assessment = self.assess_action(action, state)
-        return assessment["level"].value <= max_risk.value
+        return bool(assessment["level"].value <= max_risk.value)
 
     def filter_safe_actions(
         self,

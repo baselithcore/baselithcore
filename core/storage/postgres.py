@@ -11,6 +11,7 @@ from psycopg.rows import dict_row
 from core.config import StorageConfig
 from core.context import TenantContextError, get_current_tenant_id
 from core.db.connection import get_async_cursor
+from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.storage.interfaces import FeedbackRepository, InteractionRepository
 from core.storage.models import Feedback, Interaction
@@ -75,7 +76,15 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             return False
 
     async def _initialize_schema(self) -> None:
-        """Create necessary tables if they don't exist."""
+        """Create necessary tables if they don't exist.
+
+        Skipped when ``DB_RUNTIME_DDL`` is off (the production default): the
+        ``interactions``/``feedback`` schema is owned by
+        ``migrations/versions/001_initial_schema.py`` and applied by the
+        migrations job, so the runtime role needs no DDL rights.
+        """
+        if skip_runtime_ddl("interaction storage", "interactions, feedback"):
+            return
         # ``tenant_id`` scopes every row to the authenticated tenant (identity-
         # derived; see core.context). DEFAULT 'default' keeps existing single-
         # tenant rows working and makes the ADD COLUMN backfill safe. The ALTERs
@@ -188,7 +197,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             Optional[Interaction]: The interaction if found, else None.
         """
         sql = "SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp FROM interactions WHERE id = %s AND tenant_id = %s"
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (interaction_id, _tenant()))
             row = await cur.fetchone()
             if row and isinstance(row, dict):
@@ -216,7 +225,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         ORDER BY timestamp DESC
         LIMIT %s OFFSET %s
         """
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (session_id, _tenant(), limit, offset))
             rows = await cur.fetchall()
             return [Interaction(**row) for row in rows if isinstance(row, dict)]
@@ -273,7 +282,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             List[Feedback]: List of associated feedback records.
         """
         sql = "SELECT id, interaction_id, score, label, comment, metadata, timestamp FROM feedback WHERE interaction_id = %s AND tenant_id = %s"
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (interaction_id, _tenant()))
             rows = await cur.fetchall()
             return [Feedback(**row) for row in rows if isinstance(row, dict)]
@@ -307,7 +316,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         FROM feedback f
         {where_clause}
         """  # nosec B608
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             row = await cur.fetchone() or {}
             # row might be a dict or None (handled by or {})

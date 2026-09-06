@@ -7,7 +7,7 @@
 
 image:
   repository: ghcr.io/baselithcore/baselithcore
-  tag: "0.30.0"
+  tag: "0.31.0"
 
 autoscaling:
   enabled: true
@@ -19,13 +19,25 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 2
 
+# uvicorn trusts X-Forwarded-* only from these peers. Use the ingress
+# controller's pod CIDR (cluster-specific — this is a placeholder); leaving it
+# unset makes every request look like it came from the controller and
+# collapses per-IP rate limiting / admin lockout into a single bucket.
+forwardedAllowIps: "10.244.0.0/16"
+
+# Measured on a local k3d install, not guessed: core's own document ingestion
+# alone peaks at 1.1-1.45Gi, so the old 1Gi request understated the pod both to
+# the scheduler and to the kernel's OOM victim score, which ranks a cgroup by
+# how far it exceeds its request. No CPU limit: CPU is compressible, so a cap
+# cannot prevent exhaustion — it only throttles, and the cold start an
+# autoscaler just triggered is the worst moment for that. Re-measure against
+# your own plugin set before pinning these.
 resources:
   requests:
     cpu: "500m"
-    memory: 1Gi
-  limits:
-    cpu: "2"
     memory: 2Gi
+  limits:
+    memory: 4Gi
 
 ingress:
   enabled: true

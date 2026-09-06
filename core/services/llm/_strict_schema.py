@@ -59,7 +59,8 @@ def to_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     Returns:
         A new schema; the input is never mutated.
     """
-    return _walk(schema)
+    walked: dict[str, Any] = _walk(schema)
+    return walked
 
 
 def _walk(node: Any) -> Any:

@@ -11,7 +11,7 @@ import contextvars
 import threading
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional, TypeVar, cast
 
 from core.observability.logging import get_logger
 
@@ -76,13 +76,13 @@ class Scope:
             if interface not in self._instances:
                 self._instances[interface] = factory()
                 logger.debug(f"Created scoped instance: {interface.__name__}")
-            return self._instances[interface]
+            return cast(T, self._instances[interface])
 
     async def __aenter__(self) -> "Scope":
         _current_scope.set(self)
         return self
 
-    async def __aexit__(self, *args) -> None:
+    async def __aexit__(self, *args: object) -> None:
         _current_scope.set(None)
         self._instances.clear()
 
@@ -90,7 +90,7 @@ class Scope:
         _current_scope.set(self)
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *args: object) -> None:
         _current_scope.set(None)
         self._instances.clear()
 
@@ -138,7 +138,7 @@ class ServiceRegistry:
                 raise ServiceNotFoundError(
                     f"Service not found for interface: {interface.__name__}"
                 )
-            return cls._services[interface]
+            return cast(T, cls._services[interface])
 
     @classmethod
     def has(cls, interface: type) -> bool:
@@ -172,7 +172,7 @@ class DependencyContainer:
     or tenant-specific configurations).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._services: dict[type, tuple[Callable, ServiceLifetime]] = {}
         self._singletons: dict[type, Any] = {}
         self._lock = threading.Lock()
@@ -260,11 +260,11 @@ class DependencyContainer:
                 if interface not in self._singletons:
                     self._singletons[interface] = factory()
                     logger.debug(f"Created singleton instance: {interface.__name__}")
-                return self._singletons[interface]
+                return cast(T, self._singletons[interface])
             else:
                 instance = factory()
                 logger.debug(f"Created transient instance: {interface.__name__}")
-                return instance
+                return cast(T, instance)
 
     def _resolve_in_scope(self, interface: type[T], scope: Scope) -> T:
         """Resolve service within a specific scope."""
@@ -280,13 +280,13 @@ class DependencyContainer:
                 if interface not in self._singletons:
                     self._singletons[interface] = factory()
                     logger.debug(f"Created singleton instance: {interface.__name__}")
-                return self._singletons[interface]
+                return cast(T, self._singletons[interface])
             elif lifetime == ServiceLifetime.SCOPED:
                 return scope.get_or_create(interface, factory)
             else:
                 instance = factory()
                 logger.debug(f"Created transient instance: {interface.__name__}")
-                return instance
+                return cast(T, instance)
 
     def has(self, interface: type) -> bool:
         """

@@ -657,6 +657,13 @@ await orch.process("analyze X", run_id="run-42")
 await orch.process("analyze X", run_id="run-42", resume=True)
 ```
 
+!!! info "Who creates the table"
+    `initialize()` skips its DDL when `DB_RUNTIME_DDL` is off — the
+    production default, where
+    [migration 007](db.md#who-creates-the-schema) owns the
+    schema and the runtime role holds no DDL rights. The call stays safe
+    either way: with the gate off the table is expected to exist already.
+
 Handlers make their tool steps durable via the manager on the context:
 
 ```python
@@ -746,6 +753,67 @@ them. Both shipped stores implement it natively (Postgres orders by
 its resumable ids loaded individually, so protocol-only stores still answer.
 An unset `tenant_id` on a row is treated as the `default` tenant, matching the
 Postgres column default, so both backends filter identically.
+
+### Cross-process tool idempotency (`idempotency.py`)
+
+Checkpoint replay deduplicates a tool call **within one run's recorded steps**.
+It cannot help when the same run is re-entered from outside: a task queue
+redelivers, an operator replays a dead-lettered job, a second replica picks up
+the work. For a read that costs a wasted round trip. For a payment, an outbound
+webhook or an email-sending skill it is a defect the end user sees.
+
+`core/orchestration/idempotency.py` records the intent before the call and the
+outcome after it, keyed by a value derived from the call itself:
+
+```python
+from core.orchestration.idempotency import derive_idempotency_key
+
+key = derive_idempotency_key(run_id, step, tool, args)
+held = await ledger.begin(key, run_id=run_id, tool=tool)
+if held is not None:
+    if held.is_replayable:
+        return held.result          # already happened, do not repeat it
+    raise ToolCallInFlight(tool)    # someone else owns it right now
+...
+await ledger.complete(key, result)
+```
+
+| Component | Role |
+|-----------|------|
+| `derive_idempotency_key` | SHA-256 over `(run_id, step, tool, canonical args)` — derived, never generated, and carrying no payload |
+| `ToolLedger` | Protocol: `lookup` / `begin` / `complete` / `fail` |
+| `InMemoryToolLedger` | Bounded in-process ledger; dedupes a retry inside one worker only |
+| `PostgresToolLedger` | Durable `tool_invocations` table shared by every replica (`idempotency_postgres.py`) |
+| `requires_idempotency` | `False` only for `read_only`; an unknown category is effectful |
+
+`begin` is the whole hot path: one round trip that both claims the key and
+returns the row already holding it. A `lookup`-then-`begin` pair would be two
+round trips *and* a race — two replicas can both miss the lookup. In Postgres
+the claim is an `INSERT ... ON CONFLICT (key) DO UPDATE ... WHERE status =
+'failed'`, so exactly one caller wins and a `failed` row is re-claimable: the
+effect did not land, so the retry must be allowed. `in_flight` is **not**
+`completed` — a crash between the two leaves a row saying "this may have
+happened", and re-running an effectful call on a maybe is the defect the ledger
+exists to prevent.
+
+The table is created by `migrations/versions/009_tool_invocations.py`, is
+tenant-scoped with a row-level-security policy defined in the same migration,
+and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
+window, not an audit log.
+
+The typed `Agent` consumes it directly:
+
+```python
+agent = Agent(tools=[charge_card], tool_ledger=PostgresToolLedger())
+await agent.run("pay the invoice", run_id="order-7-attempt")
+```
+
+**A stable `run_id` across attempts is what makes deduplication possible at
+all** — a fresh id per attempt is a different run by definition, and every
+effectful tool executes again. Without a `run_id`, or without a ledger, the
+loop behaves exactly as before. A plain callable is `destructive` by default
+(see `ToolDefinition`), so tools opt *out* of the ledger by declaring
+`read_only`, never by omission.
 
 ### Durable human-in-the-loop approvals (pause → decide → resume)
 

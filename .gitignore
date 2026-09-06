@@ -85,6 +85,8 @@ node_modules/
 package-lock.json
 # The published TS SDK needs a reproducible `npm ci` in CI — keep its lockfile.
 !sdk/typescript/package-lock.json
+# The baselithbot dashboard is built from this repo before signing — keep its lockfile too.
+!plugins/baselithbot/ui/package-lock.json
 
 # --- Browser / OS ---
 .DS_Store

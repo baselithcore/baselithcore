@@ -40,7 +40,12 @@ env/
 
 # Frontend
 ui/node_modules/
-ui/dist/
+# The compiled SPA is tracked: the plugin integrity hash covers ui/dist/**,
+# so a bundle absent at signing time and present at load time makes the
+# plugin fail under BASELITH_REQUIRE_SIGNED_PLUGINS. Vite content-hashes
+# chunk filenames, so the second rule keeps rebuilt chunks visible to git.
+!ui/dist/
+!ui/dist/**
 ui/.vite/
 dashboard/node_modules/
 dashboard/dist/

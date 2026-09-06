@@ -1,0 +1,61 @@
+{
+  "name": "agent_multi_tool_order",
+  "description": "Agent.run: two sequential tool calls; every later turn must see every earlier tool result.",
+  "turns": [
+    {
+      "expect": {
+        "prompt_contains": ["order 42"],
+        "tools": ["get_order", "get_shipment"]
+      },
+      "result": {
+        "text": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "name": "get_order",
+            "arguments": {
+              "order_id": 42
+            }
+          }
+        ],
+        "stop_reason": "tool_use",
+        "tokens_used": 88
+      }
+    },
+    {
+      "expect": {
+        "prompt_contains": ["[get_order] -> {\"order_id\": 42, \"shipment_id\": \"SHP-7\"}"],
+        "tools": ["get_order", "get_shipment"]
+      },
+      "result": {
+        "text": null,
+        "tool_calls": [
+          {
+            "id": "call_2",
+            "name": "get_shipment",
+            "arguments": {
+              "shipment_id": "SHP-7"
+            }
+          }
+        ],
+        "stop_reason": "tool_use",
+        "tokens_used": 102
+      }
+    },
+    {
+      "expect": {
+        "prompt_contains": [
+          "[get_order] -> {\"order_id\": 42, \"shipment_id\": \"SHP-7\"}",
+          "[get_shipment] -> in transit, ETA 2 days"
+        ],
+        "tools": ["get_order", "get_shipment"]
+      },
+      "result": {
+        "text": "Order 42 shipped as SHP-7 and is in transit, ETA 2 days.",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 130
+      }
+    }
+  ]
+}

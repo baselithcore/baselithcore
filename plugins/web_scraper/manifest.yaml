@@ -15,4 +15,16 @@ python_dependencies:
 - soupsieve>=2.8.4
 optional_resources:
 - internet
+# Declared capabilities. A scraper's targets are supplied per crawl, so the
+# egress set is open by nature; the SSRF guard still refuses internal and
+# link-local addresses underneath this declaration.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
 integrity_sha256: d87a66e2e57214c35b0f794a44fff5c155030b0b3ba58b3a4b8371f31d4dd5e2

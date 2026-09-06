@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from core.observability.logging import get_logger
 from core.prompts.catalog import resolve_catalog_prompt
@@ -64,7 +65,7 @@ class HardenedGoal:
         return "\n".join(parts)
 
 
-async def harden_goal(goal: str, *, llm_service=None) -> HardenedGoal:
+async def harden_goal(goal: str, *, llm_service: Any | None = None) -> HardenedGoal:
     """Interrogate ``goal`` into a :class:`HardenedGoal` (fail-soft).
 
     Args:

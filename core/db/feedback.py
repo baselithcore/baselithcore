@@ -260,7 +260,8 @@ async def get_feedback_analytics(
             async with get_async_connection() as conn:
                 async with conn.cursor(row_factory=dict_row) as cursor:
                     await cursor.execute(query, list(query_params))
-                    return await cursor.fetchall()
+                    rows: list[dict[str, Any]] = await cursor.fetchall()
+                    return rows
 
     tenant_id = get_current_tenant_id()
     params: list[Any] = [tenant_id]

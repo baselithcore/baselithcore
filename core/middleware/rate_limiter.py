@@ -1,15 +1,31 @@
 """
 Distributed rate limiting.
 
-Redis-backed fixed-window rate limiter with an in-memory fallback, used by
+Redis-backed sliding-window rate limiter with an in-memory fallback, used by
 ``core.middleware.security.SecurityManager`` on every authenticated request.
 Extracted from ``core/middleware/security.py`` to keep modules under the
 500-line cap; the class is re-exported there for backward compatibility.
+
+Window model
+------------
+A fixed window admits up to **twice** the limit across a boundary (N requests
+at t=59s, N more at t=61s). This limiter keeps one counter per window *index*
+(``floor(now / window)``) and weights the previous window by how much of it
+still overlaps the trailing ``window`` seconds::
+
+    estimate = previous * (window - elapsed) / window + current
+
+The estimate is what is compared against the limit, so the boundary burst is
+rejected while steady traffic at the limit is admitted. Both counters are
+bumped/read in one atomic Lua round trip — the same per-request cost as the
+old fixed window. Keys carry a Redis Cluster hash tag so both windows of one
+identifier hash to the same slot.
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from typing import Any
 
@@ -23,19 +39,53 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Atomic fixed-window counter: INCR + first-call EXPIRE in one round trip.
-# Replaces the previous SET NX EX + INCR pair (2 RTT per request) while
-# keeping the same TOCTOU-free semantics — the script runs atomically.
-# Returns {count, ttl} so the caller can populate Retry-After / RateLimit-Reset
-# without a second round trip.
+# Atomic sliding-window step: INCR the current window (EXPIRE on first hit,
+# sized to TWO windows so the key is still readable as the *previous* window
+# during the next one) and read the previous window's count. One round trip;
+# the script runs atomically server-side, so the TTL is always set together
+# with the first increment (no TOCTOU window).
 _RATE_LIMIT_LUA = """
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
-local ttl = redis.call('TTL', KEYS[1])
-return {current, ttl}
+local previous = redis.call('GET', KEYS[2])
+return {current, tonumber(previous) or 0}
 """
+
+
+def _sliding_estimate(
+    prev: int, current: int, window_seconds: int, elapsed: float
+) -> float:
+    """Weighted request count over the trailing ``window_seconds``.
+
+    ``elapsed`` is how far into the current window ``now`` sits; the previous
+    window contributes proportionally to the part of it still inside the
+    trailing interval.
+    """
+    weight = max(0.0, window_seconds - elapsed) / window_seconds
+    return prev * weight + current
+
+
+def _sliding_retry_after(
+    prev: int, current: int, limit: int, window_seconds: int, elapsed: float
+) -> int:
+    """Seconds until one more request fits under ``limit`` (assuming no traffic).
+
+    Solves the estimate inequality for the admission time, first inside the
+    current window (only the previous window's weight decays) and, when the
+    current window is already full, after the rollover — at which point the
+    current count becomes the decaying previous window.
+    """
+    headroom = limit - current - 1
+    if headroom >= 0:
+        if prev <= 0:
+            return 0
+        admit_at = window_seconds * (1.0 - headroom / prev)
+        return max(0, math.ceil(round(admit_at - elapsed, 6)))
+    to_rollover = window_seconds - elapsed
+    decay = window_seconds * (1.0 - (limit - 1) / current)
+    return max(0, math.ceil(round(to_rollover + decay, 6)))
 
 
 def _rate_limit_headers(limit: int, current: int, reset_seconds: int) -> dict[str, str]:
@@ -85,9 +135,16 @@ def _resolve_fail_mode(configured: str | None) -> str:
     return "closed" if redis_declared else "open"
 
 
+def _window_position(window_seconds: int) -> tuple[int, float]:
+    """Return ``(window_index, seconds_elapsed_in_window)`` for *now*."""
+    now = time.time()
+    index = int(now // window_seconds)
+    return index, now - index * window_seconds
+
+
 class RateLimiter:
     """
-    Distributed rate limiter by role/key/IP, using Redis.
+    Distributed sliding-window rate limiter by role/key/IP, using Redis.
     """
 
     def __init__(self) -> None:
@@ -95,7 +152,8 @@ class RateLimiter:
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
         self._redis = None
         self._rate_limit_script: Any = None
-        self._fallback: dict[str, tuple[int, float]] = {}
+        # identifier -> (count_in_current_window, window_index, previous_count)
+        self._fallback: dict[str, tuple[int, int, int]] = {}
         self._fallback_lock = asyncio.Lock()
         # Amortizes the fallback prune: without it the O(n) sweep ran on
         # EVERY check past 1000 entries — under one global lock, exactly when
@@ -137,34 +195,43 @@ class RateLimiter:
             headers={"Retry-After": str(window_seconds)},
         )
 
+    @staticmethod
+    def _enforce(
+        prev: int, current: int, limit: int, window_seconds: int, elapsed: float
+    ) -> None:
+        """Raise 429 when the weighted estimate exceeds ``limit``."""
+        estimate = _sliding_estimate(prev, current, window_seconds, elapsed)
+        if estimate > limit:
+            reset = _sliding_retry_after(prev, current, limit, window_seconds, elapsed)
+            _raise_rate_limited(_rate_limit_headers(limit, math.ceil(estimate), reset))
+
     async def _check_fallback(
         self, identifier: str, limit: int, window_seconds: int
     ) -> None:
-        """Best-effort local fixed-window fallback when Redis is unavailable."""
+        """Best-effort local sliding-window fallback when Redis is unavailable."""
         async with self._fallback_lock:
-            now = time.time()
-            count, window_start = self._fallback.get(identifier, (0, now))
-            if now - window_start >= window_seconds:
+            index, elapsed = _window_position(window_seconds)
+            count, stored_index, prev = self._fallback.get(identifier, (0, index, 0))
+            if stored_index != index:
+                # Roll the window: the old current count becomes the previous
+                # window only if it was the immediately preceding one.
+                prev = count if stored_index == index - 1 else 0
                 count = 0
-                window_start = now
-
             count += 1
-            self._fallback[identifier] = (count, window_start)
+            self._fallback[identifier] = (count, index, prev)
 
-            # Prune expired entries to prevent unbounded memory growth.
-            # Amortized: at most one O(n) sweep per 100 checks, and only once
-            # the map is large — never on every request under the global lock.
+            # Prune entries older than the previous window to prevent unbounded
+            # memory growth. Amortized: at most one O(n) sweep per 100 checks,
+            # and only once the map is large — never on every request under
+            # the global lock.
             self._fallback_checks_since_prune += 1
             if len(self._fallback) > 1000 and self._fallback_checks_since_prune >= 100:
                 self._fallback_checks_since_prune = 0
-                cutoff = now - window_seconds
                 self._fallback = {
-                    k: v for k, v in self._fallback.items() if v[1] > cutoff
+                    k: v for k, v in self._fallback.items() if v[1] >= index - 1
                 }
 
-            if count > limit:
-                reset = int(window_seconds - (now - window_start))
-                _raise_rate_limited(_rate_limit_headers(limit, count, reset))
+            self._enforce(prev, count, limit, window_seconds, elapsed)
 
     async def check(
         self, identifier: str, limit: int | None, window_seconds: int
@@ -183,21 +250,24 @@ class RateLimiter:
         if limit is None or limit <= 0:
             return
 
-        key = f"{self._prefix}{identifier}"
-
         if self._redis is None:
             self._degraded(window_seconds)
             await self._check_fallback(identifier, limit, window_seconds)
             return
 
+        index, elapsed = _window_position(window_seconds)
+        # ``{...}`` is a Redis Cluster hash tag: both window keys of one
+        # identifier land on the same slot, which a multi-key script requires.
+        base = f"{{{self._prefix}{identifier}}}"
+        keys = [f"{base}:{index}", f"{base}:{index - 1}"]
+
         try:
-            # Single atomic Lua round trip: INCR + EXPIRE-on-first-hit, then
-            # TTL. The script executes atomically server-side, so the TTL is
-            # always set together with the first increment (no TOCTOU window)
-            # at half the per-request Redis latency of the old SET NX + INCR.
-            result = await self._rate_limit_script(keys=[key], args=[window_seconds])
+            # Single atomic Lua round trip: INCR the current window (EXPIRE on
+            # first hit) and read the previous one, at the same per-request
+            # Redis latency as a plain fixed-window INCR.
+            result = await self._rate_limit_script(keys=keys, args=[window_seconds * 2])
             current = int(result[0])
-            ttl = int(result[1])
+            prev = int(result[1])
         except Exception as e:
             logger.warning(
                 "Redis rate limit check failed (%s), fail mode: %s",
@@ -208,11 +278,7 @@ class RateLimiter:
             await self._check_fallback(identifier, limit, window_seconds)
             return
 
-        if current > limit:
-            # A negative TTL (-1 no expiry / -2 missing) collapses to the full
-            # window as a safe Retry-After hint.
-            reset = ttl if ttl >= 0 else window_seconds
-            _raise_rate_limited(_rate_limit_headers(limit, current, reset))
+        self._enforce(prev, current, limit, window_seconds, elapsed)
 
 
 __all__ = ["RateLimiter"]

@@ -198,7 +198,8 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         if not self.embedder:
             return []
         try:
-            return await encode_flexible(self.embedder, item.content)
+            embedding: list[float] = await encode_flexible(self.embedder, item.content)
+            return embedding
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
             return []
@@ -421,7 +422,9 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         like ``/metrics`` may scrape this multiple times per second; cache
         the computed snapshot for one second to coalesce bursts.
         """
-        cached = getattr(self, "_stats_cache", None)
+        cached: tuple[float, list[TierStats]] | None = getattr(
+            self, "_stats_cache", None
+        )
         if cached is not None:
             cached_at, snapshot = cached
             if time.monotonic() - cached_at < self._STATS_CACHE_TTL:

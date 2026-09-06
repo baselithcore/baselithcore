@@ -14,6 +14,7 @@ from pydantic import SecretStr
 from core.observability.logging import get_logger
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError, describe_exception
+from core.services.llm.tool_calling import LLMResult
 
 logger = get_logger(__name__)
 
@@ -105,7 +106,7 @@ class HuggingFaceProvider:
             f"Initialized HuggingFace provider (mode={'local' if use_local else 'inference_api'})"
         )
 
-    def _init_inference_client(self):
+    def _init_inference_client(self) -> None:
         """
         Initialize the HuggingFace Inference Client for cloud-based generation.
 
@@ -133,7 +134,7 @@ class HuggingFaceProvider:
         """Close the provider connection."""
         pass
 
-    def _get_local_pipeline(self, model: str):
+    def _get_local_pipeline(self, model: str) -> Any:
         """
         Get or create a local transformers pipeline for the given model.
 
@@ -201,7 +202,7 @@ class HuggingFaceProvider:
             ) from e
 
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Generate a response using HuggingFace.
@@ -224,7 +225,7 @@ class HuggingFaceProvider:
                 self._generate_inference_api, prompt, model, json_mode, **kwargs
             )
 
-    async def generate_structured(self, *args, **kwargs):
+    async def generate_structured(self, *args: Any, **kwargs: Any) -> LLMResult:
         """Not supported: HuggingFace has no native tool-calling API.
 
         Present only to satisfy ``LLMProviderProtocol``. ``supports_native_tools``
@@ -237,7 +238,7 @@ class HuggingFaceProvider:
         )
 
     def _generate_inference_api(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Execute a request via the HuggingFace Inference API.
@@ -287,7 +288,7 @@ class HuggingFaceProvider:
             raise LLMProviderError(f"HuggingFace error: {describe_exception(e)}") from e
 
     def _generate_local(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Execute generation using a local transformers model.
@@ -330,7 +331,7 @@ class HuggingFaceProvider:
             ) from e
 
     async def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> AsyncIterator[tuple[str, int]]:
         """
         Generate a streaming response using HuggingFace.
@@ -383,7 +384,7 @@ class HuggingFaceProvider:
             yield item
 
     def _generate_stream_inference_api(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> Iterator[tuple[str, int]]:
         """
         Execute a streaming request via the HuggingFace Inference API.
@@ -430,7 +431,7 @@ class HuggingFaceProvider:
             ) from e
 
     def _generate_stream_local(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> Iterator[tuple[str, int]]:
         """Stream using local transformers with TextIteratorStreamer."""
         try:

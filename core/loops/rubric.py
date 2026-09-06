@@ -15,6 +15,7 @@ model). Reach for it only when no deterministic check exists.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from core.evaluation.base import BaseLLMEvaluator
 from core.loops.engineered import Verifier
@@ -25,11 +26,13 @@ DEFAULT_RUBRIC_THRESHOLD = 0.8
 class RubricJudge(BaseLLMEvaluator):
     """LLM judge grading an output against a caller-supplied rubric."""
 
-    def __init__(self, rubric: str, llm_service=None) -> None:
+    def __init__(self, rubric: str, llm_service: Any | None = None) -> None:
         super().__init__(llm_service)
         self._rubric = rubric
 
-    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
+    def get_prompt(
+        self, query: str, response: str, context: dict[str, Any] | None = None
+    ) -> str:
         """Build the grading prompt (reasoning first, then the score)."""
         return f"""You are a strict Rubric Judge. Grade the output below against the rubric.
 
@@ -58,7 +61,7 @@ def rubric_verifier(
     *,
     goal: str,
     threshold: float = DEFAULT_RUBRIC_THRESHOLD,
-    llm_service=None,
+    llm_service: Any | None = None,
 ) -> Verifier:
     """Adapt a rubric grade to the loop's ``(done, evidence)`` contract.
 

@@ -17,7 +17,7 @@ import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import yaml
 
@@ -26,7 +26,7 @@ MAX_DESCRIPTION_CHARS: Final[int] = 200
 MAX_NAME_CHARS: Final[int] = 80
 
 
-def _logger():  # lazy: keep this module import-light
+def _logger() -> Any:  # lazy: keep this module import-light
     from core.observability.logging import get_logger
 
     return get_logger(__name__)

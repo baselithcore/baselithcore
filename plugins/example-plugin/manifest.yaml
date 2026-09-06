@@ -7,4 +7,13 @@ tags:
 - template
 python_dependencies: []
 plugin_dependencies: {}
+# Declared capabilities. This plugin reaches nothing and reads nothing, and
+# says so explicitly: an empty block is a statement, a missing block only means
+# the manifest predates the mechanism. See mkdocs-site/docs/plugins/packaging.md.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
 integrity_sha256: f405791804dfbaffc94bc5aef6ba1cdcd285fcd2bee2a7ce2666730b7daa0f95

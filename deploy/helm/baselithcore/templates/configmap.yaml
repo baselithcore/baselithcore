@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "baselithcore.labels" . | nindent 4 }}
 data:
-  {{- range $key, $value := .Values.config }}
-  {{ $key }}: {{ $value | quote }}
-  {{- end }}
+  # TRUSTED_HOSTS is derived (ingress hosts + the in-cluster Service names) when
+  # config does not set it: config.APP_ENV=production with an empty
+  # TRUSTED_HOSTS aborts startup, so leaving it unset would make the chart's own
+  # defaults un-installable. Setting config.TRUSTED_HOSTS yourself also requires
+  # setting probeHost, or the probes lose the Host header the middleware needs.
+  {{- include "baselithcore.configData" . | nindent 2 }}

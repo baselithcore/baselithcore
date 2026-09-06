@@ -74,12 +74,12 @@ class SwarmHandler(BaseFlowHandler):
 
     def __init__(
         self,
-        *args,
+        *args: Any,
         colony_config: SwarmConfig | None = None,
         virtual_agents: list[VirtualAgentSpec] | None = None,
         llm_service: Any | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the swarm handler.
 
@@ -110,7 +110,7 @@ class SwarmHandler(BaseFlowHandler):
         self._register_virtual_agents()
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -390,9 +390,10 @@ Assigned task: {task_def["description"]}
 Provide a detailed response, incorporating relevant memories and relationship data if provided.
 """
         try:
-            return await self.llm_service.generate_response(
+            answer: str = await self.llm_service.generate_response(
                 prompt, model=model_override
             )
+            return answer
         except Exception as e:
             return f"[{agent.name}] Error: {e!s}"
 
@@ -446,7 +447,8 @@ Create a final response that:
 4. Resolves any contradictions
 """
         try:
-            return await self.llm_service.generate_response(prompt)
+            synthesis: str = await self.llm_service.generate_response(prompt)
+            return synthesis
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             # Fallback

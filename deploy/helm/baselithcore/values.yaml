@@ -27,11 +27,20 @@ containerPort: 8000
 
 # uvicorn workers per pod. Scale pods (replicaCount / the HPA) before workers:
 # each worker is a full process that loads its own embedder/reranker (several
-# hundred MB with the `full` image), so two workers under the default 1Gi
-# limit sit at the OOM edge and contend for the single CPU. Raise this only
-# together with resources.limits, and then also set PROMETHEUS_MULTIPROC_DIR
-# (the chart does when webConcurrency > 1).
+# hundred MB with the `full` image), so two of them multiply the memory the
+# resources block below is sized for. Raise this only together with
+# resources, and then also set PROMETHEUS_MULTIPROC_DIR (the chart does when
+# webConcurrency > 1).
 webConcurrency: 1
+
+# Peers whose X-Forwarded-For / X-Forwarded-Proto uvicorn trusts
+# (`--forwarded-allow-ips`; comma-separated IPs or CIDRs). Empty keeps the
+# image default (127.0.0.1), which behind an ingress controller makes every
+# request appear to come from the controller: per-IP rate limits, the
+# failed-auth throttle and the admin lockout then collapse into one shared
+# bucket. Set it to the ingress controller's pod CIDR, or "*" only when
+# networkPolicy.ingressFrom already restricts who can reach the pod.
+forwardedAllowIps: ""
 
 service:
   type: ClusterIP
@@ -48,13 +57,36 @@ ingress:
           pathType: Prefix
   tls: []
 
+# requests.memory is a promise to the scheduler and the input to the kernel's
+# OOM victim score — a container is picked by how far it exceeds its request,
+# not by how big it is. Understating it therefore packs the node *and* moves
+# this pod to the front of the OOM queue, which is the worst of both. So the
+# request tracks steady-state usage and the limit covers the peak.
+#
+# The numbers below are measured, not guessed: on a local k3d install an RQ
+# worker running core's own document ingestion peaks at 1.1-1.45Gi, and the
+# API pod is that same code plus the HTTP stack and every loaded plugin. The
+# previous 512Mi/1Gi pair was below what a single ingestion needs.
+#
+# Re-measure for your own plugin set — that is what decides the number — and
+# measure under load, never at rest, over more than one pod lifetime: the
+# same deployment varies by a fifth run to run. For scale: an API pod with a
+# plugin loading BGE-M3 plus a reranker sits at 3.0-3.7Gi steady, peaks at
+# 3.1-4.5Gi under request load, and has touched 5.3Gi on a boot that
+# downloaded the models.
 resources:
   requests:
     cpu: 250m
-    memory: 512Mi
+    memory: 1536Mi
   limits:
-    cpu: "1"
-    memory: 1Gi
+    # No CPU limit on purpose. CPU is compressible: a limit cannot prevent
+    # exhaustion, it can only throttle — and the worst moment to be throttled
+    # is the cold start (plugin activation, embedder warmup) that an
+    # autoscaler just triggered. Contention is already settled fairly by
+    # requests.cpu, which sets the cgroup weight. Add limits.cpu back only
+    # when a hard ceiling is a billing or noisy-neighbour *requirement*, and
+    # never below the cold-start burst, which measures above 1 core.
+    memory: 3Gi
 
 autoscaling:
   enabled: true
@@ -95,6 +127,14 @@ tmpVolumes:
 # in-flight requests drain before SIGKILL.
 terminationGracePeriodSeconds: 45
 
+# Host header sent on the three probes. TRUSTED_HOSTS mounts Starlette's
+# TrustedHostMiddleware, which 400s any request whose Host it does not know —
+# and the kubelet addresses the pod by IP, so without a Host header the probes
+# fail and the pod never becomes ready. Left empty the chart uses the first
+# ingress host, which is right whenever it also derived TRUSTED_HOSTS. Set this
+# explicitly whenever you set config.TRUSTED_HOSTS yourself.
+probeHost: ""
+
 # Covers slow cold starts (plugin activation, embedder warmup): up to
 # periodSeconds * failureThreshold = 300s before the pod is restarted.
 # Liveness/readiness only start once this succeeds.
@@ -132,8 +172,11 @@ affinity: {}
 worker:
   enabled: false
   replicaCount: 1
+  # `baselith worker` is not a command: the CLI rejects it with
+  # "invalid choice: 'worker'". The RQ consumer lives under the queue group.
   command:
     - baselith
+    - queue
     - worker
   # Optional liveness probe, rendered verbatim into the worker container when
   # set. Leave empty and the worker has none: a hung RQ worker then keeps
@@ -162,13 +205,20 @@ worker:
   #     timeoutSeconds: 10
   #     failureThreshold: 3
   livenessProbe: {}
+  # An idle worker is the most misleading pod in the deployment: RQ forks a
+  # child per job, so the parent that `kubectl top` shows sits at ~80Mi
+  # forever while the fork is what actually allocates. Measured on a local k3d
+  # install, one document-ingestion job takes the pod from 84Mi idle to
+  # 1.1-1.45Gi — so size this for a worker doing its job, never for the
+  # queue-empty reading.
   resources:
     requests:
       cpu: 250m
-      memory: 512Mi
+      memory: 1536Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      # No CPU limit here either, and it matters more than on the API: an
+      # embedding batch is exactly the compute burst a cap would throttle.
+      memory: 3Gi
 
 # -------------------------------------------------------------------------
 # Configuration
@@ -206,12 +256,38 @@ secrets:
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []
 
+# Extra volumes / mounts, rendered verbatim into the api and worker pods.
+# `readOnlyRootFilesystem: true` leaves only the /tmp mount writable, so any
+# component that persists under the image tree (a plugin's own data directory,
+# a Hugging Face cache under /app/models) needs a volume here or it fails at
+# boot. Mount durable state on a PVC; caches can be an emptyDir.
+#   extraVolumes:
+#     - name: plugin-data
+#       persistentVolumeClaim:
+#         claimName: baselithcore-plugin-data
+#   extraVolumeMounts:
+#     - name: plugin-data
+#       mountPath: /app/data
+extraVolumes: []
+extraVolumeMounts: []
+
 # ServiceMonitor for the Prometheus Operator (scrapes /metrics).
 serviceMonitor:
   enabled: false
   interval: 15s
   path: /metrics
   labels: {}
+  # Prometheus scrapes each pod by IP, and a ServiceMonitor endpoint has no
+  # field for a Host header — so the scrape arrives as `Host: <pod-ip>`,
+  # TrustedHostMiddleware answers 400, and the target sits down forever with
+  # nothing but 400s in the app log. On (the default) the chart adds the pod's
+  # own IP to TRUSTED_HOSTS through the downward API, which is the only name
+  # the scrape can present. What that costs: a caller who can already reach the
+  # pod directly on the cluster network may use the pod IP as a Host, so any
+  # absolute URL the app builds from it would carry an in-cluster address —
+  # not a name that resolves anywhere else. Turn it off only when you set
+  # config.TRUSTED_HOSTS yourself and have made the pod IP trusted there.
+  trustPodIP: true
   # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
   # Point secretName at a Secret with the admin credentials so Prometheus can
   # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and

@@ -145,7 +145,7 @@ class Colony(ColonyOpsMixin):
                 self.auction.submit_bid(bid)
 
         # Resolve auction
-        winner_id = self.auction.resolve(task.id)
+        winner_id: str | None = self.auction.resolve(task.id)
 
         if winner_id:
             # Track assignment on the task itself (needed by self_heal)

@@ -96,8 +96,8 @@ async def _invoke(call: ProviderCall[T], *args: object, **kwargs: object) -> T:
     """Invoke a sync or async ``call`` and await if needed."""
     result = call(*args, **kwargs)
     if inspect.isawaitable(result):
-        return await result  # type: ignore[no-any-return]
-    return result  # type: ignore[return-value]
+        return await result
+    return result
 
 
 class FallbackChain(Generic[T]):

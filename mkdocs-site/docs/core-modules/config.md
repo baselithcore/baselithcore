@@ -603,6 +603,8 @@ ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by
 TRUSTED_HOSTS=                       # Host allowlist; empty = TrustedHostMiddleware not mounted
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]
 AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
+CROSS_ORIGIN_OPENER_POLICY=same-origin-allow-popups   # COOP header; empty omits it
+CROSS_ORIGIN_RESOURCE_POLICY=same-origin              # CORP header; same-site for split subdomains, empty omits
 ```
 
 The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
@@ -610,6 +612,13 @@ stuffing per source IP: rejected authentication attempts (counted on
 `authfail:{ip}` over `RATE_LIMIT_WINDOW_SECONDS`) trip to `429` once the budget
 is exhausted, while successful auth never touches the counter. See
 [Failed-auth throttle](middleware.md#failed-auth-throttle).
+
+`CROSS_ORIGIN_OPENER_POLICY` / `CROSS_ORIGIN_RESOURCE_POLICY` feed the
+cross-origin isolation pair `SecurityHeadersMiddleware` emits next to the CSP
+(OWASP Secure Headers). The defaults keep OAuth/SSO popups opened by the
+console working and stop foreign origins loading API responses as no-cors
+subresources; CORS-approved `fetch` calls from `ALLOW_ORIGINS` are unaffected.
+See [SecurityHeadersMiddleware](middleware.md#securityheadersmiddleware).
 
 !!! warning "Startup validation"
     `SecurityConfig` raises at construction if `AUTH_REQUIRED=true` without a

@@ -34,7 +34,7 @@ class Plugin(ABC):
     - Flow Handlers: Workflow logic triggered by intent detection.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the base plugin state. Internal use only.
         """

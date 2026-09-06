@@ -1,0 +1,22 @@
+# Gitleaks configuration. Extends the default ruleset; only the allowlist
+# below is local. Commit-scoped false positives live in .gitleaksignore —
+# this file is for fixtures that must stay in the tree verbatim.
+title = "baselith-core"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures that exercise the credential-redaction guardrail"
+# The canonical public example token from jwt.io (HS256, sub=1234567890). It
+# is the fixture behind the `jwt` redaction pattern in
+# core/guardrails/config.py and is referenced verbatim by
+# tests/unit/core/guardrails/test_secret_patterns.py and
+# evals/red_team/injection_variants.yaml. Matching the exact literal keeps
+# every other JWT-shaped string a finding.
+# Header and payload are anchored exactly; the signature is optional because
+# the jwt rule also matches a token whose signature was wrapped to the next
+# line, and that header/payload pair belongs to no real credential.
+regexes = [
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.(SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c)?''',
+]

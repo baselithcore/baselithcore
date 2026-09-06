@@ -242,11 +242,11 @@ class IndexingService:
 
         from core.doc_sources.filesystem import FilesystemDocumentSource
 
-        raw_path = Path(file_path).expanduser()
+        raw_path = Path(file_path).expanduser()  # noqa: ASYNC240 - path resolution for the traversal guard, microseconds
         configured_root = getattr(self._proc_config, "documents_root", None)
         allowed_root: Path | None = None
         if isinstance(configured_root, (str, Path)):
-            allowed_root = Path(configured_root).expanduser()
+            allowed_root = Path(configured_root).expanduser()  # noqa: ASYNC240 - path resolution for the traversal guard, microseconds
             if not allowed_root.is_absolute():
                 allowed_root = (Path.cwd() / allowed_root).resolve()
             else:

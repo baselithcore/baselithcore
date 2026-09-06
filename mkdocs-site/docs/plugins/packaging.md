@@ -83,6 +83,12 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
+permissions:                      # Optional. What this plugin is allowed to do.
+  network:
+    egress: ["api.github.com", "*.openai.com"]
+  tools: ["search_knowledge_base"]
+  secrets: ["MY_PLUGIN_API_KEY"]
+  filesystem: ["./data/plugins/my-plugin"]
 integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin ships and runs (manifest excluded).
 ```
 
@@ -102,7 +108,8 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin s
 | `dependencies`          | ❌        | Legacy list of required plugin **names**; prefer `plugin_dependencies` |
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
-| `environment_variables` | ❌        | Required environment variables                   |
+| `environment_variables` | ❌        | Required environment variables: names, or mappings with `name`, `description`, `required` |
+| `permissions`           | ❌        | What the plugin is allowed to do — see [Permissions](#permissions). `integrity_sha256` proves *which code* runs; this declares what that code may do. |
 | `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs — see [What is hashed](#integrity) for the exact surface. The manifest itself is **excluded**, so the publisher can inject this field after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 The class in `plugin.py` carries no identity of its own: `name`, `version` and every other
@@ -138,6 +145,97 @@ Two different grammars apply:
     incompatible plugin is skipped.
 
 ---
+
+## Permissions {#permissions}
+
+A plugin runs **in-process with the host's full authority**: any egress host,
+any file, any secret in the environment, any tool. `integrity_sha256` proves
+*which code* is running; it does not say whether that code should be able to
+reach `169.254.169.254`. The `permissions:` block answers the second question.
+
+```yaml
+permissions:
+  network:
+    egress: ["api.github.com", "*.openai.com"]
+  tools: ["search_knowledge_base", "scrape_url"]
+  secrets: ["MY_PLUGIN_API_KEY"]
+  filesystem: ["./data/plugins/my-plugin"]
+```
+
+`*` grants everything; `*.example.com` matches any subdomain but neither the
+apex nor `api.example.com.evil.net`. **Declare `"*"` honestly** where egress is
+driven by the user — a scraper reaches whatever URL it is given, and saying so
+tells an operator more than a list that is quietly incomplete.
+
+An **empty** block is a statement ("this plugin needs nothing"). A **missing**
+block only means the manifest predates the mechanism. The two are treated
+differently, which is what makes the rollout safe.
+
+### Rollout: declare, observe, enforce
+
+`BASELITH_PLUGIN_PERMISSIONS` selects the stage:
+
+| Value | Behaviour |
+| --- | --- |
+| `off` | Declarations are parsed and exposed, never consulted. |
+| `warn` *(default)* | A call outside the declared set is logged once per plugin and host, and proceeds. The observation window. |
+| `enforce` | A plugin that **declared** a block is held to it. A plugin that declared **nothing** is untouched. |
+
+That last row is the property that makes the flag safe to turn on: undeclared
+means "not migrated yet", not "denied everything", so enabling enforcement
+cannot brick plugins written before the block existed. Same shape as
+`BASELITH_REQUIRE_SIGNED_PLUGINS`.
+
+### What is enforced today
+
+| Block | Enforced | Chokepoint |
+| --- | --- | --- |
+| `network.egress` | ✅ | `core/security/ssrf.py` — every screened outbound URL |
+| `tools` | ✅ | `core.orchestration.enforcement.enforce_tool_invocation` |
+| `secrets` | ✅ | `core.security.secrets.get_secret` |
+| `filesystem` | ❌ | parsed and surfaced only — see below |
+
+**Egress.** Every outbound plugin request already passes the SSRF guard, which
+is where the per-plugin decision is made — the guard screens the *address*, the
+permission screens *which plugin* may reach it. A refused call raises
+`core.plugins.egress.EgressNotPermittedError`, a subclass of `SsrfError`, so
+callers that already handle a blocked outbound target handle this too.
+
+**Tools.** `enforce_tool_invocation` is the gate every orchestrated tool call
+passes; the permission check sits beside the contract check, because both
+answer "may this tool run at all?" before the approval and budget questions of
+whether it should. A refusal raises `core.plugins.access.ToolNotPermittedError`.
+
+**Secrets.** `get_secret` consults the declaration before resolving the value,
+so a refused read never materialises the credential. A refusal raises
+`core.plugins.access.SecretNotPermittedError`.
+
+**`filesystem` is still not enforced.** A plugin's file access has no
+comparable chokepoint — it is `open()` — so a guard would imply a guarantee
+that does not exist. The block is parsed, exposed through
+`PluginMetadata.to_dict()` and surfaced by the marketplace; treat it as
+documentation until this table says otherwise.
+
+### What this is not
+
+A plugin runs in-process. It can call `os.environ` directly, or let an SDK do
+its own credential lookup, and no in-process guard can stop it. What the
+declaration buys is that **the framework's own paths** are held to it, and that
+an operator reading a manifest knows what a plugin says it needs. Real
+containment requires process isolation, which is a different design.
+
+Guards are installed at startup by `core.plugins.guards.install_plugin_guards`,
+which points them at the loaded registry. The mode is resolved per call, so a
+deployment can move from `warn` to `enforce` without a restart.
+
+### The official plugins
+
+Every plugin under `plugins/` declares a block. Three declare `egress: ["*"]`
+(`baselithbot`, `browser_agent`, `web_scraper`) plus `document_sources`, because
+their targets are supplied per request — that is the honest declaration, and it
+still tells an operator these are the outbound ones. The rest declare an empty
+network set, which under `enforce` means they are refused any screened outbound
+call at all.
 
 ## Signing for Integrity {#integrity}
 

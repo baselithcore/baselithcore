@@ -63,7 +63,7 @@ class Bulkhead:
             raise TypeError("Bulkhead decorator only works with async functions")
 
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             async with self._semaphore:
                 with self._lock:
                     self._current += 1

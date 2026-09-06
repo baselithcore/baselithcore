@@ -11,7 +11,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from core.observability.logging import get_logger
 
@@ -172,7 +172,7 @@ class RedisCache(AsyncCacheBackend):
     async def delete(self, key: str) -> bool:
         try:
             client = await self._get_client()
-            return await client.delete(self._key(key)) > 0
+            return bool(await client.delete(self._key(key)) > 0)
         except Exception as e:
             logger.warning(f"Redis delete error: {e}")
             return False
@@ -313,7 +313,7 @@ class Cache:
             import functools
 
             @functools.wraps(func)
-            async def wrapper(*args, **kwargs):
+            async def wrapper(*args: Any, **kwargs: Any) -> T:
                 # Generate cache key from function and arguments
                 key_parts = [key_prefix or func.__name__]
                 key_parts.extend(str(a) for a in args)
@@ -323,7 +323,7 @@ class Cache:
                 # Try to get from cache
                 cached = await self.get(cache_key)
                 if cached is not None:
-                    return cached
+                    return cast(T, cached)
 
                 # Compute and cache
                 result = await func(*args, **kwargs)
@@ -336,7 +336,7 @@ class Cache:
 
 
 # Factory function
-def create_cache(backend_type: str = "memory", **kwargs) -> Cache:
+def create_cache(backend_type: str = "memory", **kwargs: Any) -> Cache:
     """
     Create a cache with the specified backend.
 

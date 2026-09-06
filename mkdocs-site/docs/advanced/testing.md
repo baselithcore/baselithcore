@@ -26,6 +26,7 @@ tests/
 ├── integration/           # Cross-module wiring: orchestrator, plugin loading, pgvector
 ├── contracts/             # OpenAPI conformance (schemathesis) + service protocols
 ├── chaos/                 # Fault-injection resilience tests (marker: chaos)
+├── golden/                # Real Agent loop driven by recorded LLM cassettes
 ├── core/                  # Plugin-system and memory tests
 ├── plugins/               # Per-plugin suites (api_routers, baselithbot)
 └── load/                  # Locust profile — not part of the pytest suite
@@ -486,6 +487,46 @@ async def test_chain_of_thought_uses_injected_llm():
     assert len(steps) == 2
 ```
 
+### Golden Trajectories (Recorded LLM Cassettes)
+
+An `AsyncMock` proves the loop *calls* the service; it cannot prove the loop
+sent the right thing. `tests/golden/` drives the real `core.agent.Agent` with a
+**cassette** — an ordered list of provider turns in
+`tests/golden/cassettes/<name>.json` — and every turn asserts what the loop
+sent before answering:
+
+```json
+{
+  "expect": {
+    "prompt_contains": ["[lookup_capital] -> Rome", "answer without calling more tools"],
+    "tools": ["lookup_capital"],
+    "response_format": null
+  },
+  "result": {"text": "The capital of Italy is Rome.", "tool_calls": [], "stop_reason": "end_turn"}
+}
+```
+
+`expect.tools` is the set of tools the loop must offer, `prompt_contains` the
+fragments the assembled prompt must carry (the previous tool result, the
+retry wording, the validation error), `response_format` the strict-schema
+name. Any drift raises `CassetteMismatch` with the full prompt; a loop that
+finishes without playing every recorded turn fails at teardown.
+
+```python
+@pytest.mark.asyncio
+async def test_tool_loop_matches_cassette(golden_llm):
+    svc = golden_llm("agent_tool_loop")
+    agent = Agent(tools=[lookup_capital], llm_service=svc)
+    result = await agent.run("What is the capital of Italy?")
+    assert result.tool_calls_made == ["lookup_capital"]
+```
+
+To capture a new cassette from a live provider, run the test once with
+`BASELITH_GOLDEN_RECORD=1` (credentials configured): `RecordingLLMService`
+wraps the real `LLMService`, writes the turns with the offered tools and the
+schema name filled in, and leaves `prompt_contains` for you to curate from the
+recorded prompt. Cassettes are replayed in CI with no keys, cost or network.
+
 ### Async Testing
 
 With `asyncio_mode = auto` a plain `async def` test is enough; the
@@ -902,7 +943,33 @@ BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py \
 ```
 
 Task weights (health 5 : chat 10 : feedback 2) approximate a chat-heavy
-workload; tune them in the locustfile. See `tests/load/README.md`.
+workload; tune them in the locustfile. Set `BASELITH_PERF_SKIP_CHAT=true` where
+no LLM provider is reachable, so chat failures do not swamp the run. See
+`tests/load/README.md`.
+
+### Performance budget
+
+The scheduled smoke run (`.github/workflows/perf-smoke.yml`) takes its verdict
+from `scripts/check_perf_budget.py`, not from Locust's exit code — that only
+reports request failures, so a run that made **zero** requests, or one 50x
+slower than the last, both exited 0.
+
+```bash
+python scripts/check_perf_budget.py --stats perf_stats.csv --report
+```
+
+| Check | Catches |
+| --- | --- |
+| `min_total_requests` | a backend that never came up, or a profile whose tasks all raised |
+| per-endpoint `min_requests` | one path silently dropping out of the mix |
+| per-endpoint `p95_ms` | a latency regression |
+| per-endpoint `max_failure_ratio` | errors under modest concurrency |
+| unbudgeted endpoint | a task added to the profile with no budget behind it |
+
+Budgets in `scripts/perf_budget.json` are ceilings set by hand. There is no
+`--update-baseline`: a perf budget rewritten from the run that broke it enforces
+nothing. They carry wide headroom because a shared runner is noisy — observed
+`GET /health` p95 is single-digit milliseconds against a 300 ms budget.
 
 ## Chaos / Resilience Testing
 

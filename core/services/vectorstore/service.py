@@ -36,7 +36,7 @@ class VectorStoreService:
     retrieval actions respect multi-tenancy and leverage caching where possible.
     """
 
-    def __init__(self, config=None, provider=None):
+    def __init__(self, config: Any | None = None, provider: Any | None = None) -> None:
         """
         Initialize the VectorStore service.
 
@@ -127,7 +127,7 @@ class VectorStoreService:
         self,
         collection_name: str | None = None,
         vector_size: int | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """
         Create a new collection/index in the vector store.
@@ -152,7 +152,7 @@ class VectorStoreService:
     async def delete_collection(
         self,
         collection_name: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """
         Permanently delete a collection.
@@ -189,7 +189,7 @@ class VectorStoreService:
         documents: Sequence[Document],
         collection_name: str | None = None,
         embedder: EmbedderProtocol | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> int:
         """
         Index a sequence of documents into the vector store.
@@ -226,7 +226,7 @@ class VectorStoreService:
         use_cache: bool = True,
         query_text: str | None = None,
         rerank: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform a vector similarity search with tenant isolation.
@@ -261,7 +261,7 @@ class VectorStoreService:
         self,
         point_ids: list[int | str],
         collection_name: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[Any]:
         """
         Directly fetch specific points by their IDs.
@@ -279,15 +279,16 @@ class VectorStoreService:
         kwargs["tenant_id"] = tenant_id
 
         try:
-            return await self.provider.retrieve(
+            points: list[Any] = await self.provider.retrieve(
                 collection_name=collection_name, point_ids=point_ids, **kwargs
             )
+            return points
         except Exception as e:
             logger.error(f"Point retrieval failed: {e}")
             raise VectorStoreError(f"Retrieve failed: {e}") from e
 
     async def delete_document(
-        self, document_id: str, collection_name: str | None = None, **kwargs
+        self, document_id: str, collection_name: str | None = None, **kwargs: Any
     ) -> None:
         """
         Remove all vector points associated with a specific document ID.
@@ -326,7 +327,7 @@ class VectorStoreService:
         self,
         document_ids: list[str],
         collection_name: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Remove all points for a batch of document IDs in ONE filtered delete.
 
@@ -366,7 +367,7 @@ class VectorStoreService:
         collection_name: str | None = None,
         limit: int = 100,
         offset: int | str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Paginate through all points in a collection (Scroll API).
@@ -395,7 +396,7 @@ class VectorStoreService:
         query_vector: Sequence[float],
         collection_name: str | None = None,
         limit: int = 10,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Perform a raw low-level query through the provider protocol.
@@ -432,7 +433,7 @@ class VectorStoreService:
         collection_name: str | None = None,
         limit: int = 10,
         group_size: int = 1,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Grouped query: best ``group_size`` chunks per top ``limit`` groups.

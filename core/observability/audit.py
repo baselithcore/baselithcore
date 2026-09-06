@@ -283,7 +283,7 @@ class AuditLogger:
         success: bool,
         user_id: str | None = None,
         ip_address: str | None = None,
-        **details,
+        **details: Any,
     ) -> None:
         """Log authentication event."""
         event_type = (
@@ -303,7 +303,7 @@ class AuditLogger:
         path: str,
         user_id: str | None = None,
         ip_address: str | None = None,
-        **details,
+        **details: Any,
     ) -> None:
         """Log API request."""
         await self.log(
@@ -320,7 +320,7 @@ class AuditLogger:
         query: str,
         session_id: str | None = None,
         user_id: str | None = None,
-        **details,
+        **details: Any,
     ) -> None:
         """Log chat request."""
         await self.log(

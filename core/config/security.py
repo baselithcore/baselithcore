@@ -6,7 +6,7 @@ Authentication, Security Headers, and Rate Limiting.
 
 import logging
 import os
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -246,6 +246,17 @@ class SecurityConfig(BaseSettings):
         ),
         alias="PERMISSIONS_POLICY",
     )
+    # Cross-origin isolation pair (OWASP Secure Headers). COOP severs the
+    # window.opener link with cross-origin windows; "same-origin-allow-popups"
+    # keeps OAuth/SSO popups opened by the console working. CORP blocks no-cors
+    # subresource loads (<img>, <script>) of our responses from foreign origins
+    # (CORS-approved fetches from ALLOW_ORIGINS are exempt); "" omits either.
+    cross_origin_opener_policy: str | None = Field(
+        default="same-origin-allow-popups", alias="CROSS_ORIGIN_OPENER_POLICY"
+    )
+    cross_origin_resource_policy: str | None = Field(
+        default="same-origin", alias="CROSS_ORIGIN_RESOURCE_POLICY"
+    )
 
     # === Request body size limit (bytes) ===
     # Protects against memory-exhaustion DoS from oversized POST/PUT bodies.
@@ -260,7 +271,7 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
-    def _coerce_to_secret_set(cls, v):
+    def _coerce_to_secret_set(cls, v: Any) -> Any:
         """Coerce comma-separated strings or iterables of mixed types to ``Set[SecretStr]``."""
         if v is None or v == "":
             return set()
@@ -273,7 +284,7 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("oidc_role_map", mode="before")
     @classmethod
-    def _parse_role_map(cls, v):
+    def _parse_role_map(cls, v: Any) -> Any:
         """Parse ``idp_role:app_role`` pairs (comma-separated) into a dict."""
         if v is None or v == "":
             return {}
@@ -292,7 +303,7 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("oidc_algorithms", mode="before")
     @classmethod
-    def _parse_algorithms(cls, v):
+    def _parse_algorithms(cls, v: Any) -> Any:
         """Allow a comma-separated string for OIDC_ALGORITHMS."""
         if isinstance(v, str):
             return [a.strip() for a in v.split(",") if a.strip()]
@@ -300,7 +311,7 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("api_keys_scoped", mode="before")
     @classmethod
-    def _parse_scoped_keys(cls, v):
+    def _parse_scoped_keys(cls, v: Any) -> Any:
         """Parse ``key=scope|scope,...`` into ``Dict[SecretStr, Set[str]]``.
 
         Already-parsed dicts pass through (keys wrapped in ``SecretStr``,
@@ -329,7 +340,7 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("data_encryption_keys", mode="before")
     @classmethod
-    def _parse_encryption_keys(cls, v):
+    def _parse_encryption_keys(cls, v: Any) -> Any:
         """Parse ``id:secret`` pairs (comma-separated) into ``Dict[str, SecretStr]``.
 
         A bare value without ``:`` is loaded under the id ``default`` so the

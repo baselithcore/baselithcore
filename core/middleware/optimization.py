@@ -33,7 +33,7 @@ def _is_streaming_response(headers: Headers) -> bool:
         return True
     # Explicit opt-out set by streaming endpoints (also disables proxy
     # buffering). If a handler declares it, honour it as a hard no-gzip signal.
-    return headers.get("x-accel-buffering", "").strip().lower() == "no"
+    return bool(headers.get("x-accel-buffering", "").strip().lower() == "no")
 
 
 class _StreamAwareGZipResponder(GZipResponder):
@@ -46,14 +46,19 @@ class _StreamAwareGZipResponder(GZipResponder):
     no body is ever accumulated for a stream.
     """
 
-    async def send_with_gzip(self, message: Message) -> None:
+    async def send_with_compression(self, message: Message) -> None:
+        # NOTE: the seam is `send_with_compression`. Overriding the older
+        # `send_with_gzip` name silently disabled this whole passthrough — the
+        # method matched nothing in the parent, so streamed responses went
+        # through Starlette's compressor unchanged by us.
+        await super().send_with_compression(message)
         if message["type"] == "http.response.start":
             headers = Headers(raw=message.get("headers") or [])
             if _is_streaming_response(headers):
-                self.initial_message = message
-                self.content_encoding_set = True  # reuse parent's raw passthrough
-                return
-        await super().send_with_gzip(message)
+                # super() has just recorded the start message; flipping this
+                # flag routes every body frame down the parent's untouched
+                # passthrough branch instead of the compressor.
+                self.content_encoding_set = True
 
 
 class StaticCacheMiddleware:

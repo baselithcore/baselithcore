@@ -8,6 +8,38 @@ PluginMetadata`` still works (``interface`` re-exports this class).
 from pathlib import Path
 from typing import Any
 
+from core.plugins.permissions import parse_permissions
+
+
+def _normalize_env_declarations(declared: Any) -> list[str]:
+    """Coerce ``environment_variables`` to the plain key list consumers expect.
+
+    Manifests use two shapes in the wild: the documented list of names
+    (``[FOO_TOKEN, FOO_URL]``) and a richer list of mappings carrying operator
+    documentation (``[{name: FOO_TOKEN, description: ..., required: true}]``).
+    Every consumer (the loader's env namespacing, the CLI deps report) wants
+    the names, and the rich form previously reached ``str.upper()`` as a dict
+    and aborted plugin load with ``AttributeError``. Normalizing once here
+    keeps both shapes valid and every consumer on one type.
+
+    Entries that are neither a string nor a mapping with a ``name`` are
+    dropped: a malformed declaration must not break plugin loading.
+    """
+    if not declared:
+        return []
+    keys: list[str] = []
+    for entry in declared:
+        if isinstance(entry, str):
+            name = entry
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "")
+        else:
+            continue
+        name = name.strip()
+        if name:
+            keys.append(name)
+    return keys
+
 
 class PluginMetadata:
     """
@@ -45,6 +77,7 @@ class PluginMetadata:
         signature_ed25519: str | None = None,
         subcomponent_of: str = "",
         llm_scopes: list[dict[str, str]] | None = None,
+        permissions: Any = None,
     ):
         """
         Initialize plugin metadata.
@@ -112,7 +145,7 @@ class PluginMetadata:
         self.icon = icon
         self.screenshots = screenshots or []
         self.category = category
-        self.environment_variables = environment_variables or []
+        self.environment_variables = _normalize_env_declarations(environment_variables)
         self.readiness = readiness
         # Platform-infrastructure marker (auth, …): hidden from user-facing nav,
         # tabs default to admin-only. See constructor docstring.
@@ -146,6 +179,12 @@ class PluginMetadata:
         # no pin falls back to the plugin's default pin. Empty ⇒ single default
         # selector, i.e. behaviour identical to a plugin that declares nothing.
         self.llm_scopes = self._normalize_llm_scopes(llm_scopes)
+        # Declared capabilities (network egress, tools, secrets, filesystem).
+        # Integrity proves *which code* runs; this declares what that code may
+        # do. Absent means "predates the mechanism", which the staged rollout
+        # treats differently from an explicit empty declaration — see
+        # core.plugins.permissions.
+        self.permissions = parse_permissions(permissions)
 
     @staticmethod
     def _normalize_llm_scopes(
@@ -201,6 +240,7 @@ class PluginMetadata:
             "signature_ed25519": self.signature_ed25519,
             "subcomponent_of": self.subcomponent_of,
             "llm_scopes": self.llm_scopes,
+            "permissions": self.permissions.summary(),
         }
 
     @classmethod
@@ -235,6 +275,7 @@ class PluginMetadata:
             optional_resources=data.get("optional_resources"),
             python_dependencies=data.get("python_dependencies"),
             plugin_dependencies=data.get("plugin_dependencies"),
+            permissions=data.get("permissions"),
             min_core_version=data.get("min_core_version"),
             max_core_version=data.get("max_core_version"),
             homepage=data.get("homepage", ""),

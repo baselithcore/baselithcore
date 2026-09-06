@@ -181,7 +181,7 @@ Before opening a PR, ensure that:
 - [ ] All tests pass: `python -m pytest`
 - [ ] No linting errors: `ruff check .`
 - [ ] Type checking OK: `mypy core/`
-- [ ] Focused strict typing gates pass: `python scripts/check_official_plugin_typing.py` and `python scripts/check_core_resilience_typing.py`
+- [ ] Focused strict typing gates pass: `python scripts/check_official_plugin_typing.py` and `python scripts/check_core_strict_typing.py`
 - [ ] Pre-commit passes: `pre-commit run --all-files`
 - [ ] Documentation updated (if necessary)
 - [ ] Clear and descriptive commit messages

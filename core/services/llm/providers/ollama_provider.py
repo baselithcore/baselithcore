@@ -140,7 +140,7 @@ class OllamaProvider:
                 logger.warning(f"Error closing Ollama client: {e}")
 
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Send a chat completion request to the local Ollama instance.
@@ -200,7 +200,7 @@ class OllamaProvider:
         tools: list[LLMToolSpec] | None = None,
         tool_choice: ToolChoice | None = None,
         response_format: ResponseFormat | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResult:
         """
         Generate using Ollama's native tool-calling / structured-output support.
@@ -276,7 +276,7 @@ class OllamaProvider:
                 f"Ollama error against {self._endpoint()}: {describe_exception(e)}"
             ) from e
 
-    def _extract_tool_calls(self, response) -> list[ToolCall]:
+    def _extract_tool_calls(self, response: Any) -> list[ToolCall]:
         """Parse Ollama tool calls, tolerating dict- and object-shaped schemas.
 
         Ollama does not assign call ids, so synthesize a stable one per index.
@@ -312,7 +312,7 @@ class OllamaProvider:
         return calls
 
     async def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> AsyncIterator[tuple[str, int]]:
         """
         Request a streaming completion from the local Ollama instance.
@@ -356,7 +356,7 @@ class OllamaProvider:
                 f"{describe_exception(e)}"
             ) from e
 
-    def _extract_content(self, response) -> str:
+    def _extract_content(self, response: Any) -> str:
         """
         Normalize and extract reasoning content from different Ollama response schemas.
 
@@ -367,14 +367,14 @@ class OllamaProvider:
             str: Cleaned and stripped text content.
         """
         if isinstance(response, dict):
-            return response.get("message", {}).get("content", "").strip()
+            return str(response.get("message", {}).get("content", "")).strip()
         elif hasattr(response, "message"):
             if hasattr(response.message, "content"):
-                return response.message.content.strip()
+                return str(response.message.content).strip()
             return str(response.message)
         return str(response)
 
-    def _extract_tokens(self, response, prompt: str, content: str) -> int:
+    def _extract_tokens(self, response: Any, prompt: str, content: str) -> int:
         """
         Calculate token usage from response metadata with estimation fallback.
 
@@ -390,12 +390,12 @@ class OllamaProvider:
             eval_count = response.get("eval_count", 0)
             prompt_eval = response.get("prompt_eval_count", 0)
             if eval_count > 0 or prompt_eval > 0:
-                return eval_count + prompt_eval
+                return int(eval_count + prompt_eval)
         elif hasattr(response, "eval_count") or hasattr(response, "prompt_eval_count"):
             eval_count = getattr(response, "eval_count", 0) or 0
             prompt_eval = getattr(response, "prompt_eval_count", 0) or 0
             if eval_count > 0 or prompt_eval > 0:
-                return eval_count + prompt_eval
+                return int(eval_count + prompt_eval)
 
         # Heuristic fallback if server does not provide usage stats.
         return estimate_tokens(prompt) + estimate_tokens(content)

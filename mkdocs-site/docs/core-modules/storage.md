@@ -136,6 +136,12 @@ non-blocking.
 (`CREATE TABLE / CREATE INDEX IF NOT EXISTS`, plus `ADD COLUMN IF NOT EXISTS`
 for the `tenant_id` backfill). The indexes it ensures on `interactions`:
 
+!!! info "Who creates the table"
+    `_initialize_schema()` is skipped when `DB_RUNTIME_DDL` is off — the
+    production default. `interactions`/`feedback`, their `tenant_id`
+    columns and the tenant indexes are owned by migrations 002b and 007;
+    see [Who creates the schema](db.md#who-creates-the-schema).
+
 | Index | Columns | Serves |
 |-------|---------|--------|
 | `idx_interactions_tenant` | `(tenant_id)` | bare tenant-scoped scans |

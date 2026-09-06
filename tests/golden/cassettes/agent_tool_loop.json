@@ -1,0 +1,43 @@
+{
+  "name": "agent_tool_loop",
+  "description": "Agent.run: one tool call, its result fed back, then a final answer grounded in it.",
+  "turns": [
+    {
+      "expect": {
+        "prompt_contains": ["capital of Italy"],
+        "tools": ["lookup_capital"]
+      },
+      "result": {
+        "text": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "name": "lookup_capital",
+            "arguments": {
+              "country": "Italy"
+            }
+          }
+        ],
+        "stop_reason": "tool_use",
+        "tokens_used": 96
+      }
+    },
+    {
+      "expect": {
+        "prompt_contains": [
+          "capital of Italy",
+          "Tool results so far:",
+          "[lookup_capital] -> Rome",
+          "answer without calling more tools"
+        ],
+        "tools": ["lookup_capital"]
+      },
+      "result": {
+        "text": "The capital of Italy is Rome.",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 141
+      }
+    }
+  ]
+}

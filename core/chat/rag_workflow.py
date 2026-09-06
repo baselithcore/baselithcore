@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _search_wrapper(query_vector, **kwargs):
+def _search_wrapper(query_vector: Any, **kwargs: Any) -> Any:
     """Wrapper for vectorstore search to maintain compatibility."""
     service = get_vectorstore_service()
     return service.search(query_vector=query_vector, **kwargs)

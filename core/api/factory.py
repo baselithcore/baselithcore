@@ -93,7 +93,8 @@ def _declare_security_schemes(app: FastAPI) -> None:
                 "description": "Access token issued by core.auth (AuthManager.create_token).",
             },
         )
-        return schema
+        annotated: dict[str, Any] = schema
+        return annotated
 
     app.openapi = openapi_with_schemes  # type: ignore[method-assign]
 
@@ -196,7 +197,9 @@ def create_app() -> FastAPI:
     # We allow credentials for specific listed origins, but disable them for '*'.
     use_wildcard = "*" in allow_origins_list
 
-    cors_params = {
+    # Annotated: the mixed bool/list values otherwise infer as dict[str, object],
+    # which no longer matches CORSMiddleware's per-parameter types once splatted.
+    cors_params: dict[str, Any] = {
         "allow_credentials": not use_wildcard,
         "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": [
@@ -288,7 +291,7 @@ def create_app() -> FastAPI:
         "/api/plugins/frontend-manifest",
         dependencies=[Depends(require_user)],
     )
-    async def get_frontend_manifest():
+    async def get_frontend_manifest() -> dict[str, Any]:
         """Return manifest of all plugin frontend assets for injection.
 
         Auth-gated: the manifest enumerates installed plugins and their asset
@@ -298,7 +301,8 @@ def create_app() -> FastAPI:
         plugin_registry = getattr(app.state, "plugin_registry", None)
         if plugin_registry is None:
             return {"plugins": {}}
-        return plugin_registry.get_frontend_manifest()
+        manifest: dict[str, Any] = plugin_registry.get_frontend_manifest()
+        return manifest
 
     # === Routers ===
     app.include_router(chat.router)

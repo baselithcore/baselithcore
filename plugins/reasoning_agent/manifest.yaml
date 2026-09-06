@@ -4,4 +4,13 @@ description: Agent capable of complex reasoning using Tree of Thoughts.
 author: System
 dependencies:
 - core
+# Declared capabilities. Tree-of-Thoughts runs on the core LLM service; the
+# plugin itself reaches nothing.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
 integrity_sha256: ddf259b0bbe82dc5da4bfd961dd2d55388786683195c9e935e8d578610f3fe8a

@@ -14,7 +14,7 @@ def _limiter(fail_mode: str, redis_ok: bool) -> RateLimiter:
         limiter = RateLimiter()
     if redis_ok:
         limiter._redis = AsyncMock()
-        limiter._rate_limit_script = AsyncMock(return_value=[1, 60])
+        limiter._rate_limit_script = AsyncMock(return_value=[1, 0])
     else:
         limiter._redis = AsyncMock()
         limiter._rate_limit_script = AsyncMock(side_effect=ConnectionError("down"))

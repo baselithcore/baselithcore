@@ -242,7 +242,7 @@ class SecurityManager(AdminLockoutMixin):
                 detail="Permission denied for this role.",
             )
 
-        role = next(iter(matching_roles))
+        role: str = next(iter(matching_roles))
 
         # Tenant-scope the rate-limit key so buckets never collide across
         # tenants and per-tenant limiting/analytics can be layered on later.

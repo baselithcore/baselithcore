@@ -104,7 +104,7 @@ def _load_plugin_module(plugin_dir: Path) -> Any | None:
     module = importlib.util.module_from_spec(spec)
     module.__package__ = f"plugins.{package_name}"
     if plugin_file.name == "__init__.py":
-        module.__path__ = [str(plugin_dir)]  # type: ignore[attr-defined]
+        module.__path__ = [str(plugin_dir)]
     sys.modules[module_fqn] = module
     # Deliberately do NOT overwrite ``sys.modules['plugins.<name>']`` here:
     # some plugins (e.g. document_sources) ship a re-exporting ``__init__.py``

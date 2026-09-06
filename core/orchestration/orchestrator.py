@@ -9,6 +9,7 @@ Implements a modular, mixin-based architecture for high extensibility.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
@@ -42,7 +43,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
     maintaining observability and human-in-the-loop safety boundaries.
     """
 
-    def _register_builtin_handler(self, intent: str, loader) -> None:
+    def _register_builtin_handler(self, intent: str, loader: Callable[[], Any]) -> None:
         """Register a built-in handler without letting optional dependencies break init."""
         try:
             self.register_handler(intent, loader())

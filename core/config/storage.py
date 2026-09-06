@@ -216,6 +216,13 @@ class StorageConfig(BaseSettings):
     # until RLS policies exist AND the app connects as a non-owner (or FORCE RLS)
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
+    # Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared
+    # pool at first use. `None` (the default) means "decide from the
+    # environment": allowed outside production, refused in production, where the
+    # migrations Job owns the schema and the runtime role should hold no DDL
+    # rights. Set explicitly to override in either direction. See
+    # `core.db.ddl.runtime_ddl_allowed`.
+    db_runtime_ddl: bool | None = Field(default=None, alias="DB_RUNTIME_DDL")
 
     @property
     def session_options(self) -> str:

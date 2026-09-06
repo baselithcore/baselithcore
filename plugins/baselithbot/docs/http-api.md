@@ -63,7 +63,7 @@ Status codes:
 | Code | Cause |
 |------|-------|
 | 200 | Task completed (check `success` flag) |
-| 401 | Missing bearer token |
+| 401 | Missing bearer token; on `POST /run`, also no resolvable tenant while central auth is active |
 | 403 | Invalid bearer token |
 | 429 | Rate limit exceeded |
 | 500 | Unhandled exception — `error` contains message |

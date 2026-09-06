@@ -266,18 +266,73 @@ compatibility) and scopes every read/write to `get_current_tenant_id()`.
     **not yet implemented**. Today, application-level tenant scoping is the
     responsibility of each repository query.
 
-#### Defense-in-depth: Row-Level Security (opt-in)
+#### Defense-in-depth: Row-Level Security
 
-Set `DB_RLS_ENABLED=true` to bind the request's tenant to the DB session on every
-pool checkout (`SELECT set_config('app.tenant_id', …, false)`), so Postgres RLS
-policies of the form `USING (tenant_id = current_setting('app.tenant_id'))` isolate
-rows **at the database**, independent of application-level filtering.
+Application-level scoping has one failure mode: a forgotten `WHERE tenant_id = %s`
+is a cross-tenant read, and nothing catches it. Row-level security moves the
+predicate into Postgres, where it cannot be forgotten.
 
-The flag is **OFF by default** and a strict no-op when off — the connection path
-is byte-identical to before. Even when on, it has no effect until RLS policies
-exist *and* the app connects as a non-owner (or `FORCE ROW LEVEL SECURITY`) role,
-so toggling it alone is never a regression. Outside a request (background task,
-script) the session binds to `"default"`.
+Two halves have to be in place, and a third to make them bite.
+
+**1. The session binding.** `DB_RLS_ENABLED=true` binds the request's tenant to
+the DB session on every pool checkout
+(`SELECT set_config('app.tenant_id', …, false)`). The flag is OFF by default and
+a strict no-op when off — the connection path is byte-identical. Outside a
+request (background task, script) the session binds to `"default"`.
+
+**2. The policies.** `migrations/versions/008_row_level_security.py` enables RLS
+and creates a `tenant_isolation` policy on every tenant-scoped table —
+`interactions`, `feedback`, `chat_feedback`, `agent_patterns`, `a2a_tasks`,
+`agent_checkpoints` (the list lives in `core.db.ddl.RLS_PROTECTED_TABLES`). The
+policy is symmetric: a row is visible, **and may be written**, only when its
+`tenant_id` equals the session's. So a cross-tenant `INSERT` or an `UPDATE` that
+moves a row to another tenant is refused, not silently hidden.
+
+**3. A role that RLS applies to.** This is the step that is easy to miss.
+Postgres exempts two kinds of session from row-level security: a **superuser**,
+and the **table owner** (unless the table is set to `FORCE ROW LEVEL SECURITY`).
+The default single-role deployment is both — `POSTGRES_USER` in the compose
+stack is a superuser that owns every table — so the policies are inert until the
+deployment separates the roles:
+
+```sql
+-- run once, as the owner
+CREATE ROLE baselith_runtime LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
+GRANT USAGE ON SCHEMA public TO baselith_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
+    TO baselith_runtime;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO baselith_runtime;
+```
+
+Then point the application at the new role (`DB_USER`/`DB_PASSWORD`) and keep
+running migrations as the owner. `GRANT USAGE ON SCHEMA` is not optional: a role
+without it cannot resolve a table name at all, and Postgres reports
+`relation "…" does not exist` rather than a permission error.
+
+`FORCE ROW LEVEL SECURITY` is deliberately not set by the migration. It would
+apply the policy to the owner too, and a background job running without a bound
+tenant would silently stop seeing its rows — a deployment decision, not
+something a migration should impose.
+
+`tests/integration/test_rls_tenant_isolation.py` proves the policy under exactly
+this setup: it creates a least-privilege role and asserts that a tenant sees only
+its own rows, that a query with no `WHERE tenant_id` still isolates, that a
+cross-tenant write is refused, and that an unbound session sees nothing.
+
+#### Who creates the schema
+
+Every Postgres table is owned by a migration. Four stores used to run
+`CREATE TABLE IF NOT EXISTS` on the shared pool at first use, which forced the
+runtime role to hold DDL privileges; `DB_RUNTIME_DDL` now gates that path. Unset,
+it is allowed outside production and refused when `APP_ENV=production`, where the
+migrations Job owns the schema. `tests/unit/test_schema_ownership.py` fails if a
+module ever creates a Postgres table no migration creates.
+
+Embedded SQLite stores (`core.privacy`, `core.incidents`, `core.compliance`,
+`core.thirdparty`, the audit chain, the SQLite checkpoint store) are out of
+scope — a single-file store has no migration job. So is the pgvector provider,
+which creates one table per *collection* on demand.
 
 ### Vector Store (Qdrant)
 

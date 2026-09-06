@@ -7,7 +7,7 @@ for RAG workflows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.chat.context import build_context_and_sources
 from core.chat.reranking import rerank_hits
@@ -22,7 +22,7 @@ from .mixins.retrieval_search import RetrievalSearchMixin
 logger = get_logger(__name__)
 
 
-async def _search_wrapper(query_vector, **kwargs):
+async def _search_wrapper(query_vector: Any, **kwargs: Any) -> Any:
     """Wrapper for vectorstore search to maintain compatibility."""
     service = get_vectorstore_service()
     return await service.search(query_vector=query_vector, **kwargs)
@@ -44,9 +44,9 @@ class RetrievalPipeline(
         self,
         service: ChatService,
         *,
-        search_fn=_search_wrapper,
-        rerank_fn=rerank_hits,
-        build_context_fn=build_context_and_sources,
+        search_fn: Any = _search_wrapper,
+        rerank_fn: Any = rerank_hits,
+        build_context_fn: Any = build_context_and_sources,
     ) -> None:
         self.service = service
         self.search_fn = search_fn

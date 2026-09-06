@@ -368,6 +368,53 @@ class TestPluginLoaderConfiguration:
         assert loader is not None
 
 
+class TestManifestEnvDeclarations:
+    """``environment_variables`` accepts both manifest shapes.
+
+    Regression: a manifest declaring the documented rich form
+    (``[{name: FOO, description: ..., required: true}]``) reached
+    ``core.plugins._env.apply_plugin_env``, where ``k.upper()`` ran against a
+    dict and aborted the load with ``AttributeError: 'dict' object has no
+    attribute 'upper'`` — the plugin never loaded.
+    """
+
+    def test_plain_string_list_is_preserved(self):
+        from core.plugins.interface import PluginMetadata
+
+        meta = PluginMetadata(
+            name="p", version="1.0.0", environment_variables=["FOO_TOKEN", "FOO_URL"]
+        )
+        assert meta.environment_variables == ["FOO_TOKEN", "FOO_URL"]
+
+    def test_rich_mapping_form_is_reduced_to_names(self):
+        from core.plugins.interface import PluginMetadata
+
+        meta = PluginMetadata(
+            name="p",
+            version="1.0.0",
+            environment_variables=[
+                {"name": "FOO_SECRET", "description": "key", "required": True},
+                {"name": "FOO_URL", "required": False},
+            ],
+        )
+        assert meta.environment_variables == ["FOO_SECRET", "FOO_URL"]
+        # Every consumer can now uppercase the entries without crashing.
+        assert {k.upper() for k in meta.environment_variables} == {
+            "FOO_SECRET",
+            "FOO_URL",
+        }
+
+    def test_malformed_entries_are_dropped_not_fatal(self):
+        from core.plugins.interface import PluginMetadata
+
+        meta = PluginMetadata(
+            name="p",
+            version="1.0.0",
+            environment_variables=[{"description": "no name"}, "", 42, "FOO_OK"],
+        )
+        assert meta.environment_variables == ["FOO_OK"]
+
+
 async def test_load_plugin_emits_plugin_load_audit_event(tmp_path, monkeypatch):
     """A plugin that finishes initialize() is recorded as `plugin.load`."""
     from core.observability import audit as audit_module

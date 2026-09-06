@@ -5,9 +5,8 @@ Text chunking utilities for vector store.
 from functools import lru_cache
 from typing import Any
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from core.observability.logging import get_logger
+from core.services.vectorstore.recursive_splitter import RecursiveCharacterSplitter
 
 logger = get_logger(__name__)
 
@@ -17,7 +16,7 @@ _SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
 # Default text splitter (reused for the common case to avoid rebuilding it
 # on every call).
-DEFAULT_SPLITTER = RecursiveCharacterTextSplitter(
+DEFAULT_SPLITTER = RecursiveCharacterSplitter(
     chunk_size=DEFAULT_CHUNK_SIZE,
     chunk_overlap=DEFAULT_CHUNK_OVERLAP,
     length_function=len,
@@ -26,13 +25,11 @@ DEFAULT_SPLITTER = RecursiveCharacterTextSplitter(
 
 
 @lru_cache(maxsize=32)
-def _get_splitter(
-    chunk_size: int, chunk_overlap: int
-) -> RecursiveCharacterTextSplitter:
+def _get_splitter(chunk_size: int, chunk_overlap: int) -> RecursiveCharacterSplitter:
     """Return a cached splitter for the given (chunk_size, chunk_overlap)."""
     if chunk_size == DEFAULT_CHUNK_SIZE and chunk_overlap == DEFAULT_CHUNK_OVERLAP:
         return DEFAULT_SPLITTER
-    return RecursiveCharacterTextSplitter(
+    return RecursiveCharacterSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         length_function=len,

@@ -8,7 +8,8 @@ and answer generation via LLM integration.
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from core.chat.agent_state import AgentState
 from core.chat.prompt import build_prompt
@@ -35,7 +36,7 @@ class Clarifier:
         self,
         state: AgentState,
         *,
-        message_builder=None,
+        message_builder: Any | None = None,
     ) -> None:
         """
         Transitions the agent state to a clarification response.
@@ -85,9 +86,9 @@ class ResponseGenerator:
         self,
         service: ChatService,
         *,
-        build_prompt_fn=build_prompt,
-        generate_response_fn=None,
-        generate_response_stream_fn=None,
+        build_prompt_fn: Any = build_prompt,
+        generate_response_fn: Any | None = None,
+        generate_response_stream_fn: Any | None = None,
     ) -> None:
         self.service = service
         self.build_prompt_fn = build_prompt_fn
@@ -125,7 +126,7 @@ class ResponseGenerator:
         await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
 
-    async def generate_answer_stream(self, state: AgentState):
+    async def generate_answer_stream(self, state: AgentState) -> AsyncIterator[str]:
         """Generates answer using streaming, yielding chunks."""
         prompt = self.build_prompt_fn(
             state.user_query,

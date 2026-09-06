@@ -16,7 +16,7 @@ imports.
 
 from __future__ import annotations
 
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.config import SecurityConfig, get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
@@ -56,7 +56,7 @@ class RequestSizeLimitMiddleware:
             max_bytes = get_security_config().max_request_size_bytes
         self.max_bytes = max_bytes
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.max_bytes <= 0 or scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -73,7 +73,7 @@ class RequestSizeLimitMiddleware:
         response_started = False
         rejected = False
 
-        async def limited_receive():
+        async def limited_receive() -> Message:
             nonlocal received, too_large
             if too_large:
                 # A handler that caught the first cut-off and keeps reading
@@ -89,7 +89,7 @@ class RequestSizeLimitMiddleware:
                     raise _BodyTooLarge
             return message
 
-        async def guarded_send(message):
+        async def guarded_send(message: Message) -> None:
             nonlocal response_started, rejected
             if rejected:
                 # Drop further frames from the downstream app after we
@@ -121,7 +121,7 @@ class RequestSizeLimitMiddleware:
         return None
 
     @staticmethod
-    async def _reject(send) -> None:
+    async def _reject(send: Send) -> None:
         body = b'{"detail":"Request body too large."}'
         await send(
             {
@@ -224,7 +224,7 @@ class SecurityHeadersMiddleware:
                 ``content_security_policy`` always wins and is left untouched.
         """
         cache_attr = "_cached_docs_headers" if docs else "_cached_headers"
-        cached = getattr(self, cache_attr)
+        cached: list[tuple[bytes, bytes]] | None = getattr(self, cache_attr)
         if cached is not None:
             return cached
         headers: list[tuple[bytes, bytes]] = [
@@ -247,6 +247,17 @@ class SecurityHeadersMiddleware:
                         self.config.permissions_policy.encode("latin-1"),
                     )
                 )
+            # Cross-origin isolation pair (OWASP Secure Headers Project). Read
+            # with ``getattr``/``isinstance`` so a partial config double (tests,
+            # legacy stubs) omitting the fields simply emits neither header.
+            coop = getattr(self.config, "cross_origin_opener_policy", None)
+            if isinstance(coop, str) and coop:
+                headers.append((b"cross-origin-opener-policy", coop.encode("latin-1")))
+            corp = getattr(self.config, "cross_origin_resource_policy", None)
+            if isinstance(corp, str) and corp:
+                headers.append(
+                    (b"cross-origin-resource-policy", corp.encode("latin-1"))
+                )
             if self.config.enable_hsts:
                 hsts = (
                     f"max-age={self.config.hsts_max_age}; includeSubDomains"
@@ -261,20 +272,35 @@ class SecurityHeadersMiddleware:
     def _is_docs_path(self, path: str) -> bool:
         return any(path == p or path.startswith(p + "/") for p in self._DOCS_PATHS)
 
-    async def __call__(self, scope, receive, send) -> None:
+    @staticmethod
+    def _carries_credential(headers: list[tuple[bytes, bytes]]) -> bool:
+        """True when the request authenticates via ``Authorization``/``X-API-Key``."""
+        for name, value in headers:
+            if name in (b"authorization", b"x-api-key") and value.strip():
+                return True
+        return False
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         baseline = self._build_headers(docs=self._is_docs_path(scope.get("path", "")))
+        credentialed = self._carries_credential(scope.get("headers") or [])
 
-        async def send_wrapper(message):
+        async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 response_headers = list(message.get("headers") or [])
                 existing = {k for k, _ in response_headers}
                 for k, v in baseline:
                     if k not in existing:
                         response_headers.append((k, v))
+                # A response earned with a credential is for that caller only:
+                # keep it out of every cache (browser, proxy, CDN) unless the
+                # route set its own directive (OWASP REST Security: no-store on
+                # authenticated responses). Anonymous responses are untouched.
+                if credentialed and b"cache-control" not in existing:
+                    response_headers.append((b"cache-control", b"no-store"))
                 message["headers"] = response_headers
             await send(message)
 

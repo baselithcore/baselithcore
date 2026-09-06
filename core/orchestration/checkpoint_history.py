@@ -83,7 +83,8 @@ async def get_state_history(
     list_snapshots = getattr(store, "list_snapshots", None)
     if list_snapshots is None:
         return []
-    return await list_snapshots(run_id)
+    snapshots: list[dict[str, Any]] = await list_snapshots(run_id)
+    return snapshots
 
 
 async def get_state(
@@ -93,7 +94,8 @@ async def get_state(
     load_snapshot = getattr(store, "load_snapshot", None)
     if load_snapshot is None:
         return None
-    return await load_snapshot(run_id, version)
+    snapshot: Checkpoint | None = await load_snapshot(run_id, version)
+    return snapshot
 
 
 async def fork_run(

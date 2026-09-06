@@ -40,6 +40,7 @@ class IndirectFindingKind(str, Enum):
     HTML_COMMENT = "html_comment"
     HIDDEN_CSS = "hidden_css"
     AI_DIRECTIVE = "ai_directive"
+    EXFIL_LINK = "exfil_link"
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,19 @@ _AI_DIRECTIVE_PATTERNS = [
 ]
 _COMPILED_AI_DIRECTIVES = [re.compile(p, re.IGNORECASE) for p in _AI_DIRECTIVE_PATTERNS]
 
+# Zero-click exfiltration channels. A markdown *image* whose URL carries a
+# query string is fetched by any renderer without a click, so it is flagged
+# unconditionally; a plain link is flagged only when the query names a
+# sensitive value (secret=, token=, conversation=, ...), because ordinary web
+# pages are full of links with harmless query strings.
+_EXFIL_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(\s*https?://[^)\s]+\?[^)\s]*\)")
+_EXFIL_LINK_RE = re.compile(
+    r"(?<!!)\[[^\]]*\]\(\s*https?://[^)\s]*\?[^)\s]*"
+    r"\b(secret|token|api[_-]?key|password|conversation|history|session|data)="
+    r"[^)\s]*\)",
+    re.IGNORECASE,
+)
+
 
 class IndirectInjectionScanner:
     """
@@ -163,6 +177,14 @@ class IndirectInjectionScanner:
                 )
             )
 
+        exfil = _EXFIL_IMAGE_RE.search(content) or _EXFIL_LINK_RE.search(content)
+        if exfil:
+            findings.append(
+                IndirectFinding(
+                    IndirectFindingKind.EXFIL_LINK,
+                    f"markdown link/image that exfiltrates data: {exfil.group(0)[:80]!r}",
+                )
+            )
         normalized = self._strip_invisibles(content)
         for pattern in _COMPILED_AI_DIRECTIVES:
             match = pattern.search(normalized)

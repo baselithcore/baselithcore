@@ -25,7 +25,7 @@ FEEDBACK_SCORE_MIN_TOTAL = _app_config.feedback_score_min_total
 RERANK_MAX_CANDIDATES = _chat_config.rerank_max_candidates
 
 
-def _get_indexed_items():
+def _get_indexed_items() -> Any:
     """Get indexed items from IndexingService."""
     service = get_indexing_service()
     return service.indexed_documents

@@ -53,3 +53,59 @@ async def test_sse_response_not_gzipped() -> None:
     # Bypassed → no gzip encoding applied, stream passes through verbatim.
     assert headers.get(b"content-encoding") != b"gzip"
     assert headers.get(b"content-type") == b"text/event-stream"
+
+
+async def _ndjson_app(scope, receive, send) -> None:
+    """Minimal ASGI app emitting a streamed application/x-ndjson response."""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/x-ndjson")],
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": b'{"token": "' + b"x" * 2000 + b'"}\n',
+            "more_body": True,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
+@pytest.mark.asyncio
+async def test_ndjson_response_not_gzipped() -> None:
+    """A streamed NDJSON response must pass through uncompressed.
+
+    A fetch-based NDJSON reader sends ``Accept-Encoding: gzip`` and no
+    ``text/event-stream`` Accept, so the request-side bypass cannot catch it:
+    the decision has to be made from the *response* content-type, inside the
+    responder. Compressing it collapses the token stream into one delayed
+    flush.
+    """
+    mw = SmartGzipMiddleware(_ndjson_app, minimum_size=500)
+    sent: list[dict] = []
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    async def receive() -> dict:
+        return {"type": "http.request"}
+
+    scope = {
+        "type": "http",
+        "path": "/api/stream",
+        "headers": [(b"accept", b"*/*"), (b"accept-encoding", b"gzip")],
+    }
+    await mw(scope, receive, send)
+
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    headers = {k.lower(): v for k, v in start["headers"]}
+    assert headers.get(b"content-encoding") != b"gzip"
+    assert headers.get(b"content-type") == b"application/x-ndjson"
+
+    body = b"".join(
+        m.get("body", b"") for m in sent if m["type"] == "http.response.body"
+    )
+    assert body.startswith(b'{"token": "xxx')

@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _resolve_effort(service: LLMService, effort: str | None, task_category: str | None):
+def _resolve_effort(
+    service: LLMService, effort: str | None, task_category: str | None
+) -> str | None:
     """Explicit effort wins; otherwise derive it from the task category.
 
     Returns None when extended thinking is disabled or maps to OFF, in which
@@ -45,7 +47,7 @@ def _resolve_effort(service: LLMService, effort: str | None, task_category: str 
 
     derived = effort_for_category(task_category)
     if derived is not None and derived is not EffortLevel.OFF:
-        return derived.value
+        return str(derived.value)
     return None
 
 
@@ -173,7 +175,7 @@ async def generate_response(
             semantic_cached = await service.semantic_cache.get_similar(prompt)
             if semantic_cached:
                 span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
-                return semantic_cached
+                return str(semantic_cached)
 
         span.set_attribute("gen_ai.baselith.cache_hit", False)
         span.set_attribute("gen_ai.baselith.semantic_cache_hit", False)

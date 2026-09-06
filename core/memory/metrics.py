@@ -10,6 +10,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import TracebackType
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -226,7 +227,12 @@ class OperationTracker:
         self._start_time = time.perf_counter()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         elapsed_ms = (time.perf_counter() - self._start_time) * 1000
         self._success = exc_type is None
 

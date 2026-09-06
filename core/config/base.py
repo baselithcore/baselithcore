@@ -8,6 +8,7 @@ variable overrides and default values.
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -88,7 +89,7 @@ class CoreConfig(BaseSettings):
         default=42, description="Random seed when deterministic_mode is enabled"
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # Ensure directories exist
         self.plugin_dir.mkdir(parents=True, exist_ok=True)

@@ -14,4 +14,16 @@ required_resources:
 - llm
 optional_resources:
 - internet
+# Declared capabilities. A browser navigates wherever it is pointed, so the
+# egress set cannot be narrowed without breaking the plugin; the SSRF guard
+# (loopback, private and link-local targets) still applies underneath.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
 integrity_sha256: 6bce5d3aef53fdc00713eb1506bdf883b85c1f4aa307232d94b94802f54cf87f

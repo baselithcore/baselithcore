@@ -371,7 +371,7 @@ async def promote_run(
 
     runs.append(run_dict)
     runs_file.parent.mkdir(parents=True, exist_ok=True)
-    runs_file.write_text(
+    runs_file.write_text(  # noqa: ASYNC240 - eval artifact write from a CLI/CI path, not a request
         json.dumps(runs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     if case_payload is not None and case_path is not None:

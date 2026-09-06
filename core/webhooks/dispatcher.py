@@ -171,11 +171,12 @@ class WebhookDispatcher:
             headers=headers,
             extensions={"sni_hostname": pin_host},
         )
-        return resp.status_code
+        status_code: int = resp.status_code
+        return status_code
 
     def _backoff(self, attempt: int) -> float:
-        base = self._config.retry_backoff_seconds
-        return min(base * (2 ** (attempt - 1)), 60.0) + random.uniform(0, base)
+        base: float = self._config.retry_backoff_seconds
+        return min(base * (2.0 ** (attempt - 1)), 60.0) + random.uniform(0, base)
 
     async def _finalize_failure(
         self, delivery: WebhookDelivery, *, error: str

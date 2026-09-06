@@ -433,8 +433,9 @@ Correctness guarantees:
   released by the previous holder.
 - **Auto-renew** — optional watchdog extends the TTL at ~⅓ of `ttl_ms`.
 
-`DistributedLock` is covered by the strict resilience typing gate
-(`scripts/check_core_resilience_typing.py`).
+`DistributedLock` is covered by the core strict-typing ratchet
+(`scripts/check_core_strict_typing.py`, which checks the whole `core.resilience`
+package under strict mypy flags).
 
 ---
 

@@ -20,14 +20,14 @@ plugin. It respects the Sacred Core rule: all domain logic lives under
 
 | Aspect          | Value                                                                                        |
 | --------------- | -------------------------------------------------------------------------------------------- |
-| Version         | 1.0.0 (beta)                                                                                 |
+| Version         | 1.0.2 (stable)                                                                               |
 | Min core        | `baselith-core >= 0.7.0, < 1.0.0`                                                            |
 | License         | `AGPL-3.0-only`                                                                              |
 | Python          | 3.12+                                                                                        |
 | Entry point     | `plugin:BaselithbotPlugin`                                                                   |
 | HTTP routes     | 95 under `/baselithbot` (REST + SSE)                                                         |
 | Dashboard       | 20-tab React + Vite bundle, served from `ui/dist/`                                           |
-| Tests           | 262 (unit + integration); `@pytest.mark.slow` nightly                                        |
+| Tests           | 345 (unit + integration); `@pytest.mark.slow` nightly                                        |
 | Wheel size      | ≈ 644 KB / 204 files                                                                         |
 | Channels        | 24 (Slack, Discord, Telegram, WhatsApp, Matrix, Signal, iMessage, WebChat, …)                |
 | MCP tools       | 37+ (browser, computer-use, OpenClaw, set-of-mark, extras)                                   |
@@ -77,7 +77,6 @@ plugin. It respects the Sacred Core rule: all domain logic lives under
 ```text
 plugin-baselithbot/
 ├── manifest.yaml              # Marketplace metadata (id, entry_point, …)
-├── catalog-info.yaml          # Backstage catalog entry
 ├── pyproject.toml             # PEP-621 package metadata
 ├── requirements.txt           # Runtime pins (mirrors python_dependencies)
 ├── README.md  LICENSE  CHANGELOG.md  CONTRIBUTING.md

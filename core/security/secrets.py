@@ -186,8 +186,34 @@ def reset_secrets_provider() -> None:
     _provider = None
 
 
+#: Optional per-caller secret guard, installed by the plugin machinery.
+#: ``core.security`` must not know what a plugin is, so the check arrives as a
+#: callable that receives the secret's *name* — never its value — and raises to
+#: refuse the read. Unset by default: exactly the behaviour this module had
+#: before.
+_SECRET_GUARD: Callable[[str], None] | None = None
+
+
+def set_secret_guard(guard: Callable[[str], None] | None) -> None:
+    """Install (or clear) the per-caller secret guard.
+
+    Args:
+        guard: Called with the secret name on every :func:`get_secret`; it
+            raises to refuse the read. ``None`` removes the guard.
+    """
+    global _SECRET_GUARD
+    _SECRET_GUARD = guard
+
+
 def get_secret(name: str) -> SecretStr | None:
-    """Convenience accessor delegating to the active provider."""
+    """Convenience accessor delegating to the active provider.
+
+    Raises:
+        Exception: Whatever the installed guard raises when the caller is not
+            permitted to read ``name``.
+    """
+    if _SECRET_GUARD is not None:
+        _SECRET_GUARD(name)
     return get_secrets_provider().get_secret(name)
 
 
@@ -199,4 +225,5 @@ __all__ = [
     "get_secrets_provider",
     "register_secrets_provider",
     "reset_secrets_provider",
+    "set_secret_guard",
 ]

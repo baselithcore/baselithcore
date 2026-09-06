@@ -26,7 +26,9 @@ request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 _old_record_factory = logging.getLogRecordFactory()
 
 
-def _record_factory(*args, **kwargs):  # pragma: no cover - logging infra
+def _record_factory(
+    *args: Any, **kwargs: Any
+) -> logging.LogRecord:  # pragma: no cover - logging infra
     record = _old_record_factory(*args, **kwargs)
     if not hasattr(record, "request_id"):
         try:
@@ -78,7 +80,7 @@ class SensitiveDataFilter(logging.Filter):
 
         # 1. Mask PII (Emails)
         # Replaces emails with e***@domain.com
-        def mask_email(match):
+        def mask_email(match: re.Match[str]) -> str:
             email = match.group(0)
             try:
                 user, domain = email.split("@")

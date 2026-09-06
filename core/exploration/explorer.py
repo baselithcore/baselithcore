@@ -56,8 +56,8 @@ class ProactiveExplorer:
     def __init__(
         self,
         sources: list[KnowledgeSource] | None = None,
-        llm_service=None,
-    ):
+        llm_service: Any | None = None,
+    ) -> None:
         """
         Initialize explorer.
 
@@ -69,7 +69,7 @@ class ProactiveExplorer:
         self._llm_service = llm_service
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -104,10 +104,10 @@ class ProactiveExplorer:
         # Expand query for better coverage
         queries = await self._expand_query(topic)
 
-        async def _probe(source, query):
+        async def _probe(source: KnowledgeSource, query: str) -> tuple[Any, Any]:
             """One independent (source, query) probe: search + related topics."""
             results = await source.search(query)
-            related = ()
+            related: Any = ()
             if depth > 0:
                 try:
                     related = await source.get_related(query)

@@ -10,66 +10,15 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
-from psycopg import AsyncConnection, AsyncCursor, Connection, Cursor
-from psycopg.rows import RowFactory
+from psycopg import AsyncConnection, Connection, Cursor
+from psycopg.rows import AsyncRowFactory, RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from core.config import get_app_config, get_storage_config
-from core.middleware.cost_control import (
-    BudgetExceededError,
-    _cost_context,
-    cost_controller,
-)
+from core.db._tracking import TrackingAsyncCursor, TrackingCursor, _track_db_query
 from core.observability.logging import get_logger
 
-
-def _track_db_query(query: Any) -> None:
-    """Increment request-scoped DB query counter; propagate only budget errors.
-
-    Short-circuits when no cost-tracking context is active. The raw query
-    object is passed through untouched — stringifying psycopg ``Composed``/
-    ``SQL`` objects on every statement is wasted work unless a positive
-    ``sql_query_limit`` actually consumes the text (see ``track_sql_query``).
-    """
-    if _cost_context.get() is None:
-        return
-
-    try:
-        # Relational SQL is tracked under the SQL budget, NOT the graph (Cypher)
-        # budget: an agentic request runs hundreds of SQL statements and must
-        # never be gated by the tight graph limit (which is for actual graph DB
-        # traversals). Default SQL limit is unlimited — see track_sql_query.
-        cost_controller.track_sql_query(query)
-    except BudgetExceededError:
-        raise
-    except Exception:
-        # Tracking must never break real queries.
-        pass
-
-
-class TrackingCursor(Cursor):
-    """Sync psycopg cursor that reports executed queries to the cost controller."""
-
-    def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
-        _track_db_query(query)
-        return super().execute(query, params, prepare=prepare, binary=binary)
-
-    def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
-        _track_db_query(query)
-        return super().executemany(query, params_seq, returning=returning)
-
-
-class TrackingAsyncCursor(AsyncCursor):
-    """Async psycopg cursor that reports executed queries to the cost controller."""
-
-    async def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
-        _track_db_query(query)
-        return await super().execute(query, params, prepare=prepare, binary=binary)
-
-    async def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
-        _track_db_query(query)
-        return await super().executemany(query, params_seq, returning=returning)
-
+__all__ = ["TrackingAsyncCursor", "TrackingCursor", "_track_db_query"]
 
 _storage_config = get_storage_config()
 _app_config = get_app_config()
@@ -254,15 +203,21 @@ def get_connection() -> Iterator[Connection[object]]:
 @contextmanager
 def get_cursor(
     *,
-    row_factory: RowFactory | None = None,
+    row_factory: RowFactory[Any] | None = None,
 ) -> Iterator[Cursor[object]]:
     """
     Returns a ready-to-use cursor, optionally configured with a row factory.
     """
 
+    # Branch instead of passing None through: psycopg's `cursor()` overloads
+    # take a factory or nothing at all, never `row_factory=None`.
     with get_connection() as connection:
-        with connection.cursor(row_factory=row_factory) as cursor:  # type: ignore[arg-type]
-            yield cursor
+        if row_factory is None:
+            with connection.cursor() as cursor:
+                yield cursor
+        else:
+            with connection.cursor(row_factory=row_factory) as cursor:
+                yield cursor
 
 
 @asynccontextmanager
@@ -297,15 +252,20 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
 @asynccontextmanager
 async def get_async_cursor(
     *,
-    row_factory: RowFactory | None = None,
+    row_factory: AsyncRowFactory[Any] | None = None,
 ) -> AsyncIterator[Any]:
     """
     Returns an asynchronous ready-to-use cursor.
     Note: the 'Any' return annotation is used because AsyncCursor is generic.
     """
+    # See get_cursor(): `row_factory=None` is not one of the overloads.
     async with get_async_connection() as connection:
-        async with connection.cursor(row_factory=row_factory) as cursor:  # type: ignore[call-overload]
-            yield cursor
+        if row_factory is None:
+            async with connection.cursor() as cursor:
+                yield cursor
+        else:
+            async with connection.cursor(row_factory=row_factory) as cursor:
+                yield cursor
 
 
 # ---------------------------------------------------------------------------
@@ -495,5 +455,6 @@ def get_pool_stats() -> dict[str, dict[str, int]]:
         try:
             stats[role] = dict(pool.get_stats())
         except Exception:  # stats are best-effort telemetry
+            logger.debug("pool_stats_unavailable", extra={"role": role}, exc_info=True)
             continue
     return stats

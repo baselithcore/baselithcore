@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import re
 from functools import lru_cache
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -57,7 +58,7 @@ def _model_factor(model: str | None) -> float:
     return 1.0
 
 
-def _get_tiktoken_encoder():
+def _get_tiktoken_encoder() -> Any:
     """
     Attempt to load and cache the tiktoken cl100k_base encoder.
     """

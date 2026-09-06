@@ -3,7 +3,7 @@ LLM Provider and Service interface definitions.
 """
 
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from core.services.llm.tool_calling import (
@@ -24,7 +24,7 @@ class LLMProviderProtocol(Protocol):
     supports_native_tools: bool
 
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Generate a response.
@@ -48,7 +48,7 @@ class LLMProviderProtocol(Protocol):
         tools: "list[LLMToolSpec] | None" = None,
         tool_choice: "ToolChoice | None" = None,
         response_format: "ResponseFormat | None" = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> "LLMResult":
         """
         Generate a response using the provider's native tool-calling /
@@ -71,7 +71,7 @@ class LLMProviderProtocol(Protocol):
         ...
 
     def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> AsyncIterator[tuple[str, int]]:
         """
         Generate a streaming response.

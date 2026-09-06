@@ -145,3 +145,104 @@ async def test_default_csp_allows_blob_images(mock_security_config):
     ]
     img_src = csp.split("img-src", 1)[1].split(";", 1)[0]
     assert "blob:" in img_src
+
+
+async def _run_with_request(
+    middleware: SecurityHeadersMiddleware,
+    *,
+    request_headers: list[tuple[bytes, bytes]] | None = None,
+    response_headers: list[tuple[bytes, bytes]] | None = None,
+) -> dict[str, str]:
+    """Like ``_run_security_headers_middleware`` but with request/response headers."""
+
+    async def downstream(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": list(response_headers or []),
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware.app = downstream
+    sent: list = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/thing",
+        "headers": list(request_headers or []),
+    }
+    await middleware(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    return {k.decode(): v.decode() for k, v in start["headers"]}
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_isolation_headers_present(mock_security_config):
+    """COOP/CORP (OWASP Secure Headers) ride along with the classic baseline."""
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware)
+    assert headers["cross-origin-opener-policy"] == "same-origin-allow-popups"
+    assert headers["cross-origin-resource-policy"] == "same-origin"
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_headers_are_configurable(mock_security_config):
+    mock_security_config.cross_origin_opener_policy = "same-origin"
+    mock_security_config.cross_origin_resource_policy = "same-site"
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware)
+    assert headers["cross-origin-opener-policy"] == "same-origin"
+    assert headers["cross-origin-resource-policy"] == "same-site"
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_headers_can_be_omitted(mock_security_config):
+    mock_security_config.cross_origin_opener_policy = ""
+    mock_security_config.cross_origin_resource_policy = None
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware)
+    assert "cross-origin-opener-policy" not in headers
+    assert "cross-origin-resource-policy" not in headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "credential",
+    [
+        pytest.param((b"authorization", b"Bearer abc"), id="bearer"),
+        pytest.param((b"x-api-key", b"k"), id="api-key"),
+    ],
+)
+async def test_credentialed_responses_are_no_store(mock_security_config, credential):
+    """A response to a credentialed request must not land in any cache."""
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_with_request(middleware, request_headers=[credential])
+    assert headers["cache-control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_anonymous_responses_get_no_cache_control(mock_security_config):
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_with_request(middleware)
+    assert "cache-control" not in headers
+
+
+@pytest.mark.asyncio
+async def test_explicit_cache_control_wins_over_no_store(mock_security_config):
+    """A route that opted into caching keeps its own directive."""
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_with_request(
+        middleware,
+        request_headers=[(b"authorization", b"Bearer abc")],
+        response_headers=[(b"cache-control", b"public, max-age=60")],
+    )
+    assert headers["cache-control"] == "public, max-age=60"

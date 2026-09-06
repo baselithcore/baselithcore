@@ -112,6 +112,9 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # load balancer is the proxy IP, collapsing per-IP rate limits and the admin
 # lockout into ONE shared bucket. Trust is limited to the IPs listed in
 # FORWARDED_ALLOW_IPS (uvicorn default 127.0.0.1); set it to your LB address(es).
+# --no-server-header: drop the `Server: uvicorn` banner. nginx replaces it at
+# the edge, but a pod behind a cloud LB / ingress that passes upstream headers
+# through would otherwise advertise the exact server stack to every caller.
 # --timeout-graceful-shutdown: bounded drain so SIGTERM with open SSE streams
 # still runs lifespan cleanup before the orchestrator (e.g. k8s, 30s grace) SIGKILLs.
 # WEB_CONCURRENCY: size to ~CPU cores in production; 1 worker means any CPU-bound
@@ -121,4 +124,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # --timeout-keep-alive: longer than any reverse proxy's upstream idle timeout
 # (nginx/ALB/Envoy default 60s) so the proxy never reuses a socket uvicorn has
 # already closed (sporadic 502s). See Dockerfile-full for the full rationale.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]

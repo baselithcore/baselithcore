@@ -29,10 +29,8 @@ email-validator>=2.1.0
 # starlette 0.38.6 — CVE-2024-47874, CVE-2026-48818, CVE-2026-54283 (fixed in
 # starlette 1.3.1, reachable only from fastapi >=0.140).
 fastapi>=0.140.13,<0.200
-fastapi-limiter<0.2.0,>=0.1.6
 httpx>=0.27.0,<1.0
 jsonschema>=4.23.0
-langchain-text-splitters>=1.1.0
 markdown-it-py>=3.0.0,<4.0
 networkx>=3.0
 numpy>=1.24.0

@@ -1,0 +1,36 @@
+{
+  "name": "agent_structured_retry",
+  "description": "Agent.run with output_type: an invalid first answer is fed back with the validation error and corrected on retry.",
+  "turns": [
+    {
+      "expect": {
+        "prompt_contains": ["Rome"],
+        "response_format": "CityInfo"
+      },
+      "result": {
+        "text": "{\"city\": \"Rome\", \"population\": \"about three million\"}",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 40
+      }
+    },
+    {
+      "expect": {
+        "prompt_contains": [
+          "Your previous answer was:",
+          "about three million",
+          "failed validation against the required schema",
+          "population",
+          "Reply again with ONLY a JSON object"
+        ],
+        "response_format": "CityInfo"
+      },
+      "result": {
+        "text": "```json\n{\"city\": \"Rome\", \"population\": 2870000}\n```",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 38
+      }
+    }
+  ]
+}
