@@ -350,7 +350,7 @@ async def submit_to_marketplace(
         )
 
     publisher = PluginPublisher()
-    result = await publisher.publish(
+    result: dict[str, Any] = await publisher.publish(
         plugin_path=safe_plugin_path,
         admin_key=body.admin_key.get_secret_value() if body.admin_key else None,
         auth_token=auth_token,
@@ -442,4 +442,4 @@ async def _exchange_github_for_jwt(*, github_token: str) -> str:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="marketplace exchange did not return a token",
         )
-    return token
+    return str(token)

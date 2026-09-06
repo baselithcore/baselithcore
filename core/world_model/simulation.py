@@ -127,7 +127,7 @@ class MCTSSimulator:
         self._local_config: Any = None  # For what_if temporary override
 
     @property
-    def current_config(self):
+    def current_config(self) -> Any:
         """Return the active simulation configuration."""
         return self._local_config if self._local_config else self.config
 

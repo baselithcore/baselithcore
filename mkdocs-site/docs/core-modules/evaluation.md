@@ -494,10 +494,16 @@ blocked last quarter and passes today is a regression, and no other test will
 notice.
 
 ```text
-evals/red_team/guardrails.yaml     # the corpus
-scripts/run_red_team_evals.py      # the gate  (CI job: "Red-Team Gate")
-core/evaluation/red_team.py        # loader + runner + report
+evals/red_team/guardrails.yaml           # volume 1: canonical jailbreaks, extraction, PII
+evals/red_team/injection_variants.yaml   # volume 2: paraphrases, multilingual, exfil links, secrets
+scripts/run_red_team_evals.py            # the gate  (CI job: "Red-Team Gate")
+core/evaluation/red_team.py              # loader + runner + report
 ```
+
+Every case that failed when a volume was added is a guardrail gap, not a
+corpus error: volume 2 landed together with the multilingual override
+patterns, the `from … import` / `os.popen` code patterns, the `exfil_link`
+finding kind and the credential redaction it exercises.
 
 Each case names a guardrail **surface** and the verdict it requires:
 

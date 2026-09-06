@@ -62,6 +62,7 @@ class QuotaMiddleware:
             try:
                 return get_auth_manager()
             except Exception:
+                logger.debug("auth_manager_unavailable_for_quota", exc_info=True)
                 return None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

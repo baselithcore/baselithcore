@@ -61,7 +61,9 @@ Both `get_cursor` and `get_async_cursor` accept an optional keyword-only
 (`pool_size`, `pool_available`, `requests_waiting`, …) for every pool that has
 actually been **created** — it never builds or opens a pool, so calling it from
 a health endpoint can't trigger a connection. Keys are the pool roles:
-`primary`, `primary_async`, `replica`, `replica_async`.
+`primary`, `primary_async`, `replica`, `replica_async`. Stats are best-effort
+telemetry: a pool whose counters cannot be read is skipped and logged at
+`debug` as `pool_stats_unavailable` with its role, never raised.
 
 ```python
 from core.db import get_pool_stats

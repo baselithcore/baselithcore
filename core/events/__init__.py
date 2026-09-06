@@ -18,6 +18,10 @@ Usage:
     await bus.emit("agent.completed", {"agent_id": "123", "result": "success"})
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from core.events.bus import EventBus, get_event_bus, reset_event_bus
 from core.events.names import EventNames
 from core.events.types import (
@@ -35,6 +39,9 @@ from core.events.validation import (
     get_dead_letter_queue,
     get_schema_registry,
 )
+
+if TYPE_CHECKING:
+    from core.events.listener import EventListener
 
 __all__ = [
     # Types
@@ -60,7 +67,7 @@ __all__ = [
 
 
 # Lazy import for listener to avoid circular imports
-def get_event_listener():
+def get_event_listener() -> EventListener:
     """Get or create the global event listener."""
     from core.events.listener import EventListener
 

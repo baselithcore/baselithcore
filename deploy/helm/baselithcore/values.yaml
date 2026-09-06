@@ -27,10 +27,10 @@ containerPort: 8000
 
 # uvicorn workers per pod. Scale pods (replicaCount / the HPA) before workers:
 # each worker is a full process that loads its own embedder/reranker (several
-# hundred MB with the `full` image), so two workers under the default 1Gi
-# limit sit at the OOM edge and contend for the single CPU. Raise this only
-# together with resources.limits, and then also set PROMETHEUS_MULTIPROC_DIR
-# (the chart does when webConcurrency > 1).
+# hundred MB with the `full` image), so two of them multiply the memory the
+# resources block below is sized for. Raise this only together with
+# resources, and then also set PROMETHEUS_MULTIPROC_DIR (the chart does when
+# webConcurrency > 1).
 webConcurrency: 1
 
 # Peers whose X-Forwarded-For / X-Forwarded-Proto uvicorn trusts
@@ -57,13 +57,36 @@ ingress:
           pathType: Prefix
   tls: []
 
+# requests.memory is a promise to the scheduler and the input to the kernel's
+# OOM victim score — a container is picked by how far it exceeds its request,
+# not by how big it is. Understating it therefore packs the node *and* moves
+# this pod to the front of the OOM queue, which is the worst of both. So the
+# request tracks steady-state usage and the limit covers the peak.
+#
+# The numbers below are measured, not guessed: on a local k3d install an RQ
+# worker running core's own document ingestion peaks at 1.1-1.45Gi, and the
+# API pod is that same code plus the HTTP stack and every loaded plugin. The
+# previous 512Mi/1Gi pair was below what a single ingestion needs.
+#
+# Re-measure for your own plugin set — that is what decides the number — and
+# measure under load, never at rest, over more than one pod lifetime: the
+# same deployment varies by a fifth run to run. For scale: an API pod with a
+# plugin loading BGE-M3 plus a reranker sits at 3.0-3.7Gi steady, peaks at
+# 3.1-4.5Gi under request load, and has touched 5.3Gi on a boot that
+# downloaded the models.
 resources:
   requests:
     cpu: 250m
-    memory: 512Mi
+    memory: 1536Mi
   limits:
-    cpu: "1"
-    memory: 1Gi
+    # No CPU limit on purpose. CPU is compressible: a limit cannot prevent
+    # exhaustion, it can only throttle — and the worst moment to be throttled
+    # is the cold start (plugin activation, embedder warmup) that an
+    # autoscaler just triggered. Contention is already settled fairly by
+    # requests.cpu, which sets the cgroup weight. Add limits.cpu back only
+    # when a hard ceiling is a billing or noisy-neighbour *requirement*, and
+    # never below the cold-start burst, which measures above 1 core.
+    memory: 3Gi
 
 autoscaling:
   enabled: true
@@ -182,13 +205,20 @@ worker:
   #     timeoutSeconds: 10
   #     failureThreshold: 3
   livenessProbe: {}
+  # An idle worker is the most misleading pod in the deployment: RQ forks a
+  # child per job, so the parent that `kubectl top` shows sits at ~80Mi
+  # forever while the fork is what actually allocates. Measured on a local k3d
+  # install, one document-ingestion job takes the pod from 84Mi idle to
+  # 1.1-1.45Gi — so size this for a worker doing its job, never for the
+  # queue-empty reading.
   resources:
     requests:
       cpu: 250m
-      memory: 512Mi
+      memory: 1536Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      # No CPU limit here either, and it matters more than on the API: an
+      # embedding batch is exactly the compute burst a cap would throttle.
+      memory: 3Gi
 
 # -------------------------------------------------------------------------
 # Configuration
@@ -247,6 +277,17 @@ serviceMonitor:
   interval: 15s
   path: /metrics
   labels: {}
+  # Prometheus scrapes each pod by IP, and a ServiceMonitor endpoint has no
+  # field for a Host header — so the scrape arrives as `Host: <pod-ip>`,
+  # TrustedHostMiddleware answers 400, and the target sits down forever with
+  # nothing but 400s in the app log. On (the default) the chart adds the pod's
+  # own IP to TRUSTED_HOSTS through the downward API, which is the only name
+  # the scrape can present. What that costs: a caller who can already reach the
+  # pod directly on the cluster network may use the pod IP as a Host, so any
+  # absolute URL the app builds from it would carry an in-cluster address —
+  # not a name that resolves anywhere else. Turn it off only when you set
+  # config.TRUSTED_HOSTS yourself and have made the pod IP trusted there.
+  trustPodIP: true
   # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
   # Point secretName at a Secret with the admin credentials so Prometheus can
   # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and

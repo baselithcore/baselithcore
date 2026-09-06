@@ -79,7 +79,7 @@ def _install_reexport_hook(
         spec.loader.exec_module(stub)
         return getattr(stub, name)
 
-    stub.__getattr__ = __getattr__  # type: ignore[method-assign, attr-defined]
+    stub.__getattr__ = __getattr__  # type: ignore[method-assign]
 
 
 def ensure_parent_packages(plugin_name: str, plugin_dir: Path) -> None:

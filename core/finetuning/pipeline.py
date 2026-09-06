@@ -114,7 +114,7 @@ class FineTuningPipeline:
 
             # Start training based on provider
             provider = self._get_provider(config.provider)
-            result = await provider.train(train_path, val_path, config)
+            result: FineTuneResult = await provider.train(train_path, val_path, config)
 
             if result.job:
                 self._jobs[result.job.id] = result.job
@@ -125,7 +125,9 @@ class FineTuningPipeline:
             logger.error("finetuning_error", error=str(e))
             return FineTuneResult(success=False, error=str(e))
 
-    def _get_provider(self, provider: FineTuneProvider):
+    def _get_provider(
+        self, provider: FineTuneProvider
+    ) -> OpenAIProvider | TogetherProvider:
         """Get the appropriate provider instance."""
         if provider == FineTuneProvider.OPENAI:
             return self._openai

@@ -86,7 +86,8 @@ def _derive_key(material: str) -> bytes:
             return candidate
     # Otherwise treat the secret as a passphrase and stretch it.
     hkdf = HKDF(algorithm=SHA256(), length=_KEY_BYTES, salt=None, info=_HKDF_INFO)
-    return hkdf.derive(raw.encode("utf-8"))
+    derived: bytes = hkdf.derive(raw.encode("utf-8"))
+    return derived
 
 
 def _pad_b64(value: str) -> str:
@@ -251,7 +252,8 @@ class FieldEncryptor:
             raise DecryptionError("Token payload is truncated.")
         nonce, ciphertext = raw[:_NONCE_BYTES], raw[_NONCE_BYTES:]
         try:
-            return key.aesgcm.decrypt(nonce, ciphertext, aad)
+            plaintext: bytes = key.aesgcm.decrypt(nonce, ciphertext, aad)
+            return plaintext
         except InvalidTag as exc:
             raise DecryptionError(
                 "Authentication failed: ciphertext was tampered with or the "

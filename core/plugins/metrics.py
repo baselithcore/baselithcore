@@ -127,7 +127,7 @@ class PluginMetricsCollector:
     - Performance trends
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metrics collector."""
         self._metrics: dict[str, PluginMetrics] = {}
         self._system_start_time = datetime.now(UTC)

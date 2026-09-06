@@ -105,8 +105,16 @@ def _call_resolver(
         try:
             return resolver(plugin_name)  # type: ignore[call-arg]
         except Exception:
+            logger.debug(
+                "llm_policy_resolver_failed",
+                extra={"plugin": plugin_name},
+                exc_info=True,
+            )
             return None
     except Exception:
+        logger.debug(
+            "llm_policy_resolver_failed", extra={"plugin": plugin_name}, exc_info=True
+        )
         return None
 
 

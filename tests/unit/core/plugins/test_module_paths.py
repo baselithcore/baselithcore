@@ -52,7 +52,7 @@ def test_child_is_bound_on_the_parent_package(plugin_tree: Path) -> None:
     ensure_parent_packages("sample_plugin", plugin_tree)
 
     parent = sys.modules["plugins"]
-    assert getattr(parent, "sample_plugin") is sys.modules["plugins.sample_plugin"]
+    assert parent.sample_plugin is sys.modules["plugins.sample_plugin"]
 
 
 def test_attribute_walk_resolves_the_dotted_path(plugin_tree: Path) -> None:

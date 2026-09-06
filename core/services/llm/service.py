@@ -59,6 +59,7 @@ def _parse_retry_after(exc: BaseException) -> float | None:
     try:
         raw = headers.get("retry-after") or headers.get("Retry-After")
     except Exception:
+        logger.debug("retry_after_header_unreadable", exc_info=True)
         return None
     if not raw:
         return None

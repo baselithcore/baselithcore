@@ -126,7 +126,8 @@ class OutputGuard:
         engine = pii_module.get_pii_engine()
         if engine is not None:
             try:
-                return engine.redact(text)
+                engine_text, engine_counts = engine.redact(text)
+                return engine_text, engine_counts
             except Exception as exc:
                 logger.warning(
                     "pii_engine_redact_failed_falling_back_regex",

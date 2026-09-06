@@ -455,5 +455,6 @@ def get_pool_stats() -> dict[str, dict[str, int]]:
         try:
             stats[role] = dict(pool.get_stats())
         except Exception:  # stats are best-effort telemetry
+            logger.debug("pool_stats_unavailable", extra={"role": role}, exc_info=True)
             continue
     return stats

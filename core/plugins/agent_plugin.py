@@ -15,7 +15,7 @@ class AgentPlugin(Plugin):
     """
 
     @abstractmethod
-    def create_agent(self, service: Any, **kwargs) -> Any:
+    def create_agent(self, service: Any, **kwargs: Any) -> Any:
         """
         Factory method to create an agent instance.
 
@@ -66,4 +66,5 @@ class AgentPlugin(Plugin):
         Returns:
             Dictionary of agent configuration
         """
-        return self.get_config("agent", {})
+        config: dict[str, Any] = self.get_config("agent", {})
+        return config

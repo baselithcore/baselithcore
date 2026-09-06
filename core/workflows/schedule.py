@@ -107,8 +107,8 @@ class WorkflowScheduler:
     def _resolve_executor(self) -> SupportsWorkflowExecute:
         """Return the executor, calling the factory when one was given."""
         if hasattr(self._executor, "execute"):
-            return self._executor  # type: ignore[return-value]
-        return self._executor()  # type: ignore[operator]
+            return self._executor
+        return self._executor()
 
     def register(self, workflow: WorkflowDefinition) -> datetime:
         """Register a workflow for scheduled execution.

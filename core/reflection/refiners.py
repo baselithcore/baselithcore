@@ -6,6 +6,8 @@ suboptimal responses into high-quality outputs by incorporating targeted
 critique into a subsequent LLM generation pass.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,7 +38,7 @@ class DefaultRefiner:
     addressing identified deficiencies in accuracy or clarity.
     """
 
-    def __init__(self, llm_service=None):
+    def __init__(self, llm_service: Any | None = None) -> None:
         """
         Initialize refiner.
 
@@ -46,7 +48,7 @@ class DefaultRefiner:
         self._llm_service = llm_service
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             from core.services.llm import get_llm_service
@@ -88,7 +90,7 @@ class DefaultRefiner:
                 return response
 
             logger.info(f"Refined response: {len(response)} -> {len(refined)} chars")
-            return refined
+            return str(refined)
 
         except Exception as e:
             logger.warning(f"Error during refinement: {e}, returning original")

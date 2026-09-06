@@ -43,7 +43,10 @@ class GuardrailsConfig:
 
 # Default injection patterns to detect
 DEFAULT_INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?",
+    # "the/any" variants: "ignore the above instructions" is as much an
+    # override as "ignore all previous instructions". The trailing
+    # `instructions?` is what keeps "ignore the previous paragraph" allowed.
+    r"ignore\s+(all\s+|the\s+|any\s+)?(previous|prior|above)\s+instructions?",
     r"disregard\s+(all\s+)?(previous|prior|above)",
     r"forget\s+(everything|all|your)\s+(you|instructions?|training)",
     r"you\s+are\s+now\s+(a|an|the)",
@@ -70,6 +73,14 @@ DEFAULT_INJECTION_PATTERNS = [
     r"(your\s+(system\s+|initial\s+|original\s+)?(prompt|instructions?)"
     r"|the\s+(system|initial|original)\s+(prompt|instructions?))",
     r"repeat\s+(the\s+)?(words|text|everything)\s+above",
+    # Multilingual overrides. An English-only pattern set is a one-line
+    # bypass for any non-English user; these cover the canonical override in
+    # the languages the framework is most deployed in (it/es/fr/de).
+    r"ignora\s+(tutte\s+le\s+|le\s+)?istruzioni\s+precedenti",
+    r"dimentica\s+(tutte\s+)?le\s+tue\s+(regole|istruzioni)",
+    r"ignora\s+(todas\s+las\s+)?instrucciones\s+anteriores",
+    r"ignore[sz]?\s+(toutes\s+les\s+)?instructions\s+pr[eé]c[eé]dentes",
+    r"ignorier(e|en)\s+(alle\s+)?vorherigen\s+anweisungen",
 ]
 
 # Code execution patterns
@@ -80,8 +91,13 @@ CODE_EXECUTION_PATTERNS = [
     r"import\s+subprocess",
     r"__import__",
     r"os\.system",
+    r"os\.popen",
     r"subprocess\.call",
     r"subprocess\.run",
+    r"subprocess\.Popen",
+    # `from subprocess import run` smuggles the same capability past the
+    # `import subprocess` pattern above.
+    r"from\s+(os|subprocess|pty|shutil)\s+import",
 ]
 
 # PII patterns for filtering. Regexes are layer 1 (fast, dependency-free);
@@ -99,6 +115,18 @@ PII_PATTERNS = {
     # Italian codice fiscale: 6 letters, 2 digits, letter, 2 digits, letter,
     # 3 digits, letter.
     "codice_fiscale": r"\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b",
+    # Credentials are the PII of the operator: a model that echoes a key it
+    # saw in a tool result or a document leaks it to every reader of the
+    # transcript. Prefix-shaped tokens only — no entropy heuristics, so ordinary
+    # words are never redacted.
+    "aws_access_key": r"\bAKIA[0-9A-Z]{16}\b",
+    "api_key_prefixed": r"\bsk-[A-Za-z0-9_-]{20,}\b",
+    "github_token": r"\bgh[pousr]_[A-Za-z0-9]{36,}\b",
+    "jwt": r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+    "private_key_block": (
+        r"-----BEGIN[^-]*PRIVATE KEY-----"
+        r"(?:[\s\S]*?-----END[^-]*PRIVATE KEY-----)?"
+    ),
 }
 
 

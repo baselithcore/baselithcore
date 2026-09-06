@@ -58,7 +58,7 @@ class PostgresDataProvider:
     async def export(self, subject_id: str) -> dict[str, list[dict[str, Any]]]:
         """Return the subject's interactions and their feedback (right to access)."""
         tenant = get_tenant_or_default()
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore[arg-type]
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 "SELECT id, session_id, user_id, agent_id, input_transcription, "
                 "output_transcription, metadata, timestamp FROM interactions "
@@ -67,7 +67,7 @@ class PostgresDataProvider:
             )
             interactions = [_row_to_dict(r) for r in await cur.fetchall()]
 
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore[arg-type]
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 "SELECT id, interaction_id, score, label, comment, metadata, "
                 "timestamp FROM feedback WHERE tenant_id = %s AND interaction_id IN "
@@ -93,13 +93,13 @@ class PostgresDataProvider:
                 "(SELECT id FROM interactions WHERE user_id = %s AND tenant_id = %s)",
                 (tenant, subject_id, tenant),
             )
-            removed += cur.rowcount
+            removed += int(cur.rowcount)
         async with get_async_cursor() as cur:
             await cur.execute(
                 "DELETE FROM interactions WHERE user_id = %s AND tenant_id = %s",
                 (subject_id, tenant),
             )
-            removed += cur.rowcount
+            removed += int(cur.rowcount)
         return removed
 
     async def purge_expired(self, older_than_seconds: int) -> int:
@@ -147,7 +147,7 @@ class PostgresDataProvider:
         try:
             async with get_async_cursor() as cur:
                 await cur.execute(sql, params)
-                return cur.rowcount
+                return int(cur.rowcount)
         except Exception as exc:
             if not optional:
                 raise

@@ -188,7 +188,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             Optional[Interaction]: The interaction if found, else None.
         """
         sql = "SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp FROM interactions WHERE id = %s AND tenant_id = %s"
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (interaction_id, _tenant()))
             row = await cur.fetchone()
             if row and isinstance(row, dict):
@@ -216,7 +216,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         ORDER BY timestamp DESC
         LIMIT %s OFFSET %s
         """
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (session_id, _tenant(), limit, offset))
             rows = await cur.fetchall()
             return [Interaction(**row) for row in rows if isinstance(row, dict)]
@@ -273,7 +273,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             List[Feedback]: List of associated feedback records.
         """
         sql = "SELECT id, interaction_id, score, label, comment, metadata, timestamp FROM feedback WHERE interaction_id = %s AND tenant_id = %s"
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (interaction_id, _tenant()))
             rows = await cur.fetchall()
             return [Feedback(**row) for row in rows if isinstance(row, dict)]
@@ -307,7 +307,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         FROM feedback f
         {where_clause}
         """  # nosec B608
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             row = await cur.fetchone() or {}
             # row might be a dict or None (handled by or {})

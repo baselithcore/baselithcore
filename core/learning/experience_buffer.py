@@ -10,6 +10,7 @@ more effectively from surprising or informative outcomes.
 import random
 from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -47,7 +48,7 @@ class SumTree:
         self.write_idx = 0
         self.size = 0
 
-    def add(self, priority: float, data) -> int:
+    def add(self, priority: float, data: Any) -> int:
         """Add data with priority, return index."""
         idx = self.write_idx + self.capacity - 1
         data_idx = self.write_idx
@@ -95,7 +96,7 @@ class SumTree:
     @property
     def total(self) -> float:
         """Total priority sum."""
-        return self.tree[0]
+        return float(self.tree[0])
 
     @property
     def min_priority(self) -> float:

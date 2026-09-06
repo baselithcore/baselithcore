@@ -87,4 +87,5 @@ class GraphPlugin(Plugin):
         Returns:
             Dictionary of graph configuration
         """
-        return self.get_config("graph", {})
+        config: dict[str, Any] = self.get_config("graph", {})
+        return config

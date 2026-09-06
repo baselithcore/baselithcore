@@ -89,7 +89,7 @@ class VectorStoreProtocol(Protocol):
     """Protocol for vector store operations."""
 
     async def search(
-        self, query_vector: Sequence[float], k: int, **kwargs
+        self, query_vector: Sequence[float], k: int, **kwargs: Any
     ) -> Sequence[SearchResult]:
         """
         Search for similar vectors in the store.
@@ -104,7 +104,7 @@ class VectorStoreProtocol(Protocol):
         """
         ...
 
-    async def index(self, documents: Sequence[Document], **kwargs) -> None:
+    async def index(self, documents: Sequence[Document], **kwargs: Any) -> None:
         """
         Index documents into the vector store.
 
@@ -114,7 +114,7 @@ class VectorStoreProtocol(Protocol):
         """
         ...
 
-    async def create_collection(self, collection_name: str, **kwargs) -> None:
+    async def create_collection(self, collection_name: str, **kwargs: Any) -> None:
         """
         Create a new collection in the vector store.
 

@@ -94,6 +94,10 @@ jobs:
         run: python scripts/check_architecture_boundaries.py
       - name: Check 500-line file size cap
         run: python scripts/check_file_size.py
+      - name: Check silent-exception ratchet
+        run: python scripts/check_exception_hygiene.py
+      - name: Check public API surface drift
+        run: python scripts/check_public_api.py
       - name: Check eval-corpus ratchet
         run: |
           pip install pyyaml
@@ -302,8 +306,8 @@ jobs:
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
           python scripts/check_official_plugin_typing.py
 
-  type_check_core_resilience:
-    name: Type Check Core Resilience
+  type_check_core_strict:
+    name: Type Check Core Strict (ratchet)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -316,10 +320,10 @@ jobs:
           python-version: '3.12'
       - name: Install uv
         run: pip install uv==0.12.0
-      - name: Type Check Core Resilience
+      - name: Type Check Core Strict
         run: |
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
-          python scripts/check_core_resilience_typing.py
+          python scripts/check_core_strict_typing.py
 
   plugin_integrity:
     name: Plugin Integrity
@@ -592,7 +596,7 @@ jobs:
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
     # required checks in branch protection.
-    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
+    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness]
     strategy:
       fail-fast: false
       matrix:

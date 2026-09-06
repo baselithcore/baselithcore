@@ -1,0 +1,17 @@
+{
+  "name": "agent_mismatch_probe",
+  "description": "Deliberately wrong expectation: used to prove a cassette drift fails loudly.",
+  "turns": [
+    {
+      "expect": {
+        "tools": ["some_other_tool"]
+      },
+      "result": {
+        "text": "unreachable",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 1
+      }
+    }
+  ]
+}

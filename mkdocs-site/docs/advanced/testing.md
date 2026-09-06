@@ -26,6 +26,7 @@ tests/
 ├── integration/           # Cross-module wiring: orchestrator, plugin loading, pgvector
 ├── contracts/             # OpenAPI conformance (schemathesis) + service protocols
 ├── chaos/                 # Fault-injection resilience tests (marker: chaos)
+├── golden/                # Real Agent loop driven by recorded LLM cassettes
 ├── core/                  # Plugin-system and memory tests
 ├── plugins/               # Per-plugin suites (api_routers, baselithbot)
 └── load/                  # Locust profile — not part of the pytest suite
@@ -485,6 +486,46 @@ async def test_chain_of_thought_uses_injected_llm():
     assert answer == "42"
     assert len(steps) == 2
 ```
+
+### Golden Trajectories (Recorded LLM Cassettes)
+
+An `AsyncMock` proves the loop *calls* the service; it cannot prove the loop
+sent the right thing. `tests/golden/` drives the real `core.agent.Agent` with a
+**cassette** — an ordered list of provider turns in
+`tests/golden/cassettes/<name>.json` — and every turn asserts what the loop
+sent before answering:
+
+```json
+{
+  "expect": {
+    "prompt_contains": ["[lookup_capital] -> Rome", "answer without calling more tools"],
+    "tools": ["lookup_capital"],
+    "response_format": null
+  },
+  "result": {"text": "The capital of Italy is Rome.", "tool_calls": [], "stop_reason": "end_turn"}
+}
+```
+
+`expect.tools` is the set of tools the loop must offer, `prompt_contains` the
+fragments the assembled prompt must carry (the previous tool result, the
+retry wording, the validation error), `response_format` the strict-schema
+name. Any drift raises `CassetteMismatch` with the full prompt; a loop that
+finishes without playing every recorded turn fails at teardown.
+
+```python
+@pytest.mark.asyncio
+async def test_tool_loop_matches_cassette(golden_llm):
+    svc = golden_llm("agent_tool_loop")
+    agent = Agent(tools=[lookup_capital], llm_service=svc)
+    result = await agent.run("What is the capital of Italy?")
+    assert result.tool_calls_made == ["lookup_capital"]
+```
+
+To capture a new cassette from a live provider, run the test once with
+`BASELITH_GOLDEN_RECORD=1` (credentials configured): `RecordingLLMService`
+wraps the real `LLMService`, writes the turns with the offered tools and the
+schema name filled in, and leaves `prompt_contains` for you to curate from the
+recorded prompt. Cassettes are replayed in CI with no keys, cost or network.
 
 ### Async Testing
 

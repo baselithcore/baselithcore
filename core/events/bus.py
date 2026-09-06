@@ -83,7 +83,7 @@ class EventBus:
         self._lock: asyncio.Lock | None = None
         # Strong refs to fire-and-forget handler tasks so the event loop does
         # not garbage-collect them mid-flight (and silently drop exceptions).
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # Optional components
         self._schema_registry: EventSchemaRegistry | None = None
@@ -127,7 +127,7 @@ class EventBus:
         self._stats.handlers_registered += 1
         logger.debug(f"Handler subscribed to '{event_name}' with priority {priority}")
 
-        def unsubscribe():
+        def unsubscribe() -> None:
             """Unsubscribe the handler from the event."""
             if entry in target:
                 target.remove(entry)
@@ -354,7 +354,7 @@ class EventBus:
     ) -> None:
         """Call a sync handler in executor with error handling."""
 
-        def sync_wrapper(event_data):
+        def sync_wrapper(event_data: dict[str, Any]) -> None:
             from core.context import (
                 reset_tenant_context,
                 reset_user_context,
@@ -386,7 +386,7 @@ class EventBus:
         self,
         event_name: str,
         data: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> int:
         """
         Synchronous emit for non-async contexts.
@@ -404,8 +404,8 @@ class EventBus:
             # Schedule as task if loop is running. Keep a strong reference until
             # completion so the event loop can't GC the task mid-flight.
             task = asyncio.ensure_future(self.emit(event_name, data, **kwargs))
-            self._background_tasks.add(task)  # type: ignore[arg-type]
-            task.add_done_callback(self._background_tasks.discard)  # type: ignore[arg-type]
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             return 0  # Can't wait in sync context
         except RuntimeError:
             # No running event loop, safe to use asyncio.run

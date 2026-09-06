@@ -32,7 +32,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -172,7 +172,8 @@ class Agent(Generic[OutputT]):
     def _parse_output(self, text: str) -> OutputT:
         assert self.output_type is not None
         cleaned = _FENCE_RE.sub("", text.strip()).strip()
-        return self.output_type.model_validate(json.loads(cleaned))  # type: ignore[attr-defined]
+        model_cls = cast("type[BaseModel]", self.output_type)
+        return cast(OutputT, model_cls.model_validate(json.loads(cleaned)))
 
     # -- public API --------------------------------------------------------
 

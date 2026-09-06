@@ -366,8 +366,8 @@ class PersistentLearner(ContinuousLearner):
         auto_save: bool = True,
         auto_load: bool = True,
         checkpoint_interval: int = 1,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize persistent learner.
 
@@ -392,7 +392,7 @@ class PersistentLearner(ContinuousLearner):
             self._try_load()
 
     @property
-    def cache(self):
+    def cache(self) -> Any:
         """Lazy load Redis cache."""
         if self._cache is None:
             try:

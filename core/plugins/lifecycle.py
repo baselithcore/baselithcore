@@ -6,11 +6,14 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 
 from .interface import Plugin
+
+if TYPE_CHECKING:
+    from .metrics import PluginMetricsCollector
 
 logger = get_logger(__name__)
 
@@ -18,7 +21,7 @@ logger = get_logger(__name__)
 _metrics_collector = None
 
 
-def _get_metrics():
+def _get_metrics() -> PluginMetricsCollector:
     """Lazy import metrics collector."""
     global _metrics_collector
     if _metrics_collector is None:
@@ -48,7 +51,7 @@ class PluginLifecycleHooks:
     Plugins can register callbacks to be invoked during state changes.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize plugin lifecycle hooks."""
         self._hooks: dict[str, dict[str, set[Callable]]] = {
             "on_before_load": {},
@@ -132,7 +135,7 @@ class PluginLifecycleManager:
     Tracks state, handles transitions, and invokes lifecycle hooks.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the plugin lifecycle manager."""
         self._states: dict[str, PluginState] = {}
         self._plugins: dict[str, Plugin] = {}

@@ -31,19 +31,11 @@ from core.evaluation.trajectory import (
 )
 
 DEFAULT_PASS_THRESHOLD: Final[float] = 0.90
-ALLOWED_CASE_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        "case_id",
-        "input",
-        "expected_keywords",
-        "forbidden_keywords",
-        "expected_tools",
-        "forbidden_tools",
-        "max_tool_calls",
-        "max_latency_ms",
-        "max_cost_usd",
-    }
-)
+# Derived from the evaluator's own case schema so the YAML loader can never
+# lag a field the evaluator already honours (it did: ``expected_tool_order``,
+# ``expected_tool_args`` and ``reference_fact`` were evaluated but rejected at
+# load time, so no corpus could use them).
+ALLOWED_CASE_KEYS: Final[frozenset[str]] = frozenset(TrajectoryCase.__annotations__)
 
 
 class RegressionLoadError(RuntimeError):

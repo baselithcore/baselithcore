@@ -33,6 +33,16 @@ The complete flow of a request through the system.
 
 <div class="feature-card" markdown>
 
+### :material-file-document-check: Decision Records
+
+Why the framework is shaped the way it is — one ADR per decision, proposed ones included.
+
+[:octicons-arrow-right-24: Read](adr/index.md)
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### :material-brain: Agentic Patterns
 
 The agentic patterns implemented in the framework.

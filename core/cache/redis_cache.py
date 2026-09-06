@@ -172,7 +172,7 @@ class RedisTTLCache(Generic[K, V]):
             try:
                 await self._client.delete(redis_key)
             except Exception:
-                pass
+                logger.debug("redis_cache_corrupt_entry_delete_failed", exc_info=True)
             return None
 
     async def set(self, key: K, value: V) -> None:
@@ -210,7 +210,9 @@ class RedisTTLCache(Generic[K, V]):
                 try:
                     await self._client.delete(redis_key)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "redis_cache_corrupt_entry_delete_failed", exc_info=True
+                    )
                 results.append(None)
 
         return results

@@ -52,7 +52,7 @@ class InternalDebate:
         self._llm_service: LLMService | None = None
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> "LLMService | None":
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -230,7 +230,10 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
             "DISAGREEMENTS:\n- <point 1>\n- <point 2>\n"
             "If none, write 'None' under that section."
         )
-        result = await self.llm_service.generate_response(
+        service = self.llm_service
+        if service is None:
+            raise RuntimeError("LLM service unavailable for agreement analysis")
+        result = await service.generate_response(
             prompt, temperature=0.2, max_tokens=300
         )
 

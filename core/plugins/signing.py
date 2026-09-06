@@ -53,7 +53,8 @@ def sign_plugin_hash(integrity_hash_hex: str, private_key_hex: str) -> str:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     private = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key_hex))
-    return private.sign(integrity_hash_hex.lower().encode("ascii")).hex()
+    signature: bytes = private.sign(integrity_hash_hex.lower().encode("ascii"))
+    return signature.hex()
 
 
 def verify_plugin_signature(

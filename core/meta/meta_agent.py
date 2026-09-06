@@ -6,11 +6,14 @@ diverse personas. Manages the synthesis of multiple expert perspectives
 through internal debate to produce balanced, high-confidence outputs.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
+    from core.personas import Persona
     from core.services.llm import LLMService
 
 from .debate import InternalDebate
@@ -18,6 +21,7 @@ from .ensemble import PersonaEnsemble
 from .types import (
     ConsensusLevel,
     DebateResult,
+    DebateRole,
     MetaAgentResponse,
     Perspective,
 )
@@ -52,7 +56,7 @@ class MultiPersonaAgent:
         self._llm_service: LLMService | None = None
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> LLMService | None:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -184,7 +188,10 @@ ANSWER: [Your synthesized response]
 RATIONALE: [Brief explanation of how you balanced the perspectives]"""
 
         try:
-            response = await self.llm_service.generate_response(
+            service = self.llm_service
+            if service is None:
+                raise RuntimeError("LLM service unavailable for synthesis")
+            response = await service.generate_response(
                 prompt, temperature=0.5, max_tokens=1000
             )
 
@@ -251,10 +258,8 @@ RATIONALE: [Brief explanation of how you balanced the perspectives]"""
         }
         return confidence_map.get(debate_result.consensus_level, 0.5)
 
-    def add_persona(self, persona, role=None):
+    def add_persona(self, persona: Persona, role: DebateRole | None = None) -> None:
         """Add a custom persona to the ensemble."""
-        from .types import DebateRole
-
         self.ensemble.add_persona(persona, role or DebateRole.ADVOCATE)
 
     @property

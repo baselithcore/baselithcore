@@ -539,7 +539,11 @@ never break LLM availability):
   default provider (the default model belongs to the default provider); a
   cross-provider pin without a model is ignored.
 - An unsupported provider, a resolver error, or an unusable target (e.g.
-  missing credentials) degrades to the deployment default.
+  missing credentials) degrades to the deployment default. A resolver
+  exception is never silent: it is logged at `debug` as
+  `llm_policy_resolver_failed` with the plugin name and the traceback, so a
+  misbehaving governance source shows up as soon as an operator raises the log
+  level (see the [exception policy](../advanced/best-practices.md#exception-policy-and-the-silent-handler-ratchet)).
 
 **Background jobs carry the pin with them.** A queue worker hosts no plugins,
 so the resolver an admin plugin installs at activation does not exist there —

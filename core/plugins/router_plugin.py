@@ -53,11 +53,12 @@ class RouterPlugin(Plugin):
         """
         return [self.metadata.name]
 
-    def get_router_config(self) -> dict:
+    def get_router_config(self) -> dict[str, Any]:
         """
         Get router-specific configuration.
 
         Returns:
             Dictionary of router configuration
         """
-        return self.get_config("router", {})
+        config: dict[str, Any] = self.get_config("router", {})
+        return config

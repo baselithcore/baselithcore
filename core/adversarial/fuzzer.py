@@ -5,6 +5,7 @@ Generates adversarial prompts to test agent vulnerabilities.
 """
 
 import random
+from collections.abc import Callable
 
 from core.observability.logging import get_logger
 
@@ -214,7 +215,7 @@ class PromptFuzzer:
 
     def _mutate_payload(self, payload: str) -> str:
         """Apply random mutations to payload."""
-        mutations = [
+        mutations: list[Callable[[str], str]] = [
             lambda p: p.upper(),
             lambda p: p.replace(" ", "_"),
             lambda p: f"Please {p}",

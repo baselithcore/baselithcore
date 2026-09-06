@@ -103,22 +103,24 @@ class CostBudgetMixin:
     def _tenant_cost_limit_for(
         self: Any, tenant_id: str, window: QuotaWindow
     ) -> float | None:
-        return self._cost_limit_for(
+        limit: float | None = self._cost_limit_for(
             window,
             get_tenant_cost_overrides(tenant_id),
             self._config.tenant_daily_cost_limit_usd,
             self._config.tenant_monthly_cost_limit_usd,
         )
+        return limit
 
     def _identity_cost_limit_for(
         self: Any, identity: str, window: QuotaWindow
     ) -> float | None:
-        return self._cost_limit_for(
+        limit: float | None = self._cost_limit_for(
             window,
             get_key_cost_overrides(identity),
             self._config.identity_daily_cost_limit_usd,
             self._config.identity_monthly_cost_limit_usd,
         )
+        return limit
 
     async def _record_cost(
         self: Any,
@@ -214,12 +216,13 @@ class CostBudgetMixin:
         self: Any, tenant_id: str, *, now: datetime | None = None
     ) -> TenantCostStatus:
         """Report the tenant's USD spend per window without consuming."""
-        return await self._peek_cost(
+        status: TenantCostStatus = await self._peek_cost(
             tenant_id,
             f"tenant:{tenant_id}:cost",
             lambda w: self._tenant_cost_limit_for(tenant_id, w),
             now or datetime.now(UTC),
         )
+        return status
 
     async def record_identity_cost(
         self: Any, identity: str, usd: float, *, now: datetime | None = None
@@ -247,12 +250,13 @@ class CostBudgetMixin:
         self: Any, identity: str, *, now: datetime | None = None
     ) -> TenantCostStatus:
         """Report one identity's USD spend per window without consuming."""
-        return await self._peek_cost(
+        status: TenantCostStatus = await self._peek_cost(
             identity,
             f"identity:{identity}:cost",
             lambda w: self._identity_cost_limit_for(identity, w),
             now or datetime.now(UTC),
         )
+        return status
 
 
 __all__ = [

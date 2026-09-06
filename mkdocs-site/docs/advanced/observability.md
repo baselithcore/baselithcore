@@ -679,6 +679,18 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
     `MultiProcessCollector`. The Helm chart wires both automatically when
     `webConcurrency > 1`.
 
+    **The `Host` header, on Kubernetes** — Prometheus derives the HTTP `Host`
+    from the target address, and a `ServiceMonitor` endpoint has no field to
+    override it, so the operator's pod-IP target scrapes with
+    `Host: <pod-ip>`. With `TRUSTED_HOSTS` set (and `APP_ENV=production`
+    requires it) `TrustedHostMiddleware` answers **400** and the target stays
+    down forever — the app is healthy, `/metrics` works through the ingress,
+    and the only symptom is 400s in the log. The chart's
+    `serviceMonitor.trustPodIP` (default on) adds the pod's own IP to
+    `TRUSTED_HOSTS` via the downward API. Rewriting `__address__` to the
+    Service instead would collapse every replica onto one target, so the pod
+    IP has to be a name the app accepts.
+
 ---
 
 ## Troubleshooting with Observability

@@ -16,7 +16,7 @@ mounted at `/baselithbot`, operated through a 20-page React dashboard.
 
 ## The stack
 
-```
+```text
 Goal (dashboard / CLI / MCP / chat channel / orchestrator intent)
         │
         ▼

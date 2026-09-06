@@ -63,7 +63,7 @@ class PubSubManager:
                     self._publisher = await self.get_redis_async()
         return self._publisher
 
-    async def publish(self, channel: str, event: RealtimeEvent):
+    async def publish(self, channel: str, event: RealtimeEvent) -> None:
         """Publish an event to a specific channel."""
         full_channel = f"{CHANNEL_PREFIX}{channel}"
         try:

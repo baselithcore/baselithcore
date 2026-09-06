@@ -69,6 +69,21 @@ repos:
         entry: python scripts/check_file_size.py
         language: system
         pass_filenames: false
+      # Silent `except Exception: pass` ratchet — see the exception policy in
+      # mkdocs-site/docs/advanced/best-practices.md.
+      - id: exception-hygiene
+        name: exception-hygiene
+        entry: python scripts/check_exception_hygiene.py
+        language: system
+        pass_filenames: false
+      # Every literal core/**/__init__.py __all__ is snapshotted; a removed
+      # symbol is a breaking change under the versioning policy.
+      - id: public-api-surface
+        name: public-api-surface
+        entry: python scripts/check_public_api.py
+        language: system
+        pass_filenames: false
+        files: ^core/.*__init__\.py$
       # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
       # exist. Import and route verification (needs the app importable) runs in
       # the CI job `docs_consistency`.
@@ -98,9 +113,9 @@ repos:
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4
           - pydantic-settings==2.14.2
-      - id: core-resilience-typing
-        name: core-resilience-typing
-        entry: python scripts/check_core_resilience_typing.py
+      - id: core-strict-typing
+        name: core-strict-typing
+        entry: python scripts/check_core_strict_typing.py
         language: python
         pass_filenames: false
         additional_dependencies: *typing_gate_deps

@@ -90,7 +90,7 @@ class PersonaEnsemble:
                 self._role_assignments[persona.name] = DebateRole.ADVOCATE
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> "LLMService | None":
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -224,7 +224,9 @@ CONFIDENCE: [High/Medium/Low]"""
         """Get all persona names."""
         return [p.name for p in self.personas]
 
-    def add_persona(self, persona: Persona, role: DebateRole = DebateRole.ADVOCATE):
+    def add_persona(
+        self, persona: Persona, role: DebateRole = DebateRole.ADVOCATE
+    ) -> None:
         """Add a persona with specified role."""
         self.personas.append(persona)
         self._role_assignments[persona.name] = role

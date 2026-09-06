@@ -53,7 +53,7 @@ class Task:
 class DependencyGraph:
     """Manages task dependencies."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize an empty dependency graph."""
         self._tasks: dict[str, Task] = {}
         self._dependents: dict[str, set[str]] = {}  # task_id -> tasks that depend on it
@@ -169,7 +169,7 @@ class DependencyGraph:
         visited = set()
         result = []
 
-        def dfs(task_id: str):
+        def dfs(task_id: str) -> None:
             """
             Depth-first search to build topological order.
 

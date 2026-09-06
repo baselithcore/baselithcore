@@ -134,6 +134,28 @@ names, which is what the probes and in-cluster callers use.
 {{- end -}}
 
 {{/*
+The same list with the pod's own IP appended, for the container env.
+
+A ServiceMonitor endpoint has no Host-header field: Prometheus derives the Host
+from `__address__`, which the operator fills with the pod IP. So the scrape
+arrives as `Host: 10.x.y.z` — a name TrustedHostMiddleware does not know — and
+answers 400, leaving the target permanently down. Rewriting `__address__` to
+the Service instead would collapse every replica onto one address, so the pod
+IP has to become a trusted name.
+
+`$(POD_IP)` is expanded by the kubelet from the downward-API entry declared
+just before it in the container's env, which is why this cannot live in the
+ConfigMap: envFrom values are never expanded.
+*/}}
+{{- define "baselithcore.trustedHostsWithPodIP" -}}
+{{- if hasKey .Values.config "TRUSTED_HOSTS" -}}
+{{- fail "config.TRUSTED_HOSTS is set by hand while serviceMonitor.trustPodIP is on: the chart will not rewrite a list it does not own. Either drop config.TRUSTED_HOSTS and let the chart derive it, or set serviceMonitor.trustPodIP=false and add the pod IP yourself (an extraEnv TRUSTED_HOSTS whose value ends with $(POD_IP), plus a POD_IP fieldRef declared before it)." -}}
+{{- end -}}
+{{- $hosts := include "baselithcore.trustedHosts" . | fromJsonArray -}}
+{{- append $hosts "$(POD_IP)" | toJson -}}
+{{- end -}}
+
+{{/*
 Browser origins allowed to POST, as the JSON list the app parses.
 
 ``ALLOW_ORIGINS`` defaults to empty, and CSRFOriginMiddleware rejects every
