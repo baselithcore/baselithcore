@@ -20,7 +20,7 @@ class SimpleGraphMemoryProvider(GraphMemoryProvider):
     Suitable for small to medium-scale entity relationship tracking.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # node_id -> List of {target, relation, weight}
         self._graph: dict[str, list[dict]] = {}
 

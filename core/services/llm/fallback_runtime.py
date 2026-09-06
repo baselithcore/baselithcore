@@ -190,9 +190,10 @@ async def run_with_fallback(
     primary_name = service.config.provider
 
     async def _primary() -> tuple[str, int]:
-        return await service._generate_with_retry(
+        result: tuple[str, int] = await service._generate_with_retry(
             prompt=prompt, model=model, json_mode=json_mode, **kwargs
         )
+        return result
 
     stages: list[Provider[tuple[str, int]]] = [
         Provider(
@@ -209,9 +210,10 @@ async def run_with_fallback(
             _provider: str = fb_provider, _model: str = fb_model
         ) -> tuple[str, int]:
             clone = _clone_service(service, _provider, _model)
-            return await clone._generate_with_retry(
+            staged: tuple[str, int] = await clone._generate_with_retry(
                 prompt=prompt, model=_model, json_mode=json_mode, **kwargs
             )
+            return staged
 
         stages.append(
             Provider(

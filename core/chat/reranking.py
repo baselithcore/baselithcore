@@ -53,7 +53,7 @@ class NullMetrics:
         """No-op increment."""
         pass
 
-    def time(self):
+    def time(self) -> Any:
         """No-op timing context manager."""
         from contextlib import nullcontext
 

@@ -9,6 +9,7 @@ Handles the two-stage retrieval process:
 import hashlib
 import json
 from collections.abc import Sequence
+from typing import Any
 
 from core.context import get_current_tenant_id
 from core.models.domain import Document, SearchResult
@@ -22,7 +23,9 @@ class SearchOrchestrator:
     Orchestrates search retrieval and re-ranking phases.
     """
 
-    def __init__(self, config, provider, search_cache=None):
+    def __init__(
+        self, config: Any, provider: Any, search_cache: Any | None = None
+    ) -> None:
         self.config = config
         self.provider = provider
         self.search_cache = search_cache
@@ -37,7 +40,7 @@ class SearchOrchestrator:
         use_cache: bool = True,
         query_text: str | None = None,
         rerank: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform a vector similarity search with tenant isolation and optional re-ranking.

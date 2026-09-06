@@ -38,6 +38,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from core.config.memory import SupermemoryConfig, get_supermemory_config
 from core.memory.interfaces import ContextProvider, MemoryProvider
@@ -90,7 +91,7 @@ class SupermemoryProvider(MemoryProvider):
         self._container_tag = container_tag or self._config.default_tag
         self._client = self._build_client()
 
-    def _build_client(self):
+    def _build_client(self) -> Any:
         """Lazily construct the Supermemory SDK client."""
         try:
             from supermemory import Supermemory  # type: ignore[import]
@@ -319,7 +320,7 @@ class SupermemoryProvider(MemoryProvider):
 
     def _to_memory_item(
         self,
-        mem,
+        mem: Any,
         fallback_type: MemoryType | None = None,
     ) -> MemoryItem:
         """Convert a raw Supermemory memory object to a BaselithCore MemoryItem."""
@@ -378,7 +379,7 @@ class SupermemoryContextProvider(ContextProvider):
         )
         self._max_results = max_results
 
-    async def get_context(self, query: str, **_kwargs) -> str:
+    async def get_context(self, query: str, **_kwargs: Any) -> str:
         """
         Build a structured memory context string for prompt injection.
 

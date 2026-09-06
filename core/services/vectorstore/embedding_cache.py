@@ -27,8 +27,10 @@ async def _encode_texts(embedder: "EmbedderProtocol", texts: list[str]) -> list[
     if inspect.isawaitable(vectors):
         vectors = await vectors
     if hasattr(vectors, "tolist"):
-        return vectors.tolist()
-    return vectors
+        listed: list[Any] = vectors.tolist()
+        return listed
+    encoded: list[Any] = vectors
+    return encoded
 
 
 @runtime_checkable

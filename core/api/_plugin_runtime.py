@@ -173,9 +173,10 @@ class PluginRuntimeHooks:
                 )
                 return False
 
-        return await self._hot_reload.enable_plugin(
+        enabled: bool = await self._hot_reload.enable_plugin(
             plugin_name, self.get_plugin_runtime_config(plugin_name)
         )
+        return enabled
 
 
 __all__ = ["PluginRuntimeHooks"]

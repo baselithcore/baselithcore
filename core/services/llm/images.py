@@ -155,4 +155,5 @@ async def generate_image(
         media_type=image.media_type,
         bytes=len(image.data),
     )
-    return image
+    generated: GeneratedImage = image
+    return generated

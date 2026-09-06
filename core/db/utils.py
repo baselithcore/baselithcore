@@ -34,11 +34,11 @@ def as_iso(
             value = value.replace(tzinfo=timezone)
         elif timezone is not None:
             value = value.astimezone(timezone)
-        return value.isoformat()
+        return str(value.isoformat())
 
     if hasattr(value, "isoformat"):
         # date objects: use isoformat directly (e.g., 2024-01-31)
-        return value.isoformat()
+        return str(value.isoformat())
 
     return str(value)
 

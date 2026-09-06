@@ -129,7 +129,7 @@ class IdempotencyMiddleware:
     def _header(self, scope: Scope, name: bytes) -> str | None:
         for key, value in scope.get("headers", []):
             if key == name:
-                return value.decode("latin-1")
+                return str(value.decode("latin-1"))
         return None
 
     def _identity_scope(self, scope: Scope) -> str | None:

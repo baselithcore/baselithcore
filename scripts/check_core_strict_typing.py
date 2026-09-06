@@ -62,12 +62,20 @@ STRICT_FLAGS: tuple[str, ...] = (
 #: Packages (or top-level ``core.<module>`` files) that pass
 #: :data:`STRICT_FLAGS`. Sorted, dotted names. Grow only.
 STRICT_CORE_PACKAGES: tuple[str, ...] = (
+    "core._version",
     "core.adversarial",
     "core.agent",
     "core.agents",
+    "core.api",
+    "core.auth",
     "core.bootstrap",
+    "core.cache",
+    "core.chat",
     "core.compliance",
+    "core.config",
     "core.context",
+    "core.db",
+    "core.di",
     "core.doc_sources",
     "core.events",
     "core.exceptions",
@@ -82,8 +90,12 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core.learning",
     "core.lifecycle",
     "core.loops",
+    "core.memory",
     "core.meta",
+    "core.middleware",
     "core.models",
+    "core.observability",
+    "core.orchestration",
     "core.personas",
     "core.planning",
     "core.plugins",
@@ -98,6 +110,8 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core.routers",
     "core.scraper",
     "core.security",
+    "core.services.llm",
+    "core.services.vectorstore",
     "core.skill_evolution",
     "core.storage",
     "core.swarm",
@@ -120,13 +134,32 @@ def package_path(root: Path, name: str) -> Path:
     return directory.with_suffix(".py")
 
 
-def all_core_packages(root: Path) -> list[str]:
-    """Every top-level ``core.*`` package or module (sorted dotted names)."""
+def _subpackages(directory: Path, prefix: str) -> list[str]:
+    return [
+        f"{prefix}.{child.name}"
+        for child in directory.iterdir()
+        if child.is_dir() and (child / "__init__.py").is_file()
+    ]
+
+
+def all_core_packages(
+    root: Path, *, allowlist: Iterable[str] = STRICT_CORE_PACKAGES
+) -> list[str]:
+    """Every ``core.*`` package or module the gate could check, sorted.
+
+    Top-level by default. A package that is only *partially* covered — one of
+    its subpackages is allowlisted, as ``core.services.llm`` is — is replaced
+    by its own subpackages, so ``--candidates`` names the unit that can
+    actually be added instead of a parent that will never go green as a whole.
+    """
     core = root / "core"
+    listed = set(allowlist)
     names: list[str] = []
     for child in core.iterdir():
         if child.is_dir() and (child / "__init__.py").is_file():
-            names.append(f"core.{child.name}")
+            dotted = f"core.{child.name}"
+            partially_covered = any(e.startswith(f"{dotted}.") for e in listed)
+            names.extend(_subpackages(child, dotted) if partially_covered else [dotted])
         elif child.suffix == ".py" and child.name != "__init__.py":
             names.append(f"core.{child.stem}")
     return sorted(names)
@@ -137,7 +170,11 @@ def candidate_packages(
 ) -> list[str]:
     """Top-level core packages not yet in the allowlist."""
     listed = set(allowlist)
-    return [name for name in all_core_packages(root) if name not in listed]
+    return [
+        name
+        for name in all_core_packages(root, allowlist=allowlist)
+        if name not in listed
+    ]
 
 
 def run_mypy(

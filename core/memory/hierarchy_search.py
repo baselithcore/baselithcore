@@ -280,7 +280,9 @@ class HierarchySearchMixin:
            are re-tokenized (LTM candidates vary per query; the in-memory
            corpus rarely does).
         """
-        cached_index = getattr(self, "_bm25_index_cache", None)
+        cached_index: tuple[Any, BM25Index] | None = getattr(
+            self, "_bm25_index_cache", None
+        )
         if cached_index is not None and cached_index[0] == docs:
             return cached_index[1]
 

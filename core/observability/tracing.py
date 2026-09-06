@@ -375,7 +375,7 @@ class Tracer:
         def decorator(func: Callable) -> Callable:
             span_name = name or func.__name__
 
-            def wrapper(*args, **kwargs):
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 with self.start_span(span_name, attributes=attributes) as span:
                     span.set_attribute("function", func.__name__)
                     return func(*args, **kwargs)

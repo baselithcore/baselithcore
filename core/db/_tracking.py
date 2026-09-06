@@ -48,11 +48,20 @@ def _track_db_query(query: Any) -> None:
 class TrackingCursor(Cursor):
     """Sync psycopg cursor that reports executed queries to the cost controller."""
 
-    def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
+    def execute(  # type: ignore[override]
+        self,
+        query: Any,
+        params: Any = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Any:
         _track_db_query(query)
         return super().execute(query, params, prepare=prepare, binary=binary)
 
-    def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
+    def executemany(  # type: ignore[override]
+        self, query: Any, params_seq: Any, *, returning: bool = False
+    ) -> Any:
         _track_db_query(query)
         return super().executemany(query, params_seq, returning=returning)
 
@@ -60,10 +69,19 @@ class TrackingCursor(Cursor):
 class TrackingAsyncCursor(AsyncCursor):
     """Async psycopg cursor that reports executed queries to the cost controller."""
 
-    async def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
+    async def execute(  # type: ignore[override]
+        self,
+        query: Any,
+        params: Any = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Any:
         _track_db_query(query)
         return await super().execute(query, params, prepare=prepare, binary=binary)
 
-    async def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
+    async def executemany(  # type: ignore[override]
+        self, query: Any, params_seq: Any, *, returning: bool = False
+    ) -> Any:
         _track_db_query(query)
         return await super().executemany(query, params_seq, returning=returning)

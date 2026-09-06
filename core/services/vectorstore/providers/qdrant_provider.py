@@ -109,7 +109,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def create_collection(
-        self, collection_name: str, vector_size: int, **kwargs
+        self, collection_name: str, vector_size: int, **kwargs: Any
     ) -> None:
         """
         Create a Qdrant collection.
@@ -174,7 +174,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def upsert(
-        self, collection_name: str, points: list[dict[str, Any]], **kwargs
+        self, collection_name: str, points: list[dict[str, Any]], **kwargs: Any
     ) -> None:
         """
         Upsert points into Qdrant collection.
@@ -214,7 +214,7 @@ class QdrantProvider:
         collection_name: str,
         query_vector: Sequence[float],
         limit: int = 10,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[Any]:
         """
         Search for similar vectors in Qdrant.
@@ -259,7 +259,8 @@ class QdrantProvider:
             logger.debug(
                 f"Search in '{collection_name}' returned {len(response.points)} results"
             )
-            return response.points
+            hits: list[Any] = response.points
+            return hits
         except Exception as e:
             if _is_missing_collection(e):
                 # A search against a not-yet-created collection is not a
@@ -280,7 +281,7 @@ class QdrantProvider:
         collection_name: str,
         query_vector: Sequence[float],
         limit: int = 10,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Execute a raw Qdrant query while still enforcing tenant isolation.
@@ -304,7 +305,7 @@ class QdrantProvider:
         group_by: str,
         limit: int = 10,
         group_size: int = 1,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Grouped vector query with tenant isolation.
@@ -325,7 +326,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def retrieve(
-        self, collection_name: str, point_ids: list[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs: Any
     ) -> list[Any]:
         """
         Retrieve points by ID from Qdrant.
@@ -360,14 +361,16 @@ class QdrantProvider:
                     limit=len(point_ids),
                     **kwargs,
                 )
-                return response_scroll
+                scrolled: list[Any] = response_scroll
+                return scrolled
 
             response = await self.client.retrieve(
                 collection_name=collection_name,
                 ids=point_ids,
                 **kwargs,
             )
-            return response
+            retrieved: list[Any] = response
+            return retrieved
         except Exception as e:
             logger.error(f"Retrieve from '{collection_name}' failed: {e}")
             raise VectorStoreError(f"Retrieve failed: {e}") from e
@@ -375,7 +378,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def delete(
-        self, collection_name: str, point_ids: list[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs: Any
     ) -> None:
         """
         Delete points from Qdrant collection.
@@ -416,8 +419,8 @@ class QdrantProvider:
         collection_name: str,
         limit: int = 100,
         offset: int | str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> Any:
         """
         Scroll through collection points.
 
@@ -460,7 +463,7 @@ class QdrantProvider:
             raise VectorStoreError(f"Scroll failed: {e}") from e
 
     async def delete_by_filter(
-        self, collection_name: str, key: str, value: Any, **kwargs
+        self, collection_name: str, key: str, value: Any, **kwargs: Any
     ) -> None:
         """
         Delete points by filtering on a payload field.

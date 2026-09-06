@@ -47,14 +47,6 @@ nav = [
       { "Overview"            = "architecture/overview.md" },
       { "Request Flow"        = "architecture/request-flow.md" },
       { "Agentic Patterns" = "architecture/agentic-patterns.md" },
-      { "Decision Records" = [
-          "architecture/adr/index.md",
-          { "ADR-0001 Kernel Tiers"       = "architecture/adr/0001-kernel-tiers.md" },
-          { "ADR-0002 Exception Policy"   = "architecture/adr/0002-exception-policy.md" },
-          { "ADR-0003 Durable Execution"  = "architecture/adr/0003-durable-execution.md" },
-          { "ADR-0004 Plugin Permissions" = "architecture/adr/0004-plugin-permissions.md" },
-          { "ADR-0005 Schema & RLS"       = "architecture/adr/0005-schema-ownership-and-rls.md" },
-      ]},
   ]},
 
   { "Core Modules" = [

@@ -87,7 +87,7 @@ async def ensure_schema() -> None:
     from alembic import command
     from alembic.config import Config
 
-    def run_upgrade():
+    def run_upgrade() -> None:
         # Get absolute path to alembic.ini
         alembic_ini_path = os.path.join(os.getcwd(), "alembic.ini")
         alembic_cfg = Config(alembic_ini_path)

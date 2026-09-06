@@ -21,7 +21,7 @@ COLLECTION = _vs_config.collection_name
 _FALLBACK_FANOUT = 8
 
 
-def _get_indexed_items():
+def _get_indexed_items() -> Any:
     """Get indexed items from IndexingService."""
     service = get_indexing_service()
     return service.indexed_documents

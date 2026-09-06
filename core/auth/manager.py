@@ -225,7 +225,7 @@ class AuthManager:
         lifetime: int | None = None,
         tenant_id: str | None = None,
         act: dict[str, Any] | None = None,
-        **extra_claims,
+        **extra_claims: Any,
     ) -> str:
         """
         Issue a new JWT access token for a user.
@@ -315,7 +315,7 @@ class AuthManager:
             if inspect.iscoroutinefunction(func):
 
                 @functools.wraps(func)
-                async def async_wrapper(*args, **kwargs):
+                async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                     user = kwargs.get("user") or kwargs.get("current_user")
                     self.enforce_scopes(user, *required, require_all=require_all)
                     return await func(*args, **kwargs)
@@ -323,7 +323,7 @@ class AuthManager:
                 return async_wrapper
 
             @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 user = kwargs.get("user") or kwargs.get("current_user")
                 self.enforce_scopes(user, *required, require_all=require_all)
                 return func(*args, **kwargs)
@@ -446,7 +446,7 @@ class AuthManager:
             # Common logic for permission checking
             def _check_permissions(
                 user_obj: AuthUser | None, required_roles: set[AuthRole] | None
-            ):
+            ) -> None:
                 if not user_obj or not user_obj.is_authenticated:
                     raise InsufficientPermissionsError("Authentication required")
                 if required_roles and not any(
@@ -459,7 +459,7 @@ class AuthManager:
             if inspect.iscoroutinefunction(func):
 
                 @functools.wraps(func)
-                async def async_wrapper(*args, **kwargs):
+                async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                     user = kwargs.get("user") or kwargs.get("current_user")
                     _check_permissions(user, roles)
                     return await func(*args, **kwargs)
@@ -468,7 +468,7 @@ class AuthManager:
             else:
 
                 @functools.wraps(func)
-                def sync_wrapper(*args, **kwargs):
+                def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                     user = kwargs.get("user") or kwargs.get("current_user")
                     _check_permissions(user, roles)
                     return func(*args, **kwargs)

@@ -7,6 +7,7 @@ resource initialization, plugin loading, and rate limiter setup.
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -42,7 +43,7 @@ _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     FastAPI Lifecycle:
     - initializes DB
@@ -156,7 +157,7 @@ async def lifespan(app: FastAPI):
 
         if "llm" in required_resources or "llm" in optional_resources:
 
-            async def get_llm():
+            async def get_llm() -> Any:
                 """
                 Dependency for retrieving the LLM service instance.
 

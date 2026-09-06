@@ -11,6 +11,7 @@ from psycopg.rows import dict_row
 from core.config import StorageConfig
 from core.context import TenantContextError, get_current_tenant_id
 from core.db.connection import get_async_cursor
+from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.storage.interfaces import FeedbackRepository, InteractionRepository
 from core.storage.models import Feedback, Interaction
@@ -75,7 +76,15 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             return False
 
     async def _initialize_schema(self) -> None:
-        """Create necessary tables if they don't exist."""
+        """Create necessary tables if they don't exist.
+
+        Skipped when ``DB_RUNTIME_DDL`` is off (the production default): the
+        ``interactions``/``feedback`` schema is owned by
+        ``migrations/versions/001_initial_schema.py`` and applied by the
+        migrations job, so the runtime role needs no DDL rights.
+        """
+        if skip_runtime_ddl("interaction storage", "interactions, feedback"):
+            return
         # ``tenant_id`` scopes every row to the authenticated tenant (identity-
         # derived; see core.context). DEFAULT 'default' keeps existing single-
         # tenant rows working and makes the ADD COLUMN backfill safe. The ALTERs

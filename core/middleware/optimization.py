@@ -33,7 +33,7 @@ def _is_streaming_response(headers: Headers) -> bool:
         return True
     # Explicit opt-out set by streaming endpoints (also disables proxy
     # buffering). If a handler declares it, honour it as a hard no-gzip signal.
-    return headers.get("x-accel-buffering", "").strip().lower() == "no"
+    return bool(headers.get("x-accel-buffering", "").strip().lower() == "no")
 
 
 class _StreamAwareGZipResponder(GZipResponder):

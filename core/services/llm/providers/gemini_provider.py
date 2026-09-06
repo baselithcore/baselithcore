@@ -12,6 +12,7 @@ Gemini ``function_declarations`` and a ``ResponseFormat`` maps to
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -123,7 +124,7 @@ class GeminiProvider:
 
     @get_circuit_breaker("gemini_provider")
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """Generate a text completion.
 
@@ -205,7 +206,9 @@ class GeminiProvider:
         return calls
 
     @get_circuit_breaker("gemini_provider")
-    async def generate_stream(self, prompt: str, model: str, **kwargs):
+    async def generate_stream(
+        self, prompt: str, model: str, **kwargs: Any
+    ) -> AsyncIterator[tuple[str, int]]:
         """Yield ``(chunk_text, tokens_so_far)`` tuples for a streamed reply."""
         client = self._ensure_client()
         try:

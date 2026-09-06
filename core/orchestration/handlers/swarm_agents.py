@@ -8,7 +8,7 @@ from ``swarm_handler`` for backward compatibility.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.orchestration.contract import ContractValidator
@@ -215,7 +215,7 @@ __all__ = [
 ]
 
 
-def register_dynamic_agent(colony, spec: VirtualAgentSpec) -> str:
+def register_dynamic_agent(colony: Any, spec: VirtualAgentSpec) -> str:
     """Register a dynamically generated agent with the colony; return its id."""
     import uuid
 
@@ -237,8 +237,8 @@ def register_dynamic_agent(colony, spec: VirtualAgentSpec) -> str:
 
 
 async def decompose_task(
-    llm_service,
-    colony,
+    llm_service: Any,
+    colony: Any,
     query: str,
     dynamic_agent_ids: list[str],
 ) -> list[dict]:

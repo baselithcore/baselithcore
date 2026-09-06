@@ -10,7 +10,7 @@ class VectorStoreProvider(Protocol):
     """Protocol for vector store providers."""
 
     def create_collection(
-        self, collection_name: str, vector_size: int, **kwargs
+        self, collection_name: str, vector_size: int, **kwargs: Any
     ) -> None:
         """
         Create a collection.
@@ -23,7 +23,7 @@ class VectorStoreProvider(Protocol):
         ...
 
     def upsert(
-        self, collection_name: str, points: list[dict[str, Any]], **kwargs
+        self, collection_name: str, points: list[dict[str, Any]], **kwargs: Any
     ) -> None:
         """
         Upsert points into collection.
@@ -40,7 +40,7 @@ class VectorStoreProvider(Protocol):
         collection_name: str,
         query_vector: Sequence[float],
         limit: int = 10,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[Any]:
         """
         Search for similar vectors.
@@ -57,7 +57,7 @@ class VectorStoreProvider(Protocol):
         ...
 
     def delete(
-        self, collection_name: str, point_ids: list[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs: Any
     ) -> None:
         """
         Delete points from collection.

@@ -47,9 +47,9 @@ class StandardRagHandler(BaseFlowHandler):
         llm_service: Any | None = None,
         config: Any | None = None,
         embedder: Any | None = None,
-        *args,
-        **kwargs,
-    ):
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the standard RAG handler.
 

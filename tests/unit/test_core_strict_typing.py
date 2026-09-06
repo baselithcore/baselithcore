@@ -14,6 +14,7 @@ from scripts.check_core_strict_typing import (
     REPO_ROOT,
     STRICT_CORE_PACKAGES,
     STRICT_FLAGS,
+    all_core_packages,
     candidate_packages,
     package_path,
 )
@@ -43,6 +44,53 @@ def test_flag_set_is_not_weakened() -> None:
         "--no-implicit-optional",
     ):
         assert flag in STRICT_FLAGS, flag
+
+
+def test_kernel_packages_are_strict() -> None:
+    """The packages that run in every deployment stay covered.
+
+    These are the ones a request touches on the way in and out — API, auth,
+    config, storage, the agent loop and the LLM/vector services. Dropping one
+    from the allowlist is a regression, not a cleanup.
+    """
+    for name in (
+        "core.api",
+        "core.auth",
+        "core.cache",
+        "core.chat",
+        "core.config",
+        "core.db",
+        "core.di",
+        "core.memory",
+        "core.middleware",
+        "core.observability",
+        "core.orchestration",
+        "core.plugins",
+        "core.services.llm",
+        "core.services.vectorstore",
+    ):
+        assert name in STRICT_CORE_PACKAGES, name
+
+
+def test_partially_covered_parent_is_replaced_by_subpackages(tmp_path: Path) -> None:
+    """``core.services`` never goes green as a whole; list its subpackages."""
+    for dotted in (
+        "core",
+        "core/services",
+        "core/services/llm",
+        "core/services/vision",
+    ):
+        pkg = tmp_path / dotted
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+
+    names = all_core_packages(tmp_path, allowlist=("core.services.llm",))
+
+    assert "core.services" not in names
+    assert names == ["core.services.llm", "core.services.vision"]
+    assert candidate_packages(tmp_path, allowlist=("core.services.llm",)) == [
+        "core.services.vision"
+    ]
 
 
 def test_candidates_exclude_allowlisted_packages(tmp_path: Path) -> None:

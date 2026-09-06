@@ -151,7 +151,7 @@ class AnthropicProvider:
     # breaker stays: failure isolation, not retry.
     @get_circuit_breaker("anthropic_provider")
     async def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Generate a response using Anthropic Claude.
@@ -237,7 +237,7 @@ class AnthropicProvider:
         tools: list[LLMToolSpec] | None = None,
         tool_choice: ToolChoice | None = None,
         response_format: ResponseFormat | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResult:
         """
         Generate using Anthropic's native tool-calling / structured-output API.
@@ -339,7 +339,7 @@ class AnthropicProvider:
         *,
         tools: list[LLMToolSpec] | None = None,
         tool_choice: ToolChoice | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> "AsyncIterator[Any]":
         """Stream a structured generation as neutral ``StreamEvent``s.
 
@@ -440,7 +440,7 @@ class AnthropicProvider:
 
     @get_circuit_breaker("anthropic_provider")
     async def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> AsyncIterator[tuple[str, int]]:
         """
         Generate a streaming response using Anthropic Claude.

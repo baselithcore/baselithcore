@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from core.db.connection import get_async_cursor
+from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.prompts.types import PromptVersion
 
@@ -64,6 +65,8 @@ class PostgresPromptBackend:
 
     async def initialize(self) -> None:
         """Create the prompt tables if absent (idempotent)."""
+        if skip_runtime_ddl("prompt store", "prompt_versions, prompt_labels"):
+            return
         async with get_async_cursor() as cur:
             await cur.execute(_DDL)
         logger.info("prompt_store_schema_initialized")

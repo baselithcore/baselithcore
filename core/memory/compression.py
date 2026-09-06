@@ -164,7 +164,7 @@ class RelevanceCalculator:
         score = (decay_factor * base_importance) + access_boost + recency_boost
 
         # Clamp to [0, 1]
-        return max(0.0, min(1.0, score))
+        return float(max(0.0, min(1.0, score)))
 
     def classify_memories(
         self,

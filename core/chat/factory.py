@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 from core.chat.dependencies import (
     ChatDependencies,
@@ -23,7 +24,7 @@ from core.config import get_chat_config
 
 def chat_service_factory(
     dependency_config: ChatDependencyConfig | None = None,
-    plugin_registry=None,
+    plugin_registry: Any | None = None,
 ) -> ChatService:
     """
     Factory function to create a ChatService instance.
@@ -127,7 +128,8 @@ def _load_factory(factory_path: str | None) -> Callable[..., ChatService]:
         raise TypeError(
             f"The specified factory '{path}' is not callable (got {type(candidate)!r})."
         )
-    return candidate
+    factory: Callable[..., ChatService] = candidate
+    return factory
 
 
 def _split_import_path(dotted_path: str) -> tuple[str, str]:

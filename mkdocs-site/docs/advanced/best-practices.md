@@ -234,13 +234,32 @@ core packages carry their real types) on every commit and in the
 
 - a package **enters** the allowlist once it passes, and never leaves — an
   entry that starts failing is a regression in that package, not a reason to
-  drop the entry;
+  drop the entry. Every package a request touches on the way in and out is
+  already covered: `core.api`, `core.auth`, `core.config`, `core.db`,
+  `core.cache`, `core.chat`, `core.memory`, `core.middleware`,
+  `core.observability`, `core.orchestration`, `core.plugins`, `core.di`,
+  `core.services.llm` and `core.services.vectorstore`, alongside the rest of
+  the allowlist;
 - `python scripts/check_core_strict_typing.py --candidates` runs the strict
   flags on every package not yet listed and prints the ones that already pass,
   so growing the list is a one-line change;
 - `--warn-unused-ignores` is deliberately not part of the flag set: whether a
   `type: ignore` on a third-party call is "unused" depends on whether that
-  library is installed, and the CI job runs with stubs only.
+  library is installed, and the CI job runs with stubs only. `--warn-return-any`
+  *is* in the set and is sensitive to the same difference in the opposite
+  direction — a call into an uninstalled library returns `Any` — so verify a
+  new entry against a stubs-only environment, not just a full developer one:
+
+  ```bash
+  uv venv /tmp/gate && uv pip install --python /tmp/gate/bin/python \
+      mypy==2.3.0 redis==5.3.1 types-requests types-setuptools \
+      pydantic pydantic-settings
+  /tmp/gate/bin/python scripts/check_core_strict_typing.py
+  ```
+
+- a parent package that is only partly covered (`core.services`) is never
+  listed by `--candidates`; its subpackages are listed instead, because the
+  parent as a whole will not go green.
 
 The ratchet superseded the earlier file-level `check_core_resilience_typing.py`
 gate; `core.resilience` is allowlisted as a whole package.

@@ -3,14 +3,14 @@ Base provider interface for LLM providers.
 """
 
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class LLMProvider(Protocol):
     """Protocol for LLM providers."""
 
     def generate(
-        self, prompt: str, model: str, json_mode: bool = False, **kwargs
+        self, prompt: str, model: str, json_mode: bool = False, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Generate a response.
@@ -27,7 +27,7 @@ class LLMProvider(Protocol):
         ...
 
     def generate_stream(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> Iterator[tuple[str, int]]:
         """
         Generate a streaming response.

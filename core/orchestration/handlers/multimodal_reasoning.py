@@ -53,18 +53,18 @@ class MultiModalReasoningHandler(BaseFlowHandler):
 
     def __init__(
         self,
-        *args,
+        *args: Any,
         vision_service: VisionService | None = None,
         llm_service: Any | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.vision_service = vision_service or VisionService()
         self._llm_service = llm_service
         self._tot_engine: TreeOfThoughtsAsync | None = None
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             self._llm_service = get_llm_service()

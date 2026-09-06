@@ -65,6 +65,31 @@ a health endpoint can't trigger a connection. Keys are the pool roles:
 telemetry: a pool whose counters cannot be read is skipped and logged at
 `debug` as `pool_stats_unavailable` with its role, never raised.
 
+### Who creates the schema
+
+`core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
+A store that self-initializes its schema on the shared pool forces the runtime
+role to hold DDL privileges in production and leaves the table with no migration
+history. `skip_runtime_ddl()` gates the four stores that used to do it
+(`core.a2a.task_store_postgres`, `core.orchestration.checkpoint_postgres`,
+`core.prompts.store_postgres`, `core.storage.postgres`):
+
+| `DB_RUNTIME_DDL` | Behaviour |
+|---|---|
+| unset (default) | allowed outside production, refused when `APP_ENV=production` |
+| `true` | always allowed — single-role local Postgres |
+| `false` | never allowed — the migrations Job owns the schema |
+
+When refused, the store logs `runtime_ddl_skipped` at `debug` and continues; the
+table is expected to exist already. A genuinely missing table then surfaces as an
+ordinary query error naming it, instead of an opaque permission error on a
+`CREATE`.
+
+`RLS_PROTECTED_TABLES` lists the tenant-scoped tables carrying a
+`tenant_isolation` row-level-security policy. See
+[Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
+for the two-role deployment that makes those policies effective.
+
 ```python
 from core.db import get_pool_stats
 

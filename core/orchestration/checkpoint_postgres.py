@@ -17,6 +17,7 @@ import orjson
 from psycopg.rows import dict_row
 
 from core.db.connection import get_async_cursor
+from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint import (
     DEFAULT_RESUMABLE_LIMIT,
@@ -173,6 +174,10 @@ class PostgresCheckpointStore:
 
     async def initialize(self) -> None:
         """Create the checkpoint tables and index if absent (idempotent)."""
+        if skip_runtime_ddl(
+            "checkpoint store", "agent_checkpoints, agent_checkpoint_history"
+        ):
+            return
         async with get_async_cursor() as cur:
             await cur.execute(_DDL)
             if self._history_enabled:

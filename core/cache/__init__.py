@@ -7,6 +7,8 @@ These are generic, reusable cache implementations for the baselith-core.
 
 from __future__ import annotations
 
+from typing import Any
+
 # Implementations
 from core.cache.local_cache import TTLCache
 
@@ -23,7 +25,7 @@ from core.cache.redis_cache import RedisTTLCache, close_redis_pools, create_redi
 from core.cache.redis_sync import close_sync_redis_pools, create_sync_redis_client
 
 
-def SemanticLLMCache(*args, **kwargs):
+def SemanticLLMCache(*args: Any, **kwargs: Any) -> Any:
     """Lazy factory for SemanticLLMCache to avoid circular imports."""
     from core.cache.semantic_cache import SemanticLLMCache as _SemanticLLMCache
 

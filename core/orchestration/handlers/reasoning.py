@@ -21,20 +21,20 @@ class ReasoningHandler(BaseFlowHandler):
     Handler for 'complex_reasoning' intent using Tree of Thoughts.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._llm_service = None
-        self._tot_engine = None
+        self._llm_service: Any | None = None
+        self._tot_engine: TreeOfThoughtsAsync | None = None
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load the LLM service."""
         if self._llm_service is None:
             self._llm_service = get_llm_service()
         return self._llm_service
 
     @property
-    def tot_engine(self):
+    def tot_engine(self) -> TreeOfThoughtsAsync:
         """Lazy load the ToT engine."""
         if self._tot_engine is None:
             self._tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)

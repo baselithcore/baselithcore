@@ -242,6 +242,13 @@ await sync.push_version(
 await sync.push_label("greet", "production", "3")   # durable promote
 ```
 
+!!! info "Who creates the table"
+    `initialize()` skips its DDL when `DB_RUNTIME_DDL` is off — the
+    production default, where
+    [migration 007](db.md#who-creates-the-schema) owns the
+    schema and the runtime role holds no DDL rights. The call stays safe
+    either way: with the gate off the table is expected to exist already.
+
 `PostgresPromptBackend` (`core/prompts/store_postgres.py`) implements the
 `PromptBackend` Protocol on two tables — `prompt_versions` (primary key
 `(name, version)`) and `prompt_labels` (primary key `(name, label)`) — created

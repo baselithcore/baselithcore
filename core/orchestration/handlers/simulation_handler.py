@@ -131,4 +131,5 @@ Provide a final report that:
 2. Identifies key inflection points or emergent behaviors.
 3. Provides a final prediction or recommendation based on the simulation outcome.
 """
-        return await self.llm_service.generate_response(prompt)
+        summary: str = await self.llm_service.generate_response(prompt)
+        return summary

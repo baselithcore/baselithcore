@@ -16,7 +16,7 @@ imports.
 
 from __future__ import annotations
 
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.config import SecurityConfig, get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
@@ -56,7 +56,7 @@ class RequestSizeLimitMiddleware:
             max_bytes = get_security_config().max_request_size_bytes
         self.max_bytes = max_bytes
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.max_bytes <= 0 or scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -73,7 +73,7 @@ class RequestSizeLimitMiddleware:
         response_started = False
         rejected = False
 
-        async def limited_receive():
+        async def limited_receive() -> Message:
             nonlocal received, too_large
             if too_large:
                 # A handler that caught the first cut-off and keeps reading
@@ -89,7 +89,7 @@ class RequestSizeLimitMiddleware:
                     raise _BodyTooLarge
             return message
 
-        async def guarded_send(message):
+        async def guarded_send(message: Message) -> None:
             nonlocal response_started, rejected
             if rejected:
                 # Drop further frames from the downstream app after we
@@ -121,7 +121,7 @@ class RequestSizeLimitMiddleware:
         return None
 
     @staticmethod
-    async def _reject(send) -> None:
+    async def _reject(send: Send) -> None:
         body = b'{"detail":"Request body too large."}'
         await send(
             {
@@ -224,7 +224,7 @@ class SecurityHeadersMiddleware:
                 ``content_security_policy`` always wins and is left untouched.
         """
         cache_attr = "_cached_docs_headers" if docs else "_cached_headers"
-        cached = getattr(self, cache_attr)
+        cached: list[tuple[bytes, bytes]] | None = getattr(self, cache_attr)
         if cached is not None:
             return cached
         headers: list[tuple[bytes, bytes]] = [
@@ -280,7 +280,7 @@ class SecurityHeadersMiddleware:
                 return True
         return False
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -288,7 +288,7 @@ class SecurityHeadersMiddleware:
         baseline = self._build_headers(docs=self._is_docs_path(scope.get("path", "")))
         credentialed = self._carries_credential(scope.get("headers") or [])
 
-        async def send_wrapper(message):
+        async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 response_headers = list(message.get("headers") or [])
                 existing = {k for k, _ in response_headers}

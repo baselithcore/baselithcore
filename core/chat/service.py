@@ -91,12 +91,12 @@ class ChatService(CoreChatService):
 
     # Expose dependencies directly for backwards compatibility
     @property
-    def embedder(self):
+    def embedder(self) -> Any:
         """Get embedder from dependencies."""
         return self.dependencies.embedder
 
     @property
-    def reranker(self):
+    def reranker(self) -> Any:
         """Get reranker from dependencies."""
         return self.dependencies.reranker
 

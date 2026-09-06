@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 
@@ -183,7 +183,7 @@ def prune_low_relevance(memory: object, calculator: object = None) -> dict[str, 
     return counts
 
 
-async def summarize_items(llm_service: object, items: list[MemoryItem]) -> str | None:
+async def summarize_items(llm_service: Any, items: list[MemoryItem]) -> str | None:
     """Summarize memory items via the LLM, with a concatenation fallback."""
     if not items:
         return None
@@ -198,7 +198,8 @@ async def summarize_items(llm_service: object, items: list[MemoryItem]) -> str |
                 + "\n\nProvide a brief, information-dense summary that preserves "
                 "key facts."
             )
-            return await llm_service.generate_response(prompt)  # type: ignore[attr-defined]
+            summary: str = await llm_service.generate_response(prompt)
+            return summary
         except Exception as e:
             logger.warning(f"LLM summarization failed: {e}")
 

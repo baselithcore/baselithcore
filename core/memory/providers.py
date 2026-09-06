@@ -8,7 +8,7 @@ ephemeral in-memory storage for testing and transient state.
 
 import asyncio
 import inspect
-from typing import cast
+from typing import Any, cast
 
 from core.models.domain import Document
 from core.observability.logging import get_logger
@@ -29,7 +29,9 @@ class VectorMemoryProvider(MemoryProvider):
     memories (Episodic and Semantic).
     """
 
-    def __init__(self, collection_name: str = "agent_memory", embedder=None):
+    def __init__(
+        self, collection_name: str = "agent_memory", embedder: Any | None = None
+    ) -> None:
         """
         Initialize the provider.
 
@@ -276,8 +278,8 @@ class InMemoryProvider(MemoryProvider):
     or scenarios where persistence is explicitly not required.
     """
 
-    def __init__(self):
-        self._checkpoints = {}  # Dict[str, MemoryItem]
+    def __init__(self) -> None:
+        self._checkpoints: dict[str, MemoryItem] = {}
 
     async def add(self, item: MemoryItem) -> None:
         """

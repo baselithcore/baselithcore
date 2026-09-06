@@ -81,7 +81,7 @@ class LLMService:
 
     def __init__(
         self,
-        config=None,
+        config: Any | None = None,
         cost_tracker: CostTracker | None = None,
         enable_cache: bool = True,
         enable_semantic_cache: bool = False,
@@ -188,7 +188,7 @@ class LLMService:
         retryable_exceptions=(RateLimitError,),
     )
     async def _generate_with_retry(
-        self, prompt: str, model: str, json_mode: bool, **kwargs
+        self, prompt: str, model: str, json_mode: bool, **kwargs: Any
     ) -> tuple[str, int]:
         """
         Generate response with automatic retry on rate limit errors.

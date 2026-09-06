@@ -101,7 +101,7 @@ class ContextMixin:
                 )
                 if was_folded:
                     logger.debug("Working-memory context folded")
-                return folded
+                return str(folded)
             except Exception as e:
                 logger.warning(f"Context folding failed: {e}")
 

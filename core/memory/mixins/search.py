@@ -48,7 +48,8 @@ class SearchMixin:
                 vec = await asyncio.to_thread(embedder.encode, query)
             if hasattr(vec, "tolist"):
                 vec = vec.tolist()
-            return vec
+            embedding: list[float] | None = vec
+            return embedding
         except Exception as e:
             logger.warning(f"Query embedding failed: {e}")
             return None

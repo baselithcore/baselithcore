@@ -16,7 +16,7 @@ import asyncio
 import threading
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from core.observability.logging import get_logger
 
@@ -48,7 +48,7 @@ class LazyServiceRegistry:
     initialized at most once in a thread-safe and async-safe manner.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the lazy registry state."""
         self._factories: dict[type | str, Callable[[], Awaitable[Any]]] = {}
         self._instances: dict[type | str, Any] = {}
@@ -115,7 +115,7 @@ class LazyServiceRegistry:
 
         # Fast path: already initialized
         if self._initialized.get(interface, False):
-            return self._instances[interface]
+            return cast(T, self._instances[interface])
 
         # Slow path: Lazy initialization with async lock
         async with self._locks[interface]:
@@ -129,7 +129,7 @@ class LazyServiceRegistry:
                 self._initialized[interface] = True
                 logger.info(f"✅ Service initialized: {self._get_name(interface)}")
 
-            return self._instances[interface]
+            return cast(T, self._instances[interface])
 
     def is_initialized(self, interface: type | str) -> bool:
         """Check if a service has already been instantiated."""
