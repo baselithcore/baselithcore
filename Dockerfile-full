@@ -2,12 +2,21 @@
 # 🏗️ Stage 1: Build dependencies and pre-cache models
 # =========================================================
 # Digest-pinned: same Dockerfile at the same commit builds the same base.
-# Refresh the digest deliberately when bumping the base image.
+# Refresh the digest deliberately when bumping the base image — and note that
+# "deliberately" now has a deadline attached: the pin freezes the Debian
+# package set too, so an untouched digest accumulates distro CVEs until the
+# post-push Trivy gate in release-image.yml fails the release. That is exactly
+# how the previous pin (2c941e86) ended: 30 HIGH/CRITICAL findings with fixes
+# available, all in util-linux (CVE-2026-53612/53613/53614) and openssl
+# (CVE-2026-14456). Verify a candidate before pinning it:
+#   trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+#     python:3.12-slim@sha256:<candidate>
+# The digest below was checked that way and reports zero.
 # No --platform=$BUILDPLATFORM here: the builder installs native wheels (torch,
 # psycopg, cryptography ...) that are copied verbatim into the runtime stage,
 # so it must run on the *target* architecture — a builder pinned to the build
 # host would ship amd64 .so files inside the arm64 image of a multi-arch push.
-FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS builder
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS builder
 
 WORKDIR /app
 
@@ -40,13 +49,28 @@ COPY requirements.txt .
 # CVE-2025-32434 (torch.load RCE). torchaudio is not a dependency of anything
 # shipped, so it is not installed.
 #
-# Both installs target --prefix /install (the only tree the runtime stage
-# copies), and the second one runs with that tree on PYTHONPATH so pip sees
-# the CPU torch already satisfied there — otherwise it would either resolve
-# torch again from PyPI (the CUDA build) or, worse, treat a torch living in
-# the builder's own site-packages as installed and ship a runtime without it.
+# Every install targets --prefix /install (the only tree the runtime stage
+# copies) and runs with that tree on PYTHONPATH, so pip judges "already
+# satisfied" against the prefix rather than the builder's own site-packages.
+# That is what keeps the CPU torch: without it pip would either resolve torch
+# again from PyPI (the CUDA build) or treat a torch living in the builder's
+# site-packages as installed and ship a runtime without it.
+# setuptools goes FIRST, from PyPI, and the order is the whole point.
+# `--index-url` below REPLACES PyPI rather than adding to it, so every
+# transitive dependency of torch is resolved from download.pytorch.org — and
+# that mirror's newest setuptools is 78.1.0, one patch below the 78.1.1 that
+# fixes CVE-2025-47273. The release image therefore shipped a flagged
+# setuptools (plus its vendored jaraco.context and wheel) while uv.lock had
+# long resolved 83.0.0. Installing it into the prefix first means the torch
+# step finds the requirement already satisfied and never reaches for the
+# mirror's copy; pip does not downgrade a satisfied requirement. A floor, not
+# an exact pin, so future security releases still flow — uv.lock resolves
+# torch and setuptools 83.0.0 together, so the two are compatible.
 RUN pip install --upgrade pip \
-    && pip install --no-cache-dir --prefix /install \
+    && PYTHONPATH=/install/lib/python3.12/site-packages \
+       pip install --no-cache-dir --prefix /install "setuptools>=83.0.0" \
+    && PYTHONPATH=/install/lib/python3.12/site-packages \
+       pip install --no-cache-dir --prefix /install \
         torch==2.13.0 torchvision==0.28.0 \
         --index-url https://download.pytorch.org/whl/cpu \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
@@ -73,7 +97,7 @@ PY
 # =========================================================
 # 🚀 Stage 2: Runtime
 # =========================================================
-FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
 WORKDIR /app
 
