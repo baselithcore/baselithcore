@@ -5,6 +5,25 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.31.0](https://github.com/baselithcore/baselithcore/compare/v0.30.0...v0.31.0) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** regenerate OpenAPI specs, triage the red-team PAT fixture, document the security guards ([b5740b3](https://github.com/baselithcore/baselithcore/commit/b5740b34f31e51640f225dd1b803b586e2f9e887)), closes [#69](https://github.com/baselithcore/baselithcore/issues/69)
+* **deploy:** make the Helm chart installable and stop Alembic discarding migrations ([0421857](https://github.com/baselithcore/baselithcore/commit/0421857256f0c4e1f613c9a18dba18fc4c66c56c))
+* **helm:** derive ALLOW_ORIGINS from the ingress hosts ([f99b057](https://github.com/baselithcore/baselithcore/commit/f99b0574547dd0df0fad925989c6cdde826360f9))
+
+
+### Features
+
+* bump version to 0.31.0 and integrate container image publishing into the CI pipeline ([cdfffbf](https://github.com/baselithcore/baselithcore/commit/cdfffbf9a98e34b67d785913186fbed4fc726493))
+* implement automated performance budget validation with custom assertion scripts and unit tests ([b8b4634](https://github.com/baselithcore/baselithcore/commit/b8b4634334e6cbb6a9228e1f0a394b8284898899))
+* implement baselithbot dashboard UI, add extensive documentation, and enhance backend replay and tenancy controls. ([2612863](https://github.com/baselithcore/baselithcore/commit/26128631f1e8ab1e712d0d37a4be560040f5c9ae))
+* implement COOP/CORP security headers, fix X-Forwarded-For trusted proxy configuration, add Dependabot, and improve observability tests. ([2060603](https://github.com/baselithcore/baselithcore/commit/20606038647ef09735458dbfd64d44c10f2959cb))
+* implement durable tool-call idempotency, workflow versioning, and unified event streaming infrastructure ([37e84f3](https://github.com/baselithcore/baselithcore/commit/37e84f3b58c6762fccec53dfec0a568f7c161b70))
+* implement row-level security and tenant isolation with database schema updates and documentation cleanup ([aff4a16](https://github.com/baselithcore/baselithcore/commit/aff4a16f9e6b352987c1e25dfe65bb5b776d8613))
+
 # [0.30.0](https://github.com/baselithcore/baselithcore/compare/v0.29.0...v0.30.0) (2026-09-05)
 
 
