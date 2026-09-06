@@ -2,8 +2,9 @@
 
 The claim semantics are the point of this ledger, so the tests pin them at the
 SQL level: what the statement says, and what the object does with the row it
-gets back. Cross-replica behaviour against a real Postgres is exercised by
-``tests/integration/`` under ``BASELITH_TEST_REAL_DB=1``.
+gets back. The property these cannot decide — that two replicas racing one key
+resolve to exactly one executor — is proved against a real server in
+``tests/integration/test_tool_ledger_postgres.py`` (``BASELITH_TEST_REAL_DB=1``).
 """
 
 from contextlib import asynccontextmanager

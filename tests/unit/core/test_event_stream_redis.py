@@ -3,8 +3,9 @@
 Redis itself is not under test — the mapping onto its commands is, because
 every mistake in it is silent: a wrong ``XREADGROUP`` id replays history, a
 swallowed error hides a broken group, an unacknowledged tombstone leaks the
-pending list. Behaviour against a real server is covered by the integration
-suite.
+pending list. Whether Redis *agrees* with the semantics assumed here is proved
+in ``tests/integration/test_event_stream_redis.py``
+(``BASELITH_TEST_REAL_REDIS=1``).
 """
 
 import pytest
