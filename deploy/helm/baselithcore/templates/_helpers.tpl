@@ -134,6 +134,33 @@ names, which is what the probes and in-cluster callers use.
 {{- end -}}
 
 {{/*
+Browser origins allowed to POST, as the JSON list the app parses.
+
+``ALLOW_ORIGINS`` defaults to empty, and CSRFOriginMiddleware rejects every
+request that carries an ``Origin`` the list does not contain. A browser sends
+one on each cross-origin-capable request, so an empty list means the SPA loads
+and then every login fails with "CSRF check failed: origin not allowed" — while
+curl, which sends no Origin, succeeds and hides the problem. The scheme follows
+whether the host is covered by an ``ingress.tls`` entry.
+*/}}
+{{- define "baselithcore.allowOrigins" -}}
+{{- $tlsHosts := list -}}
+{{- range .Values.ingress.tls -}}
+{{- range .hosts -}}
+{{- $tlsHosts = append $tlsHosts . -}}
+{{- end -}}
+{{- end -}}
+{{- $origins := list -}}
+{{- range .Values.ingress.hosts -}}
+{{- if .host -}}
+{{- $scheme := ternary "https" "http" (has .host $tlsHosts) -}}
+{{- $origins = append $origins (printf "%s://%s" $scheme .host) -}}
+{{- end -}}
+{{- end -}}
+{{- $origins | uniq | toJson -}}
+{{- end -}}
+
+{{/*
 Non-secret env, shared by the ConfigMap the pods read and the hook-scoped copy
 the migration Job reads, so the two can never drift.
 */}}
@@ -143,6 +170,9 @@ the migration Job reads, so the two can never drift.
 {{- end }}
 {{- if not (hasKey .Values.config "TRUSTED_HOSTS") }}
 TRUSTED_HOSTS: {{ include "baselithcore.trustedHosts" . | quote }}
+{{- end }}
+{{- if and (not (hasKey .Values.config "ALLOW_ORIGINS")) .Values.ingress.enabled }}
+ALLOW_ORIGINS: {{ include "baselithcore.allowOrigins" . | quote }}
 {{- end }}
 {{- end -}}
 
