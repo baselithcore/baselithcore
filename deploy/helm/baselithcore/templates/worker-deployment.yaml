@@ -29,6 +29,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
         - name: worker
           image: {{ include "baselithcore.image" . }}

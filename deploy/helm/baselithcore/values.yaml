@@ -271,6 +271,30 @@ extraEnv: []
 extraVolumes: []
 extraVolumeMounts: []
 
+# One-shot copies from the image into a mounted volume, run in an initContainer
+# before the app starts. `readOnlyRootFilesystem: true` makes every path inside
+# the image tree read-only, so a file the app *rewrites* at runtime has to live
+# on a volume — pointed at by env — instead. The catch is that a fresh volume is
+# empty, and the app needs the image's copy as its starting point:
+#
+#   configs/plugins.yaml is rewritten whenever a plugin is enabled or disabled
+#   (`baselith plugin config set`, or any admin surface that does the same).
+#   Left on the image tree every toggle fails with "Read-only file system";
+#   moved to an empty volume every plugin boots unconfigured. It needs both
+#   halves:
+#
+#     config:
+#       PLUGIN_CONFIG_PATH: /app/data/configs/plugins.yaml   # must be under CWD
+#     seedFromImage:
+#       - from: /app/configs/plugins.yaml
+#         to: /app/data/configs/plugins.yaml
+#
+# `from` may be a file or a directory. A destination that already exists is
+# never touched, so restarts and upgrades keep whatever the running deployment
+# wrote — a changed image default reaches an existing volume only if you delete
+# the destination yourself.
+seedFromImage: []
+
 # ServiceMonitor for the Prometheus Operator (scrapes /metrics).
 serviceMonitor:
   enabled: false

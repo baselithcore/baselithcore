@@ -214,3 +214,59 @@ httpHeaders:
 {{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end -}}
+
+{{/*
+initContainer that seeds mounted volumes from the image (`seedFromImage`).
+
+Every path in the image tree is read-only under `readOnlyRootFilesystem`, so a
+file the app rewrites at runtime lives on a volume instead — and a fresh volume
+starts empty, without the image's default. This copies the default across once,
+before the app container starts, and never overwrites a destination that
+already exists: what the running deployment wrote survives restarts, upgrades
+and a re-pulled image.
+
+The copy lands on a per-pod temporary name and is moved into place with a
+single rename, so a worker pod seeding the same volume concurrently can never
+read a half-written file.
+*/}}
+{{- define "baselithcore.seedInitContainers" -}}
+{{- if .Values.seedFromImage }}
+initContainers:
+  - name: seed-from-image
+    image: {{ include "baselithcore.image" . }}
+    imagePullPolicy: {{ .Values.image.pullPolicy }}
+    securityContext:
+      {{- toYaml .Values.securityContext | nindent 6 }}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        {{- range .Values.seedFromImage }}
+        {{- if not (and .from .to) }}
+        {{- fail "each seedFromImage entry needs both `from` (a path in the image) and `to` (a path under one of extraVolumeMounts)" }}
+        {{- end }}
+        {{- if not (hasPrefix "/" .to) }}
+        {{- fail (printf "seedFromImage `to` must be absolute; got %s" .to) }}
+        {{- end }}
+        if [ -e {{ .to | squote }} ]; then
+          echo "seed: {{ .to }} already present, leaving it alone"
+        else
+          mkdir -p "$(dirname {{ .to | squote }})"
+          tmp={{ .to | squote }}.seeding.$$
+          rm -rf "$tmp"
+          cp -a {{ .from | squote }} "$tmp"
+          mv -T "$tmp" {{ .to | squote }} || rm -rf "$tmp"
+          echo "seed: {{ .from }} -> {{ .to }}"
+        fi
+        {{- end }}
+    volumeMounts:
+      {{- if .Values.tmpVolumes.enabled }}
+      - name: tmp
+        mountPath: /tmp
+      {{- end }}
+      {{- with .Values.extraVolumeMounts }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+{{- end }}
+{{- end -}}

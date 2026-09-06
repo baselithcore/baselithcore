@@ -50,6 +50,7 @@ spec:
               {{- include "baselithcore.selectorLabels" . | nindent 14 }}
               app.kubernetes.io/component: api
       {{- end }}
+      {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
         - name: api
           image: {{ include "baselithcore.image" . }}
