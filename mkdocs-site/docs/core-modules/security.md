@@ -176,6 +176,26 @@ through `assert_url_safe`/`assert_url_safe_async` or
 | Web scraper (HTTP + Playwright fetchers) | `plugins.web_scraper` | Governed by `ScraperConfig.block_private_ips` (default `True`). See [Web Scraper](scraper.md#security-ssrf-protection). |
 | Baselithbot channels/integrations/skills | `plugins.baselithbot.http.hardened_client` | Rejected by default; `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true`. |
 
+### Per-caller egress guard
+
+The checks above answer "is this host safe to reach at all". They cannot answer
+"is *this caller* allowed to reach it" — that is a policy about plugins, and
+`core.security` must not know what a plugin is (Sacred Core rule). The decision
+therefore arrives as a callable:
+
+```python
+from core.security.ssrf import set_egress_guard
+
+set_egress_guard(lambda host: policy.assert_allowed(host))  # raises to refuse
+set_egress_guard(None)                                      # remove it
+```
+
+The guard is invoked with the target **host** on every screened URL, before the
+connection is made, and refuses by raising. Unset by default, which is exactly
+the behaviour of the module before it existed: the guard adds a decision point,
+never a new default. It composes with — and does not replace — the
+loopback/private/link-local screening and the IP pinning described above.
+
 ### Deprecated shims
 
 `core/webhooks/ssrf.py` is a thin backward-compatible shim over
@@ -231,3 +251,23 @@ register_secrets_provider("vault", lambda: MyVaultProvider(addr=..., token=...))
 ```
 
 A provider only needs `get_secret(name) -> SecretStr | None`.
+
+### Per-caller secret guard
+
+Which backend answers a lookup is one question; **who may ask** is another, and
+it is again a policy about plugins that `core.security` cannot hold. The same
+seam as the egress guard applies:
+
+```python
+from core.security.secrets import set_secret_guard
+
+set_secret_guard(lambda name: policy.assert_may_read(name))  # raises to refuse
+set_secret_guard(None)                                       # remove it
+```
+
+The guard runs on every `get_secret` call, before the provider is consulted, and
+receives the secret's **name only — never its value**, so installing a policy
+hook can never become a way to observe credentials. Unset by default. A guard
+that raises propagates that exception to the caller unchanged: refusing a read
+is deliberately louder than returning `None`, which would be indistinguishable
+from an unset secret.

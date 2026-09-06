@@ -87,3 +87,27 @@ vulnerabilities:
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
     expired_at: 2026-10-29
+
+# ==================================================================
+# Secret-scanner exceptions
+# ==================================================================
+# Different in kind from the CVE entries above, which are accepted RISK and
+# therefore carry an expiry so they get re-argued. These are synthetic attack
+# payloads: strings that exist precisely because a scanner-shaped secret is the
+# input under test. There is nothing to fix and nothing to re-argue, so no
+# `expired_at` — but the scope is kept as tight as the tool allows, one rule id
+# pinned to one path, so a real credential of the same shape anywhere else in
+# the tree still fails the scan. (gitleaks triages the same class of finding in
+# .gitleaksignore, where entries are commit-scoped for the same reason.)
+secrets:
+  - id: github-pat
+    paths:
+      - evals/red_team/injection_variants.yaml
+    statement: >-
+      Red-team eval corpus. The case `out_github_token` feeds a token-shaped
+      string to the OUTPUT guard and asserts it comes back redacted
+      (`expect: redacted`), so the corpus cannot hold anything but a
+      credential-looking literal. The value is a sequential-alphabet
+      placeholder (ghp_ABCDEFGHIJ...123456), never an issued token, and the file
+      is a fixture read by scripts/run_red_team_evals.py — it is not shipped in
+      the wheel and grants access to nothing.
