@@ -8,6 +8,8 @@ PluginMetadata`` still works (``interface`` re-exports this class).
 from pathlib import Path
 from typing import Any
 
+from core.plugins.permissions import parse_permissions
+
 
 def _normalize_env_declarations(declared: Any) -> list[str]:
     """Coerce ``environment_variables`` to the plain key list consumers expect.
@@ -75,6 +77,7 @@ class PluginMetadata:
         signature_ed25519: str | None = None,
         subcomponent_of: str = "",
         llm_scopes: list[dict[str, str]] | None = None,
+        permissions: Any = None,
     ):
         """
         Initialize plugin metadata.
@@ -176,6 +179,12 @@ class PluginMetadata:
         # no pin falls back to the plugin's default pin. Empty ⇒ single default
         # selector, i.e. behaviour identical to a plugin that declares nothing.
         self.llm_scopes = self._normalize_llm_scopes(llm_scopes)
+        # Declared capabilities (network egress, tools, secrets, filesystem).
+        # Integrity proves *which code* runs; this declares what that code may
+        # do. Absent means "predates the mechanism", which the staged rollout
+        # treats differently from an explicit empty declaration — see
+        # core.plugins.permissions.
+        self.permissions = parse_permissions(permissions)
 
     @staticmethod
     def _normalize_llm_scopes(
@@ -231,6 +240,7 @@ class PluginMetadata:
             "signature_ed25519": self.signature_ed25519,
             "subcomponent_of": self.subcomponent_of,
             "llm_scopes": self.llm_scopes,
+            "permissions": self.permissions.summary(),
         }
 
     @classmethod
@@ -265,6 +275,7 @@ class PluginMetadata:
             optional_resources=data.get("optional_resources"),
             python_dependencies=data.get("python_dependencies"),
             plugin_dependencies=data.get("plugin_dependencies"),
+            permissions=data.get("permissions"),
             min_core_version=data.get("min_core_version"),
             max_core_version=data.get("max_core_version"),
             homepage=data.get("homepage", ""),

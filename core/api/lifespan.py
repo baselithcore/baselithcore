@@ -217,6 +217,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     set_hot_reload_controller(hot_reload_controller)
     logger.info("🔄 Hot-reload controller initialized")
 
+    # Declared plugin capabilities: the SSRF guard screens the *address*, these
+    # screen which plugin may reach it, read a secret, or invoke a tool. Default
+    # mode is `warn`, so a deployment that has not migrated its manifests
+    # behaves exactly as before.
+    from core.plugins.guards import install_plugin_guards
+
+    install_plugin_guards(plugin_registry)
+
     # === Backstage Software Catalog integration ===
     _backstage_base_url = os.environ.get(
         "BASELITH_BASE_URL", f"http://localhost:{_app_config.port}"

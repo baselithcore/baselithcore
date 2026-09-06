@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
 
 from pydantic import BaseModel, ConfigDict
@@ -102,6 +103,24 @@ def hostname_is_blocked_literal(hostname: str) -> bool:
     return ip_is_internal(lowered)
 
 
+#: Optional per-caller egress guard, installed by the plugin machinery.
+#: ``core.security`` must not know what a plugin is, so the check arrives as a
+#: callable that receives the target host and raises to refuse it. Unset by
+#: default, which is exactly the behaviour this module had before.
+_EGRESS_GUARD: Callable[[str], None] | None = None
+
+
+def set_egress_guard(guard: Callable[[str], None] | None) -> None:
+    """Install (or clear) the per-caller egress guard.
+
+    Args:
+        guard: Called with the target host on every screened URL; it raises to
+            refuse the call. ``None`` removes the guard.
+    """
+    global _EGRESS_GUARD
+    _EGRESS_GUARD = guard
+
+
 def _parse_and_screen(url: str, policy: SsrfPolicy) -> tuple[str, str]:
     """Shared scheme/host screening. Returns ``(scheme, host)`` or raises."""
     try:
@@ -120,6 +139,8 @@ def _parse_and_screen(url: str, policy: SsrfPolicy) -> tuple[str, str]:
         raise SsrfError(f"Invalid URL port: {e}") from e
     if policy.allowed_hosts is not None and host not in policy.allowed_hosts:
         raise SsrfError(f"Host {host!r} is not in the allowed host list")
+    if _EGRESS_GUARD is not None:
+        _EGRESS_GUARD(host)
     return scheme, host
 
 

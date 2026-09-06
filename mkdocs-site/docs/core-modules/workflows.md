@@ -12,6 +12,7 @@ core/workflows/
 ├── conditions.py     # Safe AST condition evaluator
 ├── adapters.py       # CrewNodeAdapter / ColonyNodeAdapter — multi-agent primitives behind the AGENT-node contract
 ├── schedule.py       # WorkflowScheduler — in-process cron scheduling
+├── versioning.py     # Pins a definition to a durable run
 └── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
@@ -378,6 +379,60 @@ ExecutionStatus.COMPLETED
 ExecutionStatus.FAILED
 ExecutionStatus.CANCELLED
 ```
+
+---
+
+## Version pinning (durable runs)
+
+A durable run outlives the process that started it — and the *deployment*. The
+checkpoint is resumed hours later, by a pod running whatever definition the
+current release ships. If that definition changed (a node inserted, an edge
+rerouted, a condition rewritten) the resumed run replays recorded outputs into
+a graph that no longer matches them. Nothing errors; the run simply takes a
+path it was never on.
+
+`WorkflowExecutor.execute` therefore **pins** the definition to the run on its
+first pass, and verifies it on every resume. The pin lives in
+`Checkpoint.plugin_data`, which already survives a resume — no schema change,
+and a checkpoint written before this existed simply has no pin and gets one.
+
+```python
+from core.workflows import definition_fingerprint, pin_version
+
+pin_version(workflow)
+# WorkflowVersion(version='1.0.0', fingerprint='9f2c…')
+```
+
+`version` alone is not enough: it is a string a human maintains, and the edit
+this guards against is precisely the one nobody thought to bump a version for.
+So the pin carries a **fingerprint** as well — a digest of the graph's
+executable structure.
+
+| Covered by the fingerprint | Deliberately ignored |
+| --- | --- |
+| node ids, types, `config` | node `label` |
+| `agent_id`, `tool_id` | canvas `position` |
+| `condition_expression` | workflow `name`, `description` |
+| `timeout`, `retries`, `retry_backoff` | `metadata`, timestamps |
+| every edge, including `condition_label` | node and edge storage order |
+
+Cosmetic edits are excluded on purpose: a fingerprint that invalidates every
+live run because someone renamed a label gets switched off, and then it guards
+nothing.
+
+`BASELITH_WORKFLOW_VERSION_PINNING` selects the stage:
+
+| Value | Behaviour |
+| --- | --- |
+| `off` | Pins are still recorded; mismatches ignored. |
+| `warn` | The mismatch is logged and the run continues on the pinned identity. |
+| `enforce` *(default)* | The run stops: `execute()` returns a `FAILED` result carrying the mismatch. |
+
+`enforce` is safe as the default because a run that predates the mechanism
+carries no pin — it is pinned on first sight and can never mismatch
+retroactively. Only a definition genuinely edited *during* a live run is
+refused. A run without a checkpoint is never pinned: there is nothing to
+resume, so there is nothing a later deploy could change underneath it.
 
 ---
 

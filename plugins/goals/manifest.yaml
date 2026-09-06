@@ -6,4 +6,13 @@ tags:
 - goals
 - tracking
 - workflow
+# Declared capabilities. Goal tracking is in-process bookkeeping: nothing
+# outbound, no tool, no credential, no file.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
 integrity_sha256: 76811d132e6354bbd83de795715b978a3b4ac217fef67fecd7d4c6c1e1904988

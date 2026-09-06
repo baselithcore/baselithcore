@@ -165,18 +165,26 @@ def test_rls_migration_covers_every_tenant_scoped_table() -> None:
     assert "ENABLE ROW LEVEL SECURITY" in migration_text
 
 
-def test_rls_table_list_matches_the_migration() -> None:
-    """``core.db.ddl`` and the migration must name the same tables."""
+def test_rls_table_list_matches_the_migrations() -> None:
+    """``core.db.ddl`` names exactly the tables the migrations protect.
+
+    Migration 008 retrofits the policy onto the tables that predate it; every
+    table added afterwards declares its own ``TENANT_SCOPED_TABLES`` in the
+    migration that creates it. The union is the contract.
+    """
     from core.db.ddl import RLS_PROTECTED_TABLES
 
-    spec = importlib.util.spec_from_file_location(
-        "rls_migration", MIGRATIONS_DIR / "008_row_level_security.py"
-    )
-    assert spec is not None and spec.loader is not None
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    declared: set[str] = set()
+    for path in sorted(MIGRATIONS_DIR.glob("*.py")):
+        if "TENANT_SCOPED_TABLES" not in path.read_text(encoding="utf-8"):
+            continue
+        spec = importlib.util.spec_from_file_location(f"rls_{path.stem}", path)
+        assert spec is not None and spec.loader is not None
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        declared |= set(migration.TENANT_SCOPED_TABLES)
 
-    assert migration.TENANT_SCOPED_TABLES == RLS_PROTECTED_TABLES
+    assert declared == set(RLS_PROTECTED_TABLES)
 
 
 def test_ddl_module_has_no_core_to_plugin_import() -> None:

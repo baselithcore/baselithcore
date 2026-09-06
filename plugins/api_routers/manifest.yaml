@@ -10,4 +10,13 @@ tags:
 - routers
 - fastapi
 category: infrastructure
+# Declared capabilities. This plugin mounts HTTP routers; it makes no outbound
+# request, registers no tool and reads no credential of its own.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
 integrity_sha256: d1829c0d26bcea79f35da059c757c428c1d050dbda0057d3df57f6cd83659748

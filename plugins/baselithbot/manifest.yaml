@@ -52,4 +52,24 @@ python_dependencies:
 - cryptography>=42.0.0
 plugin_dependencies:
   browser_agent: '>=0.1.0'
+# Declared capabilities. Browsing, webhooks and MCP all target URLs the
+# operator or the model supplies, so the honest egress declaration is "any
+# host" — that is still information: it says this plugin is an outbound one,
+# unlike api-routers or goals. The secrets are the webhook-signing and
+# replay-encryption keys it verifies inbound requests with.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools:
+  - '*'
+  secrets:
+  - BASELITHBOT_INBOUND_GENERIC_SECRET
+  - BASELITHBOT_REPLAY_ENCRYPTION_KEY
+  - DISCORD_PUBLIC_KEY
+  - SLACK_SIGNING_SECRET
+  - TELEGRAM_WEBHOOK_SECRET
+  filesystem:
+  - configs/plugins.yaml
 integrity_sha256: 01b2d0dc80417f9028ddc6417972b37f5ff784d45dce083c8816cc355cd01fa9

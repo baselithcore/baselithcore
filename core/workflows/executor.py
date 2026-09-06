@@ -19,6 +19,7 @@ from .conditions import (  # noqa: F401  (re-export: tests and callers import fr
     _ast_interpret,
     _safe_condition,
 )
+from .versioning import VersionMismatchError, pin_run_definition
 
 logger = get_logger(__name__)
 
@@ -188,6 +189,19 @@ class WorkflowExecutor:
                 workflow_id=workflow.id,
                 status=ExecutionStatus.FAILED,
                 error=f"Validation failed: {errors[0]}",
+            )
+
+        # A durable run outlives the deployment that started it. Pin the
+        # definition to the run so a resume cannot replay recorded outputs
+        # into a graph that has since been edited.
+        try:
+            pin_run_definition(workflow, checkpoint)
+        except VersionMismatchError as exc:
+            logger.error(str(exc))
+            return WorkflowResult(
+                workflow_id=workflow.id,
+                status=ExecutionStatus.FAILED,
+                error=str(exc),
             )
 
         # Create execution context

@@ -12,4 +12,15 @@ category: ai
 required_resources:
 - llm
 - sandbox
+# Declared capabilities. Reaches the model through the core LLM service, which
+# is not plugin-attributable egress, and executes code inside the sandbox
+# resource rather than the host filesystem.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
 integrity_sha256: 1a653d7e9b9758eabcaffe5fd1e706cac8fb6c945605e5cc387f9a5cf76660ad

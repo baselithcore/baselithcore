@@ -375,6 +375,67 @@ async def enqueue_heavy_task(data):
 
 ---
 
+## Durable events (crash-safe, cross-replica)
+
+The bus delivers to the handlers registered **in this process, right now**.
+Two consequences a multi-replica deployment cannot live with:
+
+- a handler scheduled with `wait=False` is an `asyncio` task, so a worker
+  killed mid-flight takes the event with it, leaving no record it existed;
+- two pods each have their own bus, so an event emitted on one is invisible to
+  a handler that only runs on the other.
+
+`core/events/stream.py` adds an ordered, replayable log in front of the bus.
+Consumers read through a **consumer group**: each record goes to exactly one
+member and stays *pending* until that member acknowledges it. A consumer that
+dies leaves its records pending rather than consumed, and `reclaim()` hands
+them to a live member.
+
+| Component | Role |
+|-----------|------|
+| `EventStream` | Protocol: `append` / `ensure_group` / `read` / `ack` / `reclaim` |
+| `InMemoryEventStream` | Full consumer-group semantics in-process — the reference implementation, for development and tests |
+| `RedisEventStream` | Redis Streams backend (`stream_redis.py`): `XADD`, `XREADGROUP`, `XACK`, `XAUTOCLAIM` |
+| `DurableEventBridge` | Publishes to the log *and* the local bus, and replays the log onto this process's bus (`durable.py`) |
+
+```python
+from core.events import DurableEventBridge, get_event_bus
+from core.events.stream_redis import RedisEventStream
+
+bridge = DurableEventBridge(
+    RedisEventStream(redis_client),
+    bus=get_event_bus(),
+    group="projections",
+)
+await bridge.start()                                   # background consumer
+await bridge.publish("order.paid", {"order_id": 7})    # logged, then emitted
+...
+await bridge.stop()
+```
+
+The append happens **before** the local emit: an event emitted and lost before
+it reached the log is exactly the failure this removes. Consumption never feeds
+back into the log — the bridge emits on the bus rather than republishing — so a
+handler is free to `publish()` a *derived* event, which is recorded like any
+other.
+
+Every replica of one deployment shares a group; that is what makes each record
+handled once rather than once per replica. A new group starts at the end of the
+log (`XGROUP CREATE ... $`), so a replica coming up does not replay history.
+The emitting tenant travels with the record and is restored before handlers
+run, because a replica has no request context of its own.
+
+!!! warning "At-least-once, not exactly-once"
+    A record is acknowledged **after** its handlers run, so a process that dies
+    in between will see it again. Handlers must be idempotent. For tool calls
+    that is what
+    [`core.orchestration.idempotency`](orchestration.md#cross-process-tool-idempotency-idempotencypy)
+    provides. A record that keeps failing is dropped after
+    `POISON_DELIVERY_THRESHOLD` (5) deliveries rather than blocking the reclaim
+    path forever.
+
+---
+
 ## Configuration
 
 ```env title=".env"

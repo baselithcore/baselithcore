@@ -21,4 +21,17 @@ python_dependencies:
 - mineru[pipeline]>=3.4.4,<4
 optional_resources:
 - internet
+# Declared capabilities. The web source fetches operator-supplied URLs and the
+# filesystem source reads operator-supplied paths, so neither set can be
+# narrowed here — that is the plugin's purpose, and saying so plainly is worth
+# more than an understated list.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools: []
+  secrets: []
+  filesystem:
+  - '*'
 integrity_sha256: d64d16d156781402b582289acb8abba405000252d98086ebef7829d28327c587

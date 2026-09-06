@@ -23,7 +23,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.events.bus import EventBus, get_event_bus, reset_event_bus
+from core.events.durable import DEFAULT_CONSUMER_GROUP, DurableEventBridge
 from core.events.names import EventNames
+from core.events.stream import (
+    DEFAULT_STREAM_MAXLEN,
+    EventStream,
+    InMemoryEventStream,
+    StreamRecord,
+    StreamStats,
+)
 from core.events.types import (
     AsyncHandler,
     Event,
@@ -56,6 +64,14 @@ __all__ = [
     "reset_event_bus",
     # Names
     "EventNames",
+    # Durable stream
+    "DEFAULT_CONSUMER_GROUP",
+    "DEFAULT_STREAM_MAXLEN",
+    "DurableEventBridge",
+    "EventStream",
+    "InMemoryEventStream",
+    "StreamRecord",
+    "StreamStats",
     # Validation & DLQ
     "DeadLetterEntry",
     "DeadLetterQueue",
