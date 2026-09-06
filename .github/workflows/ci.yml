@@ -799,7 +799,20 @@ jobs:
     # extra token.
     name: Release Container Image
     needs: [release]
-    if: needs.release.outputs.new_release_published == 'true'
+    # DISABLED by default. The image build is the longest and most expensive
+    # job in the pipeline (multi-arch, torch + playwright + pre-cached models)
+    # and its post-push Trivy gate fails the whole release on base-image CVEs
+    # that have nothing to do with the change being released. It is therefore
+    # opt-in: the job is skipped unless the repository variable
+    # RELEASE_IMAGE_ENABLED is set to the string "true"
+    # (Settings -> Secrets and variables -> Actions -> Variables). An unset
+    # variable evaluates to the empty string, so the default is off.
+    #
+    # Nothing else is removed: release-image.yml keeps its `workflow_dispatch`
+    # trigger, so an image can still be cut by hand for any tag at any time.
+    if: >-
+      needs.release.outputs.new_release_published == 'true'
+      && vars.RELEASE_IMAGE_ENABLED == 'true'
     uses: ./.github/workflows/release-image.yml
     # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
     # the image job needs are declared here. GITHUB_TOKEN itself is passed

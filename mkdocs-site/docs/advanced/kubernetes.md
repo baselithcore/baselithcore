@@ -88,9 +88,23 @@ cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
 
 ## Supply chain: signed images & provenance
 
-Release images (`linux/amd64` + `linux/arm64`, built from `Dockerfile-full`)
-are pushed to GHCR, **signed with cosign** (keyless, Sigstore OIDC), scanned
-with Trivy, and carry two kinds of attestation
+!!! warning "Image publication is opt-in — a release does not build one"
+    The image job is **disabled by default**: `ci.yml` runs it only when the
+    repository variable `RELEASE_IMAGE_ENABLED` is set to `true`. So a new
+    version on PyPI does **not** imply a matching tag on GHCR, and the tag the
+    chart defaults to may not exist for the version you are deploying. Check
+    before you rely on it, and pin `image.tag` to a tag you have verified:
+
+    ```bash
+    docker manifest inspect ghcr.io/baselithcore/baselithcore:<version>
+    ```
+
+    To cut one on demand, run the **Release Container Image** workflow from the
+    Actions tab (`workflow_dispatch`) with the git tag, e.g. `v0.31.0`.
+
+When it does run, release images (`linux/amd64` + `linux/arm64`, built from
+`Dockerfile-full`) are pushed to GHCR, **signed with cosign** (keyless,
+Sigstore OIDC), scanned with Trivy, and carry two kinds of attestation
 (`.github/workflows/release-image.yml`):
 
 - **BuildKit attestations** — SLSA provenance (`provenance: mode=max`) and an
