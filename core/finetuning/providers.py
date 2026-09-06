@@ -60,13 +60,13 @@ class OpenAIProvider:
         client = AsyncOpenAI(api_key=self.api_key)
 
         # Upload training file
-        with open(train_path, "rb") as f:
+        with open(train_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
             train_file = await client.files.create(file=f, purpose="fine-tune")
 
         # Upload validation file if provided
         val_file_id = None
         if val_path:
-            with open(val_path, "rb") as f:
+            with open(val_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
                 val_file = await client.files.create(file=f, purpose="fine-tune")
                 val_file_id = val_file.id
 
@@ -185,7 +185,7 @@ class TogetherProvider:
 
         async with create_hardened_async_client() as client:
             # Upload file
-            with open(train_path, "rb") as f:
+            with open(train_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
                 file_response = await client.post(
                     "https://api.together.xyz/v1/files",
                     headers={"Authorization": f"Bearer {self.api_key}"},

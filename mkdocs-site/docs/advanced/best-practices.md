@@ -191,6 +191,10 @@ These rules are no longer documentation-only. The framework now enforces them th
 - `python scripts/check_official_plugin_typing.py`
 - `python scripts/check_core_strict_typing.py`
 - `python scripts/check_file_size.py`
+- `python scripts/check_exception_hygiene.py`
+- `python scripts/check_public_api.py`
+- `python scripts/check_sdk_contract.py`
+- `python scripts/check_perf_budget.py` (scheduled perf run)
 
 These checks are wired into CI and pre-commit for the supported slices of the codebase.
 

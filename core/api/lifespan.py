@@ -101,14 +101,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     try:
         raw_config_path = os.environ.get("PLUGIN_CONFIG_PATH", "configs/plugins.yaml")
-        config_path = Path(raw_config_path).resolve()
+        config_path = Path(raw_config_path).resolve()  # noqa: ASYNC240 - one-shot config read at startup, before the server accepts traffic
         cwd = Path.cwd().resolve()
         if not config_path.is_relative_to(cwd):
             raise ValueError(
                 f"PLUGIN_CONFIG_PATH must resolve inside {cwd}; got {config_path}"
             )
         if config_path.exists():
-            with open(config_path) as f:
+            with open(config_path) as f:  # noqa: ASYNC230 - one-shot config read at startup, before the server accepts traffic
                 plugin_configs = yaml.safe_load(f) or {}
             logger.info(f"📄 Loaded plugin configurations from {config_path}")
         else:
@@ -119,6 +119,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     analyzer = None
     try:
         from core.bootstrap.lazy_init import RESOURCE_FACTORIES
+        from core.config import get_storage_config
+        from core.db.schema import (
+            init_core_schema_best_effort,
+            should_run_core_schema_init,
+        )
         from core.di.lazy_registry import get_lazy_registry
         from core.plugins.resource_analyzer import ResourceAnalyzer
 
@@ -147,6 +152,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             core_storage: Any = await lazy_registry.get_or_create("postgres")
             app.state.core_storage = core_storage
             core_resources_initialized.add("postgres")
+        elif should_run_core_schema_init(
+            required_resources, postgres_enabled=get_storage_config().postgres_enabled
+        ):
+            # `chat_feedback`, `interactions`, `feedback` and `tenants` are
+            # core's tables, not a plugin's. Without this, a deployment whose
+            # enabled plugins list Postgres as merely *optional* booted healthy
+            # with no schema at all, and the first core write returned 500.
+            logger.info(
+                "🗄️ Initializing core Postgres schema (no plugin requires it)..."
+            )
+            if await init_core_schema_best_effort():
+                core_resources_initialized.add("postgres")
 
         if "vectorstore" in required_resources:
             logger.info("📦 Initializing Qdrant (required by plugins)...")

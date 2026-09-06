@@ -209,3 +209,21 @@ npx openapi-typescript sdk/openapi.json -o client.d.ts
 # Python client
 openapi-python-client generate --path sdk/openapi.json
 ```
+
+### The clients stay in step with the schema
+
+The two clients are hand-written and cover a deliberate subset — chat,
+streaming chat, feedback, health, readiness — not the full route surface.
+`scripts/check_sdk_contract.py` keeps that subset honest:
+
+```bash
+python scripts/check_sdk_contract.py --list   # what each client calls
+python scripts/check_sdk_contract.py          # the gate
+```
+
+It parses the routes out of the client sources (Python via AST, TypeScript via
+the request helpers) and fails when a client calls a `(method, path)` the
+committed schema does not declare, or when the two clients stop calling the
+same set. The `openapi_drift` job keeps `sdk/openapi.json` in step with the app;
+this closes the other half, so a renamed route can no longer reach a consumer's
+application before it reaches CI.

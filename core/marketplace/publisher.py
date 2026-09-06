@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import zipfile
@@ -51,6 +52,63 @@ def _inject_integrity(manifest_path: Path, integrity_hash: str) -> bytes | None:
         return None
 
 
+def _build_archive(
+    path: Path,
+    integrity_hash: str,
+    excluded_dir_parts: set[str],
+    excluded_ui_src_prefix: tuple[str, str],
+    manifest_filenames: set[str],
+) -> io.BytesIO:
+    """Zip a plugin directory in memory.
+
+    Walking a plugin tree and deflating it is real CPU and disk work — a large
+    plugin (a bundled UI, vendored assets) stalls the event loop for as long as
+    it takes. The caller runs this on a worker thread; keeping it a plain
+    synchronous function is what makes that possible.
+    """
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path in path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            parts = file_path.relative_to(path).parts
+            # Skip dotfiles / dotdirs (VCS, caches, env files).
+            if any(p.startswith(".") for p in parts):
+                continue
+            # Skip known-bloat directories anywhere in the tree.
+            if any(p in excluded_dir_parts for p in parts):
+                # But explicitly allow ui/dist as it contains the compiled frontend
+                if len(parts) >= 2 and parts[0] == "ui" and parts[1] == "dist":
+                    pass
+                else:
+                    continue
+            # Skip *.egg-info directories (suffix match, not exact).
+            if any(p.endswith(".egg-info") for p in parts):
+                continue
+            # Skip UI sources — only compiled `ui/dist/` ships.
+            if (
+                len(parts) >= 2
+                and parts[0] == excluded_ui_src_prefix[0]
+                and parts[1] == excluded_ui_src_prefix[1]
+            ):
+                continue
+            # Skip compiled Python bytecode.
+            if file_path.suffix in {".pyc", ".pyo"}:
+                continue
+
+            # Inject integrity_sha256 into the top-level manifest on the fly.
+            if len(parts) == 1 and file_path.name in manifest_filenames:
+                rewritten = _inject_integrity(file_path, integrity_hash)
+                if rewritten is not None:
+                    zip_file.writestr(str(file_path.relative_to(path)), rewritten)
+                    continue
+
+            zip_file.write(file_path, file_path.relative_to(path))
+
+    zip_buffer.seek(0)
+    return zip_buffer
+
+
 class PluginPublisher:
     """
     Handles packaging and submitting plugins to the central marketplace natively in the core.
@@ -84,7 +142,7 @@ class PluginPublisher:
             Dict[str, Any]: Result of the publication process.
         """
         path = Path(plugin_path)
-        if not path.is_dir():
+        if not path.is_dir():  # noqa: ASYNC240 - single stat() call; the zip work moved to a worker thread
             return {
                 "status": "error",
                 "message": f"Path is not a directory: {plugin_path}",
@@ -133,46 +191,14 @@ class PluginPublisher:
         integrity_hash = compute_plugin_hash(path)
         manifest_filenames = {"manifest.yaml", "manifest.yml", "manifest.json"}
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for file_path in path.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                parts = file_path.relative_to(path).parts
-                # Skip dotfiles / dotdirs (VCS, caches, env files).
-                if any(p.startswith(".") for p in parts):
-                    continue
-                # Skip known-bloat directories anywhere in the tree.
-                if any(p in excluded_dir_parts for p in parts):
-                    # But explicitly allow ui/dist as it contains the compiled frontend
-                    if len(parts) >= 2 and parts[0] == "ui" and parts[1] == "dist":
-                        pass
-                    else:
-                        continue
-                # Skip *.egg-info directories (suffix match, not exact).
-                if any(p.endswith(".egg-info") for p in parts):
-                    continue
-                # Skip UI sources — only compiled `ui/dist/` ships.
-                if (
-                    len(parts) >= 2
-                    and parts[0] == excluded_ui_src_prefix[0]
-                    and parts[1] == excluded_ui_src_prefix[1]
-                ):
-                    continue
-                # Skip compiled Python bytecode.
-                if file_path.suffix in {".pyc", ".pyo"}:
-                    continue
-
-                # Inject integrity_sha256 into the top-level manifest on the fly.
-                if len(parts) == 1 and file_path.name in manifest_filenames:
-                    rewritten = _inject_integrity(file_path, integrity_hash)
-                    if rewritten is not None:
-                        zip_file.writestr(str(file_path.relative_to(path)), rewritten)
-                        continue
-
-                zip_file.write(file_path, file_path.relative_to(path))
-
-        zip_buffer.seek(0)
+        zip_buffer = await asyncio.to_thread(
+            _build_archive,
+            path,
+            integrity_hash,
+            excluded_dir_parts,
+            excluded_ui_src_prefix,
+            manifest_filenames,
+        )
 
         # NOTE: For security and consistency, we ALWAYS publish to the official marketplace.
         # The registry_url override is ignored for the submission endpoint.

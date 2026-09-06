@@ -84,6 +84,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^core/.*__init__\.py$
+      # The hand-written SDKs must keep calling routes the spec still declares.
+      - id: sdk-contract
+        name: sdk-contract
+        entry: python scripts/check_sdk_contract.py
+        language: system
+        pass_filenames: false
+        files: ^sdk/
       # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
       # exist. Import and route verification (needs the app importable) runs in
       # the CI job `docs_consistency`.

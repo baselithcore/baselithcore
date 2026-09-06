@@ -121,7 +121,6 @@ def run_verify(json_output: bool = False) -> int:
         optional_deps = [
             ("sentence_transformers", "Sentence Transformers (Reranker)"),
             ("qdrant_client", "Qdrant Client (Vector DB)"),
-            ("langchain_text_splitters", "LangChain Text Splitters (Chunking)"),
         ]
 
         for module, name in optional_deps:

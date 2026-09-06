@@ -56,7 +56,6 @@ dependencies = [
   "fastapi>=0.140.13,<0.200",
   "httpx>=0.27.0,<1.0",
   "jsonschema>=4.23.0",
-  "langchain-text-splitters>=1.1.0",
   "markdown-it-py>=3.0.0,<4.0",
   "networkx>=3.0",
   "numpy>=1.24.0",
@@ -274,9 +273,6 @@ computer_use = [
 
 [tool.uv]
 constraint-dependencies = [
-  # GHSA-f4xh-w4cj-qxq8: arbitrary server-side file read in TracingMiddleware
-  # (transitive via langchain-core)
-  "langsmith>=0.8.18",
   # PYSEC-2026-3628: duplicate Host headers forwarded on HTTP/2 -> HTTP/1.1
   # downgrade (request smuggling, CWE-444). Transitive via httpx[http2].
   "h2>=4.4.1",
@@ -349,8 +345,6 @@ ignore = [
     "ASYNC109", # allow explicit `timeout` params on async funcs (deliberate API shape)
     "B008",     # FastAPI Depends()/Query() in defaults is the framework idiom
     # --- Backlog: valuable but too noisy to gate on today; fix incrementally. ---
-    "ASYNC230", # blocking open() in async fns — needs anyio/aiofiles migration
-    "ASYNC240", # blocking pathlib in async fns — needs anyio.Path migration
     "B905",     # zip() without explicit strict= — audit each call before flipping
     "B007",     # unused loop control variable
     "B024",     # ABC without abstract methods
@@ -389,6 +383,8 @@ ignore = [
 # dict()-literals and blocking sleeps are all fine in test code.
 "tests/**" = [
     "B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251",
+    # Blocking file I/O in a test is the test doing its job, not a latency bug.
+    "ASYNC230", "ASYNC240",
     # Fixture credentials, fake tokens, /tmp paths and weak hashes are the
     # subject of a security test, not a finding in one.
     "S105", "S106", "S107", "S108", "S324",
@@ -398,7 +394,18 @@ ignore = [
 ]
 "sdk/python/tests/**" = ["S105", "S106", "S107"]
 "plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
+# Documentation tooling, not shipped runtime.
+"mkdocs-site/**" = ["ASYNC230", "ASYNC240"]
+# ASYNC230/240 are enforced on `core/` only. The kernel is where a blocking
+# read inside an async handler actually costs a request under load, and where
+# every site has been triaged (fixed, or annotated with why it is harmless).
+# Plugins — including third-party ones — are not held to a rule this project
+# has not triaged in their code; the same reasoning as the strict-typing
+# allowlist, which grows package by package rather than landing all at once.
+"plugins/**" = ["ASYNC230", "ASYNC240"]
 "scripts/**" = ["ASYNC250", "RUF013",
+                # One-off admin scripts: blocking file I/O is the point.
+                "ASYNC230", "ASYNC240",
                 # `git`/`python` resolved from PATH is how a dev script is
                 # meant to run; an absolute path would break every venv.
                 "S607"]                          # one-off admin scripts; blocking sleep is fine

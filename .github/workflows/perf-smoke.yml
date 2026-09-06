@@ -3,9 +3,14 @@
 # Boots the real backend against service containers and drives it with the
 # repo's Locust profile (tests/load/locustfile.py) for a short headless run.
 # A red run means the API stopped surviving modest concurrency — a signal for
-# maintainers, never a PR blocker. Chat traffic needs a configured LLM, so
-# this run exercises the public/API-keyed HTTP surface the profile can reach
-# without one; request failures fail the job (Locust's default exit code).
+# maintainers, never a PR blocker.
+#
+# Chat traffic needs a reachable LLM, which this job has none of, so the profile
+# is told to skip it (BASELITH_PERF_SKIP_CHAT) rather than record a run that is
+# 100% failures. The verdict comes from scripts/check_perf_budget.py, not from
+# Locust's exit code: that only reports request failures, so a run that made
+# zero requests — a backend that never came up — used to look exactly like a
+# pass.
 name: Perf Smoke
 
 on:
@@ -43,6 +48,7 @@ jobs:
       BASELITH_ALLOW_UNBOUND_JWT: "true"
       BASELITH_API_KEY: perf-smoke-key
       API_KEYS_USER: '["perf-smoke-key"]'
+      BASELITH_PERF_SKIP_CHAT: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -53,6 +59,11 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[load]"
+      - name: Apply migrations
+        # The app also migrates at boot, but doing it here fails the job on a
+        # broken migration instead of leaving a backend that answers /health
+        # while core's tables are absent.
+        run: python -m alembic upgrade head
       - name: Start backend
         run: |
           export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')"
@@ -68,6 +79,8 @@ jobs:
         run: |
           locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
             --headless -u 10 -r 5 -t 60s --only-summary --csv perf
+      - name: Check performance budget
+        run: python scripts/check_perf_budget.py --stats perf_stats.csv --report
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

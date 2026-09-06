@@ -89,7 +89,7 @@ class PluginRegistry:
                 if datetime.now() - mtime < timedelta(
                     seconds=self.config.registry_cache_ttl
                 ):
-                    with open(self.cache_path) as f:
+                    with open(self.cache_path) as f:  # noqa: ASYNC230 - small local cache file read once per registry refresh
                         data_json = f.read()
                         return self._set_data(
                             RegistryData.model_validate_json(data_json)
@@ -104,7 +104,7 @@ class PluginRegistry:
         if self.config.registry_url.startswith("file://"):
             try:
                 file_path = Path(self.config.registry_url.replace("file://", ""))
-                with open(file_path) as f:
+                with open(file_path) as f:  # noqa: ASYNC230 - small local cache file read once per registry refresh
                     data_json = f.read()
                     data = self._set_data(RegistryData.model_validate_json(data_json))
                     self._save_to_cache(data_json)
@@ -132,7 +132,7 @@ class PluginRegistry:
             # Fallback to expired cache if fetch fails
             if self.cache_path.exists():
                 logger.info("Falling back to existing cache after fetch failure.")
-                with open(self.cache_path) as f:
+                with open(self.cache_path) as f:  # noqa: ASYNC230 - small local cache file read once per registry refresh
                     data_json = f.read()
                     return self._set_data(RegistryData.model_validate_json(data_json))
             raise RuntimeError(f"Could not retrieve marketplace registry: {e}") from e

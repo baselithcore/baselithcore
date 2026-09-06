@@ -120,3 +120,51 @@ async def init_db() -> None:
         return
 
     await ensure_schema()
+
+
+def should_run_core_schema_init(
+    required_resources: set[str], *, postgres_enabled: bool
+) -> bool:
+    """Whether the app lifespan must initialize core's schema itself.
+
+    The startup path initializes Postgres eagerly only when a *plugin* declares
+    it as a required resource. But ``chat_feedback``, ``interactions``,
+    ``feedback`` and ``tenants`` belong to **core**, not to a plugin: on a
+    deployment whose enabled plugins list Postgres as merely *optional*, the
+    Alembic upgrade never ran, the app still reported healthy, and the first
+    core write failed with ``relation "chat_feedback" does not exist``.
+
+    Args:
+        required_resources: Resources the loaded plugins declare as required.
+        postgres_enabled: The ``POSTGRES_ENABLED`` setting.
+
+    Returns:
+        ``True`` when nothing else will have created the schema.
+    """
+    if not postgres_enabled:
+        return False
+    return "postgres" not in required_resources
+
+
+async def init_core_schema_best_effort() -> bool:
+    """Run :func:`init_db` for core's own tables, surviving an unreachable DB.
+
+    Deliberately non-fatal. Before this existed, "Postgres enabled but no plugin
+    requires it, and the database is down" was a degraded boot; making the
+    fallback fatal would turn it into a crash loop. The failure is logged at
+    ``error`` — the schema being absent is exactly what an operator needs to see
+    when the first write starts returning 500s.
+
+    Returns:
+        Whether the initialization completed.
+    """
+    try:
+        await init_db()
+    except Exception as exc:
+        logger.error(
+            "core_schema_init_failed",
+            extra={"error": str(exc)},
+            exc_info=True,
+        )
+        return False
+    return True

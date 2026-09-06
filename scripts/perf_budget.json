@@ -1,0 +1,16 @@
+{
+  "_comment": "Ceilings for the scheduled Locust smoke run (.github/workflows/perf-smoke.yml), checked by scripts/check_perf_budget.py. Set deliberately with wide headroom: a shared CI runner is noisy, so these catch a dead backend or a 10x regression, not a 10% drift. There is no --update-baseline on purpose \u2014 a budget must never absorb a regression by being rewritten from the run that broke it. Calibrated against a real 40s run at 10 users with chat skipped (70 health requests at p95 3ms, 20 feedback at p95 39ms); CI runs 60s, so the request floors sit well below what a healthy run produces and only a dead or crawling backend trips them.",
+  "min_total_requests": 100,
+  "endpoints": {
+    "GET /health": {
+      "min_requests": 40,
+      "p95_ms": 300,
+      "max_failure_ratio": 0.0
+    },
+    "POST /feedback": {
+      "min_requests": 10,
+      "p95_ms": 1500,
+      "max_failure_ratio": 0.0
+    }
+  }
+}

@@ -943,7 +943,33 @@ BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py \
 ```
 
 Task weights (health 5 : chat 10 : feedback 2) approximate a chat-heavy
-workload; tune them in the locustfile. See `tests/load/README.md`.
+workload; tune them in the locustfile. Set `BASELITH_PERF_SKIP_CHAT=true` where
+no LLM provider is reachable, so chat failures do not swamp the run. See
+`tests/load/README.md`.
+
+### Performance budget
+
+The scheduled smoke run (`.github/workflows/perf-smoke.yml`) takes its verdict
+from `scripts/check_perf_budget.py`, not from Locust's exit code — that only
+reports request failures, so a run that made **zero** requests, or one 50x
+slower than the last, both exited 0.
+
+```bash
+python scripts/check_perf_budget.py --stats perf_stats.csv --report
+```
+
+| Check | Catches |
+| --- | --- |
+| `min_total_requests` | a backend that never came up, or a profile whose tasks all raised |
+| per-endpoint `min_requests` | one path silently dropping out of the mix |
+| per-endpoint `p95_ms` | a latency regression |
+| per-endpoint `max_failure_ratio` | errors under modest concurrency |
+| unbudgeted endpoint | a task added to the profile with no budget behind it |
+
+Budgets in `scripts/perf_budget.json` are ceilings set by hand. There is no
+`--update-baseline`: a perf budget rewritten from the run that broke it enforces
+nothing. They carry wide headroom because a shared runner is noisy — observed
+`GET /health` p95 is single-digit milliseconds against a 300 ms budget.
 
 ## Chaos / Resilience Testing
 

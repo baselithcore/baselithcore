@@ -90,6 +90,30 @@ ordinary query error naming it, instead of an opaque permission error on a
 [Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
 for the two-role deployment that makes those policies effective.
 
+### Who runs the migrations
+
+`init_db()` runs the Alembic upgrade at boot unless
+`DB_MIGRATIONS_ON_STARTUP=false` (the pre-deploy migration-job mode the Helm
+chart uses).
+
+The app's startup path initializes Postgres eagerly only when a **plugin**
+declares it a required resource. Core's own tables — `chat_feedback`,
+`interactions`, `feedback`, `tenants` — are not a plugin's concern, so
+`should_run_core_schema_init()` covers the gap: when Postgres is enabled and no
+plugin requires it, the lifespan still runs the upgrade through
+`init_core_schema_best_effort()`.
+
+That path is deliberately non-fatal. "Postgres enabled but no plugin needs it,
+and the database is down" was a degraded boot before; making the fallback fatal
+would turn it into a crash loop. The failure is logged at `error` as
+`core_schema_init_failed`, which is what an operator needs when the first write
+starts returning 500s.
+
+!!! warning "Before this existed"
+    A deployment whose enabled plugins listed Postgres as merely *optional*
+    booted healthy with no schema at all, and the first `POST /v1/feedback`
+    returned 500 with `relation "chat_feedback" does not exist`.
+
 ```python
 from core.db import get_pool_stats
 

@@ -83,7 +83,7 @@ class DockerFactory:
             dockerfile_path = os.path.join(
                 os.path.dirname(__file__), "Dockerfile.sandbox"
             )
-            if not os.path.exists(dockerfile_path):
+            if not os.path.exists(dockerfile_path):  # noqa: ASYNC240 - one-shot existence check during image build
                 # Fallback to pulling python:3.12-slim if custom dockerfile missing
                 logger.warning(
                     f"Dockerfile.sandbox not found at {dockerfile_path}. Pulling python:3.12-slim instead."

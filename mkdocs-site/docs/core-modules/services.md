@@ -895,6 +895,7 @@ core/services/vectorstore/
 ├── service.py                # VectorStoreService
 ├── embedding_cache.py        # Cached embedding generation (model-scoped keys)
 ├── chunking.py               # Text chunking utilities (default pipeline)
+├── recursive_splitter.py     # The recursive character splitter (no LangChain)
 ├── splitters.py              # Document-aware splitters (markdown, python)
 ├── chunking_hierarchical.py  # Parent/child chunking for small-to-big retrieval
 └── providers/
@@ -1020,6 +1021,24 @@ Embeddings are produced through an `EmbedderProtocol` implementation passed to
 `index()` / `search()` (or resolved from configuration). The vector store caches
 embeddings transparently via its model-scoped `embedding_cache`. There is no
 `EmbeddingService` export in `core.services.vectorstore`.
+
+### Recursive chunking (dependency-free)
+
+`chunk_text()` splits on `["\n\n", "\n", ". ", " ", ""]`, recursing into any
+piece that is still over `chunk_size` and packing the rest with
+`chunk_overlap`. The algorithm lives in
+`core/services/vectorstore/recursive_splitter.py`.
+
+It used to come from LangChain. One algorithm was pulling
+`langchain-text-splitters` → `langchain-core` → `langsmith` — ten packages, and
+a security constraint the project had to carry (`langsmith>=0.8.18`,
+GHSA-f4xh-w4cj-qxq8). The in-repo implementation is **byte-for-byte
+compatible**: chunk boundaries are not cosmetic, since a shift re-chunks every
+indexed corpus and leaves a deployed vector store holding chunks that no longer
+correspond to anything the splitter produces.
+`tests/unit/core/services/vectorstore/test_recursive_splitter.py` pins the
+output against results captured from LangChain 1.1.2 across a matrix of texts
+and `(chunk_size, chunk_overlap)` pairs.
 
 ### Document-Aware Splitters
 
