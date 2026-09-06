@@ -70,8 +70,21 @@ cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
     `ghcr.io/baselithcore/baselithcore`, the name the release workflow
     publishes under (`IMAGE_NAME: ${{ github.repository }}` in
     `.github/workflows/release-image.yml`); `image.tag` defaults to
-    `.Chart.AppVersion` (`0.30.0`). Override both with `--set` when you
+    `.Chart.AppVersion` (`0.31.0`). Override both with `--set` when you
     mirror the image into a private registry.
+
+!!! warning "First publish: check the package is public"
+    A GHCR package created by a workflow is not guaranteed to be world-readable,
+    and the chart pulls anonymously — `pullSecrets` is empty by default. After
+    the first release that pushes an image, confirm an unauthenticated pull
+    works before relying on the defaults:
+
+    ```bash
+    docker logout ghcr.io && docker pull ghcr.io/baselithcore/baselithcore:0.31.0
+    ```
+
+    A `denied` / `401` means the package is still private: make it public under
+    the org's package settings, or set `pullSecrets` in your values.
 
 ## Supply chain: signed images & provenance
 
@@ -88,7 +101,7 @@ with Trivy, and carry two kinds of attestation
 Verify before deploying:
 
 ```bash
-IMAGE=ghcr.io/baselithcore/baselithcore:0.30.0
+IMAGE=ghcr.io/baselithcore/baselithcore:0.31.0
 
 # 1. Cosign signature (keyless — issued via GitHub Actions OIDC)
 cosign verify "$IMAGE" \

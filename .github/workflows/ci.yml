@@ -690,6 +690,9 @@ jobs:
       attestations: write    # actions/attest-build-provenance
     outputs:
       new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      # Consumed by `release_image` below, which needs the version to tag the
+      # container image with (no leading `v` — the image job strips one anyway).
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -784,3 +787,31 @@ jobs:
           print-hash: true
           # PEP 740: publish sigstore attestations for every dist file.
           attestations: true
+
+  release_image:
+    # The container image half of a release, and the reason it is invoked from
+    # HERE rather than left to its own `release: published` trigger: that event
+    # is raised by semantic-release using GITHUB_TOKEN, and GitHub does not
+    # start workflow runs from it (recursion guard). The image workflow had
+    # therefore never run once across five releases, while the Helm chart's
+    # default image.repository already pointed at ghcr.io/baselithcore/
+    # baselithcore. Calling it inside this run needs no extra event and no
+    # extra token.
+    name: Release Container Image
+    needs: [release]
+    if: needs.release.outputs.new_release_published == 'true'
+    uses: ./.github/workflows/release-image.yml
+    # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
+    # the image job needs are declared here. GITHUB_TOKEN itself is passed
+    # automatically — no `secrets: inherit`, since that is the only secret the
+    # called workflow reads (GHCR login).
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # keyless cosign + SLSA provenance
+      attestations: write # actions/attest-build-provenance
+    with:
+      # The git TAG, so the image job checks out the bumped tree rather than
+      # the pre-release SHA that started this run. `v` is stripped again on the
+      # other side to form the image tag.
+      tag: v${{ needs.release.outputs.new_release_version }}

@@ -12,8 +12,8 @@
 
 [![CI](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/baselith-core.svg?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
-[![Version 0.30.0](https://img.shields.io/badge/version-0.30.0-0b5394.svg?style=flat-square)](CHANGELOG.md)
-[![Tests: 6475 passing](https://img.shields.io/badge/tests-6475%20passing-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
+[![Version 0.31.0](https://img.shields.io/badge/version-0.31.0-0b5394.svg?style=flat-square)](CHANGELOG.md)
+[![Tests: 6884 passing](https://img.shields.io/badge/tests-6884%20passing-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
 [![Coverage 80%](https://img.shields.io/badge/coverage-80%25-brightgreen.svg?style=flat-square)](https://docs.baselithcore.xyz/advanced/testing/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
@@ -160,7 +160,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect.
 
-Version 0.30.0 ships **6,475 tests** at **80% branch coverage**, gated in CI at
+Version 0.31.0 ships **6,884 tests** at **80% branch coverage**, gated in CI at
 a 75% floor alongside strict typing, architecture-boundary and docs-consistency
 checks.
 

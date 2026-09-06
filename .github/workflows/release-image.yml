@@ -1,8 +1,24 @@
 name: Release Container Image
 
-# Build, push, sign, and attest the container image. Runs after a GitHub Release
-# is published (semantic-release) and can be triggered manually.
+# Build, push, sign, and attest the container image.
+#
+# Trigger history, worth keeping: `release: published` alone NEVER fired. The
+# release is created by semantic-release using `secrets.GITHUB_TOKEN`, and
+# GitHub deliberately does not start workflow runs from events raised by that
+# token (its recursion guard). Five releases shipped with zero images pushed,
+# while the Helm chart's default `image.repository` already pointed at
+# ghcr.io/baselithcore/baselithcore. `workflow_call` is therefore the real
+# entry point: ci.yml invokes it inside the same run as the release, so no
+# second event is needed. The other two triggers stay as escape hatches — a
+# release published by a human (their token does start runs) and a manual
+# re-run for a tag.
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Git tag to build, e.g. v0.31.0 (the leading v is stripped for the image tag)"
+        required: true
+        type: string
   release:
     types: [published]
   workflow_dispatch:
@@ -30,6 +46,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
+          # Pin to the release TAG, not to the SHA that started the run. When
+          # ci.yml calls this workflow, that SHA is the commit *before*
+          # semantic-release bumped the version — checking it out would ship an
+          # image tagged 0.31.0 whose core/_version.py still said 0.30.0. The
+          # tag is pushed by the release job before this one starts. Empty (a
+          # bare workflow_dispatch) keeps the default ref.
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
           persist-credentials: false
 
       - name: Resolve image tag
@@ -70,6 +93,17 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.image }}:latest
+          # `org.opencontainers.image.source` is what links the GHCR package to
+          # this repository: without it the package shows up unattached (absent
+          # from the repo's Packages sidebar, inheriting none of its settings).
+          # The rest is provenance a puller can read straight off the manifest.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.title=BaselithCore
+            org.opencontainers.image.description=Modular orchestration engine for production-grade agentic AI
           # SLSA provenance + SBOM attached to the image at push time.
           provenance: mode=max
           sbom: true
