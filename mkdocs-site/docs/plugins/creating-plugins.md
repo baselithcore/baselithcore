@@ -140,6 +140,7 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
 | `environment_variables` | No       | Required environment variables, reported by `baselith doctor` — a list of names, or a list of mappings with `name`, `description` and `required` (only the names are used). Also **widens the plugin `.env` allowlist** to these exact keys, for names the plugin does not own (`SLACK_SIGNING_SECRET`); framework-protected keys can never be declared this way. See [the policy](../core-modules/plugins.md#two-gates-namespace-allowlist-then-protected-key-denylist) |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
+| `plugin_dependencies`   | No       | Map of plugin name to version constraint (e.g. `my_plugin: '>=2.0.0'`). Declares that this plugin needs another one, and **orders initialization** — see below |
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 
 !!! danger "Name must equal the directory name"
@@ -156,6 +157,22 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
     lowercase — static/SPA assets are only mounted for names matching
     `^[a-z0-9][a-z0-9._-]{0,63}$`. If another plugin declares `plugin_dependencies`
     against yours, the dependency key must be this exact string.
+
+!!! tip "`plugin_dependencies` decides who initializes first"
+    The loader topologically sorts plugins before initializing them, so a plugin
+    named in your `plugin_dependencies` is guaranteed to have completed
+    `initialize()` — and therefore to have registered its services in the
+    `ServiceRegistry` — before yours runs. Declare it whenever you resolve
+    another plugin's service, even lazily inside a request: without the
+    declaration the order is arbitrary, and your guard may observe a service
+    that is simply not registered yet.
+
+    A dependency that is absent from the deployment is ignored rather than
+    treated as an error, so an optional integration does not block ordering.
+
+    Both manifest spellings feed the sort: the current `plugin_dependencies`
+    map and the legacy `dependencies` list of bare names. Prefer
+    `plugin_dependencies` — it also carries the version constraint.
 
 ---
 

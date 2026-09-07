@@ -30,15 +30,32 @@ def test_session_options_carry_both_guards():
     assert "-c idle_in_transaction_session_timeout=7000" in opts
 
 
-def test_every_pool_uses_the_shared_options(monkeypatch):
-    calls: list[dict] = []
+def _pool_factory(calls: list[dict], name: str):
+    """A pool double that is complete enough for the constructor call.
+
+    The pools are built with ``check=<PoolClass>.check_connection``, so a bare
+    function is not a usable stand-in — it has no such attribute. That the
+    check is wired at all is covered by ``test_pool_connection_check.py``;
+    here it only has to exist so the constructor can be reached.
+    """
 
     def _factory(**kwargs):
         calls.append(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(connection, "ConnectionPool", _factory)
-    monkeypatch.setattr(connection, "AsyncConnectionPool", _factory)
+    _factory.check_connection = f"{name}.check_connection"
+    return _factory
+
+
+def test_every_pool_uses_the_shared_options(monkeypatch):
+    calls: list[dict] = []
+
+    monkeypatch.setattr(
+        connection, "ConnectionPool", _pool_factory(calls, "ConnectionPool")
+    )
+    monkeypatch.setattr(
+        connection, "AsyncConnectionPool", _pool_factory(calls, "AsyncConnectionPool")
+    )
     monkeypatch.setattr(connection, "POSTGRES_ENABLED", True)
     monkeypatch.setattr(connection, "DB_REPLICA_CONNINFO", "postgresql://replica")
     for name in ("_POOL", "_ASYNC_POOL", "_REPLICA_POOL", "_ASYNC_REPLICA_POOL"):

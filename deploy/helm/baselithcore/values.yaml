@@ -94,7 +94,17 @@ ingress:
 # downloaded the models.
 resources:
   requests:
-    cpu: 250m
+    # requests.cpu is not only a scheduling reservation: it is the HPA's
+    # *denominator*. With `targetCPUUtilizationPercentage: 70` a 250m request
+    # scales the deployment up the moment a pod passes 175m — and this app
+    # idles around 65m but crosses that on any burst, including its own cold
+    # start. The autoscaler then answers a burst one pod could absorb by
+    # creating another pod that costs a multi-GB cold start to become useful.
+    # 500m moves the trigger to 350m: above the idle band, below the 1.1-1.3
+    # cores measured under real request load. Raise it further if your pods
+    # genuinely run hotter — but move `targetCPUUtilizationPercentage` with it
+    # deliberately, not by accident.
+    cpu: 500m
     memory: 1536Mi
   limits:
     # No CPU limit on purpose. CPU is compressible: a limit cannot prevent
@@ -160,6 +170,23 @@ podDisruptionBudget:
 
 # Hardened pod/container security context. Matches the image's non-root
 # appuser (uid 1000) and a read-only root filesystem.
+#
+# Together these satisfy the Pod Security Standards `restricted` profile, but
+# satisfying it and having it enforced are different claims — and only the
+# second one survives somebody adding a pod later. Enforcement is a label on
+# the namespace, which this chart deliberately does not own (a chart that
+# creates its own namespace fights `helm --create-namespace` and every GitOps
+# tool). Put it wherever the namespace is created:
+#
+#   kubectl label namespace <ns> \
+#     pod-security.kubernetes.io/enforce=restricted \
+#     pod-security.kubernetes.io/enforce-version=latest \
+#     pod-security.kubernetes.io/audit=restricted \
+#     pod-security.kubernetes.io/warn=restricted
+#
+# Anything else you run in that namespace has to comply too — an in-cluster
+# Postgres or Redis usually needs a uid and a couple of writable volumes
+# before it does.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -266,6 +293,47 @@ worker:
       maxSurge: 0
       maxUnavailable: 1
 
+  # Queue-depth autoscaling via KEDA (requires the KEDA operator in the
+  # cluster; the chart renders a ScaledObject, nothing more).
+  #
+  # CPU is the wrong signal for a queue consumer: a worker with a thousand
+  # jobs waiting and one in flight looks exactly like an idle one to the HPA,
+  # because the backlog lives in Redis, not in the pod. KEDA reads the list
+  # length and drives a normal HPA from it.
+  keda:
+    enabled: false
+    # **Read this before setting 0.** Scale-to-zero is KEDA's headline feature
+    # and an idle worker reserves over a gigabyte, so it is tempting. But this
+    # worker also hosts RQ's *scheduler*: at zero replicas nothing fires the
+    # scheduled and cron jobs — including the ones that would have created the
+    # queue depth to scale back up on. Zero is right only when every job is
+    # enqueued by something else (the API, a webhook).
+    minReplicaCount: 1
+    maxReplicaCount: 5
+    pollingInterval: 15
+    # How long the backlog must stay empty before the last surplus replica
+    # goes. A worker that has just loaded an embedder is expensive to discard.
+    cooldownPeriod: 300
+    scaleUpPodsPerMinute: 2
+    redis:
+      # host:port, not a URL, and **fully qualified**: KEDA connects from the
+      # operator's own pod, in its own namespace, so a short Service name does
+      # not resolve — the ScaledObject then sits Ready=False with "no such
+      # host" and the worker silently never scales. Use
+      # <service>.<namespace>.svc.cluster.local:<port>. Required when enabled;
+      # the chart refuses to render without it.
+      address: ""
+      databaseIndex: "0"
+      enableTLS: "false"
+      # Name of an env var on the worker pod holding the password, if any.
+      passwordFromEnv: ""
+    # One trigger per RQ queue. `listLength` is jobs per replica: KEDA targets
+    # depth/listLength replicas, so it reads as "how deep a backlog one worker
+    # is allowed to own".
+    queues:
+      - name: default
+        listLength: "5"
+
   # Off by default because the default is a single worker, and a budget over
   # one pod denies every eviction and hangs node drains. Turn it on together
   # with replicaCount >= 2; the chart refuses the unsatisfiable combination.
@@ -308,6 +376,10 @@ worker:
   # queue-empty reading.
   resources:
     requests:
+      # Left at 250m against a measured 0.58-core peak during ingestion: a
+      # worker's CPU is bursty by nature and nothing autoscales on it here
+      # (queue depth does — see worker.keda), so the request is a share of a
+      # contended node rather than a trigger.
       cpu: 250m
       memory: 1536Mi
     limits:

@@ -187,6 +187,19 @@ class StorageConfig(BaseSettings):
     db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE", ge=1)
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
     db_pool_timeout: float = Field(default=30.0, alias="DB_POOL_TIMEOUT", ge=0.1)
+    db_pool_check: bool = Field(
+        default=True,
+        alias="DB_POOL_CHECK",
+        description=(
+            "Validate a pooled connection before handing it out. Without it a "
+            "database restart, failover or `pg_terminate_backend` leaves every "
+            "pooled connection dead, and each one surfaces as a 500 the first "
+            "time it is used ('terminating connection due to administrator "
+            "command') — the pool has no idea until the query fails. The check "
+            "costs one lightweight round-trip per checkout; disable it only if "
+            "that is measurably a problem and you accept the failover burst."
+        ),
+    )
     # Server-side budgets baked into every pooled connection's startup
     # options, in milliseconds (0 disables the Postgres guard). A statement
     # that outlives ``statement_timeout`` is cancelled by the server, so a

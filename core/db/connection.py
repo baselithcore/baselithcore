@@ -29,6 +29,7 @@ DB_REPLICA_CONNINFO = _storage_config.replica_conninfo
 DB_POOL_MIN_SIZE = _storage_config.db_pool_min_size
 DB_POOL_MAX_SIZE = _storage_config.db_pool_max_size
 DB_POOL_TIMEOUT = _storage_config.db_pool_timeout
+DB_POOL_CHECK = _storage_config.db_pool_check
 APP_TIMEZONE_NAME = _app_config.app_timezone
 # Opt-in Row-Level-Security: bind the request tenant to the DB session on every
 # checkout so RLS policies can isolate rows. OFF by default → the apply hook is
@@ -140,6 +141,12 @@ def _get_pool() -> ConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
+            # Hand out a connection only after checking it is still alive. A
+            # database restart or failover kills every pooled connection at
+            # once, and without this the pool keeps lending them out: each one
+            # fails on first use with AdminShutdown, so a maintenance window
+            # turns into a burst of 500s that nothing retries.
+            check=ConnectionPool.check_connection if DB_POOL_CHECK else None,
             kwargs={
                 "autocommit": True,
                 "options": _storage_config.session_options,
@@ -161,6 +168,7 @@ def _get_async_pool() -> AsyncConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
+            check=AsyncConnectionPool.check_connection if DB_POOL_CHECK else None,
             kwargs={
                 "autocommit": True,
                 "options": _storage_config.session_options,
@@ -288,6 +296,12 @@ def _get_replica_pool() -> ConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
+            # Hand out a connection only after checking it is still alive. A
+            # database restart or failover kills every pooled connection at
+            # once, and without this the pool keeps lending them out: each one
+            # fails on first use with AdminShutdown, so a maintenance window
+            # turns into a burst of 500s that nothing retries.
+            check=ConnectionPool.check_connection if DB_POOL_CHECK else None,
             kwargs={
                 "autocommit": True,
                 "options": _storage_config.session_options,
@@ -309,6 +323,7 @@ def _get_async_replica_pool() -> AsyncConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
+            check=AsyncConnectionPool.check_connection if DB_POOL_CHECK else None,
             kwargs={
                 "autocommit": True,
                 "options": _storage_config.session_options,

@@ -7,7 +7,11 @@ metadata:
     {{- include "baselithcore.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
+  {{- if not .Values.worker.keda.enabled }}
+  # Omitted when KEDA owns the count: leaving it here makes Helm and the
+  # ScaledObject's HPA overwrite each other on every upgrade.
   replicas: {{ .Values.worker.replicaCount }}
+  {{- end }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:

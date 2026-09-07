@@ -5,6 +5,7 @@ Performs comprehensive health checks on all system components using core configu
 """
 
 import json as json_lib
+import os
 import socket
 from pathlib import Path
 from typing import NamedTuple
@@ -166,23 +167,48 @@ def check_postgres() -> CheckResult:
         return CheckResult("PostgreSQL", False, f"Error: {e}")
 
 
+# Settings that only a deliberate deployment supplies: the image sets none of
+# them (its ENV block covers HOST/PORT/WEB_CONCURRENCY and the Ollama defaults),
+# so seeing any of them means configuration actually arrived.
+_ENV_CONFIG_MARKERS = (
+    "SECRET_KEY",
+    "DB_HOST",
+    "DATABASE_URL",
+    "APP_BASE_URL",
+    "TRUSTED_HOSTS",
+    "CACHE_REDIS_URL",
+)
+
+
 def check_env_file() -> CheckResult:
-    """Check if .env file exists."""
-    env_path = Path.cwd() / "configs" / ".env"
+    """Whether configuration reached the process — by file *or* by environment.
 
-    # Also check root .env as fallback/standard
-    root_env = Path.cwd() / ".env"
+    A `.env` file is one way to configure this app and the only one a laptop
+    checkout usually has. A container is the other: Kubernetes injects the
+    ConfigMap and Secret through `envFrom`, and there is deliberately no file
+    on disk. Checking only for the file reported FAIL on the *recommended*
+    production setup and told the operator to `cp configs/.env.base .env`
+    inside a read-only rootfs — advice that is wrong twice over.
+    """
+    for candidate in (Path.cwd() / "configs" / ".env", Path.cwd() / ".env"):
+        if candidate.exists():
+            return CheckResult("Environment", True, f"Found config at {candidate}")
 
-    if env_path.exists():
-        return CheckResult("Environment", True, f"Found config at {env_path}")
-    elif root_env.exists():
-        return CheckResult("Environment", True, f"Found config at {root_env}")
+    supplied = [name for name in _ENV_CONFIG_MARKERS if os.environ.get(name)]
+    if supplied:
+        return CheckResult(
+            "Environment",
+            True,
+            f"Configured from the environment ({', '.join(supplied[:3])}"
+            f"{', …' if len(supplied) > 3 else ''})",
+        )
 
     return CheckResult(
         "Environment",
         False,
-        ".env file not found",
-        "Run: cp configs/.env.base .env",
+        "no .env file and no configuration in the environment",
+        "Local checkout: cp configs/.env.base .env — "
+        "container: check the ConfigMap/Secret reach the pod via envFrom",
     )
 
 
@@ -244,7 +270,7 @@ def check_llm_provider() -> CheckResult:
                 "LLM Provider",
                 False,
                 f"{provider.upper()} API key missing",
-                "Set LLM_API_KEY in .env",
+                "Set LLM_API_KEY (in .env locally, in the Secret on Kubernetes)",
             )
 
         return CheckResult("LLM Provider", True, f"Provider: {provider}")

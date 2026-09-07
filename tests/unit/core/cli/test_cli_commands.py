@@ -172,10 +172,17 @@ class TestDoctorCommand:
             assert result.passed is True
 
     def test_check_env_file_missing(self, tmp_path, monkeypatch):
-        """Test check_env_file when .env doesn't exist."""
-        from core.cli.commands.doctor import check_env_file
+        """No .env *and* no configuration in the environment is still a FAIL.
+
+        The markers have to be cleared explicitly: `core.config` loads the
+        repository .env into os.environ at import, so a developer's own
+        SECRET_KEY would make this pass for the wrong reason.
+        """
+        from core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
 
         monkeypatch.chdir(tmp_path)
+        for name in _ENV_CONFIG_MARKERS:
+            monkeypatch.delenv(name, raising=False)
 
         with patch("core.cli.commands.doctor.Path") as mock_path:
             mock_path.cwd.return_value = tmp_path
@@ -186,6 +193,21 @@ class TestDoctorCommand:
             result = check_env_file()
             assert result.passed is False
             assert ".env" in result.message
+
+    def test_check_env_file_accepts_environment_configuration(
+        self, tmp_path, monkeypatch
+    ):
+        """A container has no .env by design — envFrom is the supported route."""
+        from core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
+
+        monkeypatch.chdir(tmp_path)
+        for name in _ENV_CONFIG_MARKERS:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("SECRET_KEY", "from-the-secret")
+
+        result = check_env_file()
+        assert result.passed is True
+        assert "environment" in result.message.lower()
 
     def test_check_plugins_found(self, tmp_path, monkeypatch):
         """Test check_plugins when plugins exist."""

@@ -64,11 +64,19 @@ class HashSurface(IntEnum):
     V3_SHIPPED = 3
     """0.27+: adds shipped executables and served front-end assets."""
 
+    V4_UI_EXPORT = 4
+    """0.31+: also covers front-end bundles a build tool writes somewhere other
+    than ``ui/dist`` — a Next.js ``output: 'export'`` console in ``ui/out``, a
+    Create React App build in ``ui/build``. V3 hardcoded ``dist``, so a plugin
+    whose toolchain picks a different directory shipped a console the operator
+    executes in their browser and no signature covered."""
 
-CURRENT_HASH_SURFACE = HashSurface.V3_SHIPPED
+
+CURRENT_HASH_SURFACE = HashSurface.V4_UI_EXPORT
 # Superseded surfaces accepted (with a warning) outside strict mode, newest
 # first so the closest match is reported.
 _LEGACY_SURFACES: tuple[HashSurface, ...] = (
+    HashSurface.V3_SHIPPED,
     HashSurface.V2_BUILD,
     HashSurface.V1_SOURCE,
 )
@@ -104,12 +112,18 @@ _EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules"})
 # shipped dashboard bundle outside the signature. Kept here only to
 # reproduce V1/V2 digests byte-for-byte.
 _LEGACY_EXCLUDED_DIRS = _EXCLUDED_DIRS | {"ui"}
-# From V3 on, ``ui/`` is scoped instead of excluded: only ``ui/dist/**``
-# ships (see ``[tool.setuptools.package-data]`` / ``exclude-package-data``),
-# so only ``ui/dist/**`` is hashed. ``ui/src``, ``ui/node_modules`` and the
+# From V3 on, ``ui/`` is scoped instead of excluded: only the compiled bundle
+# ships (see ``[tool.setuptools.package-data]`` / ``exclude-package-data``), so
+# only the bundle is hashed. ``ui/src``, ``ui/node_modules`` and the
 # tsconfig/vite build inputs are never distributed and stay out.
+#
+# V3 hardcoded ``dist``, which is Vite's default and wrong for everything else:
+# a Next.js static export lands in ``ui/out`` and Create React App writes
+# ``ui/build``. Those consoles shipped and were served while no signature
+# covered a byte of them. V4 covers all three.
 _UI_DIR = "ui"
-_UI_SHIPPED_SUBDIR = "dist"
+_UI_SHIPPED_SUBDIRS_V3 = frozenset({"dist"})
+_UI_SHIPPED_SUBDIRS = frozenset({"dist", "out", "build"})
 
 
 def is_hashed_path(
@@ -156,7 +170,12 @@ def _is_excluded(parts: tuple[str, ...], surface: HashSurface) -> bool:
         return True
     # Everything under ``ui/`` except the compiled, shipped bundle is build
     # input that never leaves the developer's machine.
-    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] != _UI_SHIPPED_SUBDIR)
+    shipped = (
+        _UI_SHIPPED_SUBDIRS
+        if surface >= HashSurface.V4_UI_EXPORT
+        else _UI_SHIPPED_SUBDIRS_V3
+    )
+    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] not in shipped)
 
 
 def _compute_hash(plugin_dir: Path, *, surface: HashSurface) -> str:
@@ -189,7 +208,7 @@ def compute_plugin_hash(plugin_dir: Path, *, surface: HashSurface | None = None)
     ``requirements*.txt``), declarative skill bodies (``SKILL.md``) whose
     contents reach the model's prompt, compiled extension modules and shell
     scripts, and the front-end assets that ship and are served to the
-    operator (``ui/dist/**``, ``static/**``: JS/HTML/CSS/SVG/WASM). The
+    operator (``ui/{dist,out,build}/**``, ``static/**``: JS/HTML/CSS/SVG/WASM). The
     manifest is intentionally excluded so the marketplace publisher can
     inject an ``integrity_sha256`` field into the manifest after computing
     the digest without invalidating it. Each included file contributes its
@@ -298,6 +317,11 @@ _SURFACE_GAPS: dict[HashSurface, str] = {
         "native extension modules (*.so/*.pyd/*.dylib), shell scripts and "
         "shipped front-end assets (ui/dist, static: JS/HTML/CSS) — code that "
         "runs on the host or in the operator's browser"
+    ),
+    HashSurface.V3_SHIPPED: (
+        "front-end bundles built outside ui/dist (ui/out from a Next.js static "
+        "export, ui/build from Create React App) — a console that ships and "
+        "runs in the operator's browser with nothing attesting its bytes"
     ),
 }
 

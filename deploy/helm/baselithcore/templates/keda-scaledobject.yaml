@@ -1,0 +1,80 @@
+{{- if and .Values.worker.enabled .Values.worker.keda.enabled }}
+{{- if not .Values.worker.keda.redis.address -}}
+{{- fail "worker.keda.enabled is on but worker.keda.redis.address is empty. KEDA connects to Redis itself, from the operator's own pod — it cannot reuse QUEUE_REDIS_URL, which is a URL in the worker's env rather than the host:port this scaler wants. Set it to the same Redis the workers consume, fully qualified because KEDA resolves it from its own namespace, e.g. \"falkordb.baselithcore.svc.cluster.local:6379\"." -}}
+{{- end -}}
+{{- if not .Values.worker.keda.queues -}}
+{{- fail "worker.keda.enabled is on but worker.keda.queues is empty: with no trigger a ScaledObject scales to minReplicaCount and stays there." -}}
+{{- end -}}
+{{/*
+Queue-depth autoscaling for the RQ worker.
+
+CPU is the wrong signal for a queue consumer: a worker with a thousand jobs
+waiting and one in flight looks exactly like an idle one to the HPA, because
+the backlog is in Redis and not in the pod. KEDA reads the list length
+directly and drives a normal HPA from it.
+
+Scale-to-zero (`minReplicaCount: 0`) is KEDA's headline feature and tempting
+here — an idle worker reserves over a gigabyte. Read the warning on
+`worker.keda.minReplicaCount` in values.yaml before reaching for it: this
+worker also hosts RQ's *scheduler*, and at zero replicas nothing fires the
+scheduled jobs that would have created the queue depth to scale back up on.
+*/}}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "baselithcore.fullname" . }}-worker
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    name: {{ include "baselithcore.fullname" . }}-worker
+  minReplicaCount: {{ .Values.worker.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.worker.keda.maxReplicaCount }}
+  {{- if eq (int .Values.worker.keda.minReplicaCount) 0 }}
+  # KEDA only consults this while the deployment is at zero: above zero the
+  # HPA's own sync loop drives the query interval, and setting it anyway makes
+  # the operator log "PollingInterval is configured but is not relevant" on
+  # every reconcile. Rendered only where it does something.
+  pollingInterval: {{ .Values.worker.keda.pollingInterval }}
+  {{- end }}
+  # How long the backlog must stay empty before the last surplus replica goes.
+  # A worker that has just loaded an embedder is expensive to throw away.
+  cooldownPeriod: {{ .Values.worker.keda.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: {{ .Values.worker.keda.scaleUpPodsPerMinute }}
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.worker.keda.cooldownPeriod }}
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+  triggers:
+    {{- range .Values.worker.keda.queues }}
+    # RQ stores each queue as a Redis list at `rq:queue:<name>`, and deletes
+    # the key when it drains — a missing key reads as length 0, which is what
+    # we want.
+    - type: redis
+      metadata:
+        address: {{ $.Values.worker.keda.redis.address | quote }}
+        databaseIndex: {{ $.Values.worker.keda.redis.databaseIndex | quote }}
+        enableTLS: {{ $.Values.worker.keda.redis.enableTLS | quote }}
+        listName: {{ printf "rq:queue:%s" .name | quote }}
+        # Jobs per replica: KEDA targets depth/listLength replicas, so this is
+        # "how deep a backlog one worker is allowed to own".
+        listLength: {{ .listLength | quote }}
+        {{- with $.Values.worker.keda.redis.passwordFromEnv }}
+        # Name of an env var *on the worker pod* holding the Redis password;
+        # KEDA reads it from the scale target rather than from a Secret of
+        # its own, so the credential stays in one place.
+        passwordFromEnv: {{ . | quote }}
+        {{- end }}
+    {{- end }}
+{{- end }}

@@ -6,10 +6,7 @@
   "additionalProperties": false,
   "definitions": {
     "quantity": {
-      "type": [
-        "string",
-        "integer"
-      ],
+      "type": ["string", "integer"],
       "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$",
       "description": "Kubernetes quantity. Written unquoted in YAML, `2` is an integer and `2Gi` a string; both are accepted, `2 Gi` and `2gb` are not."
     },
@@ -154,9 +151,7 @@
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "repository"
-      ],
+      "required": ["repository"],
       "properties": {
         "repository": {
           "type": "string",
@@ -171,11 +166,7 @@
           "description": "Empty, or a full sha256 digest. A truncated digest is rejected here rather than by the kubelet after the rollout has started."
         },
         "pullPolicy": {
-          "enum": [
-            "Always",
-            "IfNotPresent",
-            "Never"
-          ]
+          "enum": ["Always", "IfNotPresent", "Never"]
         }
       }
     },
@@ -202,12 +193,7 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": [
-            "ClusterIP",
-            "NodePort",
-            "LoadBalancer",
-            "ExternalName"
-          ]
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
         },
         "port": {
           "type": "integer",
@@ -234,9 +220,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "host"
-            ],
+            "required": ["host"],
             "properties": {
               "host": {
                 "type": "string",
@@ -247,20 +231,13 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": [
-                    "path",
-                    "pathType"
-                  ],
+                  "required": ["path", "pathType"],
                   "properties": {
                     "path": {
                       "type": "string"
                     },
                     "pathType": {
-                      "enum": [
-                        "Exact",
-                        "Prefix",
-                        "ImplementationSpecific"
-                      ]
+                      "enum": ["Exact", "Prefix", "ImplementationSpecific"]
                     }
                   }
                 }
@@ -289,27 +266,18 @@
           "minimum": 1
         },
         "targetCPUUtilizationPercentage": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 100
         },
         "targetMemoryUtilizationPercentage": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 100,
           "description": "Null by default on purpose: this pod's memory is dominated by a constant that does not shrink per replica, so a memory target parks the HPA at maxReplicas."
         },
         "behavior": {
-          "type": [
-            "object",
-            "null"
-          ]
+          "type": ["object", "null"]
         }
       }
     },
@@ -321,22 +289,13 @@
           "type": "boolean"
         },
         "minAvailable": {
-          "type": [
-            "integer",
-            "string"
-          ]
+          "type": ["integer", "string"]
         },
         "maxUnavailable": {
-          "type": [
-            "integer",
-            "string"
-          ]
+          "type": ["integer", "string"]
         },
         "unhealthyPodEvictionPolicy": {
-          "enum": [
-            "IfHealthyBudget",
-            "AlwaysAllow"
-          ]
+          "enum": ["IfHealthyBudget", "AlwaysAllow"]
         }
       }
     },
@@ -379,10 +338,7 @@
           "description": "Adds a second constraint over topology.kubernetes.io/zone. Harmless on a single-zone cluster, where every node reports the same value."
         },
         "whenUnsatisfiable": {
-          "enum": [
-            "DoNotSchedule",
-            "ScheduleAnyway"
-          ]
+          "enum": ["DoNotSchedule", "ScheduleAnyway"]
         }
       }
     },
@@ -424,16 +380,76 @@
               "type": "boolean"
             },
             "maxUnavailable": {
-              "type": [
-                "integer",
-                "string"
-              ]
+              "type": ["integer", "string"]
             },
             "unhealthyPodEvictionPolicy": {
-              "enum": [
-                "IfHealthyBudget",
-                "AlwaysAllow"
-              ]
+              "enum": ["IfHealthyBudget", "AlwaysAllow"]
+            }
+          }
+        },
+        "keda": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicaCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxReplicaCount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pollingInterval": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cooldownPeriod": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scaleUpPodsPerMinute": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "redis": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "databaseIndex": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "enableTLS": {
+                  "enum": ["true", "false"]
+                },
+                "passwordFromEnv": {
+                  "type": "string"
+                }
+              }
+            },
+            "queues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "listLength"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "listLength": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  }
+                }
+              }
             }
           }
         }
@@ -442,11 +458,7 @@
     "config": {
       "type": "object",
       "additionalProperties": {
-        "type": [
-          "string",
-          "boolean",
-          "number"
-        ]
+        "type": ["string", "boolean", "number"]
       }
     },
     "secrets": {
@@ -472,10 +484,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "from",
-          "to"
-        ],
+        "required": ["from", "to"],
         "properties": {
           "from": {
             "type": "string",
