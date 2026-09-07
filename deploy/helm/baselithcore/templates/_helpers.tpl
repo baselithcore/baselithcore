@@ -211,8 +211,17 @@ httpHeaders:
 
 {{/* Image reference, defaulting the tag to the chart appVersion. */}}
 {{- define "baselithcore.image" -}}
+{{- if .Values.image.digest -}}
+{{- /* A digest is the whole reference: a tag alongside it is ignored by the
+runtime and only misleads whoever reads the manifest. */ -}}
+{{- if not (hasPrefix "sha256:" .Values.image.digest) -}}
+{{- fail (printf "image.digest must be a full digest starting with 'sha256:'; got %q" .Values.image.digest) -}}
+{{- end -}}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- else -}}
 {{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -268,5 +277,42 @@ initContainers:
       {{- with .Values.extraVolumeMounts }}
       {{- toYaml . | nindent 6 }}
       {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+topologySpreadConstraints for one component.
+
+Hostname keeps a single node from taking the whole deployment; zone keeps a
+single availability zone from doing the same, which is the constraint most
+charts leave out and the one that matters during a real cloud incident. On a
+single-zone cluster the zone constraint is trivially satisfied — every node
+reports the same value — so it costs nothing to ship on by default.
+
+`matchLabelKeys: [pod-template-hash]` scopes the skew calculation to the
+ReplicaSet being rolled: without it, pods from the outgoing ReplicaSet count
+towards the new one's spread and a rollout can wedge itself against its own
+predecessor.
+
+Args: root (the chart context), component ("api" / "worker").
+*/}}
+{{- define "baselithcore.topologySpread" -}}
+{{- $root := .root -}}
+{{- $component := .component -}}
+{{- $when := $root.Values.topologySpreadConstraints.whenUnsatisfiable | default "ScheduleAnyway" -}}
+{{- $keys := list "kubernetes.io/hostname" -}}
+{{- if $root.Values.topologySpreadConstraints.zoneAware -}}
+{{- $keys = append $keys "topology.kubernetes.io/zone" -}}
+{{- end -}}
+{{- range $keys }}
+- maxSkew: 1
+  topologyKey: {{ . }}
+  whenUnsatisfiable: {{ $when }}
+  matchLabelKeys:
+    - pod-template-hash
+  labelSelector:
+    matchLabels:
+      {{- include "baselithcore.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
 {{- end }}
 {{- end -}}

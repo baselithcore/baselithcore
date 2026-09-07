@@ -15,6 +15,20 @@ spec:
     - Egress
     {{- end }}
   ingress:
+    # This release talking to itself: the `helm test` smoke pod, and anything
+    # else the chart ships that has to reach the API. Written out rather than
+    # assumed, because whether it works *without* this rule depends on the CNI:
+    # kube-router (k3s) lets pods selected by the same policy reach each other,
+    # while a spec-compliant implementation (Calico, Cilium) denies it. Leaving
+    # it implicit means the chart behaves differently on different clusters,
+    # which is the worst kind of difference to debug.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "baselithcore.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.containerPort }}
     {{- with .Values.networkPolicy.ingressFrom }}
     # Operator-supplied peer selectors: name the ingress controller (or whatever
     # is actually allowed to reach the API) instead of the whole namespace.
@@ -55,6 +69,37 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    {{- end }}
+    {{- if .Values.networkPolicy.egress.presets.sameNamespace }}
+    # This release's own namespace: the Postgres, Redis/Falkor and vector store
+    # the chart's config already points at. A pod selector, not a CIDR, so it
+    # keeps working when the datastores are rescheduled onto new IPs.
+    - to:
+        - podSelector: {}
+    {{- end }}
+    {{- if .Values.networkPolicy.egress.presets.internetHttps }}
+    # Outbound HTTPS — LLM providers, model downloads, webhooks — with the
+    # destinations that are never legitimate carved out. `except` is the whole
+    # point of this rule: 169.254.0.0/16 is cloud metadata (the credential
+    # endpoint an SSRF or a prompt-injected agent goes for first), and the
+    # RFC1918 / CGNAT ranges are the internal services the app's own SSRF guard
+    # does not sit in front of. Anything the deployment legitimately needs
+    # inside those ranges — an RDS instance, an internal API — has to be named
+    # explicitly under `rules`, which is the point: it becomes a decision
+    # somebody made rather than a hole nobody noticed.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
     {{- end }}
     {{- with .Values.networkPolicy.egress.rules }}
     {{- toYaml . | nindent 4 }}

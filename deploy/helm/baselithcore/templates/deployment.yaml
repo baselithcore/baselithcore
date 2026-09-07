@@ -10,6 +10,7 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "baselithcore.selectorLabels" . | nindent 6 }}
@@ -38,17 +39,14 @@ spec:
       serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              {{- include "baselithcore.selectorLabels" . | nindent 14 }}
-              app.kubernetes.io/component: api
+        {{- include "baselithcore.topologySpread" (dict "root" . "component" "api") | trim | nindent 8 }}
       {{- end }}
       {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
@@ -57,6 +55,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          # A crashed container's message comes from /dev/termination-log,
+          # which nothing here writes — so the pod's status says nothing.
+          # Falling back to the tail of the log puts the actual traceback in
+          # `kubectl describe`, where the person debugging is already looking.
+          terminationMessagePolicy: FallbackToLogsOnError
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}

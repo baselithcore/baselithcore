@@ -8,10 +8,15 @@ metadata:
     app.kubernetes.io/component: worker
 spec:
   replicas: {{ .Values.worker.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "baselithcore.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
+  {{- with .Values.worker.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
     metadata:
       annotations:
@@ -26,9 +31,18 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      # The worker's own period, not the API's: RQ finishes the job in flight
+      # on SIGTERM, and cutting that short loses work. See worker.
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.topologySpreadConstraints.enabled (gt (int .Values.worker.replicaCount) 1) }}
+      topologySpreadConstraints:
+        {{- include "baselithcore.topologySpread" (dict "root" . "component" "worker") | trim | nindent 8 }}
+      {{- end }}
       {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
         - name: worker
@@ -36,6 +50,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          # A crashed container's message comes from /dev/termination-log,
+          # which nothing here writes — so the pod's status says nothing.
+          # Falling back to the tail of the log puts the actual traceback in
+          # `kubectl describe`, where the person debugging is already looking.
+          terminationMessagePolicy: FallbackToLogsOnError
           command:
             {{- toYaml .Values.worker.command | nindent 12 }}
           envFrom:
@@ -83,6 +102,10 @@ spec:
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}

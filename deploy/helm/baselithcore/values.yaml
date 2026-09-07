@@ -8,8 +8,26 @@ image:
   repository: ghcr.io/baselithcore/baselithcore
   # `slim` excludes heavy browser/OCR extras; use `full` if you need them.
   tag: ""              # defaults to .Chart.AppVersion when empty
+  # Pin by content, not by name. A tag is a mutable pointer: the image the
+  # admission controller verified and the image that starts three weeks later
+  # after a re-push are not necessarily the same bytes, and nothing in the
+  # cluster notices. Set this to the digest your release pipeline signed
+  # ("sha256:…") and it wins over `tag`, which is then only documentation.
+  digest: ""
   pullPolicy: IfNotPresent
 pullSecrets: []
+
+# Kept ReplicaSets per Deployment. The default of 10 keeps ten rollouts' worth
+# of pod templates around in etcd for no operational benefit; three is enough
+# to roll back the mistake you just made.
+revisionHistoryLimit: 3
+
+# PriorityClass for the API and worker pods. Empty means the global default,
+# which on a contended node makes the API exactly as evictable as any batch
+# job that happens to share it. Point this at a cluster PriorityClass to say
+# otherwise (the chart does not create one — priority is a cluster-wide policy
+# decision, not a per-release one).
+priorityClassName: ""
 
 nameOverride: ""
 fullnameOverride: ""
@@ -93,13 +111,52 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
+  # Memory-based autoscaling is OFF on purpose, and turning it on is almost
+  # always a mistake here. HPA computes utilization as usage/request, and this
+  # pod's memory is dominated by a *constant* — resident model weights, plugin
+  # state, the interpreter — that does not shrink when you add replicas. So a
+  # pod sitting near its (correctly sized) request reads as permanently over
+  # target, HPA scales to maxReplicas, each new pod loads the same constant,
+  # the average never drops, and the deployment parks at maximum size forever
+  # while paying several GB per replica. Memory pressure is a sizing problem,
+  # solved by resources above; CPU is the signal that actually tracks load.
+  targetMemoryUtilizationPercentage: null
+
+  # Rendered verbatim into the HPA. The defaults are shaped by this app's cold
+  # start: a new pod needs plugin activation plus embedder warmup before it
+  # serves anything (up to the startupProbe's 300s budget), and it costs GBs.
+  # So scale up in small steps — flooding in eight pods buys eight cold starts
+  # competing for the same node, not eight times the capacity — and scale down
+  # slowly, because every removed pod throws away a warm model cache that the
+  # next scale-up has to rebuild from scratch.
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 180
 
 # PodDisruptionBudget keeps a minimum available during voluntary disruptions
 # (node drains, rollouts) — essential for the HA story.
+#
+# It has to stay strictly below the smallest replica count the deployment can
+# reach, or the eviction API denies everything and node drains hang forever.
+# The chart refuses to render a budget that can never be satisfied. Set either
+# minAvailable or maxUnavailable, never both.
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+  maxUnavailable: ""
+  # k8s 1.27+; older API servers drop the field. AlwaysAllow keeps a broken
+  # pod from holding a drain hostage — see the comment in templates/pdb.yaml.
+  unhealthyPodEvictionPolicy: AlwaysAllow
 
 # Hardened pod/container security context. Matches the image's non-root
 # appuser (uid 1000) and a read-only root filesystem.
@@ -158,9 +215,21 @@ readinessProbe:
   timeoutSeconds: 5
   failureThreshold: 3
 
-# Spread replicas across nodes/zones for availability.
+# Spread replicas across failure domains. The hostname constraint is what
+# stops a single node taking the whole deployment with it; the zone one is
+# what stops a single availability zone doing the same, and it is the half
+# most charts forget.
 topologySpreadConstraints:
   enabled: true
+  # Harmless on a single-zone cluster — every node reports the same value for
+  # topology.kubernetes.io/zone, so the constraint is trivially satisfied.
+  zoneAware: true
+  # ScheduleAnyway keeps a pod schedulable when the spread cannot be honoured
+  # (a small cluster, a zone at capacity) — availability of the pod wins over
+  # the shape of the spread. DoNotSchedule is the stronger guarantee and the
+  # right choice once you genuinely have more nodes than replicas per zone;
+  # set it there and understand that a pod may stay Pending instead.
+  whenUnsatisfiable: ScheduleAnyway
 
 nodeSelector: {}
 tolerations: []
@@ -178,6 +247,32 @@ worker:
     - baselith
     - queue
     - worker
+
+  # A worker's own grace period, separate from the API's. RQ answers SIGTERM
+  # with a *warm* shutdown: it stops taking new jobs and finishes the one in
+  # flight. Inheriting the API's 45s — tuned for draining HTTP requests — means
+  # SIGKILL lands in the middle of a job that was going to finish, and the work
+  # comes back only if the job was written to be idempotent. Raise this above
+  # your slowest job; lower it and you are choosing to lose work on every
+  # rollout and node drain.
+  terminationGracePeriodSeconds: 120
+
+  # maxSurge 0: a queue consumer gains nothing from an extra pod during a roll,
+  # and surging doubles a multi-GB footprint on the node for the length of the
+  # rollout. Take one down, bring one up.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+
+  # Off by default because the default is a single worker, and a budget over
+  # one pod denies every eviction and hangs node drains. Turn it on together
+  # with replicaCount >= 2; the chart refuses the unsatisfiable combination.
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+    unhealthyPodEvictionPolicy: AlwaysAllow
   # Optional liveness probe, rendered verbatim into the worker container when
   # set. Leave empty and the worker has none: a hung RQ worker then keeps
   # running with its queue undrained, which is the current behaviour.
@@ -295,6 +390,14 @@ extraVolumeMounts: []
 # the destination yourself.
 seedFromImage: []
 
+# `helm test <release>` — the smoke test that asks the one question a
+# successful install cannot answer: does a request reaching the Service get an
+# answer. It retries rather than sampling once, because a cold start (plugin
+# activation, embedder warmup) can outlast the first attempt and a flaky test
+# is worse than no test.
+tests:
+  timeoutSeconds: 300
+
 # ServiceMonitor for the Prometheus Operator (scrapes /metrics).
 serviceMonitor:
   enabled: false
@@ -339,26 +442,51 @@ migrations:
 networkPolicy:
   enabled: false
   # Ingress peers allowed to reach the API port. Empty means "any pod in this
-  # namespace", which is what an in-namespace ingress controller needs but also
-  # admits a compromised neighbour. Narrow it to the controller, e.g.:
+  # namespace" — which admits a compromised neighbour, and, more often, locks
+  # out the two callers that actually matter, because both usually live
+  # somewhere else: the ingress controller (its own namespace) and Prometheus
+  # (the monitoring namespace). Turning networkPolicy on with this left empty
+  # is how a deployment goes dark and every ServiceMonitor target goes red at
+  # the same moment. Name them:
+  #
   #   ingressFrom:
   #     - namespaceSelector:
   #         matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
   #       podSelector:
   #         matchLabels: {app.kubernetes.io/name: ingress-nginx}
+  #     - namespaceSelector:
+  #         matchLabels: {kubernetes.io/metadata.name: monitoring}
+  #       podSelector:
+  #         matchLabels: {app.kubernetes.io/name: prometheus}
+  #
+  # The kubelet's probes are not affected: they come from the node, and a
+  # NetworkPolicy does not apply to host-network traffic to a pod on that node.
   ingressFrom: []
   egress:
     # Off by default because enabling it is deny-by-default outbound: anything
-    # not listed below stops working, and the right list is deployment
-    # knowledge (which LLM endpoints, which object store, which SMTP relay).
-    # It is the half that matters for an agent runtime — with egress
+    # not listed below stops working, and the last mile is always deployment
+    # knowledge. It is the half that matters for an agent runtime — with egress
     # unrestricted, a prompt-injected agent or a hostile tool result can reach
-    # whatever the pod network routes to, cloud metadata included.
+    # whatever the pod network routes to, cloud metadata included. Turn it on:
+    # the presets below cover what a standard install of this chart needs.
     enabled: false
     # Keep DNS open, or every other rule fails to resolve. Assumes the standard
     # `k8s-app: kube-dns` label (CoreDNS); set false and add your own rule if
     # your cluster labels it differently.
     allowDNS: true
+    # The rules a standard install needs, so switching egress on is a flag
+    # rather than a YAML exercise nobody has time for — which is the real
+    # reason egress policies stay off everywhere.
+    presets:
+      # Every pod in this release's namespace: the in-cluster Postgres, Redis /
+      # FalkorDB and vector store the chart's own config points at.
+      sameNamespace: true
+      # Outbound TCP/443 to the public internet, with cloud metadata
+      # (169.254.0.0/16) and the RFC1918 / CGNAT / loopback ranges carved out.
+      # **Datastores outside the cluster live in those ranges**: a managed
+      # Postgres, an internal object store or a private LLM gateway needs its
+      # own entry under `rules` — the preset deliberately will not reach it.
+      internetHttps: true
     # Verbatim NetworkPolicy egress rules. Example — in-namespace Postgres and
     # Redis plus HTTPS to the internet for LLM providers:
     #   rules:
