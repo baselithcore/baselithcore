@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from scripts.config_surface import (
+    Setting,
     env_example_entries,
     env_literals,
     iter_settings,
@@ -146,3 +147,59 @@ class TestRenderReference:
         assert render_reference(iter_settings(repo)) == render_reference(
             iter_settings(repo)
         )
+
+
+def _setting(**overrides: object) -> Setting:
+    fields: dict[str, object] = {
+        "env": "WIDGET_HOST",
+        "alternatives": (),
+        "module": "core/config/widget.py",
+        "section": "Widget configuration",
+        "class_name": "WidgetSettings",
+        "type_label": "str",
+        "default": "localhost",
+        "description": "",
+        "secret": False,
+    }
+    fields.update(overrides)
+    return Setting(**fields)  # type: ignore[arg-type]
+
+
+class TestRenderSurvivesMarkdownlint:
+    """The page passes the repo's markdownlint hook without being --fixed.
+
+    Both hooks rewrite the same file, so anything markdownlint would repair
+    here deadlocks the commit: markdownlint --fix rewrites the page, the next
+    run of this generator rewrites it back, and neither ever settles.
+    """
+
+    def test_placeholder_defaults_use_asterisk_emphasis(self):
+        page = render_reference(
+            [_setting(default="computed"), _setting(env="WIDGET_PORT", default="")]
+        )
+
+        assert "*computed*" in page
+        assert "*empty*" in page
+        # MD049 runs in "consistent" mode and the preamble opens with
+        # ``*required*``: an underscore span here is what markdownlint --fix
+        # would rewrite.
+        assert "_computed_" not in page
+        assert "_empty_" not in page
+
+    def test_html_in_a_docstring_is_escaped(self):
+        page = render_reference(
+            [_setting(description="Blocks no-cors loads (<img>, <script>).")]
+        )
+
+        # Raw <img> both vanished from the rendered page and tripped MD045,
+        # which no --fix can repair.
+        assert "&lt;img>" in page
+        assert "(<img>" not in page
+
+    def test_bare_urls_are_code_spanned(self):
+        page = render_reference(
+            [_setting(description="Falls back to http://localhost:11434.")]
+        )
+
+        # MD034, also unfixable by --fix; the trailing stop stays outside.
+        assert "`http://localhost:11434`." in page

@@ -401,7 +401,7 @@ Declared in `core.config.processing`.
 | `MINERU_MAX_CONCURRENCY` | `int` | `2` |  |
 | `MINERU_MAX_PAGES` | `int` | `500` |  |
 | `MINERU_MODEL_SOURCE` | `Literal['huggingface', 'modelscope', 'local'] \| None` | *empty* |  |
-| `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. <http://mineru:30000>). |
+| `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. `http://mineru:30000`). |
 | `MINERU_TABLE_ENABLE` | `bool` | `True` |  |
 | `MINERU_TIMEOUT_SECONDS` | `float` | `300.0` |  |
 | `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` | OCR backend. MinerU is the default and needs the extra (pip install -e ".[mineru]") — heavy, and it downloads models on first use, so pre-fetch with `mineru-models-download`. Selected but not installed, OCR falls back to tesseract automatically; set 'tesseract' to avoid pulling the mineru/transformers stack at all. |
@@ -544,7 +544,7 @@ Declared in `core.config.security`.
 | `AUTH_FAILURE_LIMIT_PER_MINUTE` | `int \| None` | `20` | Per-source-IP budget for *failed* authentication attempts within the rate-limit window. Unlike the per-role limits above (which meter only already-authenticated traffic), this throttles credential brute-force / stuffing on every `require_*` route: once an IP exceeds this many rejected auth attempts it receives 429 instead of an unmetered stream of 401s. Successful auth never touches this counter, so a generous default does not penalise a mistyped token or a NAT'd client. Set to None to disable (not recommended — leaves authenticated routes brute-forceable). |
 | `AUTH_REQUIRED` | `bool` | `True` |  |
 | `CONTENT_SECURITY_POLICY` | `str \| None` | *empty* |  |
-| `CROSS_ORIGIN_OPENER_POLICY` | `str \| None` | `same-origin-allow-popups` | Cross-origin isolation pair (OWASP Secure Headers). COOP severs the window.opener link with cross-origin windows; "same-origin-allow-popups" keeps OAuth/SSO popups opened by the console working. CORP blocks no-cors subresource loads (<img>, <script>) of our responses from foreign origins (CORS-approved fetches from ALLOW_ORIGINS are exempt); "" omits either. |
+| `CROSS_ORIGIN_OPENER_POLICY` | `str \| None` | `same-origin-allow-popups` | Cross-origin isolation pair (OWASP Secure Headers). COOP severs the window.opener link with cross-origin windows; "same-origin-allow-popups" keeps OAuth/SSO popups opened by the console working. CORP blocks no-cors subresource loads (&lt;img>, &lt;script>) of our responses from foreign origins (CORS-approved fetches from ALLOW_ORIGINS are exempt); "" omits either. |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | `str \| None` | `same-origin` |  |
 | `DATA_ENCRYPTION_ACTIVE_KEY_ID` | `str \| None` | *empty* |  |
 | `DATA_ENCRYPTION_KEYS` :material-key: | `Annotated[dict[str, SecretStr], NoDecode]` | *computed* | Mapping of key_id -> secret material (raw base64 32-byte key or passphrase), supplied as "id1:secret1,id2:secret2"; a value without ':' is loaded under the id 'default'. Empty (the default) disables application-level encryption. NoDecode: skip pydantic-settings' JSON decoding so the raw "id:secret,..." string reaches the field validator below (env source would otherwise try json.loads on it and fail). |
@@ -627,7 +627,7 @@ Declared in `core.config.services`.
 | `LLM_MAX_CONCURRENT_REQUESTS` | `int` | `0` | Max concurrent LLM provider calls per process (0 = unlimited). Env: LLM_MAX_CONCURRENT_REQUESTS via the LLM_ prefix. |
 | `LLM_MAX_TOKENS` | `int \| None` | *empty* | Maximum tokens to generate |
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
-| `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then <http://localhost:11434>. |
+| `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |

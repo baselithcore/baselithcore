@@ -7,6 +7,7 @@ document variables the code no longer binds, and a hand-written reference for
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from collections.abc import Iterable
 
@@ -81,16 +82,49 @@ def _markdown(text: str) -> str:
 
 
 def _escape(text: str) -> str:
-    return _markdown(text).replace("|", "\\|")
+    """Neutralise the three characters a docstring can carry into a table cell.
+
+    ``|`` would split the cell; a bare ``<`` opens an HTML tag, so a docstring
+    mentioning ``<img>`` or ``<script>`` both vanished from the rendered page
+    and tripped markdownlint's MD045 (image without alt text) on the generated
+    file, which no ``--fix`` can repair.
+    """
+    return _markdown(text).replace("|", "\\|").replace("<", "&lt;")
+
+
+_BARE_URL = re.compile(r"(?<![`(\[])\bhttps?://[^\s`<>)\]|]+")
+
+
+def _description_cell(text: str) -> str:
+    """Escape, then code-span any bare URL a docstring left in the prose.
+
+    markdownlint's MD034 fires on a bare URL wherever it lands, generated
+    tables included, and no ``--fix`` rewrites it — so the generator has to
+    emit the code span itself.
+    """
+
+    def wrap(match: re.Match[str]) -> str:
+        url = match.group(0)
+        trailing = ""
+        while url and url[-1] in ".,;:":
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        return f"`{url}`{trailing}"
+
+    return _BARE_URL.sub(wrap, _escape(text))
 
 
 def _default_cell(setting: Setting) -> str:
     if setting.default == "required":
         return "**required**"
+    # Asterisk emphasis, matching the preamble's ``*required*``: markdownlint's
+    # MD049 runs in "consistent" mode, so an underscore here made every run of
+    # the markdownlint --fix hook rewrite the cells and every following run of
+    # this generator rewrite them back — the two hooks deadlocked the commit.
     if setting.default == "computed":
-        return "_computed_"
+        return "*computed*"
     if setting.default == "":
-        return "_empty_"
+        return "*empty*"
     return f"`{_escape(setting.default)}`"
 
 
@@ -108,7 +142,7 @@ def _row(setting: Setting) -> str:
         f"| {_variable_cell(setting)} "
         f"| `{_escape(setting.type_label)}` "
         f"| {_default_cell(setting)} "
-        f"| {_escape(setting.description)} |"
+        f"| {_description_cell(setting.description)} |"
     )
 
 
