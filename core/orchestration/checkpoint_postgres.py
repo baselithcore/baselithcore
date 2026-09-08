@@ -96,8 +96,8 @@ FROM agent_checkpoint_history WHERE run_id = %s ORDER BY version ASC
 # row is the source (history rows are per-version copies of the same run).
 _RUN_LIST = """
 SELECT data FROM agent_checkpoints
-WHERE (%(tenant_id)s IS NULL OR tenant_id = %(tenant_id)s)
-  AND (%(status)s IS NULL OR status = %(status)s)
+WHERE (%(tenant_id)s::text IS NULL OR tenant_id = %(tenant_id)s::text)
+  AND (%(status)s::text IS NULL OR status = %(status)s::text)
 ORDER BY updated_at DESC
 LIMIT %(limit)s
 """
