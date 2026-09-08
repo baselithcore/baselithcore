@@ -347,8 +347,12 @@ worker:
   #
   # RQ workers renew a heartbeat key in Redis and drop out of `Worker.all()`
   # once it expires, so "is this pod's worker still registered" is a real
-  # liveness signal. Validate the command against your own deployment before
-  # enabling it — a probe that cannot reach Redis restarts healthy workers.
+  # liveness signal. It only works because the chart sets `RQ_WORKER_NAME` to
+  # the pod name: RQ otherwise registers a random hex id that no probe can tie
+  # back to the pod it is checking, and a probe matching on the hostname then
+  # fails on a healthy worker and restarts it every failureThreshold periods.
+  # Still validate against your own deployment before enabling — a probe that
+  # cannot reach Redis restarts healthy workers just as effectively.
   #
   #   livenessProbe:
   #     exec:
@@ -356,12 +360,12 @@ worker:
   #         - python
   #         - -c
   #         - |
-  #           import os, socket, sys
+  #           import os, sys
   #           from redis import Redis
   #           from rq import Worker
   #           conn = Redis.from_url(os.environ["QUEUE_REDIS_URL"])
-  #           host = socket.gethostname()
-  #           alive = any(w.name.startswith(host) for w in Worker.all(connection=conn))
+  #           me = os.environ["RQ_WORKER_NAME"]
+  #           alive = any(w.name == me for w in Worker.all(connection=conn))
   #           sys.exit(0 if alive else 1)
   #     initialDelaySeconds: 60
   #     periodSeconds: 60

@@ -1,3 +1,9 @@
+"""Evaluation configuration (``EVAL_``).
+
+Judge model, dataset location and thresholds for the trajectory-aware case
+evaluation and the CI replay runner.
+"""
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

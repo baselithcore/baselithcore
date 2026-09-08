@@ -25,6 +25,7 @@ from core.config.cache import (
     get_semantic_cache_config,
 )
 from core.config.concurrency import get_web_concurrency, set_web_concurrency
+from core.config.drift import EnvSuspect, suspected_typos, warn_on_suspected_typos
 from core.config.environment import get_runtime_environment, is_production_env
 from core.config.evaluation import EvaluationConfig, evaluation_config
 from core.config.events import EventsConfig, get_events_config
@@ -75,6 +76,7 @@ __all__ = [
     "CacheConfig",
     "ChatConfig",
     "CoreConfig",
+    "EnvSuspect",
     "EvaluationConfig",
     "EventsConfig",
     "FineTuningConfig",
@@ -128,6 +130,8 @@ __all__ = [
     "get_supermemory_config",
     "get_web_concurrency",
     "set_web_concurrency",
+    "suspected_typos",
+    "warn_on_suspected_typos",
     "get_swarm_config",
     "get_vectorstore_config",
     "get_vision_config",

@@ -37,9 +37,22 @@ class VisionConfig(BaseSettings):
         default=None,
         validation_alias=AliasChoices("VISION_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
-    anthropic_api_key: SecretStr | None = Field(default=None, alias="ANTHROPIC_API_KEY")
-    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
-    ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
+    # Each provider credential accepts the prefixed name first and the bare
+    # vendor name as a fallback. A plain ``alias`` would REPLACE the
+    # ``env_prefix``, so ``VISION_ANTHROPIC_API_KEY`` — the name the template
+    # and the docs advertise — would silently bind nothing.
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VISION_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    )
+    google_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VISION_GOOGLE_API_KEY", "GOOGLE_API_KEY"),
+    )
+    ollama_url: str = Field(
+        default="http://localhost:11434",
+        validation_alias=AliasChoices("VISION_OLLAMA_HOST", "OLLAMA_HOST"),
+    )
 
     # Per-provider vision model identifiers. Overridable via env
     # (VISION_OPENAI_MODEL, VISION_ANTHROPIC_MODEL, VISION_GOOGLE_MODEL,
@@ -91,12 +104,20 @@ class VoiceConfig(BaseSettings):
         default=None,
         validation_alias=AliasChoices("VOICE_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
+    # Prefixed name first, bare vendor name as fallback — see VisionConfig.
     elevenlabs_api_key: SecretStr | None = Field(
-        default=None, alias="ELEVENLABS_API_KEY"
+        default=None,
+        validation_alias=AliasChoices("VOICE_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY"),
     )
-    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
+    google_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VOICE_GOOGLE_API_KEY", "GOOGLE_API_KEY"),
+    )
     google_credentials_path: str | None = Field(
-        default=None, alias="GOOGLE_APPLICATION_CREDENTIALS"
+        default=None,
+        validation_alias=AliasChoices(
+            "VOICE_GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"
+        ),
     )
 
     # ElevenLabs specific voice tuning.
@@ -129,8 +150,16 @@ class FineTuningConfig(BaseSettings):
         extra="ignore",
     )
 
-    openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
-    together_api_key: SecretStr | None = Field(default=None, alias="TOGETHER_API_KEY")
+    # Prefixed name first: without it these bound the bare vendor keys, so a
+    # fine-tuning job silently reused the chat provider's credentials.
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FINETUNE_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
+    together_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FINETUNE_TOGETHER_API_KEY", "TOGETHER_API_KEY"),
+    )
 
 
 _vision_config: VisionConfig | None = None

@@ -67,10 +67,19 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.secretName" . }}
                 optional: true
-          {{- with .Values.extraEnv }}
           env:
+            # Names the RQ worker in Redis after the pod. RQ otherwise
+            # registers a random hex id, which nothing outside the process can
+            # match back to it — so `worker.livenessProbe` has no way to ask
+            # whether *this* pod's worker is still alive, and a probe that
+            # matches on the hostname prefix fails on a perfectly healthy pod.
+            - name: RQ_WORKER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           {{- with .Values.worker.livenessProbe }}

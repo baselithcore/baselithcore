@@ -1,3 +1,9 @@
+"""Reasoning configuration (``TOT_``).
+
+Tree-of-Thoughts search shape: branching, depth and the scoring policy that
+decides which branches survive.
+"""
+
 from typing import Literal
 
 from pydantic import Field

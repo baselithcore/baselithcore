@@ -73,7 +73,10 @@ class VectorStoreConfig(BaseSettings):
     )
 
     # Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk.
-    qdrant_mode: str = Field(default="server", alias="QDRANT_MODE")
+    qdrant_mode: str = Field(
+        default="server",
+        validation_alias=AliasChoices("VECTORSTORE_QDRANT_MODE", "QDRANT_MODE"),
+    )
     qdrant_path: str | None = Field(default=None, alias="QDRANT_PATH")
 
     # Managed/remote Qdrant: API key + TLS. Both unset for the loopback

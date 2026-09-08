@@ -1,3 +1,9 @@
+"""Orchestration and routing configuration (``ORCHESTRATOR_``, ``ROUTER_``).
+
+Loop budgets, checkpointing and tool rate limiting for the agentic loop, plus
+the intent router that picks the handler for a request.
+"""
+
 from __future__ import annotations
 
 from pydantic import Field

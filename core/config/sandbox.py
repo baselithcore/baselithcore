@@ -1,3 +1,9 @@
+"""Sandbox configuration (``SANDBOX_``).
+
+Isolation backend and resource ceilings for the untrusted code the coding
+agents execute.
+"""
+
 from typing import Literal, TypeAlias
 
 from pydantic import Field

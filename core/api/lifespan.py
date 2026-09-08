@@ -55,6 +55,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "on" if POSTGRES_ENABLED else "off",
     )
 
+    # Settings classes ignore unknown variables, so a misspelled one costs a
+    # silent default. Say it once here instead of letting it be hunted later.
+    from core.config.drift import warn_on_suspected_typos
+
+    warn_on_suspected_typos()
+
     # Audit trail, compliance-profile check and the Art. 72 review sweep — each
     # individually opt-in (see core.api.startup_checks). The audit trail comes
     # up first so every later startup step is already covered by it.

@@ -66,4 +66,22 @@ spec:
           emptyDir:
             sizeLimit: 64Mi
       {{- end }}
+      # The hook runs the same image against the same database as the app, so
+      # it has to be schedulable wherever the app is. Without these it is not:
+      # a nodeSelector that pins the pods to one node leaves the Job free to
+      # land anywhere, and on a tainted or heterogeneous cluster it sits
+      # Pending until activeDeadlineSeconds fails the whole release — with the
+      # app itself perfectly schedulable.
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}
