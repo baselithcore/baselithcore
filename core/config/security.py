@@ -11,6 +11,14 @@ from typing import Annotated, Any
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from core.config._security_parsers import (
+    coerce_to_secret_set,
+    parse_algorithms,
+    parse_encryption_keys,
+    parse_role_map,
+    parse_scoped_keys,
+)
+
 logger = logging.getLogger(__name__)
 
 # Below this many characters, a configured API key stops being a random token
@@ -84,11 +92,19 @@ class SecurityConfig(BaseSettings):
             "AUTH_ACCESS_TOKEN_LIFETIME", "AUTH_SESSION_LIFETIME"
         ),
         ge=60,
-        description="Access-token lifetime in seconds (default 1h).",
+        description=(
+            "Access-token lifetime in seconds (default 1h; legacy alias "
+            "AUTH_SESSION_LIFETIME). Refresh tokens keep the JWTHandler default "
+            "of 7 days."
+        ),
     )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
+        description=(
+            "Master switch for API-key authentication. When false, API keys are "
+            "rejected entirely."
+        ),
     )
 
     # === Multi-factor authentication (TOTP / RFC 6238) ===
@@ -128,7 +144,17 @@ class SecurityConfig(BaseSettings):
 
     # CORS — defaults to empty (block all cross-origin) for safety
     allow_origins: list[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
-    trusted_hosts: list[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
+    trusted_hosts: list[str] = Field(
+        default_factory=list,
+        alias="TRUSTED_HOSTS",
+        description=(
+            "Host allowlist. Empty — the default — leaves TrustedHostMiddleware "
+            "unmounted and the Host header unvalidated, so a spoofed Host "
+            "poisons absolute URLs built from the request (reset and "
+            "verification links) and host-keyed caches. Production logs an "
+            "ERROR at startup while this is empty."
+        ),
+    )
 
     # API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry)
     api_keys_user: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
@@ -272,99 +298,32 @@ class SecurityConfig(BaseSettings):
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
     def _coerce_to_secret_set(cls, v: Any) -> Any:
-        """Coerce comma-separated strings or iterables of mixed types to ``Set[SecretStr]``."""
-        if v is None or v == "":
-            return set()
-        if isinstance(v, str):
-            items = [s.strip() for s in v.split(",") if s.strip()]
-            return {SecretStr(s) for s in items}
-        if isinstance(v, (list, set, tuple)):
-            return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in v}
-        return v
+        """Coerce comma-separated strings or mixed iterables to ``set[SecretStr]``."""
+        return coerce_to_secret_set(v)
 
     @field_validator("oidc_role_map", mode="before")
     @classmethod
     def _parse_role_map(cls, v: Any) -> Any:
         """Parse ``idp_role:app_role`` pairs (comma-separated) into a dict."""
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {str(k): str(val) for k, val in v.items()}
-        if isinstance(v, str):
-            parsed: dict[str, str] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry or ":" not in entry:
-                    continue
-                idp_role, _, app_role = entry.partition(":")
-                if idp_role.strip() and app_role.strip():
-                    parsed[idp_role.strip()] = app_role.strip().lower()
-            return parsed
-        return v
+        return parse_role_map(v)
 
     @field_validator("oidc_algorithms", mode="before")
     @classmethod
     def _parse_algorithms(cls, v: Any) -> Any:
         """Allow a comma-separated string for OIDC_ALGORITHMS."""
-        if isinstance(v, str):
-            return [a.strip() for a in v.split(",") if a.strip()]
-        return v
+        return parse_algorithms(v)
 
     @field_validator("api_keys_scoped", mode="before")
     @classmethod
     def _parse_scoped_keys(cls, v: Any) -> Any:
-        """Parse ``key=scope|scope,...`` into ``Dict[SecretStr, Set[str]]``.
-
-        Already-parsed dicts pass through (keys wrapped in ``SecretStr``,
-        scope values coerced to a set). Empty/malformed entries are skipped
-        rather than raising, so a stray trailing comma does not break startup.
-        """
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {
-                (k if isinstance(k, SecretStr) else SecretStr(str(k))): set(val)
-                for k, val in v.items()
-            }
-        if isinstance(v, str):
-            parsed: dict[SecretStr, set[str]] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry or "=" not in entry:
-                    continue
-                key, _, scope_str = entry.partition("=")
-                key = key.strip()
-                scopes = {s.strip().lower() for s in scope_str.split("|") if s.strip()}
-                if key and scopes:
-                    parsed[SecretStr(key)] = scopes
-            return parsed
-        return v
+        """Parse ``key=scope|scope,...`` into ``dict[SecretStr, set[str]]``."""
+        return parse_scoped_keys(v)
 
     @field_validator("data_encryption_keys", mode="before")
     @classmethod
     def _parse_encryption_keys(cls, v: Any) -> Any:
-        """Parse ``id:secret`` pairs (comma-separated) into ``Dict[str, SecretStr]``.
-
-        A bare value without ``:`` is loaded under the id ``default`` so the
-        common single-key case stays simple. Already-parsed dicts pass through.
-        """
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {
-                str(k): (val if isinstance(val, SecretStr) else SecretStr(str(val)))
-                for k, val in v.items()
-            }
-        if isinstance(v, str):
-            parsed: dict[str, SecretStr] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry:
-                    continue
-                if ":" in entry:
-                    key_id, secret = entry.split(":", 1)
-                    parsed[key_id.strip()] = SecretStr(secret)
-                else:
-                    parsed["default"] = SecretStr(entry)
-            return parsed
-        return v
+        """Parse ``kid:secret`` pairs (comma-separated) into ``dict[str, SecretStr]``."""
+        return parse_encryption_keys(v)
 
     @model_validator(mode="after")
     def _validate_encryption_keys(self) -> "SecurityConfig":

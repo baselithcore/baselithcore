@@ -179,6 +179,10 @@ class AppConfig(BaseSettings):
         default=10000,
         validation_alias=AliasChoices("AGENT_MAX_TOKENS", "LLM_BUDGET_MAX_TOKENS"),
         ge=100,
+        description=(
+            "Per-agent-run runaway cap, not a monthly budget: one chat run that "
+            "burns more than this is aborted by CostControlMiddleware."
+        ),
     )
 
     # === Caching (Logic limits) ===
@@ -199,7 +203,21 @@ class AppConfig(BaseSettings):
     # feature is opt-in, namespaced apart from the response cache and given a
     # deliberately short TTL. See docs/core-modules/chat.md.
     chat_rag_precheck_enabled: bool = Field(
-        default=False, alias="CHAT_RAG_PRECHECK_ENABLED"
+        default=False,
+        alias="CHAT_RAG_PRECHECK_ENABLED",
+        description=(
+            "Pre-retrieval answer cache, probed right after history load and "
+            "keyed WITHOUT the retrieved context, so a hit skips vector search, "
+            "cross-encoder rerank and context building — not just generation. "
+            "That key cannot observe a corpus change through the query alone: "
+            "the indexing service's index_version is folded in, which "
+            "invalidates on an in-process reindex, but a reindex performed by "
+            "ANOTHER process is invisible here and the short TTL is the only "
+            "defence. Leave it off unless answers up to "
+            "CHAT_RAG_PRECHECK_TTL seconds stale are acceptable. Keys live in "
+            "their own namespace and flush independently of the response cache. "
+            "See docs/core-modules/chat.md."
+        ),
     )
     chat_rag_precheck_ttl: float = Field(
         default=60.0, alias="CHAT_RAG_PRECHECK_TTL", gt=0

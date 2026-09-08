@@ -81,7 +81,15 @@ class ProcessingConfig(BaseSettings):
 
     # === OCR ===
     pdf_ocr_backend: Literal["auto", "mineru", "tesseract"] = Field(
-        default="mineru", alias="PDF_OCR_BACKEND"
+        default="mineru",
+        alias="PDF_OCR_BACKEND",
+        description=(
+            "OCR backend. MinerU is the default and needs the extra "
+            '(pip install -e ".[mineru]") — heavy, and it downloads models on '
+            "first use, so pre-fetch with `mineru-models-download`. Selected "
+            "but not installed, OCR falls back to tesseract automatically; set "
+            "'tesseract' to avoid pulling the mineru/transformers stack at all."
+        ),
     )
     mineru_backend: Literal[
         "pipeline",
@@ -89,18 +97,46 @@ class ProcessingConfig(BaseSettings):
         "hybrid-engine",
         "vlm-http-client",
         "hybrid-http-client",
-    ] = Field(default="pipeline", alias="MINERU_BACKEND")
-    mineru_lang: str = Field(default="en", alias="MINERU_LANG")
+    ] = Field(
+        default="pipeline",
+        alias="MINERU_BACKEND",
+        description="MinerU engine. 'pipeline' is the only CPU-friendly choice.",
+    )
+    mineru_lang: str = Field(
+        default="en",
+        alias="MINERU_LANG",
+        description=(
+            "OCR language model: 'en' and 'latin' cover Latin-script languages "
+            "(Italian included); others are ch, korean, japan, th, el, arabic, "
+            "cyrillic, devanagari, ..."
+        ),
+    )
     mineru_formula_enable: bool = Field(default=True, alias="MINERU_FORMULA_ENABLE")
     mineru_table_enable: bool = Field(default=True, alias="MINERU_TABLE_ENABLE")
-    mineru_server_url: str | None = Field(default=None, alias="MINERU_SERVER_URL")
+    mineru_server_url: str | None = Field(
+        default=None,
+        alias="MINERU_SERVER_URL",
+        description=(
+            "Remote inference server for the *-http-client backends "
+            "(e.g. http://mineru:30000)."
+        ),
+    )
     mineru_model_source: Literal["huggingface", "modelscope", "local"] | None = Field(
         default=None, alias="MINERU_MODEL_SOURCE"
     )
     # Untrusted-document guards for the MinerU OCR path (documents may arrive
     # from the web crawler). 0 disables an individual cap.
     mineru_max_bytes: int = Field(
-        default=50 * 1024 * 1024, ge=0, alias="MINERU_MAX_BYTES"
+        default=50 * 1024 * 1024,
+        ge=0,
+        alias="MINERU_MAX_BYTES",
+        description=(
+            "Untrusted-document guards for the MinerU OCR path (documents may "
+            "arrive from the web crawler). 0 disables an individual cap. "
+            "Oversized or too-long input is skipped before the heavy parse; the "
+            "parses themselves run on a dedicated bounded pool with a "
+            "wall-clock timeout."
+        ),
     )
     mineru_max_pages: int = Field(default=500, ge=0, alias="MINERU_MAX_PAGES")
     mineru_timeout_seconds: float = Field(

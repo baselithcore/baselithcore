@@ -72,7 +72,12 @@ class LLMConfig(BaseSettings):
     # ``core.services.llm.runtime.api_base_for`` for why that matters the
     # moment a per-plugin policy routes a call somewhere else.
     api_base: str | None = Field(
-        default=None, description="Base URL for the default provider's API"
+        default=None,
+        description=(
+            "Base URL for the default provider's API. For openai this reaches "
+            "any OpenAI-compatible server (Azure OpenAI gateway, vLLM, LiteLLM, "
+            "OpenRouter); empty keeps the SDK default (api.openai.com)."
+        ),
     )
 
     # == Per-provider endpoints (central LLM policy) ==
@@ -88,7 +93,14 @@ class LLMConfig(BaseSettings):
     ollama_api_base: str | None = Field(
         default=None,
         validation_alias=AliasChoices("LLM_OLLAMA_API_BASE"),
-        description="Dedicated Ollama endpoint (for policy-routed calls)",
+        description=(
+            "Dedicated Ollama endpoint. Set it when Ollama is NOT the default "
+            "provider but a per-plugin LLM policy pins some plugin to it: "
+            "LLM_API_BASE belongs to the default provider, and handing it to "
+            "Ollama would aim those calls at the wrong server. Falls back to "
+            "LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, "
+            "then http://localhost:11434."
+        ),
     )
 
     # == Per-provider credentials (central LLM policy) ==
@@ -99,7 +111,12 @@ class LLMConfig(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("LLM_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
-        description="Dedicated Anthropic API key (for policy-routed calls)",
+        description=(
+            "Dedicated Anthropic key for the per-plugin LLM policy. LLM_API_KEY "
+            "belongs to LLM_PROVIDER; a plugin pinned to another provider is "
+            "served by that provider's own key. Blank means the provider is "
+            "reported as not configured."
+        ),
     )
 
     # == Anthropic serving backend ==

@@ -63,16 +63,16 @@ Declared in `core.config.app`.
 | `ACTIVE_LEARNING_LIMIT` | `int` | `20` |  |
 | `ACTIVE_LEARNING_MAX_POSITIVE_RATE` | `float` | `0.6` |  |
 | `ACTIVE_LEARNING_MIN_TOTAL` | `int` | `4` |  |
-| `AGENT_MAX_TOKENS`<br>also accepts `LLM_BUDGET_MAX_TOKENS` | `int` | `10000` | Global cap on tokens per agent run to prevent infinite loops/runaway costs. |
+| `AGENT_MAX_TOKENS`<br>also accepts `LLM_BUDGET_MAX_TOKENS` | `int` | `10000` | Per-agent-run runaway cap, not a monthly budget: one chat run that burns more than this is aborted by CostControlMiddleware. |
 | `ANALYSIS_CACHE_ENABLED` | `bool` | `True` |  |
 | `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` |  |
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` |  |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
-| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `list[str]` | _computed_ | List of prohibited keywords (Regex supported). |
+| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `list[str]` | *computed* | List of prohibited keywords (Regex supported). |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
 | `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
-| `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `list[str]` | _computed_ | Patterns to detect off-topic queries. |
+| `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `list[str]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
 | `CHAT_MEMORY_MAX_SESSIONS` | `int` | `1024` |  |
 | `CHAT_MEMORY_MAX_TURNS` | `int` | `6` | Max previous turns to include in the context window. |
@@ -80,7 +80,7 @@ Declared in `core.config.app`.
 | `CHAT_MEMORY_SUMMARY_MAX_CHARS` | `int` | `800` |  |
 | `CHAT_MEMORY_SUMMARY_MAX_TURNS` | `int` | `8` |  |
 | `CHAT_MEMORY_TTL` | `float` | `3600.0` |  |
-| `CHAT_RAG_PRECHECK_ENABLED` | `bool` | `False` | Pre-retrieval answer cache. Keyed WITHOUT the retrieved context, so a hit skips vector search + cross-encoder rerank + context building. That key cannot observe a corpus change through the query alone, so the feature is opt-in, namespaced apart from the response cache and given a deliberately short TTL. See docs/core-modules/chat.md. |
+| `CHAT_RAG_PRECHECK_ENABLED` | `bool` | `False` | Pre-retrieval answer cache, probed right after history load and keyed WITHOUT the retrieved context, so a hit skips vector search, cross-encoder rerank and context building — not just generation. That key cannot observe a corpus change through the query alone: the indexing service's index_version is folded in, which invalidates on an in-process reindex, but a reindex performed by ANOTHER process is invisible here and the short TTL is the only defence. Leave it off unless answers up to CHAT_RAG_PRECHECK_TTL seconds stale are acceptable. Keys live in their own namespace and flush independently of the response cache. See docs/core-modules/chat.md. |
 | `CHAT_RAG_PRECHECK_MAXSIZE` | `int` | `256` |  |
 | `CHAT_RAG_PRECHECK_TTL` | `float` | `60.0` |  |
 | `CHAT_RERANK_CACHE_ENABLED` | `bool` | `True` |  |
@@ -108,10 +108,10 @@ Declared in `core.config.app`.
 | `LOG_MASKING_ENABLED` | `bool` | `True` | Mask sensitive data (PII, tokens) in logs. |
 | `PORT` | `int` | `8000` | Port to listen on. |
 | `PROJECT_PLANNER_ENABLE_TEST_CASES` | `bool` | `True` | Include test cases generation in the project planner agent. |
-| `SENTRY_DSN` :material-key: | `SecretStr \| None` | _empty_ | A Sentry DSN embeds a project ingest key; wrap it per the SecretStr credential rule so it never leaks via repr()/model_dump()/logs. |
+| `SENTRY_DSN` :material-key: | `SecretStr \| None` | *empty* | A Sentry DSN embeds a project ingest key; wrap it per the SecretStr credential rule so it never leaks via repr()/model_dump()/logs. |
 | `SENTRY_PROFILES_SAMPLE_RATE` | `float` | `0.0` | Profiling is an investigation tool, not steady state: the profiler samples the interpreter at ~100 Hz for every profiled transaction, which is real CPU on a pod sized around one core. Off by default; raise it for the duration of an investigation and put it back. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `float` | `0.1` | Sentry trace/profile sample rates. Defaults are conservative for production; raise to 1.0 only in pre-prod or for short investigations. |
-| `SERVICE_VERSION` | `str` | _computed_ | Service version reported as the `service.version` resource attribute. Defaults to the installed package version. |
+| `SERVICE_VERSION` | `str` | *computed* | Service version reported as the `service.version` resource attribute. Defaults to the installed package version. |
 | `STRICT_TENANT_ISOLATION` | `bool` | `True` | If True, enforces strict logical isolation between different tenants. |
 | `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics to stdout (debugging the pipeline locally). |
 | `TELEMETRY_ENABLED` | `bool` | `False` |  |
@@ -125,9 +125,9 @@ Declared in `core.config.audit`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `AUDIT_DB_PATH` | `str \| None` | _empty_ |  |
+| `AUDIT_DB_PATH` | `str \| None` | *empty* |  |
 | `AUDIT_ENABLED` | `bool` | `False` |  |
-| `AUDIT_FILE_PATH` | `str \| None` | _empty_ |  |
+| `AUDIT_FILE_PATH` | `str \| None` | *empty* |  |
 | `AUDIT_HASH_CHAIN` | `bool` | `True` | Tamper evidence: each record is hash-chained to its predecessor, so a deletion or edit inside the window is detectable via `verify_chain()`. |
 | `AUDIT_LOG_SINK_ENABLED` | `bool` | `True` | Sinks. The logger sink mirrors the historical behaviour and stays on by default so enabling the subsystem never *removes* an existing signal. |
 | `AUDIT_MAX_DETAIL_CHARS` | `int` | `2000` | Truncation guard for free-form event details, so an audit record can never grow unbounded from a caller-supplied payload. |
@@ -157,7 +157,7 @@ Declared in `core.config.cache`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `CACHE_CROSS_WORKER_SINGLE_FLIGHT` | `bool` | `False` | Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis lock, not just within one event loop. Only takes effect where the backing cache is genuinely shared (Redis) — an in-process store gives the losing worker nothing to read back. Fail-open: if Redis is unreachable the path degrades to in-process coalescing. |
+| `CACHE_CROSS_WORKER_SINGLE_FLIGHT` | `bool` | `False` | Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis lock, not just within one event loop. With WEB_CONCURRENCY>1 or several pods, in-process coalescing still lets N workers issue N identical LLM/embedding calls for one key; this elects ONE worker per key and the others read the winner's value back out of the shared cache. Only takes effect where the backing cache is backing cache is genuinely shared (Redis) — an in-process store gives the losing worker nothing to read back. Fail-open: if Redis is unreachable the path degrades to in-process coalescing. |
 | `CACHE_MAXSIZE_DEFAULT` | `int` | `256` | Default maximum size for in-memory caches |
 | `CACHE_TTL_DEFAULT` | `float` | `300.0` | Default TTL in seconds for caches |
 | `CACHE_REDIS_URL` | `str` | `redis://redis:6379/1` | Redis connection URL |
@@ -180,19 +180,19 @@ Declared in `core.config.compliance`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `COMPLIANCE_BLOCK_PROHIBITED_PRACTICES` | `bool` | `False` | : Refuse to register a system that declares an Art. 5 prohibited practice, : instead of recording it as PROHIBITED and continuing. Off by default so : an operator can inventory a system *before* deciding to retire it. |
-| `COMPLIANCE_DOCUMENTS_DB_PATH` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_DPIA_DB_PATH` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_DPO_CONTACT` | `str \| None` | _empty_ |  |
+| `COMPLIANCE_DOCUMENTS_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_DPIA_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_DPO_CONTACT` | `str \| None` | *empty* |  |
 | `COMPLIANCE_ENABLED` | `bool` | `False` |  |
-| `COMPLIANCE_FRIA_DB_PATH` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_INSTRUCTIONS_DB_PATH` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_POST_MARKET_DB_PATH` | `str \| None` | _empty_ |  |
+| `COMPLIANCE_FRIA_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_INSTRUCTIONS_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_POST_MARKET_DB_PATH` | `str \| None` | *empty* |  |
 | `COMPLIANCE_POST_MARKET_SWEEP_ENABLED` | `bool` | `False` | : Run the daily Art. 72 review sweep, which surfaces plans past their : review cadence. Off by default like every other background loop. |
-| `COMPLIANCE_PROVIDER_CONTACT` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_PROVIDER_NAME` | `str \| None` | _empty_ | : Identity of the operator, used to pre-fill generated documentation. |
-| `COMPLIANCE_REGISTRY_DB_PATH` | `str \| None` | _empty_ | : Durable stores. Unset keeps the non-durable in-memory reference stores, : so behaviour is unchanged unless a path is provided. |
-| `COMPLIANCE_RISK_DB_PATH` | `str \| None` | _empty_ |  |
-| `COMPLIANCE_ROPA_DB_PATH` | `str \| None` | _empty_ |  |
+| `COMPLIANCE_PROVIDER_CONTACT` | `str \| None` | *empty* |  |
+| `COMPLIANCE_PROVIDER_NAME` | `str \| None` | *empty* | : Identity of the operator, used to pre-fill generated documentation. |
+| `COMPLIANCE_REGISTRY_DB_PATH` | `str \| None` | *empty* | : Durable stores. Unset keeps the non-durable in-memory reference stores, : so behaviour is unchanged unless a path is provided. |
+| `COMPLIANCE_RISK_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_ROPA_DB_PATH` | `str \| None` | *empty* |  |
 
 ## Evaluation configuration (`EVAL_`)
 
@@ -202,7 +202,7 @@ Declared in `core.config.evaluation`.
 | --- | --- | --- | --- |
 | `EVAL_ENABLED` | `bool` | `False` |  |
 | `EVAL_MODEL` | `str` | `gpt-4-turbo-preview` |  |
-| `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | _empty_ | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
+| `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
 
 ## Events configuration
 
@@ -224,19 +224,19 @@ Declared in `core.config.incidents`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `AI_ACT_COMPLETE_REPORT_DAYS` | `int` | `30` |  |
-| `AI_ACT_INCIDENT_DB_PATH` | `str \| None` | _empty_ |  |
+| `AI_ACT_INCIDENT_DB_PATH` | `str \| None` | *empty* |  |
 | `AI_ACT_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting. The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so they are derived in core.incidents.ai_act and deliberately NOT settings — there is no legitimate deployment-level override. Only the complete-report follow-up is configurable: Art. 73(5) allows an initial incomplete report followed by a complete one but fixes no outer limit for the latter, so this is an internal SLA, not a regulatory deadline. |
 | `DORA_AWARENESS_CAP_HOURS` | `int` | `24` |  |
-| `DORA_DB_PATH` | `str \| None` | _empty_ |  |
+| `DORA_DB_PATH` | `str \| None` | *empty* |  |
 | `DORA_FINAL_REPORT_DAYS` | `int` | `30` |  |
 | `DORA_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | DORA (EU 2022/2554) Art. 19 major-incident reporting clock. The initial notification is due within 4h of classifying the incident as major and in any case no later than 24h from awareness; the intermediate report within 72h of the initial notification; the final report within one month of the intermediate report. Configurable for stricter internal SLAs only. |
 | `DORA_INITIAL_NOTIFICATION_HOURS` | `int` | `4` |  |
 | `DORA_INTERMEDIATE_REPORT_HOURS` | `int` | `72` |  |
 | `GDPR_AUTHORITY_NOTIFICATION_HOURS` | `int` | `72` |  |
-| `GDPR_BREACH_DB_PATH` | `str \| None` | _empty_ |  |
+| `GDPR_BREACH_DB_PATH` | `str \| None` | *empty* |  |
 | `GDPR_BREACH_REPORTING_ENABLED` | `bool` | `False` | GDPR (Regulation (EU) 2016/679) Art. 33/34 personal-data-breach clock. 72h to the supervisory authority is the Art. 33(1) maximum — configurable for stricter internal SLAs only, never to relax it. Art. 34(1) sets no fixed limit for communicating to data subjects ("without undue delay"), so that horizon is an internal SLA. |
 | `GDPR_SUBJECT_COMMUNICATION_HOURS` | `int` | `72` |  |
-| `INCIDENT_DB_PATH` | `str \| None` | _empty_ | Opt-in durable persistence. When a filesystem path is set, the singleton incident service swaps its non-durable in-memory store for a SQLite store at that path (records survive restarts). Unset (the default) keeps the in-memory store, so behaviour is byte-for-byte unchanged unless a path is provided. NIS2 (INCIDENT_DB_PATH) and DORA (DORA_DB_PATH) persist to independent files. |
+| `INCIDENT_DB_PATH` | `str \| None` | *empty* | Opt-in durable persistence. When a filesystem path is set, the singleton incident service swaps its non-durable in-memory store for a SQLite store at that path (records survive restarts). Unset (the default) keeps the in-memory store, so behaviour is byte-for-byte unchanged unless a path is provided. NIS2 (INCIDENT_DB_PATH) and DORA (DORA_DB_PATH) persist to independent files. |
 | `INCIDENT_EARLY_WARNING_HOURS` | `int` | `24` | NIS2 Art. 23 deadlines, expressed relative to the moment the entity became aware of a significant incident ("detected_at"). Configurable for stricter internal SLAs, but never relax past the regulatory maxima. |
 | `INCIDENT_FINAL_REPORT_DAYS` | `int` | `30` | Final report is due within one month of the incident notification. |
 | `INCIDENT_NOTIFICATION_HOURS` | `int` | `72` |  |
@@ -255,8 +255,8 @@ Declared in `core.config.mcp`.
 | `MCP_CACHE_TTL_MS` | `int` | `60000` | Freshness hint on list/read results, in milliseconds. 0 means "always stale": correct for a server whose tools or resources change per request. |
 | `MCP_CLIENT_REQUEST_TIMEOUT` | `float` | `30.0` | Upper bound (seconds) on waiting for a response from an external MCP server. Guards against a hung or unresponsive server blocking the agent loop indefinitely. |
 | `MCP_EXECUTE_CODE_TIMEOUT` | `int` | `30` |  |
-| `MCP_HTTP_ALLOWED_ORIGINS` | `str` | _empty_ | Comma-separated allowlist of browser Origins (DNS-rebinding defense). Requests without an Origin header (non-browser clients) always pass. |
-| `MCP_HTTP_AUTHORIZATION_SERVERS` | `str` | _empty_ | Comma-separated issuer URLs advertised as `authorization_servers` in the RFC 9728 protected-resource metadata. Defaults to the configured OIDC issuer when empty. |
+| `MCP_HTTP_ALLOWED_ORIGINS` | `str` | *empty* | Comma-separated allowlist of browser Origins (DNS-rebinding defense). Requests without an Origin header (non-browser clients) always pass. |
+| `MCP_HTTP_AUTHORIZATION_SERVERS` | `str` | *empty* | Comma-separated issuer URLs advertised as `authorization_servers` in the RFC 9728 protected-resource metadata. Defaults to the configured OIDC issuer when empty. |
 | `MCP_HTTP_MAX_SESSIONS_PER_CLIENT` | `int` | `64` | Cap on live sessions a single identity may hold at once, so a client cannot mint sessions unbounded and pin memory for the whole TTL. 0 disables the cap. |
 | `MCP_HTTP_PATH` | `str` | `/mcp` |  |
 | `MCP_HTTP_RATE_LIMIT_PER_MINUTE` | `int` | `120` | Per-identity request budget for the MCP endpoint. Each request spawns server-side work (and a streaming task), so an authenticated caller must not be able to flood it unmetered. 0 disables the limit. |
@@ -266,10 +266,10 @@ Declared in `core.config.mcp`.
 | `MCP_HTTP_TRANSPORT_ENABLED` | `bool` | `False` | Off by default: enabling exposes the MCP server on the API surface. |
 | `MCP_LIST_PAGE_SIZE` | `int` | `100` | Maximum entries returned by one tools/list, resources/list or resources/templates/list page; the client pages on with `nextCursor`. |
 | `MCP_RAG_DEFAULT_TOP_K` | `int` | `5` |  |
-| `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | _empty_ | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
+| `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
-| `MCP_SERVERS` | `dict[str, MCPServerSpec]` | _computed_ | JSON mapping of server name -> MCPServerSpec (command/args/env for stdio, or url for Streamable HTTP, plus an autonomy_category applied to the server's tools). |
-| `MCP_SERVER_INSTRUCTIONS` | `str` | _empty_ | Optional natural-language guidance returned by `server/discover`. |
+| `MCP_SERVERS` | `dict[str, MCPServerSpec]` | *computed* | JSON mapping of server name -> MCPServerSpec (command/args/env for stdio, or url for Streamable HTTP, plus an autonomy_category applied to the server's tools). |
+| `MCP_SERVER_INSTRUCTIONS` | `str` | *empty* | Optional natural-language guidance returned by `server/discover`. |
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
 | `MCP_SERVER_VERSION` | `str` | `2.0.0` |  |
 | `MCP_SSE_TRANSPORT_ENABLED` | `bool` | `False` |  |
@@ -285,8 +285,8 @@ Declared in `core.config.memory`.
 | --- | --- | --- | --- |
 | `MEMORY_CONTEXT_FOLDING_ENABLED` | `bool` | `False` | Wire a ContextFolder into AgentMemory: long working memory gets LLM-summarized (recent turns verbatim) instead of hard-truncated. Off keeps the previous truncation behaviour. |
 | `MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` | `int` | `2000` | Fold only when the assembled context exceeds this size (below it the verbatim fast-path is used, no LLM call). |
-| `SUPERMEMORY_API_KEY` :material-key: | `SecretStr \| None` | _empty_ | API key from console.supermemory.ai |
-| `SUPERMEMORY_BASE_URL` | `str \| None` | _empty_ | Base URL override for self-hosted Supermemory instances |
+| `SUPERMEMORY_API_KEY` :material-key: | `SecretStr \| None` | *empty* | API key from console.supermemory.ai |
+| `SUPERMEMORY_BASE_URL` | `str \| None` | *empty* | Base URL override for self-hosted Supermemory instances |
 | `SUPERMEMORY_DEFAULT_TAG` | `str` | `baselithcore_default` | Default container tag used when no agent/tenant ID is specified |
 | `SUPERMEMORY_ENABLED` | `bool` | `False` | Enable the Supermemory integration |
 | `SUPERMEMORY_MAX_RETRIES` | `int` | `2` | SDK-level retry attempts for transient Supermemory errors |
@@ -300,26 +300,26 @@ Declared in `core.config.multimodal`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `FINETUNE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | _empty_ | Prefixed name first: without it these bound the bare vendor keys, so a fine-tuning job silently reused the chat provider's credentials. |
-| `FINETUNE_TOGETHER_API_KEY` :material-key:<br>also accepts `TOGETHER_API_KEY` | `SecretStr \| None` | _empty_ |  |
-| `VISION_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | _empty_ | Each provider credential accepts the prefixed name first and the bare vendor name as a fallback. A plain `alias` would REPLACE the `env_prefix`, so `VISION_ANTHROPIC_API_KEY` — the name the template and the docs advertise — would silently bind nothing. |
+| `FINETUNE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first: without it these bound the bare vendor keys, so a fine-tuning job silently reused the chat provider's credentials. |
+| `FINETUNE_TOGETHER_API_KEY` :material-key:<br>also accepts `TOGETHER_API_KEY` | `SecretStr \| None` | *empty* |  |
+| `VISION_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | *empty* | Each provider credential accepts the prefixed name first and the bare vendor name as a fallback. A plain `alias` would REPLACE the `env_prefix`, so `VISION_ANTHROPIC_API_KEY` — the name the template and the docs advertise — would silently bind nothing. |
 | `VISION_ANTHROPIC_MODEL` | `str` | `claude-3-5-sonnet-20241022` | Anthropic vision model identifier. |
-| `VISION_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | _empty_ |  |
+| `VISION_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VISION_GOOGLE_MODEL` | `str` | `gemini-2.0-flash` | Google vision model identifier. |
 | `VISION_OLLAMA_HOST`<br>also accepts `OLLAMA_HOST` | `str` | `http://localhost:11434` |  |
 | `VISION_OLLAMA_MODEL` | `str` | `llava` | Ollama vision model tag (e.g. 'llava', 'llava:7b', 'llama3.2-vision'). |
-| `VISION_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | _empty_ |  |
+| `VISION_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VISION_OPENAI_AUDIO_MODEL` | `str` | `gpt-4o-audio-preview` | OpenAI audio-capable chat model for native audio analysis (env VISION_OPENAI_AUDIO_MODEL). |
 | `VISION_OPENAI_MODEL` | `str` | `gpt-4o` | OpenAI vision model identifier. |
 | `VISION_PROVIDER` | `Literal['openai', 'anthropic', 'google', 'ollama']` | `openai` | Default vision capabilities provider |
-| `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | _empty_ | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
+| `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
 | `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_multilingual_v2` | ElevenLabs model ID for TTS |
 | `VOICE_ELEVENLABS_SIMILARITY_BOOST` | `float` | `0.75` | ElevenLabs similarity boost |
 | `VOICE_ELEVENLABS_STABILITY` | `float` | `0.5` | ElevenLabs voice stability |
 | `VOICE_EMBEDDING_MODEL` | `str` | `all-MiniLM-L6-v2` | Sentence-transformer model for semantic voice cache |
-| `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | _empty_ |  |
-| `VOICE_GOOGLE_APPLICATION_CREDENTIALS`<br>also accepts `GOOGLE_APPLICATION_CREDENTIALS` | `str \| None` | _empty_ |  |
-| `VOICE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | _empty_ |  |
+| `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
+| `VOICE_GOOGLE_APPLICATION_CREDENTIALS`<br>also accepts `GOOGLE_APPLICATION_CREDENTIALS` | `str \| None` | *empty* |  |
+| `VOICE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google']` | `openai` | Default voice synthesis provider |
 
 ## Orchestration and routing configuration (`ORCHESTRATOR_`, `ROUTER_`)
@@ -328,8 +328,8 @@ Declared in `core.config.orchestration`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ORCHESTRATOR_CHECKPOINT_BACKEND` | `str` | `auto` | Checkpoint store backend: 'postgres', 'sqlite', 'memory', or 'auto' (postgres when Postgres storage is enabled, else memory). |
-| `ORCHESTRATOR_CHECKPOINT_ENABLED` | `bool` | `True` | Wire a checkpoint store into the chat orchestrator (durable runs + human-in-the-loop approval flow). |
+| `ORCHESTRATOR_CHECKPOINT_BACKEND` | `str` | `auto` | Checkpoint store backend: 'postgres', 'sqlite', 'memory', or 'auto' (postgres when Postgres storage is enabled, else memory). 'sqlite' gives durable runs from a single file, with no Postgres — for development, air-gapped or single-node deployments. |
+| `ORCHESTRATOR_CHECKPOINT_ENABLED` | `bool` | `True` | Wire a checkpoint store into the chat orchestrator: runs persist resumable checkpoints, approval gates pause durably and the /approvals API is mounted. |
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED` | `bool` | `False` | Also append an immutable snapshot of the checkpoint at every version (time-travel / state history; requires checkpoint_enabled). |
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT` | `int` | `200` | Per-run cap on retained history snapshots (newest kept); 0 means unlimited. |
 | `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` | `int` | `1000` | Retained-run cap for the in-memory checkpoint backend (oldest finished runs evicted first). Irrelevant for the Postgres backend. |
@@ -354,12 +354,12 @@ Declared in `core.config.plugins`.
 | `MARKETPLACE_AUTH_URL`<br>also accepts `PLUGIN_AUTH_URL`, `AUTH_URL` | `str` | `https://marketplace.baselithcore.xyz` | URL for the official marketplace authentication portal |
 | `MARKETPLACE_CENTRAL_URL`<br>also accepts `PLUGIN_REGISTRY_URL`, `REGISTRY_URL` | `str` | `https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json` | URL for discovering and downloading plugins (can be overriden for local mirrors) |
 | `PLUGIN_AUTO_LOAD` | `bool` | `True` | Automatically load plugins on startup |
-| `PLUGIN_CONFIG_PATH` | `Path \| None` | _empty_ | Path to plugin configuration file |
+| `PLUGIN_CONFIG_PATH` | `Path \| None` | *empty* | Path to plugin configuration file |
 | `PLUGIN_ENABLED` | `bool` | `True` | Enable plugin system |
 | `PLUGIN_OFFICIAL_MARKETPLACE_URL` | `str` | `https://marketplace.baselithcore.xyz` | Official Marketplace and Registry URLs This is the hardcoded "Source of Truth" for the official marketplace. |
 | `PLUGIN_PLUGINS_PATH` | `Path` | `Path('plugins')` | Directory where plugins are installed |
-| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | _computed_ | Per-plugin configuration |
-| `PLUGIN_PUBLISH_WORKSPACE_ROOT` | `Path \| None` | _empty_ | POST /api/backstage/publish only packages plugin directories inside this root (e.g. the Backstage Scaffolder workspace mount). Fail-closed: while unset the publish endpoint is disabled, so a job/admin caller can never point the publisher at an arbitrary host directory. |
+| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Per-plugin configuration |
+| `PLUGIN_PUBLISH_WORKSPACE_ROOT` | `Path \| None` | *empty* | POST /api/backstage/publish only packages plugin directories inside this root (e.g. the Backstage Scaffolder workspace mount). Fail-closed: while unset the publish endpoint is disabled, so a job/admin caller can never point the publisher at an arbitrary host directory. |
 | `PLUGIN_REGISTRY_CACHE_TTL` | `int` | `3600` | TTL for local registry cache in seconds |
 
 ## Prioritization Configuration
@@ -380,8 +380,8 @@ Declared in `core.config.privacy`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `str \| None` | _empty_ | Durable store for the Art. 22 register. Same reasoning as the consent log: the record is the evidence that the Art. 22(3) safeguards exist, and that question is usually asked months later. |
-| `PRIVACY_CONSENT_DB_PATH` | `str \| None` | _empty_ | Durable store for the Art. 7 consent log. Unset keeps the in-memory reference store — fine for tests, useless as Art. 7(1) proof in production, where the record chain must outlive the process. |
+| `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `str \| None` | *empty* | Durable store for the Art. 22 register. Same reasoning as the consent log: the record is the evidence that the Art. 22(3) safeguards exist, and that question is usually asked months later. |
+| `PRIVACY_CONSENT_DB_PATH` | `str \| None` | *empty* | Durable store for the Art. 7 consent log. Unset keeps the in-memory reference store — fine for tests, useless as Art. 7(1) proof in production, where the record chain must outlive the process. |
 | `PRIVACY_ENABLED` | `bool` | `False` |  |
 | `PRIVACY_RETENTION_DAYS` | `int` | `0` | Default retention horizon for sweeps, in days. 0 disables automatic purge. |
 
@@ -394,27 +394,27 @@ Declared in `core.config.processing`.
 | `DOCUMENTS_EXTENSIONS` | `tuple[str, ...]` | `('.md', '.markdown', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.tif', '.tiff')` |  |
 | `DOCUMENTS_ROOT` | `str` | `documents` |  |
 | `ENABLE_SPACY_DOCUMENTS` | `bool` | `True` |  |
-| `MINERU_BACKEND` | `Literal['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client']` | `pipeline` |  |
+| `MINERU_BACKEND` | `Literal['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client']` | `pipeline` | MinerU engine. 'pipeline' is the only CPU-friendly choice. |
 | `MINERU_FORMULA_ENABLE` | `bool` | `True` |  |
-| `MINERU_LANG` | `str` | `en` |  |
-| `MINERU_MAX_BYTES` | `int` | `50 * 1024 * 1024` | Untrusted-document guards for the MinerU OCR path (documents may arrive from the web crawler). 0 disables an individual cap. |
+| `MINERU_LANG` | `str` | `en` | OCR language model: 'en' and 'latin' cover Latin-script languages (Italian included); others are ch, korean, japan, th, el, arabic, cyrillic, devanagari, ... |
+| `MINERU_MAX_BYTES` | `int` | `50 * 1024 * 1024` | Untrusted-document guards for the MinerU OCR path (documents may arrive from the web crawler). 0 disables an individual cap. Oversized or too-long input is skipped before the heavy parse; the parses themselves run on a dedicated bounded pool with a wall-clock timeout. |
 | `MINERU_MAX_CONCURRENCY` | `int` | `2` |  |
 | `MINERU_MAX_PAGES` | `int` | `500` |  |
-| `MINERU_MODEL_SOURCE` | `Literal['huggingface', 'modelscope', 'local'] \| None` | _empty_ |  |
-| `MINERU_SERVER_URL` | `str \| None` | _empty_ |  |
+| `MINERU_MODEL_SOURCE` | `Literal['huggingface', 'modelscope', 'local'] \| None` | *empty* |  |
+| `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. <http://mineru:30000>). |
 | `MINERU_TABLE_ENABLE` | `bool` | `True` |  |
 | `MINERU_TIMEOUT_SECONDS` | `float` | `300.0` |  |
-| `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` |  |
-| `SPACY_FALLBACK_LANGUAGE` | `str \| None` | _empty_ |  |
+| `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` | OCR backend. MinerU is the default and needs the extra (pip install -e ".[mineru]") — heavy, and it downloads models on first use, so pre-fetch with `mineru-models-download`. Selected but not installed, OCR falls back to tesseract automatically; set 'tesseract' to avoid pulling the mineru/transformers stack at all. |
+| `SPACY_FALLBACK_LANGUAGE` | `str \| None` | *empty* |  |
 | `SPACY_MODEL` | `str` | `en_core_web_sm` |  |
-| `WEB_DOCUMENTS_ALLOWLIST` | `list[str]` | _computed_ |  |
+| `WEB_DOCUMENTS_ALLOWLIST` | `list[str]` | *computed* |  |
 | `WEB_DOCUMENTS_ENABLED` | `bool` | `False` |  |
 | `WEB_DOCUMENTS_MAX_DEPTH` | `int` | `2` |  |
 | `WEB_DOCUMENTS_MAX_PAGES` | `int` | `5` |  |
 | `WEB_DOCUMENTS_RENDER_TIMEOUT` | `float` | `20.0` |  |
-| `WEB_DOCUMENTS_URLS` | `list[str]` | _computed_ |  |
+| `WEB_DOCUMENTS_URLS` | `list[str]` | *computed* |  |
 | `WEB_DOCUMENTS_USER_AGENT` | `str` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36` |  |
-| `WEB_DOCUMENTS_WAIT_SELECTOR` | `str \| None` | _empty_ |  |
+| `WEB_DOCUMENTS_WAIT_SELECTOR` | `str \| None` | *empty* |  |
 
 ## Per-key usage quota configuration
 
@@ -422,16 +422,16 @@ Declared in `core.config.quotas`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `QUOTAS_ENABLED` | `bool` | `False` |  |
+| `QUOTAS_ENABLED` | `bool` | `False` | Cumulative LLM spend caps per tenant over calendar windows. Distinct from the per-run LoopBudget USD cap. |
 | `QUOTA_BACKEND` | `str` | `redis` | Backend: 'memory' (single-process) or 'redis' (shared across workers). |
-| `QUOTA_DAILY_REQUESTS` | `int \| None` | _empty_ | Default budgets applied to every identity. `None` (or 0) = unlimited. |
-| `QUOTA_IDENTITY_DAILY_COST_USD` | `float \| None` | _empty_ | Per-identity (API key / user) USD cost budgets — independent of the tenant aggregate above. `None`/0 = unlimited. |
-| `QUOTA_IDENTITY_MONTHLY_COST_USD` | `float \| None` | _empty_ |  |
-| `QUOTA_MONTHLY_REQUESTS` | `int \| None` | _empty_ |  |
-| `QUOTA_TENANT_DAILY_COST_USD` | `float \| None` | _empty_ | Cumulative dollar-cost budgets per TENANT over the same calendar windows. Distinct from the per-run `LoopLimits.budget_usd` cap: this is the tenant's aggregate LLM spend across all requests. `None`/0 = unlimited. |
-| `QUOTA_TENANT_DAILY_REQUESTS` | `int \| None` | _empty_ | Default budgets applied to every TENANT (aggregate across all its members), distinct from the per-identity limits above. `None`/0 = unlimited. |
-| `QUOTA_TENANT_MONTHLY_COST_USD` | `float \| None` | _empty_ |  |
-| `QUOTA_TENANT_MONTHLY_REQUESTS` | `int \| None` | _empty_ |  |
+| `QUOTA_DAILY_REQUESTS` | `int \| None` | *empty* | Default budgets applied to every identity. `None` (or 0) = unlimited. |
+| `QUOTA_IDENTITY_DAILY_COST_USD` | `float \| None` | *empty* | Per-identity (API key / user) USD cost budgets — independent of the tenant aggregate above. `None`/0 = unlimited. |
+| `QUOTA_IDENTITY_MONTHLY_COST_USD` | `float \| None` | *empty* |  |
+| `QUOTA_MONTHLY_REQUESTS` | `int \| None` | *empty* |  |
+| `QUOTA_TENANT_DAILY_COST_USD` | `float \| None` | *empty* | Cumulative dollar-cost budgets per TENANT over the same calendar windows. Distinct from the per-run `LoopLimits.budget_usd` cap: this is the tenant's aggregate LLM spend across all requests. `None`/0 = unlimited. |
+| `QUOTA_TENANT_DAILY_REQUESTS` | `int \| None` | *empty* | Default budgets applied to every TENANT (aggregate across all its members), distinct from the per-identity limits above. `None`/0 = unlimited. |
+| `QUOTA_TENANT_MONTHLY_COST_USD` | `float \| None` | *empty* |  |
+| `QUOTA_TENANT_MONTHLY_REQUESTS` | `int \| None` | *empty* |  |
 
 ## Reasoning configuration (`TOT_`)
 
@@ -488,7 +488,7 @@ Declared in `core.config.sandbox`.
 | `SANDBOX_IMAGE` | `str` | `python:3.12-slim` | Docker image for sandbox |
 | `SANDBOX_PROVIDER` | `Literal['docker', 'sbx']` | `docker` | Sandbox provider (docker or sbx) |
 | `SANDBOX_SBX_PATH` | `str` | `sbx` | Path to the sbx CLI binary |
-| `SANDBOX_SBX_PROFILE` | `str \| None` | _empty_ | Optional profile to use with sbx |
+| `SANDBOX_SBX_PROFILE` | `str \| None` | *empty* | Optional profile to use with sbx |
 | `SANDBOX_STATIC_ANALYSIS` | `bool` | `True` | AST-analyze Python code before sandbox execution: syntax errors are always rejected; flagged imports are handled per static_analysis_mode. |
 | `SANDBOX_STATIC_ANALYSIS_DENIED_IMPORTS` | `str` | `ctypes,socket,subprocess` | Comma-separated module names flagged by the analyzer. |
 | `SANDBOX_STATIC_ANALYSIS_MODE` | `Literal['warn', 'block']` | `warn` | 'warn' logs flagged imports and proceeds (default); 'block' rejects the execution outright. |
@@ -500,7 +500,7 @@ Declared in `core.config.scraper`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `SCRAPER_BLOCKED_EXTENSIONS` | `list[str]` | _computed_ | File extensions to skip during crawling |
+| `SCRAPER_BLOCKED_EXTENSIONS` | `list[str]` | *computed* | File extensions to skip during crawling |
 | `SCRAPER_BLOCK_PRIVATE_IPS` | `bool` | `True` | Block requests to private/internal IPs (SSRF protection) |
 | `SCRAPER_CACHE_BACKEND` | `Literal['memory', 'redis']` | `memory` | Cache backend to use |
 | `SCRAPER_CACHE_ENABLED` | `bool` | `True` | Enable response caching |
@@ -531,58 +531,58 @@ Declared in `core.config.security`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ADMIN_PASS` :material-key: | `SecretStr \| None` | _empty_ |  |
-| `ADMIN_PASS_HASHED` :material-key: | `SecretStr \| None` | _empty_ |  |
+| `ADMIN_PASS` :material-key: | `SecretStr \| None` | *empty* |  |
+| `ADMIN_PASS_HASHED` :material-key: | `SecretStr \| None` | *empty* |  |
 | `ADMIN_USER` | `str` | `admin` | Admin Credentials (Legacy/Simple Auth) |
-| `ALLOW_ORIGINS` | `list[str]` | _computed_ | CORS — defaults to empty (block all cross-origin) for safety |
-| `API_KEYS_ADMIN` :material-key: | `set[SecretStr]` | _computed_ |  |
-| `API_KEYS_JOB` :material-key: | `set[SecretStr]` | _computed_ |  |
-| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | _computed_ | Least-privilege scoped API keys: map of key -> set of capability scopes (see core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
-| `API_KEYS_USER` :material-key: | `set[SecretStr]` | _computed_ | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
-| `API_KEY_ENABLED`<br>also accepts `SECURITY_API_KEY_ENABLED` | `bool` | `True` |  |
-| `AUTH_ACCESS_TOKEN_LIFETIME`<br>also accepts `AUTH_SESSION_LIFETIME` | `int` | `3600` | Access-token lifetime in seconds (default 1h). |
+| `ALLOW_ORIGINS` | `list[str]` | *computed* | CORS — defaults to empty (block all cross-origin) for safety |
+| `API_KEYS_ADMIN` :material-key: | `set[SecretStr]` | *computed* |  |
+| `API_KEYS_JOB` :material-key: | `set[SecretStr]` | *computed* |  |
+| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
+| `API_KEYS_USER` :material-key: | `set[SecretStr]` | *computed* | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
+| `API_KEY_ENABLED`<br>also accepts `SECURITY_API_KEY_ENABLED` | `bool` | `True` | Master switch for API-key authentication. When false, API keys are rejected entirely. |
+| `AUTH_ACCESS_TOKEN_LIFETIME`<br>also accepts `AUTH_SESSION_LIFETIME` | `int` | `3600` | Access-token lifetime in seconds (default 1h; legacy alias AUTH_SESSION_LIFETIME). Refresh tokens keep the JWTHandler default of 7 days. |
 | `AUTH_FAILURE_LIMIT_PER_MINUTE` | `int \| None` | `20` | Per-source-IP budget for *failed* authentication attempts within the rate-limit window. Unlike the per-role limits above (which meter only already-authenticated traffic), this throttles credential brute-force / stuffing on every `require_*` route: once an IP exceeds this many rejected auth attempts it receives 429 instead of an unmetered stream of 401s. Successful auth never touches this counter, so a generous default does not penalise a mistyped token or a NAT'd client. Set to None to disable (not recommended — leaves authenticated routes brute-forceable). |
 | `AUTH_REQUIRED` | `bool` | `True` |  |
-| `CONTENT_SECURITY_POLICY` | `str \| None` | _empty_ |  |
+| `CONTENT_SECURITY_POLICY` | `str \| None` | *empty* |  |
 | `CROSS_ORIGIN_OPENER_POLICY` | `str \| None` | `same-origin-allow-popups` | Cross-origin isolation pair (OWASP Secure Headers). COOP severs the window.opener link with cross-origin windows; "same-origin-allow-popups" keeps OAuth/SSO popups opened by the console working. CORP blocks no-cors subresource loads (<img>, <script>) of our responses from foreign origins (CORS-approved fetches from ALLOW_ORIGINS are exempt); "" omits either. |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | `str \| None` | `same-origin` |  |
-| `DATA_ENCRYPTION_ACTIVE_KEY_ID` | `str \| None` | _empty_ |  |
-| `DATA_ENCRYPTION_KEYS` :material-key: | `Annotated[dict[str, SecretStr], NoDecode]` | _computed_ | Mapping of key_id -> secret material (raw base64 32-byte key or passphrase), supplied as "id1:secret1,id2:secret2"; a value without ':' is loaded under the id 'default'. Empty (the default) disables application-level encryption. NoDecode: skip pydantic-settings' JSON decoding so the raw "id:secret,..." string reaches the field validator below (env source would otherwise try json.loads on it and fail). |
+| `DATA_ENCRYPTION_ACTIVE_KEY_ID` | `str \| None` | *empty* |  |
+| `DATA_ENCRYPTION_KEYS` :material-key: | `Annotated[dict[str, SecretStr], NoDecode]` | *computed* | Mapping of key_id -> secret material (raw base64 32-byte key or passphrase), supplied as "id1:secret1,id2:secret2"; a value without ':' is loaded under the id 'default'. Empty (the default) disables application-level encryption. NoDecode: skip pydantic-settings' JSON decoding so the raw "id:secret,..." string reaches the field validator below (env source would otherwise try json.loads on it and fail). |
 | `ENABLE_HSTS` | `bool` | `True` |  |
 | `HSTS_MAX_AGE` | `int` | `31536000` |  |
-| `JWT_ACTIVE_KID` | `str \| None` | _empty_ | Which JWT_KEYS entry signs new tokens (required if it lists more than one). |
+| `JWT_ACTIVE_KID` | `str \| None` | *empty* | Which JWT_KEYS entry signs new tokens (required if it lists more than one). |
 | `JWT_ALGORITHM` | `str` | `HS256` | JWS algorithm for access/refresh tokens. HS256 (default) signs and verifies with SECRET_KEY. An asymmetric choice (EdDSA/RS256/ES256) additionally needs JWT_SIGNING_KEY (private) and JWT_KEYS (public), and lets a service verify tokens without being able to mint them. |
-| `JWT_AUDIENCE` | `str \| None` | _empty_ |  |
-| `JWT_ISSUER` | `str \| None` | _empty_ |  |
-| `JWT_KEYS` :material-key: | `SecretStr \| None` | _empty_ | Verification key ring as 'kid1=key1,kid2=key2'. Accepting several keys at once is what makes rotation non-disruptive: add the new key, point JWT_ACTIVE_KID at it, and drop the old one after the longest token lifetime has elapsed — no session is ever invalidated. SecretStr: with HS256 (the default) every entry is a signing-capable shared secret, so it must never surface in repr()/dumps/Sentry frames. |
-| `JWT_SIGNING_KEY` :material-key: | `SecretStr \| None` | _empty_ | Private key for asymmetric signing. Omit on verify-only services. |
+| `JWT_AUDIENCE` | `str \| None` | *empty* |  |
+| `JWT_ISSUER` | `str \| None` | *empty* |  |
+| `JWT_KEYS` :material-key: | `SecretStr \| None` | *empty* | Verification key ring as 'kid1=key1,kid2=key2'. Accepting several keys at once is what makes rotation non-disruptive: add the new key, point JWT_ACTIVE_KID at it, and drop the old one after the longest token lifetime has elapsed — no session is ever invalidated. SecretStr: with HS256 (the default) every entry is a signing-capable shared secret, so it must never surface in repr()/dumps/Sentry frames. |
+| `JWT_SIGNING_KEY` :material-key: | `SecretStr \| None` | *empty* | Private key for asymmetric signing. Omit on verify-only services. |
 | `JWT_STRICT_VALIDATION` | `bool` | `False` | When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments). |
 | `MAX_REQUEST_SIZE_BYTES` | `int` | `10 * 1024 * 1024` | Maximum request body size in bytes. 0 disables the check. |
 | `METRICS_AUTH_REQUIRED` | `bool` | `True` | Require admin basic auth on GET /metrics. Disable only when the endpoint is reachable solely from the scrape network (e.g. restricted by NetworkPolicy) or the scraper sends credentials. |
 | `MFA_ENABLED` | `bool` | `False` | Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can enroll users via AuthManager.mfa and require a TOTP step-up at login. Disabled by default — purely additive, no effect on existing auth paths. |
 | `MFA_ISSUER` | `str` | `BaselithCore` | Issuer label shown in the user's authenticator app (Google Authenticator, Authy, …) — typically the product or tenant name. |
-| `OIDC_ALGORITHMS` | `list[str]` | _computed_ |  |
-| `OIDC_AUDIENCE` | `str \| None` | _empty_ |  |
+| `OIDC_ALGORITHMS` | `list[str]` | *computed* |  |
+| `OIDC_AUDIENCE` | `str \| None` | *empty* |  |
 | `OIDC_DEFAULT_ROLE` | `str` | `user` |  |
 | `OIDC_ENABLED` | `bool` | `False` | When enabled, bearer tokens that are not local HS256 tokens are verified against an external OpenID Connect provider (Okta/Auth0/Azure AD/Keycloak) by fetching its JWKS and validating the RS256/ES256 signature. Opt-in and additive — local JWT/API-key auth is unaffected when disabled. |
-| `OIDC_ISSUER` | `str \| None` | _empty_ |  |
-| `OIDC_JWKS_URL` | `str \| None` | _empty_ | Optional explicit JWKS endpoint; if unset it is discovered from `{issuer}/.well-known/openid-configuration`. |
+| `OIDC_ISSUER` | `str \| None` | *empty* |  |
+| `OIDC_JWKS_URL` | `str \| None` | *empty* | Optional explicit JWKS endpoint; if unset it is discovered from `{issuer}/.well-known/openid-configuration`. |
 | `OIDC_ROLES_CLAIM` | `str` | `roles` |  |
-| `OIDC_ROLE_MAP` | `Annotated[dict[str, str], NoDecode]` | _computed_ | Map IdP role strings to BaselithCore AuthRole values: "okta-admins:admin,okta-users:user". |
+| `OIDC_ROLE_MAP` | `Annotated[dict[str, str], NoDecode]` | *computed* | Map IdP role strings to BaselithCore AuthRole values: "okta-admins:admin,okta-users:user". |
 | `OIDC_SCOPES_CLAIM` | `str` | `scope` |  |
-| `OIDC_TENANT_CLAIM` | `str \| None` | _empty_ |  |
+| `OIDC_TENANT_CLAIM` | `str \| None` | *empty* |  |
 | `OIDC_USERNAME_CLAIM` | `str` | `sub` | Claim names to read identity/authorization from (IdP-specific). |
 | `PERMISSIONS_POLICY` | `str \| None` | `geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` | Restrictive default: deny access to powerful browser features the API/ console never needs, so a compromised/embedded page cannot request them. Override with a policy string, or "" to omit the header entirely. |
 | `RATE_LIMIT_ADMIN_PER_MINUTE` | `int \| None` | `120` | Non-null default so admin endpoints are never silently unlimited: a value of None makes the rate limiter no-op for that scope (unthrottled brute force / resource abuse). 120/min is generous for console use while still bounding abuse. Set explicitly (or to a high number) to widen it. |
-| `RATE_LIMIT_FAIL_MODE` | `str \| None` | _empty_ | Behavior when the Redis limiter backend is unreachable: open   — degrade to a per-process in-memory window (N replicas silently allow up to N x the limit until Redis recovers) closed — reject rate-limited requests with 503 (availability traded for a hard limit; the limit is treated as a security control) Unset (the default) resolves at limiter construction: `closed` in production when a Redis cache backend is declared (CACHE_BACKEND=redis), where the per-role limits, the auth-failure throttle and the admin lockout are brute-force/cost controls that must not silently widen when the shared counter blips; `open` outside production and in deployments that never configured Redis (the per-process window is the design there, not a degraded state). Set explicitly to pin either behaviour. |
-| `RATE_LIMIT_JOB_PER_MINUTE` | `int \| None` | _empty_ |  |
+| `RATE_LIMIT_FAIL_MODE` | `str \| None` | *empty* | Behavior when the Redis limiter backend is unreachable: open   — degrade to a per-process in-memory window (N replicas silently allow up to N x the limit until Redis recovers) closed — reject rate-limited requests with 503 (availability traded for a hard limit; the limit is treated as a security control) Unset (the default) resolves at limiter construction: `closed` in production when a Redis cache backend is declared (CACHE_BACKEND=redis), where the per-role limits, the auth-failure throttle and the admin lockout are brute-force/cost controls that must not silently widen when the shared counter blips; `open` outside production and in deployments that never configured Redis (the per-process window is the design there, not a degraded state). Set explicitly to pin either behaviour. |
+| `RATE_LIMIT_JOB_PER_MINUTE` | `int \| None` | *empty* |  |
 | `RATE_LIMIT_USER_PER_MINUTE` | `int \| None` | `60` |  |
 | `RATE_LIMIT_WINDOW_SECONDS` | `int` | `60` |  |
 | `SECRETS_BACKEND` | `str` | `env` | 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets), plus any backend registered via core.security.secrets.register_secrets_provider. |
-| `SECRETS_DIR` | `str \| None` | _empty_ |  |
-| `SECRET_KEY` :material-key: | `SecretStr \| None` | _empty_ |  |
+| `SECRETS_DIR` | `str \| None` | *empty* |  |
+| `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |
-| `TRUSTED_HOSTS` | `list[str]` | _computed_ |  |
+| `TRUSTED_HOSTS` | `list[str]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production logs an ERROR at startup while this is empty. |
 | `X_FRAME_OPTIONS` | `str` | `DENY` |  |
 
 ## Service-level configuration internal engines
@@ -600,41 +600,41 @@ Declared in `core.config.services`.
 | `CHAT_RERANKER_MODEL` | `str` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model name |
 | `CHAT_RERANK_MAX_CANDIDATES` | `int` | `50` | Maximum number of candidates to rerank |
 | `CHAT_RESPONSE_CACHE_TTL` | `int` | `3600` | Response cache TTL in seconds |
-| `CHAT_SERVICE_CONFIG_FILE` | `str \| None` | _empty_ | Path to an external YAML/JSON chat config file |
-| `CHAT_SERVICE_FACTORY` | `str \| None` | _empty_ | Import path to a custom chat service factory |
+| `CHAT_SERVICE_CONFIG_FILE` | `str \| None` | *empty* | Path to an external YAML/JSON chat config file |
+| `CHAT_SERVICE_FACTORY` | `str \| None` | *empty* | Import path to a custom chat service factory |
 | `CHAT_STREAMING_ENABLED` | `bool` | `True` | Enable streaming responses |
-| `LLM_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | _empty_ | Dedicated Anthropic API key (for policy-routed calls) |
-| `LLM_ANTHROPIC_AWS_REGION` | `str \| None` | _empty_ | Bedrock region (falls back to the SDK's AWS_REGION) |
+| `LLM_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | *empty* | Dedicated Anthropic key for the per-plugin LLM policy. LLM_API_KEY belongs to LLM_PROVIDER; a plugin pinned to another provider is served by that provider's own key. Blank means the provider is reported as not configured. |
+| `LLM_ANTHROPIC_AWS_REGION` | `str \| None` | *empty* | Bedrock region (falls back to the SDK's AWS_REGION) |
 | `LLM_ANTHROPIC_BACKEND` | `Literal['api', 'bedrock', 'vertex']` | `api` | Anthropic serving backend: api, bedrock, or vertex |
-| `LLM_ANTHROPIC_VERTEX_PROJECT` | `str \| None` | _empty_ | Vertex project id (falls back to GOOGLE_CLOUD_PROJECT) |
-| `LLM_ANTHROPIC_VERTEX_REGION` | `str \| None` | _empty_ | Vertex region (falls back to CLOUD_ML_REGION) |
-| `LLM_API_BASE` | `str \| None` | _empty_ | Base URL for the default provider's API |
-| `LLM_API_KEY` :material-key:<br>also accepts `LLM_OPENAI_API_KEY` | `SecretStr \| None` | _empty_ | API key for provider |
+| `LLM_ANTHROPIC_VERTEX_PROJECT` | `str \| None` | *empty* | Vertex project id (falls back to GOOGLE_CLOUD_PROJECT) |
+| `LLM_ANTHROPIC_VERTEX_REGION` | `str \| None` | *empty* | Vertex region (falls back to CLOUD_ML_REGION) |
+| `LLM_API_BASE` | `str \| None` | *empty* | Base URL for the default provider's API. For openai this reaches any OpenAI-compatible server (Azure OpenAI gateway, vLLM, LiteLLM, OpenRouter); empty keeps the SDK default (api.openai.com). |
+| `LLM_API_KEY` :material-key:<br>also accepts `LLM_OPENAI_API_KEY` | `SecretStr \| None` | *empty* | API key for provider |
 | `LLM_CACHE_MAX_SIZE` | `int` | `1000` | Maximum number of cached items |
 | `LLM_CACHE_TTL` | `int` | `3600` | Cache TTL in seconds (default 1 hour) |
 | `LLM_CONNECT_TIMEOUT` | `float` | `5.0` | TCP connect timeout (seconds) for provider SDK calls |
 | `LLM_ENABLE_CACHE` | `bool` | `True` | Enable semantic caching for LLM responses |
 | `LLM_ENABLE_NATIVE_TOOLS` | `bool` | `True` | Use providers' native tool-calling / structured-output APIs in LLMService.generate() (falls back to prompt coercion when off). |
-| `LLM_FALLBACK_CHAIN` | `str` | _empty_ | Comma-separated ordered 'provider:model' fallback entries (e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback. |
-| `LLM_FALLBACK_STAGE_TIMEOUT` | `float \| None` | _empty_ | Per-stage timeout (seconds) for the fallback chain; unset means each stage may use the full request timeout. |
-| `LLM_FALLBACK_TOTAL_TIMEOUT` | `float \| None` | _empty_ | Wall-clock timeout (seconds) for the whole fallback chain; unset falls back to request_timeout. |
-| `LLM_GEMINI_API_KEY` :material-key:<br>also accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `SecretStr \| None` | _empty_ | Dedicated Google Gemini API key (for policy-routed calls) |
-| `LLM_HUGGINGFACE_API_KEY` :material-key:<br>also accepts `HF_TOKEN` | `SecretStr \| None` | _empty_ | Dedicated HuggingFace API key (for policy-routed calls) |
+| `LLM_FALLBACK_CHAIN` | `str` | *empty* | Comma-separated ordered 'provider:model' fallback entries (e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback. |
+| `LLM_FALLBACK_STAGE_TIMEOUT` | `float \| None` | *empty* | Per-stage timeout (seconds) for the fallback chain; unset means each stage may use the full request timeout. |
+| `LLM_FALLBACK_TOTAL_TIMEOUT` | `float \| None` | *empty* | Wall-clock timeout (seconds) for the whole fallback chain; unset falls back to request_timeout. |
+| `LLM_GEMINI_API_KEY` :material-key:<br>also accepts `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* | Dedicated Google Gemini API key (for policy-routed calls) |
+| `LLM_HUGGINGFACE_API_KEY` :material-key:<br>also accepts `HF_TOKEN` | `SecretStr \| None` | *empty* | Dedicated HuggingFace API key (for policy-routed calls) |
 | `LLM_HUGGINGFACE_DEVICE` | `str` | `auto` | Device for local HuggingFace models (auto, cpu, cuda, mps) |
 | `LLM_HUGGINGFACE_DTYPE` | `str` | `auto` | Torch dtype for local models (auto, float16, bfloat16, float32) |
 | `LLM_HUGGINGFACE_LOCAL` | `bool` | `False` | Use local transformers instead of HuggingFace Inference API |
 | `LLM_HUGGINGFACE_TRUST_REMOTE_CODE` | `bool` | `False` | Trust remote code when loading HuggingFace models |
 | `LLM_MAX_CONCURRENT_REQUESTS` | `int` | `0` | Max concurrent LLM provider calls per process (0 = unlimited). Env: LLM_MAX_CONCURRENT_REQUESTS via the LLM_ prefix. |
-| `LLM_MAX_TOKENS` | `int \| None` | _empty_ | Maximum tokens to generate |
+| `LLM_MAX_TOKENS` | `int \| None` | *empty* | Maximum tokens to generate |
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
-| `LLM_OLLAMA_API_BASE` | `str \| None` | _empty_ | Dedicated Ollama endpoint (for policy-routed calls) |
+| `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then <http://localhost:11434>. |
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
-| `LLM_ROUTING_POLICY` | `str` | _empty_ | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
+| `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
-| `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | _empty_ | Dedicated OpenAI API key (for policy-routed calls) |
+| `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
 ## Storage configuration
 
@@ -645,7 +645,7 @@ Declared in `core.config.storage`.
 | `CACHE_BACKEND` | `str` | `local` | For now, simplistic cache config. Ideally dedicated CacheConfig. |
 | `CACHE_REDIS_PREFIX` | `str` | `baselithcore` |  |
 | `CACHE_REDIS_URL` | `str` | `redis://localhost:6379/1` |  |
-| `DATABASE_URL`<br>also accepts `DATABASE_URL` | `str \| None` | _empty_ | Full database connection URL |
+| `DATABASE_URL`<br>also accepts `DATABASE_URL` | `str \| None` | *empty* | Full database connection URL |
 | `DB_HOST` | `str` | `postgres` |  |
 | `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` | `int` | `60000` |  |
 | `DB_MIGRATIONS_ON_STARTUP` | `bool` | `True` | Run `alembic upgrade head` inside the app lifespan at boot. Default True for single-node/back-compat. Set False when migrations run as a pre-deploy step (Helm hook Job / initContainer): a bad migration then fails one Job instead of crash-looping the whole ReplicaSet, and pods stop contending on the migration advisory lock during rolling deploys. |
@@ -656,10 +656,10 @@ Declared in `core.config.storage`.
 | `DB_POOL_MIN_SIZE` | `int` | `2` | min_size=2 keeps warm connections through cold start / traffic ramp so early requests skip the TCP+TLS+auth handshake on the hot path; still small enough that idle deployments hold a negligible connection budget. |
 | `DB_POOL_TIMEOUT` | `float` | `30.0` |  |
 | `DB_PORT` | `int` | `5432` |  |
-| `DB_REPLICA_URL` | `str \| None` | _empty_ | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
+| `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
-| `DB_RUNTIME_DDL` | `bool \| None` | _empty_ | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
-| `DB_SSL_MODE` | `str \| None` | _empty_ |  |
+| `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
+| `DB_SSL_MODE` | `str \| None` | *empty* |  |
 | `DB_STATEMENT_TIMEOUT_MS` | `int` | `30000` | Server-side budgets baked into every pooled connection's startup options, in milliseconds (0 disables the Postgres guard). A statement that outlives `statement_timeout` is cancelled by the server, so a runaway query cannot hold a pooled connection indefinitely. The idle-in-transaction cap kills a session that opened a transaction and went quiet (leaked connection, crashed handler mid-transaction) before the locks it holds block everyone else. |
 | `DB_USER` | `str` | `baselith` |  |
 | `GRAPH_CACHE_TTL` | `int` | `3600` |  |
@@ -683,12 +683,12 @@ Declared in `core.config.swarm`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `HANDOFF_CYCLE_GUARD`<br>also accepts `BASELITH_HANDOFF_CYCLE_GUARD`, `SWARM_HANDOFF_CYCLE_GUARD` | `bool` | `True` | Refuse a handoff that would return a task to an agent that already held it, or exceed max_handoff_hops. Kill-switch: set BASELITH_HANDOFF_CYCLE_GUARD=0 to restore unbounded handoffs. |
-| `SWARM_AUCTION` | `AuctionConfig` | _computed_ |  |
+| `SWARM_AUCTION` | `AuctionConfig` | *computed* |  |
 | `SWARM_ENABLE_AUTO_HEALING` | `bool` | `True` | Enable self-healing mechanism |
 | `SWARM_MAX_CONCURRENT_SUBTASKS` | `int` | `5` | Maximum sub-tasks executed concurrently within one swarm handle(). Each sub-task is a full LLM call, so an unbounded fan-out over a large decomposition would open that many simultaneous provider calls (429 storm + unmetered cost spike). The per-request loop budget still caps the TOTAL sub-tasks; this caps how many run at once. |
 | `SWARM_MAX_HANDOFF_HOPS` | `int` | `8` | Maximum number of handoffs a single task may undergo before further transfers are refused (only enforced while handoff_cycle_guard is on). A task bouncing past this many agents is pathological ping-pong, not routing. |
 | `SWARM_PHEROMONE_DECAY_RATE` | `float` | `0.1` | Rate of pheromone decay |
-| `SWARM_TEAM` | `TeamConfig` | _computed_ |  |
+| `SWARM_TEAM` | `TeamConfig` | *computed* |  |
 
 ## Task-queue configuration (`TASK_QUEUE_`)
 
@@ -696,7 +696,7 @@ Declared in `core.config.task_queue`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `QUEUE_REDIS_URL`<br>also accepts `QUEUE_REDIS_URL` | `str \| None` | _empty_ | QUEUE_REDIS_URL — the documented deployment name. Declared as an explicit validation alias rather than relying on a bare field name: an empty `env_prefix` would also bind generic names such as `REDIS_URL` or `MAX_CONNECTIONS`, letting an unrelated service silently redirect the broker and strand every enqueued job on a database no worker listens on. Both spellings are named explicitly. A single-string `validation_alias` accepts only the alias, so `TaskQueueConfig(queue_redis_url=...)` bound nothing and silently fell through to the localhost default on the pydantic-settings version `uv.lock` pins; newer releases happen to also match the field name. Listing both removes the dependence on which release is installed, and widens nothing: it is the same env var name, and the generic names this alias exists to keep out stay out. |
+| `QUEUE_REDIS_URL`<br>also accepts `QUEUE_REDIS_URL` | `str \| None` | *empty* | QUEUE_REDIS_URL — the documented deployment name. Declared as an explicit validation alias rather than relying on a bare field name: an empty `env_prefix` would also bind generic names such as `REDIS_URL` or `MAX_CONNECTIONS`, letting an unrelated service silently redirect the broker and strand every enqueued job on a database no worker listens on. Both spellings are named explicitly. A single-string `validation_alias` accepts only the alias, so `TaskQueueConfig(queue_redis_url=...)` bound nothing and silently fell through to the localhost default on the pydantic-settings version `uv.lock` pins; newer releases happen to also match the field name. Listing both removes the dependence on which release is installed, and widens nothing: it is the same env var name, and the generic names this alias exists to keep out stay out. |
 | `TASK_QUEUE_DEFAULT_QUEUE` | `str` | `default` |  |
 | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `int` | `3` | Retry settings |
 | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `int` | `60` |  |
@@ -705,7 +705,7 @@ Declared in `core.config.task_queue`.
 | `TASK_QUEUE_JOB_TIMEOUT` | `int` | `3600` | Task execution settings |
 | `TASK_QUEUE_MAX_CONNECTIONS` | `int` | `50` | Connection pool settings |
 | `TASK_QUEUE_QUEUES` | `list[str]` | `['default', 'documents', 'analysis']` |  |
-| `TASK_QUEUE_REDIS_URL` | `str \| None` | _empty_ | TASK_QUEUE_REDIS_URL — the most specific name, so it wins. |
+| `TASK_QUEUE_REDIS_URL` | `str \| None` | *empty* | TASK_QUEUE_REDIS_URL — the most specific name, so it wins. |
 | `TASK_QUEUE_RESULT_TTL` | `int` | `86400` |  |
 
 ## DORA Register of Information persistence configuration
@@ -714,7 +714,7 @@ Declared in `core.config.thirdparty`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `THIRDPARTY_REGISTER_DB_PATH` | `str \| None` | _empty_ |  |
+| `THIRDPARTY_REGISTER_DB_PATH` | `str \| None` | *empty* |  |
 
 ## AI-transparency configuration (EU AI Act Article 50)
 
@@ -725,8 +725,8 @@ Declared in `core.config.transparency`.
 | `TRANSPARENCY_CLAIM_GENERATOR` | `str` | `BaselithCore` | Identifies the producing system in provenance tags (C2PA claim_generator). |
 | `TRANSPARENCY_DISCLOSURE_TEXT` | `str` | `DEFAULT_DISCLOSURE_TEXT` |  |
 | `TRANSPARENCY_ENABLED` | `bool` | `False` |  |
-| `TRANSPARENCY_PROVIDER_NAME` | `str \| None` | _empty_ |  |
-| `TRANSPARENCY_SIGNING_SECRET` :material-key: | `SecretStr \| None` | _empty_ | Optional HMAC secret; when set, provenance tags are signed and verifiable. |
+| `TRANSPARENCY_PROVIDER_NAME` | `str \| None` | *empty* |  |
+| `TRANSPARENCY_SIGNING_SECRET` :material-key: | `SecretStr \| None` | *empty* | Optional HMAC secret; when set, provenance tags are signed and verifiable. |
 
 ## Vector store configuration (Qdrant / pgvector)
 
@@ -737,9 +737,9 @@ Declared in `core.config.vectorstore`.
 | `EMBEDDING_CACHE_TTL` | `int` | `7 * 24 * 3600` | Embedding cache TTL in seconds (default 7 days) |
 | `INDEX_BATCH_SIZE` | `int` | `32` | Bulk-ingestion batching + bounded delete fan-out (see indexing service): docs per index() call, and max concurrent vector-store delete round-trips. |
 | `INDEX_MAX_CONCURRENCY` | `int` | `8` |  |
-| `QDRANT_API_KEY` :material-key: | `SecretStr \| None` | _empty_ | API key for managed/remote Qdrant (unset for local) |
+| `QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | API key for managed/remote Qdrant (unset for local) |
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
-| `QDRANT_PATH` | `str \| None` | _empty_ |  |
+| `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `384` | Embedding dimension |
 | `VECTORSTORE_EMBEDDING_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model name |

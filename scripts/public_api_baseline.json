@@ -1,9 +1,7 @@
 {
   "_comment": "Literal __all__ of every core package. Removing a symbol is a breaking change under the versioning policy; refresh with: python scripts/check_public_api.py --update-baseline",
   "packages": {
-    "core": [
-      "__version__"
-    ],
+    "core": ["__version__"],
     "core.a2a": [
       "A2AClient",
       "A2AClientConfig",
@@ -86,10 +84,7 @@
       "Task",
       "TaskResult"
     ],
-    "core.agents": [
-      "BrowserAgent",
-      "CodingAgent"
-    ],
+    "core.agents": ["BrowserAgent", "CodingAgent"],
     "core.agents.coding": [
       "CodeExecutionResult",
       "CodeLanguage",
@@ -98,10 +93,7 @@
       "CodingTaskType",
       "register_coding_tools"
     ],
-    "core.api": [
-      "AgentEvent",
-      "EventType"
-    ],
+    "core.api": ["AgentEvent", "EventType"],
     "core.auth": [
       "APIKeyValidator",
       "AuthError",
@@ -207,9 +199,7 @@
       "get_chat_service",
       "initialize_chat_service_with_plugins"
     ],
-    "core.cli": [
-      "main"
-    ],
+    "core.cli": ["main"],
     "core.cli.commands": [
       "cache",
       "config",
@@ -420,10 +410,7 @@
       "get_lazy_registry",
       "reset_lazy_registry"
     ],
-    "core.doc_sources": [
-      "DocumentSourceError",
-      "create_document_sources"
-    ],
+    "core.doc_sources": ["DocumentSourceError", "create_document_sources"],
     "core.evaluation": [
       "BakeOffResult",
       "BaseLLMEvaluator",
@@ -499,15 +486,8 @@
       "FineTuningPipeline",
       "TrainingStatus"
     ],
-    "core.goals": [
-      "Goal",
-      "GoalStatus",
-      "GoalTracker"
-    ],
-    "core.graph": [
-      "GraphDb",
-      "graph_db"
-    ],
+    "core.goals": ["Goal", "GoalStatus", "GoalTracker"],
+    "core.graph": ["GraphDb", "graph_db"],
     "core.guardrails": [
       "CodeReview",
       "CodeReviewComment",
@@ -527,12 +507,7 @@
       "review_code",
       "scan_external_content"
     ],
-    "core.human": [
-      "HumanIntervention",
-      "HumanRequest",
-      "InteractionStatus",
-      "InteractionType"
-    ],
+    "core.human": ["HumanIntervention", "HumanRequest", "InteractionStatus", "InteractionType"],
     "core.incidents": [
       "AiActIncidentNotFoundError",
       "AiActIncidentService",
@@ -714,12 +689,7 @@
       "FeedbackRequest",
       "SearchResult"
     ],
-    "core.nlp": [
-      "CachedEmbedder",
-      "get_embedder",
-      "get_pipeline",
-      "get_reranker"
-    ],
+    "core.nlp": ["CachedEmbedder", "get_embedder", "get_pipeline", "get_reranker"],
     "core.observability": [
       "AuditEvent",
       "AuditEventType",
@@ -1055,9 +1025,7 @@
       "ReflectionAgent",
       "SelfEvaluator"
     ],
-    "core.registries": [
-      "BaseRegistry"
-    ],
+    "core.registries": ["BaseRegistry"],
     "core.resilience": [
       "Bulkhead",
       "CircuitBreaker",
@@ -1121,21 +1089,10 @@
       "build_fallback_stream",
       "stream_answer"
     ],
-    "core.services.evaluation": [
-      "EvaluationService",
-      "get_evaluation_service"
-    ],
-    "core.services.graph": [
-      "GraphService"
-    ],
-    "core.services.graph.ops": [
-      "DocumentOperations",
-      "current_timestamp"
-    ],
-    "core.services.indexing": [
-      "IndexingService",
-      "get_indexing_service"
-    ],
+    "core.services.evaluation": ["EvaluationService", "get_evaluation_service"],
+    "core.services.graph": ["GraphService"],
+    "core.services.graph.ops": ["DocumentOperations", "current_timestamp"],
+    "core.services.indexing": ["IndexingService", "get_indexing_service"],
     "core.services.llm": [
       "ANY",
       "AUTO",

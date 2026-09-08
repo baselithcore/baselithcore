@@ -47,6 +47,7 @@ core/config/
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
+├── _security_parsers.py  # env-string -> typed credential coercion for security.py
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
@@ -782,6 +783,27 @@ demand:
 ```bash
 baselith config env
 ```
+
+### What belongs in `.env.example`
+
+The template is not the manual. It once carried an entry for nearly every
+setting, so ~110 of its lines restated a default the code already had, and its
+prose drifted out of step with the descriptions on the fields. Three kinds of
+line survive there now:
+
+- credentials the operator must supply (`__CHANGE_ME__`);
+- values the template deliberately sets **away** from the code default — it is a
+  profile as much as an example, and dropping those would silently change what
+  `cp .env.example .env` produces;
+- flags read straight from the environment rather than through a settings field,
+  where a wrong value is a security incident (the `BASELITH_A2A_*` family, the
+  SSRF and plugin-signature switches). Those have no `Field` to carry their
+  description, so their prose stays in the template.
+
+Everything else lives on the generated reference page. When a template entry is
+removed, its documentation moves into the field's `description=` first — the
+reference is generated from those, so prose deleted from the template without
+that step would simply be lost.
 
 ### Keeping the surface honest
 

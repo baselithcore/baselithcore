@@ -123,6 +123,12 @@ Copy the example configuration file:
 cp .env.example .env
 ```
 
+The template is deliberately short: it carries the credentials you must supply,
+the values it sets away from the code default, and the flags whose wrong value
+is a security incident. Every other setting has a working default and is listed
+in the [configuration reference](configuration.md). `baselith config env`
+reports any variable in your `.env` that binds nothing.
+
 Edit `.env` with your configurations:
 
 ```env title=".env"
