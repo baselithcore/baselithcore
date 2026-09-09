@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import types
 
-from core.observability import otel
+from core.observability import otel_instrumentation as otel
 
 
 def test_default_exclusions_are_anchored_probe_paths(monkeypatch):

@@ -363,4 +363,31 @@ def create_app() -> FastAPI:
 
     _declare_security_schemes(app)
 
+    # === OpenTelemetry ===
+    # Here, and not in the lifespan, because of *when* Starlette freezes its
+    # middleware stack. The FastAPI instrumentation works by wrapping
+    # ``build_middleware_stack``, and Starlette builds that stack lazily on the
+    # first call into the app — which the lifespan message itself already is.
+    # Instrumenting from the lifespan therefore patched a function that would
+    # never run again: telemetry logged itself as enabled and not one HTTP
+    # server span was ever produced. The class-level patch does not help
+    # either, since this module holds a direct reference to ``FastAPI``.
+    #
+    # Registered after every ``add_middleware`` call so the OTel span wraps the
+    # whole stack and measures true end-to-end latency. Idempotent and gated on
+    # ``telemetry_enabled``; the lifespan still calls it, and finds it done.
+    if getattr(_app_config, "telemetry_enabled", False):
+        try:
+            from core.observability.otel import setup_telemetry
+
+            setup_telemetry(
+                service_name="baselith-core",
+                otlp_endpoint=getattr(_app_config, "telemetry_otel_endpoint", None),
+                app=app,
+            )
+        except Exception as exc:  # pragma: no cover - telemetry is never fatal
+            from core.observability.logging import get_logger as _get_logger
+
+            _get_logger(__name__).warning("[OTEL] setup skipped: %s", exc)
+
     return app

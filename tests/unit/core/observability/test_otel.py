@@ -153,3 +153,180 @@ class TestHelpers:
 
         assert isinstance(otel._build_sampler(1.0), ParentBased)
         assert isinstance(otel._build_sampler(0.25), ParentBased)
+
+
+class TestOptionalExport:
+    """An empty endpoint installs the providers without an OTLP exporter.
+
+    A collector is deployment-optional: the in-process span sinks (dashboards,
+    debug readers) are fed by the bridge processor, not by the exporter. An
+    exporter aimed at an endpoint nothing listens on would retry every batch
+    forever, so it must not be attached at all.
+    """
+
+    @staticmethod
+    def _span_processor_types(provider) -> list[str]:
+        """Names of the processor classes registered on *provider*."""
+        multi = provider._active_span_processor
+        return [type(p).__name__ for p in multi._span_processors]
+
+    @pytest.mark.parametrize("endpoint", ["", "   ", None])
+    def test_blank_endpoint_means_no_collector(self, endpoint):
+        assert otel._normalize_endpoint(endpoint) is None
+
+    def test_endpoint_is_stripped(self):
+        assert otel._normalize_endpoint("  http://c:4317 ") == "http://c:4317"
+
+    def test_no_exporter_without_endpoint(self, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            trace, "set_tracer_provider", lambda p: captured.setdefault("p", p)
+        )
+        provider = otel._setup_tracing(
+            resource=None,
+            endpoint=None,
+            sampler=otel._build_sampler(1.0),
+            console_export=False,
+        )
+        names = self._span_processor_types(provider)
+        assert "BatchSpanProcessor" not in names
+        # The in-process mirror is the whole point of the collector-less mode.
+        assert "_SinkSpanProcessor" in names
+
+    def test_exporter_attached_with_endpoint(self, monkeypatch):
+        monkeypatch.setattr(trace, "set_tracer_provider", lambda p: None)
+        provider = otel._setup_tracing(
+            resource=None,
+            endpoint="http://collector:4317",
+            sampler=otel._build_sampler(1.0),
+            console_export=False,
+        )
+        assert "BatchSpanProcessor" in self._span_processor_types(provider)
+        provider.shutdown()
+
+    def test_meter_provider_skipped_with_no_destination(self):
+        assert otel._setup_metrics(None, None, False) is None
+
+
+class TestExistingAppIsInstrumented:
+    """The app exists before telemetry starts — it must still be traced.
+
+    ``FastAPIInstrumentor().instrument()`` swaps the ``fastapi.FastAPI`` class,
+    so it only reaches apps built afterwards. Telemetry is initialized from the
+    lifespan, which runs once the app object exists, so the global patch missed
+    the app actually serving traffic: instrumentation logged itself as enabled
+    and produced no HTTP server span at all.
+    """
+
+    def test_prebuilt_app_gets_instrumented(self):
+        from fastapi import FastAPI
+
+        from core.observability import otel_instrumentation
+
+        app = FastAPI()
+        assert not getattr(app, "_is_instrumented_by_opentelemetry", False)
+        otel_instrumentation._instrument_app(app)
+        assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+
+    def test_probe_and_sub_span_exclusions_reach_the_instrumentor(self, monkeypatch):
+        """Probes stay untraced and one request stays one span."""
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        from core.observability import otel_instrumentation
+
+        monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
+        monkeypatch.delenv("OTEL_PYTHON_EXCLUDED_URLS", raising=False)
+        monkeypatch.delenv("BASELITH_OTEL_ASGI_SUB_SPANS", raising=False)
+
+        # Resolved before the spy replaces instrument_app: the helper probes
+        # that very signature to decide whether exclude_spans is supported.
+        expected_spans = otel_instrumentation._fastapi_exclude_spans()
+        assert expected_spans == ["receive", "send"]
+
+        seen: dict = {}
+
+        def spy(app, **kwargs):
+            seen.update(kwargs)
+
+        monkeypatch.setattr(
+            otel_instrumentation,
+            "_fastapi_exclude_spans",
+            lambda: expected_spans,
+        )
+        monkeypatch.setattr(FastAPIInstrumentor, "instrument_app", staticmethod(spy))
+        otel_instrumentation._instrument_app(object())
+
+        assert "/health$" in seen["excluded_urls"]
+        assert seen["exclude_spans"] == ["receive", "send"]
+
+    def test_sub_spans_can_be_restored_for_debugging(self, monkeypatch):
+        from core.observability import otel_instrumentation
+
+        monkeypatch.setenv("BASELITH_OTEL_ASGI_SUB_SPANS", "true")
+        assert otel_instrumentation._fastapi_exclude_spans() is None
+
+    def test_instrument_app_is_a_noop_without_an_app(self):
+        from core.observability import otel_instrumentation
+
+        otel_instrumentation._instrument_app(None)  # must not raise
+
+
+class TestInstrumentationOrdering:
+    """*When* the app is instrumented decides whether it is traced at all.
+
+    Starlette builds its middleware stack lazily and caches it on the first
+    call into the application — and the lifespan startup message is such a
+    call. The FastAPI instrumentation works by wrapping
+    ``build_middleware_stack``, so instrumenting from the lifespan patches a
+    function that will never run again: telemetry reports itself enabled and
+    produces no HTTP server span at all. These two tests pin both halves so the
+    call cannot drift back into the lifespan.
+    """
+
+    @staticmethod
+    def _app_with_route():
+        from fastapi import FastAPI
+
+        app = FastAPI()
+
+        @app.get("/work")
+        def work() -> dict[str, str]:
+            return {"ok": "yes"}
+
+        return app
+
+    @staticmethod
+    def _recording_provider():
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        return exporter, provider
+
+    def test_instrumented_before_first_call_emits_a_server_span(self):
+        from fastapi.testclient import TestClient
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        app = self._app_with_route()
+        exporter, provider = self._recording_provider()
+
+        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+        TestClient(app).get("/work")
+
+        kinds = [(s.name, s.kind.name) for s in exporter.get_finished_spans()]
+        assert any(k == "SERVER" for _, k in kinds), kinds
+
+    def test_instrumented_after_the_stack_is_frozen_emits_nothing(self):
+        """The bug this ordering exists to avoid — kept as an executable note."""
+        from fastapi.testclient import TestClient
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        app = self._app_with_route()
+        exporter, provider = self._recording_provider()
+
+        client = TestClient(app)
+        client.get("/work")  # first call: Starlette freezes the stack here
+        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+        client.get("/work")
+
+        kinds = [s.kind.name for s in exporter.get_finished_spans()]
+        assert "SERVER" not in kinds, kinds
