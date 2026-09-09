@@ -39,26 +39,48 @@ def _is_streaming_response(headers: Headers) -> bool:
 class _StreamAwareGZipResponder(GZipResponder):
     """GZip responder that passes streaming responses through uncompressed.
 
-    Starlette's responder already forwards responses that declare a
-    ``Content-Encoding`` untouched (``content_encoding_set``). We piggyback on
-    that passthrough path for streaming media types / ``X-Accel-Buffering: no``:
-    the decision is made from the buffered ``http.response.start`` headers, so
-    no body is ever accumulated for a stream.
+    The decision is taken from the ``http.response.start`` headers — a
+    streaming media type or ``X-Accel-Buffering: no`` — *before* any body byte
+    reaches the compressor, inside an ASGI ``send`` wrapper that ``__call__``
+    installs. It deliberately does not override one of the parent's
+    compression hooks: Starlette renamed that hook (``send_with_gzip`` up to
+    0.38, ``send_with_compression`` from 1.x), and an override whose name
+    matches nothing fails silently. The stream then goes through the stock
+    compressor, which never flushes mid-stream: measured on Starlette 0.38.6,
+    a 28-byte NDJSON heartbeat leaves as a **0-byte** body frame, every one of
+    them, until the response ends — so the reverse proxy sees an idle upstream
+    and cuts a minutes-long ingest at its read timeout while the worker is
+    still busy. Non-streaming responses are handed to whichever hook the
+    installed Starlette provides, so ordinary JSON keeps being compressed.
     """
 
-    async def send_with_compression(self, message: Message) -> None:
-        # NOTE: the seam is `send_with_compression`. Overriding the older
-        # `send_with_gzip` name silently disabled this whole passthrough — the
-        # method matched nothing in the parent, so streamed responses went
-        # through Starlette's compressor unchanged by us.
-        await super().send_with_compression(message)
-        if message["type"] == "http.response.start":
-            headers = Headers(raw=message.get("headers") or [])
-            if _is_streaming_response(headers):
-                # super() has just recorded the start message; flipping this
-                # flag routes every body frame down the parent's untouched
-                # passthrough branch instead of the compressor.
-                self.content_encoding_set = True
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        self.send = send
+        passthrough = False
+
+        async def guard(message: Message) -> None:
+            nonlocal passthrough
+            if message["type"] == "http.response.start":
+                passthrough = _is_streaming_response(
+                    Headers(raw=message.get("headers") or [])
+                )
+            if passthrough:
+                await send(message)
+                return
+            await self._compression_hook(message)
+
+        await self.app(scope, receive, guard)
+
+    async def _compression_hook(self, message: Message) -> None:
+        """Forward to the parent's compressor under whichever name it carries."""
+        hook = getattr(self, "send_with_compression", None) or getattr(
+            self, "send_with_gzip", None
+        )
+        if hook is None:  # pragma: no cover — no Starlette release lacks both
+            raise AttributeError(
+                "GZipResponder exposes neither send_with_compression nor send_with_gzip"
+            )
+        await hook(message)
 
 
 class StaticCacheMiddleware:

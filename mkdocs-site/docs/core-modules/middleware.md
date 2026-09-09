@@ -331,7 +331,26 @@ catches it and, if the response has not started, returns `429` with a
 - **`SmartGzipMiddleware`** subclasses Starlette's `GZipMiddleware` but skips
   compression entirely for configured `excluded_paths` (the factory excludes
   both `/chat/stream` and `/v1/chat/stream`) to preserve the streaming
-  "typewriter" effect.
+  "typewriter" effect. Requests whose `Accept` names `text/event-stream` are
+  bypassed too. Every other streamed response is caught from the *response*
+  side: a streaming media type (`text/event-stream`, `application/x-ndjson`,
+  `application/stream+json`, `application/jsonl`, `application/x-jsonlines`)
+  or an `X-Accel-Buffering: no` header on `http.response.start` flips the
+  responder into raw pass-through for the rest of that response, so a
+  `fetch`-based NDJSON reader (which sends `Accept-Encoding: gzip` and no
+  event-stream `Accept`) still gets each frame the moment it is written.
+
+    That decision lives in an ASGI `send` wrapper installed by the responder's
+    `__call__`, on purpose not in an override of the parent's compression
+    hook: Starlette renamed that hook (`send_with_gzip` up to 0.38,
+    `send_with_compression` from 1.x) and an override keyed on one name
+    matches nothing on the other, silently. Through the stock compressor a
+    28-byte heartbeat frame leaves as a **0-byte** body write — every one of
+    them, until the response ends — and a reverse proxy with a read timeout
+    cuts a minutes-long stream while the worker is still busy. Non-streaming
+    responses are forwarded to whichever hook the installed Starlette
+    provides. `tests/unit/core/optimization/test_gzip_sse.py` runs the
+    streaming cases under both hook names.
 
 ---
 
