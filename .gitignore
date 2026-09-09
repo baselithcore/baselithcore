@@ -15,6 +15,8 @@
 /docs/
 CLAUDE.md
 
+.agents/
+
 
 # --- Python and Packaging ---
 __pycache__/
@@ -56,6 +58,10 @@ EXTERNAL/
 # NEVER commit real credentials
 .env
 .env.*
+# These plugins are maintained and committed in their dedicated repositories.
+/plugins/wikigen/
+/plugins/auth/
+/plugins/baselithcontrol/
 plugins/*/.state/
 !.env.example
 !.env.*.example
