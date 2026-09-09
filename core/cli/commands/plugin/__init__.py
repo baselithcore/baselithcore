@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     # while keeping runtime resolution lazy via ``__getattr__`` below.
     from .config import config_get, config_reset, config_set, config_show
     from .create import create_plugin
-    from .deps import deps_check, deps_install
+    from .deps import deps_check, deps_check_all, deps_install, deps_install_all
     from .local import (
         delete_local_plugin,
         disable_local_plugin,
@@ -64,7 +64,9 @@ _LAZY_EXPORTS: dict[str, str] = {
     "logout_cmd": "marketplace",
     "identity_cmd": "marketplace",
     "deps_check": "deps",
+    "deps_check_all": "deps",
     "deps_install": "deps",
+    "deps_install_all": "deps",
     "config_show": "config",
     "config_set": "config",
     "config_get": "config",
@@ -82,7 +84,9 @@ __all__ = [
     "create_plugin",
     "delete_local_plugin",
     "deps_check",
+    "deps_check_all",
     "deps_install",
+    "deps_install_all",
     "disable_local_plugin",
     "enable_local_plugin",
     "export_manifest_cmd",

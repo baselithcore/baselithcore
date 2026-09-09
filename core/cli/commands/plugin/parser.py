@@ -141,19 +141,41 @@ def register_parser(subparsers, formatter_class):
         help="Verify all declared dependencies for a plugin",
         formatter_class=formatter_class,
     )
-    deps_check.add_argument("name", help="Plugin name to check")
+    deps_check.add_argument("name", nargs="?", default="", help="Plugin name to check")
+    deps_check.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_plugins",
+        help="Check dependencies for all local plugins",
+    )
+    deps_check.add_argument(
+        "--python-only",
+        action="store_true",
+        help="Only check Python package dependencies",
+    )
 
     deps_install = deps_subparsers.add_parser(
         "install",
         help="Install missing Python dependencies for a plugin",
         formatter_class=formatter_class,
     )
-    deps_install.add_argument("name", help="Plugin name")
+    deps_install.add_argument("name", nargs="?", default="", help="Plugin name")
+    deps_install.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_plugins",
+        help="Install missing Python dependencies for all local plugins",
+    )
     deps_install.add_argument(
         "-y",
         "--yes",
         action="store_true",
         help="Skip confirmation prompt",
+    )
+    deps_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show missing Python packages without installing them",
     )
 
     # ─── Configuration ─────────────────────────────────────

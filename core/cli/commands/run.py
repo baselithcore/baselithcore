@@ -20,6 +20,8 @@ def run_server(
     reload: bool = True,
     workers: int = 1,
     log_level: str = "info",
+    preflight: bool = True,
+    include_plugins: bool = False,
 ) -> int:
     """
     Start the development server using uvicorn.
@@ -30,6 +32,8 @@ def run_server(
         reload: Enable auto-reload on file changes
         workers: Number of worker processes (ignored if reload=True)
         log_level: Logging level
+        preflight: Run doctor checks before starting Uvicorn
+        include_plugins: Include plugin readiness checks in preflight
 
     Returns:
         Exit code (0 for success)
@@ -55,6 +59,11 @@ def run_server(
             "Make sure you're in the project root",
         )
         return 1
+
+    if preflight:
+        preflight_code = _run_preflight(include_plugins=include_plugins)
+        if preflight_code != 0:
+            return preflight_code
 
     # Resolve host/port from app config lazily — keeps the heavy config import
     # out of module load (and CLI startup/registration), so `baselith --help`
@@ -132,6 +141,37 @@ def run_server(
         return 1
 
 
+def _run_preflight(include_plugins: bool = False) -> int:
+    """Run startup-blocking diagnostics before Uvicorn starts."""
+    from core.cli.commands.doctor import run_checks
+
+    checks = run_checks(include_plugins=include_plugins)
+    failures = [check for check in checks if not check.passed and check.severity == "fail"]
+    if not failures:
+        return 0
+
+    table = Table(show_header=True, header_style="bold magenta", expand=True)
+    table.add_column("Component", style="cyan")
+    table.add_column("Problem")
+    table.add_column("Resolution", style="dim")
+    for check in failures:
+        table.add_row(check.name, check.message, check.details)
+
+    console.print()
+    console.print(
+        Panel(
+            table,
+            title="[bold red]Startup preflight failed[/bold red]",
+            border_style="red",
+            expand=False,
+        )
+    )
+    console.print("[dim]Run `baselith doctor` for the full diagnostic report.[/dim]")
+    console.print("[dim]Use `baselith run --check-plugins` to include plugin readiness.[/dim]")
+    console.print("[dim]Use `baselith run --skip-preflight` only for debugging.[/dim]")
+    return 1
+
+
 def register_parser(subparsers, formatter_class):
     """Register 'run' command parser."""
     run_parser = subparsers.add_parser(
@@ -175,6 +215,16 @@ def register_parser(subparsers, formatter_class):
         choices=["debug", "info", "warning", "error"],
         default="info",
         help="Set the verbosity of system logs (default: info)",
+    )
+    run_parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Start Uvicorn without running doctor checks first",
+    )
+    run_parser.add_argument(
+        "--check-plugins",
+        action="store_true",
+        help="Include plugin readiness checks in the startup preflight",
     )
     return run_parser
 

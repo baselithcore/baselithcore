@@ -65,18 +65,36 @@ def cmd_plugin(args: argparse.Namespace) -> int:
     # Handle nested subcommands: deps, config, marketplace
     if command == "deps":
         DEPS_COMMANDS = {
-            "check": lambda: plugin.deps_check(
-                args.name, json_output=args.format == "json"
+            "check": lambda: (
+                plugin.deps_check_all(
+                    json_output=args.format == "json",
+                    python_only=getattr(args, "python_only", False),
+                )
+                if getattr(args, "all_plugins", False)
+                else plugin.deps_check(
+                    args.name,
+                    json_output=args.format == "json",
+                    python_only=getattr(args, "python_only", False),
+                )
             ),
-            "install": lambda: plugin.deps_install(
-                args.name, yes=getattr(args, "yes", False)
+            "install": lambda: (
+                plugin.deps_install_all(
+                    yes=getattr(args, "yes", False),
+                    dry_run=getattr(args, "dry_run", False),
+                )
+                if getattr(args, "all_plugins", False)
+                else plugin.deps_install(
+                    args.name,
+                    yes=getattr(args, "yes", False),
+                    dry_run=getattr(args, "dry_run", False),
+                )
             ),
         }
         d_command = getattr(args, "deps_command", None)
         handler = DEPS_COMMANDS.get(d_command) if d_command else None
         if handler:
             return handler()
-        print_error("Usage: baselith plugin deps {check|install} <name>")
+        print_error("Usage: baselith plugin deps {check|install} <name|--all>")
         return 1
 
     elif command == "config":
@@ -140,15 +158,36 @@ def cmd_plugin(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Execute the setup orchestration command."""
+    from core.cli.commands.setup import run_setup
+
+    return run_setup(
+        profile=getattr(args, "profile", "dev"),
+        install_deps=getattr(args, "install_deps", False),
+        include_plugins=getattr(args, "with_plugins", False),
+        start_services=getattr(args, "start_services", False),
+        migrate=getattr(args, "migrate", False),
+        wait_timeout=getattr(args, "wait_timeout", 60),
+        json_output=getattr(args, "json", False) or args.format == "json",
+    )
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """Execute the 'config' command to inspect and modify settings."""
-    from core.cli.commands.config import show_config, validate_config
+    from core.cli.commands.config import ensure_env_profile, show_config, validate_config
 
-    return (
-        show_config()
-        if (getattr(args, "config_command", "show") or "show") == "show"
-        else validate_config()
-    )
+    command = getattr(args, "config_command", "show") or "show"
+    if command == "show":
+        return show_config()
+    if command == "validate":
+        return validate_config()
+    if command == "env":
+        return ensure_env_profile(
+            getattr(args, "profile", "dev"),
+            json_output=getattr(args, "json", False) or args.format == "json",
+        )
+    return 1
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -168,6 +207,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         reload=args.reload and not getattr(args, "no_reload", False),
         workers=args.workers,
         log_level=args.log_level,
+        preflight=not getattr(args, "skip_preflight", False),
+        include_plugins=getattr(args, "check_plugins", False),
     )
 
 
@@ -184,7 +225,7 @@ def cmd_db(args: argparse.Namespace) -> int:
 
     return run_db(
         getattr(args, "db_command", "status") or "status",
-        json_output=args.format == "json",
+        json_output=getattr(args, "json", False) or args.format == "json",
     )
 
 
@@ -216,7 +257,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """Execute the 'doctor' command for comprehensive system diagnostics."""
     from core.cli.commands.doctor import run_doctor
 
-    return run_doctor(json_output=getattr(args, "json", False))
+    return run_doctor(
+        json_output=getattr(args, "json", False),
+        fix=getattr(args, "fix", False),
+        include_plugins=not getattr(args, "core_only", False),
+    )
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -250,6 +295,7 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 COMMAND_HANDLERS_MAP = {
     "init": cmd_init,
+    "setup": cmd_setup,
     "plugin": cmd_plugin,
     "config": cmd_config,
     "verify": cmd_verify,

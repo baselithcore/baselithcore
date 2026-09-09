@@ -69,6 +69,7 @@ COPY plugins/ plugins/
 COPY configs/ configs/
 COPY scripts/ scripts/
 COPY templates/ templates/
+COPY deploy/docker/core-entrypoint.sh /usr/local/bin/baselith-core-entrypoint
 
 # Install the package itself in non-editable mode
 RUN pip install .
@@ -96,6 +97,7 @@ ENV HOST=0.0.0.0 \
 # --- Create non-root user and volumes ---
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
     && mkdir -p data logs documents models \
+    && chmod +x /usr/local/bin/baselith-core-entrypoint \
     && chown -R appuser:appuser /app /ms-playwright
 
 USER appuser

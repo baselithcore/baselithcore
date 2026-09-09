@@ -28,6 +28,7 @@ from core.cli.handlers import (
     cmd_plugin,
     cmd_queue,
     cmd_run,
+    cmd_setup,
     cmd_shell,
     cmd_test,
     cmd_verify,
@@ -62,7 +63,7 @@ except ImportError:
 # ──────────────────────────────────────────
 
 COMMANDS_MAP = {
-    "SCAFFOLDING": ["init", "plugin"],
+    "SCAFFOLDING": ["init", "setup", "plugin"],
     "DEVELOPMENT": ["run", "shell", "docs"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
     "INFRASTRUCTURE": ["db", "cache", "queue"],
@@ -75,6 +76,7 @@ COMMANDS = [cmd for group in COMMANDS_MAP.values() for cmd in group]
 # Mapping of commands to handlers. Using lambdas to allow patching in tests.
 COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "init": lambda *args, **kwargs: cmd_init(*args, **kwargs),
+    "setup": lambda *args, **kwargs: cmd_setup(*args, **kwargs),
     "plugin": lambda *args, **kwargs: cmd_plugin(*args, **kwargs),
     "config": lambda *args, **kwargs: cmd_config(*args, **kwargs),
     "verify": lambda *args, **kwargs: cmd_verify(*args, **kwargs),
