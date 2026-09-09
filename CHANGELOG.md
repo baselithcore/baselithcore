@@ -5,6 +5,22 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.32.0](https://github.com/baselithcore/baselithcore/compare/v0.31.1...v0.32.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* add explicit type casts to nullable Postgres query placeholders to resolve data type ambiguity errors ([9a72db7](https://github.com/baselithcore/baselithcore/commit/9a72db7cf3be9b8fb2658b422e55dfbb5f622ee7))
+* **ci:** restamp the OpenAPI specs after the 0.31.1 release ([c6511d4](https://github.com/baselithcore/baselithcore/commit/c6511d492ffb16e9c40fbf7cdf9ae22767fe53ec))
+
+
+### Features
+
+* add seedFromImage support to initialize writable volumes from image paths in initContainers ([998cf5e](https://github.com/baselithcore/baselithcore/commit/998cf5ec2dcddcb26296c8ed570ad83438bdb4b4))
+* automate pip-audit ignore list via central .trivyignore.yaml registry and expiry-aware script ([a9ffa9b](https://github.com/baselithcore/baselithcore/commit/a9ffa9b97ea7facd064cd9275fa58d07b39034d6))
+* implement environment variable alias scoping for configuration classes and add a pre-commit check to verify config consistency with documentation. ([9ee427c](https://github.com/baselithcore/baselithcore/commit/9ee427c050da9eeabc4472a0feb8bbf4ab4536f4))
+* support KEDA autoscaling, improve doctor CLI environment checks, and fix plugin dependency ordering ([ea82ce8](https://github.com/baselithcore/baselithcore/commit/ea82ce8bc24c6a25425363a9631cf73250352272))
+
 ## [0.31.1](https://github.com/baselithcore/baselithcore/compare/v0.31.0...v0.31.1) (2026-09-06)
 
 
