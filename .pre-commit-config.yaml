@@ -91,6 +91,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^sdk/
+      # Settings classes vs .env.example vs the generated reference page. An
+      # explicit ``alias=`` replaces a class's ``env_prefix``, so a template
+      # entry can look right and bind nothing; this catches that.
+      - id: config-surface
+        name: config-surface
+        entry: python scripts/check_config_surface.py
+        language: system
+        pass_filenames: false
+        files: ^(core/config/|plugins/|\.env\.example|mkdocs-site/docs/getting-started/configuration\.md)
       # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
       # exist. Import and route verification (needs the app importable) runs in
       # the CI job `docs_consistency`.

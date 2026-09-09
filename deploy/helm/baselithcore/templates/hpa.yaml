@@ -22,6 +22,9 @@ spec:
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
     {{- end }}
     {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    # Off by default: this pod's memory is mostly a constant that does not
+    # shrink per replica, so a memory target parks the HPA at maxReplicas.
+    # See the comment on autoscaling in values.yaml before enabling it.
     - type: Resource
       resource:
         name: memory
@@ -29,4 +32,8 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+  {{- with .Values.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

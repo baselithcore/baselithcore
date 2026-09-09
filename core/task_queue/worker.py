@@ -23,6 +23,7 @@ Two properties of this module are load-bearing and easy to lose:
   answering from two different models, with nothing on screen to say so.
 """
 
+import os
 import sys
 from multiprocessing import Process
 
@@ -86,6 +87,12 @@ class TenantAwareWorker(Worker):
 def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker:
     """Create a tenant-aware worker wired to the dead-letter handler.
 
+    ``RQ_WORKER_NAME`` names the worker in Redis instead of RQ's random hex.
+    Without it a worker's registration cannot be tied back to the process that
+    owns it, so nothing outside the process can answer "is *my* worker still
+    alive?" — which is exactly what a container liveness check has to ask. Set
+    it to the pod name and the check becomes an equality test.
+
     Args:
         queue_names: Queues to listen on, in priority order.
         connection: Redis connection to the task-queue database.
@@ -97,7 +104,10 @@ def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker
 
     queues = [Queue(name, connection=connection) for name in queue_names]
     return TenantAwareWorker(
-        queues, connection=connection, exception_handlers=[dead_letter_handler]
+        queues,
+        connection=connection,
+        name=os.getenv("RQ_WORKER_NAME") or None,
+        exception_handlers=[dead_letter_handler],
     )
 
 

@@ -52,7 +52,11 @@ class CacheConfig(BaseSettings):
         default=False,
         description=(
             "Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis "
-            "lock, not just within one event loop. Only takes effect where the "
+            "lock, not just within one event loop. With WEB_CONCURRENCY>1 or "
+            "several pods, in-process coalescing still lets N workers issue N "
+            "identical LLM/embedding calls for one key; this elects ONE worker "
+            "per key and the others read the winner's value back out of the "
+            "shared cache. Only takes effect where the backing cache is "
             "backing cache is genuinely shared (Redis) — an in-process store "
             "gives the losing worker nothing to read back. Fail-open: if Redis "
             "is unreachable the path degrades to in-process coalescing."

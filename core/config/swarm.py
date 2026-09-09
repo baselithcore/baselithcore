@@ -1,3 +1,8 @@
+"""Swarm configuration (``SWARM_``).
+
+Team composition and the auction protocol agents use to bid for tasks.
+"""
+
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field

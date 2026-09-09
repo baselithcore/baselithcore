@@ -60,3 +60,31 @@ that persists under the image tree — a plugin's own data directory, a Hugging
 Face cache under `/app/models` — needs an entry in `extraVolumes` /
 `extraVolumeMounts` (a PVC for durable state, an emptyDir for caches) or it
 fails at boot.
+
+One of those paths is a file the app *rewrites* rather than a directory it
+merely fills, so a volume alone is not enough — the volume also has to start
+with the image's copy. `seedFromImage` runs an initContainer that copies each `from`
+(image path) to its `to` (a path under one of `extraVolumeMounts`) exactly
+once, never overwriting a destination that already exists:
+
+```yaml
+config:
+  # Must resolve inside the app's working directory (/app).
+  PLUGIN_CONFIG_PATH: /app/data/configs/plugins.yaml
+seedFromImage:
+  - from: /app/configs/plugins.yaml
+    to: /app/data/configs/plugins.yaml
+```
+
+`configs/plugins.yaml` is rewritten on every plugin enable/disable
+(`baselith plugin config set`, or an admin surface that does the same); without
+the move each toggle fails with `cannot write configs/plugins.yaml: [Errno 30]
+Read-only file system`, and without the seed the plugins come up unconfigured.
+A plugin that creates state directories per identity needs the same treatment
+for its own root — a writable path, and a seed only if the image ships content
+it cannot regenerate.
+
+Point it at a **ReadWriteMany** volume when the api runs more than one
+replica. `plugins.yaml` is per-filesystem: on ReadWriteOnce volumes a toggle
+applied on one pod is invisible to the others until they restart onto the same
+node.

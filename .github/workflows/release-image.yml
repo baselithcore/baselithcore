@@ -9,9 +9,13 @@ name: Release Container Image
 # while the Helm chart's default `image.repository` already pointed at
 # ghcr.io/baselithcore/baselithcore. `workflow_call` is therefore the real
 # entry point: ci.yml invokes it inside the same run as the release, so no
-# second event is needed. The other two triggers stay as escape hatches — a
-# release published by a human (their token does start runs) and a manual
-# re-run for a tag.
+# second event is needed.
+#
+# That call is currently OPT-IN and off by default — ci.yml gates the
+# `release_image` job on the repository variable RELEASE_IMAGE_ENABLED, because
+# the build is long and its post-push CVE gate fails releases for reasons
+# unrelated to the change being shipped. `workflow_dispatch` below is the
+# supported way to cut an image by hand in the meantime; pass the git tag.
 on:
   workflow_call:
     inputs:

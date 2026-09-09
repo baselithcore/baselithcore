@@ -55,17 +55,45 @@ def safe_plugin_path(base: Path, name: str) -> Path:
     return Path(candidate)
 
 
+def _declared_dependencies(plugin: Plugin) -> set[str]:
+    """Every plugin name ``plugin`` declares a dependency on.
+
+    Manifests carry two spellings and both are load-bearing: the legacy
+    ``dependencies:`` list and the current ``plugin_dependencies:`` map of
+    name to version constraint. Only the version constraints differ — for
+    ordering, a name from either key means the same thing.
+
+    Reading just the legacy field left every manifest using the modern key
+    topologically unordered against the plugins it names. That matters
+    wherever a plugin registers a service during ``initialize()`` that other
+    plugins resolve from the ``ServiceRegistry``: the registry *raises* for an
+    unregistered service, so loading a consumer first makes it observe a
+    provider that is simply not there yet.
+
+    Args:
+        plugin: The plugin whose metadata declares the dependencies.
+
+    Returns:
+        set[str]: Declared dependency names, from both manifest spellings.
+    """
+    legacy = getattr(plugin.metadata, "dependencies", None) or ()
+    modern = getattr(plugin.metadata, "plugin_dependencies", None) or {}
+    return {*legacy, *modern}
+
+
 def sort_by_dependencies(plugins: dict[str, Plugin]) -> list[str]:
     """Order plugin names so dependencies load first (topological sort).
 
-    Dependencies that are not present in ``plugins`` are ignored, so optional
-    or external ones do not block the ordering.
+    Both manifest dependency spellings are honoured — see
+    :func:`_declared_dependencies`. Dependencies that are not present in
+    ``plugins`` are ignored, so optional or external ones do not block the
+    ordering.
 
     Raises:
         graphlib.CycleError: If the dependency graph contains a cycle.
     """
     graph = {
-        name: {d for d in plugin.metadata.dependencies if d in plugins}
+        name: {d for d in _declared_dependencies(plugin) if d in plugins}
         for name, plugin in plugins.items()
     }
     return list(graphlib.TopologicalSorter(graph).static_order())

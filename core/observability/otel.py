@@ -17,8 +17,16 @@ Design rules:
 - **Graceful degradation.** Every OTel import is guarded. A missing SDK or
   instrumentation package downgrades to a warning, never an exception — the
   framework keeps running with tracing disabled.
-- **No reverse dependency.** This module imports only ``config`` and
-  ``logging``; ``tracing.py`` imports *from* here (lazily), never the reverse.
+- **The collector is optional.** An empty ``telemetry_otel_endpoint`` installs
+  the providers and the auto-instrumentation *without* an OTLP exporter. Spans
+  are still produced and still reach in-process consumers through the sink
+  bridge (a control-plane trace viewer, a debug reader), they simply do not
+  leave the process. Attaching an exporter pointed at an endpoint nothing is
+  listening on is the worst of both worlds: no trace backend *and* a retrying
+  gRPC exporter burning CPU and filling the log on every batch.
+- **No reverse dependency.** This module imports only ``config``, ``logging``
+  and its own ``otel_instrumentation`` sibling; ``tracing.py`` imports *from*
+  here (lazily), never the reverse.
 
 The Prometheus ``/metrics`` scrape endpoint (``core.observability.metrics``)
 is independent of the OTLP metric push configured here; both can run together.
@@ -34,6 +42,10 @@ from typing import Any
 
 from core.config import get_app_config
 from core.observability.logging import get_logger
+from core.observability.otel_instrumentation import (
+    instrument_libraries,
+    setup_propagators,
+)
 
 logger = get_logger(__name__)
 
@@ -54,6 +66,17 @@ _meter_provider: Any = None
 def is_initialized() -> bool:
     """Return ``True`` once a real OTel TracerProvider has been installed."""
     return _initialized and _tracer_provider is not None
+
+
+def _normalize_endpoint(value: str | None) -> str | None:
+    """Return a usable OTLP endpoint, or ``None`` when none is configured.
+
+    Blank and whitespace-only values mean "no collector" rather than "export to
+    the empty string": a Helm chart or a ``.env`` that leaves the key present
+    but empty must not produce an exporter aimed at nothing.
+    """
+    endpoint = (value or "").strip()
+    return endpoint or None
 
 
 def _build_resource(service_name: str, config: Any) -> Any:
@@ -89,20 +112,30 @@ def _build_sampler(sample_rate: float) -> Any:
 
 def _setup_tracing(
     resource: Any,
-    endpoint: str,
+    endpoint: str | None,
     sampler: Any,
     console_export: bool,
 ) -> Any:
-    """Install a TracerProvider with OTLP (and optional console) export."""
+    """Install a TracerProvider with optional OTLP and console export.
+
+    ``endpoint`` of ``None`` installs the provider with no OTLP exporter: spans
+    are sampled, instrumented and handed to in-process sinks, but nothing is
+    shipped off-box.
+    """
     from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-        OTLPSpanExporter,
-    )
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     provider = TracerProvider(resource=resource, sampler=sampler)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+
+    if endpoint is not None:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
+        )
 
     if console_export:
         from opentelemetry.sdk.trace.export import (
@@ -120,130 +153,55 @@ def _setup_tracing(
     install_span_sink_bridge(provider)
 
     trace.set_tracer_provider(provider)
-    logger.info("[OTEL] TracerProvider installed (endpoint=%s)", endpoint)
+    logger.info(
+        "[OTEL] TracerProvider installed (export=%s)",
+        endpoint if endpoint is not None else "in-process only",
+    )
     return provider
 
 
-def _setup_metrics(resource: Any, endpoint: str, console_export: bool) -> Any:
-    """Install a MeterProvider with OTLP periodic metric export."""
+def _setup_metrics(
+    resource: Any, endpoint: str | None, console_export: bool
+) -> Any | None:
+    """Install a MeterProvider with OTLP periodic metric export.
+
+    Returns ``None`` when there is no destination at all (no endpoint, no
+    console): unlike traces, OTel metrics have no in-process consumer here —
+    the Prometheus ``/metrics`` scrape is a separate pipeline — so a provider
+    whose only reader exports nowhere is a periodic export thread doing pure
+    waste.
+    """
     from opentelemetry import metrics
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-        OTLPMetricExporter,
-    )
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-    readers: list[Any] = [
-        PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
-    ]
+    readers: list[Any] = []
+
+    if endpoint is not None:
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+            OTLPMetricExporter,
+        )
+
+        readers.append(
+            PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
+        )
 
     if console_export:
         from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
         readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
 
+    if not readers:
+        logger.info("[OTEL] MeterProvider skipped (no OTLP endpoint, no console)")
+        return None
+
     provider = MeterProvider(resource=resource, metric_readers=readers)
     metrics.set_meter_provider(provider)
-    logger.info("[OTEL] MeterProvider installed (endpoint=%s)", endpoint)
-    return provider
-
-
-def _setup_propagators() -> None:
-    """Set the global propagator to W3C TraceContext + Baggage."""
-    try:
-        from opentelemetry.baggage.propagation import W3CBaggagePropagator
-        from opentelemetry.propagate import set_global_textmap
-        from opentelemetry.propagators.composite import CompositePropagator
-        from opentelemetry.trace.propagation.tracecontext import (
-            TraceContextTextMapPropagator,
-        )
-
-        set_global_textmap(
-            CompositePropagator(
-                [TraceContextTextMapPropagator(), W3CBaggagePropagator()]
-            )
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[OTEL] Propagator setup skipped: %s", exc)
-
-
-def _instrument(enable_fastapi: bool, enable_redis: bool, enable_httpx: bool) -> None:
-    """Best-effort auto-instrumentation for common libraries."""
-    if enable_fastapi:
-        _try_instrument(
-            "opentelemetry.instrumentation.fastapi",
-            "FastAPIInstrumentor",
-            "FastAPI",
-            excluded_urls=_fastapi_excluded_urls(),
-        )
-    if enable_httpx:
-        _try_instrument(
-            "opentelemetry.instrumentation.httpx",
-            "HTTPXClientInstrumentor",
-            "HTTPX",
-        )
-    if enable_redis:
-        _try_instrument(
-            "opentelemetry.instrumentation.redis",
-            "RedisInstrumentor",
-            "Redis",
-        )
-    # Database instrumentation is opportunistic — only active when the
-    # corresponding instrumentation extra is installed.
-    _try_instrument(
-        "opentelemetry.instrumentation.psycopg",
-        "PsycopgInstrumentor",
-        "psycopg",
-        quiet=True,
+    logger.info(
+        "[OTEL] MeterProvider installed (export=%s)",
+        endpoint if endpoint is not None else "console only",
     )
-
-
-#: Liveness/readiness probes and the Prometheus scrape hit every pod every
-#: 10-30s and carry no user work: tracing them is pure exporter/collector
-#: cost. Anchored regexes (the instrumentation ``re.search``es the full URL) so
-#: a route that merely *contains* "health" is still traced.
-_DEFAULT_FASTAPI_EXCLUDED_URLS = "/health$,/health/ready$,/metrics$"
-
-
-def _fastapi_excluded_urls() -> str | None:
-    """Return the probe/scrape exclusion list unless the operator set one.
-
-    The OTel SDK's own ``OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`` /
-    ``OTEL_PYTHON_EXCLUDED_URLS`` win when present: passing the kwarg would
-    silently override them.
-    """
-    if os.getenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or os.getenv(
-        "OTEL_PYTHON_EXCLUDED_URLS"
-    ):
-        return None
-    return _DEFAULT_FASTAPI_EXCLUDED_URLS
-
-
-def _try_instrument(
-    module_path: str,
-    class_name: str,
-    label: str,
-    *,
-    quiet: bool = False,
-    **instrument_kwargs: Any,
-) -> None:
-    """Import and apply a single instrumentor, swallowing absence/errors.
-
-    ``instrument_kwargs`` are forwarded to ``instrument()``; ``None`` values
-    are dropped so an instrumentor's own default/env resolution still applies.
-    """
-    try:
-        import importlib
-
-        instrumentor_cls = getattr(importlib.import_module(module_path), class_name)
-        kwargs = {k: v for k, v in instrument_kwargs.items() if v is not None}
-        instrumentor_cls().instrument(**kwargs)
-        logger.info("[OTEL] %s instrumentation enabled", label)
-    except ImportError:
-        log = logger.debug if quiet else logger.warning
-        log("[OTEL] %s instrumentation not available", label)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("[OTEL] %s instrumentation failed: %s", label, exc)
+    return provider
 
 
 def setup_telemetry(
@@ -253,6 +211,7 @@ def setup_telemetry(
     enable_fastapi: bool = True,
     enable_redis: bool = True,
     enable_httpx: bool = True,
+    app: Any = None,
 ) -> bool:
     """
     Configure OpenTelemetry tracing and metrics for the application.
@@ -264,10 +223,16 @@ def setup_telemetry(
     Args:
         service_name: Logical service name for the OTel ``Resource``.
         otlp_endpoint: OTLP/gRPC collector endpoint. Falls back to
-            ``telemetry_otel_endpoint`` from config.
+            ``telemetry_otel_endpoint`` from config. Empty (or blank) means no
+            collector: providers and instrumentation are installed, spans stay
+            in-process and reach the local sinks, nothing is exported.
         enable_fastapi: Auto-instrument FastAPI.
         enable_redis: Auto-instrument Redis.
         enable_httpx: Auto-instrument the HTTPX client.
+        app: The already-constructed FastAPI application, when there is one.
+            Pass it: the class-level instrumentation only reaches apps built
+            after this call, and telemetry is set up from the lifespan, i.e.
+            after the app exists. Without it no HTTP server span is produced.
 
     Returns:
         ``True`` if telemetry is active after the call, ``False`` otherwise
@@ -284,7 +249,7 @@ def setup_telemetry(
         if _initialized:
             return True
 
-        endpoint = otlp_endpoint or config.telemetry_otel_endpoint
+        endpoint = _normalize_endpoint(otlp_endpoint or config.telemetry_otel_endpoint)
         console_export = getattr(config, "telemetry_console_export", False)
         sample_rate = getattr(config, "telemetry_traces_sample_rate", 1.0)
 
@@ -298,16 +263,18 @@ def setup_telemetry(
             if getattr(config, "telemetry_metrics_enabled", False):
                 _meter_provider = _setup_metrics(resource, endpoint, console_export)
 
-            _setup_propagators()
-            _instrument(enable_fastapi, enable_redis, enable_httpx)
+            setup_propagators()
+            instrument_libraries(enable_fastapi, enable_redis, enable_httpx, app)
 
             _initialized = True
             atexit.register(shutdown_telemetry)
             logger.info(
-                "[OTEL] Telemetry initialized (service=%s, env=%s, sample_rate=%.2f)",
+                "[OTEL] Telemetry initialized "
+                "(service=%s, env=%s, sample_rate=%.2f, export=%s)",
                 service_name,
                 getattr(config, "deployment_environment", "development"),
                 sample_rate,
+                endpoint if endpoint is not None else "in-process only",
             )
             return True
         except ImportError as exc:

@@ -142,13 +142,11 @@ def cmd_plugin(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     """Execute the 'config' command to inspect and modify settings."""
-    from core.cli.commands.config import show_config, validate_config
+    from core.cli.commands.config import check_env, show_config, validate_config
 
-    return (
-        show_config()
-        if (getattr(args, "config_command", "show") or "show") == "show"
-        else validate_config()
-    )
+    command = getattr(args, "config_command", "show") or "show"
+    dispatch = {"show": show_config, "validate": validate_config, "env": check_env}
+    return dispatch.get(command, show_config)()
 
 
 def cmd_verify(args: argparse.Namespace) -> int:

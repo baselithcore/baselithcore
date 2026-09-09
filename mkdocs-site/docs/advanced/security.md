@@ -583,7 +583,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token); report pass for every severity, then a blocking `--severity ERROR --error` pass |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
-| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
+| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations. Opt-in: the job runs only with the repository variable `RELEASE_IMAGE_ENABLED=true`, or on demand via `workflow_dispatch` — a release alone does not build an image |
 
 CodeQL runs in **report mode** — it publishes findings without failing the
 build. Semgrep and Trivy each run **twice**: a report-only pass that feeds the
@@ -593,6 +593,14 @@ Security tab (Semgrep without `--error`; Trivy `--scanners vuln,secret,misconfig
 --exit-code 1` for anything not accepted in `.trivyignore.yaml`. A new
 HIGH/CRITICAL dependency CVE is therefore a red build, the same posture as
 `pip-audit`; IaC and secret findings stay visible without gating.
+
+`.trivyignore.yaml` is the single accepted-risk register for both scanners.
+Trivy reads it directly; `pip-audit` takes advisory ids on the command line, so
+the CI step generates them with `scripts/audit_ignores.py`. That script drops an
+entry the day its `expired_at` passes, which is what stops an exception from
+outliving the argument that justified it: once the date is gone the CVE is
+reported again and the build goes red until the entry is renewed, or the
+dependency is finally fixed and the entry deleted.
 
 <!-- markdownlint-disable MD046 -->
 <!-- The tables below sit inside an mkdocs admonition, so they are indented by

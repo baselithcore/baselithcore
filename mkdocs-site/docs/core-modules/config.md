@@ -47,10 +47,12 @@ core/config/
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
+├── _security_parsers.py  # env-string -> typed credential coercion for security.py
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
+├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
 ├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
@@ -748,6 +750,84 @@ SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
     does not affect startup until the provider is actually used.
 
 ---
+
+## Environment drift
+
+Every settings class is declared with `extra="ignore"`. That is what lets one
+process carry variables meant for another, and it is also why a misspelled
+variable produces no error: `CORE_LOG_LEVL=DEBUG` is accepted, ignored, and the
+operator sees the default with no hint why.
+
+`core/config/drift.py` closes that gap by reporting *suspected typos* rather
+than unknown variables. A name that closely resembles a declared setting without
+matching one is almost always a mistake; a name that resembles nothing is
+usually a variable read through `os.getenv`, so it stays silent. Precision is
+the point — a check that cries wolf gets ignored.
+
+```python
+from core.config.drift import suspected_typos
+
+suspected_typos({"CORE_LOG_LEVL": "DEBUG"})
+# [EnvSuspect(name='CORE_LOG_LEVL', suggestion='CORE_LOG_LEVEL')]
+```
+
+The known names come from the live `BaseSettings` class tree, so a plugin that
+declares its own settings is covered as soon as it is imported. Two families are
+skipped because their suffix is chosen at runtime and no declared name exists to
+compare against: `BASELITH_FLAG_<FLAG>` and `BASELITH_PROMPT_VARIANTS_<PROMPT>`.
+
+The application logs one warning per suspect at startup — never an exception, so
+a false positive cannot stop a deployment — and the same report is available on
+demand:
+
+```bash
+baselith config env
+```
+
+### What belongs in `.env.example`
+
+The template is not the manual. It once carried an entry for nearly every
+setting, so ~110 of its lines restated a default the code already had, and its
+prose drifted out of step with the descriptions on the fields. Three kinds of
+line survive there now:
+
+- credentials the operator must supply (`__CHANGE_ME__`);
+- values the template deliberately sets **away** from the code default — it is a
+  profile as much as an example, and dropping those would silently change what
+  `cp .env.example .env` produces;
+- flags read straight from the environment rather than through a settings field,
+  where a wrong value is a security incident (the `BASELITH_A2A_*` family, the
+  SSRF and plugin-signature switches). Those have no `Field` to carry their
+  description, so their prose stays in the template.
+
+Everything else lives on the generated reference page. When a template entry is
+removed, its documentation moves into the field's `description=` first — the
+reference is generated from those, so prose deleted from the template without
+that step would simply be lost.
+
+### Keeping the surface honest
+
+`scripts/check_config_surface.py` audits the three artefacts that describe the
+same settings: the classes that bind the environment, the `.env.example`
+template, and the generated reference page. It fails when a template entry binds
+nothing, and when the reference page is stale.
+
+```bash
+python scripts/check_config_surface.py           # gate
+python scripts/check_config_surface.py --write   # restamp the reference page
+```
+
+The gate reads the sources with `ast` rather than importing them: importing
+`core.config` loads the repository `.env`, which would publish a developer's
+local overrides as the shipped defaults.
+
+It found real drift when introduced. `VISION_ANTHROPIC_API_KEY`,
+`VOICE_ELEVENLABS_API_KEY`, `FINETUNE_OPENAI_API_KEY` and their neighbours were
+documented but bound nothing: an explicit `alias=` **replaces** the class's
+`env_prefix` instead of adding to it, so the prefixed names never reached the
+field, and the fine-tuning credentials silently shared the chat provider's key.
+Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
+field should answer to both.
 
 ## Validation
 

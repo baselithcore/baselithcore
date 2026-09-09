@@ -208,6 +208,41 @@ def validate_config() -> int:
     return 0
 
 
+def check_env() -> int:
+    """Report environment variables that look like misspelled settings.
+
+    Settings classes ignore unknown variables by design, so a typo costs a
+    silent default rather than an error. This surfaces those on demand.
+
+    Returns:
+        Exit code (0 when nothing is suspicious, 1 when suspects were found)
+    """
+    import core.config  # noqa: F401  — importing binds every settings class
+    from core.config.drift import suspected_typos
+
+    print_header("🔎 Environment Check")
+
+    suspects = suspected_typos()
+    if not suspects:
+        console.print(
+            "[bold green]✅ No environment variable resembles an unbound "
+            "setting.[/bold green]"
+        )
+        return 0
+
+    table = Table(show_header=True, header_style="bold magenta", expand=True)
+    table.add_column("Variable", style="yellow")
+    table.add_column("Closest setting", style="cyan")
+    for suspect in suspects:
+        table.add_row(suspect.name, suspect.suggestion)
+    console.print(table)
+    console.print(
+        f"[bold yellow]⚠️  {len(suspects)} variable(s) bind nothing. "
+        "Fix the name or remove it.[/bold yellow]"
+    )
+    return 1
+
+
 def register_parser(subparsers, formatter_class):
     """Register 'config' command parser."""
     config_parser = subparsers.add_parser(
@@ -229,7 +264,12 @@ def register_parser(subparsers, formatter_class):
         help="Check .env integrity and required fields",
         formatter_class=formatter_class,
     )
+    config_subparsers.add_parser(
+        "env",
+        help="Report environment variables that resemble misspelled settings",
+        formatter_class=formatter_class,
+    )
     return config_parser
 
 
-__all__ = ["register_parser", "show_config", "validate_config"]
+__all__ = ["check_env", "register_parser", "show_config", "validate_config"]

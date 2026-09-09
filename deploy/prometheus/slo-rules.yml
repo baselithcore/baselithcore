@@ -14,34 +14,41 @@ groups:
     interval: 30s
     rules:
       # --- Availability SLI: fraction of requests that are 5xx (error ratio) ---
+      # `or vector(0)` on the numerator is not decoration. With no 5xx at all
+      # the selector matches no series, and in PromQL an empty vector divided
+      # by anything is still empty — so the recording rule evaluated "ok" and
+      # produced nothing, the availability panel showed no data, and the
+      # burn-rate alerts below had no input to fire on. The SLI vanished
+      # exactly while the service was healthy, which is the one state where
+      # you need it to say 100%.
       - record: slo:http_error_ratio:rate5m
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          (sum(rate(http_requests_total{status=~"5.."}[5m])) or vector(0))
           / clamp_min(sum(rate(http_requests_total[5m])), 1)
       - record: slo:http_error_ratio:rate30m
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[30m]))
+          (sum(rate(http_requests_total{status=~"5.."}[30m])) or vector(0))
           / clamp_min(sum(rate(http_requests_total[30m])), 1)
       - record: slo:http_error_ratio:rate1h
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[1h]))
+          (sum(rate(http_requests_total{status=~"5.."}[1h])) or vector(0))
           / clamp_min(sum(rate(http_requests_total[1h])), 1)
       - record: slo:http_error_ratio:rate6h
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[6h]))
+          (sum(rate(http_requests_total{status=~"5.."}[6h])) or vector(0))
           / clamp_min(sum(rate(http_requests_total[6h])), 1)
 
       # --- Latency SLI: fraction of requests slower than the 1s objective ---
       - record: slo:http_latency_slow_ratio:rate5m
         expr: |
           1 - (
-            sum(rate(http_request_duration_seconds_bucket{le="1.0"}[5m]))
+            (sum(rate(http_request_duration_seconds_bucket{le="1.0"}[5m])) or vector(0))
             / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 1)
           )
       - record: slo:http_latency_slow_ratio:rate1h
         expr: |
           1 - (
-            sum(rate(http_request_duration_seconds_bucket{le="1.0"}[1h]))
+            (sum(rate(http_request_duration_seconds_bucket{le="1.0"}[1h])) or vector(0))
             / clamp_min(sum(rate(http_request_duration_seconds_count[1h])), 1)
           )
 

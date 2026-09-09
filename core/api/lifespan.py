@@ -55,6 +55,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "on" if POSTGRES_ENABLED else "off",
     )
 
+    # Settings classes ignore unknown variables, so a misspelled one costs a
+    # silent default. Say it once here instead of letting it be hunted later.
+    from core.config.drift import warn_on_suspected_typos
+
+    warn_on_suspected_typos()
+
     # Audit trail, compliance-profile check and the Art. 72 review sweep — each
     # individually opt-in (see core.api.startup_checks). The audit trail comes
     # up first so every later startup step is already covered by it.
@@ -62,6 +68,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Setup OpenTelemetry tracing + metrics (centralized in observability.otel:
     # rich resource, sampling, OTLP traces/metrics, propagators, shutdown).
+    # ``create_app`` already did this (it must: the middleware stack is frozen
+    # before we get here). Idempotent, so this only covers other entrypoints.
     if getattr(_app_config, "telemetry_enabled", False):
         logger.info("📊 Initializing OpenTelemetry...")
         try:
@@ -70,6 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if setup_telemetry(
                 service_name="baselith-core",
                 otlp_endpoint=getattr(_app_config, "telemetry_otel_endpoint", None),
+                app=app,
             ):
                 logger.info("📊 OpenTelemetry initialized")
             else:
@@ -237,8 +246,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "url:https://github.com/baselith/core/blob/main/",
     )
     # Optional human-facing "Manage Plugin" link ({plugin} placeholder), e.g.
-    # http://<host>:8000/baselithcontrol/#/plugin/{plugin} on deployments that
-    # ship a control-plane UI.
+    # http://<host>:8000/<console>/#/plugin/{plugin} on deployments that ship a
+    # control-plane UI.
     _backstage_plugin_link = os.environ.get("BASELITH_PLUGIN_LINK_TEMPLATE")
     # When set to the repo root on the portal backend's filesystem, TechDocs
     # reads each plugin's docs from disk (a ``dir:`` ref) instead of a git host

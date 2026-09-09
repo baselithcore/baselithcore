@@ -323,6 +323,7 @@
       "CacheConfig",
       "ChatConfig",
       "CoreConfig",
+      "EnvSuspect",
       "EvaluationConfig",
       "EventsConfig",
       "FineTuningConfig",
@@ -382,7 +383,9 @@
       "get_webhook_config",
       "get_world_model_config",
       "is_production_env",
-      "set_web_concurrency"
+      "set_web_concurrency",
+      "suspected_typos",
+      "warn_on_suspected_typos"
     ],
     "core.db": [
       "close_pool",

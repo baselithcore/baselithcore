@@ -78,3 +78,52 @@ class TestSortByDependencies:
         order = sort_by_dependencies(plugins)  # type: ignore[arg-type]
         assert order.index("b") < order.index("a")
         assert set(order) == {"a", "b", "c"}
+
+    def test_honours_the_modern_plugin_dependencies_map(self) -> None:
+        """``plugin_dependencies`` orders the graph, not just legacy ``dependencies``.
+
+        Manifests declare ``plugin_dependencies: {provider: '>=2.0.0'}``; only
+        a handful still use the legacy ``dependencies:`` list. Reading just the
+        legacy field left every manifest on the modern key topologically
+        unordered, so a consumer could initialise before the plugin whose
+        service it resolves.
+        """
+
+        class _Meta:
+            def __init__(self, deps: dict[str, str]) -> None:
+                self.dependencies: list[str] = []
+                self.plugin_dependencies = deps
+
+        class _Plugin:
+            def __init__(self, deps: dict[str, str]) -> None:
+                self.metadata = _Meta(deps)
+
+        plugins = {
+            "consumer": _Plugin({"provider": ">=2.0.0"}),
+            "provider": _Plugin({}),
+            "solo": _Plugin({"absent": "*"}),
+        }
+        order = sort_by_dependencies(plugins)  # type: ignore[arg-type]
+        assert order.index("provider") < order.index("consumer")
+        assert set(order) == {"consumer", "provider", "solo"}
+
+    def test_merges_both_dependency_declarations(self) -> None:
+        """A manifest carrying both keys is ordered after every named plugin."""
+
+        class _Meta:
+            def __init__(self, legacy: list[str], modern: dict[str, str]) -> None:
+                self.dependencies = legacy
+                self.plugin_dependencies = modern
+
+        class _Plugin:
+            def __init__(self, legacy: list[str], modern: dict[str, str]) -> None:
+                self.metadata = _Meta(legacy, modern)
+
+        plugins = {
+            "app": _Plugin(["legacy_dep"], {"modern_dep": "*"}),
+            "legacy_dep": _Plugin([], {}),
+            "modern_dep": _Plugin([], {}),
+        }
+        order = sort_by_dependencies(plugins)  # type: ignore[arg-type]
+        assert order.index("legacy_dep") < order.index("app")
+        assert order.index("modern_dep") < order.index("app")

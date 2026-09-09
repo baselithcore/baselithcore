@@ -3,9 +3,14 @@ name: baselithcore
 description: BaselithCore — modular orchestration engine for production-grade agentic AI.
 type: application
 # Chart version (SemVer) — bump on chart changes, independent of appVersion.
-version: 0.3.0
+version: 0.5.1
 # Tracks the BaselithCore application release (see core/_version.py).
 appVersion: "0.31.0"
+# The chart uses fields that older API servers silently drop rather than
+# reject: PodDisruptionBudget.unhealthyPodEvictionPolicy (1.27+) and
+# topologySpreadConstraints.matchLabelKeys (1.27+). Declaring the floor turns
+# "the budget quietly does not protect you" into a refused install.
+kubeVersion: ">=1.27.0-0"
 home: https://github.com/baselithcore
 sources:
   - https://github.com/baselithcore

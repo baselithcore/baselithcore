@@ -1,3 +1,8 @@
+"""Task-queue configuration (``TASK_QUEUE_``).
+
+Broker endpoint, worker concurrency and retry policy for deferred work.
+"""
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

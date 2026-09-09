@@ -98,6 +98,8 @@ jobs:
         run: python scripts/check_exception_hygiene.py
       - name: Check public API surface drift
         run: python scripts/check_public_api.py
+      - name: Check configuration surface (.env.example + reference page)
+        run: python scripts/check_config_surface.py
       - name: Check eval-corpus ratchet
         run: |
           pip install pyyaml
@@ -432,9 +434,13 @@ jobs:
         run: |
           uv pip install --system -e . pip-audit==2.10.1
           # Blocking: a known-vulnerable installed dependency fails the PR.
-          # (The base install has no `mineru` extra, so the accepted
-          # transformers CVEs in .trivyignore.yaml are not present here.)
-          pip-audit --skip-editable
+          # Exceptions come from .trivyignore.yaml, the one accepted-risk
+          # register, via scripts/audit_ignores.py — which drops an entry once
+          # its `expired_at` passes, so an exception cannot outlive the argument
+          # that justified it. (The base install has no `mineru` or
+          # `huggingface` extra, so none of the registered CVEs is present
+          # here; the flags are passed for symmetry with the locked pass.)
+          pip-audit --skip-editable $(python scripts/audit_ignores.py)
           # Second, blocking pass over the LOCKED set with every extra the
           # images can install — all but `mineru`, which conflicts with
           # `huggingface` and whose accepted CVEs are tracked in
@@ -445,7 +451,8 @@ jobs:
           uv export --frozen --all-extras --no-extra mineru --no-dev \
             --no-emit-project --no-hashes --format requirements-txt \
             -o /tmp/lock-audit.txt
-          pip-audit --no-deps -r /tmp/lock-audit.txt
+          pip-audit --no-deps -r /tmp/lock-audit.txt \
+            $(python scripts/audit_ignores.py)
 
   # ------------------------------------------------------------
   # Software Bill of Materials (SBOM) — CycloneDX
@@ -799,7 +806,20 @@ jobs:
     # extra token.
     name: Release Container Image
     needs: [release]
-    if: needs.release.outputs.new_release_published == 'true'
+    # DISABLED by default. The image build is the longest and most expensive
+    # job in the pipeline (multi-arch, torch + playwright + pre-cached models)
+    # and its post-push Trivy gate fails the whole release on base-image CVEs
+    # that have nothing to do with the change being released. It is therefore
+    # opt-in: the job is skipped unless the repository variable
+    # RELEASE_IMAGE_ENABLED is set to the string "true"
+    # (Settings -> Secrets and variables -> Actions -> Variables). An unset
+    # variable evaluates to the empty string, so the default is off.
+    #
+    # Nothing else is removed: release-image.yml keeps its `workflow_dispatch`
+    # trigger, so an image can still be cut by hand for any tag at any time.
+    if: >-
+      needs.release.outputs.new_release_published == 'true'
+      && vars.RELEASE_IMAGE_ENABLED == 'true'
     uses: ./.github/workflows/release-image.yml
     # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
     # the image job needs are declared here. GITHUB_TOKEN itself is passed

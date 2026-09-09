@@ -12,6 +12,7 @@ core/observability/
 ├── span_sink.py  # In-process fan-out of completed spans (dashboards, tests)
 ├── span_bridge.py    # OTel SDK SpanProcessor feeding the span sinks
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
+├── otel_instrumentation.py  # what gets instrumented, and the propagators
 ├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
@@ -109,20 +110,25 @@ with tracer.start_span("retrieve-documents") as span:
 
 ### The OTel backbone (`otel.py`)
 
-`setup_telemetry()` (called from the FastAPI lifespan when
-`TELEMETRY_ENABLED=true`) installs, **idempotently**:
+`setup_telemetry()` installs, **idempotently**:
 
 - A rich **`Resource`**: `service.name`, `service.version`,
   `service.namespace`, `service.instance.id` (`host:pid`) and
   `deployment.environment`.
 - A **`TracerProvider`** with a `ParentBased(TraceIdRatioBased)` sampler driven
   by `TELEMETRY_TRACES_SAMPLE_RATE`, exporting via **OTLP/gRPC**
-  (`BatchSpanProcessor`).
+  (`BatchSpanProcessor`) — but only when `TELEMETRY_OTEL_ENDPOINT` is set. Left
+  empty, the provider and the instrumentation are still installed and spans
+  still reach in-process consumers through the sink bridge; they simply do not
+  leave the process. Attaching an exporter to an endpoint nothing listens on is
+  the worst of both worlds: no trace backend *and* a retrying gRPC exporter
+  burning CPU on every batch.
 - An optional **`MeterProvider`** (`TELEMETRY_METRICS_ENABLED=true`) pushing
   OTel-native metrics over OTLP — independent of the Prometheus `/metrics`
   scrape, which is always available.
 - **Auto-instrumentation** for FastAPI, HTTPX, Redis and (opportunistically)
-  psycopg. The FastAPI instrumentor skips `/health`, `/health/ready` and
+  psycopg — the *what* and *how* of it living in `otel_instrumentation.py`, so
+  `otel.py` keeps to provider configuration. The FastAPI instrumentor skips `/health`, `/health/ready` and
   `/metrics` (anchored regexes, so a route merely *containing* "health" is
   still traced): probes and scrapes hit every pod every 10–30 s and carry no
   user work, so tracing them was pure exporter/collector cost. Setting the
@@ -133,6 +139,18 @@ with tracer.start_span("retrieve-documents") as span:
 
 `shutdown_telemetry()` (called on lifespan shutdown, plus an `atexit` safety
 net) flushes the batch processors so no spans/metrics are lost on exit.
+
+!!! warning "Instrumentation is wired in `create_app()`, not in the lifespan"
+    The FastAPI instrumentation works by wrapping `build_middleware_stack`, and
+    Starlette builds that stack **lazily, on the first call into the app** — and
+    the lifespan message is itself that first call. Instrumenting from the
+    lifespan therefore patched a function that would never run again: telemetry
+    logged itself as enabled and not one HTTP server span was produced. So
+    `create_app()` calls `setup_telemetry(app=app)` after the last
+    `add_middleware()`, which both fixes the ordering and makes the OTel span
+    wrap the whole stack, measuring true end-to-end latency. The lifespan still
+    calls it — idempotent, and it covers entrypoints that build the app
+    differently — and finds the work already done.
 
 ### OpenInference enrichment (`openinference.py`)
 

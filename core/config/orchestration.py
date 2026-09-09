@@ -1,3 +1,9 @@
+"""Orchestration and routing configuration (``ORCHESTRATOR_``, ``ROUTER_``).
+
+Loop budgets, checkpointing and tool rate limiting for the agentic loop, plus
+the intent router that picks the handler for a request.
+"""
+
 from __future__ import annotations
 
 from pydantic import Field
@@ -46,13 +52,16 @@ class OrchestrationConfig(BaseSettings):
     # HITL within the process; capped by checkpoint_memory_max_entries).
     checkpoint_enabled: bool = Field(
         default=True,
-        description="Wire a checkpoint store into the chat orchestrator "
-        "(durable runs + human-in-the-loop approval flow).",
+        description="Wire a checkpoint store into the chat orchestrator: runs "
+        "persist resumable checkpoints, approval gates pause durably and the "
+        "/approvals API is mounted.",
     )
     checkpoint_backend: str = Field(
         default="auto",
         description="Checkpoint store backend: 'postgres', 'sqlite', 'memory', "
-        "or 'auto' (postgres when Postgres storage is enabled, else memory).",
+        "or 'auto' (postgres when Postgres storage is enabled, else memory). "
+        "'sqlite' gives durable runs from a single file, with no Postgres — for "
+        "development, air-gapped or single-node deployments.",
     )
     checkpoint_sqlite_path: str = Field(
         default="data/checkpoints.db",
