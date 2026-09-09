@@ -9,8 +9,12 @@
 #     structural block (an unliftable dependency cap, an unmaintained
 #     transitive) plus a bounded blast radius.
 #
-# Consumed by the Trivy Scan job in .github/workflows/ci.yml, which passes
-# `--ignorefile .trivyignore.yaml` explicitly.
+# Two consumers, one register. The Trivy Scan job in
+# .github/workflows/ci.yml passes `--ignorefile .trivyignore.yaml` explicitly
+# and honours `expired_at` itself. pip-audit takes advisory ids on the command
+# line instead, so the same job generates them with
+# `scripts/audit_ignores.py`, which drops an entry the day its `expired_at`
+# passes — an exception cannot outlive the argument that justified it.
 
 vulnerabilities:
   # ----------------------------------------------------------------
@@ -87,6 +91,37 @@ vulnerabilities:
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
     expired_at: 2026-10-29
+
+  # ----------------------------------------------------------------
+  # accelerate 1.14.0 — present only with the `huggingface` extra installed
+  # ----------------------------------------------------------------
+  - id: CVE-2026-69112
+    paths:
+      - uv.lock
+    statement: >-
+      Path traversal in accelerate's load_checkpoint_in_model /
+      load_checkpoint_and_dispatch: unsanitised `weight_map` entries in a
+      sharded-checkpoint index let a crafted model repository read arbitrary
+      files, or block indefinitely on a named pipe. The structural block is
+      harder than the caps above — there is nothing to upgrade to. The
+      advisory covers "through 1.14.0" and 1.14.0 (2026-06-11) is the newest
+      release on PyPI; upstream has only a fix commit, no release carrying it.
+      Reachability: nothing in core/, plugins/, sdk/ or scripts/ imports
+      accelerate. It is reached only indirectly, by transformers'
+      from_pretrained(..., device_map=...) in the local HuggingFace provider,
+      which needs BOTH the `huggingface` extra installed AND
+      LLM_HUGGINGFACE_LOCAL=true (default false); a base install has no
+      accelerate at all and the Inference-API path never loads a checkpoint.
+      Blast radius: exploitation requires the deployment to be pointed at a
+      hostile model repository, and the model id is deployment configuration
+      (LLM_MODEL, or a per-plugin LLM policy) — ChatRequest declares no model
+      field and forbids extras, so no request can choose one. That is the same
+      trust boundary the codebase already draws around model loading with
+      LLM_HUGGINGFACE_TRUST_REMOTE_CODE (default false), which grants a
+      strictly stronger capability (RCE) than this arbitrary-file-read.
+      Shorter expiry than the entries above on purpose: the fix is already
+      committed upstream, so a release should land well inside the window.
+    expired_at: 2026-10-09
 
 # ==================================================================
 # Secret-scanner exceptions

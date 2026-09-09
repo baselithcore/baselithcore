@@ -594,6 +594,14 @@ Security tab (Semgrep without `--error`; Trivy `--scanners vuln,secret,misconfig
 HIGH/CRITICAL dependency CVE is therefore a red build, the same posture as
 `pip-audit`; IaC and secret findings stay visible without gating.
 
+`.trivyignore.yaml` is the single accepted-risk register for both scanners.
+Trivy reads it directly; `pip-audit` takes advisory ids on the command line, so
+the CI step generates them with `scripts/audit_ignores.py`. That script drops an
+entry the day its `expired_at` passes, which is what stops an exception from
+outliving the argument that justified it: once the date is gone the CVE is
+reported again and the build goes red until the entry is renewed, or the
+dependency is finally fixed and the entry deleted.
+
 <!-- markdownlint-disable MD046 -->
 <!-- The tables below sit inside an mkdocs admonition, so they are indented by
      four spaces. markdownlint has no notion of admonitions and reads that

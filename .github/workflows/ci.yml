@@ -434,9 +434,13 @@ jobs:
         run: |
           uv pip install --system -e . pip-audit==2.10.1
           # Blocking: a known-vulnerable installed dependency fails the PR.
-          # (The base install has no `mineru` extra, so the accepted
-          # transformers CVEs in .trivyignore.yaml are not present here.)
-          pip-audit --skip-editable
+          # Exceptions come from .trivyignore.yaml, the one accepted-risk
+          # register, via scripts/audit_ignores.py — which drops an entry once
+          # its `expired_at` passes, so an exception cannot outlive the argument
+          # that justified it. (The base install has no `mineru` or
+          # `huggingface` extra, so none of the registered CVEs is present
+          # here; the flags are passed for symmetry with the locked pass.)
+          pip-audit --skip-editable $(python scripts/audit_ignores.py)
           # Second, blocking pass over the LOCKED set with every extra the
           # images can install — all but `mineru`, which conflicts with
           # `huggingface` and whose accepted CVEs are tracked in
@@ -447,7 +451,8 @@ jobs:
           uv export --frozen --all-extras --no-extra mineru --no-dev \
             --no-emit-project --no-hashes --format requirements-txt \
             -o /tmp/lock-audit.txt
-          pip-audit --no-deps -r /tmp/lock-audit.txt
+          pip-audit --no-deps -r /tmp/lock-audit.txt \
+            $(python scripts/audit_ignores.py)
 
   # ------------------------------------------------------------
   # Software Bill of Materials (SBOM) — CycloneDX
