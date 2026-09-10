@@ -316,3 +316,30 @@ Args: root (the chart context), component ("api" / "worker").
       app.kubernetes.io/component: {{ $component }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Environment shared by the backup CronJob's wait-for-database init container and
+its dump container. Defined once because the two have to agree: an init
+container that probes a different host than the one pg_dump later contacts is
+worse than no probe at all — it reports the database ready and the dump then
+fails against something else.
+*/}}
+{{- define "baselithcore.backupEnv" -}}
+- name: BACKUP_DIR
+  value: /backups
+- name: RETENTION_DAYS
+  value: {{ .Values.backup.retentionDays | quote }}
+- name: PGHOST
+  value: {{ .Values.backup.pg.host | quote }}
+- name: PGPORT
+  value: {{ .Values.backup.pg.port | quote }}
+- name: PGDATABASE
+  value: {{ .Values.backup.pg.database | quote }}
+- name: PGUSER
+  value: {{ .Values.backup.pg.user | quote }}
+- name: PGPASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.backup.pg.passwordSecret.name | default (include "baselithcore.secretName" .) }}
+      key: {{ .Values.backup.pg.passwordSecret.key }}
+{{- end -}}

@@ -587,6 +587,16 @@ backup:
   retentionDays: 30
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
+  backoffLimit: 2
+  # `concurrencyPolicy: Forbid` means a job that hangs blocks every schedule
+  # after it, so the run is bounded. Has to cover waitForDatabaseSeconds plus
+  # the dump of the largest database this is pointed at.
+  activeDeadlineSeconds: 3600
+  # How long to wait for the database to accept connections before the dump.
+  # A CronJob replays its missed schedules when a cluster comes back up, so
+  # the nightly run routinely starts mid-boot, ahead of CoreDNS: without this
+  # pg_dump dies on the first name-resolution failure and the day is lost.
+  waitForDatabaseSeconds: 300
   pg:
     host: postgres
     port: 5432

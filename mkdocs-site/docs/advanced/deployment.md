@@ -960,16 +960,30 @@ docker compose exec postgres psql -U baselithcore -d baselithcore -c \
 
 ```bash title="scripts/backup-db.sh"
 #!/bin/bash
+# pipefail, or `set -e` only sees gzip: a pg_dump that dies mid-pipe exits 0.
+set -euo pipefail
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="/backups/postgres"
+OUT="${BACKUP_DIR}/backup_${DATE}.sql.gz"
+TMP="${BACKUP_DIR}/.backup_${DATE}.sql.gz.partial"
+trap 'rm -f "${TMP}"' EXIT
 
-# Create backup
+# Create backup under a temporary name, publish it only on success
 docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U baselithcore baselithcore \
-  | gzip > "${BACKUP_DIR}/backup_${DATE}.sql.gz"
+  | gzip > "${TMP}"
+mv "${TMP}" "${OUT}"
 
 # Retain last 30 days
 find "${BACKUP_DIR}" -name "backup_*.sql.gz" -mtime +30 -delete
 ```
+
+!!! warning "A failed backup must look like a missing one"
+    Dumping straight to the final name creates the file before `pg_dump` can
+    fail, so a failed run leaves a 20-byte gzip of nothing — newer than every
+    real backup, kept for the whole retention window, and the first thing
+    picked by anyone restoring "the latest". Dump to a temporary name and
+    rename only after the dump exits 0. The chart's backup CronJob does the
+    same.
 
 **Cron configuration:**
 

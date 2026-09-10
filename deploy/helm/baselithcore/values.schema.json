@@ -623,6 +623,18 @@
           "type": "integer",
           "minimum": 0
         },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "waitForDatabaseSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pg": {
           "type": "object",
           "additionalProperties": false,

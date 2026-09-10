@@ -13,7 +13,12 @@ spec:
   failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
-      backoffLimit: 1
+      backoffLimit: {{ .Values.backup.backoffLimit }}
+      # Under `concurrencyPolicy: Forbid` a job that never finishes is not a
+      # slow backup, it is the end of all backups: every later schedule is
+      # skipped while it hangs. The deadline has to cover the wait below plus
+      # the dump itself.
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -23,6 +28,39 @@ spec:
           restartPolicy: Never
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          # A CronJob does not only fire on a healthy cluster. When one comes
+          # back after downtime the controller replays the schedules it missed
+          # immediately, so the nightly dump starts during the boot — ahead of
+          # CoreDNS, which resolves `postgres` for it. pg_dump does not retry:
+          # it exits on the first `could not translate host name ... Try again`,
+          # the two attempts `backoffLimit` allows land seconds apart inside the
+          # same gap, and the day has no backup. Waiting for the database to
+          # actually answer costs nothing on a healthy cluster and is the whole
+          # difference on a cold one.
+          initContainers:
+            - name: wait-for-db
+              image: {{ .Values.backup.image | quote }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  DEADLINE=$(( $(date +%s) + WAIT_SECONDS ))
+                  until pg_isready -q; do
+                    if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                      echo "database ${PGHOST}:${PGPORT} still unreachable after ${WAIT_SECONDS}s, giving up" >&2
+                      exit 1
+                    fi
+                    echo "waiting for ${PGHOST}:${PGPORT} ..."
+                    sleep 5
+                  done
+                  echo "database ${PGHOST}:${PGPORT} is accepting connections"
+              env:
+                - name: WAIT_SECONDS
+                  value: {{ .Values.backup.waitForDatabaseSeconds | quote }}
+                {{- include "baselithcore.backupEnv" . | nindent 16 }}
           containers:
             - name: pg-backup
               image: {{ .Values.backup.image | quote }}
@@ -35,29 +73,25 @@ spec:
                   set -euo pipefail
                   TS=$(date +%Y%m%d_%H%M%S)
                   OUT="${BACKUP_DIR}/backup_${TS}.sql.gz"
+                  # Dumped to a temporary name and renamed only once pg_dump
+                  # has exited 0. Writing straight to $OUT leaves the file
+                  # behind when the dump fails — a 20-byte gzip of nothing,
+                  # newer than every real backup, kept for the whole retention
+                  # window, and picked first by anyone restoring "the latest".
+                  # A failed backup must look like a missing one.
+                  TMP="${BACKUP_DIR}/.backup_${TS}.sql.gz.partial"
+                  trap 'rm -f "${TMP}"' EXIT
                   echo "Dumping ${PGDATABASE} -> ${OUT}"
-                  pg_dump | gzip > "${OUT}"
+                  pg_dump | gzip > "${TMP}"
+                  mv "${TMP}" "${OUT}"
                   echo "Pruning backups older than ${RETENTION_DAYS} days"
                   find "${BACKUP_DIR}" -name 'backup_*.sql.gz' -mtime +${RETENTION_DAYS} -delete
+                  # Interrupted runs (OOM, node eviction, the deadline above)
+                  # never reach the trap, so their partials are swept here.
+                  find "${BACKUP_DIR}" -name '.backup_*.sql.gz.partial' -mmin +60 -delete
                   echo "Backup complete."
               env:
-                - name: BACKUP_DIR
-                  value: /backups
-                - name: RETENTION_DAYS
-                  value: {{ .Values.backup.retentionDays | quote }}
-                - name: PGHOST
-                  value: {{ .Values.backup.pg.host | quote }}
-                - name: PGPORT
-                  value: {{ .Values.backup.pg.port | quote }}
-                - name: PGDATABASE
-                  value: {{ .Values.backup.pg.database | quote }}
-                - name: PGUSER
-                  value: {{ .Values.backup.pg.user | quote }}
-                - name: PGPASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.backup.pg.passwordSecret.name | default (include "baselithcore.secretName" .) }}
-                      key: {{ .Values.backup.pg.passwordSecret.key }}
+                {{- include "baselithcore.backupEnv" . | nindent 16 }}
               volumeMounts:
                 - name: backups
                   mountPath: /backups
