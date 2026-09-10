@@ -84,6 +84,16 @@ class SQLiteCheckpointStore:
         self._conn.executescript(_SCHEMA)
         self._lock = RLock()
 
+    @property
+    def history_enabled(self) -> bool:
+        """Whether every save also records an immutable per-version snapshot.
+
+        Every store exposes ``list_snapshots``; only a store built with
+        ``history_enabled=True`` ever fills it, so readers ask this instead of
+        inferring history from the method's presence.
+        """
+        return self._history_enabled
+
     def close(self) -> None:
         """Close the underlying connection (tests / shutdown)."""
         with self._lock:

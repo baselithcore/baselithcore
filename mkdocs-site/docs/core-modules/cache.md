@@ -242,8 +242,18 @@ from a bare `Redis.from_url()`:
 
 | Client | Factory | Registry keyed by |
 | ------ | ------- | ----------------- |
-| `redis.asyncio` | `create_redis_client()` | `(url, decode_responses)` |
+| `redis.asyncio` | `create_redis_client()` | `(event loop, url, decode_responses)` |
 | `redis` (sync) | `create_sync_redis_client()` | `(url, decode_responses, socket_timeout)` |
+
+The asyncio registry is keyed by the **running event loop** as well.
+`redis.asyncio` connections are bound to the loop that opened them, so a
+single process-wide pool let a connection opened on a short-lived loop — an
+`asyncio.run()` inside a worker thread — be handed to the serving loop, where
+every command failed with `RuntimeError: Event loop is closed` and the failing
+connection went straight back into the pool for the next caller. One stray
+call poisoned the pool for the rest of the process. Each loop now gets its own
+pool; pools whose loop has closed are dropped on the next request, and a call
+outside any loop gets a loop-less pool of its own.
 
 Both apply the same limits from the cache config: `max_connections`,
 `health_check_interval`, `socket_timeout` and `socket_connect_timeout`. The

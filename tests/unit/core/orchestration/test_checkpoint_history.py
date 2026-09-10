@@ -339,3 +339,29 @@ class TestFactoryWiring:
         finally:
             reset_default_checkpoint_store()
             monkeypatch.setattr(orch_config, "_orchestration_config", None)
+
+
+class TestHistoryFlag:
+    """Stores say whether they record snapshots, so a reader never has to guess.
+
+    Every store has ``list_snapshots``; only one built with
+    ``history_enabled=True`` ever fills it. A consumer that inferred "history
+    on" from the method's presence showed an always-empty timeline.
+    """
+
+    def test_in_memory_store_exposes_history_enabled(self):
+        assert InMemoryCheckpointStore(history_enabled=True).history_enabled is True
+        assert InMemoryCheckpointStore().history_enabled is False
+
+    def test_postgres_store_exposes_history_enabled(self):
+        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+
+        assert PostgresCheckpointStore(history_enabled=True).history_enabled is True
+        assert PostgresCheckpointStore().history_enabled is False
+
+    def test_sqlite_store_exposes_history_enabled(self, tmp_path):
+        from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+
+        path = tmp_path / "cp.sqlite"
+        assert SQLiteCheckpointStore(path, history_enabled=True).history_enabled is True
+        assert SQLiteCheckpointStore(path).history_enabled is False

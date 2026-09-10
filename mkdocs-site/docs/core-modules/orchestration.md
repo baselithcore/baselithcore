@@ -999,7 +999,10 @@ await orch.process(fork.query, run_id="run-42-alt", resume=True)
 
 Snapshot support is duck-typed like `save_step` (optional
 `list_snapshots` / `load_snapshot` store methods): the helpers degrade to
-"no history" against protocol-only stores instead of failing. In Postgres,
+"no history" against protocol-only stores instead of failing. Every bundled
+store also exposes a read-only `history_enabled` property — the flag it was
+built with — so a reader asks that rather than inferring history from the
+presence of `list_snapshots`, which exists (and stays empty) on every store. In Postgres,
 snapshots live in `agent_checkpoint_history` keyed `(run_id, version)`; the
 `save_step` fast-path snapshots the just-patched live row **server-side**
 (`INSERT ... SELECT`), so no full payload crosses the wire and the O(n) write

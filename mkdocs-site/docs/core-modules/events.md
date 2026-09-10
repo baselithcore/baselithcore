@@ -101,9 +101,16 @@ ring-buffer, and then runs **every handler concurrently** with
   background task and `emit()` returns immediately.
 
 `emit_sync(name, data, **kwargs)` is the escape hatch for non-async code:
-inside a running loop it schedules `emit()` as a tracked task and returns `0`;
-with no loop it runs `asyncio.run(emit(...))`. The orchestrator emits
-`FLOW_COMPLETED` this way.
+inside a running loop it schedules `emit()` as a tracked task and returns `0`.
+From a thread that has no loop of its own (an `asyncio.to_thread` worker, sync
+persistence code) it marshals `emit()` onto the **application's loop** — the
+one the bus saw its first `emit()` on — with `run_coroutine_threadsafe`, and
+waits for the handlers unless `wait=False`. Handlers are written for that
+loop: they hold loop-bound resources such as async Redis pools, and running
+them on a throwaway `asyncio.run()` loop that is torn down the moment `emit()`
+returns left those resources bound to a closed loop. Only a process that has
+never run a loop at all falls back to `asyncio.run(emit(...))`. The
+orchestrator emits `FLOW_COMPLETED` this way.
 
 ### History, dead-letter queue and schemas
 

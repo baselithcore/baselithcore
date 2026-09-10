@@ -108,6 +108,13 @@ with tracer.start_span("retrieve-documents") as span:
     # Span closes automatically — status set to OK (ERROR on exception)
 ```
 
+`tracer.current_span` — and therefore the parent a nested `start_span()`
+picks up — is tracked per task and thread (a `ContextVar`), not per tracer
+instance, so concurrent requests sharing one tracer never nest under each
+other's spans. Without the OTel SDK the same tracer feeds the in-process
+span sink, so this is also what keeps a live trace viewer's waterfalls
+separate under load.
+
 ### The OTel backbone (`otel.py`)
 
 `setup_telemetry()` installs, **idempotently**:

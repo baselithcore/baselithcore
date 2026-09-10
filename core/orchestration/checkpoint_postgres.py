@@ -172,6 +172,16 @@ class PostgresCheckpointStore:
         self._history_enabled = history_enabled
         self._history_limit = history_limit
 
+    @property
+    def history_enabled(self) -> bool:
+        """Whether every save also records an immutable per-version snapshot.
+
+        Every store exposes ``list_snapshots``; only a store built with
+        ``history_enabled=True`` ever fills it, so readers ask this instead of
+        inferring history from the method's presence.
+        """
+        return self._history_enabled
+
     async def initialize(self) -> None:
         """Create the checkpoint tables and index if absent (idempotent)."""
         if skip_runtime_ddl(
