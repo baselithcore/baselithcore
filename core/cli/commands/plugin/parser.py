@@ -69,6 +69,11 @@ def register_parser(subparsers, formatter_class):
         action="store_true",
         help="Install missing Python dependencies into the current Python environment",
     )
+    add_plugin.add_argument(
+        "--docker",
+        action="store_true",
+        help="Install/build the plugin into the Docker core runtime",
+    )
 
     # ─── Local Management ──────────────────────────────────
     plugin_subparsers.add_parser(

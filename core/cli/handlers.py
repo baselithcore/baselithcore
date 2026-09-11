@@ -23,6 +23,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             ref=getattr(args, "ref", None),
             force=getattr(args, "force", False),
             install_deps=getattr(args, "install_deps", False),
+            docker=getattr(args, "docker", False),
         ),
         "create": lambda: plugin.create_plugin(
             args.name,

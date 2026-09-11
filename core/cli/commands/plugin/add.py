@@ -30,45 +30,60 @@ def add_plugin(
     ref: str | None = None,
     force: bool = False,
     install_deps: bool = False,
+    docker: bool = False,
 ) -> int:
     """Clone, validate, enable, and optionally install deps for a Git plugin."""
     plugin_name = _resolve_name(source, name)
     plugin_dir = Path("plugins") / plugin_name
 
     if plugin_dir.exists():
-        if not force:
+        if force:
+            if not _remove_existing(plugin_dir):
+                return 1
+        elif plugin_dir.is_dir():
+            print_info(f"Plugin '{plugin_name}' already exists; reusing it.")
+        else:
             print_error(
                 f"Plugin '{plugin_name}' already exists.",
                 "Use --force to replace it, or pass --name for another folder.",
             )
             return 1
-        if not _remove_existing(plugin_dir):
-            return 1
-
-    if not _clone(source, plugin_dir, ref):
+    if not plugin_dir.exists() and not _clone(source, plugin_dir, ref):
         return 1
 
-    if not _validate_install_shape(plugin_dir):
+    manifest = _load_manifest(plugin_dir)
+    if not _validate_install_shape(plugin_dir, manifest):
         print_error(f"Plugin '{plugin_name}' was cloned but is not installable.")
         return 1
+    print_success("Manifest valid")
+    if not _check_core_compatibility(manifest):
+        return 1
+    print_success("Core compatible")
 
     _copy_env_example(plugin_dir)
+
+    if not _install_plugin_dependencies(manifest):
+        return 1
 
     enable_code = enable_local_plugin(plugin_name)
     if enable_code != 0:
         return enable_code
 
     validate_code = validate_local_plugin(plugin_name)
-    deps_code = (
-        deps_install(plugin_name, yes=True)
-        if install_deps
-        else deps_check(plugin_name)
-    )
-    if deps_code != 0 and not install_deps:
+    deps_code = deps_check(plugin_name)
+    if deps_code != 0 and install_deps and not docker:
+        deps_code = deps_install(plugin_name, yes=True)
+    elif deps_code != 0 and not docker:
         print_info(
             "Install missing Python deps with: "
             f"baselith plugin deps install {plugin_name} -y"
         )
+
+    if docker:
+        from .add_docker import install_plugin_into_docker
+
+        docker_code = install_plugin_into_docker(plugin_name, manifest or {})
+        return docker_code
 
     if validate_code != 0 or deps_code != 0:
         print_warning(
@@ -110,7 +125,7 @@ def _clone(source: str, plugin_dir: Path, ref: str | None) -> bool:
     if result.returncode != 0:
         print_error("git clone failed", result.stderr.strip())
         return False
-    print_success(f"Cloned plugin '{plugin_dir.name}'.")
+    print_success("Repository cloned")
     return True
 
 
@@ -123,7 +138,7 @@ def _copy_env_example(plugin_dir: Path) -> None:
     print_info(f"Created {env_file} from .env.example")
 
 
-def _validate_install_shape(plugin_dir: Path) -> bool:
+def _validate_install_shape(plugin_dir: Path, manifest: dict | None) -> bool:
     plugin_file = plugin_dir / "plugin.py"
     if not plugin_file.is_file():
         print_error(f"Missing plugin.py in {plugin_dir}")
@@ -157,7 +172,6 @@ def _validate_install_shape(plugin_dir: Path) -> bool:
         print_error(f"No Baselith plugin class found in {plugin_file}")
         return False
 
-    manifest = _load_manifest(plugin_dir)
     if manifest is None:
         print_error(f"Missing or unreadable manifest in {plugin_dir}")
         return False
@@ -169,6 +183,51 @@ def _validate_install_shape(plugin_dir: Path) -> bool:
     if missing:
         print_error("Plugin manifest is incomplete", ", ".join(missing))
         return False
+    return True
+
+
+def _install_plugin_dependencies(manifest: dict | None) -> bool:
+    if not manifest:
+        return True
+    deps = manifest.get("plugin_dependencies", {}) or {}
+    names = deps.keys() if isinstance(deps, dict) else deps
+    for dep_name in names:
+        if not isinstance(dep_name, str):
+            continue
+        if (Path("plugins") / dep_name).is_dir():
+            if enable_local_plugin(dep_name) != 0:
+                print_error(f"Could not enable plugin dependency '{dep_name}'.")
+                return False
+            continue
+        source = f"https://github.com/baselithcore/plugin-{dep_name}"
+        print_info(f"Installing plugin dependency '{dep_name}' from {source}")
+        code = add_plugin(source, name=dep_name)
+        if code != 0:
+            print_error(f"Could not install plugin dependency '{dep_name}'.")
+            return False
+    return True
+
+
+def _check_core_compatibility(manifest: dict | None) -> bool:
+    if not manifest:
+        return False
+    min_core = manifest.get("min_core_version")
+    if not min_core:
+        print_warning("Manifest does not declare min_core_version.")
+        return True
+    try:
+        from packaging.version import Version
+
+        from core._version import __version__
+
+        if Version(__version__) < Version(str(min_core)):
+            print_error(
+                "Plugin requires a newer Baselith core.",
+                f"Installed {__version__}, required >= {min_core}",
+            )
+            return False
+    except Exception as exc:
+        print_warning(f"Could not verify core compatibility: {exc}")
     return True
 
 

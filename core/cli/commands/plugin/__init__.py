@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     # Static-analysis-only imports: give type checkers/IDEs the real symbols
     # while keeping runtime resolution lazy via ``__getattr__`` below.
     from .add import add_plugin
+    from .add_docker import install_plugin_into_docker
     from .config import config_get, config_reset, config_set, config_show
     from .create import create_plugin
     from .deps import deps_check, deps_check_all, deps_install, deps_install_all
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 # Public name -> submodule that defines it. Resolved on first access.
 _LAZY_EXPORTS: dict[str, str] = {
     "add_plugin": "add",
+    "install_plugin_into_docker": "add_docker",
     "create_plugin": "create",
     "status_local_plugins": "local",
     "info_local_plugin": "local",
@@ -94,6 +96,7 @@ __all__ = [
     "enable_local_plugin",
     "export_manifest_cmd",
     "identity_cmd",
+    "install_plugin_into_docker",
     "info_local_plugin",
     "info_plugin",
     "install_plugin_cmd",
