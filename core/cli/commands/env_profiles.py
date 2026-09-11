@@ -127,6 +127,14 @@ def ensure_dev_env(env_path: Path | None = None) -> list[str]:
             lines.append(f"DB_PASSWORD={generated}")
         changed.append("DB_PASSWORD")
 
+    current_secret = values.get("SECRET_KEY")
+    if is_placeholder_secret(current_secret):
+        generated = token_urlsafe(48)
+        lines, replaced = _set_env_value(lines, "SECRET_KEY", generated)
+        if not replaced:
+            lines.append(f"SECRET_KEY={generated}")
+        changed.append("SECRET_KEY")
+
     if changed:
         path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return changed
@@ -167,9 +175,28 @@ def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
             lines.append(f"DB_PASSWORD={generated}")
         changed.append("DB_PASSWORD")
 
+    current_secret = values.get("SECRET_KEY")
+    if is_placeholder_secret(current_secret):
+        generated = _local_secret_key() or token_urlsafe(48)
+        lines, replaced = _set_env_value(lines, "SECRET_KEY", generated)
+        if not replaced:
+            lines.append(f"SECRET_KEY={generated}")
+        changed.append("SECRET_KEY")
+
     if changed:
         path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return changed
+
+
+def _local_secret_key() -> str | None:
+    local_env = Path.cwd() / ".env"
+    if not local_env.is_file():
+        return None
+    values = _parse_env(local_env.read_text(encoding="utf-8").splitlines())
+    secret_key = values.get("SECRET_KEY")
+    if is_placeholder_secret(secret_key):
+        return None
+    return secret_key
 
 
 def _compose_project_name(project_root: Path) -> str:
