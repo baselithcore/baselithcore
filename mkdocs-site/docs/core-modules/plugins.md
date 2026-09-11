@@ -148,10 +148,13 @@ class MyPlugin(Plugin, RouterPlugin):
     `/chat`, `/admin`, `/console`, `/feedback`, `/feedbacks`, `/health`,
     `/index`, `/metrics`, `/reindex`, `/status`, `/static`, `/docs`,
     `/redoc`, `/openapi.json`, `/.well-known` — cannot express ownership and
-    is **excluded from attribution** (logged as a warning): it would claim
-    unrelated core traffic, routing it through the wrong plugin's LLM policy
-    and returning spurious 503s when the claiming plugin fails to activate.
-    Multi-segment prefixes such as `/api/my-plugin` are unaffected.
+    is **excluded from attribution** (logged as a warning once per plugin
+    and process — the route snapshot is rebuilt on every discovery change,
+    the deployment shape it describes is not): it would claim unrelated core
+    traffic, routing it through the wrong plugin's LLM policy and returning
+    spurious 503s when the claiming plugin fails to activate. Requests under
+    such a prefix simply stay unattributed. Multi-segment prefixes such as
+    `/api/my-plugin` are unaffected.
 
 ### GraphPlugin
 

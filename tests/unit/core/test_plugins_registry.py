@@ -2,6 +2,7 @@
 Unit tests for core.plugins.registry module.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -389,3 +390,46 @@ async def test_unregister_emits_plugin_unload_audit_event(monkeypatch):
     assert [e[0].value for e in events] == ["plugin.unload"]
     assert events[0][1]["resource"] == "plugin:demo"
     assert events[0][1]["action"] == "unload"
+
+
+class TestGenericRoutePrefixWarning:
+    """A too-generic router prefix (``/api``) is reported once, not on every
+    snapshot rebuild — the deployment shape does not change between rebuilds."""
+
+    def _discovery(self, name: str, prefix: str) -> PluginDiscovery:
+        return PluginDiscovery(
+            name=name,
+            directory_name=name,
+            plugin_dir=Path(f"/plugins/{name}"),
+            metadata=PluginMetadata(name=name, version="1.0.0", description=name),
+            provides_routes=True,
+            router_prefix=prefix,
+        )
+
+    def test_generic_prefix_is_never_attributed(self):
+        registry = PluginRegistry()
+        registry.register_discovered_plugin(self._discovery("auth", "/api"))
+        registry.register_discovered_plugin(self._discovery("shop", "/api/shop"))
+        assert registry.match_plugin_route("/api/shop/items") == "shop"
+        assert registry.match_plugin_route("/api/anything/else") is None
+
+    def test_generic_prefix_warning_is_emitted_once_per_plugin(self, monkeypatch):
+        from core.plugins import registry as registry_module
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(registry_module, "logger", fake_logger)
+        registry = PluginRegistry()
+        registry.register_discovered_plugin(self._discovery("auth", "/api"))
+        registry.match_plugin_route("/api/x")
+        # Every discovery change invalidates the snapshot → rebuilds again.
+        registry.register_discovered_plugin(self._discovery("shop", "/api/shop"))
+        registry.match_plugin_route("/api/y")
+        registry.register_discovered_plugin(self._discovery("other", "/api/other"))
+        registry.match_plugin_route("/api/z")
+        hits = [
+            c
+            for c in fake_logger.warning.call_args_list
+            if "Ignoring route prefix" in c.args[0]
+        ]
+        assert len(hits) == 1
+        assert hits[0].args[1:] == ("/api", "auth")

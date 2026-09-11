@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.cache.protocols import TTLCacheProtocol
 from core.config.storage import get_storage_config
-from core.context import get_current_tenant_id
+from core.context import get_tenant_or_default
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -79,7 +79,10 @@ class RedisCache:
             self._client = None
 
     def _make_key(self, key: str) -> str:
-        tenant_id = get_current_tenant_id()
+        # Lenient tenant lookup: the id namespaces the Redis key, it is not an
+        # access boundary. Out-of-request callers share the ``"default"``
+        # prefix rather than raising under ``strict_tenant_isolation``.
+        tenant_id = get_tenant_or_default()
         return f"{self.config.cache_redis_prefix}:{tenant_id}:{self.prefix}:{key}"
 
     async def get(self, key: str) -> Any | None:

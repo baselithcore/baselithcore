@@ -82,6 +82,11 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._discovered_intent_pattern_owners: dict[str, str] = {}
         self._discovered_flow_handler_owners: dict[str, str] = {}
         self._suppressed_discovered_plugins: set[str] = set()
+        # (plugin, prefix) pairs already reported as too generic to attribute
+        # request ownership — the snapshot is rebuilt on every discovery/
+        # suppression change, and the deployment shape it describes never
+        # changes between rebuilds, so the warning is emitted once per pair.
+        self._warned_generic_prefixes: set[tuple[str, str]] = set()
         # Immutable, pre-sorted (longest-prefix-first) snapshot of router
         # prefixes for the per-request hot path (match_plugin_route). Rebuilt
         # lazily under the lock and read lock-free; None means "stale, rebuild".
@@ -244,15 +249,19 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
                 if not segments or (
                     len(segments) == 1 and segments[0] in RESERVED_ROUTE_SEGMENTS
                 ):
-                    logger.warning(
-                        "Ignoring route prefix %r for plugin %s: it is empty or "
-                        "collides with a core/framework route namespace, so it "
-                        "cannot attribute request ownership (a plugin claiming "
-                        "it would bind the wrong owner into the plugin context "
-                        "for core traffic)",
-                        discovery.router_prefix,
-                        plugin_name,
-                    )
+                    warned = (plugin_name, discovery.router_prefix)
+                    if warned not in self._warned_generic_prefixes:
+                        self._warned_generic_prefixes.add(warned)
+                        logger.warning(
+                            "Ignoring route prefix %r for plugin %s: it is empty or "
+                            "collides with a core/framework route namespace, so it "
+                            "cannot attribute request ownership (a plugin claiming "
+                            "it would bind the wrong owner into the plugin context "
+                            "for core traffic). Requests under it stay unattributed; "
+                            "reported once per process.",
+                            discovery.router_prefix,
+                            plugin_name,
+                        )
                     continue
                 routes.append((len(prefix), prefix, plugin_name))
             # Longest prefix first (most specific route wins); ties break on

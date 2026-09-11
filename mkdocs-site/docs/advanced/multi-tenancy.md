@@ -75,7 +75,7 @@ user. The flow is:
 
 For **background tasks and scripts**, you must set the context explicitly (see Troubleshooting below).
 
-When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_current_tenant_id()`) then key off the current context.
+When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_tenant_or_default()`) then key off the current context.
 
 There is **no** context-manager helper. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, and `get_current_tenant_id()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
 
@@ -344,13 +344,18 @@ tenant filtering on every vector search is a **Roadmap** item.
 
 `SemanticLLMCache` (`core/cache/semantic_cache.py`) is tenant-partitioned: it
 stores entries under `entries[tenant_id][prompt_hash]`, deriving `tenant_id` from
-`get_current_tenant_id()`. Two tenants issuing the same prompt never share a cache
+`get_tenant_or_default()`. Two tenants issuing the same prompt never share a cache
 entry:
 
 ```python
 # Internally, SemanticLLMCache keys by the current tenant context:
-#   self._entries[get_current_tenant_id()][prompt_hash] = CacheEntry
+#   self._entries[get_tenant_or_default()][prompt_hash] = CacheEntry
 ```
+
+The **exact** LLM response cache (`core/services/llm/_generation.py`) and the
+Redis cache prefix (`core/optimization/caching.py`) partition the same way. All
+three resolve the tenant *leniently* — see
+[Namespacing is not a boundary](#namespacing-is-not-a-boundary).
 
 !!! info "Roadmap: Redis keyspace prefixing & per-tenant flush"
     A Redis-backed cache with automatic per-tenant key prefixing and a
@@ -443,6 +448,31 @@ tenant_id = get_current_tenant_id()
     Leave strict mode on in production; it is the default precisely so that a
     code path that forgot to set the tenant context fails loudly instead of
     silently reading or writing the `"default"` tenant.
+
+### Namespacing is not a boundary
+
+Strict mode is about *data*. A lookup that only builds a key prefix has no data
+to protect, so it must not fail closed — otherwise a cache key prefix becomes a
+hard dependency on request context and takes down the work it was caching for.
+Two helpers, one rule:
+
+| Call | Use for | No tenant bound |
+|---|---|---|
+| `get_current_tenant_id()` | data boundaries: rows, documents, graph nodes, per-tenant scratchpads | raises `TenantContextError` under strict isolation |
+| `get_tenant_or_default()` | namespacing only: cache keys, cost ledger entries, metric labels | returns `"default"` |
+
+In `core/`, the second group is the LLM response cache
+(`core/services/llm/_generation.py`), the semantic cache
+(`core/cache/semantic_cache.py`), the Redis cache prefix
+(`core/optimization/caching.py`) and the cost ledger
+(`core/quotas/cost_enforcement.py`): an entry is keyed by the prompt hash and
+never read across prefixes, so an unbound caller shares the `"default"` bucket.
+
+Apply the same rule in your own code. A failure in this group is easy to miss:
+callers that degrade gracefully (falling back to a template, skipping the
+cache) swallow the exception, and the only trace of it is a failed span in the
+observability view — the feature silently stops using the LLM while the service
+looks healthy.
 
 ---
 
@@ -588,7 +618,9 @@ async def test_tenant_isolation():
 
 **Cause:** With `strict_tenant_isolation` enabled, you are running code outside of an HTTP request context (e.g., background task, script) without setting the tenant first.
 
-**Solution:**
+**Solution:** bind the tenant at the entry point of the task and restore it
+after — `contextvars` do not cross task boundaries on their own, so setting it
+once at startup does not cover a consumer loop started later:
 
 ```python
 from core.context import set_tenant_context, reset_tenant_context
@@ -601,6 +633,15 @@ async def background_task(tenant_id: str):
     finally:
         reset_tenant_context(token)
 ```
+
+The framework already binds at every chokepoint it owns
+(`core/middleware/tenant.py`, `core/task_queue/worker.py`,
+`core/events/durable.py`); a plugin that starts its own producer or consumer
+task owns the same responsibility.
+
+If the raising call is only building a cache key or a metric label, the fix is
+the other way round — use `get_tenant_or_default()`, see
+[Namespacing is not a boundary](#namespacing-is-not-a-boundary).
 
 ### One tenant's data visible to another
 

@@ -338,7 +338,10 @@ When a plugin implements `create_router()`, its endpoints are automatically:
 * Mounted under `get_router_prefix()` — `/api/{plugin-name}` by default. The prefix
   is passed verbatim to `include_router`, and any `prefix=` set on the `APIRouter`
   is appended after it: `APIRouter(prefix="/my-plugin")` would end up at
-  `/api/my-plugin/my-plugin/status`, so leave the router prefix empty.
+  `/api/my-plugin/my-plugin/status`, so leave the router prefix empty. Keep
+  `get_router_prefix()` plugin-specific: a bare core-owned segment such as
+  `/api` cannot express ownership, so the registry logs a warning (once) and
+  leaves requests under it unattributed for the plugin context.
 * Included in OpenAPI documentation
 * Tagged for easy discovery in Swagger UI
 

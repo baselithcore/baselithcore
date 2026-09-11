@@ -93,9 +93,16 @@ def _build_cache_key(
     and sampling params, not just the user prompt) so two callers with the same
     prompt but different system prompts never share a cached answer.
     """
-    from core.context import get_current_tenant_id
+    from core.context import get_tenant_or_default
 
-    tenant_id = get_current_tenant_id()
+    # Lenient on purpose: the tenant only *namespaces* the cache key, it is not
+    # an access boundary (the entry is keyed by the prompt hash and never read
+    # across prefixes). Under ``strict_tenant_isolation`` the strict lookup
+    # raised here for every out-of-request caller — a plugin's background task,
+    # a scheduler, a CLI script — killing the whole generation before the
+    # provider was ever called. Unbound callers share the ``"default"`` bucket,
+    # exactly like the cost ledger (``enforce_tenant_cost_budget``) does.
+    tenant_id = get_tenant_or_default()
     key_material = "\x1f".join(
         (prompt, system_prompt or "", repr(temperature), repr(max_tokens))
     )
