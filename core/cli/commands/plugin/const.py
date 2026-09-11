@@ -35,7 +35,7 @@ class {class_name}Plugin(AgentPlugin):
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize the plugin."""
-        self._config = config
+        await super().initialize(config)
         # Setup resources if needed
 
     def create_agent(self, service: Any, **kwargs) -> {class_name}Agent:
@@ -117,7 +117,7 @@ class {class_name}Plugin(RouterPlugin):
     """Plugin providing the {class_name} API endpoints."""
 
     async def initialize(self, config: Dict[str, Any]) -> None:
-        pass
+        await super().initialize(config)
 
     def create_router(self) -> APIRouter:
         return router
@@ -166,7 +166,7 @@ class {class_name}Plugin(GraphPlugin):
     """Plugin extending the Graph Schema."""
 
     async def initialize(self, config: Dict[str, Any]) -> None:
-        pass
+        await super().initialize(config)
 
     def register_entity_types(self) -> List[Dict[str, Any]]:
         """Register custom entity types."""

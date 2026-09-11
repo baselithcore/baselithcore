@@ -21,6 +21,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             args.name,
             args.type,
             interactive=getattr(args, "interactive", False),
+            register=not getattr(args, "no_register", False),
         ),
         "list": lambda: plugin.status_local_plugins(
             getattr(args, "name", None), json_output=args.format == "json"

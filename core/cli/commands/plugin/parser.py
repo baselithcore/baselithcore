@@ -37,6 +37,11 @@ def register_parser(subparsers, formatter_class):
         action="store_true",
         help="Run interactive creation wizard",
     )
+    create_plugin.add_argument(
+        "--no-register",
+        action="store_true",
+        help="Create plugin files without enabling it in configs/plugins.yaml",
+    )
 
     # ─── Local Management ──────────────────────────────────
     plugin_subparsers.add_parser(
