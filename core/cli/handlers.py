@@ -218,6 +218,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         log_level=args.log_level,
         preflight=not getattr(args, "skip_preflight", False),
         include_plugins=getattr(args, "check_plugins", False),
+        require_services=getattr(args, "require_services", False),
     )
 
 

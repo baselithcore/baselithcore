@@ -22,6 +22,7 @@ def run_server(
     log_level: str = "info",
     preflight: bool = True,
     include_plugins: bool = False,
+    require_services: bool = False,
 ) -> int:
     """
     Start the development server using uvicorn.
@@ -34,6 +35,7 @@ def run_server(
         log_level: Logging level
         preflight: Run doctor checks before starting Uvicorn
         include_plugins: Include plugin readiness checks in preflight
+        require_services: Block startup when backing services are unreachable
 
     Returns:
         Exit code (0 for success)
@@ -61,7 +63,10 @@ def run_server(
         return 1
 
     if preflight:
-        preflight_code = _run_preflight(include_plugins=include_plugins)
+        preflight_code = _run_preflight(
+            include_plugins=include_plugins,
+            require_services=require_services,
+        )
         if preflight_code != 0:
             return preflight_code
 
@@ -141,15 +146,71 @@ def run_server(
         return 1
 
 
-def _run_preflight(include_plugins: bool = False) -> int:
-    """Run startup-blocking diagnostics before Uvicorn starts."""
+CONNECTIVITY_CHECKS = {
+    "Redis (Cache)",
+    "Qdrant",
+    "PostgreSQL",
+    "GraphDB",
+    "Telemetry",
+}
+
+
+def _run_preflight(
+    include_plugins: bool = False,
+    require_services: bool = False,
+) -> int:
+    """Run startup diagnostics before Uvicorn starts."""
     from core.cli.commands.doctor import run_checks
 
     checks = run_checks(include_plugins=include_plugins)
-    failures = [check for check in checks if not check.passed and check.severity == "fail"]
+    failed_checks = [
+        check for check in checks if not check.passed and check.severity == "fail"
+    ]
+    service_failures = [check for check in failed_checks if _is_connectivity_check(check)]
+    failures = [
+        check
+        for check in failed_checks
+        if require_services or not _is_connectivity_check(check)
+    ]
+    if service_failures and not require_services:
+        _print_preflight_panel(
+            service_failures,
+            title="[bold yellow]Startup preflight service warnings[/bold yellow]",
+            border_style="yellow",
+        )
+        console.print(
+            "[dim]Service reachability is handled by application readiness and "
+            "lazy initialization. Use `baselith run --require-services` to block "
+            "startup on these checks.[/dim]"
+        )
     if not failures:
         return 0
 
+    _print_preflight_panel(
+        failures,
+        title="[bold red]Startup preflight failed[/bold red]",
+        border_style="red",
+    )
+    console.print("[dim]Run `baselith doctor` for the full diagnostic report.[/dim]")
+    console.print("[dim]Use `baselith run --check-plugins` to include plugin readiness.[/dim]")
+    console.print("[dim]Use `baselith run --skip-preflight` only for debugging.[/dim]")
+    return 1
+
+
+def _is_connectivity_check(check) -> bool:
+    if check.name in CONNECTIVITY_CHECKS:
+        return True
+    if check.name != "LLM Provider":
+        return False
+    message = check.message.lower()
+    return "not reachable" in message or "cannot connect" in message
+
+
+def _print_preflight_panel(
+    failures,
+    title: str,
+    border_style: str,
+) -> None:
     table = Table(show_header=True, header_style="bold magenta", expand=True)
     table.add_column("Component", style="cyan")
     table.add_column("Problem")
@@ -161,15 +222,11 @@ def _run_preflight(include_plugins: bool = False) -> int:
     console.print(
         Panel(
             table,
-            title="[bold red]Startup preflight failed[/bold red]",
-            border_style="red",
+            title=title,
+            border_style=border_style,
             expand=False,
         )
     )
-    console.print("[dim]Run `baselith doctor` for the full diagnostic report.[/dim]")
-    console.print("[dim]Use `baselith run --check-plugins` to include plugin readiness.[/dim]")
-    console.print("[dim]Use `baselith run --skip-preflight` only for debugging.[/dim]")
-    return 1
 
 
 def register_parser(subparsers, formatter_class):
@@ -225,6 +282,11 @@ def register_parser(subparsers, formatter_class):
         "--check-plugins",
         action="store_true",
         help="Include plugin readiness checks in the startup preflight",
+    )
+    run_parser.add_argument(
+        "--require-services",
+        action="store_true",
+        help="Block startup when preflight cannot reach backing services",
     )
     return run_parser
 
