@@ -88,6 +88,7 @@ demo_workspace/
 
 # --- JavaScript / Node ---
 node_modules/
+*.tsbuildinfo
 package-lock.json
 # The published TS SDK needs a reproducible `npm ci` in CI — keep its lockfile.
 !sdk/typescript/package-lock.json
