@@ -61,6 +61,16 @@ docker-compose.yml
 frontend/dist
 frontend/.vite
 frontend/node_modules
+# Plugin console build inputs. Both Dockerfiles `COPY plugins/ plugins/`, and
+# only the compiled bundle (ui/dist, ui/out, ui/build) is served at runtime or
+# hashed by the integrity check (core/plugins/integrity.py scopes ui/ the same
+# way) — the TypeScript sources and tsc incremental state are pure build input
+# that otherwise land in a pushed layer. Patterns are single-segment globs on
+# purpose: plugins/<name>/ui/src, never a nested match. Plugin tests/ stay:
+# they ARE part of the integrity hash, so dropping them would break signed
+# plugins at load.
+plugins/*/ui/src
+plugins/*/ui/*.tsbuildinfo
 tests/
 htmlcov/
 .coverage

@@ -89,6 +89,9 @@ class StaticCacheMiddleware:
     def __init__(self, app: ASGIApp, max_age: int = 86400) -> None:
         self.app = app
         self.max_age = max_age
+        # Constant for the life of the middleware: encode once here rather
+        # than formatting + encoding it on every /static and /console response.
+        self._max_age_header = f"public, max-age={max_age}".encode("latin-1")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -102,7 +105,7 @@ class StaticCacheMiddleware:
             await self.app(scope, receive, send)
             return
 
-        max_age_header = f"public, max-age={self.max_age}".encode("latin-1")
+        max_age_header = self._max_age_header
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":

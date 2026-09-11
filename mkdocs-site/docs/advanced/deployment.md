@@ -612,8 +612,18 @@ upstream backend {
     server 127.0.0.1:8001;
     server 127.0.0.1:8002;
 
-    # Keepalive connections
+    # Keepalive connections — only honoured when the proxied request carries
+    # NO `Connection: close` (see the map below and `proxy_http_version 1.1`).
     keepalive 32;
+}
+
+# WebSocket upgrade passthrough that keeps the upstream keepalive pool alive.
+# The textbook `'' close` sends `Connection: close` upstream on every ordinary
+# request, so nginx opens a fresh TCP connection to uvicorn per request and the
+# pool above never holds a socket. An empty value omits the header instead.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' "";
 }
 
 server {
@@ -632,17 +642,22 @@ server {
     ssl_certificate /etc/letsencrypt/live/baselith.ai/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/baselith.ai/privkey.pem;
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    # Security headers. Each value must EQUAL what SecurityHeadersMiddleware
+    # sends: add_header appends a second copy rather than replacing the
+    # upstream one, and browsers apply the last (X-Frame-Options: conflicting
+    # values are treated as DENY, so a looser edge value cannot relax the app,
+    # but a stricter app value cannot be relaxed by the edge either).
+    add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "0" always;   # legacy auditor off — matches the app
+    add_header Referrer-Policy "same-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         # Let nginx compress (gzip on, in C, off the app's event loop) instead
         # of the app's Python gzip middleware: strip the client's
@@ -660,8 +675,14 @@ server {
     # SSE / chat streaming: disable proxy buffering to preserve token-by-token
     # delivery. Regex so the versioned alias /v1/chat/stream is covered too —
     # a plain prefix location would let it fall through to `location /` and
-    # its shorter read timeout.
-    location ~ ^/(v1/)?chat/stream$ {
+    # its shorter read timeout. The other long-lived streams are listed as
+    # well: the run event feed (GET /runs/{id}/events), the MCP Streamable
+    # HTTP transport (POST /mcp, SSE responses) and the baselithbot dashboard
+    # event feed (`/dash/events/stream`, a mounted sub-app) — under
+    # `location /` each of them was cut
+    # by the read timeout after a minute of silence (an agent waiting on a
+    # slow LLM call).
+    location ~ ^/(v1/)?(chat/stream|runs/[^/]+/events|mcp|dash/events/stream)$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -670,11 +691,21 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
-        add_header X-Accel-Buffering no;
+        # NOT `add_header X-Accel-Buffering no` here: one add_header inside a
+        # location cancels EVERY header inherited from the server block, so
+        # the streams would ship without any security header. The app already
+        # emits X-Accel-Buffering on every stream; just pass it through.
+        proxy_pass_header X-Accel-Buffering;
         proxy_read_timeout 300s;
     }
 }
 ```
+
+The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
+`docker-compose.prod.yml`) applies the same three rules — empty `Connection`
+for non-upgrade requests so `keepalive 32` is actually used, the extended
+streaming location, and no `add_header` inside a location — and is checked
+with `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
 
 ### SSL Certificate Setup (Let's Encrypt)
 

@@ -810,7 +810,7 @@ before the cost-control middleware could see them.
 
 ## Admin Account Lockout
 
-After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login.
+After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login. Each failure is recorded by a single atomic Lua script (increment, arm the window, extend to the lockout TTL at the threshold), so a crash mid-update can never leave a counter without an expiry — which used to mean a permanent lockout for that IP.
 
 !!! warning "Behind a reverse proxy: run uvicorn with `--proxy-headers`"
     IP-keyed protections (this lockout, anonymous rate limiting) key on

@@ -174,3 +174,77 @@ class TestNoSharedCounterAtAll:
             "core.middleware._admin_lockout._is_production_env", return_value=False
         ):
             await manager.check_admin_lockout("10.0.0.4")
+
+
+class TestRecordFailureAtomic:
+    """The failure step is ONE Redis round trip (a Lua script), not an
+    INCR followed by one or two EXPIRE calls — the gap between those left a
+    counter without a TTL (a permanent lockout for that IP) whenever the
+    process died in between."""
+
+    def _manager(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = None
+        return SecurityManager(mock_security_config)
+
+    @pytest.mark.asyncio
+    async def test_uses_registered_script_once(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        script = AsyncMock(return_value=1)
+        redis = MagicMock()
+        redis.register_script = MagicMock(return_value=script)
+        redis.incr = AsyncMock(side_effect=AssertionError("non-atomic INCR used"))
+        redis.expire = AsyncMock(side_effect=AssertionError("non-atomic EXPIRE used"))
+        manager.rate_limiter._redis = redis
+
+        await manager.record_admin_failure("203.0.113.9")
+        await manager.record_admin_failure("203.0.113.9")
+
+        # Registered once, invoked per failure with the key and the three
+        # policy constants (window, lockout duration, threshold).
+        redis.register_script.assert_called_once()
+        assert script.await_count == 2
+        kwargs = script.await_args.kwargs
+        assert kwargs["keys"] == [
+            f"{manager.rate_limiter._prefix}admin_lockout:203.0.113.9"
+        ]
+        assert kwargs["args"] == [
+            manager._LOCKOUT_WINDOW_SECONDS,
+            manager._LOCKOUT_DURATION_SECONDS,
+            manager._LOCKOUT_MAX_FAILURES,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_plain_eval_when_client_cannot_register(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        redis = MagicMock(spec=["eval"])
+        redis.eval = AsyncMock(return_value=5)
+        manager.rate_limiter._redis = redis
+
+        await manager.record_admin_failure("203.0.113.10")
+
+        redis.eval.assert_awaited_once()
+        script, numkeys, key, *args = redis.eval.await_args.args
+        assert numkeys == 1 and key.endswith("admin_lockout:203.0.113.10")
+        assert args == [
+            manager._LOCKOUT_WINDOW_SECONDS,
+            manager._LOCKOUT_DURATION_SECONDS,
+            manager._LOCKOUT_MAX_FAILURES,
+        ]
+        # The script arms the window on first hit, heals a TTL-less key and
+        # stretches to the lockout duration at the threshold.
+        assert "INCR" in script and "TTL" in script and "EXPIRE" in script
+
+    @pytest.mark.asyncio
+    async def test_script_failure_counts_in_memory(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        redis = MagicMock(spec=["eval"])
+        redis.eval = AsyncMock(side_effect=RuntimeError("redis down"))
+        manager.rate_limiter._redis = redis
+
+        await manager.record_admin_failure("203.0.113.11")
+
+        count, _ = manager._lockout_fallback["203.0.113.11"]
+        assert count == 1

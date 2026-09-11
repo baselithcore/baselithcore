@@ -109,7 +109,7 @@ adds, in order:
 | Added in factory | Class | Purpose |
 | ---------------- | ----- | ------- |
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
-| `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
+| `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` (header pre-encoded once at construction) |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
@@ -548,7 +548,14 @@ backed by `SecurityManager`:
 - `clear_admin_failures(username)` — clears it after a successful login.
 
 Lockout policy: **5 failures** within a 60s window locks the account for
-**15 minutes**, tracked in Redis with an in-memory fallback. The admin router
+**15 minutes**, tracked in Redis with an in-memory fallback. Recording a
+failure is **one atomic Lua step** (`INCR`, arm the 60s window on the first
+hit, stretch the TTL to the full lockout at the threshold) rather than an
+`INCR` followed by separate `EXPIRE` calls: the old pair cost up to three
+round trips per bad login and, if the process died between the two, left a
+counter with **no TTL** — a permanent lockout for that IP. The script also
+re-arms the window on any key it finds without a TTL, healing such
+leftovers. The admin router
 (`plugins/api_routers/admin.py`) wires these into its `verify_credentials`
 dependency. The lockout state and checks live in `AdminLockoutMixin`
 (`core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
