@@ -5,17 +5,27 @@ Constants and templates for plugin commands.
 # Plugin creation templates
 PLUGIN_TEMPLATE = {
     "agent": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom agent plugin for {name}",
-    "author": "Baselith User",
-    "tags": ["agent", "{name}"],
-    "category": "AI",
-    "icon": "bot",
-    "readiness": "alpha",
-    "environment_variables": []
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom agent plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: AI
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entrypoint: __init__.py
+plugin_dependencies: {{}}
+required_resources: []
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: null
+environment_variables: []
+tags:
+- agent
+- {name}
+""",
         "__init__.py": '''"""
 {name} Plugin.
 """
@@ -89,14 +99,27 @@ __all__ = ["{class_name}Agent"]
 ''',
     },
     "router": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom router plugin for {name}",
-    "category": "Utilities",
-    "icon": "link",
-    "readiness": "alpha"
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom router plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: Utilities
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entrypoint: __init__.py
+plugin_dependencies: {{}}
+required_resources: []
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: /{name}/health
+environment_variables: []
+tags:
+- router
+- {name}
+""",
         "__init__.py": '''"""
 {name} Plugin.
 """
@@ -141,14 +164,28 @@ async def health():
 ''',
     },
     "graph": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom graph schema plugin for {name}",
-    "category": "Knowledge",
-    "icon": "database",
-    "readiness": "alpha"
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom graph schema plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: Knowledge
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entrypoint: __init__.py
+plugin_dependencies: {{}}
+required_resources:
+- graph
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: null
+environment_variables: []
+tags:
+- graph
+- {name}
+""",
         "__init__.py": '''"""
 {name} Graph Plugin.
 """

@@ -2,7 +2,6 @@
 Plugin creation logic.
 """
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -82,18 +81,26 @@ def _create_interactive() -> int:
 
     # Override manifest with interactive data
     plugin_path = Path("plugins") / name
-    manifest_path = plugin_path / "manifest.json"
+    manifest_path = plugin_path / "manifest.yaml"
     if manifest_path.exists():
         try:
+            import yaml
+
             with open(manifest_path, encoding="utf-8") as f:
-                manifest = json.load(f)
+                manifest = yaml.safe_load(f) or {}
             manifest["description"] = description
             manifest["author"] = author
             manifest["tags"] = tags
             if env_vars:
                 manifest["environment_variables"] = env_vars
             with open(manifest_path, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, indent=4)
+                yaml.dump(
+                    manifest,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
         except Exception:
             pass
 
