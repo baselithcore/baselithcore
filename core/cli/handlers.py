@@ -17,6 +17,13 @@ def cmd_plugin(args: argparse.Namespace) -> int:
 
     # Main plugin command dispatch
     PLUGIN_COMMANDS = {
+        "add": lambda: plugin.add_plugin(
+            args.source,
+            name=getattr(args, "name", None),
+            ref=getattr(args, "ref", None),
+            force=getattr(args, "force", False),
+            install_deps=getattr(args, "install_deps", False),
+        ),
         "create": lambda: plugin.create_plugin(
             args.name,
             args.type,

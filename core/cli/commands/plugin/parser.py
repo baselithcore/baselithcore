@@ -43,6 +43,33 @@ def register_parser(subparsers, formatter_class):
         help="Create plugin files without enabling it in configs/plugins.yaml",
     )
 
+    add_plugin = plugin_subparsers.add_parser(
+        "add",
+        help="Clone and enable a Baselith plugin from Git",
+        description=(
+            "Clone a Git plugin into plugins/, validate it, enable it, "
+            "and check dependencies."
+        ),
+        formatter_class=formatter_class,
+    )
+    add_plugin.add_argument("source", help="Git URL or local Git source to clone")
+    add_plugin.add_argument(
+        "--name",
+        default=None,
+        help="Plugin folder name under plugins/ (default: derived from repo name)",
+    )
+    add_plugin.add_argument("--ref", default=None, help="Branch, tag, or ref to clone")
+    add_plugin.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing clean plugin directory",
+    )
+    add_plugin.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install missing Python dependencies into the current Python environment",
+    )
+
     # ─── Local Management ──────────────────────────────────
     plugin_subparsers.add_parser(
         "list",

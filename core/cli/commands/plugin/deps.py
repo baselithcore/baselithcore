@@ -140,6 +140,10 @@ def deps_check(
         print_error(f"Plugin '{plugin_name}' not found.")
         return 1
 
+    from core.plugins.env import load_plugin_dotenv
+
+    load_plugin_dotenv(plugin_dir)
+
     manifest = _load_manifest(plugin_dir)
     if manifest is None:
         print_error(f"No manifest found for plugin '{plugin_name}'.")

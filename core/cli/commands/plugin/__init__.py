@@ -17,6 +17,7 @@ from .parser import register_parser
 if TYPE_CHECKING:
     # Static-analysis-only imports: give type checkers/IDEs the real symbols
     # while keeping runtime resolution lazy via ``__getattr__`` below.
+    from .add import add_plugin
     from .config import config_get, config_reset, config_set, config_show
     from .create import create_plugin
     from .deps import deps_check, deps_check_all, deps_install, deps_install_all
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
 
 # Public name -> submodule that defines it. Resolved on first access.
 _LAZY_EXPORTS: dict[str, str] = {
+    "add_plugin": "add",
     "create_plugin": "create",
     "status_local_plugins": "local",
     "info_local_plugin": "local",
@@ -81,6 +83,7 @@ __all__ = [
     "config_reset",
     "config_set",
     "config_show",
+    "add_plugin",
     "create_plugin",
     "delete_local_plugin",
     "deps_check",
