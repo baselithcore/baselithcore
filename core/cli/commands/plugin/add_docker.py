@@ -331,7 +331,8 @@ def _compose(args: list[str]) -> int:
 
 def _wait_for_http(path: str, expected: int, timeout: int = 90) -> bool:
     deadline = time.time() + timeout
-    url = f"http://localhost:8000{path}"
+    port = os.environ.get("BASELITH_HTTP_PORT") or "8000"
+    url = f"http://localhost:{port}{path}"
     while time.time() < deadline:
         try:
             request = Request(url, method="GET")
@@ -348,7 +349,8 @@ def _probe_plugin(plugin_name: str, manifest: dict[str, Any]) -> bool:
     if isinstance(health, str) and health:
         return _wait_for_http(health, 200, timeout=45)
 
-    url = f"http://localhost:8000/{plugin_name}/"
+    port = os.environ.get("BASELITH_HTTP_PORT") or "8000"
+    url = f"http://localhost:{port}/{plugin_name}/"
     try:
         request = Request(url, method="GET")
         with urlopen(request, timeout=10) as response:
