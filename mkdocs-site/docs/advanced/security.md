@@ -642,6 +642,37 @@ dependency is finally fixed and the entry deleted.
 
 <!-- markdownlint-enable MD046 -->
 
+<!-- markdownlint-disable MD046 -->
+<!-- The fenced block below sits inside an mkdocs admonition, so it is indented
+     by four spaces; markdownlint reads that as an indented code block. -->
+
+!!! note "The base image is pinned by digest *and* patched at build time"
+    The `Dockerfile` pins `python:3.12-slim` by digest, so the same Dockerfile
+    at the same commit builds from the same base — including the same Debian
+    package set. That second half is the catch: Debian keeps publishing
+    security updates against a frozen set, and refreshing the digest does not
+    necessarily collect them, because the upstream image is only rebuilt on its
+    own schedule. A pin left alone therefore accumulates distro CVEs until the
+    post-push Trivy gate in `release-image.yml` fails a release.
+
+    So the runtime stage runs `apt-get upgrade` on top of the pinned base. The
+    two answer different questions: the digest decides which base a build
+    starts from, the upgrade decides that the build does not ship known holes in
+    it. The interpreter is unaffected — `python:3.12-slim` compiles Python from
+    source, so apt never touches it.
+
+    The trade is that the runtime layer is no longer bit-identical from one day
+    to the next, which is why the release pipeline scans the image it **pushed**
+    rather than trusting the one it built. When bumping the digest, check the
+    candidate first:
+
+    ```bash
+    trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+        python:3.12-slim@sha256:<candidate>
+    ```
+
+<!-- markdownlint-enable MD046 -->
+
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
     (`--skip-files` in `ci.yml`). The developer portal is a **vendored, dev-only

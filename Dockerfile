@@ -195,6 +195,25 @@ ENV PYTHONUNBUFFERED=1 \
 # image.
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 
+# --- Debian security updates ---
+# The digest pin above freezes the package set as well as the interpreter, and
+# Debian keeps publishing fixes against it. At the time of writing the pinned
+# base — and the floating `python:3.12-slim` tag, which upstream has not
+# rebuilt since — carries a CRITICAL in perl-base and HIGHs in gzip,
+# libpcre2-8-0 and libsqlite3-0, all with a `+deb13uN` fix already in the
+# archive. Refreshing the digest fixes none of them; only applying the updates
+# does.
+#
+# So the pin and this layer answer different questions: the pin decides which
+# base a build starts from, this decides that the build does not ship known
+# holes in it. The cost is that the runtime layer is no longer bit-identical
+# across days — which is the correct trade for security updates, and the
+# reason the release pipeline scans what it pushed rather than trusting what
+# it built.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Dependencies ---
 # Deliberately NOT owned by appuser: the process only reads them. Leaving them
 # root-owned costs nothing, keeps them out of the duplication above, and means
