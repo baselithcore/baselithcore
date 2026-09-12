@@ -636,6 +636,30 @@ Before deploying or testing, validate that your plugin conforms to the framework
 baselith plugin validate my-plugin
 ```
 
+### Signing
+
+A plugin that declares `integrity_sha256` in its manifest is verified against
+its own tree before the loader executes it, so the hash has to be recomputed
+whenever the executable surface changes:
+
+```bash
+baselith plugin sign plugins/my-plugin
+```
+
+The hash covers what the plugin ships **and** executes — Python sources, the
+packaging files `pip install` trusts, `SKILL.md` bodies, native extensions and
+shell scripts, and the front-end assets the console serves. Build directories
+are excluded, because their contents are neither shipped nor reproducible
+between machines: `node_modules` for the JavaScript toolchain, `target` for
+Cargo's. Without that, the signature of a plugin with a Rust component depended
+on whether `cargo build` had been run locally, and the same tree hashed
+differently before and after compiling. The full surface is listed under
+[Plugin integrity](../core-modules/plugins.md).
+
+In a checkout with `pre-commit install` done, a source change re-signs the
+affected plugin automatically and stages the manifest with it; without the hook
+the CI gate `check_plugin_integrity.py` is what catches the drift.
+
 ### Disabling/Enabling
 
 Temporarily deactivate a plugin without deleting its files:
