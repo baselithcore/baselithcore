@@ -1,4 +1,11 @@
 {{- if .Values.backup.enabled }}
+{{- $offsite := .Values.backup.offsite }}
+{{- if and $offsite.enabled (not $offsite.path) }}
+{{- fail "backup.offsite.enabled requires backup.offsite.path (\"bucket/prefix\" on the remote)" }}
+{{- end }}
+{{- if and $offsite.enabled (not (hasKey $offsite.remote "type")) }}
+{{- fail "backup.offsite.remote needs at least `type` (s3, gcs, azureblob, ...): it is the rclone backend the dumps are copied to" }}
+{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -17,15 +24,25 @@ spec:
       # Under `concurrencyPolicy: Forbid` a job that never finishes is not a
       # slow backup, it is the end of all backups: every later schedule is
       # skipped while it hangs. The deadline has to cover the wait below plus
-      # the dump itself.
+      # the dump itself (and the upload, when offsite is on).
       activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
             {{- include "baselithcore.selectorLabels" . | nindent 12 }}
             app.kubernetes.io/component: backup
+            {{- with .Values.backup.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         spec:
           restartPolicy: Never
+          {{- with (include "baselithcore.backupServiceAccountName" .) }}
+          serviceAccountName: {{ . }}
+          {{- end }}
+          # The backup never calls the Kubernetes API. A cloud identity
+          # (IRSA, Workload Identity) rides on its own projected token that
+          # the provider's webhook injects; it does not need this one.
+          automountServiceAccountToken: false
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
           # A CronJob does not only fire on a healthy cluster. When one comes
@@ -61,40 +78,66 @@ spec:
                 - name: WAIT_SECONDS
                   value: {{ .Values.backup.waitForDatabaseSeconds | quote }}
                 {{- include "baselithcore.backupEnv" . | nindent 16 }}
+            {{- if $offsite.enabled }}
+            # With offsite on, the dump is an init container so it has finished
+            # (exit 0, file renamed into place) before the upload starts: two
+            # containers in one pod run concurrently and would need a
+            # handshake, init containers run in order for free.
+            {{- include "baselithcore.backupDumpContainer" . | nindent 12 }}
+            {{- end }}
           containers:
-            - name: pg-backup
-              image: {{ .Values.backup.image | quote }}
+            {{- if $offsite.enabled }}
+            - name: offsite-upload
+              image: {{ $offsite.image | quote }}
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
               command:
                 - /bin/sh
                 - -c
                 - |
-                  set -euo pipefail
-                  TS=$(date +%Y%m%d_%H%M%S)
-                  OUT="${BACKUP_DIR}/backup_${TS}.sql.gz"
-                  # Dumped to a temporary name and renamed only once pg_dump
-                  # has exited 0. Writing straight to $OUT leaves the file
-                  # behind when the dump fails — a 20-byte gzip of nothing,
-                  # newer than every real backup, kept for the whole retention
-                  # window, and picked first by anyone restoring "the latest".
-                  # A failed backup must look like a missing one.
-                  TMP="${BACKUP_DIR}/.backup_${TS}.sql.gz.partial"
-                  trap 'rm -f "${TMP}"' EXIT
-                  echo "Dumping ${PGDATABASE} -> ${OUT}"
-                  pg_dump | gzip > "${TMP}"
-                  mv "${TMP}" "${OUT}"
-                  echo "Pruning backups older than ${RETENTION_DAYS} days"
-                  find "${BACKUP_DIR}" -name 'backup_*.sql.gz' -mtime +${RETENTION_DAYS} -delete
-                  # Interrupted runs (OOM, node eviction, the deadline above)
-                  # never reach the trap, so their partials are swept here.
-                  find "${BACKUP_DIR}" -name '.backup_*.sql.gz.partial' -mmin +60 -delete
-                  echo "Backup complete."
+                  set -eu
+                  echo "Uploading ${BACKUP_DIR} -> offsite:${OFFSITE_PATH}"
+                  # Copy, never sync: sync would delete remote dumps the local
+                  # retention already pruned, and the remote keeps its own
+                  # (longer) history. Files already present are skipped.
+                  # shellcheck disable=SC2086 — EXTRA_ARGS is a flag list by design
+                  rclone copy "${BACKUP_DIR}" "offsite:${OFFSITE_PATH}" \
+                    --include 'backup_*.sql.gz' --no-traverse --stats-one-line -v ${EXTRA_ARGS}
+                  if [ "${OFFSITE_RETENTION_DAYS}" -gt 0 ]; then
+                    echo "Pruning offsite dumps older than ${OFFSITE_RETENTION_DAYS} days"
+                    rclone delete "offsite:${OFFSITE_PATH}" \
+                      --min-age "${OFFSITE_RETENTION_DAYS}d" --include 'backup_*.sql.gz'
+                  fi
+                  echo "Offsite copy now holds:"
+                  rclone lsf "offsite:${OFFSITE_PATH}" --include 'backup_*.sql.gz' | tail -n 5
+                  echo "Offsite upload complete."
               env:
-                {{- include "baselithcore.backupEnv" . | nindent 16 }}
+                - name: BACKUP_DIR
+                  value: /backups
+                - name: OFFSITE_PATH
+                  value: {{ $offsite.path | quote }}
+                - name: OFFSITE_RETENTION_DAYS
+                  value: {{ $offsite.retentionDays | quote }}
+                - name: EXTRA_ARGS
+                  value: {{ join " " $offsite.extraArgs | quote }}
+                # No config file: the remote is defined entirely by the
+                # RCLONE_CONFIG_OFFSITE_* variables below, and /dev/null stops
+                # rclone from trying to create one under a read-only $HOME.
+                - name: RCLONE_CONFIG
+                  value: /dev/null
+                {{- include "baselithcore.backupOffsiteRemoteEnv" . | trim | nindent 16 }}
+              {{- with $offsite.credentialsSecret }}
+              envFrom:
+                - secretRef:
+                    name: {{ . | quote }}
+              {{- end }}
               volumeMounts:
                 - name: backups
                   mountPath: /backups
+                  readOnly: true
+            {{- else }}
+            {{- include "baselithcore.backupDumpContainer" . | nindent 12 }}
+            {{- end }}
           volumes:
             - name: backups
               {{- toYaml .Values.backup.volume | nindent 14 }}

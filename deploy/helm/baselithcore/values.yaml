@@ -392,9 +392,59 @@ worker:
       memory: 3Gi
 
 # -------------------------------------------------------------------------
+# Telemetry (OpenTelemetry traces + metrics)
+# -------------------------------------------------------------------------
+# Off by default, and off means *nothing is instrumented*: no TracerProvider,
+# no FastAPI/HTTPX/Redis auto-instrumentation, therefore no HTTP, database or
+# client spans anywhere — including in-process consumers such as the
+# BaselithControl "Traces" tab, which then correctly reports that the SDK is
+# not active and shows an empty list. Turning tracing on is this block; it is
+# not something the app infers from having the SDK installed.
+telemetry:
+  # Installs the providers and the auto-instrumentation at boot.
+  enabled: false
+
+  # OTLP/gRPC collector endpoint (e.g. "http://tempo.monitoring:4317",
+  # "http://otel-collector:4317").
+  #
+  # EMPTY IS A SUPPORTED MODE, and the right one for a cluster with no trace
+  # backend: the providers and every instrumentor are still installed, spans
+  # are still produced and still reach in-process consumers (the Traces tab),
+  # they simply are not shipped anywhere. Pointing the exporter at a collector
+  # that is not deployed is strictly worse than leaving this empty — the gRPC
+  # exporter retries every batch with backoff, burning CPU on the export
+  # thread and filling the log, and you still have no trace backend.
+  #
+  # A collector outside this namespace also needs a NetworkPolicy egress rule
+  # when networkPolicy.egress.enabled is on: presets.sameNamespace does not
+  # cover it, and the export then fails silently at the CNI.
+  otlpEndpoint: ""
+
+  # Head-based sampling ratio, ParentBased(TraceIdRatio). 1.0 traces every
+  # request: fine for a lab or a low-traffic staging, but on a busy deployment
+  # it is the single most expensive knob here — every sampled span costs
+  # attribute allocation, queue space and (with a collector) egress. Lower it
+  # in production; the trace you keep is still a complete one, because the
+  # decision is taken once at the root and inherited by every child.
+  tracesSampleRate: 1.0
+
+  # Push OTel-native metrics over OTLP. Independent of the Prometheus /metrics
+  # scrape, which is always available and is what serviceMonitor uses — so
+  # this is duplicate cost unless a collector actually consumes it. Requires
+  # otlpEndpoint (metrics have no in-process consumer; the chart refuses the
+  # combination rather than starting an export thread that exports nowhere).
+  metricsEnabled: false
+
+  # `deployment.environment` resource attribute on every span/metric. Empty
+  # leaves the app default ("development"), which mislabels a production
+  # deployment in whatever backend receives it.
+  environment: ""
+
+# -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-# Non-secret environment variables -> ConfigMap.
+# Non-secret environment variables -> ConfigMap. Keys set here always win over
+# the blocks above, so an operator can still drive TELEMETRY_* by hand.
 config:
   CORE_LOG_LEVEL: INFO
   CORE_LOG_FORMAT: json
@@ -608,10 +658,48 @@ networkPolicy:
     rules: []
 
 # Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
-# prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the
-# directory offsite for true DR. Disabled by default.
+# prunes by age; with `offsite` on, every dump is then copied to an object
+# store, which is what makes it a backup rather than a file on the node that
+# just died. Disabled by default.
 backup:
   enabled: false
+  # Identity the backup pod runs as. Kept apart from the app's ServiceAccount
+  # so a cloud role for the bucket (IRSA on EKS, Workload Identity on GKE,
+  # AKS workload identity) is granted to the backup alone, never to the pods
+  # that serve requests. `annotations` carries the binding
+  # (`eks.amazonaws.com/role-arn`, `iam.gke.io/gcp-service-account`, ...).
+  serviceAccount:
+    create: false
+    name: ""                     # defaults to <fullname>-backup when created
+    annotations: {}
+  # Extra labels on the backup pod. Some identity webhooks key on a pod
+  # label rather than on the ServiceAccount alone: AKS workload identity
+  # injects its token only into pods labelled
+  # `azure.workload.identity/use: "true"`.
+  podLabels: {}
+  # Copy each dump to an object store with rclone. Any rclone backend works:
+  # `remote` is the backend definition (every key becomes an
+  # RCLONE_CONFIG_OFFSITE_<KEY> variable, so `type: s3, provider: AWS,
+  # env_auth: true, region: eu-west-1` is an S3 remote authenticated through
+  # the pod's cloud identity; `type: gcs, env_auth: true` a GCS one;
+  # `type: azureblob, env_auth: true, account: <name>` Azure Blob; an S3-
+  # compatible store such as OVH or MinIO adds `provider: Other` and
+  # `endpoint`). `path` is "bucket/prefix" on that remote. Static keys, where
+  # the provider has no pod identity, go in `credentialsSecret`: a Secret
+  # whose keys are the same RCLONE_CONFIG_OFFSITE_* variables
+  # (RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID / _SECRET_ACCESS_KEY for S3).
+  #
+  # The local `retentionDays` still applies to the volume; `offsite.retentionDays`
+  # prunes the remote copy too, and 0 leaves that to the bucket's own lifecycle
+  # rules (the platform Terraform sets those on the backups bucket).
+  offsite:
+    enabled: false
+    image: rclone/rclone:1.75.1
+    remote: {}
+    path: ""
+    retentionDays: 0
+    credentialsSecret: ""
+    extraArgs: []
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30
@@ -635,7 +723,14 @@ backup:
     passwordSecret:
       name: ""                   # defaults to the release secret
       key: DB_PASSWORD
-  # Where dumps land. Replace with a persistentVolumeClaim for durability.
+  # Where dumps land. Replace with a persistentVolumeClaim for durability —
+  # and null the emptyDir when you do. Values merge rather than replace, so a
+  # claim added on top of this default renders a volume with two types and the
+  # API server rejects the CronJob outright:
+  #   backup:
+  #     volume:
+  #       emptyDir: null
+  #       persistentVolumeClaim: {claimName: baselithcore-backups}
   volume:
     emptyDir: {}
     # persistentVolumeClaim:

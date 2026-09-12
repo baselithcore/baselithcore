@@ -455,6 +455,34 @@
         }
       }
     },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OpenTelemetry traces/metrics. `enabled: false` installs no providers and no auto-instrumentation, so no spans exist at all \u2014 not even for in-process consumers such as the control-plane trace viewer.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://[^\\s]+$",
+          "description": "OTLP/gRPC collector endpoint. Empty is a supported mode, not a mistake: instrumentation stays on, no exporter is attached, spans stay in-process for local consumers."
+        },
+        "tracesSampleRate": {
+          "type": ["number", "string"],
+          "minimum": 0,
+          "maximum": 1,
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "0..1. A string is accepted because `--set` cannot produce a float: `--set telemetry.tracesSampleRate=0.1` reaches the chart as the string \"0.1\". `minimum`/`maximum` constrain the number form, the pattern the string form."
+        },
+        "metricsEnabled": {
+          "type": "boolean"
+        },
+        "environment": {
+          "type": "string"
+        }
+      }
+    },
     "config": {
       "type": "object",
       "additionalProperties": {
@@ -687,6 +715,68 @@
         },
         "volume": {
           "type": "object"
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "podLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "offsite": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Copy each dump to an object store with rclone. `remote` is the rclone backend definition (each key becomes RCLONE_CONFIG_OFFSITE_<KEY>), `path` the bucket/prefix on it.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
+            "remote": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["string", "boolean", "integer", "number"]
+              }
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^$|^[^/].*$",
+              "description": "bucket/prefix on the remote, no leading slash"
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "credentialsSecret": {
+              "type": "string"
+            },
+            "extraArgs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
