@@ -195,25 +195,6 @@ ENV PYTHONUNBUFFERED=1 \
 # image.
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 
-# --- Debian security updates ---
-# The digest pin above freezes the package set as well as the interpreter, and
-# Debian keeps publishing fixes against it. At the time of writing the pinned
-# base — and the floating `python:3.12-slim` tag, which upstream has not
-# rebuilt since — carries a CRITICAL in perl-base and HIGHs in gzip,
-# libpcre2-8-0 and libsqlite3-0, all with a `+deb13uN` fix already in the
-# archive. Refreshing the digest fixes none of them; only applying the updates
-# does.
-#
-# So the pin and this layer answer different questions: the pin decides which
-# base a build starts from, this decides that the build does not ship known
-# holes in it. The cost is that the runtime layer is no longer bit-identical
-# across days — which is the correct trade for security updates, and the
-# reason the release pipeline scans what it pushed rather than trusting what
-# it built.
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-
 # --- Dependencies ---
 # Deliberately NOT owned by appuser: the process only reads them. Leaving them
 # root-owned costs nothing, keeps them out of the duplication above, and means
@@ -263,6 +244,42 @@ RUN python -m compileall -q --invalidation-mode checked-hash \
 # --- Writable runtime directories ---
 RUN mkdir -p data logs documents qdrant_data \
     && chown appuser:appuser /app data logs documents qdrant_data
+
+# --- Debian security updates ---
+# LAST, and the position is the whole point.
+#
+# The digest pin freezes the Debian package set as well as the interpreter, and
+# Debian keeps publishing fixes against a frozen set. Refreshing the digest
+# collects them only if upstream happened to rebuild, so a pin left alone
+# accumulates distro CVEs until the post-push Trivy gate fails a release. The
+# pin decides which base a build starts from; this decides that the build does
+# not ship known holes in it.
+#
+# Two reasons it runs here rather than near the top of the stage:
+#
+#   * `playwright install --with-deps` above pulls in ~110 apt packages, and an
+#     upgrade placed before it can never reach them. On a FRESH build that
+#     costs nothing — apt installs them from the archive with its security
+#     updates already in, and either position upgrades the same 12 base
+#     packages (measured). It costs something on a later release, where that
+#     1.39GB Chromium layer comes from the build cache months old and its
+#     packages are frozen at the day it was built; only an upgrade downstream
+#     of it catches those.
+#   * Docker keys a RUN's cache on the command string and the parent layer, not
+#     on what the apt archive holds today. Near the top, the layer stayed
+#     cached for as long as the base digest did, so the upgrade ran once and
+#     never again — and everything below it (the 1.89GB dependency copy, the
+#     1.39GB Chromium install) would have had to rebuild to force it. Here, the
+#     source COPYs above already change on every release (semantic-release
+#     rewrites core/_version.py), so this layer is rebuilt every release for
+#     free, and it is the only one that is. Re-tagging an unchanged tree reuses
+#     it, which is the honest limit of the arrangement.
+#
+# The interpreter is unaffected: python:3.12-slim compiles CPython from source
+# into /usr/local, so apt owns no part of it.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 USER appuser
 

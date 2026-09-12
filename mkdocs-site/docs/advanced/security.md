@@ -661,6 +661,22 @@ dependency is finally fixed and the entry deleted.
     it. The interpreter is unaffected — `python:3.12-slim` compiles Python from
     source, so apt never touches it.
 
+    It is the **last** step of the stage, and the position is load-bearing.
+    Docker keys a `RUN`'s cache on the command string and the parent layer, not
+    on what the apt archive holds today, so an upgrade near the top of the stage
+    stayed cached for as long as the base digest did — it ran once and never
+    again, and forcing it would have meant rebuilding the 1.89GB dependency copy
+    and the 1.39GB Chromium install below it. Last, it sits downstream of the
+    source `COPY`s, which change on every release because semantic-release
+    rewrites `core/_version.py`; the layer is therefore rebuilt every release
+    for free and is the only one that is. It also sits downstream of the ~110
+    apt packages `playwright install --with-deps` brings in, which an upgrade
+    placed earlier could never reach — on a fresh build that costs nothing,
+    since apt installs those with the archive's security updates already in, but
+    on a release whose Chromium layer comes from a months-old cache those
+    packages are frozen at the day it was built. Re-tagging an unchanged tree
+    reuses the layer, which is the honest limit of the arrangement.
+
     The trade is that the runtime layer is no longer bit-identical from one day
     to the next, which is why the release pipeline scans the image it **pushed**
     rather than trusting the one it built. When bumping the digest, check the
