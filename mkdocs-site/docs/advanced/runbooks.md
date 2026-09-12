@@ -32,7 +32,7 @@ When Prometheus triggers a **HighErrorRate** alert (HTTP 5xx > 5%):
 1. Check the logs for the `api` and `worker` services:
 
    ```bash
-   docker compose -f docker-compose.prod.yml logs --tail 200 api worker
+   docker compose -f compose.prod.yaml logs --tail 200 api worker
    ```
 
 2. Identify the source of the 5xx errors. Common causes include:

@@ -1,17 +1,28 @@
 ---
 # ============================================================
-# 🚀 PRODUCTION — docker-compose.yml
+# compose.yaml — the single-host stack
 # ============================================================
-# Full stack deployment with API, worker, and all services.
+# Everything in one place for local work and small self-hosted
+# installs: API, worker, Postgres, FalkorDB and Qdrant.
 #
-# Usage:
 #   docker compose up -d
 #
-# Sandboxed agent code execution (Docker-in-Docker) is OPT-IN —
-# the daemon needs `privileged: true` (root-equivalent on the
-# host), so it is deliberately NOT part of the default stack:
-#   docker compose -f docker-compose.yml \
-#                  -f docker-compose.sandbox.yml up -d
+# This file used to call itself PRODUCTION in its own header
+# while compose.prod.yaml was the actual production stack — two
+# files claiming the same role, which is how someone ends up
+# running the unhardened one on a public address. Production is
+# compose.prod.yaml. This one is the batteries-included stack.
+#
+# Optional service groups are PROFILES, not separate files:
+#
+#   docker compose --profile observability up -d   # Jaeger, Prometheus, Grafana
+#   docker compose --profile local-llm up -d       # Ollama
+#
+# Two overlays stay separate files, because they modify the
+# services above rather than adding to them:
+#
+#   -f compose.yaml -f compose.dev.yaml        # live-reload: source over the image
+#   -f compose.yaml -f compose.sandbox.yaml    # opt-in Docker-in-Docker sandbox
 # ============================================================
 
 services:
@@ -19,7 +30,6 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
     environment:
@@ -37,11 +47,10 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      # python, not curl: the image ships no shell utilities (see Dockerfile).
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -55,7 +64,6 @@ services:
   worker:
     build:
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-worker
     command: python -m core.task_queue.worker
     env_file: configs/.env.production
@@ -68,8 +76,6 @@ services:
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -178,12 +184,21 @@ services:
           cpus: '0.5'
           memory: 512M
 
-  # === Ollama (Local LLM Runtime) ===
-  # ⚠️ RECOMMENDATION: On macOS or Linux with GPU, it is HIGHLY RECOMMENDED to run
-  # Ollama NATIVELY (outside Docker) to leverage GPU acceleration (Metal/CUDA) easily.
-  # If running natively, you can disable this service and update .env.docker
-  # to use: LLM_API_BASE=http://host.docker.internal:11434
+  # === Ollama (Local LLM Runtime) — profile: local-llm ===
+  # Opt-in, for two reasons. It is a 4GB memory reservation that most
+  # deployments do not use (any hosted provider makes it dead weight), and
+  # api/worker used to declare `depends_on: ollama: service_healthy`, so every
+  # `up` waited for a model runtime to report healthy before the API could
+  # start — for a dependency nothing touches until a request arrives.
+  #
+  #   docker compose --profile local-llm up -d
+  #
+  # ⚠️ On macOS, or on Linux with a GPU, running Ollama NATIVELY is strongly
+  # preferable: the container cannot reach Metal, and CUDA passthrough needs
+  # extra setup. Natively, leave this profile off and point the app at
+  # LLM_API_BASE=http://host.docker.internal:11434.
   ollama:
+    profiles: [local-llm]
     # Pinned: a `latest` re-pull silently changes the local LLM runtime.
     image: ollama/ollama:0.33.2
     container_name: baselith-core-ollama
@@ -202,8 +217,76 @@ services:
         limits:
           memory: 4G # Higher memory limit for LLM weights
 
+  # === Observability — profile: observability ===
+  # Was docker-compose.observability.yml. A separate file meant Jaeger and
+  # Prometheus were declared twice in this repository (there and in
+  # compose.prod.yaml) with different port exposure, and starting them needed
+  # a second `-f`. A profile is what Compose has for an opt-in service group.
+  #
+  #   docker compose --profile observability up -d
+  #
+  # Endpoints (all loopback-only): Jaeger UI :16686, Prometheus :9090,
+  # Grafana :3000, OTLP gRPC :4317 / HTTP :4318.
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    # Loopback-only: the UI is unauthenticated and every span it holds is
+    # application internals (URLs, tenant ids, prompts). Reach it through an
+    # SSH tunnel, or put an authenticating proxy in front. Containers on the
+    # shared network still send to `jaeger:4317` by service name.
+    ports:
+      - '127.0.0.1:16686:16686'
+      - '127.0.0.1:4317:4317'
+      - '127.0.0.1:4318:4318'
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.5
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # The storage path below was set without a volume, so every restart
+      # started the TSDB empty — the one thing a metrics store must not do.
+      - prometheus_data:/prometheus
+    # Loopback-only: the query API exposes every metric series, and the admin
+    # endpoints are unauthenticated by design in Prometheus.
+    ports:
+      - '127.0.0.1:9090:9090'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # NOT enabled: --web.enable-lifecycle exposes unauthenticated POST
+      # /-/reload and /-/quit to anyone who can reach the port, i.e. a remote
+      # shutdown of the monitoring that is supposed to notice the incident.
+      # Reload with `docker compose kill -s SIGHUP prometheus` instead.
+    restart: unless-stopped
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.4.10
+    container_name: grafana
+    environment:
+      # No default on purpose: admin/admin on a reachable Grafana is an
+      # instant takeover of every dashboard and datasource. Compose aborts
+      # until GRAFANA_ADMIN_PASSWORD is set (same pattern as DB_PASSWORD).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set (no default)}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   qdrant_data:
   ollama_data:
+  prometheus_data:

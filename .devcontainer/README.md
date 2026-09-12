@@ -10,8 +10,8 @@ itself.
 - **Python 3.12** with the framework installed editable plus all dev tooling
   (`pip install -e ".[dev]"`) and pre-commit hooks.
 - **Node LTS** for the TypeScript SDK (`sdk/typescript`) and the dashboard UIs.
-- **Docker access** (docker-outside-of-docker) so `docker compose up -d` brings
-  up Redis, Qdrant, and Postgres from the repo's `docker-compose.yml`.
+- **Docker access** (docker-outside-of-docker) so `docker compose up -d postgres redis qdrant` brings
+  up Redis, Qdrant, and Postgres from the repo's `compose.yaml`.
 - VS Code wired for Ruff (format + organize imports on save), Mypy, pytest,
   Docker, TOML, and YAML.
 
@@ -20,7 +20,7 @@ itself.
 `postCreateCommand` runs [`post-create.sh`](post-create.sh) automatically. Then:
 
 ```bash
-docker compose up -d     # supporting services
+docker compose up -d postgres redis qdrant     # supporting services
 baselith doctor          # verify configuration
 python backend.py        # API on :8000  →  /console, /docs
 ```

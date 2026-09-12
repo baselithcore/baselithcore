@@ -3,8 +3,10 @@ services:
   # Main service: API Backend
   api:
     build:
+      # One Dockerfile for every environment (the `Dockerfile-slim` /
+      # `Dockerfile-full` pair is gone): multi-stage, so the compiler
+      # toolchain stays in the build stage and never ships.
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
     environment:
@@ -31,9 +33,17 @@ services:
     networks:
       - app_net
       - obs_net
+    # Health conditions, not a bare list: the plain form only waits for the
+    # container to be *created*, so the API could start against a Postgres
+    # still running initdb and take its first requests with a dead pool. The
+    # worker already gated on health; the api did not.
     depends_on:
-      - falkordb
-      - postgres
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     init: true
     security_opt:
       - no-new-privileges:true
@@ -48,10 +58,17 @@ services:
           cpus: '1.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # No curl in the runtime stage (and pulling one in only for the probe
+      # would widen the image): probe with the interpreter already there.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 3
+      # Cold start loads the embedder + reranker before /health answers —
+      # measured at ~100s on a laptop. Without a start period those probes
+      # count as failures and the container is flagged unhealthy while it is
+      # still booting normally.
+      start_period: 150s
 
   # Cache and Message Queue
   # Graph Database and Cache (Redis compatible)
@@ -95,7 +112,23 @@ services:
 
   # Relational Database
   postgres:
-    image: postgres:16-alpine
+    # Same image as compose.yaml, deliberately. This was `postgres:16-alpine`
+    # while the single-host stack ran `pgvector/pgvector:pg16`, so production
+    # ran a different Postgres build from the one everything was developed
+    # against, AND the documented optional backend
+    # `VECTORSTORE_PROVIDER=pgvector` could not work here at all — the
+    # extension simply was not in the image. pgvector/pgvector:pg16 is the
+    # official postgres:16 plus that extension, nothing else.
+    #
+    # ⚠️ MIGRATING AN EXISTING VOLUME: alpine links musl, this image links
+    # glibc, and the two sort text differently. The data files are compatible
+    # (same major version), but every index on a text column is ordered by the
+    # old collation and must be rebuilt, or lookups silently miss rows:
+    #     docker compose -f compose.prod.yaml up -d postgres
+    #     docker compose -f compose.prod.yaml exec postgres \
+    #       psql -U baselithcore -d baselithcore -c 'REINDEX DATABASE baselithcore;'
+    # A fresh deployment needs none of this.
+    image: pgvector/pgvector:pg16
     # Publish to host loopback so a natively-deployed app (running on the host,
     # not in a container) can reach Postgres at 127.0.0.1. Bound to 127.0.0.1
     # only — not exposed on any external interface. Harmless for the
@@ -138,11 +171,50 @@ services:
       timeout: 5s
       retries: 5
 
+  # Vector Store
+  # Absent until now, which left this stack with NO reachable vector store:
+  # VectorStoreConfig defaults to provider "qdrant", configs/.env.production
+  # pointed VECTORSTORE_QDRANT_HOST at `localhost` (inside the api container,
+  # where nothing listens), and the pgvector alternative was unavailable
+  # because of the Postgres image above. Nothing failed at boot — the store is
+  # resolved lazily — so retrieval and long-term memory broke at request time,
+  # on a stack whose whole point is that everything else is bundled.
+  #
+  # Point QDRANT_HOST at a managed instance to use one instead; this service
+  # is then surplus and can be left out of `up` by naming the others.
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: baselith-qdrant
+    # Loopback only, like the other stores: reachable from app_net by service
+    # name, published on the host purely for operator tooling.
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      # The qdrant image ships no curl/wget; a bash TCP connect to the REST
+      # port is the standard liveness probe for it.
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" 2>/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Worker for Async Tasks
   worker:
     build:
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-worker
     env_file: configs/.env.production
     command: python -m core.task_queue.worker
@@ -165,6 +237,8 @@ services:
       postgres:
         condition: service_healthy
       falkordb:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     init: true
     security_opt:
@@ -257,6 +331,7 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
+  qdrant_data:
   prometheus_data:
 
 networks:

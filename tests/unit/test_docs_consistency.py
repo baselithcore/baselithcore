@@ -30,11 +30,11 @@ def test_extract_imports_handles_parenthesised_lists_and_comments() -> None:
 
 
 def test_extract_paths_ignores_placeholders_and_finds_root_files() -> None:
-    text = "See core/api/factory.py, plugins/<name>/plugin.py, docker-compose.prod.yml and tests/x.py."
+    text = "See core/api/factory.py, plugins/<name>/plugin.py, compose.prod.yaml and tests/x.py."
     assert [c.value for c in scan.extract_paths(PAGE, text)] == [
         "core/api/factory.py",
         "tests/x.py",
-        "docker-compose.prod.yml",
+        "compose.prod.yaml",
     ]
 
 

@@ -65,7 +65,7 @@ def check_redis() -> CheckResult:
             "Redis (Cache)",
             False,
             f"Cannot connect ({host}:{port})",
-            "Run: docker-compose up -d redis",
+            "Run: docker compose up -d redis",
         )
     except ImportError:
         return CheckResult(
@@ -99,7 +99,7 @@ def check_qdrant() -> CheckResult:
             "Qdrant",
             False,
             f"Cannot connect ({host}:{port})",
-            "Run: docker-compose up -d qdrant",
+            "Run: docker compose up -d qdrant",
         )
     except Exception as e:
         return CheckResult("Qdrant", False, f"Error: {e}")
@@ -127,7 +127,7 @@ def check_graph_db() -> CheckResult:
             "GraphDB",
             False,
             f"Cannot connect ({host}:{port})",
-            "Run: docker-compose up -d neo4j/redis",
+            "Run: docker compose up -d neo4j/redis",
         )
     except Exception as e:
         return CheckResult("GraphDB", False, f"Error: {e}")
@@ -161,7 +161,7 @@ def check_postgres() -> CheckResult:
             "PostgreSQL",
             False,
             f"Cannot connect ({host}:{port})",
-            "Run: docker-compose up -d postgres",
+            "Run: docker compose up -d postgres",
         )
     except Exception as e:
         return CheckResult("PostgreSQL", False, f"Error: {e}")

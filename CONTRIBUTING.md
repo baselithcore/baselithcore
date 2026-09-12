@@ -113,7 +113,7 @@ when adding or changing a dependency:
 To run supporting services:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ---

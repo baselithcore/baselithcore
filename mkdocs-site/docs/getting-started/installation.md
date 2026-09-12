@@ -205,7 +205,7 @@ The target database for each role is encoded in its connection URL (the trailing
         Download the latest binary from the [FalkorDB Releases](https://github.com/FalkorDB/FalkorDB/releases) or build it from source.
 
     === "Docker Compose"
-        The included `docker-compose.yml` automatically includes FalkorDB.
+        The included `compose.yaml` automatically includes FalkorDB.
 
 ---
 

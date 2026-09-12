@@ -28,7 +28,7 @@ trap 'rm -f "${TMP}"' EXIT
 
 # Create backup inside the postgres container and gzip it directly
 # Assuming network is 'baselith-network' and DB name is 'baselithcore'
-docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U baselithcore baselithcore \
+docker compose -f compose.prod.yaml exec -T postgres pg_dump -U baselithcore baselithcore \
   | gzip > "${TMP}"
 mv "${TMP}" "${OUT}"
 
