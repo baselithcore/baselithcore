@@ -7,7 +7,14 @@
 
 image:
   repository: ghcr.io/baselithcore/baselithcore
-  tag: "0.31.0"
+  # Empty on purpose: the tag then comes from Chart.appVersion, which the
+  # release commit rewrites. A hardcoded tag here was a SECOND place to bump
+  # and it had already drifted a release behind the chart it shipped with.
+  # For a real pin use the digest — a tag is a mutable pointer, so the image
+  # an admission controller verified and the one that starts weeks later after
+  # a re-push are not necessarily the same bytes.
+  tag: ""
+  # digest: "sha256:…"
 
 autoscaling:
   enabled: true
@@ -44,6 +51,14 @@ ingress:
   className: nginx
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"   # required for /chat/stream SSE
+    # Buffering off is only half of what a stream needs: ingress-nginx also
+    # applies proxy-read-timeout, which defaults to 60s, so any stream idle
+    # for a minute — an agent waiting on a slow LLM call — was cut by the
+    # ingress even with buffering disabled. Covers every streaming path the
+    # app serves (/chat/stream and its /v1 alias, /runs/{id}/events, /mcp),
+    # since this Ingress routes them all under one `/` prefix rule.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
     - host: api.example.com

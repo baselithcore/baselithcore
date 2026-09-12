@@ -28,13 +28,13 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "python - <<'PY'\nfrom pathlib import Path\npath = Path('core/_version.py')\npath.write_text('\"\"\"Single source of truth for the framework version.\"\"\"\\n\\n__version__ = \"${nextRelease.version}\"\\n', encoding='utf-8')\nPY"
+        "prepareCmd": "python - <<'PY'\nimport re\nfrom pathlib import Path\npath = Path('core/_version.py')\npath.write_text('\"\"\"Single source of truth for the framework version.\"\"\"\\n\\n__version__ = \"${nextRelease.version}\"\\n', encoding='utf-8')\n# The Helm chart's appVersion IS the image tag a plain `helm install` pulls\n# (image.tag defaults to empty). Rewriting only core/_version.py left the\n# chart a release behind, silently deploying the previous image.\nchart = Path('deploy/helm/baselithcore/Chart.yaml')\nchart.write_text(re.sub(r'^appVersion: \".*\"$', 'appVersion: \"${nextRelease.version}\"', chart.read_text(encoding='utf-8'), count=1, flags=re.M), encoding='utf-8')\nPY"
       }
     ],
     [
       "@semantic-release/git",
       {
-        "assets": ["core/_version.py", "CHANGELOG.md"],
+        "assets": ["core/_version.py", "CHANGELOG.md", "deploy/helm/baselithcore/Chart.yaml"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],

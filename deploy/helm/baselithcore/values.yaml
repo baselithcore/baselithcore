@@ -6,7 +6,10 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/baselithcore/baselithcore
-  # `slim` excludes heavy browser/OCR extras; use `full` if you need them.
+  # There is ONE image. This used to say "`slim` excludes heavy browser/OCR
+  # extras; use `full` if you need them" — no build ever produced either tag,
+  # and the two Dockerfiles behind those names installed the same Playwright,
+  # Chromium and pytesseract. Both are gone; the repository has one Dockerfile.
   tag: ""              # defaults to .Chart.AppVersion when empty
   # Pin by content, not by name. A tag is a mutable pointer: the image the
   # admission controller verified and the image that starts three weeks later
