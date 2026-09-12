@@ -107,7 +107,13 @@ _HASHED_ASSET_SUFFIXES = frozenset(
     {".js", ".mjs", ".cjs", ".wasm", ".html", ".htm", ".svg", ".css"}
 )
 
-_EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules"})
+# ``target`` is Cargo's build directory, the Rust counterpart of
+# ``node_modules``: gitignored, never distributed, and full of ``.dylib`` /
+# ``.so`` / ``.sh`` files that the executable-surface rules below would
+# otherwise hash. Leaving it in made the signature of any plugin carrying a
+# Rust component depend on whether ``cargo build`` had been run locally — the
+# same tree hashed differently before and after compiling.
+_EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "target"})
 # Pre-V3 the whole ``ui/`` tree was excluded — which left the compiled,
 # shipped dashboard bundle outside the signature. Kept here only to
 # reproduce V1/V2 digests byte-for-byte.

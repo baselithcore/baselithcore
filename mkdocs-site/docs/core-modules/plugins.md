@@ -328,7 +328,12 @@ console serves from the plugin's own origin (`*.js`, `*.mjs`, `*.cjs`,
 `*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` — in practice `ui/dist/**`
 and `static/**`). `manifest.yaml`, `docs/` and the non-shipped part of
 `ui/` (`ui/src`, `ui/node_modules`, the tsconfig/vite build inputs) stay
-excluded. Enforcement is controlled by environment flags:
+excluded, as do the build directories of the two toolchains whose output
+would otherwise be hashed: `node_modules` and Cargo's `target`. Both are
+gitignored and never distributed, and both are full of files the rules above
+match — leaving `target` in made the signature of a plugin with a Rust
+component depend on whether `cargo build` had been run locally, so the same
+tree hashed differently before and after compiling. Enforcement is controlled by environment flags:
 
 | Variable | Effect |
 |----------|--------|
