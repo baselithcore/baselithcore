@@ -191,6 +191,129 @@ class TestChartRenders:
         assert "worker.keda.redis.address" in result.stderr
 
 
+class TestPrometheusRule:
+    """The alerts, and the one property that decides whether they are trusted.
+
+    A suspended customer cell IS zero replicas with the data kept, and KEDA is
+    allowed to scale the worker to zero on an empty queue. Both are desired
+    states and both look exactly like an outage to kube-state-metrics, so every
+    "nothing is running" alert has to be qualified by the deployment still
+    *wanting* replicas. Get that wrong and every suspension pages somebody at
+    3am for a cell that is off on purpose — which is how a team learns to close
+    alerts without reading them.
+    """
+
+    @staticmethod
+    def _rules(*args: str) -> list[dict]:
+        rendered = TestChartRenders._render(
+            "--set", "prometheusRule.enabled=true", *args
+        )
+        objects = [
+            doc
+            for doc in yaml.safe_load_all(rendered)
+            if doc and doc["kind"] == "PrometheusRule"
+        ]
+        assert len(objects) == 1, [doc["metadata"]["name"] for doc in objects]
+        groups = objects[0]["spec"]["groups"]
+        assert len(groups) == 1, "one group keeps every expression on one instant"
+        return groups[0]["rules"]
+
+    def test_absent_by_default(self) -> None:
+        """A rule object referencing a Prometheus that is not there is dead
+        YAML, so the chart ships the alerts off."""
+        kinds = {
+            doc["kind"] for doc in yaml.safe_load_all(TestChartRenders._render()) if doc
+        }
+        assert "PrometheusRule" not in kinds
+
+    def test_down_alerts_exempt_a_suspended_deployment(self) -> None:
+        rules = self._rules("--set", "worker.enabled=true")
+        down = [rule for rule in rules if rule["alert"].endswith("Down")]
+        assert {rule["alert"] for rule in down} == {
+            "BaselithcoreApiDown",
+            "BaselithcoreWorkerDown",
+        }
+        for rule in down:
+            expr = " ".join(rule["expr"].split())
+            assert "kube_deployment_spec_replicas" in expr, rule["alert"]
+            assert "> 0" in expr, rule["alert"]
+
+    def test_ratio_alerts_survive_an_idle_deployment(self) -> None:
+        """Two failure modes, one idiom, both silent.
+
+        A ratio over a zero denominator is NaN, and NaN compares false — so a
+        quiet deployment would switch the rule off exactly when a single failed
+        request should trip it. And in PromQL an empty vector divided by
+        anything is still empty, so with no errors at all the rule evaluates to
+        nothing rather than to zero: indistinguishable from a rule that is not
+        firing, which is how a broken rule hides. ``clamp_min`` answers the
+        first, ``or vector(0)`` the second, and this is the idiom
+        ``deploy/prometheus/slo-rules.yml`` already established for the same
+        metric.
+        """
+        ratios = [rule for rule in self._rules() if rule["alert"].endswith("Ratio")]
+        assert len(ratios) >= 2
+        for rule in ratios:
+            expr = " ".join(rule["expr"].split())
+            assert "clamp_min(" in expr, rule["alert"]
+            assert "or vector(0)" in expr, rule["alert"]
+
+    def test_latency_excludes_the_routes_designed_to_be_slow(self) -> None:
+        """The streaming routes stay open for minutes by design, so leaving
+        them in the denominator turns the alert into a measure of how much
+        streaming the deployment does."""
+        rule = next(
+            rule
+            for rule in self._rules()
+            if rule["alert"] == "BaselithcoreHttpLatencyHigh"
+        )
+        for route in ("/chat/stream", "/v1/chat/stream", "/runs/.*/events", "/mcp"):
+            assert route in rule["expr"], route
+        # `\{` is not a legal escape in a PromQL string literal, so the events
+        # route cannot be matched by its `/runs/{run_id}/events` template.
+        assert "run_id" not in rule["expr"]
+
+    def test_every_alert_carries_a_severity_and_says_what_to_do(self) -> None:
+        for rule in self._rules(
+            "--set", "worker.enabled=true", "--set", "backup.enabled=true"
+        ):
+            assert rule["labels"]["severity"] in {"critical", "warning"}, rule["alert"]
+            assert rule["annotations"]["summary"], rule["alert"]
+            assert len(rule["annotations"]["description"]) > 40, rule["alert"]
+
+    def test_optional_workloads_get_alerts_only_when_they_exist(self) -> None:
+        default = {rule["alert"] for rule in self._rules()}
+        assert "BaselithcoreWorkerDown" not in default
+        assert "BaselithcoreBackupStale" not in default
+        both = {
+            rule["alert"]
+            for rule in self._rules(
+                "--set", "worker.enabled=true", "--set", "backup.enabled=true"
+            )
+        }
+        assert {"BaselithcoreWorkerDown", "BaselithcoreBackupStale"} <= both
+
+    def test_disabled_alerts_are_left_out(self) -> None:
+        """Silencing in the values keeps the reason in git, where an
+        Alertmanager silence does not."""
+        rules = self._rules(
+            "--set", "prometheusRule.disabledAlerts[0]=BaselithcoreHttpLatencyHigh"
+        )
+        assert "BaselithcoreHttpLatencyHigh" not in {rule["alert"] for rule in rules}
+        assert "BaselithcoreApiDown" in {rule["alert"] for rule in rules}
+
+    def test_a_stale_backup_fires_even_when_it_never_ran(self) -> None:
+        """The absent() arm is the point: with only the age comparison the rule
+        stays silent precisely when backups have never once succeeded, because
+        the series it measures does not exist."""
+        rule = next(
+            rule
+            for rule in self._rules("--set", "backup.enabled=true")
+            if rule["alert"] == "BaselithcoreBackupStale"
+        )
+        assert "absent(" in rule["expr"]
+
+
 def _containers(doc: dict) -> list[dict]:
     """Every container of a rendered manifest, whatever kind wraps the pod."""
     spec = doc.get("spec") or {}

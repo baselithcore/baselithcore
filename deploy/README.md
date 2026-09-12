@@ -98,6 +98,56 @@ low-traffic deployment), and the ASGI `receive`/`send` sub-spans are dropped so
 one request is one span instead of three. `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`
 and `BASELITH_OTEL_ASGI_SUB_SPANS=true` override them respectively.
 
+## Alerts
+
+`prometheusRule.enabled` renders a `PrometheusRule` with eleven rules: the RED
+HTTP metrics the app already exports (`http_requests_total`,
+`http_request_duration_seconds`), `mas_llm_*` and `security_events_total`, plus
+kube-state-metrics and the kubelet's volume stats. It is off by default: a rule
+object referencing a Prometheus that is not there is dead YAML, and a chart that
+ships alerts nobody routed teaches operators to ignore the ones that do fire.
+
+It does **not** replace `deploy/prometheus/*.yml`, and the two are not
+alternatives to pick between. Those are file-based rules for the single-host
+Prometheus the compose stack runs, including the SLO burn-rate alerts; this is
+the Kubernetes half, and most of it could not exist there — nothing in a compose
+deployment knows about a Deployment's replica count, a hook Job's exit status or
+a PVC filling up. Where they do overlap, the error-rate rule deliberately reads
+the same `http_requests_total` series that `slo-rules.yml` uses as its
+availability SLI, so the alert and the SLO cannot drift apart.
+
+Two properties are the whole reason these are worth having rather than a
+starting point you rewrite.
+
+**Every "nothing is running" rule is qualified by
+`kube_deployment_spec_replicas > 0`.** A suspended deployment *is* zero
+replicas with the data kept — that is how a customer cell is suspended — and
+KEDA is allowed to scale the worker to zero on an empty queue. Both are desired
+states, and at the kube-state-metrics level both are indistinguishable from an
+outage. Without the guard every suspension pages somebody at 3am for something
+that is off on purpose, which is how a team learns to close alerts without
+reading them.
+
+**The error rules are ratios, with a traffic guard.** An absolute threshold is
+either useless on a deployment serving ten requests a minute or deaf on one
+serving ten thousand. And a ratio over a zero denominator is `NaN`, which
+compares false — so the denominator is required to be above zero explicitly,
+or the rule would be silently off exactly when the deployment is quiet and
+silently on when a single request fails.
+
+The rest is knobs. `prometheusRule.thresholds` holds every number, because each
+one is a judgement about a particular deployment's traffic and none of them
+belongs in the template. `disabledAlerts` drops a rule by name, which keeps the
+reason in git where an Alertmanager silence does not. `extraRules` is appended
+to the group verbatim. Alerts for optional workloads render only when those
+workloads do — no worker Deployment, no worker alert.
+
+One failure mode is worth naming because it looks like the alerts are broken:
+`prometheusRule.labels`. kube-prometheus-stack selects rule objects by label
+(commonly `release: <stack release>`), so an object without the label is
+created, accepted by the API server, and never evaluated. Check the Prometheus
+resource's `ruleSelector` before looking anywhere else.
+
 ## Writable paths
 
 `readOnlyRootFilesystem: true` leaves only the `/tmp` mount writable. Anything

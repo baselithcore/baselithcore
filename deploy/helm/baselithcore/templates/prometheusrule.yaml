@@ -1,0 +1,276 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- $t := .Values.prometheusRule.thresholds }}
+{{- $off := .Values.prometheusRule.disabledAlerts }}
+{{- $ns := .Release.Namespace }}
+{{- $api := include "baselithcore.fullname" . }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "baselithcore.fullname" . }}
+  {{- with .Values.prometheusRule.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    # One group, so every expression below is evaluated against the same
+    # instant. Alerts that contradict each other across two evaluation cycles
+    # ("down" firing while "degraded" resolves) are the usual reason a runbook
+    # stops being trusted.
+    - name: {{ include "baselithcore.fullname" . }}
+      {{- with .Values.prometheusRule.interval }}
+      interval: {{ . }}
+      {{- end }}
+      rules:
+        {{- if not (has "BaselithcoreApiDown" $off) }}
+        # `and kube_deployment_spec_replicas > 0` is not defensive noise:
+        # `replicaCount: 0` is a supported state, not a mistake — it is how a
+        # deployment is suspended, with the volumes, Secret, database and backup
+        # CronJob left in place, which is why the schema allows it. Without the
+        # guard every suspension pages somebody at 3am for a deployment that is
+        # off on purpose, and an alert that fires when nothing is wrong is an
+        # alert people learn to close without reading.
+        - alert: BaselithcoreApiDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="{{ $ns }}",deployment="{{ $api }}"} == 0
+              and kube_deployment_spec_replicas{namespace="{{ $ns }}",deployment="{{ $api }}"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: api
+          annotations:
+            summary: "No API replica is serving in {{ $ns }}"
+            description: >-
+              The deployment wants replicas and none is available. Nothing is
+              answering requests. Start from the first forty log lines of a pod,
+              not the last: the failure is almost always in boot (a dead DB
+              pool, a plugin refusing integrity), and the tail only shows the
+              probe timing out afterwards.
+        {{- end }}
+        {{- if not (has "BaselithcoreApiDegraded" $off) }}
+        - alert: BaselithcoreApiDegraded
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="{{ $ns }}",deployment="{{ $api }}"}
+              < kube_deployment_spec_replicas{namespace="{{ $ns }}",deployment="{{ $api }}"}
+          for: 15m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "API running below its desired replica count in {{ $ns }}"
+            description: >-
+              Serving continues on fewer replicas than requested. Fifteen
+              minutes is deliberately longer than a rolling deploy and longer
+              than the 150s start period a cold start needs to load the
+              embedder and reranker, so a normal release does not trip this.
+              A Pending pod on a single-node cluster is usually the
+              ReadWriteOnce volume holding it to the node its predecessor ran on.
+        {{- end }}
+        {{- if and .Values.worker.enabled (not (has "BaselithcoreWorkerDown" $off)) }}
+        # Same suspension guard, and it earns its place twice here: KEDA is
+        # allowed to scale the worker to zero on an empty queue, which is
+        # indistinguishable from a suspended cell at the kube-state-metrics
+        # level. Both are desired states, both are spec_replicas == 0.
+        - alert: BaselithcoreWorkerDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="{{ $ns }}",deployment="{{ $api }}-worker"} == 0
+              and kube_deployment_spec_replicas{namespace="{{ $ns }}",deployment="{{ $api }}-worker"} > 0
+          for: 10m
+          labels:
+            severity: critical
+            component: worker
+          annotations:
+            summary: "No queue worker is running in {{ $ns }}"
+            description: >-
+              Queued jobs accumulate in Redis and nothing drains them. The API
+              keeps answering, so this does not surface as an outage — it
+              surfaces later as work that silently never happened.
+        {{- end }}
+        {{- if not (has "BaselithcoreHttpErrorRatio" $off) }}
+        # The RED HTTP counter, not the chat-specific one: it covers every
+        # route, and `deploy/prometheus/slo-rules.yml` already treats it as the
+        # availability SLI, so the alert and the SLO measure the same thing.
+        #
+        # `or vector(0)` on the numerator and `clamp_min` on the denominator are
+        # the idiom those SLO rules established, and both halves matter. With no
+        # 5xx at all the selector matches no series, and in PromQL an empty
+        # vector divided by anything is still empty — the rule would evaluate to
+        # nothing rather than to zero, which is indistinguishable from "not
+        # firing" and hides a broken rule. `clamp_min(..., 1)` keeps an idle
+        # deployment from dividing by zero into NaN, which compares false and
+        # would silently switch the alert off exactly while traffic is low.
+        - alert: BaselithcoreHttpErrorRatio
+          expr: |-
+            (
+              (sum(rate(http_requests_total{namespace="{{ $ns }}",status=~"5.."}[5m])) or vector(0))
+              / clamp_min(sum(rate(http_requests_total{namespace="{{ $ns }}"}[5m])), 1)
+            ) > {{ $t.httpErrorRatio }}
+          for: 10m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "More than {{ mulf $t.httpErrorRatio 100 }}% of requests are 5xx in {{ $ns }}"
+            description: >-
+              Break it down by the `route` label first. One route failing is a
+              handler or its dependency; every route failing is the database,
+              the cache or the boot path, and the first forty log lines of a pod
+              say which.
+        {{- end }}
+        {{- if not (has "BaselithcoreHttpLatencyHigh" $off) }}
+        # The slow-request RATIO against the 1s objective, not a p95. Two
+        # reasons: it is the form the latency SLO already uses (so the two agree
+        # rather than drifting), and `histogram_quantile` interpolates inside
+        # whichever bucket the quantile lands in, which on a low-traffic
+        # deployment moves the reported figure around without the service
+        # changing.
+        #
+        # The streaming routes are excluded, and that is not tidiness. The
+        # events route is matched as `/runs/.*/events` rather than by its
+        # literal template: the label value is `/runs/{run_id}/events`, and a
+        # PromQL string literal rejects `\{`, so escaping the braces for RE2 is
+        # not available — the wildcard also survives a rename of the path param.
+        # They are instrumented like everything else and they are *designed* to
+        # stay open for minutes, so a deployment serving one stream and ten
+        # probes has a slow ratio near 10% while behaving perfectly. Health
+        # probes pull the other way — fast, frequent, and they would mask a real
+        # regression by dilution — but excluding them too would leave some
+        # deployments with almost no denominator, so they stay in.
+        - alert: BaselithcoreHttpLatencyHigh
+          expr: |-
+            (
+              1 - (
+                (sum(rate(http_request_duration_seconds_bucket{namespace="{{ $ns }}",le="1.0",route!~"/chat/stream|/v1/chat/stream|/runs/.*/events|/mcp"}[10m])) or vector(0))
+                / clamp_min(sum(rate(http_request_duration_seconds_count{namespace="{{ $ns }}",route!~"/chat/stream|/v1/chat/stream|/runs/.*/events|/mcp"}[10m])), 1)
+              )
+            ) > {{ $t.httpSlowRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "More than {{ mulf $t.httpSlowRatio 100 }}% of non-streaming requests slower than 1s in {{ $ns }}"
+            description: >-
+              Compare against the LLM latency histogram before touching the
+              deployment: when an upstream provider is the cause the two move
+              together and nothing here needs changing.
+        {{- end }}
+        {{- if not (has "BaselithcoreLlmErrorRatio" $off) }}
+        - alert: BaselithcoreLlmErrorRatio
+          expr: |-
+            (
+              (sum(rate(mas_llm_errors_total{namespace="{{ $ns }}"}[10m])) or vector(0))
+              / clamp_min(sum(rate(mas_llm_requests_total{namespace="{{ $ns }}"}[10m])), 1)
+            ) > {{ $t.llmErrorRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            component: llm
+          annotations:
+            summary: "More than {{ mulf $t.llmErrorRatio 100 }}% of LLM calls are failing in {{ $ns }}"
+            description: >-
+              The `error_type` and `model` labels say whether this is one
+              model, one provider or the credential. A single failing model
+              with a fallback chain behind it is not an incident; every model
+              failing is.
+        {{- end }}
+        {{- if not (has "BaselithcoreSecurityEventSpike" $off) }}
+        - alert: BaselithcoreSecurityEventSpike
+          expr: |-
+            sum(rate(security_events_total{namespace="{{ $ns }}"}[5m])) > {{ $t.securityEventsPerSecond }}
+          for: 10m
+          labels:
+            severity: warning
+            component: security
+          annotations:
+            summary: "Elevated security events in {{ $ns }}"
+            description: >-
+              Auth failures, rate-limit rejections and oversized requests share
+              this counter, so read the `reason` label before concluding
+              anything. A deploy that rotated a client credential looks exactly
+              like credential stuffing until you do.
+        {{- end }}
+        {{- if and .Values.migrations.enabled (not (has "BaselithcoreMigrationJobFailed" $off)) }}
+        # A failed migration Job is the one failure that a rollback does not
+        # undo: the release can go back, the schema does not. Critical, and the
+        # runbook says to read `alembic current` before assuming a clean state.
+        - alert: BaselithcoreMigrationJobFailed
+          expr: |-
+            kube_job_status_failed{namespace="{{ $ns }}",job_name=~"{{ $api }}-migrate.*"} > 0
+          for: 1m
+          labels:
+            severity: critical
+            component: migrations
+          annotations:
+            summary: "Database migration Job failed in {{ $ns }}"
+            description: >-
+              The release is blocked and the schema may be half-applied. Check
+              `alembic current` against a fresh connection — an `upgrade head`
+              that exits 0 is not proof it committed.
+        {{- end }}
+        {{- if and .Values.backup.enabled (not (has "BaselithcoreBackupStale" $off)) }}
+        # `kube_cronjob_status_last_successful_time` rather than the Job's
+        # completion time: a Job that completed is not a Job that succeeded,
+        # and the failed ones are exactly the case this alert is for. Absent
+        # series means the CronJob has never succeeded at all, which `absent()`
+        # catches — without it the rule stays silent precisely when backups
+        # have never once worked.
+        - alert: BaselithcoreBackupStale
+          expr: |-
+            (time() - max(kube_cronjob_status_last_successful_time{namespace="{{ $ns }}",cronjob="{{ $api }}-backup"}))
+              > {{ mul $t.backupMaxAgeHours 3600 }}
+            or absent(kube_cronjob_status_last_successful_time{namespace="{{ $ns }}",cronjob="{{ $api }}-backup"})
+          for: 30m
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "No successful backup in {{ $t.backupMaxAgeHours }}h in {{ $ns }}"
+            description: >-
+              A backup nobody has restored is a hope, not a backup. Restore the
+              most recent one into a scratch database and count the tables
+              before trusting it.
+        {{- end }}
+        {{- if not (has "BaselithcoreVolumeAlmostFull" $off) }}
+        - alert: BaselithcoreVolumeAlmostFull
+          expr: |-
+            1 - (
+              kubelet_volume_stats_available_bytes{namespace="{{ $ns }}"}
+                / kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}"}
+            ) > {{ $t.volumeUsedRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            component: storage
+          annotations:
+            summary: "Volume {{ "{{ $labels.persistentvolumeclaim }}" }} over {{ mulf $t.volumeUsedRatio 100 }}% full in {{ $ns }}"
+            description: >-
+              A full volume takes the pod down on the next write, and expanding
+              one needs a StorageClass with allowVolumeExpansion — check that
+              before promising a resize.
+        {{- end }}
+        {{- if not (has "BaselithcorePodRestarting" $off) }}
+        - alert: BaselithcorePodRestarting
+          expr: |-
+            increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}",pod=~"{{ $api }}-.*"}[15m])
+              > {{ $t.containerRestarts }}
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "Container {{ "{{ $labels.container }}" }} restarting repeatedly in {{ $ns }}"
+            description: >-
+              With a 5s health-check timeout a blocked worker is SIGKILLed
+              mid-response, which reads like a proxy timeout to the client and
+              like a restart here. Raise the probe's timeout before raising the
+              replica count.
+        {{- end }}
+        {{- with .Values.prometheusRule.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

@@ -583,6 +583,56 @@ serviceMonitor:
   #  usernameKey: username
   #  passwordKey: password
 
+# PrometheusRule for the Prometheus Operator — the alerts that go with the
+# ServiceMonitor above. Off by default: a rule object referencing a Prometheus
+# that is not there is dead YAML, and a chart that ships alerts nobody routed
+# teaches operators to ignore the ones that do fire.
+#
+# `labels` is usually what decides whether the rules are picked up at all:
+# kube-prometheus-stack selects PrometheusRule objects by label (commonly
+# `release: <stack release>`), so an object without it is created, accepted and
+# never evaluated. Check the Prometheus resource's `ruleSelector` before
+# concluding the alerts do not work.
+prometheusRule:
+  enabled: false
+  # Rules can live in the Prometheus namespace instead of the release's, for
+  # setups whose ruleNamespaceSelector is narrow. Empty = the release namespace.
+  namespace: ""
+  labels: {}
+  #  release: kube-prometheus-stack
+  # Group evaluation interval. Empty = Prometheus' global default, which is the
+  # right answer unless you have measured otherwise.
+  interval: ""
+  # Thresholds. Every one of them is a judgement about THIS deployment's
+  # traffic, so they are values and not constants in the template.
+  thresholds:
+    # Ratios, not counts: an absolute error threshold is either useless on a
+    # cell serving ten requests a minute or deaf on one serving ten thousand.
+    # Measured on the RED HTTP counter, which is also the availability SLI in
+    # deploy/prometheus/slo-rules.yml, so the two cannot disagree.
+    httpErrorRatio: 0.05
+    llmErrorRatio: 0.10
+    # Fraction of NON-streaming requests slower than the 1s latency objective.
+    # The streaming routes are excluded in the rule: they are designed to stay
+    # open for minutes, so leaving them in makes the ratio a measure of how
+    # much streaming a deployment does.
+    httpSlowRatio: 0.05
+    # Auth failures, rate-limit rejections and oversized requests share one
+    # counter, so this is a spike detector, not a policy.
+    securityEventsPerSecond: 1
+    volumeUsedRatio: 0.85
+    containerRestarts: 3
+    # Longer than the daily schedule plus one missed run, so a single skipped
+    # backup does not page and two do.
+    backupMaxAgeHours: 26
+  # Alert names to leave out, for the one a given deployment cannot act on —
+  # silencing here rather than in Alertmanager keeps the reason in git.
+  disabledAlerts: []
+  #  - BaselithcoreHttpLatencyHigh
+  # Extra rule objects, appended to the group verbatim. For deployment-specific
+  # alerts that have no business in the chart.
+  extraRules: []
+
 # Pre-deploy Alembic migrations (helm hook Job). When enabled, api pods boot
 # with DB_MIGRATIONS_ON_STARTUP=false — a bad migration fails the Job (and
 # the upgrade) instead of crash-looping the ReplicaSet.

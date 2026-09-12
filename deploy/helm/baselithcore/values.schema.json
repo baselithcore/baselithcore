@@ -90,7 +90,8 @@
   "properties": {
     "replicaCount": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 0,
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
     },
     "revisionHistoryLimit": {
       "type": "integer",
@@ -580,6 +581,77 @@
               "type": "string"
             }
           }
+        }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/definitions/labelMap",
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+        },
+        "interval": {
+          "oneOf": [{ "$ref": "#/definitions/duration" }, { "type": "string", "maxLength": 0 }],
+          "description": "Group evaluation interval. Empty means Prometheus' global default, which is the right answer unless you have measured otherwise."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "httpErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of 5xx responses that fires the alert. A ratio and not a count on purpose: an absolute threshold is either useless on a cell serving ten requests a minute or deaf on one serving ten thousand. Measured on http_requests_total, which is also the availability SLI in deploy/prometheus/slo-rules.yml."
+            },
+            "llmErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "httpSlowRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of non-streaming requests slower than the 1s objective. The streaming routes are excluded in the rule: they are designed to stay open for minutes, so leaving them in turns the ratio into a measure of how much streaming the deployment does."
+            },
+            "securityEventsPerSecond": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "volumeUsedRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "containerRestarts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backupMaxAgeHours": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Longer than the schedule plus one missed run, so a single skipped backup does not page and two do."
+            }
+          }
+        },
+        "disabledAlerts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Alert names to leave out. Silencing here rather than in Alertmanager keeps the reason in git."
+        },
+        "extraRules": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Extra rule objects appended to the group verbatim, for deployment-specific alerts that have no business in the chart."
         }
       }
     },
