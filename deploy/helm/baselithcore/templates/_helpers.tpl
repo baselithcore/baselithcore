@@ -53,6 +53,36 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
+{{/* Name of the ConfigMap carrying the declarative plugin set (`plugins.config`). */}}
+{{- define "baselithcore.pluginsConfigName" -}}
+{{- printf "%s-plugins" (include "baselithcore.fullname" .) -}}
+{{- end -}}
+
+{{/*
+Volume + mount for the declarative plugin set. Rendered into both pod specs
+only when `plugins.config` is non-empty, so a chart without it renders
+byte-identically to before the key existed. `subPath` mounts a single file
+over the image's configs/plugins.yaml without hiding the rest of configs/;
+the pods roll on content changes through the checksum/plugins annotation,
+which is also why a subPath (which does not live-update) is fine here.
+*/}}
+{{- define "baselithcore.pluginsConfigVolumeMount" -}}
+{{- if .Values.plugins.config }}
+- name: plugins-config
+  mountPath: /app/configs/plugins.yaml
+  subPath: plugins.yaml
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "baselithcore.pluginsConfigVolume" -}}
+{{- if .Values.plugins.config }}
+- name: plugins-config
+  configMap:
+    name: {{ include "baselithcore.pluginsConfigName" . }}
+{{- end }}
+{{- end -}}
+
 {{/*
 Names of the env sources the pre-deploy migration hook reads.
 

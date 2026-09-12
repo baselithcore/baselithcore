@@ -466,6 +466,36 @@ extraVolumeMounts: []
 # the destination yourself.
 seedFromImage: []
 
+# Declarative plugin set. The other way round from `seedFromImage` above: that
+# one makes configs/plugins.yaml writable so an admin can toggle plugins at
+# runtime; this one makes the plugin set a property of the release. When
+# `config` is non-empty it is rendered into a ConfigMap and mounted read-only
+# over /app/configs/plugins.yaml in the api and worker pods (subPath, so the
+# rest of configs/ stays as shipped). The app reads that path by default, so
+# no PLUGIN_CONFIG_PATH is involved, and the pods roll whenever the content
+# changes. Every console or CLI toggle then fails with "Read-only file
+# system" — deliberately: the set of plugins a release runs is decided by
+# whoever renders the values (a customer spec, a GitOps overlay), not by a
+# click in a pod, and the running state can never drift from the manifest.
+#
+# The map is the plugins.yaml content verbatim: plugin name -> its block. Note
+# the loader's rule (core/api/lifespan.py): when the file has any entries, a
+# plugin absent from it is NOT loaded, so list every plugin the release needs,
+# system plugins included.
+#
+#   plugins:
+#     config:
+#       auth: {enabled: true}
+#       api_routers: {enabled: true}
+#       baselithcontrol: {enabled: true, require_admin: false}
+#       compliance: {enabled: true, require_admin: true}
+#
+# Mutually exclusive with `config.PLUGIN_CONFIG_PATH` and with a
+# `seedFromImage` entry from /app/configs/plugins.yaml; the chart refuses to
+# render the combination.
+plugins:
+  config: {}
+
 # `helm test <release>` — the smoke test that asks the one question a
 # successful install cannot answer: does a request reaching the Service get an
 # answer. It retries rather than sampling once, because a cold start (plugin

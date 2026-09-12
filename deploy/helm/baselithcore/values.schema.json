@@ -497,6 +497,24 @@
         }
       }
     },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declarative plugin set. `config` is the plugins.yaml content (plugin name -> its block); when non-empty it is mounted read-only over /app/configs/plugins.yaml and runtime toggles are refused. Mutually exclusive with config.PLUGIN_CONFIG_PATH.",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
     "serviceMonitor": {
       "type": "object",
       "additionalProperties": false,

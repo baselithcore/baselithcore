@@ -117,7 +117,7 @@ adds, in order:
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
-| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot) |
+| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot). Only plugins the enable-list in `configs/plugins.yaml` allows are consulted — the same rule the lifespan applies to routers, read through `core/plugins/config_file.py`, so a plugin disabled there installs no middleware and mounts no SPA either |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** — a single cheap header compare that rejects before a quota unit is consumed, an idempotency lock taken or a plugin route matched |
 | `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); added after CSRF so it runs outermost of the two; see the note below |
 | `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work |

@@ -28,6 +28,9 @@ spec:
         {{- if .Values.secrets.create }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- end }}
+        {{- if .Values.plugins.config }}
+        checksum/plugins: {{ include (print $.Template.BasePath "/plugins-configmap.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "baselithcore.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
@@ -141,7 +144,7 @@ spec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumeMounts }}
+          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumeMounts .Values.plugins.config }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
@@ -153,11 +156,14 @@ spec:
             - name: prometheus-multiproc
               mountPath: /tmp/prometheus
             {{- end }}
+            {{- if .Values.plugins.config }}
+            {{- include "baselithcore.pluginsConfigVolumeMount" . | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumes }}
+      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumes .Values.plugins.config }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
@@ -168,6 +174,9 @@ spec:
         - name: prometheus-multiproc
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- if .Values.plugins.config }}
+        {{- include "baselithcore.pluginsConfigVolume" . | nindent 8 }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

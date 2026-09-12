@@ -1,0 +1,31 @@
+{{- if .Values.plugins.config }}
+{{- /*
+A declarative plugin set: `plugins.config` is rendered into this ConfigMap and
+mounted read-only over /app/configs/plugins.yaml in the api and worker pods,
+shadowing the copy baked into the image. The app reads that path by default
+(core/api/lifespan.py), so no PLUGIN_CONFIG_PATH is needed — and every CLI
+and console surface that rewrites configs/plugins.yaml now fails with
+"Read-only file system", which is the point: the set of plugins a release runs
+is decided by whoever renders the values, not by a toggle in a pod.
+
+The two mechanisms cannot be combined, so the conflicts are refused here rather
+than discovered as an unexplained "the toggle does nothing" later.
+*/ -}}
+{{- if hasKey .Values.config "PLUGIN_CONFIG_PATH" }}
+{{- fail "plugins.config and config.PLUGIN_CONFIG_PATH are mutually exclusive: the first mounts a read-only plugins.yaml over the image path, the second moves the file onto a writable volume. Pick one." }}
+{{- end }}
+{{- range .Values.seedFromImage }}
+{{- if eq .from "/app/configs/plugins.yaml" }}
+{{- fail "plugins.config and a seedFromImage entry from /app/configs/plugins.yaml are mutually exclusive: the seed would copy the chart-rendered file onto a volume the app never reads. Drop the seed entry." }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "baselithcore.pluginsConfigName" . }}
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+data:
+  plugins.yaml: |
+    {{- toYaml .Values.plugins.config | nindent 4 }}
+{{- end }}

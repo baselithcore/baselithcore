@@ -269,6 +269,12 @@ class MyPlugin(Plugin):
         await super().shutdown()
 ```
 
+`setup_app_middleware` follows the same enable-list as everything else: a
+plugin that `configs/plugins.yaml` disables (or omits, when the file names
+any plugin at all) gets neither its routers nor this hook, so it installs no
+middleware and mounts no SPA. Both loaders read the file through
+`core/plugins/config_file.py`, which is what keeps them in agreement.
+
 ---
 
 ## Accessing Core Services

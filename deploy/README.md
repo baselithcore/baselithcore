@@ -84,6 +84,28 @@ A plugin that creates state directories per identity needs the same treatment
 for its own root — a writable path, and a seed only if the image ships content
 it cannot regenerate.
 
+The opposite stance exists too. When the plugin set is a property of the
+release rather than something an admin toggles at runtime — a per-customer
+SaaS cell rendered from a spec, a GitOps overlay — put the `plugins.yaml`
+content under `plugins.config` instead:
+
+```yaml
+plugins:
+  config:
+    auth: {enabled: true}
+    api_routers: {enabled: true}
+    baselithcontrol: {enabled: true, require_admin: false}
+    compliance: {enabled: true, require_admin: true}
+```
+
+The chart renders it into a ConfigMap mounted read-only over
+`/app/configs/plugins.yaml` in both pods (the path the app reads by default,
+so no `PLUGIN_CONFIG_PATH`), rolls the pods when it changes, and refuses to
+render alongside `config.PLUGIN_CONFIG_PATH` or a `seedFromImage` entry for
+that file. Toggles from the console then fail with `Read-only file system`,
+which is the point. List every plugin the release needs, system plugins
+included: when the file has entries, a plugin absent from it is not loaded.
+
 Point it at a **ReadWriteMany** volume when the api runs more than one
 replica. `plugins.yaml` is per-filesystem: on ReadWriteOnce volumes a toggle
 applied on one pod is invisible to the others until they restart onto the same

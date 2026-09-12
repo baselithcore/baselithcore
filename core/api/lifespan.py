@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import FastAPI
 
 from core.api.startup_checks import (
@@ -27,6 +26,7 @@ from core.api.startup_checks import (
 from core.config import get_app_config, get_storage_config
 from core.observability.logging import get_logger
 from core.plugins import PluginLoader, PluginRegistry
+from core.plugins.config_file import read_plugin_configs
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 
 logger = get_logger(__name__)
@@ -106,24 +106,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # === LAZY LOADING: Analyze plugin requirements first ===
     logger.info("🔌 Initializing plugin system with lazy loading...")
 
-    plugin_configs: dict[str, Any] = {}
-
-    try:
-        raw_config_path = os.environ.get("PLUGIN_CONFIG_PATH", "configs/plugins.yaml")
-        config_path = Path(raw_config_path).resolve()  # noqa: ASYNC240 - one-shot config read at startup, before the server accepts traffic
-        cwd = Path.cwd().resolve()
-        if not config_path.is_relative_to(cwd):
-            raise ValueError(
-                f"PLUGIN_CONFIG_PATH must resolve inside {cwd}; got {config_path}"
-            )
-        if config_path.exists():
-            with open(config_path) as f:  # noqa: ASYNC230 - one-shot config read at startup, before the server accepts traffic
-                plugin_configs = yaml.safe_load(f) or {}
-            logger.info(f"📄 Loaded plugin configurations from {config_path}")
-        else:
-            logger.warning(f"⚠️ Plugin configuration file not found: {config_path}")
-    except Exception as e:
-        logger.error(f"❌ Failed to load plugin configurations: {e}")
+    # One reader shared with create_app()'s middleware pre-discovery, so the
+    # two never disagree on which plugins this process runs.
+    plugin_configs: dict[str, Any] = read_plugin_configs()
 
     analyzer = None
     try:
