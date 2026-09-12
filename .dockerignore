@@ -52,8 +52,10 @@ Thumbs.db
 /feedback.db
 
 # === Docker ===
+# The Dockerfile is read separately from the context, and the compose files are
+# host-side orchestration — none of them belong in a build layer.
 Dockerfile
-docker-compose.yml
+compose*.yaml
 .dockerignore
 
 # === Frontend & Build Artifacts ===
