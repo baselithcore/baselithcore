@@ -10,6 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from core.middleware.cost_control import cost_controller
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 # OTel GenAI semantic-convention `gen_ai.system` values for our providers
 # (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Falls back to the raw
@@ -74,6 +77,59 @@ def report_tokens_to_middleware(count: int, model: str) -> None:
                 pass
 
 
+#: Model ids the funnel uses to mean "these were prompt tokens" (paired with a
+#: following real-model report so a consumer can reconstruct one call).
+_INPUT_SENTINEL = "input"
+_INPUT_STREAM_SENTINEL = "input_stream"
+
+
+def report_external_usage(
+    model: str,
+    *,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    stream: bool = False,
+) -> None:
+    """Report token usage measured **outside** this funnel.
+
+    For callers that do not go through ``core.services.llm`` at all — a
+    vendored engine with its own provider client, an out-of-process child that
+    returns its own counts — but whose usage must still reach every consumer of
+    the report seam (per-plugin cost attribution, per-user accounting, the
+    Gen AI metrics). Without it such an engine reports nothing and every
+    consumer shows it as having spent zero.
+
+    Emits the funnel's own **paired** reports in the funnel's own order: the
+    prompt count under the ``input`` sentinel (``input_stream`` when *stream*),
+    then the completion count under the real ``model`` id. A consumer pairs the
+    two to reconstruct one call, so the order is load-bearing.
+
+    Unlike :func:`report_tokens_to_middleware` this never raises: the tokens
+    were already spent by an engine this process does not gate, so a budget
+    rejection must neither corrupt a response that is already paid for nor
+    swallow the second half of the pair.
+
+    Args:
+        model: The real model id the completion came from.
+        prompt_tokens: Measured prompt/input tokens (skipped when <= 0).
+        completion_tokens: Measured completion/output tokens (skipped when <= 0).
+        stream: True when the completion was streamed, which selects the
+            ``input_stream`` sentinel the streaming funnel path uses.
+    """
+    input_label = _INPUT_STREAM_SENTINEL if stream else _INPUT_SENTINEL
+    for count, label in ((prompt_tokens, input_label), (completion_tokens, model)):
+        if count <= 0:
+            continue
+        try:
+            report_tokens_to_middleware(int(count), label)
+        except Exception as exc:
+            logger.debug(
+                "external LLM usage report rejected",
+                model=label,
+                error=str(exc),
+            )
+
+
 def record_genai_metrics(
     system: str,
     model: str,
@@ -120,6 +176,7 @@ __all__ = [
     "gen_ai_system",
     "record_genai_metrics",
     "register_token_sink",
+    "report_external_usage",
     "report_tokens_to_middleware",
     "unregister_token_sink",
 ]

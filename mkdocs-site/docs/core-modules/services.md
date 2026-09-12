@@ -762,6 +762,33 @@ regardless. Do **not** monkeypatch `service._report_tokens_to_middleware`
 instead: every call site imports the report function directly at import time,
 so rebinding that module alias silently detaches from the real call path.
 
+#### Reporting usage measured outside the funnel
+
+A caller that does **not** go through this service — a plugin with a vendored
+engine and its own provider client, an out-of-process child that returns its own
+counts — is invisible to every sink, so each such plugin read as having spent
+zero. `report_external_usage` is the seam for that measured usage:
+
+```python
+from core.services.llm import report_external_usage
+
+report_external_usage("qwen3:8b", prompt_tokens=1200, completion_tokens=80)
+# streamed completion → stream=True (selects the "input_stream" sentinel)
+```
+
+It emits the funnel's own **paired** reports in the funnel's own order — the
+prompt count under `input`/`input_stream`, then the completion count under the
+real model id — because consumers pair the two to reconstruct one call. Unlike
+`report_tokens_to_middleware` it never raises: the tokens were already spent by
+an engine this process does not gate, so a budget rejection must neither corrupt
+a response that is already paid for nor swallow the second half of the pair.
+
+Report **measured** counts only (the provider's `usage` block, Ollama's
+`prompt_eval_count`/`eval_count`) and report from **inside the request that made
+the call** — per-plugin and per-user attribution comes from that request's
+context, so a report made on a bare worker thread is filed as unattributable
+unless the spawn carries the caller's context across (`contextvars.copy_context`).
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM

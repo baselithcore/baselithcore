@@ -1114,6 +1114,7 @@
       "maybe_run_with_fallback",
       "parse_fallback_chain",
       "register_token_sink",
+      "report_external_usage",
       "reset_fallback_services",
       "resolve_governed_client_config",
       "resolve_llm_credential",

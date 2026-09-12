@@ -6,6 +6,7 @@ Provides a modular, protocol-based LLM service with support for multiple provide
 
 from core.services.llm._telemetry import (
     register_token_sink,
+    report_external_usage,
     unregister_token_sink,
 )
 from core.services.llm.credentials import (
@@ -65,6 +66,7 @@ __all__ = [
     "maybe_run_with_fallback",
     "parse_fallback_chain",
     "register_token_sink",
+    "report_external_usage",
     "unregister_token_sink",
     "reset_fallback_services",
     "resolve_governed_client_config",
