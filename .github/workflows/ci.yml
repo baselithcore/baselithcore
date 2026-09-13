@@ -878,6 +878,7 @@ jobs:
           POSTGRES_DB: test_db
           DB_HOST: localhost
           REDIS_URL: redis://localhost:6379/0
+          CACHE_REDIS_URL: redis://localhost:6379/1
         run: |
           # Install the LOCKED set, not a fresh resolution. `-e ".[test]"`
           # re-resolved every dependency to whatever was newest that morning,

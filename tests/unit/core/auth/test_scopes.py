@@ -160,6 +160,20 @@ class TestScopedKeyConfig:
 
 # === Scoped API keys end-to-end ===
 class TestScopedApiKey:
+    @pytest.fixture(autouse=True)
+    def _mock_denylist_redis(self):
+        # APIKeyValidator.__init__ builds its own Redis client for the shared
+        # denylist (separate from JWTHandler's, patched above). Unmocked, it
+        # points at whatever CACHE_REDIS_URL resolves to in this environment;
+        # a mere `.exists()` failure now fails the key *closed* (see
+        # API_KEY_REVOCATION_FAIL_MODE), so these tests would depend on a
+        # reachable Redis instead of the in-process registration they exercise.
+        with patch("core.cache.redis_cache.create_redis_client") as factory:
+            redis = AsyncMock()
+            redis.exists.return_value = False
+            factory.return_value = redis
+            yield
+
     @pytest.mark.asyncio
     async def test_scoped_key_carries_capability(self):
         config = SecurityConfig(

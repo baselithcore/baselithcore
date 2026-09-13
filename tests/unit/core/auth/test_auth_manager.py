@@ -19,10 +19,22 @@ def security_config():
 class TestAuthManager:
     @pytest.fixture
     def auth_manager(self, security_config):
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        # AuthManager wires up both a JWTHandler and an APIKeyValidator, each
+        # building its own Redis client at construction time — the second one
+        # (the shared revocation denylist) needs its own mock, or an unmocked
+        # `.exists()` failure now fails the key *closed* instead of open.
+        with (
+            patch("core.auth.jwt.create_redis_client") as mock_redis_factory,
+            patch(
+                "core.cache.redis_cache.create_redis_client"
+            ) as mock_cache_redis_factory,
+        ):
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
+            mock_cache_redis = AsyncMock()
+            mock_cache_redis.exists.return_value = False
+            mock_cache_redis_factory.return_value = mock_cache_redis
             return AuthManager(config=security_config)
 
     @pytest.mark.asyncio
@@ -258,11 +270,16 @@ class TestJWTHandlerAndAPIKeys:
 
         from core.auth.api_keys import APIKeyValidator
 
-        validator = APIKeyValidator(config=security_config)
+        # This round trip is process-local (see the assertions below): revoke
+        # removes the key from in-process state directly, so the mocked
+        # denylist Redis only needs to stay out of the way, not model real
+        # persistence. The unique key just avoids collisions across tests.
+        with patch("core.cache.redis_cache.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.exists.return_value = False
+            mock_redis_factory.return_value = mock_redis
+            validator = APIKeyValidator(config=security_config)
 
-        # Unique per run: revocation tombstones are PERSISTENT (Redis, no
-        # TTL), so a fixed literal would stay denied across test runs when a
-        # real Redis is reachable.
         key = f"new-key-{uuid4().hex}"
         validator.register_key(key, "new-user")
         user = await validator.validate_key(key)
