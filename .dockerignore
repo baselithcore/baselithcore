@@ -73,6 +73,22 @@ frontend/node_modules
 # plugins at load.
 plugins/*/ui/src
 plugins/*/ui/*.tsbuildinfo
+# Source maps: the dashboards build with `sourcemap: 'hidden'`, which writes
+# .map files for upload to an error tracker and strips the sourceMappingURL
+# comment — so nothing in the running image would ever request them, and they
+# would only sit in a pushed layer carrying the original TypeScript sources.
+# Same exclusion as the wheel's [tool.setuptools.exclude-package-data].
+plugins/*/ui/dist/**/*.map
+# In-repo FIXTURES, not product. `example-plugin` is the scaffold the authoring
+# guide walks through and `test-project` is the tree the plugin CLI tests
+# scaffold against. `COPY plugins/ plugins/` shipped both into the runtime
+# image, and configs/plugins.yaml had `example-plugin: enabled: true`, so the
+# released container actually LOADED the demo plugin and registered its
+# handlers and router into the production API gateway. They are excluded from
+# the wheel the same way (see [tool.setuptools.packages.find] in
+# pyproject.toml).
+plugins/example-plugin/
+plugins/test-project/
 tests/
 htmlcov/
 .coverage

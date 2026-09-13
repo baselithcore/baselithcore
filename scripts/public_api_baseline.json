@@ -1,7 +1,9 @@
 {
   "_comment": "Literal __all__ of every core package. Removing a symbol is a breaking change under the versioning policy; refresh with: python scripts/check_public_api.py --update-baseline",
   "packages": {
-    "core": ["__version__"],
+    "core": [
+      "__version__"
+    ],
     "core.a2a": [
       "A2AClient",
       "A2AClientConfig",
@@ -12,6 +14,7 @@
       "A2ARequest",
       "A2AResponse",
       "A2AServer",
+      "AGENT_CARD_PATH",
       "AgentCapabilities",
       "AgentCapability",
       "AgentCard",
@@ -19,6 +22,7 @@
       "AgentRegistration",
       "AgentSkill",
       "Artifact",
+      "DEPRECATED_PUSH_NOTIFICATION_METHODS",
       "DataPart",
       "EchoA2AServer",
       "ErrorCode",
@@ -28,9 +32,11 @@
       "JSONRPCError",
       "JSONRPCRequest",
       "JSONRPCResponse",
+      "LEGACY_AGENT_CARD_PATH",
       "Message",
       "MessageType",
       "PEER_HEADER",
+      "PUSH_NOTIFICATION_METHODS",
       "Part",
       "PostgresTaskStore",
       "Role",
@@ -44,6 +50,7 @@
       "build_signature_headers",
       "create_a2a_router",
       "create_standalone_app",
+      "create_wellknown_router",
       "get_a2a_peer_id",
       "get_a2a_peer_secrets",
       "get_a2a_shared_secret",
@@ -84,7 +91,10 @@
       "Task",
       "TaskResult"
     ],
-    "core.agents": ["BrowserAgent", "CodingAgent"],
+    "core.agents": [
+      "BrowserAgent",
+      "CodingAgent"
+    ],
     "core.agents.coding": [
       "CodeExecutionResult",
       "CodeLanguage",
@@ -93,7 +103,10 @@
       "CodingTaskType",
       "register_coding_tools"
     ],
-    "core.api": ["AgentEvent", "EventType"],
+    "core.api": [
+      "AgentEvent",
+      "EventType"
+    ],
     "core.auth": [
       "APIKeyValidator",
       "AuthError",
@@ -199,7 +212,9 @@
       "get_chat_service",
       "initialize_chat_service_with_plugins"
     ],
-    "core.cli": ["main"],
+    "core.cli": [
+      "main"
+    ],
     "core.cli.commands": [
       "cache",
       "config",
@@ -410,7 +425,10 @@
       "get_lazy_registry",
       "reset_lazy_registry"
     ],
-    "core.doc_sources": ["DocumentSourceError", "create_document_sources"],
+    "core.doc_sources": [
+      "DocumentSourceError",
+      "create_document_sources"
+    ],
     "core.evaluation": [
       "BakeOffResult",
       "BaseLLMEvaluator",
@@ -486,8 +504,15 @@
       "FineTuningPipeline",
       "TrainingStatus"
     ],
-    "core.goals": ["Goal", "GoalStatus", "GoalTracker"],
-    "core.graph": ["GraphDb", "graph_db"],
+    "core.goals": [
+      "Goal",
+      "GoalStatus",
+      "GoalTracker"
+    ],
+    "core.graph": [
+      "GraphDb",
+      "graph_db"
+    ],
     "core.guardrails": [
       "CodeReview",
       "CodeReviewComment",
@@ -507,7 +532,15 @@
       "review_code",
       "scan_external_content"
     ],
-    "core.human": ["HumanIntervention", "HumanRequest", "InteractionStatus", "InteractionType"],
+    "core.human": [
+      "DEFAULT_MAX_RECENT_REQUESTS",
+      "HumanIntervention",
+      "HumanRequest",
+      "InteractionStatus",
+      "InteractionType",
+      "get_hitl_executor",
+      "shutdown_hitl_executor"
+    ],
     "core.incidents": [
       "AiActIncidentNotFoundError",
       "AiActIncidentService",
@@ -643,7 +676,9 @@
       "MemoryType",
       "SupermemoryContextProvider",
       "SupermemoryProvider",
+      "TenantScopedState",
       "TierConfig",
+      "current_memory_tenant",
       "get_memory"
     ],
     "core.meta": [
@@ -689,7 +724,12 @@
       "FeedbackRequest",
       "SearchResult"
     ],
-    "core.nlp": ["CachedEmbedder", "get_embedder", "get_pipeline", "get_reranker"],
+    "core.nlp": [
+      "CachedEmbedder",
+      "get_embedder",
+      "get_pipeline",
+      "get_reranker"
+    ],
     "core.observability": [
       "AuditEvent",
       "AuditEventType",
@@ -760,6 +800,7 @@
       "AdaptiveController",
       "AgentProtocol",
       "ApprovalPendingError",
+      "ApprovalPrincipal",
       "ApprovalRequiredError",
       "AutonomyLevel",
       "AutonomyPolicy",
@@ -783,9 +824,11 @@
       "StreamHandler",
       "ToolCall",
       "ToolResult",
+      "UNTRUSTED_OUTPUT_SYSTEM_RULE",
       "annotate_context",
       "detect_modality",
       "enforce_approval",
+      "escape_untrusted_markers",
       "fork_run",
       "get_run_event_stream",
       "get_state",
@@ -793,10 +836,15 @@
       "list_runs",
       "publish_run_event",
       "record_approval_decision",
+      "recovery_sweep_loop",
+      "run_recovery_cycle",
+      "sanitize_tool_output",
       "set_run_event_broadcaster",
       "step_key",
       "stream_run_events",
-      "truncate_tool_output"
+      "truncate_tool_output",
+      "unwrap_untrusted",
+      "wrap_untrusted"
     ],
     "core.orchestration.handlers": [
       "BaseFlowHandler",
@@ -838,21 +886,28 @@
       "BackstageProvider",
       "CatalogExporter",
       "DeclarativeSkillLoader",
+      "ENTRY_POINT_GROUP",
       "GraphPlugin",
       "HotReloadController",
       "LoadedSkill",
+      "ManifestValidationError",
       "PLUGIN_ACTIVATED",
       "PLUGIN_DEACTIVATED",
       "PLUGIN_FAILED",
       "PLUGIN_RELOADED",
       "Plugin",
+      "PluginClassError",
+      "PluginHealth",
       "PluginLifecycleHooks",
       "PluginLifecycleManager",
       "PluginLoader",
+      "PluginManifestModel",
       "PluginMetadata",
       "PluginMetricsCollector",
       "PluginRegistry",
       "PluginState",
+      "PluginTaskClosedError",
+      "PluginTaskNursery",
       "RouterPlugin",
       "SemanticVersion",
       "SkillCard",
@@ -861,6 +916,7 @@
       "SkillSandboxError",
       "SkillScriptResult",
       "SkillService",
+      "VENDOR_EXTENSION_PREFIX",
       "VersionConstraint",
       "apply_plugin_app_middleware",
       "backstage_exporter_router",
@@ -872,16 +928,24 @@
       "get_metrics_collector",
       "is_compat_enforcement_enabled",
       "is_config_enforcement_enabled",
+      "is_entry_point_discovery_enabled",
+      "is_extension_key",
+      "iter_entry_point_plugin_dirs",
+      "known_manifest_keys",
+      "load_manifest_model",
       "load_plugin_dotenv",
       "make_activation_tool_fn",
       "make_run_skill_script_tool",
+      "merge_plugin_dirs",
       "ok",
       "partial",
       "plugin_management_router",
+      "resolve_plugin_class",
       "run_skill_script",
       "set_backstage_provider",
       "set_hot_reload_controller",
       "split_frontmatter",
+      "validate_manifest_data",
       "validate_plugin_config"
     ],
     "core.plugins.exporters": [
@@ -1025,7 +1089,9 @@
       "ReflectionAgent",
       "SelfEvaluator"
     ],
-    "core.registries": ["BaseRegistry"],
+    "core.registries": [
+      "BaseRegistry"
+    ],
     "core.resilience": [
       "Bulkhead",
       "CircuitBreaker",
@@ -1089,31 +1155,66 @@
       "build_fallback_stream",
       "stream_answer"
     ],
-    "core.services.evaluation": ["EvaluationService", "get_evaluation_service"],
-    "core.services.graph": ["GraphService"],
-    "core.services.graph.ops": ["DocumentOperations", "current_timestamp"],
-    "core.services.indexing": ["IndexingService", "get_indexing_service"],
+    "core.services.evaluation": [
+      "EvaluationService",
+      "get_evaluation_service"
+    ],
+    "core.services.graph": [
+      "GraphService"
+    ],
+    "core.services.graph.ops": [
+      "DocumentOperations",
+      "current_timestamp"
+    ],
+    "core.services.indexing": [
+      "IndexingService",
+      "get_indexing_service"
+    ],
     "core.services.llm": [
       "ANY",
       "AUTO",
       "BudgetExceededError",
+      "ContentBlock",
+      "EffortLevel",
       "GeneratedImage",
       "GovernedClientConfig",
+      "ImageBlock",
+      "LLMClientError",
+      "LLMConnectionError",
+      "LLMRateLimitError",
+      "LLMRefusalError",
       "LLMResult",
+      "LLMServerError",
       "LLMService",
+      "LLMTimeoutError",
       "LLMToolSpec",
+      "Message",
+      "ModelCapabilities",
       "NONE",
       "PluginLLMPolicy",
       "ResponseFormat",
+      "Role",
+      "TextBlock",
+      "ThinkingBlock",
+      "ThinkingMode",
       "ToolCall",
       "ToolChoice",
+      "ToolResultBlock",
+      "ToolUseBlock",
+      "Usage",
       "api_key_from_config",
+      "capabilities_for",
+      "clamp_effort",
+      "default_max_tokens",
       "generate_image",
       "generate_typed",
       "get_llm_service",
       "maybe_run_with_fallback",
+      "message_from_result",
       "parse_fallback_chain",
       "register_token_sink",
+      "rejects_forced_tool_choice",
+      "render_as_prompt",
       "report_external_usage",
       "reset_fallback_services",
       "resolve_governed_client_config",
@@ -1122,6 +1223,9 @@
       "run_with_fallback",
       "set_llm_credential_resolver",
       "set_plugin_llm_policy_resolver",
+      "supports_sampling_params",
+      "to_anthropic",
+      "to_openai",
       "tool_spec_from_mcp",
       "unregister_token_sink"
     ],
@@ -1137,8 +1241,11 @@
     "core.services.tenant": [
       "DEFAULT_TENANT_PAGE_SIZE",
       "MAX_TENANT_PAGE_SIZE",
+      "ReservedTenantIdError",
       "Tenant",
+      "TenantPurgeBlockedError",
       "TenantService",
+      "assert_purge_visible",
       "get_tenant_service",
       "purge_tenant_data",
       "tenant_scoped_tables"
@@ -1286,6 +1393,7 @@
       "canonicalize",
       "cosine_similarity",
       "cosine_similarity_many",
+      "count_tokens_exact_available",
       "estimate_tokens",
       "sanitize_log_value",
       "sniff_audio_type",

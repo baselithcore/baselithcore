@@ -83,7 +83,7 @@ def _settings_fields(tree: ast.AST) -> tuple[set[str], set[str]]:
                         ):
                             prefix = str(kw.value.value)
                 elif isinstance(value, ast.Dict):  # {"env_prefix": "..."}
-                    for key, val in zip(value.keys, value.values, strict=False):
+                    for key, val in zip(value.keys, value.values, strict=True):
                         if (
                             isinstance(key, ast.Constant)
                             and key.value == "env_prefix"

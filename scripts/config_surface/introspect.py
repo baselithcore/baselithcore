@@ -81,7 +81,7 @@ def _env_prefix(node: ast.ClassDef) -> str:
         if isinstance(value, ast.Call):
             pairs = [(ast.Constant(kw.arg), kw.value) for kw in value.keywords]
         elif isinstance(value, ast.Dict):
-            pairs = list(zip(value.keys, value.values, strict=False))
+            pairs = list(zip(value.keys, value.values, strict=True))
         for key, val in pairs:
             if (
                 isinstance(key, ast.Constant)

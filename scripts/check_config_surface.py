@@ -9,8 +9,9 @@ bound bare ``ANTHROPIC_API_KEY``, so following the template set nothing.
 
 The gate therefore:
 
-- fails on any ``.env.example`` entry that no settings field and no source
-  literal binds (a variable that does nothing when set);
+- fails on any entry in a shipped template (``.env.example`` and
+  ``configs/.env.base``) that no settings field and no source literal binds —
+  a variable that does nothing when set;
 - fails when the generated reference page is stale.
 
 Run with ``--write`` to restamp the reference page after changing a setting.
@@ -32,7 +33,17 @@ from scripts.config_surface import (  # noqa: E402
     render_reference,
 )
 
-ENV_EXAMPLE = REPO_ROOT / ".env.example"
+#: Every template the project tells an operator to copy. ``.env.example`` is
+#: the root template; ``configs/.env.base`` is what ``baselith doctor`` prints
+#: ("cp configs/.env.base .env") and what the baselithbot docs call the
+#: reference template. Only the first was ever checked, so the second rotted
+#: unobserved — it still advertised a removed OCR backend. A template nobody
+#: validates is worse than no template: following it sets nothing and says so
+#: to no one.
+CHECKED_TEMPLATES: tuple[Path, ...] = (
+    REPO_ROOT / ".env.example",
+    REPO_ROOT / "configs" / ".env.base",
+)
 REFERENCE_PAGE = (
     REPO_ROOT / "mkdocs-site" / "docs" / "getting-started" / "configuration.md"
 )
@@ -50,16 +61,39 @@ def _is_bound(name: str, known: set[str]) -> bool:
     return name in known or name.startswith(DYNAMIC_ENV_PREFIXES)
 
 
-def check_env_example(known: set[str]) -> list[str]:
-    """Template entries that bind nothing, as ``path:line`` findings."""
-    findings = []
-    for name, line in sorted(env_example_entries(ENV_EXAMPLE).items()):
-        if not _is_bound(name, known):
-            findings.append(
-                f".env.example:{line}: {name} binds no setting — "
-                "the value is ignored when set"
-            )
-    return findings
+def known_env_names() -> set[str]:
+    """Every environment variable name something in the repository binds.
+
+    Returns:
+        Settings-field names (aliases included) plus the upper-snake literals
+        found in source, which together cover both declarative and
+        ``os.environ``-read configuration.
+    """
+    settings = iter_settings(REPO_ROOT)
+    return {name for setting in settings for name in setting.names} | env_literals(
+        REPO_ROOT
+    )
+
+
+def check_template(template: Path, known: set[str]) -> list[str]:
+    """Entries in one template that bind nothing, as ``path:line`` findings.
+
+    Args:
+        template: A shipped ``.env`` template.
+        known: Every environment variable name the repository binds.
+
+    Returns:
+        One finding per dead entry. Empty when the template is clean or absent
+        — a template that does not exist cannot mislead anyone.
+    """
+    if not template.exists():
+        return []
+    label = template.name
+    return [
+        f"{label}:{line}: {name} binds no setting — the value is ignored when set"
+        for name, line in sorted(env_example_entries(template).items())
+        if not _is_bound(name, known)
+    ]
 
 
 def check_reference(expected: str) -> list[str]:
@@ -95,9 +129,16 @@ def main() -> int:
         )
         return 0
 
-    known = {name for setting in settings for name in setting.names}
-    known |= env_literals(REPO_ROOT)
-    findings = check_env_example(known) + check_reference(expected)
+    # Call the helper rather than re-deriving inline: the regression test in
+    # tests/unit/scripts/test_config_surface.py asserts against
+    # known_env_names(), and two copies of this set would let the test drift
+    # away from what the gate actually does.
+    known = known_env_names()
+    findings = [
+        finding
+        for template in CHECKED_TEMPLATES
+        for finding in check_template(template, known)
+    ] + check_reference(expected)
 
     if findings:
         print("❌ configuration surface out of sync:\n")

@@ -47,6 +47,21 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    # --- Container hardening, mirrored from compose.prod.yaml ---
+    # This stack is the one people actually run for local work and small
+    # self-hosted installs, and it had none of it: the process could gain
+    # privileges through a setuid binary, and it kept the full default Linux
+    # capability set (CHOWN, SETUID, NET_RAW, MKNOD ...) that a Python web app
+    # has no use for. Hardening only the file labelled "production" protects
+    # the deployment least likely to be exposed by accident.
+    # `init: true` reaps the zombies a PID-1 uvicorn otherwise leaks.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     healthcheck:
       # python, not curl: the image ships no shell utilities (see Dockerfile).
@@ -54,6 +69,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      # Matches the image HEALTHCHECK: boot imports torch and
+      # sentence-transformers and loads the cached models, which regularly
+      # outlasts a 90s retry budget counted from process start.
+      start_period: 300s
+      start_interval: 5s
     deploy:
       resources:
         limits:
@@ -77,6 +97,16 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    # Same hardening as `api` above, and for the same reason: the worker runs
+    # the identical image and executes queued jobs, which is the side that
+    # touches plugin code paths with the least supervision.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:

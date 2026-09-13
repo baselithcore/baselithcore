@@ -67,11 +67,56 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=on \
 # `ssdeep`/`libfuzzy-dev` — no package, module or plugin in this repo
 # references them, and the released image has never carried libfuzzy at
 # runtime, so nothing could have been linking it.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+#
+# BuildKit cache mounts (this file requires BuildKit — Docker >= 23, which is
+# what buildx in release-image.yml and `docker compose build` both use). The
+# downloaded .debs and the package lists live in a cache that survives between
+# builds instead of being re-fetched every time, and because a cache mount is
+# not part of the layer, neither of them ends up in the image — which is what
+# the old trailing `rm -rf /var/lib/apt/lists/*` was there to guarantee.
+# `docker-clean` has to go first: the base image installs it precisely to
+# delete the .debs after every apt run, which would empty the cache we just
+# mounted. `sharing=locked` serialises concurrent builds on the same cache
+# rather than letting two apt processes corrupt it.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends build-essential
 
-COPY requirements.txt .
+# --- The dependency set, materialised from the lock ---
+# uv.lock, not requirements.txt. requirements.txt carries the same *specs* as
+# pyproject.toml — ranges, by design, because it is a library contract — so
+# `pip install -r requirements.txt` resolved every transitive dependency to
+# whatever was newest on the morning of the build. The image therefore ran a
+# combination no test ever saw, and two builds of the same commit were two
+# different images. `uv export --frozen` emits the exact set uv.lock pins, i.e.
+# the one CI installs and tests against. requirements.txt stays as the
+# human-readable mirror of the spec surface (and as the subject of the
+# `requirements_sync` gate), it is just no longer what the image installs.
+#
+# The extras are the capability groups the image bakes in; they are the same
+# set Section 2 of requirements.txt enumerates. `mineru` is deliberately absent
+# (it conflicts with `huggingface`, see [tool.uv] conflicts in pyproject.toml).
+#
+# The `grep -v` drops the CUDA runtime and triton. They are dependencies of the
+# PyPI torch wheel, which is what uv.lock resolved; this image installs the CPU
+# build from download.pytorch.org instead (see the next step), and that wheel
+# needs none of them. Left in, they add several GB of GPU libraries that nothing
+# in the image ever loads.
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    pip install uv==0.12.0 \
+    && uv export --frozen --no-dev --no-emit-project --no-hashes --no-annotate \
+        --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
+        --extra web --extra browser --extra documents --extra ocr \
+        --extra computer_use \
+        --format requirements-txt -o /tmp/requirements.lock.txt \
+    && grep -vE '^(nvidia-|triton)' /tmp/requirements.lock.txt \
+        > /tmp/requirements.image.txt \
+    && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages"
 
 # Torch CPU-only, pinned for reproducible builds and kept in step with
 # uv.lock. >=2.6 closes CVE-2025-32434 (torch.load RCE). Neither torchaudio nor
@@ -79,7 +124,7 @@ COPY requirements.txt .
 # tree's only torch import is core/services/llm/providers/huggingface_provider
 # .py, and sentence-transformers needs torchvision only for image models, which
 # no plugin loads). The only thing in uv.lock that wants torchvision is
-# mineru's OPTIONAL `pipeline` extra, which requirements.txt does not install —
+# mineru's OPTIONAL `pipeline` extra, which the export above does not select —
 # verified on the built image, where `import torchvision` raises
 # ModuleNotFoundError and everything else works.
 #
@@ -100,15 +145,29 @@ COPY requirements.txt .
 # requirement already satisfied and never reaches for the mirror's copy; pip
 # does not downgrade a satisfied requirement. A floor, not an exact pin, so
 # future security releases still flow.
-RUN pip install --upgrade pip \
+#
+# `--no-cache-dir` is gone on purpose: with the BuildKit cache mount below, pip
+# reuses its own wheel cache across builds (a rebuild after a lock bump
+# re-downloads only what changed) and the cache still never lands in a layer,
+# which is the only thing --no-cache-dir was buying.
+#
+# The final `if` is the guard for the CUDA strip in the export step above: if an
+# nvidia-* package ever makes it into the prefix, the "CPU-only" image has
+# quietly grown by gigabytes, and the build fails instead of pushing it.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --no-cache-dir --prefix /install "setuptools>=83.0.0" \
+       pip install --prefix /install "setuptools>=83.0.0" \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --no-cache-dir --prefix /install \
+       pip install --prefix /install \
         torch==2.13.0 \
         --index-url https://download.pytorch.org/whl/cpu \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --no-cache-dir --prefix /install -r requirements.txt
+       pip install --prefix /install -r /tmp/requirements.image.txt \
+    && if ls /install/lib/python3.12/site-packages | grep -q '^nvidia'; then \
+         echo "ERROR: CUDA packages installed into a CPU-only image" >&2; \
+         exit 1; \
+       fi
 
 # --- Pre-cache the embedder + reranker ---
 # Baked in rather than downloaded on first use: a pod that fetches several
@@ -150,8 +209,9 @@ FROM deps AS app
 COPY pyproject.toml README.md ./
 COPY core/ core/
 COPY plugins/ plugins/
-RUN PYTHONPATH=/install/lib/python3.12/site-packages \
-    pip install --no-cache-dir --no-deps --prefix /install-app .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    PYTHONPATH=/install/lib/python3.12/site-packages \
+    pip install --no-deps --prefix /install-app .
 
 # ============================================================
 # Stage 3: runtime (default target)
@@ -209,9 +269,16 @@ COPY --from=deps --chown=appuser:appuser /build/models /app/models
 # /install. Below them, a one-line code change invalidated it and the build
 # reinstalled the whole browser. Ownership is set inside the same RUN that
 # creates the files, so it adds no second copy.
-RUN mkdir -p /ms-playwright \
+#
+# `playwright install --with-deps` shells out to apt, so the same cache mounts
+# (and the same docker-clean removal) apply here as in the deps stage; the
+# trailing `rm -rf /var/lib/apt/lists/*` is gone because a cache mount is not
+# part of the layer in the first place.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && mkdir -p /ms-playwright \
     && python -m playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/* \
     && chown -R appuser:appuser /ms-playwright
 
 # --- Console script (`baselith`) ---
@@ -229,7 +296,28 @@ COPY --chown=appuser:appuser migrations/ migrations/
 COPY --chown=appuser:appuser core/ core/
 COPY --chown=appuser:appuser plugins/ plugins/
 COPY --chown=appuser:appuser configs/ configs/
-COPY --chown=appuser:appuser scripts/ scripts/
+# --- Maintenance scripts: an explicit allowlist, not the directory ---
+# `COPY scripts/ scripts/` shipped the whole repository toolbox into the
+# runtime image, including `scripts/reset_all.py`, `reset_analytics_db.py`,
+# `reset_graphdb.py` and `reset_qdrant.py` — four scripts whose entire purpose
+# is to drop the production data stores, sitting on the filesystem of the
+# process that is exposed to the internet. It also shipped every CI gate
+# (`check_*.py`), the plugin signing keys' tooling and the eval runners: build
+# tooling that has no caller inside the container and only widens what an RCE
+# can reach for.
+#
+# Nothing the image runs needs any of it. The API entrypoint is
+# `uvicorn backend:app`, the worker is `baselith queue worker` (a console
+# script from /install-app), and the migration Job runs `alembic upgrade head`
+# against alembic.ini + migrations/, both copied above. Verified by grepping
+# core/, backend.py, the compose files and every Helm template for a reference
+# to scripts/ — the only one was this COPY.
+#
+# The operational shell scripts (backup-db.sh, restore-db.sh, verify-backup.sh,
+# prod-preflight.sh) are documented as running on the HOST against a checkout,
+# not inside this container, so they stay out too.
+#
+# If something here ever does need a script, add that one file by name.
 COPY --chown=appuser:appuser templates/ templates/
 
 # --- Precompile the application bytecode ---
@@ -277,9 +365,11 @@ RUN mkdir -p data logs documents qdrant_data \
 #
 # The interpreter is unaffected: python:3.12-slim compiles CPython from source
 # into /usr/local, so apt owns no part of it.
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get upgrade -y --no-install-recommends
 
 USER appuser
 
@@ -287,7 +377,23 @@ EXPOSE 8000
 
 # python, not curl: the runtime carries no shell utilities, and pulling one in
 # for a healthcheck would widen the attack surface for nothing.
+#
+# --start-period is the fix for a container that was marked unhealthy while it
+# was still perfectly fine: without it the retry budget (3 x 30s = 90s) starts
+# counting at process start, and this app's boot is nowhere near that fast —
+# it imports torch and sentence-transformers, loads the pre-cached embedder and
+# reranker off disk, runs the plugin loader and opens the DB/Redis pools. On a
+# throttled pod that exceeds 90s, the container flips to `unhealthy`, and an
+# orchestrator configured to act on it restarts a process that was seconds from
+# serving. During the start period a failing probe does not count against
+# `--retries`; the FIRST success ends the period early, so a fast boot is not
+# penalised by the generous budget.
+#
+# --start-interval polls every 5s during that window instead of every 30s, so a
+# container that becomes healthy at t=12s is marked healthy at ~t=15s rather
+# than waiting for the next 30s tick (Docker >= 25; ignored by older daemons).
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    --start-period=300s --start-interval=5s \
     CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8000\")}/health', timeout=8)" || exit 1
 
 # --proxy-headers + FORWARDED_ALLOW_IPS: without them request.client.host behind
@@ -300,7 +406,10 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # through would otherwise advertise the exact server stack to every caller.
 # --timeout-graceful-shutdown: bounded drain so SIGTERM with open SSE streams
 # still runs lifespan cleanup before the orchestrator (k8s: a 30s grace)
-# SIGKILLs.
+# SIGKILLs. The default MUST match backend.py's
+# `GRACEFUL_SHUTDOWN_TIMEOUT`, "30"` — it read 25 here, so the same variable
+# meant two different drains depending on whether the app was started through
+# this CMD or through `python backend.py`.
 # WEB_CONCURRENCY: size to ~CPU cores in production; 1 worker means any
 # CPU-bound work freezes the whole API. With WEB_CONCURRENCY>1 also set
 # PROMETHEUS_MULTIPROC_DIR (e.g. /tmp/prometheus) so /metrics aggregates across
@@ -309,4 +418,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # the upstream keepalive pool of every common reverse proxy (nginx 60s, ALB 60s,
 # Envoy 60s), so the proxy reuses sockets uvicorn already closed and surfaces
 # sporadic 502s. Keep the app side *longer* than the proxy side.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]

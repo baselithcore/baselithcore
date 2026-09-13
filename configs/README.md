@@ -2,13 +2,21 @@
 
 This directory contains the **official configuration templates** for the Baselith-Core.
 
-> **Note**: Legacy configuration files (`.env.example`, `.env.prod`, `plugins.yaml`, etc.) have been removed from the project root. The framework now exclusively uses the templates in this directory.
+> **Note**: The root [`.env.example`](../.env.example) is the **canonical, gated
+> template** — `scripts/check_config_surface.py` validates every entry in it
+> against the settings classes, and the [configuration
+> reference](../mkdocs-site/docs/getting-started/configuration.md) is generated
+> from the same source. The templates in this directory are curated starting
+> points layered on top of it; they cover the settings a deployment usually
+> touches, not all of them. Both `.env.example` and `.env.base` are checked for
+> entries that bind nothing, so neither can quietly advertise a setting that no
+> longer exists.
 
 ## File Structure
 
 | File                   | Purpose                                                            |
 | ---------------------- | ------------------------------------------------------------------ |
-| `.env.base`            | **Complete reference** with all settings and defaults. Start here. |
+| `.env.base`            | Curated starting point: the commonly-tuned settings with their defaults. Start here, then consult `.env.example` for the full surface. |
 | `.env.development`     | Settings for local development (Ollama, debug enabled).            |
 | `.env.production`      | Settings for production (OpenAI, Redis, strict security).          |
 | `.env.test`            | Settings for automated tests (isolation, caching disabled).        |

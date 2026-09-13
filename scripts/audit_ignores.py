@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
@@ -36,7 +36,7 @@ def ignored_ids(register: Path = REGISTER, today: date | None = None) -> list[st
     if not register.exists():
         return []
     document = yaml.safe_load(register.read_text(encoding="utf-8")) or {}
-    now = today or date.today()
+    now = today or datetime.now(UTC).date()
     live: list[str] = []
     for entry in document.get("vulnerabilities") or []:
         advisory = str(entry.get("id", "")).strip()
