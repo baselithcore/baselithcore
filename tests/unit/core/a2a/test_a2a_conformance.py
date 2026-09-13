@@ -273,7 +273,12 @@ class TestStreamKeepalive:
             frames.append(frame)
 
         assert any(frame.startswith(":") for frame in frames)
-        assert json.loads(frames[-1].removeprefix("data: ").strip())["id"] == 1
+        # Not `frames[-1]`: the producer finishing is a separate scheduling step
+        # from its last `put`, so a loaded machine can fit one more keepalive in
+        # between and land it after the data frame. A trailing comment is
+        # conformant and ignored by clients — what matters is the event arrived.
+        data = [frame for frame in frames if frame.startswith("data: ")]
+        assert json.loads(data[-1].removeprefix("data: ").strip())["id"] == 1
 
     async def test_producer_is_cancelled_when_the_consumer_leaves(self) -> None:
         """Client gone: the work behind the stream must not keep running."""

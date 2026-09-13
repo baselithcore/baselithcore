@@ -36,6 +36,10 @@ class ObservabilityConfig(BaseSettings):
         env_prefix="OBSERVABILITY_",
         case_sensitive=False,
         extra="ignore",
+        # Both fields carry an explicit env alias. Without this, constructing
+        # the class in code by field name silently falls back to the default
+        # (``extra="ignore"`` swallows the kwarg) instead of applying it.
+        populate_by_name=True,
     )
 
     # ``NoDecode``: pydantic-settings JSON-decodes complex fields before any
