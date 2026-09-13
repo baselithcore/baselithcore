@@ -2,10 +2,11 @@
 
 import sys
 
-import plugins.api_routers.chat as _chat
-from plugins.api_routers.chat import router
+from core.utils.optional_import import optional_router
 
-# Register self as the plugin module for runtime compatibility
-sys.modules[__name__] = _chat
+_chat, router = optional_router("plugins.api_routers.chat")
+if _chat is not None:
+    # Register self as the plugin module for runtime compatibility
+    sys.modules[__name__] = _chat
 
 __all__ = ["router"]

@@ -58,6 +58,7 @@ docker-compose.yml
 
 # === Frontend & Build Artifacts ===
 **/node_modules
+**/.pnpm-store
 frontend/dist
 frontend/.vite
 frontend/node_modules

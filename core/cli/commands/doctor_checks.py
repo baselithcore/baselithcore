@@ -76,7 +76,11 @@ def is_placeholder_secret(value: object) -> bool:
     if not value:
         return True
     normalized = str(value).strip().lower()
-    return normalized in {"__change_me__", "changeme", "change_me", "todo", "dummy"}
+    if not normalized:
+        return True
+    if normalized in {"__change_me__", "changeme", "change_me", "todo", "dummy"}:
+        return True
+    return normalized.startswith("__change_me")
 
 
 def resolve_local_path(value: str | None, fallback: str) -> Path:

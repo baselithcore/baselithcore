@@ -18,6 +18,13 @@ from core.cli.ui import print_error, print_info, print_step, print_success
 PLUGIN_REQUIREMENTS = Path("configs") / "plugin-requirements.txt"
 COMPOSE_FILE = "docker-compose.core.yml"
 DOCKER_ENV_FILE = Path("configs") / ".env.docker.core"
+COMPOSE_SHELL_OVERRIDE_KEYS = {
+    "BASELITH_HTTP_PORT",
+    "BASELITH_POSTGRES_PORT",
+    "BASELITH_REDIS_PORT",
+    "BASELITH_QDRANT_PORT",
+    "COMPOSE_PROJECT_NAME",
+}
 
 
 def install_plugin_into_docker(plugin_name: str, manifest: dict[str, Any]) -> int:
@@ -323,10 +330,33 @@ def _compose(args: list[str]) -> int:
         COMPOSE_FILE,
         *args,
     ]
-    env = os.environ.copy()
+    env = _compose_environment(DOCKER_ENV_FILE)
     env["BASELITH_DOCKER_ENV_FILE"] = str(DOCKER_ENV_FILE)
     result = subprocess.run(command, env=env, check=False)
     return result.returncode
+
+
+def _compose_environment(env_file: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    for key, value in _read_env_file(env_file).items():
+        if key in COMPOSE_SHELL_OVERRIDE_KEYS and os.environ.get(key):
+            continue
+        env[key] = value
+    return env
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    """Read a dotenv-style file for Docker Compose interpolation."""
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
 
 
 def _wait_for_http(path: str, expected: int, timeout: int = 90) -> bool:
