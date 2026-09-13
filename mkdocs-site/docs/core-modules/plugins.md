@@ -13,22 +13,31 @@ The `core/plugins` module manages the complete lifecycle of plugins within the s
 core/plugins/
 ├── __init__.py           # Public exports
 ├── interface.py          # Base Plugin class + manifest loading/validation
+├── manifest_model.py     # PluginManifestModel — the strict manifest schema
+├── _metadata.py          # PluginMetadata, built from the manifest model
 ├── agent_plugin.py       # AgentPlugin mixin
 ├── router_plugin.py      # RouterPlugin mixin
 ├── graph_plugin.py       # GraphPlugin mixin
 ├── registry.py           # PluginRegistry implementation
 ├── loader.py             # PluginLoader implementation
+├── bulk_load.py          # load_all_plugins — per-plugin failure containment
+├── discovery.py          # baselith.plugins entry-point group + merge rules
+├── plugin_class.py       # entry_point resolution / ambiguity refusal
+├── nursery.py            # PluginTaskNursery — owned background tasks
 ├── app_setup.py          # Sync pre-discovery for app-level middleware hooks
-├── integrity.py          # SHA-256 integrity verification / signing policy
+├── integrity.py          # Hashed surface (V1–V5), canonical manifest digest
+├── integrity_policy.py   # Verification policy: strict mode, legacy fallback
+├── signing.py            # Ed25519 signatures, trust roots and trust store
+├── manifest_rewrite.py   # Comment-preserving manifest writer used by signing
 ├── declarative.py        # SKILL.md declarative skill loader
 ├── skills_service.py     # SkillService — registry-backed catalog + gated activation
 ├── skill_scripts.py      # Sandboxed runner for a skill's bundled .py helpers
 ├── result.py             # SkillResult envelope (ok/fail/partial)
-├── load_gates.py         # Compatibility/config gates before init
+├── load_gates.py         # Compatibility/config gates before init (fail-closed)
 ├── lifecycle.py          # Lifecycle management
 ├── hotreload.py          # Hot reload support
 ├── metrics.py            # Plugin metrics collection
-├── health.py             # Health checking
+├── health.py             # Health checking + PluginHealth
 ├── version.py            # Version management
 ├── lookup.py             # Plugin lookup utilities
 ├── registration.py       # Registration logic
@@ -312,7 +321,105 @@ plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 
 `load_all_plugins(configs=None)` takes an optional map of plugin name → config
 dict and returns **how many** plugins loaded, not the instances — those are in
-the registry.
+the registry. One plugin that fails to instantiate is logged and skipped; it
+never aborts the rest of the boot (`core/plugins/bulk_load.py`).
+
+### Discovery sources
+
+`discover_plugins()` merges two sources (`core/plugins/discovery.py`):
+
+1. the **directory scan** under the loader's plugins root, and
+2. every installed distribution advertising the **`baselith.plugins` entry-point
+   group**, resolved to the package directory holding its manifest.
+
+The directory scan is authoritative: on a name clash the local tree wins, the
+installed package is ignored and a warning names both paths. Broken distribution
+metadata, an entry point that no longer imports, and a package without a manifest
+are each logged and skipped — discovery can never stop the process from starting.
+`BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the second
+source off entirely.
+
+`core/api/lifespan.py` hands the merged list to `ResourceAnalyzer.discover_plugins(
+extra_dirs=...)`, so entry-point plugins contribute routes, UI tabs and flow
+handlers exactly like directory ones — the two paths cannot disagree about which
+plugins exist. See
+[Packaging › Shipping a plugin as a distribution](../plugins/packaging.md#distribution-entry-points).
+
+### Which class gets instantiated
+
+`resolve_plugin_class()` (`core/plugins/plugin_class.py`) honours the manifest's
+`entry_point` — `module:Class`, `:Class` or a bare `Class`, with the module half
+resolved inside the plugin's own package. Without one it falls back to scanning the
+executed module for a concrete `Plugin` subclass, and **more than one candidate is
+an error** (`PluginClassError`) rather than the old alphabetical coin flip. A class
+imported from a dependency does not create ambiguity by itself: when several exist,
+the ones defined inside the plugin's own package win, and a lone candidate is
+accepted wherever it was defined.
+
+### The manifest schema is strict
+
+`PluginManifestModel` (`core/plugins/manifest_model.py`) is `extra="forbid"` and
+defines the whole contract. `validate_manifest_data()` checks the key set *before*
+Pydantic so it can name every offending key at once with a `difflib` suggestion:
+
+```text
+manifest.yaml: unknown manifest key(s): 'min_core_verison' (did you mean
+'min_core_version'?). Remove the key or fix the spelling — the loader ignores
+nothing.
+```
+
+`ManifestValidationError` subclasses `ValueError`, so the existing "skip this
+plugin" handlers keep working. Two cases that look alike are now separated:
+
+| Shape | Outcome |
+| --- | --- |
+| No manifest at all | Loads. The documented legacy shape; it grants nothing either way. |
+| Manifest present but invalid | **Refused in every environment**, with the reason from `describe_manifest_failure()` and a `transition_to_failed` on the lifecycle manager. |
+
+The second used to load the plugin with `discovery=None` — meaning no declared
+`permissions`, no `min_core_version` and no declared `environment_variables`. A typo
+therefore bought the plugin *more* authority than its author asked for.
+
+Three keys that were previously read and silently dropped are now carried on
+`PluginMetadata`: `entry_point`, `id` (as `.plugin_id`) and `repository`.
+
+#### Vendor extensions: the `x-` namespace
+
+A fail-closed schema has exactly as many legal keys as the core understands, so
+`split_extension_keys()` partitions the parsed mapping **before** validation: the
+core half goes through the unchanged `extra="forbid"` model, and every key
+matching `^x-[A-Za-z0-9][A-Za-z0-9._/-]*$` lands in
+`PluginManifestModel.extensions`. The refusal message carries the rule, so an
+author who just hit the error finds the remedy in it —
+`'control' (vendor data? declare it as 'x-control')`.
+
+```python
+from core.plugins import VENDOR_EXTENSION_PREFIX, is_extension_key
+
+VENDOR_EXTENSION_PREFIX          # "x-"
+is_extension_key("x-control")    # True
+```
+
+`PluginMetadata.extensions` is the mapping keyed as written;
+`.extension(name, default=None)` accepts either spelling; `to_dict()` re-emits the
+keys at top level so a round-trip stays a valid manifest.
+
+Two design points are what keep this a namespace rather than a hole:
+
+- `extensions` is a **read-only property over a private attribute**, not a field,
+  so `extensions:` never becomes a second unprefixed door, and
+  `known_manifest_keys()` — the surface the CLI validator and the marketplace read
+  — stays exactly the set of keys the core interprets.
+- No core key starts with `x-` and none may, so the namespaces are syntactically
+  disjoint: a misspelled core key can never acquire the prefix by accident and
+  disappear into the extension bucket. Typo protection is untouched, and the
+  did-you-mean hint still wins whenever a close known key exists.
+
+Extensions are inside the V5 digest by construction — the surface hashes the whole
+canonicalised manifest minus the three self-referential keys — so editing one
+breaks the signature exactly like editing `permissions` does. Nothing in
+`core/plugins/integrity.py` changed to achieve that. See
+[Packaging › Vendor extensions](../plugins/packaging.md#vendor-extensions).
 
 ### Plugin Signing & Integrity
 
@@ -323,10 +430,11 @@ ships that also executes: `*.py`/`*.pyi` sources, the build/packaging files
 `pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`,
 `requirements*.txt`), declarative `SKILL.md` skill bodies (their contents
 reach the model's prompt), native extension modules and shell scripts
-(`*.so`, `*.pyd`, `*.dylib`, `*.sh`), and the front-end assets the operator
+(`*.so`, `*.pyd`, `*.dylib`, `*.sh`), the front-end assets the operator
 console serves from the plugin's own origin (`*.js`, `*.mjs`, `*.cjs`,
-`*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` — in practice `ui/dist/**`
-and `static/**`). `manifest.yaml`, `docs/` and the non-shipped part of
+`*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` — in practice
+`ui/{dist,out,build}/**` and `static/**`), and — since V5 — the
+**canonicalised manifest** (below). `docs/` and the non-shipped part of
 `ui/` (`ui/src`, `ui/node_modules`, the tsconfig/vite build inputs) stay
 excluded, as do the build directories of the two toolchains whose output
 would otherwise be hashed: `node_modules` and Cargo's `target`. Both are
@@ -360,8 +468,9 @@ convenience).
     lives under `core/utils/` rather than in `core/config/`.
 
 **The surface is versioned.** `HashSurface` names each generation of the hashed
-set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+) — and
-`CURRENT_HASH_SURFACE` is what the signing tools produce. Widening the surface
+set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+),
+`V4_UI_EXPORT` (0.31+), `V5_MANIFEST` (0.33+) — and `CURRENT_HASH_SURFACE` is what
+the signing tools produce (`V5_MANIFEST`). Widening the surface
 invalidates older digests, so `verify_plugin_integrity` re-computes the previous
 generations as a fallback: a plugin signed against a superseded surface still
 loads **outside** strict mode, with a warning naming what its signature does not
@@ -370,12 +479,32 @@ is re-signed. Both `compute_plugin_hash(plugin_dir, surface=...)` and
 `is_hashed_path(path, surface=...)` accept an explicit generation; omitted, they
 use the current one.
 
-!!! warning "Re-sign after building a plugin UI"
-    `ui/dist/**` entered the surface in 0.27, so `npm run build` changes the
-    plugin hash. Re-sign with `baselith plugin sign <path>` or load the tree with
-    `BASELITH_SKIP_INTEGRITY_CHECK=true` (dev only). See
-    [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed) for the
-    full file list.
+**The manifest is inside the digest (V5).** Up to V4 the manifest was excluded so
+a publisher could inject `integrity_sha256` after computing the hash — which left
+the file declaring the plugin's `permissions` (egress, tools, secrets),
+`python_dependencies`, `min_core_version` and `name` as the one thing a signed
+plugin could rewrite freely. V5 hashes a *canonical projection* instead of the
+bytes: `canonical_manifest_bytes()` parses the manifest, drops the three
+self-referential keys (`integrity_sha256`, `signature_ed25519`,
+`hash_surface_version`) and dumps the rest as compact sorted JSON. Injection still
+works, formatting and comments stay free, and any other edit breaks both the hash
+and the signature over it. `is_hashed_path()` still answers **False** for a
+manifest — it asks "does this file contribute its raw bytes?" — so pair it with
+`is_manifest_path()` when the question is "does this file move the digest?".
+
+`hash_surface_version` in the manifest records the generation a digest was computed
+under (`read_declared_surface()`). It is **advisory**: it sits outside the digest by
+construction, and verification always tries the current surface first and falls back
+through the superseded ones, so tampering with the number buys nothing.
+
+!!! warning "Re-sign after building a plugin UI — or editing the manifest"
+    `ui/dist/**` entered the surface in 0.27 and the manifest in V5, so both
+    `npm run build` and a `permissions:` edit change the plugin hash. Re-sign with
+    `baselith plugin sign <path>` (or `python scripts/sign_changed_plugins.py <path>
+    | --all`) or load the tree with `BASELITH_SKIP_INTEGRITY_CHECK=true` (dev only).
+    See [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed) for the
+    full file list, and [Security › Plugin trust
+    store](../advanced/security.md#plugin-trust-store) for publisher keys.
 
 !!! warning "Production recommendation"
     Sign all plugins (`integrity_sha256`) and leave the fail-closed default in
@@ -387,10 +516,11 @@ use the current one.
 After a plugin is instantiated and before `initialize()` is called, the loader
 runs two admission gates — `compat_gate(plugin, available_versions)` and
 `config_gate(plugin, config)` in `core/plugins/load_gates.py`, thin wrappers
-that run the checks below and apply the enforcement flags. Both are **warn-only by
-default** — they log problems but still load the plugin, so existing deployments
-are unaffected — and only *skip* an offending plugin when their matching
-enforcement flag is set.
+that run the checks below and apply the enforcement flags. Both **fail closed**:
+a plugin whose declarations are not satisfied is skipped, because the manifest is
+the author's own statement of what is safe to run. The matching environment
+variables survive only as explicit *downgrade* flags, for booting a deployment
+while a manifest is corrected.
 
 **Version compatibility** (`check_plugin_compatibility`,
 `core/plugins/version.py`) checks the plugin's
@@ -406,10 +536,24 @@ user-supplied config against the JSON Schema returned by the plugin's
 Validation runs in both the single-plugin path and `load_all_plugins`, giving
 authors precise, early feedback instead of an opaque failure during init.
 
-| Variable | Effect |
-|----------|--------|
-| `BASELITH_ENFORCE_PLUGIN_COMPAT=true` | Skip plugins whose core/plugin-dependency version constraints are not satisfied. |
-| `BASELITH_ENFORCE_PLUGIN_CONFIG=true` | Skip plugins whose config fails their declared JSON Schema. |
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `BASELITH_ENFORCE_PLUGIN_COMPAT` | `true` | Skip plugins whose core/plugin-dependency version constraints are not satisfied. Set to `false`/`0`/`no`/`off` to downgrade to warn-only. |
+| `BASELITH_ENFORCE_PLUGIN_CONFIG` | `true` | Skip plugins whose config fails their declared JSON Schema. Same downgrade values. |
+
+!!! warning "Disabling a plugin now disables its dependents"
+    `plugin_dependencies` are part of the compat gate, so a dependency that is absent
+    from the load set is a refusal, not a warning. Turning `browser_agent` off in
+    `configs/plugins.yaml` therefore skips `baselithbot` as well. Either disable the
+    dependents too, or set `BASELITH_ENFORCE_PLUGIN_COMPAT=false` for the duration.
+
+`BASELITH_ENFORCE_PLUGIN_CONFIG` has a **single** reading, owned by
+`core.plugins.config_validation.is_config_enforcement_enabled()` and fail-closed:
+enforcement is on unless the variable is explicitly `false`/`0`/`no`/`off`.
+`load_gates.is_config_gate_enforced()` is an alias of it, kept for existing
+callers. The two used to disagree on an unset environment — the gate fail-closed,
+the older helper opt-in — so the honest answer to "is plugin config enforced
+here?" depended on which function you happened to call.
 
 ```yaml
 # manifest.yaml — declare compatibility bounds and dependencies
@@ -582,6 +726,70 @@ for name, status in report["plugins"].items():
 
 one = registry.health_check("weather-agent")   # single plugin
 ```
+
+### The `health()` hook
+
+`health_check()` only knows whether `initialize()` completed. A plugin usually knows
+more — a stale upstream, an expired credential, a drained queue — so it can override
+the optional async hook:
+
+```python
+from core.plugins import Plugin, PluginHealth
+
+
+class WeatherPlugin(Plugin):
+    async def health(self) -> PluginHealth:
+        lag = await self._feed.seconds_behind()
+        return PluginHealth(
+            healthy=lag < 300,
+            detail=f"feed {lag:.0f}s behind",
+            data={"lag_seconds": lag},
+        )
+```
+
+`await registry.check_health()` is the async counterpart of `health_check()` and
+returns the same shape, with `detail` and `data` added for each plugin that
+overrides the hook. Two properties are worth knowing:
+
+- the hook is awaited **only when overridden** (`Plugin.has_health_override()`), so a
+  plugin that ignores it costs nothing and is still reported on its init state;
+- a hook that raises marks *that* plugin unhealthy and is logged — a broken reporter
+  never takes the health endpoint down with it.
+
+The synchronous `health_check()` is unchanged and still callable from any thread.
+
+---
+
+## Background tasks
+
+A plugin that starts its own `asyncio` task used to outlive its own reload: the new
+generation initialized while the old one's loop kept touching shared state. Spawn
+through the registry instead, and the task is owned by the plugin
+(`core/plugins/nursery.py`):
+
+```python
+task = registry.spawn_task("weather-agent", self._poll_forever())
+
+registry.get_plugin_task_count("weather-agent")   # -> int, outstanding tasks
+await registry.cancel_plugin_tasks("weather-agent")  # cancels AND awaits
+```
+
+`unregister`, `reload_plugin` and the hot-reload controller all cancel a plugin's
+tasks before `shutdown()`. Cancellation **awaits**, because a bare `cancel()` only
+requests it. The wait is bounded: the registry holds its lock across `unregister`
+and a task is free to swallow `CancelledError`, so on expiry the stragglers are
+logged by name and abandoned rather than freezing the registry.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BASELITH_PLUGIN_TASK_CANCEL_TIMEOUT` | `10` | Seconds teardown waits for cancelled tasks to unwind. `0` means cancel and do not wait; a non-numeric value warns and falls back to the default. |
+
+While teardown is in flight, `spawn_task()` raises `PluginTaskClosedError` rather
+than accepting work that would outlive the generation being torn down — and it
+closes the coroutine, so the refusal cannot leak a never-awaited coroutine.
+Spawning works again once teardown finishes. Wrap cancel *and* shutdown in
+`registry.closing_plugin(name)` when tearing a plugin down by hand, so work started
+from inside `Plugin.shutdown()` is refused too.
 
 ---
 

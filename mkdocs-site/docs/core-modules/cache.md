@@ -199,8 +199,11 @@ and return something `np.asarray` can consume.
     A synchronous embedder goes to the **dedicated inference pool**
     (`run_inference`), never `run_in_executor(None, …)`. The default executor
     serves latency-critical short tasks; parking a multi-tens-of-milliseconds
-    sentence-transformer forward pass there starves them. Follow the same rule
-    in any plugin that wraps a local model.
+    sentence-transformer forward pass there starves them. `run_inference` also
+    propagates the caller's contextvars, so a span opened by the embedder nests
+    under the request instead of starting a new trace — see
+    [NLP › Where inference runs](nlp.md#where-inference-runs). Follow the same
+    rule in any plugin that wraps a local model.
 
 !!! danger "A swallowed embedding error is a silently dead cache"
     `set()` and `get_similar_with_score()` both wrap the embedding step in a

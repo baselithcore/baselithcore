@@ -57,8 +57,7 @@ and rate-limited before the route body runs. The routes delegate to
 `chat_service` (`core.chat.chat_service`), which owns the `Orchestrator`.
 
 ```python title="plugins/api_routers/chat.py (trimmed)"
-from fastapi import APIRouter, Depends, Response
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Request, Response
 
 from core.chat import chat_service
 from core.middleware import require_user
@@ -73,12 +72,15 @@ async def chat(req: ChatRequest, response: Response):
     return result
 
 
-@router.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
+@router.post("/chat/stream", response_class=SSEResponse)
+async def chat_stream(req: ChatRequest, request: Request) -> SSEResponse:
     stream = await chat_service.handle_chat_stream_async(req)
-    return StreamingResponse(
-        bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
-        media_type="text/plain",
+    return SSEResponse(
+        sse_stream(
+            request,
+            bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
+            timeout_seconds,
+        ),
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 ```
@@ -86,7 +88,10 @@ async def chat_stream(req: ChatRequest):
 The trimmed parts are the transparency headers (`X-Baselith-AI-Disclosure`,
 `X-Baselith-AI-Provenance`, added only when `TransparencyService` is enabled)
 and `bounded_stream`, which caps a stream at `STREAM_MAX_BYTES` (4 MiB) in
-total and `STREAM_MAX_CHUNK_BYTES` (64 KiB) per chunk.
+total and `STREAM_MAX_CHUNK_BYTES` (64 KiB) per chunk. `SSEResponse` is a
+`StreamingResponse` subclass with `media_type = "text/event-stream"` pinned on
+the class, so the OpenAPI schema documents the right content type — see
+[Streaming Response](#streaming-response).
 
 ### Request Model
 
@@ -545,14 +550,33 @@ When `TransparencyService` is enabled the route also writes
 
 ### Streaming Response
 
-`/chat/stream` is **not** server-sent events. `handle_chat_stream_async` runs
-`Orchestrator.process_stream(query, context)` and the route wraps it in a
-`StreamingResponse` with `media_type="text/plain"`: each yielded chunk is raw
-text with no framing, and the stream simply ends when generation is done.
+`/chat/stream` speaks **Server-Sent Events** (`text/event-stream`).
+`handle_chat_stream_async` runs `Orchestrator.process_stream(query, context)`
+and the route wraps it in an `SSEResponse`, which pins the media type on the
+class so the OpenAPI schema advertises it too:
+
+| Frame | When | Payload |
+| --- | --- | --- |
+| `data: <line>` | once per model chunk | A chunk containing newlines becomes one `data:` line per line — exactly how a compliant client reassembles it. |
+| `event: error` | the source raised mid-stream | `data: stream failed` — deliberately fixed text; the exception can carry provider detail, prompt fragments or credentials, and it is already in the log. |
+| `event: done` | **always**, last | `data: [DONE]`, matching the convention every OpenAI-compatible SSE client already implements. |
+
+The terminal event is the point: it used to answer `text/plain` with the tokens
+simply concatenated, which gave a client no frame boundaries and no way to tell a
+finished stream from a dropped connection.
+
+Two other bounds apply to every stream:
+
+- **Client disconnect** — the generator checks `request.is_disconnected()` each
+  round and closes the source on the way out, so a closed tab no longer leaves the
+  upstream LLM call running (and billing).
+- **Wall clock** — `CHAT_STREAM_TIMEOUT_SECONDS` (default `300.0`) bounds the whole
+  response; on expiry the stream ends cleanly with `event: done`.
+
 `SmartGzipMiddleware` excludes `/chat/stream` (and `/v1/chat/stream`) so
 chunks are never buffered. If `ChatConfig.streaming_enabled` is off,
 `handle_chat_stream_async` falls back to `handle_chat_async` and yields the
-full answer as a single chunk.
+full answer as a single chunk — still SSE-framed.
 
 Intents without a `StreamHandler` still stream — the orchestrator runs the
 full non-streaming pipeline and emits its final response as one chunk:
@@ -568,7 +592,8 @@ if not handler:
     return
 ```
 
-Consuming the stream from a client:
+Consuming the stream from a client — read *lines*, not raw chunks, and stop on
+the terminal event:
 
 ```python
 import httpx
@@ -580,8 +605,19 @@ async with httpx.AsyncClient(base_url="http://localhost:8000") as client:
         json={"query": "What is the weather in Rome?"},
         headers={"Authorization": "Bearer <token>"},
     ) as resp:
-        async for chunk in resp.aiter_text():
-            print(chunk, end="", flush=True)
+        event = ""
+        async for line in resp.aiter_lines():
+            if line.startswith("event: "):
+                event = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = line.removeprefix("data: ")
+                if event == "done":
+                    break
+                if event == "error":
+                    raise RuntimeError(data)
+                print(data, end="", flush=True)
+            elif not line:
+                event = ""  # blank line terminates the event
 ```
 
 ---

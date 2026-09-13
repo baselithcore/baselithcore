@@ -396,7 +396,9 @@ All similarity computations use the shared `core.utils.similarity.cosine_similar
 For the clustering strategy, both the batched `encode()` pass and the
 pairwise-similarity/greedy-clustering pass run on the dedicated inference
 executor (`core.utils.concurrency.run_inference`), keeping the CPU-bound work
-off the event loop.
+off the event loop. The offload carries the caller's `contextvars` (tenant,
+trace) into the worker — see
+[NLP › Where inference runs](nlp.md#where-inference-runs).
 
 ---
 
@@ -684,6 +686,50 @@ Expose `update_scratchpad(section, content)` and
 `read_scratchpad(section?)` as tools so the agent can write to and
 read from its own scratchpad without escaping the runtime.
 
+### Async surface
+
+Inside an agent loop, the synchronous methods are a full Redis round-trip on the
+event loop. Every one has an `a`-prefixed twin, and both surfaces share the same
+validation and caps (`_validate`, `_check_section_budget`, `_render`) so they
+cannot drift:
+
+| Sync | Async |
+|---|---|
+| `update_section(thread_id, section, content)` | `aupdate_section(...)` |
+| `read_section(thread_id, section)` | `aread_section(...)` |
+| `clear_section(thread_id, section)` | `aclear_section(...)` |
+| `list_sections(thread_id)` | `alist_sections(...)` |
+| `read_all(thread_id)` | `aread_all(...)` |
+| `clear(thread_id)` | `aclear(...)` |
+
+```python
+pad = Scratchpad(RedisScratchpadBackend())
+
+await pad.aupdate_section("user-42", "goal", "synthesize Q3 report")
+goal = await pad.aread_section("user-42", "goal")
+full = await pad.aread_all("user-42")
+```
+
+The `ScratchpadBackend` protocol gained the matching backend hooks — `aget`,
+`aset`, `adelete`, `alist`, `aclear` — and `InMemoryScratchpadBackend`
+implements them (plus `get_all` / `aget_all`).
+
+!!! info "A sync-only backend still works, and still does not block the loop"
+    `Scratchpad` prefers the backend's `a*` coroutine and otherwise offloads the
+    synchronous method with `asyncio.to_thread`. A third-party backend written
+    before the async protocol existed keeps working unchanged. Likewise
+    `aread_all` prefers `aget_all` (one `HGETALL`), then offloads a synchronous
+    `get_all`, and only then falls back to one `get` per section.
+
+`RedisScratchpadBackend` holds **two** clients: the sync one for the synchronous
+methods and an asyncio one for the `a*` ones. The async client is built lazily
+and memoised **per event loop** — an asyncio Redis connection is bound to the
+loop that opened it, so a backend reused from a second loop (a restarted worker,
+two `asyncio.run` calls) gets a fresh client. Inject your own with
+`RedisScratchpadBackend(async_redis_client=...)`. If no async client can be
+built, the failure is logged once and the async methods fall back to
+`to_thread` over the sync client — never a blocking call on the loop.
+
 ---
 
 ## Hybrid retrieval — BM25 + Reciprocal Rank Fusion
@@ -749,6 +795,14 @@ inference executor (`core.utils.concurrency.run_inference`) instead of inline
 on the event loop; below the threshold the thread hand-off would cost more
 than the work, so it stays inline. The opt-in reranker already ran off-loop
 the same way.
+
+The offload carries the caller's `contextvars` (tenant, trace) into the worker —
+see [NLP › Where inference runs](nlp.md#where-inference-runs). That is
+load-bearing here: the tiers this pass reads are tenant-scoped, so a worker
+running in an empty context would resolve them to a shared `default` bucket (or
+raise under `strict_tenant_isolation`). `HierarchicalMemory` used to carry a
+local `copy_context()` shim for exactly this; `run_inference` now owns it and the
+shim is gone.
 
 ### Example: fuse keyword + dense
 

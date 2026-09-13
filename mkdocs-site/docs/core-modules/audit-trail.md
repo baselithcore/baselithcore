@@ -26,6 +26,7 @@ the flag unset the historical logger-only behaviour is byte-for-byte unchanged.
 | ------ | ---- |
 | [`audit.py`](https://github.com/baselithcore/baselithcore) | Event model (`AuditEvent`, `AuditEventType`), sink protocol, fan-out `AuditLogger`, `audit_emit()` |
 | `audit_chain.py` | `SQLiteAuditSink` — append-only, hash-chained, queryable, purgeable |
+| `audit_digest.py` | `compute_entry_hash`, `coerce_chain_key`, `AuditChainKeyError`, `require_chain_key_from_env` — re-exported from `audit_chain.py`, so the public import path is unchanged |
 | `audit_setup.py` | Builds the logger from config; owns the retention sweep |
 | `core/config/audit.py` | `AuditConfig` / `get_audit_config()` |
 
@@ -38,6 +39,8 @@ the flag unset the historical logger-only behaviour is byte-for-byte unchanged.
 | `AUDIT_FILE_PATH` | `None` | Append events as JSON lines to this file |
 | `AUDIT_DB_PATH` | `None` | SQLite path for the durable, hash-chained sink |
 | `AUDIT_HASH_CHAIN` | `true` | Link each record to its predecessor (tamper evidence) |
+| `AUDIT_CHAIN_HMAC_KEY` | `None` | Secret keying the chain digest (HMAC-SHA256). Unset falls back to a plain SHA-256 chain — see [Tamper evidence](#tamper-evidence). Held as `SecretStr`; a blank or whitespace value is normalised to "no key". |
+| `AUDIT_CHAIN_REQUIRE_KEY` | `false` | Refuse to start the durable sink without that key, instead of silently downgrading to an unkeyed chain. |
 | `AUDIT_RETENTION_DAYS` | `180` | Retention horizon; `0` keeps records forever |
 | `AUDIT_MAX_DETAIL_CHARS` | `2000` | Cap on caller-supplied `details` per record |
 
@@ -135,13 +138,21 @@ representation rather than being dropped.
 
 ## Tamper evidence
 
-Every record stores `prev_hash` (its predecessor's `entry_hash`) and
+Every record stores `prev_hash` (its predecessor's `entry_hash`), and the digest
+is **keyed** when `AUDIT_CHAIN_HMAC_KEY` is set
+(`core.observability.audit_digest.compute_entry_hash`):
 
 ```text
+# with a key — tamper-evident against an attacker
+entry_hash = HMAC-SHA256(key, prev_hash ‖ canonical_json(event))
+
+# without one — the historical fallback
 entry_hash = SHA-256(prev_hash ‖ canonical_json(event))
 ```
 
-Editing or deleting a record breaks every downstream link:
+The payload is serialized with sorted keys and no whitespace, so the digest
+depends on the data and never on dict ordering or formatting. Editing or deleting
+a record breaks every downstream link:
 
 ```python
 from core.observability.audit_setup import get_durable_audit_sink
@@ -151,10 +162,30 @@ if not result.ok:
     alert(f"audit chain broken at seq={result.broken_at}: {result.reason}")
 ```
 
-This is **detection, not prevention** — an attacker with write access to the
-file can rebuild the whole chain. When the threat model includes a compromised
-host, anchor the digest externally: ship `sink.head_hash()` periodically to a
-WORM store or a separate SIEM, and compare on verification.
+Verification compares with `hmac.compare_digest`.
+
+!!! warning "An unkeyed chain detects accidents, not attackers"
+    Without a key, anyone who can write to the audit database can recompute every
+    link and the trail verifies again. Opening a chained sink with no key logs one
+    loud startup warning. Set `AUDIT_CHAIN_HMAC_KEY` wherever the audit trail is
+    evidence rather than telemetry, and set `AUDIT_CHAIN_REQUIRE_KEY=true` to make
+    the absence of a key a **boot failure** (`AuditChainKeyError`) instead of a
+    silent downgrade — `configure_audit_logging()` and `start_audit_trail()` both
+    re-raise it ahead of their normal degrade-gracefully handlers, and a malformed
+    audit config in that state is a boot failure too rather than a disabled trail.
+
+!!! danger "Rotating the key invalidates verification of older rows"
+    `verify_chain()` recomputes with the key it has now. Rows written under a
+    previous key fail with *"record content does not match its stored `entry_hash`
+    (tampering, or the chain was written under a different
+    `AUDIT_CHAIN_HMAC_KEY`)"*. This is strict on purpose: retrying unkeyed on
+    failure would hand an attacker the downgrade. **Rotate at a chain boundary** —
+    archive the current database, start a fresh one under the new key — and keep
+    the old key alongside the archive so the archive stays verifiable.
+
+Even keyed, this is **detection, not prevention**. When the threat model includes
+a compromised host, anchor the digest externally: ship `sink.head_hash()`
+periodically to a WORM store or a separate SIEM, and compare on verification.
 
 ## Retention and truncation
 

@@ -715,20 +715,33 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
 #### Tenant cost budgets (cumulative spend)
 
 The per-request `LoopBudget` caps one run; the **tenant cost budget** caps the
-ambient tenant's cumulative LLM spend over calendar windows. Both the
-generation and the streaming path enforce it through the seam in
-`core/quotas/cost_enforcement.py`:
+ambient tenant's cumulative LLM spend over calendar windows. **All five**
+generation paths enforce it through the seam in
+`core/quotas/cost_enforcement.py` — plain generation (`_generation.py`),
+streaming (`_streaming.py`), stream events (`stream_events.py`), the
+[message API](messages.md) (`message_runtime.py`) and structured output
+(`structured.py`):
 
-- **Pre-call gate** — `enforce_tenant_cost_budget()` runs before any provider
-  spend (at stream start for streaming); a tenant over its daily/monthly USD
-  limit gets `CostBudgetExceededError` and the span records
-  `gen_ai.baselith.error=tenant_cost_budget_exceeded`.
-- **Post-call booking** — the same USD cost charged to the `LoopBudget` is
-  booked on the tenant's cumulative ledger via `record_tenant_llm_cost()`
-  (at stream end for streaming). Booking never raises: the money is already
-  spent, and enforcement happens on the *next* call (post-paid metering).
+- **Pre-call gate** — `enforce_tenant_cost_budget(model=...)` runs before any
+  provider spend (at stream start for streaming); a tenant over its
+  daily/monthly USD limit gets `CostBudgetExceededError` and the span records
+  `gen_ai.baselith.error=tenant_cost_budget_exceeded`. Passing `model=` also
+  applies the **unknown-model cost policy here**, so a `reject`-policy
+  deployment refuses an unpriceable call *before* it spends rather than after
+  the provider has answered, raising `UnknownModelCostRejected` — see
+  [Usage Quotas › Unknown-model pricing](quotas.md#unknown-model-pricing).
+- **Post-call booking** — the turn's USD cost is booked on the tenant's
+  cumulative ledger by `record_usage_cost(model, usage)` (at stream end for
+  streaming), which prices the **whole four-bucket record**, so a cache read is
+  billed at its own tier rather than at the full input rate. Booking never
+  raises: the money is already spent, and enforcement happens on the *next*
+  call (post-paid metering). That is also why an unpriced model under the
+  `reject` policy is a "don't meter" here rather than an error — raising after
+  the provider has been paid would destroy a completed generation the user
+  already owes for.
 - **Fail-open** — a quota-store outage degrades to unmetered service with a
-  warning, never to an LLM outage; only the budget rejection itself
+  warning, never to an LLM outage; only the budget rejection itself (and a
+  configured `reject` refusal, which is not an infrastructure failure)
   propagates.
 
 A no-op unless `QUOTAS_ENABLED=true` and a cost limit is configured

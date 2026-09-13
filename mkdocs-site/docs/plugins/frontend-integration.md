@@ -133,8 +133,9 @@ leaves browsers pointing at deleted hashed bundles.
 
 !!! warning "Served assets are part of the integrity hash"
     `*.js`, `*.css`, `*.html`, `*.svg` and the other served asset types under `static/`
-    and `ui/dist/` are hashed by `baselith plugin sign`. Re-sign after changing them —
-    see [Packaging › Signing](packaging.md#integrity).
+    and `ui/{dist,out,build}/` are hashed by `baselith plugin sign`, and since hash
+    surface V5 so is the manifest itself. Re-sign after changing either — see
+    [Packaging › Signing](packaging.md#integrity).
 
 ---
 

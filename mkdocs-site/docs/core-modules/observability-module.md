@@ -14,6 +14,7 @@ core/observability/
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
 ├── otel_instrumentation.py  # what gets instrumented, and the propagators
 ├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
+├── agent_spans.py    # Agent-attributed spans (OTel GenAI: invoke_agent / execute_tool)
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
 ├── audit.py      # AuditLogger — typed audit events to pluggable sinks
@@ -215,6 +216,68 @@ Guarantees:
 
 Sinks receive raw instrumentation attributes: redact and truncate them before
 retaining or displaying anything.
+
+### Agent attribution (`agent_spans.py`)
+
+Every other span says *what* happened — a chat completion, an HTTP call, a skill
+activation — but not **which agent was running** when it happened. Without that,
+a trace can show a slow multi-agent answer while leaving you to guess which
+agent owned the slow part, and a topology of "who calls whom" cannot be built
+from the span stream at all.
+
+`agent_spans.py` closes the gap with two context managers that stamp a unit of
+agent work with the OpenTelemetry GenAI semantic conventions, so semconv-aware
+backends (Langfuse, Phoenix, Datadog LLM Observability, a plain OTel collector)
+light up on the same data any in-house reader uses.
+
+```python
+from core.observability.agent_spans import agent_span, tool_span
+
+with agent_span("researcher", plugin="my_plugin", kind="handler"):
+    with tool_span("web_search"):
+        results = await search(query)
+```
+
+| Attribute | Value |
+| --- | --- |
+| `gen_ai.operation.name` | `invoke_agent` (agents) or `execute_tool` (tools) |
+| `gen_ai.agent.name` | Display name |
+| `gen_ai.agent.id` | Stable id, `<plugin>:<name>` — `core:<name>` when unowned |
+| `gen_ai.tool.name` | Tool name, on tool spans only |
+| `baselith.agent.kind` | Producing seam: `handler`, `swarm`, `crew`, `workflow`, `tool` |
+| `baselith.agent.parent` | The enclosing agent's id |
+| `baselith.plugin` | Owning plugin |
+
+**The parent is not the span parent.** It comes from a context variable holding
+the currently executing agent. Span parentage records whichever span happens to
+enclose this one — an HTTP server span, a retry wrapper, a database call — while
+the context variable records the enclosing *agent*. That is the edge a topology
+needs, and it survives unrelated spans in between. A contextvar rather than a
+thread local because agent work is async: it follows an `await` into a task
+without leaking across concurrent siblings.
+
+A tool span deliberately does **not** become the current agent. A tool is a
+leaf; treating it as an agent would make every subsequent call appear to descend
+from it.
+
+The framework wires this at four points, so most code inherits attribution for
+free rather than calling the helpers itself:
+
+- the orchestrator's flow-handler dispatch, covering every registered intent
+  handler including the streaming path;
+- swarm sub-agent execution, which is where real agent-to-agent edges appear;
+- tool steps in `CheckpointManager.run_step`, giving agent-to-tool edges;
+- `publish_run_event`, so an `AgentEvent`'s `agent_id` finally names the agent
+  that produced the step instead of always reading `system`.
+
+Recording is best-effort throughout. A tracer that cannot start yields `None`
+and the work proceeds, because a failure to record telemetry must never fail the
+work being recorded. Errors raised by the body propagate untouched; the tracer
+marks the span failed on the way past.
+
+`baselith.plugin` doubles as the primary key any per-plugin span attribution
+should read, so setting it here means a reader does not have to infer ownership
+from a route prefix.
 
 ### Trace ↔ log correlation
 

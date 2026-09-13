@@ -75,6 +75,31 @@ remains available via `card.capabilities` and `card.add_capability(...)` for
 backward compatibility; new code should prefer `AgentSkill` and
 `AgentCapabilities`.
 
+### Transport and authentication on the card
+
+Without these, a peer has to guess how to reach the agent and how to authenticate
+to it — which in practice means trying unsigned and being refused. A2A 0.3.0 puts
+all three on the card, and every one is overridable per deployment:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `preferredTransport` | `"JSONRPC"` | Transport a peer should try first. |
+| `securitySchemes` | `{"hmacSignature": {...}}` | OpenAPI 3 `SecurityScheme` objects. The default declares `apiKey` in header `X-A2A-Signature`, with a description naming the companion `X-A2A-Timestamp` / `X-A2A-Nonce` / `X-A2A-Peer` headers that the signature covers — see [Request signing (HMAC)](#request-signing-hmac). |
+| `security` | `[{"hmacSignature": []}]` | Which of those schemes a peer must satisfy. |
+
+Build the defaults directly with `default_security_schemes()` and
+`default_security()` from `core.a2a.agent_card`, or replace them when a
+deployment fronts the agent with OAuth or mTLS.
+
+!!! warning "`protocols` is deprecated and no longer emitted"
+    The pre-0.3.0 `protocols` list was never in the spec, and a conformant peer
+    validating the card against the 0.3.0 schema rejects unknown members — so
+    `to_dict()` drops it. The dataclass field and the `from_dict()` reading stay
+    for backward compatibility; it duplicated what `preferredTransport` now says
+    properly. `AgentDiscovery.find_by_protocol()` matches `protocols` **or**
+    `preferredTransport`, case-insensitively, so a card minted from a conformant
+    0.3.0 peer is still findable.
+
 ---
 
 ## Discovery
@@ -92,7 +117,9 @@ discovery.register(card)
 # Find agents by legacy capability name (matches AgentCard.capabilities)
 analysts = discovery.find_by_capability("data_analysis", healthy_only=True)
 
-# Find agents by supported protocol (matches AgentCard.protocols)
+# Find agents by supported protocol. Matches the deprecated AgentCard.protocols
+# OR AgentCard.preferredTransport, case-insensitively — a card minted from a
+# conformant 0.3.0 peer carries only the latter.
 rpc_agents = discovery.find_by_protocol("jsonrpc")
 
 # Look up a single card by name
@@ -120,20 +147,31 @@ stats = discovery.get_stats()            # {total_agents, healthy_agents, ...}
 
 ### Well-known discovery endpoint
 
-Per the A2A spec, an agent advertises its card at `/.well-known/agent.json`.
+Per A2A 0.3.0, an agent advertises its card at `/.well-known/agent-card.json`.
 The main BaselithCore app mounts this automatically — `core.api.factory`
 builds the card from app config plus the framework version and includes
 `create_wellknown_router(...)` — so peer agents can discover this instance
 without bespoke integration:
 
 ```bash
-curl http://localhost:8000/.well-known/agent.json
+curl http://localhost:8000/.well-known/agent-card.json
 # { "name": "Baselith-Core", "version": "0.11.x",
+#   "protocolVersion": "0.3.0", "preferredTransport": "JSONRPC",
 #   "capabilities": { "streaming": true, ... }, ... }
 ```
 
-Both the standard path and the alias `/a2a/agent-card` are served. To
-advertise a custom card from any FastAPI app **without** a full JSON-RPC
+| Path | Role | Constant |
+|---|---|---|
+| `/.well-known/agent-card.json` | Canonical (0.3.0) | `core.a2a.router.AGENT_CARD_PATH` |
+| `/.well-known/agent.json` | Pre-0.3.0 alias, still served | `LEGACY_AGENT_CARD_PATH` |
+| `/a2a/agent-card` | Convenience alias | — |
+
+All three serve an identical body, and all three are mounted by both
+`create_wellknown_router` and the `include_wellknown` sub-router of
+`create_a2a_router`. Point new peers at the canonical path; keep the alias for
+the ones you do not control.
+
+To advertise a custom card from any FastAPI app **without** a full JSON-RPC
 backend, use the discovery-only router:
 
 ```python
@@ -175,10 +213,37 @@ final task in one response. The card also carries a `protocolVersion` field
 endpoint it replays the task snapshot followed by the terminal
 `status-update` (`final: true`) — the tail a reconnecting client needs; over
 sync `dispatch()` it returns the current snapshot. Unknown ids get the spec's
-`TaskNotFoundError` (-32003). `tasks/pushNotification/set|get` answer the
-spec's `PushNotificationNotSupportedError` (-32007) — the conformant reply
-for an agent whose card advertises `pushNotifications: false` — instead of a
-generic `method_not_found`.
+`TaskNotFoundError` (-32003).
+
+Push-notification configuration is answered with the spec's
+`PushNotificationNotSupportedError` (-32007) — the conformant reply for an agent
+whose card advertises `pushNotifications: false` — rather than a generic
+`method_not_found`. Six spellings land there:
+
+| Method | Status |
+|---|---|
+| `tasks/pushNotificationConfig/set` | 0.3.0 |
+| `tasks/pushNotificationConfig/get` | 0.3.0 |
+| `tasks/pushNotificationConfig/list` | 0.3.0 |
+| `tasks/pushNotificationConfig/delete` | 0.3.0 |
+| `tasks/pushNotification/set` | 0.2 alias, **deprecated** |
+| `tasks/pushNotification/get` | 0.2 alias, **deprecated** |
+
+The deprecated pair keeps working so peers pinned to the older spelling are not
+broken, but each call logs `a2a_deprecated_push_notification_method`. The sets are
+exported as `PUSH_NOTIFICATION_METHODS` and
+`DEPRECATED_PUSH_NOTIFICATION_METHODS` from `core.a2a.protocol`, so peer tooling
+can agree with the server instead of maintaining its own list.
+
+### Task states
+
+`TaskState` follows A2A 0.3.0. Two members are easy to miss, and both are
+**non-terminal**:
+
+| State | Meaning |
+|---|---|
+| `auth-required` | The client must authenticate (or step up) before the agent can continue — distinct from `input-required`, which asks for task *content*. A peer that cannot tell them apart re-prompts a human for data when it should be refreshing a token. |
+| `unknown` | The agent cannot determine the state. Deserializing a peer's task in this state used to raise `ValueError`, so one unrecognisable task poisoned the whole exchange. |
 
 ---
 

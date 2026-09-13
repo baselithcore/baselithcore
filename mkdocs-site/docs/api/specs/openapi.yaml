@@ -1,7 +1,111 @@
 components:
   schemas:
+    AgentCardResponse:
+      additionalProperties: true
+      description: 'The agent card as served at the discovery endpoints.
+
+
+        Mirrors :meth:`core.a2a.agent_card.AgentCard.to_dict`; unknown members are
+
+        passed through untouched.'
+      properties:
+        capabilities:
+          additionalProperties: true
+          description: 'Protocol features: streaming, pushNotifications, stateTransitionHistory.'
+          title: Capabilities
+          type: object
+        defaultInputModes:
+          description: Content types the agent accepts.
+          items:
+            type: string
+          title: Defaultinputmodes
+          type: array
+        defaultOutputModes:
+          description: Content types the agent produces.
+          items:
+            type: string
+          title: Defaultoutputmodes
+          type: array
+        description:
+          description: What this agent does.
+          title: Description
+          type: string
+        documentationUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Human-readable documentation for this agent.
+          title: Documentationurl
+        name:
+          description: Unique agent name.
+          title: Name
+          type: string
+        preferredTransport:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Transport a peer should try first.
+          title: Preferredtransport
+        protocolVersion:
+          default: 0.3.0
+          description: A2A protocol revision this agent implements.
+          title: Protocolversion
+          type: string
+        security:
+          anyOf:
+          - items:
+              additionalProperties:
+                items:
+                  type: string
+                type: array
+              type: object
+            type: array
+          - type: 'null'
+          description: Which of those schemes a peer must satisfy.
+          title: Security
+        securitySchemes:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          description: Named OpenAPI security schemes the agent accepts.
+          title: Securityschemes
+        skills:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          description: A2A skill definitions this agent offers.
+          title: Skills
+        url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Base URL for A2A communication.
+          title: Url
+        version:
+          description: The agent's own semantic version.
+          title: Version
+          type: string
+      required:
+      - name
+      - description
+      - version
+      title: AgentCardResponse
+      type: object
     ApprovalDecision:
-      description: Reviewer decision payload for a paused run.
+      description: 'Reviewer decision payload for a paused run.
+
+
+        ``approver`` is **not** the identity. Who decided comes from the
+
+        authenticated request; a body field is a string the client chose, which
+
+        answers none of the questions an auditor asks. It is kept only as an
+
+        optional display label recorded beside the real principal.'
       properties:
         approved:
           title: Approved
@@ -11,6 +115,8 @@ components:
           - maxLength: 200
             type: string
           - type: 'null'
+          description: Optional display label. The recorded identity always comes
+            from the authenticated request, never from this field.
           title: Approver
         reason:
           anyOf:
@@ -604,23 +710,35 @@ components:
       type: http
 info:
   title: Baselith-Core
-  version: 0.31.0
+  version: 0.32.0
 openapi: 3.1.0
 paths:
-  /.well-known/agent.json:
+  /.well-known/agent-card.json:
     get:
-      description: Standard A2A agent-card discovery endpoint.
-      operationId: wellknown_agent_card__well_known_agent_json_get
+      description: Standard A2A agent-card discovery endpoint (0.3.0).
+      operationId: wellknown_agent_card__well_known_agent_card_json_get
       responses:
         '200':
           content:
             application/json:
               schema:
-                additionalProperties: true
-                title: Response Wellknown Agent Card  Well Known Agent Json Get
-                type: object
+                $ref: '#/components/schemas/AgentCardResponse'
           description: Successful Response
       summary: Wellknown Agent Card
+      tags:
+      - A2A Discovery
+  /.well-known/agent.json:
+    get:
+      description: Pre-0.3.0 discovery path, kept so existing peers still resolve.
+      operationId: legacy_wellknown_agent_card__well_known_agent_json_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCardResponse'
+          description: Successful Response
+      summary: Legacy Wellknown Agent Card
       tags:
       - A2A Discovery
   /a2a/agent-card:
@@ -632,9 +750,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                title: Response Agent Card Alias A2A Agent Card Get
-                type: object
+                $ref: '#/components/schemas/AgentCardResponse'
           description: Successful Response
       summary: Agent Card Alias
       tags:
@@ -860,7 +976,8 @@ paths:
       - admin
   /admin/tenants:
     get:
-      description: List tenants, newest first (paginated — the listing is never unbounded).
+      description: "List tenants, newest first (paginated \u2014 the listing is never\
+        \ unbounded)."
       operationId: list_tenants_admin_tenants_get
       parameters:
       - description: Page size
@@ -1153,20 +1270,20 @@ paths:
       - Plugin Management
   /api/plugins/frontend-manifest:
     get:
-      description: 'Return manifest of all plugin frontend assets for injection.
-
-
-        Auth-gated: the manifest enumerates installed plugins and their asset
-
-        paths — free recon for an anonymous caller, and every other
-
-        plugin-metadata route already requires auth.'
+      description: "Return manifest of all plugin frontend assets for injection.\n\
+        \nAuth-gated: the manifest enumerates installed plugins and their asset\n\
+        paths \u2014 free recon for an anonymous caller, and every other\nplugin-metadata\
+        \ route already requires auth."
       operationId: get_frontend_manifest_api_plugins_frontend_manifest_get
       responses:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get Frontend Manifest Api Plugins Frontend Manifest
+                  Get
+                type: object
           description: Successful Response
       summary: Get Frontend Manifest
   /api/plugins/metrics/all:
@@ -1178,7 +1295,10 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get All Metrics Api Plugins Metrics All Get
+                type: object
           description: Successful Response
       summary: Get All Metrics
       tags:
@@ -1192,7 +1312,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get System Metrics Api Plugins Metrics System Overview
+                  Get
+                type: object
           description: Successful Response
       summary: Get System Metrics
       tags:
@@ -1206,7 +1330,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get Performance Metrics Api Plugins Metrics System
+                  Performance Get
+                type: object
           description: Successful Response
       summary: Get Performance Metrics
       tags:
@@ -1219,7 +1347,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Reset All Metrics Api Plugins Metrics System Reset
+                  Delete
+                type: object
           description: Successful Response
       summary: Reset All Metrics
       tags:
@@ -1240,7 +1372,10 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Reset Plugin Metrics Api Plugins Metrics  Plugin Name  Delete
+                type: object
           description: Successful Response
         '422':
           content:
@@ -1267,7 +1402,10 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get Plugin Metrics Api Plugins Metrics  Plugin Name  Get
+                type: object
           description: Successful Response
         '422':
           content:
@@ -1358,7 +1496,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                additionalProperties: true
+                title: Response Get Plugin Dependents Api Plugins  Plugin Name  Dependents
+                  Get
+                type: object
           description: Successful Response
         '422':
           content:
@@ -1507,7 +1649,18 @@ paths:
 
         The decision is consumed by the approval gate on the next resume: the run
 
-        continues (approved) or aborts with a denial (denied).'
+        continues (approved) or aborts with a denial (denied).
+
+
+        The reviewer is the **authenticated** admin the Basic Auth dependency
+
+        established, not anything the request body claims: an approval is a human
+
+        taking responsibility for a side effect the policy refused to let the
+
+        agent take alone, and an identity the caller typed is not evidence of who
+
+        that human was.'
       operationId: decide_approvals__run_id__decision_post
       parameters:
       - in: path
@@ -1606,7 +1759,10 @@ paths:
       summary: Chat
   /chat/stream:
     post:
-      description: Returns the agent response as a stream (text chunks).
+      description: "Stream the agent response as Server-Sent Events.\n\nEmits one\
+        \ ``data:`` frame per model chunk and a final ``event: done``.\nThe response\
+        \ is cut short \u2014 cleanly \u2014 when the client disconnects or when\n\
+        ``CHAT_STREAM_TIMEOUT_SECONDS`` elapses."
       operationId: chat_stream_chat_stream_post
       requestBody:
         content:
@@ -1617,8 +1773,9 @@ paths:
       responses:
         '200':
           content:
-            application/json:
-              schema: {}
+            text/event-stream:
+              schema:
+                type: string
           description: Successful Response
         '422':
           content:
@@ -2267,12 +2424,9 @@ paths:
       - compliance
   /compliance/risk-management/{file_id}/review:
     post:
-      description: 'Record an Art. 9(1) systematic review.
-
-
-        Refused while risks remain open — a review signed over untreated,
-
-        unverified or unaccepted risks records something that did not happen.'
+      description: "Record an Art. 9(1) systematic review.\n\nRefused while risks\
+        \ remain open \u2014 a review signed over untreated,\nunverified or unaccepted\
+        \ risks records something that did not happen."
       operationId: review_risk_file_compliance_risk_management__file_id__review_post
       parameters:
       - in: path
@@ -2379,15 +2533,10 @@ paths:
       tags:
       - compliance
     post:
-      description: 'Register a system: screens Art. 5, derives the Art. 6 risk category.
-
-
-        A declared prohibited practice yields a ``PROHIBITED`` record rather than
-        a
-
-        rejection — inventorying a banned system is a prerequisite to retiring it.
-
-        Set ``COMPLIANCE_BLOCK_PROHIBITED_PRACTICES`` to refuse instead.'
+      description: "Register a system: screens Art. 5, derives the Art. 6 risk category.\n\
+        \nA declared prohibited practice yields a ``PROHIBITED`` record rather than\
+        \ a\nrejection \u2014 inventorying a banned system is a prerequisite to retiring\
+        \ it.\nSet ``COMPLIANCE_BLOCK_PROHIBITED_PRACTICES`` to refuse instead."
       operationId: register_system_compliance_systems_post
       requestBody:
         content:
@@ -2650,17 +2799,11 @@ paths:
       - feedback
   /health:
     get:
-      description: 'Liveness probe — process is up. Cheap, no dependency checks, no
-        auth.
-
-
-        Use for Kubernetes ``livenessProbe``: it must only fail if the process is
-
-        wedged, never because a downstream dependency is unavailable (that is the
-
-        readiness probe''s job). ``async def`` on purpose: a sync handler would
-
-        dispatch every probe through the anyio threadpool to return a literal.'
+      description: "Liveness probe \u2014 process is up. Cheap, no dependency checks,\
+        \ no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the\
+        \ process is\nwedged, never because a downstream dependency is unavailable\
+        \ (that is the\nreadiness probe's job). ``async def`` on purpose: a sync handler\
+        \ would\ndispatch every probe through the anyio threadpool to return a literal."
       operationId: health_check_health_get
       responses:
         '200':
@@ -2677,16 +2820,12 @@ paths:
       - status
   /health/ready:
     get:
-      description: 'Readiness probe — checks critical dependencies (no auth).
-
-
-        Returns HTTP 503 when the database is unreachable so Kubernetes removes the
-
-        pod from Service endpoints (traffic draining) until it recovers. Redis is
-
-        reported but advisory: the framework degrades to in-memory fallbacks, so it
-
-        does not gate readiness. Results are cached (~30s) to bound probe overhead.'
+      description: "Readiness probe \u2014 checks critical dependencies (no auth).\n\
+        \nReturns HTTP 503 when the database is unreachable so Kubernetes removes\
+        \ the\npod from Service endpoints (traffic draining) until it recovers. Redis\
+        \ is\nreported but advisory: the framework degrades to in-memory fallbacks,\
+        \ so it\ndoes not gate readiness. Results are cached (~30s) to bound probe\
+        \ overhead."
       operationId: readiness_health_ready_get
       responses:
         '200':
@@ -2985,18 +3124,11 @@ paths:
       - indexing
   /runs/{run_id}/events:
     get:
-      description: 'Stream a run''s structured events as Server-Sent Events.
-
-
-        Frames are ``event: <type>`` + ``data: <AgentEvent JSON>``; the stream
-
-        closes after a terminal event (final answer, error, or durable approval
-
-        pause). Subscribe **before** starting/resuming the run — events are
-
-        fan-out only, not replayed (the checkpoint trajectory is the durable
-
-        record).'
+      description: "Stream a run's structured events as Server-Sent Events.\n\nFrames\
+        \ are ``event: <type>`` + ``data: <AgentEvent JSON>``; the stream\ncloses\
+        \ after a terminal event (final answer, error, or durable approval\npause).\
+        \ Subscribe **before** starting/resuming the run \u2014 events are\nfan-out\
+        \ only, not replayed (the checkpoint trajectory is the durable\nrecord)."
       operationId: run_events_runs__run_id__events_get
       parameters:
       - in: path
@@ -3164,7 +3296,8 @@ paths:
       - status
   /v1/admin/tenants:
     get:
-      description: List tenants, newest first (paginated — the listing is never unbounded).
+      description: "List tenants, newest first (paginated \u2014 the listing is never\
+        \ unbounded)."
       operationId: list_tenants_v1_admin_tenants_get
       parameters:
       - description: Page size
@@ -3266,7 +3399,10 @@ paths:
       summary: Chat
   /v1/chat/stream:
     post:
-      description: Returns the agent response as a stream (text chunks).
+      description: "Stream the agent response as Server-Sent Events.\n\nEmits one\
+        \ ``data:`` frame per model chunk and a final ``event: done``.\nThe response\
+        \ is cut short \u2014 cleanly \u2014 when the client disconnects or when\n\
+        ``CHAT_STREAM_TIMEOUT_SECONDS`` elapses."
       operationId: chat_stream_v1_chat_stream_post
       requestBody:
         content:
@@ -3277,8 +3413,9 @@ paths:
       responses:
         '200':
           content:
-            application/json:
-              schema: {}
+            text/event-stream:
+              schema:
+                type: string
           description: Successful Response
         '422':
           content:
@@ -3374,17 +3511,11 @@ paths:
       - feedback
   /v1/health:
     get:
-      description: 'Liveness probe — process is up. Cheap, no dependency checks, no
-        auth.
-
-
-        Use for Kubernetes ``livenessProbe``: it must only fail if the process is
-
-        wedged, never because a downstream dependency is unavailable (that is the
-
-        readiness probe''s job). ``async def`` on purpose: a sync handler would
-
-        dispatch every probe through the anyio threadpool to return a literal.'
+      description: "Liveness probe \u2014 process is up. Cheap, no dependency checks,\
+        \ no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the\
+        \ process is\nwedged, never because a downstream dependency is unavailable\
+        \ (that is the\nreadiness probe's job). ``async def`` on purpose: a sync handler\
+        \ would\ndispatch every probe through the anyio threadpool to return a literal."
       operationId: health_check_v1_health_get
       responses:
         '200':
@@ -3401,16 +3532,12 @@ paths:
       - status
   /v1/health/ready:
     get:
-      description: 'Readiness probe — checks critical dependencies (no auth).
-
-
-        Returns HTTP 503 when the database is unreachable so Kubernetes removes the
-
-        pod from Service endpoints (traffic draining) until it recovers. Redis is
-
-        reported but advisory: the framework degrades to in-memory fallbacks, so it
-
-        does not gate readiness. Results are cached (~30s) to bound probe overhead.'
+      description: "Readiness probe \u2014 checks critical dependencies (no auth).\n\
+        \nReturns HTTP 503 when the database is unreachable so Kubernetes removes\
+        \ the\npod from Service endpoints (traffic draining) until it recovers. Redis\
+        \ is\nreported but advisory: the framework degrades to in-memory fallbacks,\
+        \ so it\ndoes not gate readiness. Results are cached (~30s) to bound probe\
+        \ overhead."
       operationId: readiness_v1_health_ready_get
       responses:
         '200':

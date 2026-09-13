@@ -172,10 +172,12 @@ constraint parser (`core/plugins/version.py`): a full `MAJOR.MINOR.PATCH` versio
 single operator (`==`, `!=`, `>`, `>=`, `<`, `<=`, `^`, `~`). `plugin_dependencies` is a
 **mapping** of plugin name → constraint, not a list.
 
-These constraints are evaluated when the plugin loads, not at install time. By default an
-unsatisfied constraint is logged as a warning and the plugin still loads; set
-`BASELITH_ENFORCE_PLUGIN_COMPAT=true` to skip incompatible plugins instead
-(`core/plugins/load_gates.py`).
+These constraints are evaluated when the plugin loads, not at install time, and the gate
+is **fail-closed**: an unsatisfied constraint skips the plugin
+(`core/plugins/load_gates.py`). `BASELITH_ENFORCE_PLUGIN_COMPAT=false` is the explicit
+downgrade back to warn-only, for booting while a manifest is corrected. Because
+`plugin_dependencies` are part of the check, disabling a plugin also skips anything that
+depends on it.
 
 ---
 

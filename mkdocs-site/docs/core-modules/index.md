@@ -64,6 +64,7 @@ description: Core modules of the BaselithCore Framework
 | **Hierarchical Memory** | Efficient STM/MTM/LTM context management        | [`core/memory/hierarchy.py`](hierarchical-memory.md) |
 | **Knowledge Graph**     | L2 Structured entity relationships via FalkorDB | [`core/graph/`](graph.md)                            |
 | **Services**            | LLM, VectorStore, Vision, Indexing, HITL        | [`core/services/`](services.md)                      |
+| **Neutral Message API** | Provider-independent conversation history: tool-call correlation, `is_error`, verbatim thinking, stable cache prefix | [`core/services/llm/messages.py`](messages.md) |
 | **Storage Layer**       | Typed Interaction/Feedback repositories with a PostgreSQL backend | [`core/storage/`](storage.md)      |
 | **Supermemory**         | Cloud-native `MemoryProvider` with fact extraction, user profiles and hybrid search | [`core/memory/supermemory_provider.py`](supermemory.md) |
 | **Database Layer**      | Relational database abstractions                | [`core/db/`](db.md)                                  |

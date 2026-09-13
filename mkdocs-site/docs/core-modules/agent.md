@@ -41,11 +41,17 @@ result.iterations        # LLM round-trips used
 - **Plain-Python tools** — pass sync or async callables; the JSON schema is
   inferred from type hints and the docstring (explicit
   `ToolDefinition`s are accepted too). The tool loop runs until the model
-  answers without tool calls, bounded by `max_iterations`. Tool results
-  **accumulate across rounds** — every round's prompt carries the outputs of
-  all previous calls, not just the last one, so the model never re-requests
-  work it has already been given and multi-tool tasks converge instead of
-  running to the `max_iterations` cap.
+  answers without tool calls, bounded by `max_iterations`.
+- **A real message history** — the loop keeps a
+  [neutral `Message` history](messages.md) and only ever appends to it: the
+  assistant turn goes back **verbatim** (thinking blocks included), and every
+  tool result of that turn returns in one user message as a `tool_result` block
+  carrying the `tool_use_id` it answers and an `is_error` flag when the call
+  failed. That is what keeps parallel calls correlated, keeps a failure legible
+  as one, and keeps the prompt prefix byte-stable so the provider's prompt cache
+  can serve it. `AgentResult.messages` is the conversation the loop actually
+  sent, oldest first. A service that predates the message API still works — the
+  history is flattened into a transcript for it.
 - **Streaming** — `agent.run_stream(prompt)` yields text chunks
   (text-only: `output_type`/tools are rejected on the stream path).
 - **The whole runtime underneath** — calls go through `LLMService`, so
@@ -66,6 +72,28 @@ result.iterations        # LLM round-trips used
 | `max_iterations` | `6` | Hard cap on LLM round-trips (tools + retries) |
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
+| `autonomy_policy` | `None` | When set, tools whose category needs approval at the active level are gated through the enforcement chokepoint. Left `None` deliberately: there is no ambient policy to inherit here, and defaulting to one would start demanding approval for every effectful tool of every existing typed agent, with no channel to approve on. |
+| `tool_ledger` | `None` | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run |
+
+## What `run()` raises
+
+| Exception | When |
+|---|---|
+| `AgentOutputValidationError` | `output_type` was never satisfied within `max_retries`. |
+| `RuntimeError` | `max_iterations` exhausted before a final answer. |
+| `BudgetExceededError` | An ambient `LoopBudget` cap was hit. Fail-closed — a runaway loop cannot keep dispatching tools. |
+| `ApprovalPendingError` | A tool needs a human decision that is not available yet; the run pauses **durably**. Only reachable when the agent was given an `autonomy_policy`; without one the approval gate is inert. |
+
+The last two are new failure modes for callers that previously only had to handle
+validation and iteration exhaustion. Both come from the shared enforcement
+chokepoint (`core.orchestration.enforcement`), so an `Agent` embedded in an
+orchestrated request is subject to exactly the same caps as any other path.
+
+!!! tip "`run_id` is what makes deduplication possible"
+    `agent.run(prompt, run_id=...)` is ignored unless a `tool_ledger` was
+    supplied — and a *fresh* id per attempt is a different run by definition, so
+    the ledger has nothing to match and every effectful tool executes again. Pass
+    a **stable** id across retries of the same logical run.
 
 ## Relationship to the orchestrator
 

@@ -511,11 +511,14 @@ default to a non-breaking posture; enable the stricter ones in production.
 | -------- | ------- | ------ |
 | `BASELITH_SANITIZE_EXTERNAL_CONTENT` | **on** | Strip invisibles/bidi/HTML comments from flagged fetched content (tool output, scraped pages). Set `false` for legacy detection-only mode. |
 | `BASELITH_ORCHESTRATOR_GUARDRAILS` | **on** | Input validation (regex, pre-budget) + output PII/harmful-content filtering on every `Orchestrator.process` call. Set `false` to bypass for trusted internal traffic. |
-| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface — a digest computed before 0.27 (which left shipped `ui/dist/**` assets, native modules and shell scripts uncovered) is refused until the plugin is re-signed. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface (`V5_MANIFEST`) — a digest computed against any superseded surface is refused until the plugin is re-signed. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
-| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
-| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). |
+| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a **usable** trusted key — neither revoked nor expired. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Legacy form: comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). No key identity, no expiry, no revocation — prefer the trust store below. |
+| `BASELITH_PLUGIN_TRUST_STORE` | unset | Path to a JSON trust store carrying key identity, expiry and revocation — see [Plugin trust store](#plugin-trust-store). Merged with the roots above; a store entry for the same key **wins**, so revoking works even while the key is still listed there. |
+| `BASELITH_DISABLE_PLUGIN_ENTRY_POINTS` | off | Consider only the `plugins/` directory and ignore every installed distribution advertising the `baselith.plugins` entry-point group. For a deployment that wants exactly the trees it shipped and nothing a transitive dependency might advertise. |
+| `BASELITH_ENFORCE_PLUGIN_COMPAT` / `BASELITH_ENFORCE_PLUGIN_CONFIG` | **on** | Admission gates, both fail-closed: a plugin whose declared version bounds / `plugin_dependencies` (COMPAT) or whose config against its own JSON Schema (CONFIG) do not check out is skipped. `false`/`0`/`no`/`off` downgrades to warn-only while a manifest is corrected. |
 | `BASELITH_PLUGIN_PERMISSIONS` | `warn` | How strictly a plugin's declared `permissions:` block is applied: `off` (parsed, never consulted), `warn` (a call outside the declared set is logged once and proceeds), `enforce` (refused). Integrity proves *which code* runs; this decides what it may do. Egress, `tools` and `secrets` are enforced at their chokepoints; `filesystem` is documentation only. A plugin that declared **nothing** is never refused, even under `enforce` — see [Packaging › Permissions](../plugins/packaging.md#permissions). |
 | `BASELITH_WORKFLOW_VERSION_PINNING` | **`enforce`** | A durable workflow run is pinned to the definition it started on (declared version + structural fingerprint). `enforce` fails a resume whose definition changed mid-flight rather than replaying recorded outputs into an edited graph; `warn` logs and continues; `off` records the pin but ignores mismatches. Safe as a default because a run with no pin gets one on first sight and cannot mismatch retroactively. |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
@@ -702,6 +705,73 @@ dependency is finally fixed and the entry deleted.
     shipped product, so its lockfile is an accepted exclusion. Secret and
     misconfig scanning of the portal source is unaffected — only its lockfile is
     skipped.
+
+### Plugin trust store {#plugin-trust-store}
+
+`integrity_sha256` proves the tree matches what was signed; `signature_ed25519`
+proves **who** signed it. The set of publishers a deployment accepts comes from two
+sources (`core/plugins/signing.py`), merged:
+
+| Source | Shape | Limits |
+| ------ | ----- | ------ |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | Comma-separated hex public keys | No identity, no expiry, no revocation |
+| `BASELITH_PLUGIN_TRUST_STORE` | Path to a JSON file | Key id, expiry and revocation per key |
+
+```json title="trust-store.json"
+{
+  "keys": [
+    {
+      "key_id": "release-2026",
+      "public_key_hex": "4f2c…<64 hex characters>",
+      "not_after": "2027-01-01T00:00:00Z"
+    },
+    {
+      "key_id": "leaked-2026",
+      "public_key_hex": "9ab1…<64 hex characters>",
+      "revoked": true
+    }
+  ]
+}
+```
+
+| Key | Required | Meaning |
+| --- | -------- | ------- |
+| `public_key_hex` | ✅ | Raw 32-byte Ed25519 public key, 64 hex characters. A different length is skipped with an ERROR. |
+| `key_id` | ❌ | Operator-facing label, quoted in refusal logs. Defaults to the first 16 hex characters of the key. |
+| `not_after` | ❌ | ISO-8601 instant after which the key stops verifying. Absent or empty means no expiry; a **naive** value is read as UTC. |
+| `revoked` | ❌ | `true` refuses the key immediately, regardless of `not_after`. |
+
+A bare JSON list is accepted in place of the `{"keys": [...]}` wrapper.
+
+Three behaviours are worth being explicit about, because they are what makes the
+store usable in an incident:
+
+- **Revocation beats the legacy env var.** The merge is keyed by public key and a
+  store entry replaces the env-derived one, so revoking a key takes effect even
+  while it is still listed in `BASELITH_PLUGIN_TRUST_ROOTS`.
+- **Everything fails closed.** A missing, unreadable or malformed store logs an
+  ERROR and yields *no* keys — with `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true` that
+  refuses every plugin. A `not_after` that will not parse is treated as **already
+  expired**, never as "no expiry".
+- **Refusals name the key.** When a signature fails, the loader checks it against
+  the revoked and expired entries and, on a match, logs that the signature was
+  produced by trust store key `leaked-2026`, which is revoked. Revocation doing its
+  job reads very differently from tampering.
+
+The public API is `load_trust_store(path=None)` (every well-formed entry, usable or
+not), `load_trusted_keys()` (env roots merged with the store) and `load_trust_roots()`
+(usable hex keys only — unchanged signature, unchanged behaviour when only the env
+var is set). `TrustedKey.rejection_reason()` returns `"revoked"`,
+`"expired on <timestamp>"` or `None`.
+
+!!! danger "A pre-V5 signature does not cover the manifest"
+    Signature enforcement on its own still accepts a signature computed against a
+    superseded hash surface, and nothing before `V5_MANIFEST` covered the manifest —
+    so a plugin's declared `permissions:` (egress, tools, secrets) could be widened
+    without breaking its hash or its publisher signature. Re-sign your plugins at V5
+    (`python scripts/sign_changed_plugins.py --all`), and/or set
+    `BASELITH_REQUIRE_SIGNED_PLUGINS=true`, which refuses every superseded surface.
+    See [Packaging › Hash surface generations](../plugins/packaging.md#hash-surface-generations).
 
 ## Secrets Management
 

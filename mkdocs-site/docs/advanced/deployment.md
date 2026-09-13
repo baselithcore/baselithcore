@@ -537,7 +537,7 @@ The production image's entrypoint runs Uvicorn with proxy-aware and shutdown fla
 uvicorn backend:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-server-header \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
-    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
+    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-30}" \
     --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
 ```
 
@@ -555,8 +555,11 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
   passes upstream headers through would otherwise advertise the exact server
   stack to every caller.
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
-  SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
-  pod drains cleanly instead of being force-killed.
+  SIGTERM (default 30s, the same value `backend.py` uses so one variable cannot
+  mean two drains). Keep it **below** your termination grace so the pod drains
+  cleanly instead of being force-killed: the Helm chart sets
+  `terminationGracePeriodSeconds: 45` for the API, and 30 also matches the bare
+  Kubernetes default of 30s. Raise the grace period first if you raise this.
 - **`--timeout-keep-alive`** — how long an idle client connection is kept
   open (default 75s). Uvicorn's own default is 5s, *shorter* than the idle
   timeout of the upstream keepalive pool of every common reverse proxy
@@ -984,7 +987,7 @@ MAX_REQUEST_SIZE_BYTES=10485760
 # CIDR; the production compose defaults it to the app_net subnet)
 WEB_CONCURRENCY=4
 FORWARDED_ALLOW_IPS=172.28.0.0/24
-GRACEFUL_SHUTDOWN_TIMEOUT=25
+GRACEFUL_SHUTDOWN_TIMEOUT=30
 
 # Database
 DB_HOST=postgres

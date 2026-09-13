@@ -68,11 +68,11 @@ Declared in `core.config.app`.
 | `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` |  |
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` |  |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
-| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `list[str]` | *computed* | List of prohibited keywords (Regex supported). |
+| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
 | `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
-| `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `list[str]` | *computed* | Patterns to detect off-topic queries. |
+| `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
 | `CHAT_MEMORY_MAX_SESSIONS` | `int` | `1024` |  |
 | `CHAT_MEMORY_MAX_TURNS` | `int` | `6` | Max previous turns to include in the context window. |
@@ -89,6 +89,7 @@ Declared in `core.config.app`.
 | `CHAT_RESPONSE_CACHE_ENABLED` | `bool` | `True` | Note: Database backend connection details are in `StorageConfig` |
 | `CHAT_RESPONSE_CACHE_MAXSIZE` | `int` | `256` |  |
 | `CHAT_RESPONSE_CACHE_TTL` | `float` | `3600.0` |  |
+| `CHAT_STREAM_TIMEOUT_SECONDS` | `float` | `300.0` | Wall-clock cap on a single `POST /chat/stream` SSE response. A hung or very slow provider otherwise holds the connection — and the worker slot behind it — open indefinitely; on expiry the stream is closed cleanly with its terminal `event: done` frame rather than dropped mid-token. |
 | `COST_CONTROL_ENABLED`<br>also accepts `LLM_BUDGET_ENABLED` | `bool` | `True` |  |
 | `DEPLOYMENT_ENVIRONMENT`<br>also accepts `ENVIRONMENT` | `str` | `development` | Deployment environment tag attached to every span/metric as the `deployment.environment` resource attribute (dev/staging/production). |
 | `ENABLE_FEEDBACK` | `bool` | `True` | Enable user feedback collection for reinforcement learning. |
@@ -125,6 +126,8 @@ Declared in `core.config.audit`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `AUDIT_CHAIN_HMAC_KEY` :material-key: | `SecretStr \| None` | *empty* | Secret key for the HMAC-SHA256 audit hash chain. Unset falls back to a plain SHA-256 chain (detects accidents, not attackers). |
+| `AUDIT_CHAIN_REQUIRE_KEY` | `bool` | `False` | Refuse to start the durable audit sink without AUDIT_CHAIN_HMAC_KEY. Turn this on where the audit trail is evidence rather than telemetry. |
 | `AUDIT_DB_PATH` | `str \| None` | *empty* |  |
 | `AUDIT_ENABLED` | `bool` | `False` |  |
 | `AUDIT_FILE_PATH` | `str \| None` | *empty* |  |
@@ -201,6 +204,8 @@ Declared in `core.config.evaluation`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `EVAL_ENABLED` | `bool` | `False` |  |
+| `EVAL_JUDGE_MAX_PARALLEL` | `int` | `4` | Maximum judge calls in flight at once across the suite. |
+| `EVAL_JUDGE_SAMPLES` | `int` | `3` | Judge evaluations per case; the median score gates. |
 | `EVAL_MODEL` | `str` | `gpt-4-turbo-preview` |  |
 | `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
 
@@ -265,9 +270,12 @@ Declared in `core.config.mcp`.
 | `MCP_HTTP_SESSION_TTL_SECONDS` | `int` | `3600` |  |
 | `MCP_HTTP_TRANSPORT_ENABLED` | `bool` | `False` | Off by default: enabling exposes the MCP server on the API surface. |
 | `MCP_LIST_PAGE_SIZE` | `int` | `100` | Maximum entries returned by one tools/list, resources/list or resources/templates/list page; the client pages on with `nextCursor`. |
+| `MCP_MAX_TOOL_RESULT_BYTES` | `int` | `1048576` | Upper bound on the serialized size of one `tools/call` result. A larger result is truncated with an explicit notice rather than refused: the call succeeded, and the model is told what it is missing. 0 disables the cap; any other value must clear MIN_TOOL_RESULT_BYTES, the cost of the truncation envelope itself. |
 | `MCP_RAG_DEFAULT_TOP_K` | `int` | `5` |  |
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
+| `MCP_REQUIRE_TOKEN_AUDIENCE` | `bool \| None` | *empty* | Whether an OAuth access token must name this MCP endpoint in its `aud` claim (RFC 8707 resource indicators / RFC 9728). When on, a token whose `aud` names a *different* resource is refused — that is a token minted for somebody else, replayed here — and so is a token carrying no `aud` at all. `None` (the default) resolves at request time to the runtime posture: enforced in production, off elsewhere. Setting it to `false` is the operator override that stands the whole check down, which matters because JWT_AUDIENCE is pinned per deployment: if the issued audience is not this endpoint's resource URL, *every* token mismatches and the endpoint is unreachable until the tokens are reissued (or MCP_RESOURCE_URL is set to the audience they already carry). API keys are never subject to the check: they are not OAuth tokens and carry no audience. |
+| `MCP_RESOURCE_URL` | `str` | *empty* | Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728): the value published as `resource` in the protected-resource metadata AND the value a token's `aud` is checked against — one setting, so the two can never disagree. Unset, it is derived from the request's base URL, which comes from the Host header: behind a proxy that does not pin the host (ALLOWED_HOSTS unset), a caller controls what the endpoint claims to be. Set it to the public URL, e.g. `https://api.example.com/mcp`. |
 | `MCP_SERVERS` | `dict[str, MCPServerSpec]` | *computed* | JSON mapping of server name -> MCPServerSpec (command/args/env for stdio, or url for Streamable HTTP, plus an autonomy_category applied to the server's tools). |
 | `MCP_SERVER_INSTRUCTIONS` | `str` | *empty* | Optional natural-language guidance returned by `server/discover`. |
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
@@ -276,6 +284,7 @@ Declared in `core.config.mcp`.
 | `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` |  |
 | `MCP_TASK_POLL_INTERVAL_MS` | `int` | `1000` |  |
 | `MCP_TASK_TTL_MS` | `int` | `3600000` | How long a task handle stays resolvable, and how often the client should poll it. Both are hints carried in the CreateTaskResult. |
+| `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `float` | `60.0` | Server-side deadline on one `tools/call` handler. Without it a hung tool holds the request (and, on HTTP, the connection) indefinitely. 0 disables the deadline. |
 
 ## Memory configuration
 
@@ -303,7 +312,7 @@ Declared in `core.config.multimodal`.
 | `FINETUNE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first: without it these bound the bare vendor keys, so a fine-tuning job silently reused the chat provider's credentials. |
 | `FINETUNE_TOGETHER_API_KEY` :material-key:<br>also accepts `TOGETHER_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VISION_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | *empty* | Each provider credential accepts the prefixed name first and the bare vendor name as a fallback. A plain `alias` would REPLACE the `env_prefix`, so `VISION_ANTHROPIC_API_KEY` — the name the template and the docs advertise — would silently bind nothing. |
-| `VISION_ANTHROPIC_MODEL` | `str` | `claude-3-5-sonnet-20241022` | Anthropic vision model identifier. |
+| `VISION_ANTHROPIC_MODEL` | `str` | `claude-opus-5` | Anthropic vision model identifier. |
 | `VISION_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VISION_GOOGLE_MODEL` | `str` | `gemini-2.0-flash` | Google vision model identifier. |
 | `VISION_OLLAMA_HOST`<br>also accepts `OLLAMA_HOST` | `str` | `http://localhost:11434` |  |
@@ -322,6 +331,15 @@ Declared in `core.config.multimodal`.
 | `VOICE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google']` | `openai` | Default voice synthesis provider |
 
+## Observability configuration (metric cardinality and trace exemplars)
+
+Declared in `core.config.observability`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `METRICS_EXEMPLARS_ENABLED` | `bool` | `True` | Attach the current trace_id to histogram observations as an OpenMetrics exemplar, linking a latency bucket to its trace. |
+| `METRICS_TENANT_LABEL_ALLOWLIST` | `Annotated[set[str], NoDecode]` | *computed* | Comma-separated tenant ids broken out individually on tenant-labelled metrics. Every other tenant collapses to 'other'. Empty (default) collapses all of them, keeping cardinality at one extra series. |
+
 ## Orchestration and routing configuration (`ORCHESTRATOR_`, `ROUTER_`)
 
 Declared in `core.config.orchestration`.
@@ -333,11 +351,19 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED` | `bool` | `False` | Also append an immutable snapshot of the checkpoint at every version (time-travel / state history; requires checkpoint_enabled). |
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT` | `int` | `200` | Per-run cap on retained history snapshots (newest kept); 0 means unlimited. |
 | `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` | `int` | `1000` | Retained-run cap for the in-memory checkpoint backend (oldest finished runs evicted first). Irrelevant for the Postgres backend. |
-| `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool` | `False` | On app startup, resume runs left in the 'running' state by a crash/restart (requires checkpoint_enabled; runs awaiting approval are never auto-resumed). |
+| `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool` | `False` | Start the background recovery sweeps: runs left in the 'running' state by a crash/restart are re-entered, and runs that stopped making progress are marked failed. Sweeps repeat every recovery_sweep_interval_seconds (not just at startup); a run is only re-entered once it has been silent for recovery_resume_after_seconds, so one still executing is left alone. Requires checkpoint_enabled; runs awaiting approval are never auto-resumed. |
 | `ORCHESTRATOR_CHECKPOINT_SQLITE_PATH` | `str` | `data/checkpoints.db` | Database file for the 'sqlite' checkpoint backend (durable runs without a Postgres instance; parent directories are created on first use). |
 | `ORCHESTRATOR_CONFIDENCE_THRESHOLD` | `float` | `0.6` | Minimum confidence for LLM classification |
+| `ORCHESTRATOR_CONTEXT_WINDOW_TOKENS` | `int` | `200000` | Assumed model context window, used as the denominator of LoopBudget.token_pressure() when no token cap is set so context auto-tuning still has a signal. 0 disables that fallback. |
+| `ORCHESTRATOR_CREW_MAX_PARALLEL` | `int` | `8` | Maximum crew tasks executed concurrently under process='parallel'. Each task is a full LLM call, so an unbounded fan-out over a caller-supplied task list would open that many simultaneous provider calls (429 storm + unmetered cost spike). |
 | `ORCHESTRATOR_DEFAULT_INTENT` | `str` | `qa_docs` | Default intent when classification fails |
 | `ORCHESTRATOR_ENABLE_TELEMETRY` | `bool` | `False` | Whether to record telemetry metrics |
+| `ORCHESTRATOR_HITL_CALLBACK_THREADS` | `int` | `8` | Worker threads for blocking human-in-the-loop callbacks. They run on a dedicated pool, never the interpreter default one: a callback waits on a person, and a timed-out one never returns its thread, so sharing would starve short latency-critical tasks. |
+| `ORCHESTRATOR_LOOP_MAX_SECONDS` | `float` | `600.0` | Wall-clock deadline in seconds for one orchestrated request; also shrinks per-tool/LLM timeouts so a single slow call cannot outlive it. 0 disables the deadline. |
+| `ORCHESTRATOR_LOOP_MAX_TOKENS` | `int` | `400000` | Cumulative token cap (input + output, every LLM call) for one orchestrated request. 0 disables the cap. |
+| `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` | `float` | `300.0` | Minimum progress silence before a 'running' checkpoint is re-entered by the recovery sweep. Recent progress means some worker still owns the run, and resuming it anyway would execute the same agent loop twice. Keep it at or above the sweep interval. |
+| `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` | `float` | `1800.0` | Progress-silence threshold after which a 'running' checkpoint is marked failed by the stale-run sweep. |
+| `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` | `float` | `300.0` | Interval between background crash-recovery sweeps (resume interrupted runs + fail wedged ones) when checkpoint_resume_on_startup is enabled. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED` | `bool` | `False` | Enforce a sliding-window burst limit on side-effecting tool invocations (categories destructive/external_side_effect), keyed (tenant, tool). In-process; off by default. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS` | `int` | `30` | Invocations allowed per (tenant, tool) inside one window. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS` | `float` | `60.0` | Sliding-window length in seconds for the tool rate limit. |
@@ -391,7 +417,7 @@ Declared in `core.config.processing`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `DOCUMENTS_EXTENSIONS` | `tuple[str, ...]` | `('.md', '.markdown', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.tif', '.tiff')` |  |
+| `DOCUMENTS_EXTENSIONS` | `Annotated[tuple[str, ...], NoDecode]` | `('.md', '.markdown', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.tif', '.tiff')` | NoDecode + csv_list: `.env.example` documents `DOCUMENTS_EXTENSIONS=pdf,docx,txt,md`, and a tuple is a "complex" type to pydantic-settings exactly like a list — so the documented value raised a SettingsError out of the whole ProcessingConfig. |
 | `DOCUMENTS_ROOT` | `str` | `documents` |  |
 | `ENABLE_SPACY_DOCUMENTS` | `bool` | `True` |  |
 | `MINERU_BACKEND` | `Literal['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client']` | `pipeline` | MinerU engine. 'pipeline' is the only CPU-friendly choice. |
@@ -400,19 +426,19 @@ Declared in `core.config.processing`.
 | `MINERU_MAX_BYTES` | `int` | `50 * 1024 * 1024` | Untrusted-document guards for the MinerU OCR path (documents may arrive from the web crawler). 0 disables an individual cap. Oversized or too-long input is skipped before the heavy parse; the parses themselves run on a dedicated bounded pool with a wall-clock timeout. |
 | `MINERU_MAX_CONCURRENCY` | `int` | `2` |  |
 | `MINERU_MAX_PAGES` | `int` | `500` |  |
-| `MINERU_MODEL_SOURCE` | `Literal['huggingface', 'modelscope', 'local'] \| None` | *empty* |  |
+| `MINERU_MODEL_SOURCE` | `Literal['huggingface', 'modelscope', 'local'] \| None` | *empty* | Model download source. Empty means 'auto' — the documented meaning of the blank value `.env.example` ships. |
 | `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. `http://mineru:30000`). |
 | `MINERU_TABLE_ENABLE` | `bool` | `True` |  |
 | `MINERU_TIMEOUT_SECONDS` | `float` | `300.0` |  |
 | `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` | OCR backend. MinerU is the default and needs the extra (pip install -e ".[mineru]") — heavy, and it downloads models on first use, so pre-fetch with `mineru-models-download`. Selected but not installed, OCR falls back to tesseract automatically; set 'tesseract' to avoid pulling the mineru/transformers stack at all. |
 | `SPACY_FALLBACK_LANGUAGE` | `str \| None` | *empty* |  |
 | `SPACY_MODEL` | `str` | `en_core_web_sm` |  |
-| `WEB_DOCUMENTS_ALLOWLIST` | `list[str]` | *computed* |  |
+| `WEB_DOCUMENTS_ALLOWLIST` | `Annotated[list[str], NoDecode]` | *computed* |  |
 | `WEB_DOCUMENTS_ENABLED` | `bool` | `False` |  |
 | `WEB_DOCUMENTS_MAX_DEPTH` | `int` | `2` |  |
 | `WEB_DOCUMENTS_MAX_PAGES` | `int` | `5` |  |
 | `WEB_DOCUMENTS_RENDER_TIMEOUT` | `float` | `20.0` |  |
-| `WEB_DOCUMENTS_URLS` | `list[str]` | *computed* |  |
+| `WEB_DOCUMENTS_URLS` | `Annotated[list[str], NoDecode]` | *computed* | NoDecode + csv_list: `.env.example` ships this key blank, and a blank value JSON-decodes to a SettingsError that takes the whole ProcessingConfig — every document/OCR/NLP setting — down with it. |
 | `WEB_DOCUMENTS_USER_AGENT` | `str` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36` |  |
 | `WEB_DOCUMENTS_WAIT_SELECTOR` | `str \| None` | *empty* |  |
 
@@ -482,6 +508,7 @@ Declared in `core.config.sandbox`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
 | `SANDBOX_COST_PER_COMPUTE_SECOND` | `float` | `0.0` | USD charged per wall-clock compute second of sandbox execution. 0 (default) keeps cost_usd at 0 while compute_seconds is still recorded. |
 | `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker socket path |
 | `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Enable network in sandbox |
@@ -493,6 +520,7 @@ Declared in `core.config.sandbox`.
 | `SANDBOX_STATIC_ANALYSIS_DENIED_IMPORTS` | `str` | `ctypes,socket,subprocess` | Comma-separated module names flagged by the analyzer. |
 | `SANDBOX_STATIC_ANALYSIS_MODE` | `Literal['warn', 'block']` | `warn` | 'warn' logs flagged imports and proceeds (default); 'block' rejects the execution outright. |
 | `SANDBOX_TIMEOUT` | `int` | `30` | Execution timeout in seconds |
+| `SANDBOX_UNHARDENED_BASE_IMAGE` | `str \| None` | *empty* | Digest-pinned fallback image (e.g. 'python@sha256:&lt;64 hex>'), used only when allow_unhardened_base is true. Tags are rejected. |
 
 ## Scraper configuration
 
@@ -500,7 +528,7 @@ Declared in `core.config.scraper`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `SCRAPER_BLOCKED_EXTENSIONS` | `list[str]` | *computed* | File extensions to skip during crawling |
+| `SCRAPER_BLOCKED_EXTENSIONS` | `Annotated[list[str], NoDecode]` | *computed* | File extensions to skip during crawling |
 | `SCRAPER_BLOCK_PRIVATE_IPS` | `bool` | `True` | Block requests to private/internal IPs (SSRF protection) |
 | `SCRAPER_CACHE_BACKEND` | `Literal['memory', 'redis']` | `memory` | Cache backend to use |
 | `SCRAPER_CACHE_ENABLED` | `bool` | `True` | Enable response caching |
@@ -534,12 +562,13 @@ Declared in `core.config.security`.
 | `ADMIN_PASS` :material-key: | `SecretStr \| None` | *empty* |  |
 | `ADMIN_PASS_HASHED` :material-key: | `SecretStr \| None` | *empty* |  |
 | `ADMIN_USER` | `str` | `admin` | Admin Credentials (Legacy/Simple Auth) |
-| `ALLOW_ORIGINS` | `list[str]` | *computed* | CORS — defaults to empty (block all cross-origin) for safety |
-| `API_KEYS_ADMIN` :material-key: | `set[SecretStr]` | *computed* |  |
-| `API_KEYS_JOB` :material-key: | `set[SecretStr]` | *computed* |  |
+| `ALLOW_ORIGINS` | `Annotated[list[str], NoDecode]` | *computed* | Comma-separated list of browser origins allowed to make cross-origin requests, each written scheme-and-host (no trailing path). Empty — the default — blocks every cross-origin request, which is the safe posture for an API with no browser front end. |
+| `API_KEYS_ADMIN` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
+| `API_KEYS_JOB` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
 | `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
-| `API_KEYS_USER` :material-key: | `set[SecretStr]` | *computed* | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
+| `API_KEYS_USER` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
 | `API_KEY_ENABLED`<br>also accepts `SECURITY_API_KEY_ENABLED` | `bool` | `True` | Master switch for API-key authentication. When false, API keys are rejected entirely. |
+| `API_KEY_REVOCATION_FAIL_MODE` | `Literal['closed', 'open']` | `closed` | What to do when the shared API-key revocation denylist is unreadable: 'closed' (default) rejects the key, 'open' accepts it on process-local state. |
 | `AUTH_ACCESS_TOKEN_LIFETIME`<br>also accepts `AUTH_SESSION_LIFETIME` | `int` | `3600` | Access-token lifetime in seconds (default 1h; legacy alias AUTH_SESSION_LIFETIME). Refresh tokens keep the JWTHandler default of 7 days. |
 | `AUTH_FAILURE_LIMIT_PER_MINUTE` | `int \| None` | `20` | Per-source-IP budget for *failed* authentication attempts within the rate-limit window. Unlike the per-role limits above (which meter only already-authenticated traffic), this throttles credential brute-force / stuffing on every `require_*` route: once an IP exceeds this many rejected auth attempts it receives 429 instead of an unmetered stream of 401s. Successful auth never touches this counter, so a generous default does not penalise a mistyped token or a NAT'd client. Set to None to disable (not recommended — leaves authenticated routes brute-forceable). |
 | `AUTH_REQUIRED` | `bool` | `True` |  |
@@ -561,7 +590,7 @@ Declared in `core.config.security`.
 | `METRICS_AUTH_REQUIRED` | `bool` | `True` | Require admin basic auth on GET /metrics. Disable only when the endpoint is reachable solely from the scrape network (e.g. restricted by NetworkPolicy) or the scraper sends credentials. |
 | `MFA_ENABLED` | `bool` | `False` | Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can enroll users via AuthManager.mfa and require a TOTP step-up at login. Disabled by default — purely additive, no effect on existing auth paths. |
 | `MFA_ISSUER` | `str` | `BaselithCore` | Issuer label shown in the user's authenticator app (Google Authenticator, Authy, …) — typically the product or tenant name. |
-| `OIDC_ALGORITHMS` | `list[str]` | *computed* |  |
+| `OIDC_ALGORITHMS` | `Annotated[list[str], NoDecode]` | *computed* | `NoDecode` on every collection field below: pydantic-settings JSON-decodes complex types inside EnvSettingsSource *before* any validator runs, so the coercers these fields already declare never saw the raw string and a plain `RS256,ES256` raised SettingsError out of the whole SecurityConfig — i.e. no API at all. |
 | `OIDC_AUDIENCE` | `str \| None` | *empty* |  |
 | `OIDC_DEFAULT_ROLE` | `str` | `user` |  |
 | `OIDC_ENABLED` | `bool` | `False` | When enabled, bearer tokens that are not local HS256 tokens are verified against an external OpenID Connect provider (Okta/Auth0/Azure AD/Keycloak) by fetching its JWKS and validating the RS256/ES256 signature. Opt-in and additive — local JWT/API-key auth is unaffected when disabled. |
@@ -582,7 +611,7 @@ Declared in `core.config.security`.
 | `SECRETS_DIR` | `str \| None` | *empty* |  |
 | `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |
-| `TRUSTED_HOSTS` | `list[str]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production logs an ERROR at startup while this is empty. |
+| `TRUSTED_HOSTS` | `Annotated[list[str], NoDecode]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production logs an ERROR at startup while this is empty. |
 | `X_FRAME_OPTIONS` | `str` | `DENY` |  |
 
 ## Service-level configuration internal engines
@@ -700,11 +729,13 @@ Declared in `core.config.task_queue`.
 | `TASK_QUEUE_DEFAULT_QUEUE` | `str` | `default` |  |
 | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `int` | `3` | Retry settings |
 | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `int` | `60` |  |
+| `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `Annotated[list[str], NoDecode]` | `['core.', 'plugins.']` | Comma-separated module prefixes a dead-lettered job may be replayed from. A stored function reference outside them is refused before any import happens. |
+| `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `int` | `604800` | Dead-letter retention. The DLQ is a diagnosis and replay aid, not an archive: without a horizon every terminally-failed job stays in Redis forever, so one bad deploy's failures sit in memory indefinitely. Matches `failure_ttl` so the two views of a failed job expire together. 0 disables expiry (keep forever) — only for a deployment that prunes the DLQ by hand. |
 | `TASK_QUEUE_FAILURE_TTL` | `int` | `604800` |  |
 | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `float` | `30.0` |  |
 | `TASK_QUEUE_JOB_TIMEOUT` | `int` | `3600` | Task execution settings |
 | `TASK_QUEUE_MAX_CONNECTIONS` | `int` | `50` | Connection pool settings |
-| `TASK_QUEUE_QUEUES` | `list[str]` | `['default', 'documents', 'analysis']` |  |
+| `TASK_QUEUE_QUEUES` | `Annotated[list[str], NoDecode]` | `['default', 'documents', 'analysis']` | NoDecode + csv_list, same reason as dlq_replay_allowed_modules below: `TASK_QUEUE_QUEUES=default,documents` must configure the queues, not raise a SettingsError out of the whole task-queue configuration. |
 | `TASK_QUEUE_REDIS_URL` | `str \| None` | *empty* | TASK_QUEUE_REDIS_URL — the most specific name, so it wins. |
 | `TASK_QUEUE_RESULT_TTL` | `int` | `86400` |  |
 
@@ -743,7 +774,11 @@ Declared in `core.config.vectorstore`.
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `384` | Embedding dimension |
 | `VECTORSTORE_EMBEDDING_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model name |
+| `VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED` | `bool` | `False` | Record gen_ai.usage.input_tokens on embedding spans. Costs an extra tokenizer pass per cache miss; off by default. |
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
+| `VECTORSTORE_HNSW_EF_CONSTRUCTION` | `int` | `64` | HNSW build-time candidate list size (pgvector 'ef_construction'); must be >= 2 * hnsw_m. |
+| `VECTORSTORE_HNSW_EF_SEARCH` | `int` | `40` | HNSW query-time candidate list size, applied as SET LOCAL hnsw.ef_search per search. 0 leaves the server default alone and skips the enclosing transaction. |
+| `VECTORSTORE_HNSW_M` | `int` | `16` | HNSW graph connectivity (pgvector 'm'); build-time. |
 | `VECTORSTORE_HOST`<br>also accepts `VECTORSTORE_QDRANT_HOST` | `str` | `localhost` | Vector store server host |
 | `VECTORSTORE_PORT` | `int` | `6333` | Vector store HTTP/REST port |
 | `VECTORSTORE_PROVIDER` | `Literal['qdrant', 'pgvector']` | `qdrant` | Vector store provider: 'qdrant' (dedicated vector DB) or 'pgvector' (PostgreSQL + vector extension, reuses the shared pool). |
@@ -781,6 +816,22 @@ Declared in `core.config.world_model`.
 | `WORLD_MODEL_ROLLBACK_ENABLE_CHECKPOINTS` | `bool` | `True` | Enable state checkpoints |
 | `WORLD_MODEL_ROLLBACK_MAX_CHECKPOINT_AGE` | `int` | `10` | Max actions before checkpoint expires |
 
+## Ambient tenant cost-budget seam for the LLM generation path
+
+Declared in `core.quotas.cost_enforcement`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `BASELITH_UNKNOWN_MODEL_COST_POLICY` | `UnknownModelCostPolicy` | `charge` | How to price an LLM call to a model absent from the pricing table: 'charge' (default) bills UNKNOWN_PRICE so a missing entry stays visible in cost dashboards instead of silently billing $0; 'zero' treats the call as free (e.g. a self-hosted model with no meaningful USD cost); 'reject' raises UnknownModelCostRejected instead of billing anything. |
+
+## Token Estimation Utilities
+
+Declared in `core.utils.tokens`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `BASELITH_EXACT_TOKEN_COUNTING` | `bool` | `False` | Use anthropic.Anthropic().messages.count_tokens (via estimate_tokens_async) for claude* models instead of the tiktoken/heuristic estimate. Off by default: ANTHROPIC_API_KEY alone is not enough to enable it, since a key is present in most production deployments already and this call is a blocking network request. The sync estimate_tokens() never makes this call regardless of this setting. |
+
 ## OpenAI Realtime WebSocket adapter for the core duplex voice protocol
 
 Declared in `plugins.baselithbot.voice.openai_realtime`.
@@ -800,4 +851,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-508 settings documented.
+538 settings documented.

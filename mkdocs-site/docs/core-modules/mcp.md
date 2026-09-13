@@ -140,8 +140,11 @@ IDEs.
       rather than a single shared `None`, so unauthenticated clients can no
       longer ride, terminate, or exhaust each other's sessions.
     - Sessions expire after `MCP_HTTP_SESSION_TTL_SECONDS` (default 3600) and
-      are process-local — multi-replica deployments need session-affine
-      routing.
+      are **Redis-backed when the deployment already declares
+      `CACHE_BACKEND=redis`** — see [Session storage](#session-storage).
+    - **Audience binding (RFC 8707)** — a bearer token whose `aud` names a
+      different resource is refused (`401`, JSON-RPC `-32001`); see [Audience
+      binding](#audience-binding).
 
 ### Capability gate
 
@@ -170,6 +173,63 @@ API_KEYS_SCOPED="sk_mcp=mcp:invoke|chat:read"
 The scope is declared in `core/auth/scopes.py` (`SCOPE_MCP_INVOKE`) and is part
 of `KNOWN_SCOPES`, so it validates like any other capability — see [Auth ›
 Capability Scopes](auth.md#capability-scopes-fine-grained-authorization).
+
+### Audience binding (RFC 8707) {#audience-binding}
+
+A token is valid **for a resource**. Without that check, a token an authorization
+server minted for an unrelated service — or one lifted from it — reached this
+endpoint's whole tool catalog. The gate's fourth step compares the caller's `aud`
+claim against this endpoint's canonical resource identifier:
+
+| Token shape | Outcome with the check on |
+|---|---|
+| `aud` names this resource — the full endpoint URL *or* its bare origin, both listed as canonical by the MCP authorization spec | accepted |
+| `aud` names a different resource | `401` + JSON-RPC `-32001`, `WWW-Authenticate: Bearer error="invalid_token"` |
+| no `aud` at all | same refusal — an unbound token |
+| API key (no `Authorization: Bearer`) | **exempt**: an API key has no issuer and no audience, so there is nothing to bind |
+
+Scheme and host compare case-insensitively and a trailing slash is insignificant;
+anything else — a differing path — is a different resource.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MCP_RESOURCE_URL` | `""` | Pins the canonical resource identifier. Unset, it is derived from `request.base_url`, which comes from the `Host` header — so unless the deployment pins the host (`TRUSTED_HOSTS`), a caller chooses what this endpoint claims to be. |
+| `MCP_REQUIRE_TOKEN_AUDIENCE` | unset (`None`) | Resolves **at request time** to the runtime posture: enforced in production, off elsewhere. `false` stands the whole check down. |
+
+`resource_identifier()` is the single source of both the value published as
+`resource` in the protected-resource metadata and the value the `aud` claim is
+compared against, so advertised and enforced cannot drift.
+
+!!! warning "This can lock out existing clients"
+    `JWT_AUDIENCE` is pinned once per deployment, so the outcome is binary: either
+    the issued audience is this endpoint's resource identifier or *every* token
+    mismatches and the endpoint is unreachable. Before enabling this in production,
+    either request the MCP resource URL via the RFC 8707 `resource` parameter when
+    obtaining tokens, or set `MCP_RESOURCE_URL` to the audience your tokens already
+    carry. `MCP_REQUIRE_TOKEN_AUDIENCE=false` is the lever if you cannot reissue
+    today.
+
+### Session storage {#session-storage}
+
+The legacy era mints an `Mcp-Session-Id` at `initialize` and expects every later
+request to present it. `build_session_store()` (`core/mcp/http_sessions.py`) picks
+the backing store automatically — no new setting to discover:
+
+| Deployment | Store | Behaviour |
+|---|---|---|
+| `CACHE_BACKEND=redis` | `RedisSessionStore` | Sessions, owner binding and the per-owner cap are shared across replicas. Keys are `mcp:session:id:<sid>` (owner, TTL'd by Redis) and `mcp:session:owner:<owner>` (a hash of `sid → expiry`, used only for the cap). |
+| anything else | `SessionStore` | Process-local, the historical behaviour. Streamable HTTP sessions are then an affinity contract between one client and one server instance, and the spec's recovery path — a `404` answered by re-initializing — covers failover. |
+
+The namespace is deliberately distinct from the application cache's own prefix, so
+flushing a cache never strands live sessions. A Redis failure **degrades** to the
+process-local store with a warning rather than failing the request: every request
+is still authenticated, authorized, metered and owner-bound; only the sharing of
+the session across replicas is lost.
+
+!!! warning "`SessionStore` methods are now async"
+    Both stores implement one **async** interface, so `create`, `touch`,
+    `terminate` and friends must be awaited. `SessionStore` keeps its name and its
+    `core.mcp.http_transport` import path; only the call shape changed.
 
 ## Protocol eras
 
@@ -257,14 +317,24 @@ rejects categories requiring human approval).
 
 `ServerCapabilities` members are emitted as objects or **omitted entirely** —
 never as JSON `null`, which strictly-typed clients reject. A sub-capability is
-advertised only when it is actually implemented: `listChanged: true` is sent
-because the server really does emit `notifications/*/list_changed` on any
-`subscriptions/listen` stream that opted in. `extensions` advertises
-`io.modelcontextprotocol/tasks`.
+advertised only when it is actually implemented **and reachable by the client
+being answered**: a capability is a promise, and the two eras can honour
+different ones.
 
-Advertising `logging` (default on, `MCPServerCapabilities.logging`) obliges the
-server to answer `logging/setLevel`; it accepts the eight RFC 5424 severities
-and rejects anything else.
+| Sub-capability | Legacy (`initialize`) | Modern (`server/discover`) | Why |
+|---|:---:|:---:|---|
+| `listChanged` on `tools`/`resources`/`prompts` | omitted | `true` | The server pushes `notifications/*/list_changed` on a `subscriptions/listen` response stream, and only 2026-07-28 has one. A legacy client was being promised notifications it has no channel to receive; it is told to re-list instead. |
+| `extensions` (`io.modelcontextprotocol/tasks`) | omitted | advertised | Every `tasks/*` method answers *method not found* outside the modern era. |
+| `logging` | advertised when `MCPServerCapabilities.logging` is on (the default) | omitted | `logging/setLevel` was removed in 2026-07-28; a modern client carries its level in each request's `_meta`. |
+
+The era is read off the *message*, not off connection state — `initialize` is a
+legacy-only method and `server/discover` a modern-only one — which is what makes
+this safe on a stateless transport. `completions` is advertised when any
+completion handler is registered; `prompts` follows what is actually registered
+rather than a static server trait.
+
+Advertising `logging` obliges the server to answer `logging/setLevel` for legacy
+clients; it accepts the eight RFC 5424 severities and rejects anything else.
 
 `ping` is answered with an **empty** result object, per the spec.
 
@@ -303,9 +373,9 @@ The declared schema is a contract: output that violates it is returned as a
 
 ### Tool failures vs protocol errors
 
-Exceptions raised *inside* a tool handler become `isError: true` results
-carrying the message, never JSON-RPC errors — the model needs to see them to
-retry or route around them. Protocol-level problems keep their spec codes:
+Exceptions raised *inside* a tool handler become `isError: true` results, never
+JSON-RPC errors — the model needs to see them to retry or route around them.
+Protocol-level problems keep their spec codes:
 
 | Condition | Code |
 |-----------|-----:|
@@ -313,6 +383,27 @@ retry or route around them. Protocol-level problems keep their spec codes:
 | Unknown resource URI (no resource and no matching template) | `-32002` |
 | Unknown method | `-32601` |
 | Server fault | `-32603` |
+
+The exception's **text** does not reach the model. An exception message names
+DSNs, filesystem paths and driver internals, and a `tools/call` result crosses a
+trust boundary to an external client, so the result reads
+`Tool 'x' failed. Error id: <12 hex>` while `mcp_tool_execution_failed` logs the
+same correlation id alongside the full text and `error_type`. Input-validation
+messages (SEP-1303) stay verbatim — those are the model's to act on.
+
+### Tool call limits
+
+Two server-side bounds apply to every `tools/call`, on the synchronous path and
+inside the `tasks/*` runner alike:
+
+| Setting | Default | Behaviour when exceeded |
+|---|---|---|
+| `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `60.0` | The handler is **cancelled** (so its own cleanup runs) and the result is an execution error: `Tool 'x' timed out after 60.0s and was cancelled.` `0` disables the deadline. |
+| `MCP_MAX_TOOL_RESULT_BYTES` | `1048576` (1 MiB) | The text blocks collapse into one truncated block plus a notice, `structuredContent` is **dropped** (a cut object would violate the schema the tool declared), `isError` stays `false`, and `_meta` carries `truncated: true`, `originalBytes` and `maxBytes`. `0` disables the cap. |
+
+A hung tool otherwise pins the request — and on HTTP the connection behind it —
+for the life of the process, and an unbounded result exhausts the calling model's
+context long before it exhausts the transport.
 
 ### Pagination
 
@@ -1069,6 +1160,10 @@ MCP_LIST_PAGE_SIZE=100
 MCP_HTTP_AUTHORIZATION_SERVERS=          # falls back to OIDC_ISSUER
 MCP_HTTP_REQUIRED_SCOPE=mcp:invoke       # capability demanded per request; empty disables
 MCP_HTTP_RATE_LIMIT_PER_MINUTE=120       # per-identity budget; 0 disables
+MCP_RESOURCE_URL=                        # pins the RFC 8707 resource identifier
+MCP_REQUIRE_TOKEN_AUDIENCE=              # unset = enforced in production only
+MCP_TOOL_CALL_TIMEOUT_SECONDS=60.0       # server-side deadline on one tools/call; 0 disables
+MCP_MAX_TOOL_RESULT_BYTES=1048576        # cap on a serialized tool result; 0 disables
 MCP_CACHE_TTL_MS=60000
 MCP_CACHE_SCOPE=private                  # or "public" — see Modern era above
 MCP_SERVER_INSTRUCTIONS=                 # optional server/discover guidance
