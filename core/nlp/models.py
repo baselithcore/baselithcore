@@ -67,9 +67,9 @@ def _token_usage_enabled() -> bool:
     try:
         return bool(get_vectorstore_config().embedding_token_usage_enabled)
     except Exception as exc:  # config must never break an embedding
-        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         # `exc` is a config-lookup failure, not a credential; the rule matches
         # on "token" (NLP tokenization here, not an auth token).
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.debug("[embedder] token-usage setting unavailable: %s", exc)
         return False
 
@@ -84,9 +84,9 @@ def _count_tokens_sync(model: Any, texts: list[str]) -> int | None:
         ids = encoded["input_ids"] if isinstance(encoded, dict) else encoded.input_ids
         return sum(len(row) for row in ids)
     except Exception as exc:  # telemetry must never break an embedding
-        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         # `exc` is a tokenizer failure, not a credential; the rule matches on
         # "token" (NLP tokenization here, not an auth token).
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.debug("[embedder] token count unavailable: %s", exc)
         return None
 
