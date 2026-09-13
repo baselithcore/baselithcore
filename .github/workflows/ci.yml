@@ -440,6 +440,9 @@ jobs:
       - name: Type Check Official Plugins
         run: |
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
+          # The roster derivation reads each manifest.yaml — same parser pin as
+          # the eval-baseline and plugin_integrity jobs.
+          pip install pyyaml==6.0.3
           python scripts/check_official_plugin_typing.py
 
   type_check_core_strict:
