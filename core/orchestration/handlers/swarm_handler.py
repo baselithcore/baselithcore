@@ -12,9 +12,11 @@ Use cases:
 """
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from core.config.swarm import SwarmConfig
+from core.observability.agent_spans import agent_span
 from core.observability.logging import get_logger
 from core.orchestration.enforcement import enforce_iteration, enforce_tool_invocation
 from core.orchestration.handlers import BaseFlowHandler
@@ -32,9 +34,21 @@ from core.orchestration.handlers.swarm_agents import (
 )
 from core.orchestration.handlers.swarm_agents import (
     decompose_task,
+    gather_memory_context,
+    resolve_agent_persona,
 )
 from core.orchestration.handlers.swarm_agents import (
     max_dynamic_subtasks as max_dynamic_subtasks,
+)
+
+# Per-request / per-tenant colony ownership lives in a sibling module (500-line
+# cap); MAX_TENANT_COLONIES is re-exported so callers can read the bound.
+from core.orchestration.handlers.swarm_colony import (
+    MAX_TENANT_COLONIES as MAX_TENANT_COLONIES,
+)
+from core.orchestration.handlers.swarm_colony import (
+    ColonyScopeMixin,
+    request_colony_scope,
 )
 from core.swarm.colony import Colony
 from core.swarm.types import (
@@ -47,7 +61,7 @@ from core.swarm.types import (
 logger = get_logger(__name__)
 
 
-class SwarmHandler(BaseFlowHandler):
+class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
     """
     Handler for 'collaborative_task' intent.
 
@@ -78,6 +92,7 @@ class SwarmHandler(BaseFlowHandler):
         colony_config: SwarmConfig | None = None,
         virtual_agents: list[VirtualAgentSpec] | None = None,
         llm_service: Any | None = None,
+        colony_factory: Callable[[], Colony] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -87,6 +102,11 @@ class SwarmHandler(BaseFlowHandler):
             colony_config: Configuration for the swarm colony.
             virtual_agents: Optional custom virtual agent specifications.
             llm_service: Optional LLM service for task decomposition and synthesis.
+            colony_factory: Optional zero-argument factory minting the colony
+                for one request. Defaults to a fresh ``Colony`` carrying the
+                virtual-agent roster. The handler is process-wide, so the
+                colony must never be — see
+                :mod:`core.orchestration.handlers.swarm_colony`.
             *args, **kwargs: Passed to BaseFlowHandler.
         """
         super().__init__(*args, **kwargs)
@@ -98,8 +118,8 @@ class SwarmHandler(BaseFlowHandler):
 
             self.colony_config = get_swarm_config()
 
-        self._colony = Colony(config=self.colony_config)
         self._virtual_agents = virtual_agents or DEFAULT_VIRTUAL_AGENTS
+        self._init_colony_scope(colony_factory or self._build_colony)
 
         if llm_service:
             self._llm_service = llm_service
@@ -107,7 +127,11 @@ class SwarmHandler(BaseFlowHandler):
             # Lazy load will handle fallback
             self._llm_service = None
 
-        self._register_virtual_agents()
+    def _build_colony(self) -> Colony:
+        """Mint a colony carrying the handler's virtual-agent roster."""
+        colony = Colony(config=self.colony_config)
+        self._register_virtual_agents(colony)
+        return colony
 
     @property
     def llm_service(self) -> Any:
@@ -121,8 +145,9 @@ class SwarmHandler(BaseFlowHandler):
                 logger.warning(f"Could not load LLM service: {e}")
         return self._llm_service
 
-    def _register_virtual_agents(self) -> None:
-        """Register virtual agents with the colony."""
+    def _register_virtual_agents(self, colony: Colony | None = None) -> None:
+        """Register the virtual-agent roster with ``colony`` (default: current)."""
+        target = self._colony if colony is None else colony
         for spec in self._virtual_agents:
             profile = AgentProfile(
                 id=f"virtual_{spec.role}",
@@ -131,12 +156,18 @@ class SwarmHandler(BaseFlowHandler):
                     Capability(name=cap, proficiency=0.9) for cap in spec.capabilities
                 ],
             )
-            self._colony.register_agent(profile)
+            target.register_agent(profile)
             logger.debug(f"Registered virtual agent: {spec.name}")
 
     async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle collaborative task request.
+
+        The request runs inside its own :class:`~core.swarm.colony.Colony`
+        (see :func:`~core.orchestration.handlers.swarm_colony.request_colony_scope`):
+        the handler is process-wide, so a shared colony would carry one
+        request's pheromone field, agent roster and auction state into the
+        next one — across tenants.
 
         Args:
             query: User's complex query/task
@@ -148,12 +179,17 @@ class SwarmHandler(BaseFlowHandler):
                 - sub_results: Results from individual agents
                 - coordination_stats: Colony statistics
         """
-        # Ids of agents minted for THIS request. The colony outlives the
-        # request (built once at orchestrator registration), so anything
-        # registered here must be unregistered on the way out — otherwise
-        # every request leaks its dynamic agents into the shared registry,
-        # growing get_available_agents() scans and letting stale agents
-        # compete in later requests' auctions.
+        with request_colony_scope(self.new_colony()):
+            return await self._handle_in_colony(query, context)
+
+    async def _handle_in_colony(
+        self, query: str, context: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Body of :meth:`handle`, run with a request-scoped colony bound."""
+        # Ids of agents minted for THIS request. Belt and braces: the colony
+        # is already per-request, but subclasses (and the tenant-scoped
+        # fallback colony) still rely on the explicit cleanup, so stale
+        # agents can never compete in a later request's auctions.
         dynamic_agent_ids: list[str] = []
         try:
             # DEBUG: the raw user query is free-text PII — keep it out of
@@ -281,8 +317,11 @@ class SwarmHandler(BaseFlowHandler):
                     "success": False,
                 }
 
-            # Execute task with LLM (simulating agent execution)
-            result = await self._execute_with_agent(task_def, agent)
+            # Execute task with LLM (simulating agent execution). The agent
+            # span records this sub-agent under the flow handler that spawned
+            # it — the one place a real agent-to-agent edge is observable.
+            with agent_span(agent.name, kind="swarm"):
+                result = await self._execute_with_agent(task_def, agent)
 
             # Mark task complete
             self._colony.complete_task(task.id, success=True, result=result)
@@ -336,49 +375,15 @@ class SwarmHandler(BaseFlowHandler):
         if not self.llm_service:
             return f"[{agent.name}] Analysis not available without LLM."
 
-        # 1. Fetch memory context
-        memory_context = ""
-        if self._colony.memory_manager:
-            try:
-                # Semantic search for relevant memories
-                memories = await self._colony.memory_manager.recall(
-                    query=task_def["description"], limit=5
-                )
-                if memories:
-                    memory_context = "\n## Relevant Memories\n" + "\n".join(
-                        f"- {m.content}" for m in memories
-                    )
-
-                # Graph expansion (GraphRAG)
-                if self._colony.memory_manager.graph_provider:
-                    graph_results = (
-                        await self._colony.memory_manager.graph_provider.query_graph(
-                            query=task_def["description"]
-                        )
-                    )
-                    if graph_results:
-                        memory_context += "\n## Entity Relationships\n" + "\n".join(
-                            f"- {r['source']} {r['relation']} {r['target']}"
-                            for r in graph_results
-                        )
-            except Exception as e:
-                logger.warning(f"Memory retrieval failed for agent {agent.name}: {e}")
-
-        # 2. Preparation prompt (and per-agent model override, when the spec
-        #    or profile declares one — cheap executor / strong reviewer split).
-        agent_spec = next(
-            (a for a in self._virtual_agents if f"virtual_{a.role}" == agent.id),
-            None,
+        # 1. Fetch memory context from the request's colony (recall + GraphRAG).
+        memory_context = await gather_memory_context(
+            self._colony, task_def["description"]
         )
-        system_prompt = agent.metadata.get("system_prompt")
-        if not system_prompt:
-            system_prompt = (
-                agent_spec.system_prompt
-                if agent_spec
-                else "You are a helpful assistant."
-            )
-        model_override = agent.metadata.get("model") or (
-            agent_spec.model if agent_spec else None
+
+        # 2. Persona + per-agent model override (cheap executor / strong
+        #    reviewer split), from the profile metadata or the static spec.
+        system_prompt, model_override = resolve_agent_persona(
+            self._virtual_agents, agent
         )
 
         prompt = f"""{system_prompt}

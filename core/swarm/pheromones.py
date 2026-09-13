@@ -8,7 +8,7 @@ contexts.
 """
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from core.observability.logging import get_logger
 
@@ -82,7 +82,7 @@ class PheromoneSystem:
                 existing.intensity + intensity,
                 self.max_intensity,
             )
-            existing.timestamp = datetime.now()
+            existing.timestamp = datetime.now(UTC)
             existing.depositor_id = agent_id
         else:
             # Create new pheromone
@@ -109,7 +109,7 @@ class PheromoneSystem:
         advanced by the consumed whole intervals so the fractional remainder
         keeps accruing toward the next step.
         """
-        elapsed = (datetime.now() - pheromone.timestamp).total_seconds()
+        elapsed = (datetime.now(UTC) - pheromone.timestamp).total_seconds()
         if elapsed < self.decay_interval:
             return
         steps = int(elapsed // self.decay_interval)

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.db.connection import get_async_cursor
+from core.db.connection import get_async_cursor, system_tenant_scope
 from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.prompts.types import PromptVersion
@@ -61,43 +61,62 @@ _SELECT_LABELS = "SELECT name, label, version FROM prompt_labels"
 
 
 class PostgresPromptBackend:
-    """Durable prompt storage in PostgreSQL."""
+    """Durable prompt storage in PostgreSQL.
+
+    Every method runs inside :func:`core.db.connection.system_tenant_scope`.
+    Prompts are **deployment-global**: neither table carries a ``tenant_id``
+    column and neither is covered by a row-level-security policy, so there is no
+    tenant this store could be attributed to. What there *is*, under
+    ``DB_RLS_ENABLED``, is a pool that refuses to check out a connection for a
+    caller that bound no tenant — and the callers here are out of request by
+    construction: the schema bootstrap, and ``PromptSynchronizer.refresh``,
+    which runs on a background timer. Unscoped, ``refresh`` raised
+    ``TenantContextError`` into its own fail-open handler on every tick, so
+    prompt sync logged a warning and quietly never synced.
+    """
 
     async def initialize(self) -> None:
         """Create the prompt tables if absent (idempotent)."""
         if skip_runtime_ddl("prompt store", "prompt_versions, prompt_labels"):
             return
-        async with get_async_cursor() as cur:
-            await cur.execute(_DDL)
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(_DDL)
         logger.info("prompt_store_schema_initialized")
 
     async def upsert_version(self, version: PromptVersion) -> None:
-        async with get_async_cursor() as cur:
-            await cur.execute(
-                _UPSERT_VERSION,
-                (
-                    version.name,
-                    version.version,
-                    version.template,
-                    version.description,
-                    json.dumps(version.variables),
-                    json.dumps(version.metadata, default=str),
-                    version.created_at,
-                ),
-            )
+        """Insert or update one prompt version."""
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(
+                    _UPSERT_VERSION,
+                    (
+                        version.name,
+                        version.version,
+                        version.template,
+                        version.description,
+                        json.dumps(version.variables),
+                        json.dumps(version.metadata, default=str),
+                        version.created_at,
+                    ),
+                )
 
     async def set_label(self, name: str, label: str, version: str) -> None:
-        async with get_async_cursor() as cur:
-            await cur.execute(_UPSERT_LABEL, (name, label, version))
+        """Point a label (``prod``, ``canary``, …) at a version."""
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(_UPSERT_LABEL, (name, label, version))
 
     async def fetch_all(
         self,
     ) -> tuple[list[PromptVersion], dict[tuple[str, str], str]]:
-        async with get_async_cursor() as cur:
-            await cur.execute(_SELECT_VERSIONS)
-            version_rows: list[tuple[Any, ...]] = await cur.fetchall()
-            await cur.execute(_SELECT_LABELS)
-            label_rows: list[tuple[Any, ...]] = await cur.fetchall()
+        """Every stored version and label — the synchronizer's refresh read."""
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(_SELECT_VERSIONS)
+                version_rows: list[tuple[Any, ...]] = await cur.fetchall()
+                await cur.execute(_SELECT_LABELS)
+                label_rows: list[tuple[Any, ...]] = await cur.fetchall()
 
         versions = [
             PromptVersion(

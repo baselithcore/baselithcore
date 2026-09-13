@@ -30,7 +30,7 @@ class TestResumeInterruptedRuns:
 
         assert report.resumed == ["r1"]
         orchestrator.process.assert_awaited_once_with(
-            "continue the work", run_id="r1", resume=True
+            "continue the work", context={}, run_id="r1", resume=True
         )
 
     async def test_awaiting_approval_never_auto_resumed(self):
@@ -49,7 +49,7 @@ class TestResumeInterruptedRuns:
         await _seed(store, "good", "running")
         orchestrator = AsyncMock()
 
-        async def _process(query, run_id=None, resume=False):
+        async def _process(query, context=None, run_id=None, resume=False):
             if run_id == "bad":
                 raise RuntimeError("poisoned")
             return {"response": "ok"}
@@ -132,3 +132,78 @@ class TestRecoverySweepLock:
         report = await resume_interrupted_runs(orchestrator, store, lock=lock)
 
         assert report.resumed == ["r1"]
+
+
+class TestTenancyOnResume:
+    """A resumed run must re-enter under its own tenant.
+
+    ``process`` was called with no context, so the run inherited whatever
+    ambient tenant the boot sweep happened to carry ("default") — the tenant
+    isolation guard then either stamped the wrong tenant on the context or
+    raised a mismatch, depending on the deployment.
+    """
+
+    async def test_checkpoint_tenant_is_passed_and_bound(self):
+        from core.context import get_current_tenant_id
+
+        store = InMemoryCheckpointStore()
+        checkpoint = Checkpoint(run_id="t1", query="q", status="running")
+        checkpoint.tenant_id = "acme"
+        await store.save(checkpoint)
+
+        seen: dict = {}
+
+        class _Orchestrator:
+            async def process(self, query, context=None, run_id=None, resume=False):
+                seen["context"] = context
+                seen["ambient"] = get_current_tenant_id()
+                return {"response": "ok"}
+
+        report = await resume_interrupted_runs(_Orchestrator(), store)
+
+        assert report.resumed == ["t1"]
+        assert seen["context"] == {"tenant_id": "acme"}
+        assert seen["ambient"] == "acme"
+
+    async def test_ambient_tenant_is_restored_after_the_run(self):
+        from core.context import get_current_tenant_id
+
+        store = InMemoryCheckpointStore()
+        checkpoint = Checkpoint(run_id="t2", query="q", status="running")
+        checkpoint.tenant_id = "acme"
+        await store.save(checkpoint)
+
+        before = get_current_tenant_id()
+        orchestrator = AsyncMock()
+        orchestrator.process = AsyncMock(return_value={"response": "ok"})
+        await resume_interrupted_runs(orchestrator, store)
+        assert get_current_tenant_id() == before
+
+    async def test_ambient_tenant_is_restored_after_a_failed_run(self):
+        from core.context import get_current_tenant_id
+
+        store = InMemoryCheckpointStore()
+        checkpoint = Checkpoint(run_id="t3", query="q", status="running")
+        checkpoint.tenant_id = "acme"
+        await store.save(checkpoint)
+
+        before = get_current_tenant_id()
+        orchestrator = AsyncMock()
+        orchestrator.process = AsyncMock(side_effect=RuntimeError("poisoned"))
+        report = await resume_interrupted_runs(orchestrator, store)
+        assert "t3" in report.failed
+        assert get_current_tenant_id() == before
+
+    async def test_tenantless_checkpoint_passes_an_empty_context(self):
+        store = InMemoryCheckpointStore()
+        await _seed(store, "t4", "running")
+
+        seen: dict = {}
+
+        class _Orchestrator:
+            async def process(self, query, context=None, run_id=None, resume=False):
+                seen["context"] = context
+                return {"response": "ok"}
+
+        await resume_interrupted_runs(_Orchestrator(), store)
+        assert seen["context"] == {}

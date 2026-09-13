@@ -33,9 +33,9 @@ from .checkpoint import (
     CheckpointManager,
     CheckpointStore,
     InMemoryCheckpointStore,
-    record_approval_decision,
     step_key,
 )
+from .checkpoint_approvals import ApprovalPrincipal, record_approval_decision
 from .checkpoint_history import fork_run, get_state, get_state_history, list_runs
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
@@ -51,6 +51,7 @@ from .protocols import (
     OrchestratorProtocol,
     StreamHandler,
 )
+from .recovery import recovery_sweep_loop, run_recovery_cycle
 from .run_events import (
     RunEventStream,
     get_run_event_stream,
@@ -58,7 +59,14 @@ from .run_events import (
     set_run_event_broadcaster,
     stream_run_events,
 )
-from .tool_output import truncate_tool_output
+from .tool_output import (
+    UNTRUSTED_OUTPUT_SYSTEM_RULE,
+    escape_untrusted_markers,
+    sanitize_tool_output,
+    truncate_tool_output,
+    unwrap_untrusted,
+    wrap_untrusted,
+)
 
 __all__ = [
     # Protocols
@@ -95,7 +103,15 @@ __all__ = [
     "set_run_event_broadcaster",
     "stream_run_events",
     # Tool output hygiene
+    "UNTRUSTED_OUTPUT_SYSTEM_RULE",
+    "escape_untrusted_markers",
+    "sanitize_tool_output",
     "truncate_tool_output",
+    "unwrap_untrusted",
+    "wrap_untrusted",
+    # Crash recovery
+    "recovery_sweep_loop",
+    "run_recovery_cycle",
     # Modality routing
     "Modality",
     "annotate_context",
@@ -111,5 +127,6 @@ __all__ = [
     "AutonomyPolicy",
     "AutonomyUpgradeGate",
     "enforce_approval",
+    "ApprovalPrincipal",
     "record_approval_decision",
 ]

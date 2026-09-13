@@ -16,7 +16,7 @@ from typing import Any
 import orjson
 from psycopg.rows import dict_row
 
-from core.db.connection import get_async_cursor
+from core.db.connection import get_async_cursor, system_tenant_scope
 from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint import (
@@ -183,15 +183,23 @@ class PostgresCheckpointStore:
         return self._history_enabled
 
     async def initialize(self) -> None:
-        """Create the checkpoint tables and index if absent (idempotent)."""
+        """Create the checkpoint tables and index if absent (idempotent).
+
+        Runs inside :func:`core.db.connection.system_tenant_scope`: the first
+        touch of this store is often out of request (a worker, a script, an
+        import-time bootstrap), and under ``DB_RLS_ENABLED`` the pool refuses to
+        bind a tenant nobody declared. Schema work belongs to the deployment,
+        not to a tenant.
+        """
         if skip_runtime_ddl(
             "checkpoint store", "agent_checkpoints, agent_checkpoint_history"
         ):
             return
-        async with get_async_cursor() as cur:
-            await cur.execute(_DDL)
-            if self._history_enabled:
-                await cur.execute(_HISTORY_DDL)
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(_DDL)
+                if self._history_enabled:
+                    await cur.execute(_HISTORY_DDL)
         logger.info("agent_checkpoints schema initialized")
 
     async def _trim_history(self, cur: Any, run_id: str) -> None:

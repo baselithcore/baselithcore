@@ -36,7 +36,7 @@ class TestToolTimeout:
         )
         assert agent._tool_timeout is None
         result = await agent._execute_tool("quick", "")
-        assert result == "ok"
+        assert "ok" in result
 
 
 class TestToolRetry:
@@ -57,7 +57,7 @@ class TestToolRetry:
             retry_backoff=0.01,
         )
         result = await agent._execute_tool("flaky", "")
-        assert result == "recovered"
+        assert "recovered" in result
         assert len(calls) == 2
 
     async def test_non_transient_error_not_retried(self) -> None:

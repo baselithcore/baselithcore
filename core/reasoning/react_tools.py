@@ -1,8 +1,10 @@
 """Guarded tool execution for the ReAct loop.
 
 Holds everything between "the model asked for a tool" and "here is the
-observation": the contract / autonomy / budget gates, the timeout and retry
-policy, and the consecutive-failure circuit breaker.
+observation": the enforcement chokepoint, argument validation, the idempotency
+ledger, the timeout and retry policy, and the consecutive-failure circuit
+breaker. The pieces that surround the call itself live in
+:mod:`core.reasoning.react_tool_gate` (module size cap).
 
 Mixed into :class:`core.reasoning.react.ReActAgent`; not useful standalone.
 """
@@ -11,12 +13,21 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from typing import Any
 
 from core.observability.logging import get_logger
-from core.orchestration.tool_output import (
-    sanitize_tool_output,
-    truncate_tool_output,
+from core.orchestration.tool_output import escape_untrusted_markers
+from core.reasoning.react_tool_gate import (
+    build_gate_context,
+    claim_ledger_entry,
+    dispatch_post_hook,
+    gate_denial,
+    invalid_arguments_message,
+    new_ledger,
+    new_run_id,
+    note_tool_outcome,
+    render_observation,
 )
 from core.reasoning.react_types import ToolDefinition
 
@@ -28,6 +39,20 @@ logger = get_logger(__name__)
 MAX_PARALLEL_TOOL_CALLS = 8
 
 
+def _unknown_tool_message(name: str, tools: dict[str, ToolDefinition]) -> str:
+    """Runtime narration for a tool the model invented.
+
+    ``name`` is whatever the model wrote, so it is tool-adjacent content being
+    interpolated into a string that lands outside the untrusted envelope; its
+    markers are neutralised. The registered names are the operator's own and
+    need no scrubbing.
+    """
+    return (
+        f"Error: unknown tool '{escape_untrusted_markers(name)}'. "
+        f"Available tools: {list(tools)}"
+    )
+
+
 class ToolExecutionMixin:
     """Tool dispatch, gating and failure accounting for :class:`ReActAgent`.
 
@@ -36,6 +61,13 @@ class ToolExecutionMixin:
     ``_human_intervention``, ``_contract_validator``, ``_loop_budget``,
     ``_checkpoint``, ``_max_consecutive_tool_failures``, ``_failure_streak``
     and ``_stall_guard``.
+
+    Three attributes are optional and lazily defaulted here, so a host that
+    predates them keeps working: ``_tool_hooks`` (a per-agent
+    :class:`~core.orchestration.hooks.ToolHookRegistry`; the process-wide one
+    is used when unset), ``_tool_ledger`` (a
+    :class:`~core.orchestration.idempotency.ToolLedger`; an in-process one is
+    created on first effectful call) and ``_ledger_run_id``.
     """
 
     _tools: dict[str, ToolDefinition]
@@ -57,8 +89,14 @@ class ToolExecutionMixin:
         return await self._run_tool_guarded(name, tuple(args), {})
 
     async def _execute_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
-        """Execute a structured (native) tool call with keyword arguments."""
-        return await self._run_tool_guarded(name, (), dict(arguments))
+        """Execute a structured (native) tool call with keyword arguments.
+
+        The arguments came from the model, so they are schema-checked before
+        anything is gated or dispatched.
+        """
+        return await self._run_tool_guarded(
+            name, (), dict(arguments), validate_schema=True
+        )
 
     async def _execute_tool_calls(
         self, calls: list[tuple[str, dict[str, Any]]]
@@ -84,17 +122,22 @@ class ToolExecutionMixin:
         for index, (name, arguments) in enumerate(calls):
             tool = self._tools.get(name)
             if tool is None:
-                observations[index] = (
-                    f"Error: unknown tool '{name}'. Available tools: {list(self._tools)}"
-                )
+                observations[index] = _unknown_tool_message(name, self._tools)
+                continue
+            kwargs = dict(arguments)
+            # Reject malformed arguments before the gate: a call the model got
+            # wrong must not consume an approval or a budget entry.
+            invalid = invalid_arguments_message(tool, kwargs)
+            if invalid is not None:
+                observations[index] = invalid
                 continue
             # Propagates ApprovalPendingError / BudgetExceededError, which must
             # abort the turn before any later tool in it executes.
-            denial = await self._enforce_tool_gates(tool)
+            denial = await self._enforce_tool_gates(tool, args=kwargs)
             if denial is not None:
                 observations[index] = denial
                 continue
-            runnable.append((index, tool, dict(arguments)))
+            runnable.append((index, tool, kwargs))
 
         if runnable:
             if self._checkpoint is not None:
@@ -149,109 +192,124 @@ class ToolExecutionMixin:
         except Exception:
             return None
 
-    async def _enforce_tool_gates(self, tool: ToolDefinition) -> str | None:
-        """Apply contract / autonomy / budget gates before a tool runs.
+    async def _enforce_tool_gates(
+        self, tool: ToolDefinition, args: Any | None = None
+    ) -> str | None:
+        """Push one invocation through the single enforcement chokepoint.
 
-        Returns an error-observation string when the call is denied (the loop
-        continues and the model can adapt), or None when the call may proceed.
-        Fail-closed exceptions propagate: ``ApprovalPendingError`` (durable
-        HITL pause) and ``BudgetExceededError`` (tool-call cap) abort the run.
+        Delegates to :func:`core.orchestration.enforcement.enforce_tool_invocation`
+        rather than re-checking contract / autonomy / budget by hand. That is
+        the whole point: every control the chokepoint gains — plugin capability
+        checks, the tool rate limit, veto-capable pre-hooks, the audit trail —
+        now applies to the ReAct loop too, instead of only to orchestrated
+        handlers.
+
+        Args:
+            tool: The tool about to run.
+            args: Its arguments, hashed (never stored raw) into the audit
+                record and the pre-hook event.
+
+        Returns:
+            An error-observation string when the call is denied — the loop
+            continues and the model can adapt — or None when it may proceed.
+
+        Raises:
+            ApprovalPendingError: Durable human-in-the-loop pause.
+            BudgetExceededError: A per-request cap was hit (fail-closed).
         """
-        from core.orchestration.autonomy import (
-            ApprovalPendingError,
-            ApprovalRequiredError,
-            enforce_approval,
-        )
-        from core.orchestration.contract import ContractViolationError
+        from core.orchestration.autonomy import ApprovalPendingError
+        from core.orchestration.enforcement import enforce_tool_invocation
+        from core.orchestration.limits import BudgetExceededError
 
-        if self._contract_validator is not None:
-            try:
-                self._contract_validator.check_tool_call(tool.name)
-            except ContractViolationError as exc:
-                logger.warning(
-                    "ReAct tool '%s' blocked by contract: %s", tool.name, exc
-                )
-                return f"Error executing '{tool.name}': {exc}"
-
-        if self._autonomy_policy is not None:
-            try:
-                await enforce_approval(
-                    self._autonomy_policy,
-                    tool.category,
-                    tool.name,
-                    self._human_intervention,
-                    checkpoint=self._checkpoint,
-                )
-            except ApprovalPendingError:
-                # Durable pause — the checkpoint is already awaiting_approval.
-                raise
-            except ApprovalRequiredError as exc:
-                logger.warning(
-                    "ReAct tool '%s' blocked by autonomy policy: %s", tool.name, exc
-                )
-                return f"Error executing '{tool.name}': {exc}"
-
-        budget = self._active_budget()
-        if budget is not None:
-            # Raises BudgetExceededError at the cap: fail-closed, a runaway
-            # loop cannot keep dispatching tools.
-            budget.record_tool_call()
+        try:
+            await enforce_tool_invocation(
+                build_gate_context(self),
+                tool.name,
+                tool.normalized_category(),
+                args=args,
+            )
+        except (ApprovalPendingError, BudgetExceededError):
+            # Fail-closed by design: the run pauses durably, or aborts.
+            raise
+        except Exception as exc:
+            return gate_denial(tool.name, exc)
         return None
+
+    # ------------------------------------------------------------------
+    # Idempotency ledger (non-read_only categories only)
+    # ------------------------------------------------------------------
+
+    def _ledger(self) -> Any:
+        """The agent's tool ledger, created in-process on first use."""
+        ledger = getattr(self, "_tool_ledger", None)
+        if ledger is None:
+            ledger = new_ledger()
+            self._tool_ledger = ledger
+        return ledger
+
+    def _ledger_entries(self) -> int:
+        """How many calls this agent's ledger holds (diagnostics / tests)."""
+        ledger = getattr(self, "_tool_ledger", None)
+        entries = getattr(ledger, "_entries", None)
+        return len(entries) if entries is not None else 0
+
+    def _ledger_identity(self) -> tuple[str, int]:
+        """``(run_id, step)`` identifying the next effectful call.
+
+        Under a checkpoint the step is the replay cursor, so the same call gets
+        the same key on every pass. Without one it is a per-agent counter: keys
+        stay stable within an attempt, which is as much as an in-process ledger
+        can honestly promise.
+        """
+        run_id = getattr(self, "_ledger_run_id", None)
+        if run_id is None:
+            run_id = getattr(self._checkpoint, "run_id", None) or new_run_id()
+            self._ledger_run_id = run_id
+        cursor = getattr(self._checkpoint, "_cursor", None)
+        if isinstance(cursor, int):
+            return run_id, cursor
+        step = getattr(self, "_ledger_step", 0)
+        self._ledger_step = step + 1
+        return run_id, step
 
     def _note_tool_outcome(self, observation: str) -> str | None:
         """Track the consecutive-failure streak; return an escalation message
         when the configured cap is crossed, else None.
 
-        Failed observations are the error strings produced by the guarded
-        executor (``Error ...``); any success resets the streak. Escalating
-        early keeps a broken tool from burning the whole iteration budget.
+        Body in :func:`core.reasoning.react_tool_gate.note_tool_outcome`
+        (extracted for the module size cap).
         """
-        cap = self._max_consecutive_tool_failures
-        if cap is None and self._stall_guard is None:
-            return None
-        if observation.startswith("Error"):
-            self._failure_streak += 1
-        else:
-            self._failure_streak = 0
-            return None
-
-        # Futility check: the streak counts *how many* failures; the stall
-        # guard counts how many times the *same* failure came back. A tool
-        # that keeps returning a different error each time is still making
-        # the loop pay for nothing.
-        if self._stall_guard is not None:
-            verdict = self._stall_guard.record(observation)
-            if verdict.stalled:
-                logger.warning(
-                    "ReAct: %s — escalating instead of continuing the loop.",
-                    verdict.reason,
-                )
-                return (
-                    f"Stopping: {verdict.reason} (last: {observation}). "
-                    "Please review the tool configuration or retry later."
-                )
-
-        if cap is None or self._failure_streak < cap:
-            return None
-        logger.warning(
-            "ReAct: %d consecutive tool failures — escalating instead of "
-            "continuing the loop.",
-            self._failure_streak,
-        )
-        return (
-            f"Stopping: tools failed {self._failure_streak} consecutive times "
-            f"(last: {observation}). Please review the tool configuration or "
-            "retry later."
-        )
+        return note_tool_outcome(self, observation)
 
     async def _run_tool_guarded(
-        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+        self,
+        name: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        *,
+        validate_schema: bool = False,
     ) -> str:
+        """Look the tool up, validate, gate it, then run it.
+
+        Args:
+            name: Tool name as the model spelled it.
+            args: Positional arguments (legacy text-parsed loop only).
+            kwargs: Keyword arguments.
+            validate_schema: Check ``kwargs`` against the tool's JSON Schema
+                first. On for structured calls, where the model authored a
+                typed object; off for the text loop, whose comma-split strings
+                are positional and describe nothing a schema can judge.
+        """
         tool = self._tools.get(name)
         if tool is None:
-            return f"Error: unknown tool '{name}'. Available tools: {list(self._tools)}"
+            return _unknown_tool_message(name, self._tools)
 
-        denial = await self._enforce_tool_gates(tool)
+        if validate_schema:
+            invalid = invalid_arguments_message(tool, kwargs)
+            if invalid is not None:
+                return invalid
+
+        denial = await self._enforce_tool_gates(tool, args=kwargs or list(args))
         if denial is not None:
             return denial
 
@@ -273,21 +331,59 @@ class ToolExecutionMixin:
             result = await self._checkpoint.run_step(
                 tool.name,
                 payload,
-                lambda: self._invoke_tool_uncheckpointed(tool, args, kwargs),
+                lambda: self._invoke_tool_ledgered(tool, args, kwargs),
                 category=tool.category,
             )
             return str(result)
-        return await self._invoke_tool_uncheckpointed(tool, args, kwargs)
+        return await self._invoke_tool_ledgered(tool, args, kwargs)
+
+    async def _invoke_tool_ledgered(
+        self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
+        """Wrap an effectful invocation in an idempotency-ledger claim.
+
+        ``read_only`` tools pass straight through — repeating a read costs a
+        round trip, not a defect. Everything else (including an unrecognised
+        category, which is treated as effectful) records its intent before the
+        call and its outcome after, so a replay returns the recorded result
+        instead of sending the payment / email / webhook twice.
+        """
+        if tool.is_read_only:
+            return await self._invoke_tool_uncheckpointed(tool, args, kwargs)
+        ledger_args = dict(kwargs) if kwargs else {"__args__": list(args)}
+        run_id, step = self._ledger_identity()
+        key, replayed = await claim_ledger_entry(
+            self._ledger(), run_id, step, tool, ledger_args
+        )
+        if replayed is not None:
+            return replayed
+        observation = await self._invoke_tool_uncheckpointed(tool, args, kwargs)
+        if key is not None:
+            try:
+                if observation.startswith("Error"):
+                    await self._ledger().fail(key, observation)
+                else:
+                    await self._ledger().complete(key, observation)
+            except Exception as exc:  # the ledger must not break the loop
+                logger.warning(
+                    "tool_ledger_record_failed tool=%s error=%s", tool.name, exc
+                )
+        return observation
 
     async def _invoke_tool_uncheckpointed(
         self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> str:
-        """Run an already-gated tool, applying timeout, retries and truncation.
+        """Run an already-gated tool, applying timeout, retries and rendering.
 
         Split from :meth:`_run_tool_guarded` so a multi-tool turn can gate its
         calls in order and then overlap only the invocations.
         """
         name = tool.name
+        # This method's error strings are runtime narration and therefore live
+        # OUTSIDE the untrusted envelope. ``safe_name`` and the escaped
+        # exception text below are what keeps that trusted region trusted.
+        safe_name = escape_untrusted_markers(name)
+        started = time.perf_counter()
 
         async def _invoke() -> Any:
             if inspect.iscoroutinefunction(tool.fn):
@@ -299,16 +395,20 @@ class ToolExecutionMixin:
                 return await asyncio.wait_for(coro, timeout=timeout)
             return await coro
 
+        async def _finish(observation: str, ok: bool) -> str:
+            await dispatch_post_hook(
+                self, tool, ok=ok, elapsed_ms=(time.perf_counter() - started) * 1000
+            )
+            return observation
+
         for attempt in range(self._tool_retries + 1):
             try:
                 result = await _invoke()
-                # Cap the observation so a large tool result can't
-                # bloat/overflow the context window on the next reasoning turn;
-                # then the opt-in indirect-injection scan (universal
-                # observation chokepoint — no-op unless enabled).
-                return sanitize_tool_output(
-                    truncate_tool_output(str(result)), source=name
-                )
+                # SkillResult is unpacked (snapshot to the model, success to
+                # the failure streak); everything else is bounded, scanned and
+                # sealed in the untrusted envelope.
+                observation, ok = render_observation(name, result)
+                return await _finish(observation, ok)
             except TimeoutError:
                 # Also reachable via a tool's own socket timeout (builtin
                 # TimeoutError subclasses OSError, so this clause must come
@@ -319,7 +419,9 @@ class ToolExecutionMixin:
                     else ""
                 )
                 logger.warning("Tool '%s' timed out%s", name, after)
-                return f"Error executing '{name}': timed out{after}"
+                return await _finish(
+                    f"Error executing '{safe_name}': timed out{after}", False
+                )
             except (ConnectionError, OSError) as exc:
                 if attempt < self._tool_retries:
                     delay = self._retry_backoff * (2**attempt)
@@ -334,12 +436,20 @@ class ToolExecutionMixin:
                     await asyncio.sleep(delay)
                     continue
                 logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
-                return f"Error executing '{name}': {exc}"
+                return await _finish(
+                    f"Error executing '{safe_name}': "
+                    f"{escape_untrusted_markers(str(exc))}",
+                    False,
+                )
             except Exception as exc:
                 logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
-                return f"Error executing '{name}': {exc}"
+                return await _finish(
+                    f"Error executing '{safe_name}': "
+                    f"{escape_untrusted_markers(str(exc))}",
+                    False,
+                )
         # Unreachable: every path in the loop returns.
-        return f"Error executing '{name}': exhausted retries"
+        return f"Error executing '{safe_name}': exhausted retries"
 
 
 __all__ = ["ToolExecutionMixin"]

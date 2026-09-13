@@ -31,9 +31,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from core.observability.agent_spans import tool_span
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:  # re-exported below through the module __getattr__ shim
+    from core.orchestration.checkpoint_approvals import (
+        ApprovalPrincipal,
+        record_approval_decision,
+    )
     from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 
 logger = get_logger(__name__)
@@ -273,7 +278,12 @@ class CheckpointManager:
             )
             return recorded["result"]
 
-        result = await fn()
+        # The tool span attributes the call to whichever agent is running, so a
+        # topology view can draw agent-to-tool edges. Replayed steps get no
+        # span: nothing executed, and a zero-duration bar would misreport the
+        # run's real cost.
+        with tool_span(tool_name, attributes={"baselith.step.cursor": cursor}):
+            result = await fn()
         publish_run_event(
             self.run_id, EventType.TOOL_RESULT, {**step_meta, "replayed": False}
         )
@@ -378,6 +388,13 @@ async def init_checkpoint(
             budget.iterations = int(b.get("iterations", 0))
             budget.tool_calls = int(b.get("tool_calls", 0))
             budget.cost_usd = float(b.get("cost_usd", 0.0))
+            # Tokens are the counter a long run is most likely to be near, and
+            # dropping them handed the resumed run a full token cap — the one
+            # way a crash-loop could spend without bound. ``context_tokens``
+            # rides along so the allocation signal (and the token-pressure
+            # fallback that reads it) survives the restart too.
+            budget.tokens = int(b.get("tokens", 0))
+            budget.context_tokens = int(b.get("context_tokens", 0))
             existing.status = STATUS_RUNNING
             logger.info(
                 "checkpoint_resume run=%s steps=%d",
@@ -399,47 +416,19 @@ async def init_checkpoint(
     return CheckpointManager(store, checkpoint)
 
 
-async def record_approval_decision(
-    store: CheckpointStore,
-    run_id: str,
-    approved: bool,
-    *,
-    approver: str | None = None,
-    reason: str | None = None,
-) -> bool:
-    """Record a reviewer's decision on a run paused ``awaiting_approval``.
-
-    The operator-facing half of the durable human-in-the-loop flow: persist
-    the decision, then re-run ``process(run_id=..., resume=True)`` — the
-    approval gate consumes the decision and the run continues (approved) or
-    aborts with a denial (denied).
-
-    Returns:
-        True when the decision was recorded; False when the run is unknown or
-        has no pending approval request.
-    """
-    checkpoint = await store.load(run_id)
-    if checkpoint is None or not checkpoint.pending_approval:
-        return False
-    checkpoint.pending_approval["decision"] = {
-        "approved": approved,
-        "approver": approver,
-        "reason": reason,
-        "at": time.time(),
-    }
-    await store.save(checkpoint)
-    return True
-
-
-# Concrete backends live beside the contract, not inside it: the in-memory store
-# is re-exported here so ``from core.orchestration.checkpoint import
-# InMemoryCheckpointStore`` keeps working (deferred import breaks the cycle —
-# checkpoint_memory imports the contract from this module).
+# The operator-side approval flow lives in ``checkpoint_approvals`` (module
+# size cap) and is re-exported here so ``from core.orchestration.checkpoint
+# import record_approval_decision`` keeps working. Deferred, like the in-memory
+# store below: both siblings import the contract from this module.
 def __getattr__(name: str) -> Any:  # pragma: no cover - import shim
     if name == "InMemoryCheckpointStore":
         from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 
         return InMemoryCheckpointStore
+    if name in ("ApprovalPrincipal", "record_approval_decision"):
+        from core.orchestration import checkpoint_approvals
+
+        return getattr(checkpoint_approvals, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -451,10 +440,12 @@ __all__ = [
     "STATUS_COMPLETED",
     "STATUS_FAILED",
     "STATUS_RUNNING",
+    "ApprovalPrincipal",
     "Checkpoint",
     "CheckpointManager",
     "CheckpointStore",
     "InMemoryCheckpointStore",
+    "init_checkpoint",
     "record_approval_decision",
     "step_key",
 ]

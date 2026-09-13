@@ -51,6 +51,10 @@ class AuditEventType(str, Enum):
     TOOL_INVOKE = "tool.invoke"
     TOOL_BLOCKED = "tool.blocked"
 
+    # Human-in-the-loop: a reviewer approved or denied a paused run. Emitted by
+    # core.orchestration.checkpoint_approvals with the deciding principal.
+    APPROVAL_DECISION = "approval.decision"
+
     # Self-modification: any change the system makes to its own future
     # behavior (skill synthesis, prompt tuning, routing overrides).
     SELF_MODIFY_PROPOSE = "self_modify.propose"

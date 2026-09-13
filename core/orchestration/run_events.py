@@ -33,6 +33,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from core.api.events import AgentEvent, EventType
+from core.observability.agent_spans import current_agent_id
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -165,7 +166,15 @@ def publish_run_event(
     if not run_id:
         return 0
     payload = {"run_id": run_id, **(data or {})}
-    event = AgentEvent(type=event_type, content=content, data=payload)
+    # ``agent_id`` existed on the event but nothing ever set it, so every
+    # consumer saw "system" and could not tell which agent produced a step in a
+    # multi-agent run. The ambient agent context answers that when one is open.
+    event = AgentEvent(
+        type=event_type,
+        content=content,
+        data=payload,
+        agent_id=current_agent_id() or "system",
+    )
     if _broadcaster is not None:
         try:
             _broadcaster(run_id, event)

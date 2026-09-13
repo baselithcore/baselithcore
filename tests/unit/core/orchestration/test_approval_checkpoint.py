@@ -61,10 +61,10 @@ async def test_record_decision_roundtrip():
 
 async def test_record_decision_unknown_run_or_no_pending():
     store = InMemoryCheckpointStore()
-    assert await record_approval_decision(store, "ghost", True) is False
+    assert await record_approval_decision(store, "ghost", True, approver="op") is False
     manager, _ = _manager(store, run_id="r2")
     await store.save(manager.checkpoint)  # running, no pending approval
-    assert await record_approval_decision(store, "r2", True) is False
+    assert await record_approval_decision(store, "r2", True, approver="op") is False
 
 
 async def test_pending_approval_survives_serialization():
@@ -98,7 +98,7 @@ async def test_no_channel_without_checkpoint_keeps_terminal_denial():
 async def test_recorded_approval_lets_tool_proceed():
     manager, store = _manager()
     await manager.await_approval("deploy", "destructive")
-    await record_approval_decision(store, "run-1", True)
+    await record_approval_decision(store, "run-1", True, approver="op")
 
     resumed = CheckpointManager(store, await store.load("run-1"))
     # No exception: the recorded decision is consumed.
@@ -110,7 +110,9 @@ async def test_recorded_approval_lets_tool_proceed():
 async def test_recorded_denial_is_terminal():
     manager, store = _manager()
     await manager.await_approval("deploy", "destructive")
-    await record_approval_decision(store, "run-1", False, reason="too risky")
+    await record_approval_decision(
+        store, "run-1", False, approver="op", reason="too risky"
+    )
 
     resumed = CheckpointManager(store, await store.load("run-1"))
     with pytest.raises(ApprovalRequiredError) as exc_info:
@@ -138,7 +140,7 @@ async def test_enforce_tool_invocation_pause_then_resume():
     with pytest.raises(ApprovalPendingError):
         await enforce_tool_invocation(context, "deploy", "destructive")
 
-    assert await record_approval_decision(store, "run-1", True)
+    assert await record_approval_decision(store, "run-1", True, approver="op")
 
     resumed_ctx = {
         "autonomy_policy": SUPERVISED,

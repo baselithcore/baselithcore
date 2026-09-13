@@ -61,7 +61,7 @@ def breadth_first_search(
 
             # Evaluate children (batch evaluation could be optimized here)
             scores = evaluator(children)
-            for child, score in zip(children, scores):
+            for child, score in zip(children, scores, strict=True):
                 child.score = score
                 candidates.append(child)
 
@@ -121,7 +121,7 @@ def depth_first_search(
         # Filter and add to stack (higher scores processed last -> LIFO)
         # So we actually want to sort ascending so best ones are at the end (top) of stack
         scored_children = []
-        for child, score in zip(children, scores):
+        for child, score in zip(children, scores, strict=True):
             child.score = score
             if score >= threshold:
                 scored_children.append(child)

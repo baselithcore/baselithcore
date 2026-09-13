@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Optional
 
-from core.context import reset_plugin_context, set_plugin_context
+from core.context import set_plugin_context
 from core.observability.logging import get_logger
 from core.orchestration.autonomy import ApprovalPendingError
 from core.orchestration.limits import (
@@ -14,11 +14,20 @@ from core.orchestration.limits import (
     LoopBudget,
     LoopLimits,
 )
+from core.orchestration.mixins._agent_attribution import (
+    dispatch_attribution,
+    intent_owner,
+)
 from core.orchestration.mixins._context_assembly import (
     annotate_modality,
     enforce_tenant_isolation,
     inject_capabilities,
     inject_memory_context,
+)
+from core.orchestration.mixins._failure_paths import (
+    handle_budget_exceeded,
+    handle_cancellation,
+    handle_handler_error,
 )
 from core.orchestration.run_events import EventType, publish_run_event
 
@@ -66,15 +75,12 @@ class ExecutionMixin:
         attribute the dispatch to its owning plugin. Returns the reset token,
         or ``None`` when the intent is core-owned/unknown. Best-effort:
         attribution failures never block a dispatch.
+
+        Dispatch sites use :func:`dispatch_attribution` instead, which binds the
+        same context *and* opens the agent span. This remains for callers that
+        want the binding alone.
         """
-        registry = getattr(self, "plugin_registry", None)
-        if registry is None:
-            return None
-        try:
-            owner = registry.get_flow_handler_owner(intent)
-        except Exception:
-            logger.debug("flow_handler_owner_lookup_failed", exc_info=True)
-            return None
+        owner = intent_owner(self, intent)
         return set_plugin_context(owner) if owner else None
 
     def _schedule_memory_write(
@@ -244,7 +250,9 @@ class ExecutionMixin:
         assert intent is not None
 
         # 2. Inject Capabilities (human intervention, feedback, skills catalog).
-        inject_capabilities(self, context)
+        #    The query rides along so the skill catalog is ranked for *this*
+        #    request instead of dumping every card into the prompt.
+        inject_capabilities(self, context, query=query)
 
         context["intent"] = intent
 
@@ -283,14 +291,12 @@ class ExecutionMixin:
             }
 
         # Execute handler — bound to its owning plugin so downstream seams
-        # (e.g. the central per-plugin LLM policy) attribute the work to it.
+        # (e.g. the central per-plugin LLM policy) attribute the work to it,
+        # and wrapped in an agent span so the trace stream records which agent
+        # ran and under which parent.
         try:
-            plugin_token = self._bind_intent_plugin(intent)
-            try:
+            with dispatch_attribution(self, intent):
                 result = await handler.handle(query, context)
-            finally:
-                if plugin_token is not None:
-                    reset_plugin_context(plugin_token)
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__
 
@@ -367,62 +373,21 @@ class ExecutionMixin:
                     "category": e.category,
                 },
             }
+        except asyncio.CancelledError:
+            # Not an Exception: the generic handler below never saw it, so a
+            # client disconnect or a shutdown left the checkpoint pinned at
+            # ``running``. Record the cancellation, then re-raise — swallowing
+            # it would break structured concurrency for the awaiting task.
+            await handle_cancellation(intent, checkpoint_mgr, events_run_id)
+            raise
         except BudgetExceededError as e:
-            logger.warning(
-                "loop_budget_exceeded",
-                extra={
-                    "intent": intent,
-                    "reason": e.reason,
-                    "snapshot": str(e.snapshot),
-                },
+            return await handle_budget_exceeded(
+                e, intent, checkpoint_mgr, events_run_id
             )
-            if checkpoint_mgr is not None:
-                await checkpoint_mgr.fail(f"budget_exceeded: {e.reason}")
-            publish_run_event(
-                events_run_id,
-                EventType.ERROR,
-                {"error": f"budget_exceeded: {e.reason}"},
-            )
-            return {
-                "response": f"Request aborted: {e.reason}",
-                "intent": intent,
-                "error": True,
-                "budget_exceeded": e.reason,
-                "budget": e.snapshot.__dict__,
-            }
         except Exception as e:
-            logger.error(f"Handler error for intent {intent}: {e}")
-            # Mark failed but keep the checkpoint — a resumable run survives the
-            # crash and completed steps replay instead of re-executing.
-            if checkpoint_mgr is not None:
-                try:
-                    await checkpoint_mgr.fail(str(e))
-                except Exception as cp_err:
-                    logger.warning(f"Failed to persist checkpoint failure: {cp_err}")
-
-            # Emit flow failed event
-            if _HAS_EVENT_BUS:
-                elapsed = time.time() - start_time
-                try:
-                    get_event_bus().emit_sync(
-                        EventNames.FLOW_COMPLETED,
-                        {
-                            "intent": intent,
-                            "duration_ms": int(elapsed * 1000),
-                            "success": False,
-                            "error": str(e),
-                            "run_id": events_run_id,
-                        },
-                    )
-                except Exception as e_emit:
-                    logger.warning(f"Failed to emit failure event: {e_emit}")
-
-            publish_run_event(events_run_id, EventType.ERROR, {"error": str(e)})
-            return {
-                "response": f"Error processing request: {e!s}",
-                "intent": intent,
-                "error": True,
-            }
+            return await handle_handler_error(
+                e, intent, checkpoint_mgr, events_run_id, start_time
+            )
 
     async def process_stream(
         self,
@@ -481,15 +446,11 @@ class ExecutionMixin:
         # chunk boundaries via a holdback window) and then the opt-in
         # streaming moderation layer (see core.orchestration.stream_guard).
         try:
-            plugin_token = self._bind_intent_plugin(intent)
-            try:
+            with dispatch_attribution(self, intent):
                 async for chunk in moderate_stream(
                     guard_stream(handler.handle(query, context))
                 ):
                     yield chunk
-            finally:
-                if plugin_token is not None:
-                    reset_plugin_context(plugin_token)
         except Exception as e:
             logger.error(f"Stream handler error for intent {intent}: {e}")
             yield f"[ERROR] {e!s}"

@@ -7,7 +7,7 @@ including agent profiles, task definitions, and communication schema.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -111,7 +111,7 @@ class Task:
     )  # Memory context filters
     status: str = "pending"
     assigned_to: str | None = None
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def is_assigned(self) -> bool:
@@ -128,7 +128,7 @@ class Bid:
     score: float  # Bid score (higher is better)
     estimated_time: float = 0.0  # Estimated completion time
     confidence: float = 1.0
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def combined_score(self) -> float:
@@ -145,7 +145,7 @@ class SwarmMessage:
     sender_id: str = ""
     receiver_id: str | None = None  # None = broadcast
     payload: dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -158,7 +158,7 @@ class TeamFormation:
     leader_id: str | None = None
     goal: str = ""
     status: str = "forming"
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def size(self) -> int:
@@ -257,7 +257,7 @@ class Handoff:
     brief: HandoffBrief | None = None
     hop_count: int = 0
     visited: tuple[str, ...] = ()
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_message(self) -> "SwarmMessage":
         """Render the handoff as a directed :class:`SwarmMessage`."""
@@ -323,7 +323,7 @@ class Pheromone:
     location: str  # Context/topic identifier
     intensity: float = 1.0
     depositor_id: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def decay(self, rate: float = 0.1) -> None:
         """Reduce intensity due to decay."""
