@@ -19,8 +19,9 @@ logger sink stays the only sink and no file or database is touched.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,33 @@ class AuditConfig(BaseSettings):
     # deletion or edit inside the window is detectable via ``verify_chain()``.
     hash_chain: bool = Field(default=True, alias="AUDIT_HASH_CHAIN")
 
+    # Keyed chain. An *unkeyed* SHA-256 chain detects an edit only from an
+    # attacker who cannot also recompute the chain — i.e. almost none of them,
+    # since the algorithm is public and the data is right there in the file.
+    # HMAC-SHA256 with a key the database does not contain raises the bar to
+    # "needs the key as well as write access", which is the property an
+    # evidentiary trail is supposed to have.
+    #
+    # Unset keeps the historical plain-hash behaviour (with a startup warning)
+    # so enabling the audit trail never fails on an existing deployment.
+    chain_hmac_key: SecretStr | None = Field(
+        default=None,
+        alias="AUDIT_CHAIN_HMAC_KEY",
+        description=(
+            "Secret key for the HMAC-SHA256 audit hash chain. Unset falls back "
+            "to a plain SHA-256 chain (detects accidents, not attackers)."
+        ),
+    )
+    chain_require_key: bool = Field(
+        default=False,
+        alias="AUDIT_CHAIN_REQUIRE_KEY",
+        description=(
+            "Refuse to start the durable audit sink without "
+            "AUDIT_CHAIN_HMAC_KEY. Turn this on where the audit trail is "
+            "evidence rather than telemetry."
+        ),
+    )
+
     # Retention. 0 disables purging entirely (keep forever); any positive value
     # is enforced by a daily sweep over the durable sink.
     retention_days: int = Field(default=180, alias="AUDIT_RETENTION_DAYS", ge=0)
@@ -55,6 +83,46 @@ class AuditConfig(BaseSettings):
     # Truncation guard for free-form event details, so an audit record can
     # never grow unbounded from a caller-supplied payload.
     max_detail_chars: int = Field(default=2000, alias="AUDIT_MAX_DETAIL_CHARS", ge=64)
+
+    @field_validator("chain_hmac_key", mode="before")
+    @classmethod
+    def _blank_key_is_no_key(cls, value: Any) -> Any:
+        """Normalise a blank key to ``None``.
+
+        ``AUDIT_CHAIN_HMAC_KEY=`` (or whitespace) is an operator who has not
+        set a key. Without this the model validator saw "a key is present" and
+        let the configuration pass, while the sink's own
+        :func:`~core.observability.audit_digest.coerce_chain_key` refused it —
+        two guards disagreeing about the same value, which is how a deployment
+        ends up believing it has a keyed chain that it does not.
+        """
+        if isinstance(value, SecretStr):
+            return None if not value.get_secret_value().strip() else value
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _require_chain_key(self) -> AuditConfig:
+        """Fail closed when a keyed chain is mandated but no key is set.
+
+        Only bites when the trail is both enabled and hash-chained: turning the
+        requirement on in a template must not break a deployment that does not
+        run the audit subsystem at all.
+        """
+        if (
+            self.enabled
+            and self.hash_chain
+            and self.chain_require_key
+            and self.chain_hmac_key is None
+        ):
+            raise ValueError(
+                "AUDIT_CHAIN_REQUIRE_KEY is set but AUDIT_CHAIN_HMAC_KEY is "
+                "empty: the audit hash chain would fall back to an unkeyed "
+                "digest, which is not tamper-evident against an attacker with "
+                "write access."
+            )
+        return self
 
     @model_validator(mode="after")
     def _warn_on_short_retention(self) -> AuditConfig:

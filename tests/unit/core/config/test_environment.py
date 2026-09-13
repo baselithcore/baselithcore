@@ -94,9 +94,13 @@ def test_a2a_and_integrity_share_one_definition(monkeypatch):
     """The two modules used to carry their own literal comparison, so they
     drifted from the shared helper the moment an alias was used."""
     from core.a2a import security as a2a_security
-    from core.plugins import integrity
+
+    # The plugin-integrity half of the pair lives in ``integrity_policy`` since
+    # the hashing and policy halves were split apart (500-line cap); the shared
+    # definition it must agree with is unchanged.
+    from core.plugins import integrity_policy
 
     monkeypatch.setenv("APP_ENV", "prod")
 
-    assert integrity._is_production() is True
+    assert integrity_policy._is_production() is True
     assert a2a_security._is_production() is True

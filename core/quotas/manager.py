@@ -288,7 +288,9 @@ class QuotaManager(CostBudgetMixin):
             return identity_status, tenant_status
 
         used_values = await self._store.get_many([entry[4] for entry in plan])
-        for (status, subject, window, limit, _), used in zip(plan, used_values):
+        for (status, subject, window, limit, _), used in zip(
+            plan, used_values, strict=True
+        ):
             if used + cost > limit:
                 logger.warning(
                     "quota_exceeded",
@@ -302,7 +304,9 @@ class QuotaManager(CostBudgetMixin):
                 for (_, _, window, _, key) in plan
             ]
         )
-        for (status, _, window, limit, _), new_used in zip(plan, new_values):
+        for (status, _, window, limit, _), new_used in zip(
+            plan, new_values, strict=True
+        ):
             status.windows[window.value] = WindowStatus(
                 limit=limit, used=new_used, remaining=max(0, limit - new_used)
             )

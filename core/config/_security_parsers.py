@@ -17,13 +17,23 @@ from typing import Any
 
 from pydantic import SecretStr
 
+from core.config._collections import csv_list
+
 
 def coerce_to_secret_set(value: Any) -> Any:
-    """Coerce a comma-separated string or mixed iterable to ``set[SecretStr]``."""
+    """Coerce a comma-separated string or mixed iterable to ``set[SecretStr]``.
+
+    ``csv_list`` rather than a bare comma split, because the fields using this
+    are declared ``NoDecode``: pydantic no longer JSON-decodes them, so a
+    ``["k1","k2"]`` value — the form the deployment docs and
+    ``tests/conftest.py`` use — arrives here verbatim and a comma split would
+    turn it into ``{'["k1"', '"k2"]'}``. Silently: no validation error, just
+    every configured key failing to match from then on.
+    """
     if value is None or value == "":
         return set()
     if isinstance(value, str):
-        return {SecretStr(item) for item in _split(value)}
+        return {SecretStr(item) for item in csv_list(value)}
     if isinstance(value, (list, set, tuple)):
         return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in value}
     return value
@@ -46,9 +56,13 @@ def parse_role_map(value: Any) -> Any:
 
 
 def parse_algorithms(value: Any) -> Any:
-    """Allow a comma-separated string for the OIDC algorithm list."""
+    """Allow a comma-separated *or* JSON-array string for the algorithm list.
+
+    See :func:`coerce_to_secret_set` for why the JSON form has to be handled
+    here rather than by pydantic-settings.
+    """
     if isinstance(value, str):
-        return _split(value)
+        return csv_list(value)
     return value
 
 
@@ -104,6 +118,12 @@ def parse_encryption_keys(value: Any) -> Any:
 
 
 def _split(value: str) -> list[str]:
+    """Split a flat ``a,b,c`` env value.
+
+    Kept comma-only: its remaining callers parse ``key:value`` / ``key=v|v``
+    pairs, whose documented spelling is never a JSON array. The list-of-scalars
+    parsers above use :func:`~core.config._collections.csv_list` instead.
+    """
     return [item.strip() for item in value.split(",") if item.strip()]
 
 

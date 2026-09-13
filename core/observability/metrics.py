@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from prometheus_client import Counter, Gauge, Histogram
 
+from core.observability.metric_context import (
+    ExemplarHistogram,
+    TenantLabeledCounter,
+)
+
 # === Chat Metrics ===
 CHAT_REQUESTS_TOTAL = Counter(
     "mas_chat_requests_total",
@@ -74,24 +79,41 @@ INDEXED_DOCUMENTS_GAUGE = Gauge(
 # core.services.llm._telemetry.record_genai_metrics. The legacy ``mas_llm_*``
 # family below is kept registered for scrape-config compatibility but was
 # never wired to an emit site — prefer these for new dashboards.
-GEN_AI_TOKEN_USAGE = Histogram(
-    "gen_ai_client_token_usage",
-    "Tokens used per Gen AI client call (semconv gen_ai.client.token.usage).",
-    ["gen_ai_system", "gen_ai_request_model", "gen_ai_token_type"],
-    buckets=(16, 64, 256, 1024, 4096, 16384, 65536, 262144),
+# Wrapped in ``ExemplarHistogram``: each observation carries the active
+# ``trace_id`` as an OpenMetrics exemplar, so a slow bucket in Grafana links
+# straight to the trace that produced it. The proxy is transparent — the
+# ``.labels(...).observe(...)`` call sites are unchanged.
+GEN_AI_TOKEN_USAGE = ExemplarHistogram(
+    Histogram(
+        "gen_ai_client_token_usage",
+        "Tokens used per Gen AI client call (semconv gen_ai.client.token.usage).",
+        ["gen_ai_system", "gen_ai_request_model", "gen_ai_token_type"],
+        buckets=(16, 64, 256, 1024, 4096, 16384, 65536, 262144),
+    )
 )
-GEN_AI_OPERATION_DURATION = Histogram(
-    "gen_ai_client_operation_duration_seconds",
-    "Gen AI client call duration (semconv gen_ai.client.operation.duration).",
-    ["gen_ai_system", "gen_ai_request_model", "gen_ai_operation_name"],
-    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+GEN_AI_OPERATION_DURATION = ExemplarHistogram(
+    Histogram(
+        "gen_ai_client_operation_duration_seconds",
+        "Gen AI client call duration (semconv gen_ai.client.operation.duration).",
+        ["gen_ai_system", "gen_ai_request_model", "gen_ai_operation_name"],
+        buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+    )
 )
 # USD cost per call, derived from core.models.pricing at emit time. Extension
 # metric (no semconv name exists for cost yet); powers the Grafana cost panel.
-GEN_AI_COST_USD = Counter(
-    "gen_ai_client_cost_usd_total",
-    "Estimated USD cost of Gen AI client calls (from the pricing table).",
-    ["gen_ai_system", "gen_ai_request_model"],
+#
+# ``tenant`` answers *who* spent it — chargeback and abuse triage both need it —
+# without unbounded cardinality: the label is resolved through
+# ``METRICS_TENANT_LABEL_ALLOWLIST`` (listed tenants keep their id, everything
+# else collapses to ``other``). ``TenantLabeledCounter`` back-fills the value
+# from the ambient tenant context, so two-argument ``.labels(system, model)``
+# call sites keep working unchanged.
+GEN_AI_COST_USD = TenantLabeledCounter(
+    Counter(
+        "gen_ai_client_cost_usd_total",
+        "Estimated USD cost of Gen AI client calls (from the pricing table).",
+        ["gen_ai_system", "gen_ai_request_model", "tenant"],
+    )
 )
 LLM_REQUESTS_TOTAL = Counter(
     "mas_llm_requests_total",
@@ -194,11 +216,13 @@ HTTP_REQUESTS_TOTAL = Counter(
     "Total HTTP requests handled by the API.",
     ["method", "route", "status"],
 )
-HTTP_REQUEST_DURATION_SECONDS = Histogram(
-    "http_request_duration_seconds",
-    "HTTP request latency (seconds).",
-    ["method", "route"],
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+HTTP_REQUEST_DURATION_SECONDS = ExemplarHistogram(
+    Histogram(
+        "http_request_duration_seconds",
+        "HTTP request latency (seconds).",
+        ["method", "route"],
+        buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    )
 )
 HTTP_REQUESTS_IN_PROGRESS = Gauge(
     "http_requests_in_progress",
@@ -223,7 +247,10 @@ __all__ = [
     "RETRIEVAL_LATENCY_SECONDS",
     "INDEXED_DOCUMENTS_TOTAL",
     "INDEXED_DOCUMENTS_GAUGE",
-    # LLM
+    # LLM (OTel Gen AI semconv + cost extension)
+    "GEN_AI_TOKEN_USAGE",
+    "GEN_AI_OPERATION_DURATION",
+    "GEN_AI_COST_USD",
     "LLM_REQUESTS_TOTAL",
     "LLM_TOKENS_TOTAL",
     "LLM_LATENCY_SECONDS",

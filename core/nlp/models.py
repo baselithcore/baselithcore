@@ -7,12 +7,17 @@ Provides embedder and reranker model loading with caching.
 from __future__ import annotations
 
 import hashlib
+import time
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from core.observability.logging import get_logger
+from core.observability.metrics import (
+    GEN_AI_OPERATION_DURATION,
+    GEN_AI_TOKEN_USAGE,
+)
 
 if TYPE_CHECKING:
     from sentence_transformers import (  # type: ignore[import-untyped]
@@ -34,6 +39,82 @@ from core.config import get_chat_config, get_storage_config, get_vectorstore_con
 from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
+
+#: OTel Gen AI ``gen_ai.operation.name`` for an embedding call. Embeddings are
+#: a first-class Gen AI operation in the semantic conventions, and a retrieval
+#: trace without them is missing the inference that produced the query vector.
+EMBEDDING_OPERATION = "embeddings"
+
+#: ``gen_ai.system`` for the local sentence-transformers runtime.
+EMBEDDING_SYSTEM = "sentence_transformers"
+
+
+def _model_name(model: Any) -> str:
+    """Best-effort model identifier for span/metric labels."""
+    card = getattr(model, "model_card_data", None)
+    for candidate in (
+        getattr(card, "base_model", None),
+        getattr(card, "model_name", None),
+        getattr(model, "model_name", None),
+    ):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return type(model).__name__
+
+
+def _token_usage_enabled() -> bool:
+    """Whether embedding spans should carry ``gen_ai.usage.input_tokens``."""
+    try:
+        return bool(get_vectorstore_config().embedding_token_usage_enabled)
+    except Exception as exc:  # config must never break an embedding
+        logger.debug("[embedder] token-usage setting unavailable: %s", exc)
+        return False
+
+
+def _count_tokens_sync(model: Any, texts: list[str]) -> int | None:
+    """Blocking token count for *texts*, or ``None`` if unavailable."""
+    tokenizer = getattr(model, "tokenizer", None)
+    if tokenizer is None or not texts:
+        return None
+    try:
+        encoded = tokenizer(texts)
+        ids = encoded["input_ids"] if isinstance(encoded, dict) else encoded.input_ids
+        return sum(len(row) for row in ids)
+    except Exception as exc:  # telemetry must never break an embedding
+        logger.debug("[embedder] token count unavailable: %s", exc)
+        return None
+
+
+async def _count_input_tokens(model: Any, texts: list[str]) -> int | None:
+    """Token count for *texts*, or ``None`` when it is off or unavailable.
+
+    A real ``gen_ai.usage.input_tokens`` is the only way to compare the cost of
+    an embedding with the rest of the Gen AI calls, but obtaining it means
+    tokenizing the text a second time — a full, CPU-bound pass. So it is
+    gated on ``VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED`` (off by default),
+    counts only the texts that actually reached the model (a cache hit pays
+    nothing), and runs on the shared inference pool so it never blocks the
+    event loop.
+    """
+    if not texts or not _token_usage_enabled():
+        return None
+    return await run_inference(lambda: _count_tokens_sync(model, texts))
+
+
+def _record_embedding_metrics(
+    model_name: str, tokens: int | None, elapsed: float
+) -> None:
+    """Emit the Gen AI semconv metrics for one embedding call."""
+    try:
+        GEN_AI_OPERATION_DURATION.labels(
+            EMBEDDING_SYSTEM, model_name, EMBEDDING_OPERATION
+        ).observe(elapsed)
+        if tokens:
+            GEN_AI_TOKEN_USAGE.labels(EMBEDDING_SYSTEM, model_name, "input").observe(
+                tokens
+            )
+    except Exception:  # silent-ok: metrics must not fail an embedding
+        pass
 
 
 def _require_sentence_transformers() -> None:
@@ -131,6 +212,13 @@ class CachedEmbedder:
         """
         Encode sentences to embeddings with caching (async).
 
+        Wrapped in an OTel Gen AI span (``gen_ai.operation.name=embeddings``)
+        so the inference that produces a query vector shows up in the same
+        trace as the retrieval and the completion it feeds. With
+        ``VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED`` the span also carries
+        ``gen_ai.usage.input_tokens`` for the texts that actually reached the
+        model — cache hits cost nothing and are reported as such.
+
         Args:
             sentences: Text or list of texts to encode
             **kwargs: Additional arguments for SentenceTransformer.encode
@@ -138,8 +226,54 @@ class CachedEmbedder:
         Returns:
             Embedding(s) as numpy array(s)
         """
+        from core.observability import get_tracer
+
+        model_name = _model_name(self.model)
+        inputs = 1 if isinstance(sentences, str) else len(list(sentences))
+        encoded_texts: list[str] = []
+        started = time.perf_counter()
+        with get_tracer("embedding-service").start_span(
+            f"{EMBEDDING_OPERATION} {model_name}",
+            attributes={
+                "gen_ai.operation.name": EMBEDDING_OPERATION,
+                "gen_ai.system": EMBEDDING_SYSTEM,
+                "gen_ai.request.model": model_name,
+                "gen_ai.baselith.input_count": inputs,
+            },
+        ) as span:
+            try:
+                return await self._encode(sentences, encoded_texts, **kwargs)
+            finally:
+                elapsed = time.perf_counter() - started
+                tokens = await _count_input_tokens(self.model, encoded_texts)
+                span.set_attribute("gen_ai.baselith.encoded_count", len(encoded_texts))
+                span.set_attribute(
+                    "gen_ai.baselith.cache_hits", max(inputs - len(encoded_texts), 0)
+                )
+                if tokens is not None:
+                    span.set_attribute("gen_ai.usage.input_tokens", tokens)
+                _record_embedding_metrics(model_name, tokens, elapsed)
+
+    async def _encode(
+        self, sentences: str | list[str], encoded_texts: list[str], **kwargs: Any
+    ) -> list[float] | np.ndarray | list[np.ndarray]:
+        """Cache lookup + model inference for :meth:`encode`.
+
+        Args:
+            sentences: Text or list of texts to encode.
+            encoded_texts: Out-parameter; every text actually sent to the model
+                is appended, so the caller can attribute token usage to the
+                real inference rather than to the cache hits.
+            **kwargs: Passed through to ``SentenceTransformer.encode``.
+
+        Returns:
+            Embedding(s) as numpy array(s).
+        """
         # Passthrough if cache disabled
         if not self._cache:
+            encoded_texts.extend(
+                [sentences] if isinstance(sentences, str) else list(sentences)
+            )
             # Blocking encode offloaded to the dedicated inference pool.
             return await run_inference(lambda: self.model.encode(sentences, **kwargs))
 
@@ -182,6 +316,7 @@ class CachedEmbedder:
             real_idx = missing_indices[0]
 
             async def _encode_and_fill() -> Any:
+                encoded_texts.extend(missing_texts)
                 emb = (
                     await run_inference(
                         lambda: self.model.encode(missing_texts, **kwargs)
@@ -201,6 +336,7 @@ class CachedEmbedder:
                 hashes[real_idx], _encode_and_fill, recheck=_recheck_shared
             )
         elif missing_texts:
+            encoded_texts.extend(missing_texts)
             # Blocking model call on the dedicated inference pool.
             embeddings = await run_inference(
                 lambda: self.model.encode(missing_texts, **kwargs)
@@ -288,4 +424,10 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     return CrossEncoder(actual_model_name)
 
 
-__all__ = ["CachedEmbedder", "get_embedder", "get_reranker"]
+__all__ = [
+    "EMBEDDING_OPERATION",
+    "EMBEDDING_SYSTEM",
+    "CachedEmbedder",
+    "get_embedder",
+    "get_reranker",
+]

@@ -6,7 +6,7 @@ agents execute.
 
 from typing import Literal, TypeAlias
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,6 +61,47 @@ class SandboxConfig(BaseSettings):
         default="ctypes,socket,subprocess",
         description="Comma-separated module names flagged by the analyzer.",
     )
+
+    # == Base-image resolution (fails closed) ==
+    # The sandbox image is built from the bundled Dockerfile.sandbox, which is
+    # the hardened one: non-root user, no build tooling left behind. When that
+    # file is missing the factory used to silently pull a floating
+    # ``python:3.12-slim`` instead — an unpinned, unhardened image substituted
+    # for the hardened one, with nothing but a log line to say so. It now
+    # refuses unless an operator opts in, and the opt-in has to name a digest:
+    # a tag is mutable, so "the image we reviewed" and "the image we run" are
+    # only the same thing when the reference is content-addressed.
+    allow_unhardened_base: bool = Field(
+        default=False,
+        description="Permit falling back to an external base image when the "
+        "bundled core/services/sandbox/Dockerfile.sandbox is missing. "
+        "Requires unhardened_base_image.",
+    )
+    unhardened_base_image: str | None = Field(
+        default=None,
+        description="Digest-pinned fallback image (e.g. "
+        "'python@sha256:<64 hex>'), used only when allow_unhardened_base is "
+        "true. Tags are rejected.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_unhardened_base(self) -> "SandboxConfig":
+        """Reject a fallback image that is not pinned to a digest.
+
+        Validated here rather than at the call site so a bad value fails at
+        startup, not on the first sandbox execution.
+
+        Raises:
+            ValueError: ``unhardened_base_image`` is set but carries no
+                ``@sha256:`` digest.
+        """
+        image = self.unhardened_base_image
+        if image is not None and "@sha256:" not in image:
+            raise ValueError(
+                "SANDBOX_UNHARDENED_BASE_IMAGE must be pinned by digest "
+                f"(e.g. 'python@sha256:<64 hex>'), got {image!r}"
+            )
+        return self
 
 
 # Type aliases

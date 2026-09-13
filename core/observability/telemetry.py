@@ -94,10 +94,12 @@ class TelemetryCollector:
         with self._lock:
             counters = dict(self._counters)
             last_updated = {
-                key: datetime.datetime.fromtimestamp(ts).isoformat()
+                key: datetime.datetime.fromtimestamp(ts, datetime.UTC).isoformat()
                 for key, ts in self._last_updated.items()
             }
-            created_at = datetime.datetime.fromtimestamp(self._created_at).isoformat()
+            created_at = datetime.datetime.fromtimestamp(
+                self._created_at, datetime.UTC
+            ).isoformat()
 
         return {
             "created_at": created_at,

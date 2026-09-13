@@ -6,7 +6,7 @@ Tests for status tracking, monitoring, and scheduling.
 
 # Check if rq is available
 import importlib.util
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -179,7 +179,7 @@ class TestStatusFunctions:
         job_id = "job-123"
         mock_job = MagicMock()
         mock_job.get_status.return_value = "running"
-        mock_job.enqueued_at = datetime(2025, 1, 1)
+        mock_job.enqueued_at = datetime(2025, 1, 1, tzinfo=UTC)
         mock_job.started_at = None
         mock_job.ended_at = None
         mock_job.func_name = "test_func"
@@ -341,8 +341,8 @@ class TestWorkerInfo:
             current_job="job-789",
             successful_jobs=50,
             failed_jobs=2,
-            birth_date=datetime(2025, 1, 1, 10, 0, 0),
-            last_heartbeat=datetime(2025, 1, 1, 12, 0, 0),
+            birth_date=datetime(2025, 1, 1, 10, 0, 0, tzinfo=UTC),
+            last_heartbeat=datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
 
         data = info.to_dict()

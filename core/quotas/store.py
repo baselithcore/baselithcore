@@ -26,9 +26,24 @@ class QuotaStore(Protocol):
 
     async def incr(self, window_key: str, amount: int, ttl_seconds: int) -> int: ...
 
-    async def get_many(self, window_keys: Sequence[str]) -> list[int]: ...
+    async def get_many(self, window_keys: Sequence[str]) -> list[int]:
+        """Read many counters in one round-trip.
 
-    async def incr_many(self, items: Sequence[tuple[str, int, int]]) -> list[int]: ...
+        Implementations MUST return **exactly one count per key, in the key
+        order**, using ``0`` for a counter that does not exist yet — the
+        manager zips the result back against its plan under ``strict=True`` to
+        match each count to its window.
+        """
+        ...
+
+    async def incr_many(self, items: Sequence[tuple[str, int, int]]) -> list[int]:
+        """Increment many counters in one round-trip.
+
+        Implementations MUST return **exactly one post-increment value per
+        item, in the item order** — the manager zips the result back against
+        its plan under ``strict=True`` to attach each new value to its window.
+        """
+        ...
 
 
 class InMemoryQuotaStore:
@@ -101,7 +116,7 @@ class RedisQuotaStore:
 
         fresh = [
             (self._prefix + key, ttl)
-            for (key, amount, ttl), new_value in zip(items, new_values)
+            for (key, amount, ttl), new_value in zip(items, new_values, strict=True)
             if new_value == amount and ttl > 0
         ]
         if fresh:
