@@ -11,6 +11,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+// api.js reads the API key from `sessionStorage`, a browser-only global Node
+// does not provide. Stub it before import so getKey()/authHeaders() resolve.
+if (typeof globalThis.sessionStorage === 'undefined') {
+  const store = new Map();
+  globalThis.sessionStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+}
+
 import { streamChat, ApiError } from './api.js';
 
 /** A `Response.body.getReader()`-alike that replays fixed byte chunks. */
