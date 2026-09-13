@@ -120,7 +120,7 @@ class TestLearnedModelRouter:
         router = LearnedModelRouter()
         decision = router.select(TaskCategory.PLANNING)
         assert decision.rule == "primary"
-        assert decision.model_id == "claude-opus-4-8"
+        assert decision.model_id == "claude-opus-5"
 
     def test_an_empty_scoreboard_changes_nothing(self):
         router = LearnedModelRouter(scoreboard=RoutingScoreboard())
@@ -138,14 +138,14 @@ class TestLearnedModelRouter:
         _feed(
             board,
             TaskCategory.SUMMARIZATION,
-            "claude-sonnet-4-6",
+            "claude-sonnet-5",
             attempts=20,
             successes=20,
         )
         router = LearnedModelRouter(scoreboard=board)
 
         decision = router.select(TaskCategory.SUMMARIZATION)
-        assert decision.model_id == "claude-sonnet-4-6"
+        assert decision.model_id == "claude-sonnet-5"
         # The override is auditable: a learned pick never masquerades as policy.
         assert decision.rule == "learned_override"
 
@@ -155,3 +155,73 @@ class TestLearnedModelRouter:
         )
         decision = router.select(TaskCategory.EXECUTION, Complexity.COMPLEX)
         assert decision.rule == "complexity_upgrade"
+
+
+class TestLearnedOverrideRespectsTheCostGuard:
+    """The scoreboard may not spend money the caller said it did not have.
+
+    ``max_cost_per_1k_usd`` was applied by the static policy and then ignored:
+    the scoreboard's candidate set is every model the policy can produce for
+    *any* category, so a confident challenger could reinstate the flagship the
+    guard had just excluded — the one protection the caller asked for, undone
+    by a learned preference.
+    """
+
+    @staticmethod
+    def _board_preferring_the_flagship() -> RoutingScoreboard:
+        board = RoutingScoreboard(min_samples=10, margin=0.05)
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-haiku-4-5",
+            attempts=20,
+            successes=12,
+        )
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-opus-5",
+            attempts=20,
+            successes=20,
+        )
+        return board
+
+    def test_a_challenger_over_budget_is_refused(self):
+        router = LearnedModelRouter(scoreboard=self._board_preferring_the_flagship())
+
+        # Unbudgeted: the override stands, as designed.
+        assert router.select(TaskCategory.SUMMARIZATION).model_id == "claude-opus-5"
+
+        # Budgeted below the flagship's cost: the static pick survives.
+        decision = router.select(TaskCategory.SUMMARIZATION, max_cost_per_1k_usd=0.005)
+        assert decision.model_id == "claude-haiku-4-5"
+        assert decision.rule != "learned_override"
+
+    def test_a_challenger_within_budget_still_wins(self):
+        """The guard narrows the candidate set; it does not disable learning."""
+        board = RoutingScoreboard(min_samples=10, margin=0.05)
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-haiku-4-5",
+            attempts=20,
+            successes=12,
+        )
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-sonnet-5",
+            attempts=20,
+            successes=20,
+        )
+        router = LearnedModelRouter(scoreboard=board)
+
+        decision = router.select(TaskCategory.SUMMARIZATION, max_cost_per_1k_usd=0.007)
+        assert decision.model_id == "claude-sonnet-5"
+        assert decision.rule == "learned_override"
+
+    def test_the_candidate_set_is_filtered_by_price(self):
+        router = LearnedModelRouter(scoreboard=RoutingScoreboard())
+        assert "claude-opus-5" in router._allowed_models()
+        assert "claude-opus-5" not in router._allowed_models(0.005)
+        assert "claude-haiku-4-5" in router._allowed_models(0.005)

@@ -21,48 +21,52 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 from core.resilience.circuit_breaker import get_circuit_breaker
-from core.services.llm._strict_schema import to_strict_schema
 from core.services.llm.cost_control import estimate_tokens
+from core.services.llm.errors import LLMRefusalError, map_provider_exception
 from core.services.llm.exceptions import LLMProviderError, describe_exception
-from core.services.llm.images import GeneratedImage, decode_image_payload
+from core.services.llm.images import GeneratedImage
+from core.services.llm.messages import Message
+from core.services.llm.providers._openai_images import (
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_IMAGE_SIZE,
+)
+from core.services.llm.providers._openai_mapping import (
+    to_openai_tool_choice,
+    to_openai_tools,
+)
+from core.services.llm.providers._openai_request import (
+    extract_usage,
+    refusal_of,
+)
+from core.services.llm.providers._openai_request import (
+    request_kwargs as _forwardable_kwargs,
+)
+from core.services.llm.stop_reasons import (
+    STOP_REFUSAL,
+    TRUNCATION_STOP_REASONS,
+    raise_for_refusal,
+)
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
     ResponseFormat,
-    ToolCall,
     ToolChoice,
 )
+from core.services.llm.usage import Usage
 
 logger = get_logger(__name__)
 
-# Landscape by default: every consumer so far wants a cover, not a square.
-_DEFAULT_IMAGE_MODEL = "gpt-image-1"
-_DEFAULT_IMAGE_SIZE = "1536x1024"
+# Image defaults live with the image path; kept under the historical
+# private names for callers that import them.
+_DEFAULT_IMAGE_MODEL = DEFAULT_IMAGE_MODEL
+_DEFAULT_IMAGE_SIZE = DEFAULT_IMAGE_SIZE
 
 
-def _to_openai_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
-    """Map neutral tool specs to OpenAI ``tools`` (function) entries."""
-    result: list[dict[str, Any]] = []
-    for spec in tools:
-        function: dict[str, Any] = {
-            "name": spec.name,
-            "description": spec.description,
-            "parameters": spec.parameters or {"type": "object"},
-        }
-        if spec.strict:
-            function["strict"] = True
-        result.append({"type": "function", "function": function})
-    return result
-
-
-def _to_openai_tool_choice(choice: ToolChoice) -> Any:
-    """Map a neutral :class:`ToolChoice` to OpenAI's ``tool_choice`` value."""
-    if choice.mode == "tool":
-        return {"type": "function", "function": {"name": choice.name}}
-    if choice.mode == "any":
-        return "required"
-    # "auto" | "none" map to the string forms.
-    return choice.mode
+# Tool/response mapping lives in ``_openai_mapping`` (shared with the
+# structured and message paths); kept under the historical private names for
+# call sites that import them.
+_to_openai_tools = to_openai_tools
+_to_openai_tool_choice = to_openai_tool_choice
 
 
 class OpenAIProvider:
@@ -76,6 +80,11 @@ class OpenAIProvider:
     # OpenAI maps tool specs to its native function-calling API and parses
     # ``message.tool_calls`` back into structured tool calls.
     supports_native_tools: bool = True
+
+    # Chat Completions is already a message API: tool calls and their results
+    # travel as correlated messages, and an append-only history keeps the
+    # prefix stable for OpenAI's automatic prompt caching.
+    supports_messages: bool = True
 
     def __init__(
         self,
@@ -181,14 +190,10 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         try:
-            # "effort"/"thinking_budget" are cross-provider thinking hints
-            # (honoured by providers with a thinking API); the OpenAI chat
-            # completions API rejects unknown kwargs, so strip them here.
-            request_kwargs = {
-                k: v
-                for k, v in kwargs.items()
-                if k not in ["system", "json_mode", "effort", "thinking_budget"]
-            }
+            # Cross-provider hints ("effort", "allow_refusal", ...) and the
+            # renamed token cap are handled by the shaper; Chat Completions
+            # rejects unknown kwargs, so nothing else may pass through.
+            request_kwargs = _forwardable_kwargs(kwargs)
 
             system_prompt = kwargs.get("system", "")
             if json_mode:
@@ -207,21 +212,56 @@ class OpenAIProvider:
                 **request_kwargs,
             )
 
-            raw_content = response.choices[0].message.content
+            choice = response.choices[0]
+            message = choice.message
+            raw_content = message.content
             content = raw_content.strip() if raw_content else ""
 
-            # Retrieve official token usage from metadata, fallback to estimation if missing.
+            usage, reported_total = extract_usage(response)
+            self._record_usage(kwargs, usage)
             tokens_used = (
-                response.usage.total_tokens
-                if response.usage
-                else estimate_tokens(prompt) + estimate_tokens(content)
+                usage.total
+                or reported_total
+                or (estimate_tokens(prompt) + estimate_tokens(content))
             )
+
+            refusal = refusal_of(message)
+            if refusal and not kwargs.get("allow_refusal", False):
+                raise_for_refusal(STOP_REFUSAL, {"explanation": refusal}, model=model)
+            finish_reason = getattr(choice, "finish_reason", None)
+            if (
+                isinstance(finish_reason, str)
+                and finish_reason in TRUNCATION_STOP_REASONS
+            ):
+                logger.warning(
+                    "llm_response_truncated",
+                    extra={"model": model, "stop_reason": finish_reason},
+                )
 
             return content, tokens_used
 
+        except LLMRefusalError:
+            # The call succeeded and was billed; the model simply declined.
+            # ``raise_for_refusal`` already logged it at warning with the
+            # refusal detail, so an error-level "generation error" here would
+            # both double-report it and misclassify it.
+            raise
         except Exception as e:
             logger.error(f"OpenAI generation error: {describe_exception(e)}")
-            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
+            raise map_provider_exception(e, provider="OpenAI") from e
+
+    @staticmethod
+    def _record_usage(kwargs: dict[str, Any], usage: Usage) -> None:
+        """Publish exact usage to a caller-supplied sink, when there is one.
+
+        The ``(text, total_tokens)`` return type cannot carry the input/output
+        split, and re-deriving it downstream from a tokenizer estimate
+        misprices every call. An opt-in list lets a caller receive the metered
+        record without changing that contract.
+        """
+        sink = kwargs.get("usage_sink")
+        if isinstance(sink, list) and not usage.is_empty:
+            sink.append(usage)
 
     @get_circuit_breaker("openai_provider")
     async def generate_structured(
@@ -237,10 +277,11 @@ class OpenAIProvider:
         """
         Generate using OpenAI's native function-calling / structured outputs.
 
-        Tool specs map to ``tools`` (function type) selected via ``tool_choice``;
+        Body lives in ``_openai_structured`` (module size cap). Tool specs map
+        to ``tools`` (function type) selected via ``tool_choice``;
         ``response_format`` maps to a ``json_schema`` response format.
         ``message.tool_calls`` are parsed back into :class:`ToolCall` (the
-        function ``arguments`` JSON string is parsed here — callers never
+        function ``arguments`` JSON string is parsed there — callers never
         re-parse).
 
         Args:
@@ -254,82 +295,49 @@ class OpenAIProvider:
         Returns:
             LLMResult: text and/or structured tool calls with token usage.
         """
-        import json
+        from core.services.llm.providers._openai_structured import generate_structured
 
-        client = self._ensure_client()
-        try:
-            messages: list[dict[str, Any]] = []
-            system_prompt = kwargs.get("system", "")
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
+        return await generate_structured(
+            self,
+            prompt,
+            model,
+            tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
+            **kwargs,
+        )
 
-            request_kwargs: dict[str, Any] = {"model": model, "messages": messages}
-            if "temperature" in kwargs:
-                request_kwargs["temperature"] = kwargs["temperature"]
-            if "max_tokens" in kwargs:
-                request_kwargs["max_tokens"] = kwargs["max_tokens"]
-            if tools:
-                request_kwargs["tools"] = _to_openai_tools(tools)
-                choice = tool_choice or ToolChoice(mode="auto")
-                request_kwargs["tool_choice"] = _to_openai_tool_choice(choice)
-            if response_format is not None:
-                # Strict enforcement accepts a narrower dialect than JSON
-                # Schema: every property must be required and no object may
-                # allow extras. A Pydantic model with a defaulted field
-                # violates that and is rejected with a 400 before generation,
-                # so the schema is adapted here rather than at every caller.
-                schema = (
-                    to_strict_schema(response_format.schema)
-                    if response_format.strict
-                    else response_format.schema
-                )
-                request_kwargs["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": response_format.name,
-                        "schema": schema,
-                        "strict": response_format.strict,
-                    },
-                }
+    @get_circuit_breaker("openai_provider")
+    async def generate_messages(
+        self,
+        messages: list[Message],
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        system: str | None = None,
+        **kwargs: Any,
+    ) -> LLMResult:
+        """Generate one turn from a neutral message history.
 
-            response = await client.chat.completions.create(**request_kwargs)
+        Body lives in ``_openai_messages`` (module size cap).
 
-            message = response.choices[0].message
-            raw_content = message.content
-            text = raw_content.strip() if raw_content else None
+        Args:
+            messages: Conversation so far, oldest first.
+            model: Model name.
+            tools: Tools the model may call.
+            system: System prompt, sent as the leading ``system`` message.
+            **kwargs: ``tool_choice``, ``response_format``, and the same
+                surface as :meth:`generate_structured`.
 
-            tool_calls: list[ToolCall] = []
-            for call in getattr(message, "tool_calls", None) or []:
-                raw_args = call.function.arguments
-                try:
-                    arguments = json.loads(raw_args) if raw_args else {}
-                except (json.JSONDecodeError, TypeError):
-                    # Malformed arguments: surface the raw string so the caller
-                    # can decide, rather than dropping the call silently.
-                    arguments = {"_raw": raw_args}
-                tool_calls.append(
-                    ToolCall(id=call.id, name=call.function.name, arguments=arguments)
-                )
+        Returns:
+            LLMResult: text and/or tool calls, plus ``message`` — the assistant
+            turn as neutral blocks, for replay on the next iteration.
+        """
+        from core.services.llm.providers._openai_messages import generate_messages
 
-            tokens_used = (
-                response.usage.total_tokens
-                if response.usage
-                else estimate_tokens(prompt) + estimate_tokens(text or "")
-            )
-
-            return LLMResult(
-                text=text,
-                tool_calls=tool_calls,
-                stop_reason=getattr(response.choices[0], "finish_reason", None),
-                tokens_used=tokens_used,
-                native=True,
-                raw=response,
-            )
-
-        except Exception as e:
-            logger.error(f"OpenAI structured generation error: {describe_exception(e)}")
-            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
+        return await generate_messages(
+            self, messages, model, tools=tools, system=system, **kwargs
+        )
 
     @get_circuit_breaker("openai_provider")
     async def generate_image(
@@ -343,57 +351,28 @@ class OpenAIProvider:
     ) -> GeneratedImage:
         """Generate one image and return its bytes.
 
+        Body lives in ``_openai_images`` (module size cap).
+
         Args:
             prompt: The whole brief for the image.
             model: Image model; ``gpt-image-1`` when None.
             size: Provider size string; a landscape cover when None.
-            quality: Quality tier (``low``/``medium``/``high`` for the GPT
-                image models). Omitted from the request when None, because
-                the accepted values differ per model (``dall-e-3`` takes
-                ``standard``/``hd``) and the API rejects unknown ones.
+            quality: Quality tier; omitted from the request when None.
             **kwargs: Passthrough parameters.
 
         Returns:
             The decoded image and the model that produced it.
-
-        Raises:
-            LLMProviderError: The API refused the request, or returned a
-                payload with no image in it.
         """
-        client = self._ensure_client()
-        chosen = model or _DEFAULT_IMAGE_MODEL
-        if quality is not None:
-            kwargs["quality"] = quality
-        try:
-            response = await client.images.generate(
-                model=chosen,
-                prompt=prompt,
-                size=size or _DEFAULT_IMAGE_SIZE,
-                n=1,
-                **kwargs,
-            )
-            item = (response.data or [None])[0]
-            payload = getattr(item, "b64_json", None) if item else None
-            if not payload:
-                raise LLMProviderError(
-                    "OpenAI returned no image data (the model may return a URL "
-                    "instead of base64 — this provider expects base64)"
-                )
-            # Not a bare b64decode: a data-URL prefix would decode into a
-            # corrupt image without raising, and the returned format is not
-            # always the documented PNG. Both are read off the bytes.
-            data, media_type = decode_image_payload(payload)
-            return GeneratedImage(
-                data=data,
-                media_type=media_type,
-                model=chosen,
-                revised_prompt=getattr(item, "revised_prompt", None),
-            )
-        except LLMProviderError:
-            raise
-        except Exception as e:
-            logger.error(f"OpenAI image generation error: {describe_exception(e)}")
-            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
+        from core.services.llm.providers._openai_images import generate_image
+
+        return await generate_image(
+            self._ensure_client(),
+            prompt,
+            model=model,
+            size=size,
+            quality=quality,
+            **kwargs,
+        )
 
     # No @retry here either: decorating an async generator never retried
     # anything (errors surface during iteration, outside the wrapper) —
@@ -416,7 +395,7 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         try:
-            request_kwargs = {k: v for k, v in kwargs.items() if k not in ["system"]}
+            request_kwargs = _forwardable_kwargs(kwargs)
 
             system_prompt = kwargs.get("system", "")
             messages = []
@@ -456,6 +435,6 @@ class OpenAIProvider:
 
         except Exception as e:
             logger.error(f"OpenAI streaming error: {describe_exception(e)}")
-            raise LLMProviderError(
-                f"OpenAI streaming error: {describe_exception(e)}"
+            raise map_provider_exception(
+                e, provider="OpenAI", action="streaming"
             ) from e

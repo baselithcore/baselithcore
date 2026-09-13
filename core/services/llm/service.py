@@ -20,6 +20,11 @@ from core.services.llm._telemetry import (
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import CostTracker
+from core.services.llm.errors import (
+    RETRYABLE_ERRORS,
+    is_retryable,
+    retry_after_from_exception,
+)
 from core.services.llm.exceptions import RateLimitError
 from core.services.llm.interfaces import LLMProviderProtocol
 from core.services.llm.model_routing import routed_model
@@ -33,43 +38,16 @@ _gen_ai_system = gen_ai_system
 
 logger = get_logger(__name__)
 
-# Cap on a server-supplied Retry-After. A provider (or a proxy in front of it)
-# can answer with a window far longer than any request is willing to wait;
-# honouring it verbatim would pin a worker for minutes. Beyond this we ignore
-# the hint and let the caller's own backoff/timeout budget decide.
-_MAX_HONOURED_RETRY_AFTER_SECONDS = 120.0
+# Retry-After parsing moved to ``errors`` (shared with the structured path and
+# the provider mapping); re-exported under the historical private name.
+_parse_retry_after = retry_after_from_exception
 
-
-def _parse_retry_after(exc: BaseException) -> float | None:
-    """Extract the RFC 9110 ``Retry-After`` window from a provider exception.
-
-    Provider SDKs (OpenAI, Anthropic) surface the HTTP response on the raised
-    error, so the header is reachable without depending on any one SDK's types:
-    the lookup is duck-typed and every failure path returns ``None``, leaving
-    the retry layer on its own backoff curve.
-
-    Only the delta-seconds form is honoured. The HTTP-date form is valid per
-    the RFC but rare from these APIs, and parsing it correctly needs the
-    server's clock — a skewed one would produce a wildly wrong wait.
-    """
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return None
-    try:
-        raw = headers.get("retry-after") or headers.get("Retry-After")
-    except Exception:
-        logger.debug("retry_after_header_unreadable", exc_info=True)
-        return None
-    if not raw:
-        return None
-    try:
-        seconds = float(str(raw).strip())
-    except (TypeError, ValueError):
-        return None  # HTTP-date form, or malformed
-    if seconds <= 0 or seconds > _MAX_HONOURED_RETRY_AFTER_SECONDS:
-        return None
-    return seconds
+#: Failures the text path retries (defined once in ``errors``): transient by
+#: nature, so the condition may not hold a moment later. Client errors (bad
+#: key, unknown model, malformed request) and refusals are absent on purpose —
+#: resending them buys nothing but another failed attempt and another mark
+#: against the circuit breaker.
+_RETRYABLE = RETRYABLE_ERRORS
 
 
 class LLMService:
@@ -78,6 +56,14 @@ class LLMService:
 
     Implements LLMServiceProtocol.
     """
+
+    # Capability flag read by message-based callers (``core.agent.Agent``).
+    # Checked with ``is True`` on purpose: a caller must be able to tell a
+    # service that really speaks messages from a test double whose every
+    # attribute answers truthily, or the double silently takes a path it
+    # cannot serve. Always True here — a provider that cannot receive a
+    # message list is degraded inside ``generate_messages``, not refused.
+    supports_messages: bool = True
 
     def __init__(
         self,
@@ -185,19 +171,19 @@ class LLMService:
         max_attempts=3,
         base_delay=1.0,
         max_delay=30.0,
-        retryable_exceptions=(RateLimitError,),
+        retryable_exceptions=_RETRYABLE,
     )
     async def _generate_with_retry(
         self, prompt: str, model: str, json_mode: bool, **kwargs: Any
     ) -> tuple[str, int]:
         """
-        Generate response with automatic retry on rate limit errors.
+        Generate response with automatic retry on transient provider failures.
 
         This is the SINGLE retry layer of the LLM stack: providers do not
         retry on their own (a stacked provider-level retry multiplied
         attempts up to 3x3 per request and re-tried non-transient failures).
-        Only rate-limit errors are retried; everything else fails fast and
-        feeds the provider's circuit breaker.
+        Rate limits, 5xx, connection errors and timeouts are retried;
+        everything else fails fast and feeds the provider's circuit breaker.
 
         Args:
             prompt: Input prompt
@@ -227,27 +213,33 @@ class LLMService:
                         prompt=prompt, model=model, json_mode=json_mode, **merged
                     )
                 )
-        except Exception as e:
-            # Check if it's a rate limit error (429)
-            error_str = str(e).lower()
-            if (
-                "429" in error_str
-                or "rate limit" in error_str
-                or "too many" in error_str
-            ):
-                # Carry the provider's own Retry-After through to the retry
-                # layer: backing off for less than the window it asked for
-                # re-sends into a closed door and deepens the throttle.
-                retry_after = _parse_retry_after(e)
-                logger.warning(
-                    "Rate limit hit, will retry%s: %s",
-                    f" after {retry_after:.1f}s (server-requested)"
-                    if retry_after is not None
-                    else "",
-                    e,
-                )
-                raise RateLimitError(str(e), retry_after=retry_after) from e
+        except _RETRYABLE as e:
+            # Already typed by the provider's error mapping: the retry
+            # decorator sees the class and decides. Only the log line is owed.
+            logger.warning(
+                "Transient provider failure (%s), will retry: %s",
+                type(e).__name__,
+                e,
+            )
             raise
+        except Exception as e:
+            # Unmapped exception type (a provider without the neutral
+            # taxonomy, or a library raising its own class): fall back to the
+            # legacy substring heuristic so nothing that used to retry stops.
+            if not is_retryable(e):
+                raise
+            # Carry the provider's own Retry-After through to the retry
+            # layer: backing off for less than the window it asked for
+            # re-sends into a closed door and deepens the throttle.
+            retry_after = retry_after_from_exception(e)
+            logger.warning(
+                "Rate limit hit, will retry%s: %s",
+                f" after {retry_after:.1f}s (server-requested)"
+                if retry_after is not None
+                else "",
+                e,
+            )
+            raise RateLimitError(str(e), retry_after=retry_after) from e
 
     async def generate_response(
         self,
@@ -259,6 +251,8 @@ class LLMService:
         max_tokens: int | None = None,
         task_category: str | None = None,
         effort: str | None = None,
+        allow_refusal: bool = False,
+        usage_sink: list[Any] | None = None,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -276,6 +270,13 @@ class LLMService:
                 When None and ``thinking_enabled`` is set, derived from
                 ``task_category``. Only providers with a thinking API honour
                 it (currently Anthropic); others ignore the hint.
+            allow_refusal: When True a model refusal is returned as text
+                instead of raising ``LLMRefusalError`` — for callers that want
+                to inspect or report the refusal.
+            usage_sink: Optional list; the call's
+                :class:`~core.services.llm.usage.Usage` is appended to it, for
+                callers that must cost a plain-text call (the ``-> str``
+                return type cannot carry it).
 
         Returns:
             Generated response text
@@ -296,6 +297,8 @@ class LLMService:
             max_tokens=max_tokens,
             task_category=task_category,
             effort=effort,
+            allow_refusal=allow_refusal,
+            usage_sink=usage_sink,
         )
 
     async def generate(
@@ -310,6 +313,7 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         task_category: str | None = None,
+        allow_refusal: bool = False,
     ) -> "Any":
         """
         Generate a structured response with native tool-calling support.
@@ -332,6 +336,8 @@ class LLMService:
             max_tokens: Optional output token cap.
             task_category: Optional cost-aware routing hint (TaskCategory
                 value); ignored unless routing is enabled.
+            allow_refusal: When True a model refusal is returned on the result
+                instead of raising ``LLMRefusalError``.
 
         Returns:
             LLMResult: text and/or structured tool calls with usage.
@@ -351,6 +357,68 @@ class LLMService:
             temperature=temperature,
             max_tokens=max_tokens,
             task_category=task_category,
+            allow_refusal=allow_refusal,
+        )
+
+    async def generate_messages(
+        self,
+        messages: "list[Any]",
+        *,
+        model: str | None = None,
+        tools: "list[Any] | None" = None,
+        tool_choice: "Any | None" = None,
+        response_format: "Any | None" = None,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        task_category: str | None = None,
+        allow_refusal: bool = False,
+    ) -> "Any":
+        """
+        Generate one turn from a neutral conversation history.
+
+        The message-based counterpart of :meth:`generate`. An agentic loop has
+        a history, not a prompt: sending it as a real message list is what
+        keeps a tool result correlated to the call that produced it, keeps a
+        failure flagged as one, replays thinking blocks verbatim, and leaves
+        the prompt prefix stable enough for the provider's cache to serve it.
+
+        Degrades rather than fails: a provider without a message API (or with
+        native tools disabled) receives the history rendered as a transcript
+        through the structured path. Body lives in
+        ``core.services.llm.message_runtime`` (module size cap).
+
+        Args:
+            messages: ``list[Message]`` — the conversation so far, oldest
+                first.
+            model: Optional model override (config default when None).
+            tools: ``list[LLMToolSpec]`` the model may call.
+            tool_choice: ``ToolChoice`` selection policy (defaults to auto).
+            response_format: Optional ``ResponseFormat`` constraint.
+            system: System prompt; the stable, cacheable prefix.
+            temperature: Optional sampling temperature.
+            max_tokens: Optional output token cap.
+            task_category: Optional cost-aware routing hint.
+            allow_refusal: When True a refusal is returned on the result
+                instead of raising ``LLMRefusalError``.
+
+        Returns:
+            LLMResult: text and/or structured tool calls with usage.
+        """
+        from core.services.llm.message_runtime import generate_messages
+
+        return await generate_messages(
+            self,
+            messages,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            task_category=task_category,
+            allow_refusal=allow_refusal,
         )
 
     async def generate_response_stream(

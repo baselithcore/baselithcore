@@ -136,6 +136,9 @@ def record_genai_metrics(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    batch: bool = False,
     duration_seconds: float | None = None,
     operation: str = "chat",
 ) -> None:
@@ -145,6 +148,13 @@ def record_genai_metrics(
     ``gen_ai_client_operation_duration_seconds``) so semconv-aware dashboards
     light up without bespoke queries. Best-effort: metric registration/emit
     failures never break the request path.
+
+    ``input_tokens`` is *fresh* input; cached prompt tokens are reported under
+    their own ``gen_ai_token_type`` label values and priced at their own
+    tier, so ``gen_ai_client_cost_usd_total`` agrees with the ``LoopBudget``
+    and the tenant ledger instead of billing every cache read as full input.
+    ``batch`` applies the batch API's 50% discount to the cost counter for
+    the same reason: one price per call, in every ledger that reports it.
     """
     try:
         from core.observability.metrics import (
@@ -152,20 +162,31 @@ def record_genai_metrics(
             GEN_AI_TOKEN_USAGE,
         )
 
-        if input_tokens > 0:
-            GEN_AI_TOKEN_USAGE.labels(system, model, "input").observe(input_tokens)
-        if output_tokens > 0:
-            GEN_AI_TOKEN_USAGE.labels(system, model, "output").observe(output_tokens)
+        for count, token_type in (
+            (input_tokens, "input"),
+            (output_tokens, "output"),
+            (cache_read_tokens, "cache_read"),
+            (cache_write_tokens, "cache_write"),
+        ):
+            if count > 0:
+                GEN_AI_TOKEN_USAGE.labels(system, model, token_type).observe(count)
         if duration_seconds is not None:
             GEN_AI_OPERATION_DURATION.labels(system, model, operation).observe(
                 duration_seconds
             )
-        if input_tokens > 0 or output_tokens > 0:
+        if input_tokens > 0 or output_tokens > 0 or cache_read_tokens > 0:
             from core.models.pricing import DEFAULT_PRICING, estimate_cost
             from core.observability.metrics import GEN_AI_COST_USD
 
             if model in DEFAULT_PRICING:
-                cost = estimate_cost(model, max(input_tokens, 0), max(output_tokens, 0))
+                cost = estimate_cost(
+                    model,
+                    max(input_tokens, 0),
+                    max(output_tokens, 0),
+                    cache_read_tokens=max(cache_read_tokens, 0),
+                    cache_write_tokens=max(cache_write_tokens, 0),
+                    batch=batch,
+                )
                 if cost > 0:
                     GEN_AI_COST_USD.labels(system, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests

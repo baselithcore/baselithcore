@@ -9,7 +9,11 @@ timeouts and retry discipline stay identical to the primary path.
 
 Open circuit breakers are skipped without paying for a doomed call. Budget
 and deadline errors are fatal: the request is out of money or time, so
-falling through to a second provider would double-spend, not recover.
+falling through to a second provider would double-spend, not recover. So is a
+policy **refusal**: the model ran, was billed and declined — re-asking a
+different model the thing the first refused is provider shopping, not failover,
+and burying the refusal inside ``AllProvidersFailedError`` would also hide it
+from the refusal accounting that books the spend.
 """
 
 from __future__ import annotations
@@ -185,6 +189,7 @@ async def run_with_fallback(
         BudgetExceededError as MiddlewareBudgetExceededError,
     )
     from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
+    from core.services.llm.errors import LLMRefusalError
     from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
 
     primary_name = service.config.provider
@@ -231,6 +236,12 @@ async def run_with_fallback(
             BudgetExceededError,
             MiddlewareBudgetExceededError,
             LoopBudgetExceededError,
+            # A refusal is a decision, not an outage: the model ran and the
+            # call was billed. Falling through would re-ask a second provider
+            # the thing the first declined, and would replace the typed
+            # refusal with a generic LLMProviderError — unreachable refusal
+            # accounting and an unbooked, already-paid-for turn.
+            LLMRefusalError,
         ),
     )
     try:
@@ -271,6 +282,7 @@ async def maybe_run_structured_with_fallback(
         BudgetExceededError as MiddlewareBudgetExceededError,
     )
     from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
+    from core.services.llm.errors import LLMRefusalError
     from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
     from core.services.llm.structured import _native_with_retry
 
@@ -336,6 +348,12 @@ async def maybe_run_structured_with_fallback(
             BudgetExceededError,
             MiddlewareBudgetExceededError,
             LoopBudgetExceededError,
+            # A refusal is a decision, not an outage: the model ran and the
+            # call was billed. Falling through would re-ask a second provider
+            # the thing the first declined, and would replace the typed
+            # refusal with a generic LLMProviderError — unreachable refusal
+            # accounting and an unbooked, already-paid-for turn.
+            LLMRefusalError,
         ),
     )
     try:
@@ -346,6 +364,109 @@ async def maybe_run_structured_with_fallback(
     if outcome.provider != _stage_name(primary_name, model):
         logger.warning(
             "llm_structured_fallback_served",
+            extra={"provider": served_by, "primary": primary_name},
+        )
+    return outcome.result, served_by
+
+
+async def maybe_run_messages_with_fallback(
+    service: LLMService,
+    messages: object,
+    model: str,
+    **kwargs: object,
+) -> tuple[object, str]:
+    """Fallback-aware **message API** call (the agentic conversation path).
+
+    Same chain discipline as :func:`maybe_run_structured_with_fallback`, applied
+    to ``generate_messages``: direct provider call when no chain is set;
+    otherwise primary + config-declared stages, skipping open breakers and
+    stages whose provider has no message API. That last filter is the same
+    reasoning as the structured one's native-tool check, one step stricter: a
+    stage that cannot receive a message list would have to be handed a
+    flattened transcript, silently dropping tool-call correlation, ``is_error``
+    and thinking blocks mid-chain — a different conversation answering the same
+    request. Budget/deadline errors stay fatal.
+
+    Args:
+        service: The primary :class:`~core.services.llm.service.LLMService`.
+        messages: The neutral history (``list[Message]``).
+        model: Model for the primary stage.
+        **kwargs: ``tools``, ``system``, ``tool_choice``, ``response_format``
+            and the provider's usual parameters.
+
+    Returns:
+        tuple: ``(LLMResult, serving_provider_name)``.
+    """
+    from core.middleware.cost_control import (
+        BudgetExceededError as MiddlewareBudgetExceededError,
+    )
+    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
+    from core.services.llm.errors import LLMRefusalError
+    from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
+    from core.services.llm.message_runtime import _messages_with_retry
+
+    primary_name = service.config.provider
+    chain_spec = getattr(service.config, "fallback_chain", "")
+
+    async def _primary() -> object:
+        return await _messages_with_retry(service, messages, model, **kwargs)  # type: ignore[arg-type]
+
+    if not (isinstance(chain_spec, str) and chain_spec):
+        return await _primary(), primary_name
+
+    stages: list[Provider[object]] = [
+        Provider(
+            name=_stage_name(primary_name, model),
+            call=_primary,
+            is_open=lambda: _breaker_open(primary_name),
+        )
+    ]
+    for fb_provider, fb_model in parse_fallback_chain(chain_spec):
+        if fb_provider == primary_name and fb_model == model:
+            continue
+
+        async def _stage(
+            _provider: str = fb_provider, _model: str = fb_model
+        ) -> object:
+            clone = _clone_service(service, _provider, _model)
+            if not getattr(clone.provider, "supports_messages", False):
+                raise LLMProviderError(
+                    f"Fallback provider '{_provider}' has no message API"
+                )
+            return await _messages_with_retry(clone, messages, _model, **kwargs)  # type: ignore[arg-type]
+
+        stages.append(
+            Provider(
+                name=_stage_name(fb_provider, fb_model),
+                call=_stage,
+                is_open=partial(_breaker_open, fb_provider),
+            )
+        )
+
+    chain: FallbackChain[object] = FallbackChain(
+        stages,
+        stage_timeout_seconds=_stage_timeout(service),
+        total_timeout_seconds=_chain_timeout(service),
+        fatal_exceptions=(
+            BudgetExceededError,
+            MiddlewareBudgetExceededError,
+            LoopBudgetExceededError,
+            # A refusal is a decision, not an outage: the model ran and the
+            # call was billed. Falling through would re-ask a second provider
+            # the thing the first declined, and would replace the typed
+            # refusal with a generic LLMProviderError — unreachable refusal
+            # accounting and an unbooked, already-paid-for turn.
+            LLMRefusalError,
+        ),
+    )
+    try:
+        outcome = await chain.run()
+    except AllProvidersFailedError as exc:
+        raise LLMProviderError(str(exc)) from exc
+    served_by = _stage_provider(outcome.provider)
+    if outcome.provider != _stage_name(primary_name, model):
+        logger.warning(
+            "llm_messages_fallback_served",
             extra={"provider": served_by, "primary": primary_name},
         )
     return outcome.result, served_by

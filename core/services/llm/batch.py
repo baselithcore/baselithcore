@@ -15,7 +15,17 @@ module adds a provider-neutral seam:
 
 Security/cost posture: batch calls bypass the per-request LoopBudget by
 design (they are offline jobs, not orchestrated requests); the middleware
-cost controller is likewise out of scope. Callers own their own budgets.
+cost controller is likewise out of scope. Callers own their own *request*
+budgets.
+
+The tenant's cumulative ledger is not a request budget, and this path does
+book it: a batch job is the largest single spend the service can make, and
+for a while it was the only provider call here that no gate stood in front
+of and no ledger recorded — batch spend was invisible to the tenant cost cap
+rather than merely mispriced. It is metered at the batch rate (50%), so the
+ledger matches the invoice. The sequential fallback meters through
+``generate_response`` at the full interactive rate, which is correct: it
+buys no discount.
 """
 
 from __future__ import annotations
@@ -25,6 +35,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from core.services.llm._accounting import record_usage_cost
+from core.services.llm._telemetry import gen_ai_system, record_genai_metrics
+from core.services.llm.model_capabilities import default_max_tokens
+from core.services.llm.usage import Usage
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -36,23 +50,44 @@ _POLL_SECONDS = 10.0
 
 @dataclass(frozen=True)
 class BatchPrompt:
-    """One prompt in a batch, keyed by a caller-chosen ``custom_id``."""
+    """One prompt in a batch, keyed by a caller-chosen ``custom_id``.
+
+    Attributes:
+        custom_id: Caller-chosen id; batch results key on it.
+        prompt: The user turn.
+        system_prompt: Optional system prompt for this entry.
+        max_tokens: Output cap; ``None`` uses the model family's recommended
+            default rather than a fixed 4096, which truncated long entries.
+        metadata: Free-form caller metadata (not sent upstream).
+    """
 
     custom_id: str
     prompt: str
     system_prompt: str | None = None
-    max_tokens: int = 4096
+    max_tokens: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class BatchCompletion:
-    """Outcome for one batch entry (``succeeded`` → ``text`` populated)."""
+    """Outcome for one batch entry (``succeeded`` → ``text`` populated).
+
+    Attributes:
+        custom_id: The id of the prompt this answers.
+        text: The answer, when the entry succeeded.
+        succeeded: Whether the entry produced an answer.
+        error: Provider-reported failure type, when it did not.
+        usage: Token accounting for this entry. Batches are billed at half
+            price *per entry*, so a job's cost can only be reconstructed from
+            the per-entry numbers — a batch that reported nothing could not be
+            costed at all.
+    """
 
     custom_id: str
     text: str | None
     succeeded: bool
     error: str | None = None
+    usage: Usage = field(default_factory=Usage)
 
 
 async def _anthropic_batch(
@@ -72,12 +107,20 @@ async def _anthropic_batch(
     for p in prompts:
         params: dict[str, Any] = {
             "model": model,
-            "max_tokens": p.max_tokens,
+            "max_tokens": p.max_tokens or default_max_tokens(model),
             "messages": [{"role": "user", "content": p.prompt}],
         }
         if p.system_prompt:
             params["system"] = p.system_prompt
         requests.append({"custom_id": p.custom_id, "params": params})
+
+    # Gate on the ambient tenant's cumulative USD budget BEFORE submitting.
+    # Nothing stood in front of this call: a tenant over its cap could still
+    # submit an unbounded batch job, which is the single largest spend this
+    # service is able to make.
+    from core.quotas.cost_enforcement import enforce_tenant_cost_budget
+
+    await enforce_tenant_cost_budget(model=model)
 
     batch = await client.messages.batches.create(requests=requests)
     logger.info(
@@ -101,7 +144,10 @@ async def _anthropic_batch(
             message = result.result.message
             text = next((b.text for b in message.content if b.type == "text"), "")
             completions[result.custom_id] = BatchCompletion(
-                custom_id=result.custom_id, text=text, succeeded=True
+                custom_id=result.custom_id,
+                text=text,
+                succeeded=True,
+                usage=Usage.from_anthropic(getattr(message, "usage", None)),
             )
         else:
             completions[result.custom_id] = BatchCompletion(
@@ -111,13 +157,50 @@ async def _anthropic_batch(
                 error=result.result.type,
             )
     # Return in submission order; missing ids (shouldn't happen) marked failed.
-    return [
+    ordered = [
         completions.get(
             p.custom_id,
             BatchCompletion(p.custom_id, None, False, error="missing_result"),
         )
         for p in prompts
     ]
+    await _meter_batch_job(service, model, ordered)
+    return ordered
+
+
+async def _meter_batch_job(
+    service: LLMService, model: str, completions: list[BatchCompletion]
+) -> None:
+    """Book a finished batch job's spend at the batch rate.
+
+    Args:
+        service: The owning service (for the ``gen_ai.system`` label).
+        model: The model the job ran on.
+        completions: Every entry's outcome; only metered successes cost money.
+    """
+    metered = [c.usage for c in completions if c.succeeded and not c.usage.is_empty]
+    if not metered:
+        return
+
+    system = gen_ai_system(getattr(service.config, "provider", None))
+    total = Usage()
+    for usage in metered:
+        # Per entry, because each entry is one call: an aggregate observation
+        # would misreport the per-call token distribution.
+        record_genai_metrics(
+            system,
+            model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            batch=True,
+        )
+        total = total.merge(usage)
+
+    # One ledger write per job, not per entry: a ten-thousand-entry batch must
+    # not become ten thousand quota-store round trips. Never raises.
+    await record_usage_cost(model, total, batch=True)
 
 
 async def _sequential_fallback(
@@ -127,13 +210,24 @@ async def _sequential_fallback(
     out: list[BatchCompletion] = []
     for p in prompts:
         try:
+            # One sink per entry: a batch is costed per ``custom_id``, so a
+            # shared accumulator would attribute every entry to the last one.
+            usage_sink: list[Usage] = []
             text = await service.generate_response(
                 p.prompt,
                 model=model,
                 system_prompt=p.system_prompt,
                 max_tokens=p.max_tokens,
+                usage_sink=usage_sink,
             )
-            out.append(BatchCompletion(p.custom_id, text, True))
+            out.append(
+                BatchCompletion(
+                    p.custom_id,
+                    text,
+                    True,
+                    usage=usage_sink[-1] if usage_sink else Usage(),
+                )
+            )
         except Exception as exc:
             out.append(BatchCompletion(p.custom_id, None, False, error=str(exc)))
     return out

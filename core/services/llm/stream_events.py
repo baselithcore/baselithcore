@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from core.services.llm._accounting import charge_usage_to_budget, record_usage_cost
 from core.services.llm._deadline import stream_within_deadline
 from core.services.llm._telemetry import (
     gen_ai_system,
@@ -35,7 +36,9 @@ from core.services.llm._telemetry import (
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
+from core.services.llm.stop_reasons import apply_stop_reason
 from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ToolChoice
+from core.services.llm.usage import billed_usage
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -87,8 +90,15 @@ async def generate_stream_events(
     system_prompt: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    allow_refusal: bool = False,
 ) -> AsyncIterator[StreamEvent]:
-    """Stream a structured generation as neutral events (see module doc)."""
+    """Stream a structured generation as neutral events (see module doc).
+
+    ``allow_refusal`` has the same meaning as on the buffered paths: when
+    False (the default) a refusal raises
+    :class:`~core.services.llm.errors.LLMRefusalError` once the turn is
+    accounted for, rather than reaching the consumer as an empty answer.
+    """
     import time
 
     model = service._resolve_model(model)
@@ -111,6 +121,7 @@ async def generate_stream_events(
             system_prompt=system_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            allow_refusal=allow_refusal,
         )
         if result.text:
             yield TextDelta(result.text)
@@ -119,7 +130,14 @@ async def generate_stream_events(
         yield StreamEnd(result)
         return
 
-    # Native path: accounting mirrors structured.generate_structured.
+    # Native path: accounting mirrors structured.generate_structured — which
+    # means the pre-call tenant gate too. The buffered branch above gets it
+    # from ``service.generate``; this branch talks to the provider directly,
+    # so without it an event-streaming deployment spends unchecked.
+    from core.quotas.cost_enforcement import enforce_tenant_cost_budget
+
+    await enforce_tenant_cost_budget(model=model)
+
     input_tokens = await estimate_tokens_async(prompt)
     report_tokens_to_middleware(input_tokens, model="input")
     if service.cost_tracker:
@@ -132,34 +150,61 @@ async def generate_stream_events(
         extra["temperature"] = temperature
     if max_tokens is not None:
         extra["max_tokens"] = max_tokens
+    if allow_refusal:
+        extra["allow_refusal"] = True
 
     assert provider_stream is not None  # guaranteed by use_native above
     started = time.perf_counter()
+    # The terminal event is held back until the turn is accounted for and the
+    # stop-reason policy has run: it carries the authoritative result, so
+    # ``truncated`` must already be set when the consumer sees it, and a
+    # refusal must raise *instead of* delivering a result.
+    final_event: StreamEnd | None = None
     final: LLMResult | None = None
     async for event in stream_within_deadline(
         provider_stream(prompt, model, tools=tools, tool_choice=tool_choice, **extra)
     ):
         if isinstance(event, StreamEnd):
+            final_event = event
             final = event.result
+            continue
         yield event
 
     if final is not None:
+        # The middleware ledger already booked the estimated prompt side, so
+        # only the remainder of the total may be added there; pricing and
+        # metrics use the provider's metered split when it reported one.
         output_tokens = max(final.tokens_used - input_tokens, 0)
+        billed = billed_usage(
+            final.usage,
+            fallback_input=input_tokens,
+            fallback_total=final.tokens_used,
+        )
         report_tokens_to_middleware(output_tokens, model=model)
         if service.cost_tracker:
             service.cost_tracker.track_tokens(output_tokens, model=model)
         record_genai_metrics(
             gen_ai_system(service.config.provider),
             model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=billed.input_tokens,
+            output_tokens=billed.output_tokens,
+            cache_read_tokens=billed.cache_read_tokens,
+            cache_write_tokens=billed.cache_write_tokens,
             duration_seconds=time.perf_counter() - started,
         )
         # Charge real dollar cost against the ambient per-request LoopBudget
-        # (no-op outside an orchestrated request). Lazy import: circular.
-        from core.orchestration.budget_context import charge_llm_cost
+        # (no-op outside an orchestrated request), every bucket at its own
+        # rate, then book the turn on the tenant's cumulative ledger — the
+        # ledger the pre-call gate above reads on the next call.
+        charge_usage_to_budget(model, billed)
+        await record_usage_cost(model, billed)
 
-        charge_llm_cost(model, input_tokens, output_tokens)
+        # Stop-reason policy last: the turn is accounted for either way (it was
+        # billed), and only then may a refusal abort the consumer.
+        apply_stop_reason(final, model=model, allow_refusal=allow_refusal)
+
+    if final_event is not None:
+        yield final_event
 
 
 __all__ = [

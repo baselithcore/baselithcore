@@ -120,7 +120,10 @@ async def open_stream(
         prompt: Prompt to stream a completion for.
         model: Already-resolved model for the primary stage.
         stream_kwargs: Extra provider kwargs (system prompt, temperature,
-            max_tokens) passed through unchanged to every stage.
+            max_tokens, and the ``usage_sink`` list a provider appends its
+            metered usage to) passed through unchanged to every stage. Every
+            stage shares the sink, so the serving stage's record is its last
+            entry.
 
     Returns:
         ``(chunks, serving_service, serving_provider, serving_model)`` — the

@@ -30,6 +30,7 @@ from core.models.routing import (
     RoutingDecision,
     RoutingPolicy,
     TaskCategory,
+    cost_per_1k_usd,
 )
 from core.observability.logging import get_logger
 
@@ -230,25 +231,55 @@ class LearnedModelRouter(ModelRouter):
         """The attached scoreboard, if any."""
         return self._scoreboard
 
-    def _allowed_models(self) -> set[str]:
-        """Every model the static policy can produce."""
+    def _allowed_models(self, max_cost_per_1k_usd: float | None = None) -> set[str]:
+        """Every model the static policy can produce, within the cost guard.
+
+        Args:
+            max_cost_per_1k_usd: When given, models whose approximate cost per
+                1K tokens exceeds it are excluded — the scoreboard must not be
+                able to substitute a model the static policy was just forbidden
+                from choosing.
+
+        Returns:
+            The candidate set the scoreboard may choose from.
+        """
         allowed = set(self.policy.primary.values())
         for upgrades in self.policy.complexity_upgrade.values():
             allowed.update(upgrades.values())
-        return allowed
+        if max_cost_per_1k_usd is None:
+            return allowed
+        return {
+            model for model in allowed if cost_per_1k_usd(model) <= max_cost_per_1k_usd
+        }
 
     def select(
         self,
         category: TaskCategory,
         complexity: Complexity = Complexity.MEDIUM,
+        *,
+        max_cost_per_1k_usd: float | None = None,
     ) -> RoutingDecision:
-        """Route the task, letting the scoreboard override when confident."""
-        decision = super().select(category, complexity)
+        """Route the task, letting the scoreboard override when confident.
+
+        ``max_cost_per_1k_usd`` is applied first, by the static policy (see
+        :meth:`core.models.routing.RoutingPolicy.select`) — *and then again* to
+        the scoreboard's candidate set. The second application is the point:
+        the candidate set is every model the policy can produce for **any**
+        category, so without it the scoreboard could answer a budgeted request
+        with a flagship the static layer had just refused, silently undoing the
+        one guard the caller asked for. When nothing in the scoreboard's reach
+        fits the budget, the static (cost-guarded) decision stands.
+        """
+        decision = super().select(
+            category, complexity, max_cost_per_1k_usd=max_cost_per_1k_usd
+        )
         if self._scoreboard is None:
             return decision
 
         challenger = self._scoreboard.prefer(
-            category, decision.model_id, allowed=self._allowed_models()
+            category,
+            decision.model_id,
+            allowed=self._allowed_models(max_cost_per_1k_usd),
         )
         if challenger is None:
             return decision
