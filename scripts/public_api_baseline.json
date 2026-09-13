@@ -803,6 +803,7 @@
       "ApprovalPrincipal",
       "ApprovalRequiredError",
       "AutonomyLevel",
+      "BUILTIN_INTENTS",
       "AutonomyPolicy",
       "AutonomyUpgradeGate",
       "BaseFlowHandler",

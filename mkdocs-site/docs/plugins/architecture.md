@@ -143,6 +143,26 @@ dictionaries under the intent fails at call time (a `dict` is not callable). Int
 patterns are keyed by `"name"` — an entry without it is silently dropped — and a
 missing `"priority"` defaults to `0` (higher wins).
 
+**Declaration and binding are separate, and land in different places.** Intent
+patterns are read from the manifest when the plugin is discovered, so they are
+available before anything runs. The flow handler itself is only bound once the
+plugin activates. A tool that lists what a deployment *can* run therefore has to
+read the declarations, not the bindings, or it sees nothing on a deployment
+where no plugin has been exercised yet:
+
+| Question | Registry call |
+| --- | --- |
+| Which intents are declared? | `get_all_intent_patterns()` |
+| Who declared this intent? | `get_intent_pattern_owner(intent)` |
+| Which handlers are bound? | `get_all_flow_handlers()` |
+| Who owns this bound handler? | `get_flow_handler_owner(intent)` |
+
+Neither pair covers the intents the orchestrator registers for itself
+(`qa_docs`, `complex_reasoning`, `vision_analysis`, `multimodal_reasoning`,
+`collaborative_task`, `scenario_simulation`). Those never enter the registry,
+and the orchestrator is constructed lazily on first use, so there is usually no
+instance to interrogate. Read `core.orchestration.BUILTIN_INTENTS` instead.
+
 ### RouterPlugin
 
 For plugins that expose APIs. `create_router()` is abstract; `get_routers()` defaults

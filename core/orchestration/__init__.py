@@ -40,7 +40,7 @@ from .checkpoint_history import fork_run, get_state, get_state_history, list_run
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
 from .modality_router import Modality, annotate_context, detect_modality
-from .orchestrator import Orchestrator
+from .orchestrator import BUILTIN_INTENTS, Orchestrator
 
 # New efficiency-focused modules
 from .parallel import ExecutionPlan, ParallelToolExecutor, ToolCall, ToolResult
@@ -76,6 +76,7 @@ __all__ = [
     "IntentClassifierProtocol",
     "OrchestratorProtocol",
     # Implementations
+    "BUILTIN_INTENTS",
     "Orchestrator",
     "IntentClassifier",
     "BaseFlowHandler",
