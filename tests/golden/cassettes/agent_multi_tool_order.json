@@ -1,11 +1,12 @@
 {
   "name": "agent_multi_tool_order",
-  "description": "Agent.run: two sequential tool calls; every later turn must see every earlier tool result.",
+  "description": "Agent.run: two sequential tool calls; the history is append-only, so every later turn still carries every earlier tool_use/tool_result pair.",
   "turns": [
     {
       "expect": {
         "prompt_contains": ["order 42"],
-        "tools": ["get_order", "get_shipment"]
+        "tools": ["get_order", "get_shipment"],
+        "roles": ["user"]
       },
       "result": {
         "text": null,
@@ -24,8 +25,16 @@
     },
     {
       "expect": {
-        "prompt_contains": ["[get_order] -> {\"order_id\": 42, \"shipment_id\": \"SHP-7\"}"],
-        "tools": ["get_order", "get_shipment"]
+        "tools": ["get_order", "get_shipment"],
+        "roles": ["user", "assistant", "user"],
+        "tool_results": [
+          {
+            "tool_use_id": "call_1",
+            "contains": ["{\"order_id\": 42, \"shipment_id\": \"SHP-7\"}"],
+            "is_error": false
+          }
+        ],
+        "envelope": true
       },
       "result": {
         "text": null,
@@ -45,10 +54,20 @@
     {
       "expect": {
         "prompt_contains": [
-          "[get_order] -> {\"order_id\": 42, \"shipment_id\": \"SHP-7\"}",
-          "[get_shipment] -> in transit, ETA 2 days"
+          "order 42",
+          "[tool_result call_1]",
+          "{\"order_id\": 42, \"shipment_id\": \"SHP-7\"}"
         ],
-        "tools": ["get_order", "get_shipment"]
+        "tools": ["get_order", "get_shipment"],
+        "roles": ["user", "assistant", "user", "assistant", "user"],
+        "tool_results": [
+          {
+            "tool_use_id": "call_2",
+            "contains": ["in transit, ETA 2 days"],
+            "is_error": false
+          }
+        ],
+        "envelope": true
       },
       "result": {
         "text": "Order 42 shipped as SHP-7 and is in transit, ETA 2 days.",

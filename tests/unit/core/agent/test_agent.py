@@ -16,7 +16,13 @@ class CityInfo(BaseModel):
 
 
 def _mock_service(results):
-    """LLMService stub whose generate() pops canned LLMResults in order."""
+    """LLMService stub whose generate() pops canned LLMResults in order.
+
+    Deliberately does **not** advertise ``supports_messages``, so these cases
+    exercise the legacy ``generate(prompt=...)`` path an injected service that
+    predates the message API still gets. The message loop itself is covered by
+    ``test_agent_messages.py``.
+    """
     svc = AsyncMock()
     svc.generate = AsyncMock(side_effect=list(results))
     svc.generate_response = AsyncMock(return_value="plain answer")
