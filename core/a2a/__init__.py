@@ -33,6 +33,8 @@ from .guards import (
 
 # Protocol
 from .protocol import (
+    DEPRECATED_PUSH_NOTIFICATION_METHODS,
+    PUSH_NOTIFICATION_METHODS,
     A2AMessage,
     A2AMethod,
     A2ARequest,
@@ -45,7 +47,13 @@ from .protocol import (
 )
 
 # Router
-from .router import create_a2a_router, create_standalone_app
+from .router import (
+    AGENT_CARD_PATH,
+    LEGACY_AGENT_CARD_PATH,
+    create_a2a_router,
+    create_standalone_app,
+    create_wellknown_router,
+)
 
 # Security (HMAC request signing)
 from .security import (
@@ -105,6 +113,8 @@ __all__ = [
     "TextPart",
     "part_from_dict",
     # Protocol
+    "DEPRECATED_PUSH_NOTIFICATION_METHODS",
+    "PUSH_NOTIFICATION_METHODS",
     "A2AMessage",
     "A2AMethod",
     "A2ARequest",
@@ -125,8 +135,11 @@ __all__ = [
     "PostgresTaskStore",
     "TaskStore",
     # Router
+    "AGENT_CARD_PATH",
+    "LEGACY_AGENT_CARD_PATH",
     "create_a2a_router",
     "create_standalone_app",
+    "create_wellknown_router",
     # Security
     "PEER_HEADER",
     "build_signature_headers",

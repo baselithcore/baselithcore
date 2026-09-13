@@ -137,7 +137,12 @@ class TestToolExecutionFailures:
         assert response is not None
         assert "error" not in response
         assert response["result"]["isError"] is True
-        assert "upstream API is down" in response["result"]["content"][0]["text"]
+        # The failure is reported, but the exception text is not: it names
+        # upstream hosts and credentials and this result crosses a trust
+        # boundary. The model gets a correlation id; the log keeps the text.
+        message = response["result"]["content"][0]["text"]
+        assert "upstream API is down" not in message
+        assert "explode" in message and "error id" in message.lower()
 
 
 class TestErrorCodes:

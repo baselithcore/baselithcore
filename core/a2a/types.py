@@ -30,25 +30,38 @@ class Role(str, Enum):
 
 class TaskState(str, Enum):
     """
-    Task lifecycle states per A2A specification.
+    Task lifecycle states per A2A specification (0.3.0).
 
     States:
         SUBMITTED: Task received, not yet started
         WORKING: Task is actively being processed
         INPUT_REQUIRED: Agent needs additional input from user
+        AUTH_REQUIRED: Agent needs the client to authenticate (or step up)
+            before it can continue — distinct from ``INPUT_REQUIRED``, which
+            asks for task *content*. A peer that cannot tell them apart
+            re-prompts a human for data when it should be refreshing a token.
         COMPLETED: Task finished successfully
         CANCELED: Task was canceled by client
         FAILED: Task failed due to an error
         REJECTED: Task was rejected by the agent
+        UNKNOWN: The agent cannot determine the state. Deserializing a peer's
+            task used to raise ``ValueError`` on this value, so one
+            unrecognisable task poisoned the whole exchange.
+
+    ``AUTH_REQUIRED`` and ``UNKNOWN`` are non-terminal: both can still move on
+    — the first once credentials arrive, the second once the agent regains
+    visibility.
     """
 
     SUBMITTED = "submitted"
     WORKING = "working"
     INPUT_REQUIRED = "input-required"
+    AUTH_REQUIRED = "auth-required"
     COMPLETED = "completed"
     CANCELED = "canceled"
     FAILED = "failed"
     REJECTED = "rejected"
+    UNKNOWN = "unknown"
 
 
 # =============================================================================

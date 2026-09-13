@@ -160,15 +160,24 @@ class AgentDiscovery:
         """
         Find agents supporting a specific protocol.
 
+        A card minted from a 0.3.0 peer carries ``preferredTransport``
+        ("JSONRPC") rather than the deprecated, non-spec ``protocols`` list, so
+        both are consulted — matching only the old field would have made every
+        conformant peer invisible to this lookup.
+
         Args:
             protocol: Protocol name (e.g., "jsonrpc", "rest")
             healthy_only: Only return healthy agents
         """
+        wanted = protocol.strip().lower()
         results = []
         for reg in self._agents.values():
             if healthy_only and not reg.is_healthy:
                 continue
-            if protocol in reg.card.protocols:
+            declared = {p.strip().lower() for p in reg.card.protocols}
+            if reg.card.preferredTransport:
+                declared.add(reg.card.preferredTransport.strip().lower())
+            if wanted in declared:
                 results.append(reg.card)
         return results
 

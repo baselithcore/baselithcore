@@ -44,8 +44,12 @@ class TestPromptsCapability:
         assert "prompts" not in empty["capabilities"]
 
         with_prompts = await _prompt_server()._handle_initialize({})
-        assert with_prompts["capabilities"]["prompts"] == {"listChanged": True}
+        # Legacy handshake: present, but without the listChanged promise the
+        # era cannot deliver on (see test_era_capabilities.py).
+        assert with_prompts["capabilities"]["prompts"] == {}
         assert with_prompts["capabilities"]["completions"] == {}
+        modern = await _prompt_server()._handle_discover()
+        assert modern["capabilities"]["prompts"] == {"listChanged": True}
 
 
 class TestPromptsList:

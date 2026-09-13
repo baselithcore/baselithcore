@@ -302,39 +302,44 @@ async def test_auth_required_accepts_authenticated(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_session_store_lifecycle():
+# The store API is async since it grew a Redis-backed sibling (see
+# core.mcp.http_sessions and tests/unit/mcp/test_http_sessions.py); the
+# semantics below are unchanged.
+
+
+async def test_session_store_lifecycle():
     store = SessionStore(ttl_seconds=3600)
-    session_id = store.create("u1")
-    assert store.touch(session_id, "u1") is True
-    assert store.terminate(session_id, "u1") is True
-    assert store.touch(session_id, "u1") is False
-    assert store.terminate(session_id, "u1") is False
+    session_id = await store.create("u1")
+    assert await store.touch(session_id, "u1") is True
+    assert await store.terminate(session_id, "u1") is True
+    assert await store.touch(session_id, "u1") is False
+    assert await store.terminate(session_id, "u1") is False
 
 
-def test_session_store_expiry():
+async def test_session_store_expiry():
     store = SessionStore(ttl_seconds=-1.0)  # everything is instantly expired
-    session_id = store.create("u1")
-    assert store.touch(session_id, "u1") is False
+    session_id = await store.create("u1")
+    assert await store.touch(session_id, "u1") is False
 
 
-def test_session_store_rejects_foreign_owner():
+async def test_session_store_rejects_foreign_owner():
     # A session id presented by a different identity must not be usable.
     store = SessionStore(ttl_seconds=3600)
-    session_id = store.create("alice")
+    session_id = await store.create("alice")
     assert session_id is not None
-    assert store.touch(session_id, "mallory") is False
-    assert store.terminate(session_id, "mallory") is False
+    assert await store.touch(session_id, "mallory") is False
+    assert await store.terminate(session_id, "mallory") is False
     # The real owner is unaffected.
-    assert store.touch(session_id, "alice") is True
+    assert await store.touch(session_id, "alice") is True
 
 
-def test_session_store_per_owner_cap():
+async def test_session_store_per_owner_cap():
     store = SessionStore(ttl_seconds=3600, max_per_owner=2)
-    assert store.create("u1") is not None
-    assert store.create("u1") is not None
-    assert store.create("u1") is None  # cap reached for u1
+    assert await store.create("u1") is not None
+    assert await store.create("u1") is not None
+    assert await store.create("u1") is None  # cap reached for u1
     # A different identity is unaffected by u1's cap.
-    assert store.create("u2") is not None
+    assert await store.create("u2") is not None
 
 
 async def test_cross_identity_session_rejected_over_http(monkeypatch):
