@@ -8,7 +8,7 @@ This fetcher is used when pages require JavaScript execution
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from core.security.ssrf import SsrfError, assert_url_safe_async
@@ -167,7 +167,7 @@ class PlaywrightFetcher(BaseFetcher):
                     status_code=response.status if response else 200,
                     html=html,
                     headers=headers,
-                    fetched_at=datetime.now(),
+                    fetched_at=datetime.now(UTC),
                     fetch_time_ms=self._calc_duration_ms(start),
                     error=None,
                 )

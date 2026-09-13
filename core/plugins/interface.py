@@ -19,6 +19,10 @@ from core.observability.logging import get_logger
 # keeps working for every existing caller.
 from core.plugins._metadata import PluginMetadata
 
+# Same reasoning for the health report: ``health.py`` only imports this module
+# under TYPE_CHECKING, so importing PluginHealth from there at runtime is safe.
+from core.plugins.health import PluginHealth
+
 logger = get_logger(__name__)
 
 
@@ -145,6 +149,41 @@ class Plugin(ABC):
         True if the initialize() method has been successfully called.
         """
         return self._initialized
+
+    async def health(self) -> PluginHealth:
+        """
+        Report whether this plugin can currently serve.
+
+        Override to report what only the plugin knows — a stale upstream, an
+        expired credential, a drained work queue. The registry calls this from
+        :meth:`core.plugins.health.HealthMixin.check_health` **only when the
+        method is overridden**, so a plugin that does not implement it costs
+        nothing and is still reported on its initialization state.
+
+        The default implementation reports the framework's own view: healthy
+        once ``initialize()`` has completed.
+
+        Returns:
+            PluginHealth: The plugin's self-assessment.
+        """
+        return PluginHealth(
+            healthy=self._initialized,
+            detail="" if self._initialized else "not initialized",
+        )
+
+    @staticmethod
+    def has_health_override(plugin_cls: type["Plugin"]) -> bool:
+        """
+        Whether ``plugin_cls`` implements its own :meth:`health` hook.
+
+        Args:
+            plugin_cls: The plugin class to inspect.
+
+        Returns:
+            bool: True when the class (or a base other than ``Plugin``)
+            replaces the default implementation.
+        """
+        return getattr(plugin_cls, "health", None) is not Plugin.health
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """

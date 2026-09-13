@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -166,7 +166,7 @@ class CrawlEngine:
         """
         result = CrawlResult(
             seed_url=seed_url,
-            stats=CrawlStats(start_time=datetime.now()),
+            stats=CrawlStats(start_time=datetime.now(UTC)),
         )
 
         total_bytes = 0
@@ -191,7 +191,7 @@ class CrawlEngine:
                 )
 
         # Finalize stats
-        result.stats.end_time = datetime.now()
+        result.stats.end_time = datetime.now(UTC)
         result.stats.total_bytes = total_bytes
         if result.stats.pages_crawled > 0:
             result.stats.avg_response_time_ms = (

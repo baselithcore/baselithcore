@@ -8,7 +8,7 @@ extracted data, links, images, and crawl results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -64,7 +64,7 @@ class ScrapedPage:
     status_code: int
     html: str
     headers: dict[str, str] = field(default_factory=dict)
-    fetched_at: datetime = field(default_factory=datetime.now)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     fetch_time_ms: float = 0.0
     error: str | None = None
 
@@ -123,7 +123,7 @@ class CrawlError:
     url: str
     error_type: str
     message: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -133,14 +133,14 @@ class CrawlStats:
     pages_crawled: int = 0
     pages_failed: int = 0
     total_bytes: int = 0
-    start_time: datetime = field(default_factory=datetime.now)
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
     avg_response_time_ms: float = 0.0
 
     @property
     def duration_seconds(self) -> float:
         """Get total duration in seconds."""
-        end = self.end_time or datetime.now()
+        end = self.end_time or datetime.now(UTC)
         return (end - self.start_time).total_seconds()
 
 

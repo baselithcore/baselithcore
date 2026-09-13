@@ -7,7 +7,7 @@ This is the default fetcher for fast, lightweight scraping of static pages.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
@@ -178,7 +178,7 @@ class HttpxFetcher(BaseFetcher):
                 status_code=status_code,
                 html=final_html,
                 headers=headers,
-                fetched_at=datetime.now(),
+                fetched_at=datetime.now(UTC),
                 fetch_time_ms=self._calc_duration_ms(start),
                 error=None,
             )

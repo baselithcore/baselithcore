@@ -276,6 +276,20 @@ class HotReloadController:
                 await self.lifecycle.transition_to_unloading(plugin_name)
                 await self.lifecycle.remove_plugin(plugin_name)
 
+                # Stop the outgoing generation's background work before its
+                # modules are purged. ``_do_disable`` already does this via
+                # registry.unregister for an ACTIVE plugin; a reload from
+                # DISABLED/FAILED never went through that path, and a task
+                # surviving the module purge would run against code that is no
+                # longer importable.
+                cancelled = await self.registry.cancel_plugin_tasks(plugin_name)
+                if cancelled:
+                    logger.info(
+                        "Cancelled %d background task(s) before reloading %s",
+                        cancelled,
+                        plugin_name,
+                    )
+
                 if plugin_name in self.loader._loaded_modules:
                     self.loader._unload_module(plugin_name)
 

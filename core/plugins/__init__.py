@@ -27,6 +27,12 @@ from .declarative import (
     SkillSandboxError,
     split_frontmatter,
 )
+from .discovery import (
+    ENTRY_POINT_GROUP,
+    is_entry_point_discovery_enabled,
+    iter_entry_point_plugin_dirs,
+    merge_plugin_dirs,
+)
 from .env import load_plugin_dotenv
 from .exporters import (
     BackstageProvider,
@@ -34,6 +40,7 @@ from .exporters import (
     set_backstage_provider,
 )
 from .graph_plugin import GraphPlugin
+from .health import PluginHealth
 from .hotreload import HotReloadController
 from .interface import Plugin, PluginMetadata
 from .lifecycle import PluginLifecycleHooks, PluginLifecycleManager, PluginState
@@ -45,7 +52,18 @@ from .lifecycle_events import (
     emit_lifecycle_event,
 )
 from .loader import PluginLoader
+from .manifest_model import (
+    VENDOR_EXTENSION_PREFIX,
+    ManifestValidationError,
+    PluginManifestModel,
+    is_extension_key,
+    known_manifest_keys,
+    load_manifest_model,
+    validate_manifest_data,
+)
 from .metrics import PluginMetricsCollector, get_metrics_collector
+from .nursery import PluginTaskClosedError, PluginTaskNursery
+from .plugin_class import PluginClassError, resolve_plugin_class
 from .protocols import BackstageExporter, CatalogExporter
 from .registry import PluginRegistry
 from .result import SkillResult, fail, ok, partial
@@ -74,6 +92,25 @@ __all__ = [
     "GraphPlugin",
     "PluginRegistry",
     "PluginLoader",
+    "PluginHealth",
+    # Manifest schema (the plugin contract)
+    "PluginManifestModel",
+    "ManifestValidationError",
+    "VENDOR_EXTENSION_PREFIX",
+    "is_extension_key",
+    "known_manifest_keys",
+    "load_manifest_model",
+    "validate_manifest_data",
+    # Plugin-class resolution + discovery sources
+    "PluginClassError",
+    "resolve_plugin_class",
+    "ENTRY_POINT_GROUP",
+    "is_entry_point_discovery_enabled",
+    "iter_entry_point_plugin_dirs",
+    "merge_plugin_dirs",
+    # Per-plugin background-task nursery
+    "PluginTaskNursery",
+    "PluginTaskClosedError",
     # Phase 2: Hot-reload & lifecycle
     "PluginLifecycleManager",
     "PluginState",

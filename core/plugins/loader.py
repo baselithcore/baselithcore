@@ -13,9 +13,17 @@ from ._audit import audit_plugin_load
 from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from ._resolve import safe_plugin_path, sort_by_dependencies
-from .integrity import enforce_signing_policy, verify_plugin_integrity
+from .bulk_load import load_all_plugins as _load_all_plugins
+from .discovery import (
+    find_manifest,
+    iter_entry_point_plugin_dirs,
+    merge_plugin_dirs,
+)
+from .integrity import verify_plugin_integrity
 from .interface import Plugin
-from .load_gates import compat_gate, config_gate
+from .load_gates import config_gate
+from .manifest_model import describe_manifest_failure
+from .plugin_class import PluginClassError, resolve_plugin_class
 from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
 
@@ -54,6 +62,35 @@ class PluginLoader:
         self._resource_analyzer = ResourceAnalyzer(self.plugins_dir)
         self._discover_cache: list[Path] | None = None
 
+    @property
+    def resource_analyzer(self) -> ResourceAnalyzer:
+        """The analyzer this loader reads manifests and capabilities through."""
+        return self._resource_analyzer
+
+    def match_config_key(
+        self,
+        configs: dict[str, dict[str, Any]],
+        directory_name: str,
+        plugin_name: str,
+    ) -> str | None:
+        """Resolve which config entry (if any) governs a plugin.
+
+        Config files key plugins by directory name or by manifest name, and the
+        two differ for several shipped plugins (``browser_agent`` vs
+        ``browser-agent``).
+
+        Args:
+            configs: The plugin config mapping.
+            directory_name: The plugin's directory name.
+            plugin_name: The plugin's manifest name.
+
+        Returns:
+            The matching config key, or ``None`` when the plugin is not listed.
+        """
+        return self._resource_analyzer._match_config_key(
+            configs, directory_name, plugin_name
+        )
+
     def invalidate_discovery_cache(self) -> None:
         """Drop the cached plugin directory listing.
 
@@ -66,16 +103,29 @@ class PluginLoader:
         """
         Discover plugin directories.
 
+        Two sources are merged: the filesystem scan of ``plugins_dir`` and the
+        ``baselith.plugins`` entry-point group advertised by installed
+        distributions (see :mod:`core.plugins.discovery`). The directory scan
+        wins on a name clash — a tree an operator dropped in locally is a
+        deliberate override and must not be shadowed by a wheel on ``sys.path``.
+
         Returns:
             List of paths to plugin directories
         """
         if self._discover_cache is not None:
             return self._discover_cache
 
+        plugin_dirs = self._scan_plugin_dirs()
+        self._discover_cache = merge_plugin_dirs(
+            plugin_dirs, iter_entry_point_plugin_dirs()
+        )
+        return self._discover_cache
+
+    def _scan_plugin_dirs(self) -> list[Path]:
+        """Walk ``plugins_dir`` for directories that look like plugins."""
         if not self.plugins_dir.exists():
             logger.warning(f"Plugins directory not found: {self.plugins_dir}")
-            self._discover_cache = []
-            return self._discover_cache
+            return []
 
         plugins_root = self.plugins_dir.resolve()
         plugin_dirs: list[Path] = []
@@ -90,8 +140,26 @@ class PluginLoader:
                     plugin_dirs.append(item)
                     logger.debug(f"Discovered plugin directory: {item.name}")
 
-        self._discover_cache = plugin_dirs
         return plugin_dirs
+
+    async def load_all_plugins(
+        self,
+        configs: dict[str, dict[str, Any]] | None = None,
+        *,
+        activate_on_load: bool = True,
+    ) -> int:
+        """
+        Discover and load all plugins with dependency resolution.
+
+        Args:
+            configs: Dictionary mapping plugin names to their configurations
+            activate_on_load: Initialize each plugin immediately instead of
+                registering it cold for lazy activation.
+
+        Returns:
+            Number of successfully loaded plugins
+        """
+        return await _load_all_plugins(self, configs, activate_on_load=activate_on_load)
 
     async def load_plugin(
         self,
@@ -120,6 +188,30 @@ class PluginLoader:
         # Track loading state if lifecycle manager available
         if self.lifecycle_manager:
             await self.lifecycle_manager.transition_to_loading(plugin_name)
+
+        # A manifest that is *present but invalid* is refused in every
+        # environment. Loading it anyway would run the plugin with
+        # ``discovery=None``, which silently means: no declared permissions (so
+        # `declared=False` and the capability guards never deny anything), no
+        # min_core_version, no declared environment_variables and no
+        # entry_point. That is strictly more privilege than the author asked
+        # for, granted because their manifest had a typo — the opposite of what
+        # the gate is for. A directory with *no* manifest stays allowed: that is
+        # the documented legacy shape, and it grants nothing either way.
+        if discovery is None:
+            manifest_path = find_manifest(plugin_dir)
+            if manifest_path is not None:
+                reason = describe_manifest_failure(manifest_path)
+                logger.error(
+                    "Refusing plugin %s: its manifest is present but invalid — %s",
+                    safe_name,
+                    reason,
+                )
+                if self.lifecycle_manager:
+                    await self.lifecycle_manager.transition_to_failed(
+                        plugin_name, ValueError(reason)
+                    )
+                return None
 
         try:
             # Verify plugin integrity before executing any of its code.
@@ -212,29 +304,18 @@ class PluginLoader:
             self._loaded_modules[plugin_name] = module
             self._module_packages[plugin_name] = package_name
 
-            # Find the Plugin class in the module
-            plugin_class = None
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name)
-                if (
-                    isinstance(attr, type)
-                    and issubclass(attr, Plugin)
-                    and attr is not Plugin
-                    and not getattr(
-                        attr, "__abstractmethods__", None
-                    )  # Skip abstract classes
-                    # Skip framework base classes imported into the plugin's
-                    # namespace: ``GraphPlugin`` is concrete, so a plugin whose
-                    # class name sorts after it alphabetically (dir() is
-                    # sorted) would otherwise instantiate the base instead of
-                    # its own class.
-                    and not attr.__module__.startswith("core.plugins")
-                ):
-                    plugin_class = attr
-                    break
-
-            if plugin_class is None:
-                logger.error(f"No Plugin subclass found in {safe_name}")
+            # Identify the Plugin class: the manifest's ``entry_point`` when it
+            # declares one, otherwise the module's single concrete subclass.
+            # Ambiguity is refused rather than resolved alphabetically — see
+            # core.plugins.plugin_class.
+            try:
+                plugin_class = resolve_plugin_class(
+                    module,
+                    package_prefix=f"plugins.{package_name}",
+                    entry_point=(discovery.metadata.entry_point if discovery else ""),
+                )
+            except PluginClassError as exc:
+                logger.error(f"Cannot resolve plugin class for {safe_name}: {exc}")
                 return None
 
             # Instantiate the plugin
@@ -278,118 +359,6 @@ class PluginLoader:
 
             return None
 
-    async def load_all_plugins(
-        self,
-        configs: dict[str, dict[str, Any]] | None = None,
-        *,
-        activate_on_load: bool = True,
-    ) -> int:
-        """
-        Discover and load all plugins with dependency resolution.
-
-        Args:
-            configs: Dictionary mapping plugin names to their configurations
-
-        Returns:
-            Number of successfully loaded plugins
-        """
-        configs = configs or {}
-        # Surface (and optionally hard-fail on) an insecure signing posture
-        # before any plugin code is loaded.
-        enforce_signing_policy()
-        plugin_dirs = self.discover_plugins()
-
-        if not plugin_dirs:
-            logger.info("No plugins found to load")
-            return 0
-
-        # Pass 1: Instantiate all plugins to read metadata (without initializing)
-        instantiated_plugins: dict[str, Plugin] = {}
-
-        # If configs are provided, we only load plugins listed there
-        filter_by_config = len(configs) > 0
-
-        plugin_configs_by_name: dict[str, dict[str, Any]] = {}
-
-        for plugin_dir in plugin_dirs:
-            discovery = self._resource_analyzer.discover_plugin(plugin_dir)
-            plugin_name = discovery.name if discovery else plugin_dir.name
-            safe_name = sanitize_log_value(plugin_name)
-            config_key = None
-
-            if filter_by_config:
-                config_key = self._resource_analyzer._match_config_key(
-                    configs,
-                    plugin_dir.name,
-                    plugin_name,
-                )
-                if config_key is None:
-                    logger.debug(f"Skipping plugin {safe_name} (not in config)")
-                    continue
-
-                plugin_config = configs[config_key]
-                if not plugin_config.get("enabled", True):
-                    logger.info(f"Skipping disabled plugin {safe_name}")
-                    continue
-
-            # Load without init
-            plugin = await self.load_plugin(plugin_dir, initialize=False)
-            if plugin:
-                instantiated_plugins[plugin.metadata.name] = plugin
-                plugin_configs_by_name[plugin.metadata.name] = configs.get(
-                    config_key or plugin.metadata.name, {}
-                )
-
-        if not instantiated_plugins:
-            return 0
-
-        # Map of available plugin name -> version for dependency compat checks.
-        available_versions = {
-            name: plugin.metadata.version
-            for name, plugin in instantiated_plugins.items()
-        }
-
-        # Pass 2: Sort by dependencies
-        try:
-            sorted_names = self._sort_by_dependencies(instantiated_plugins)
-        except Exception as e:
-            logger.error(f"Dependency resolution failed: {e}")
-            return 0
-
-        # Pass 3: Initialize immediately or register for lazy activation
-        loaded_count = 0
-        for name in sorted_names:
-            plugin = instantiated_plugins.get(name)
-            if not plugin:
-                continue
-            safe_name = sanitize_log_value(name)
-
-            try:
-                config = plugin_configs_by_name.get(name, {})
-
-                # Gate on version compatibility and config schema. Warn-only by
-                # default; skips the plugin when the matching enforcement flag
-                # is set (BASELITH_ENFORCE_PLUGIN_COMPAT / _CONFIG).
-                if not compat_gate(plugin, available_versions):
-                    continue
-                if not config_gate(plugin, config):
-                    continue
-
-                if activate_on_load:
-                    await plugin.initialize(config)
-                    self.registry.register(plugin)
-                    logger.info(f"Initialized and registered plugin: {safe_name}")
-                else:
-                    self.registry.register(plugin, require_initialized=False)
-                    logger.info(f"Registered plugin for lazy activation: {safe_name}")
-                loaded_count += 1
-
-            except Exception as e:
-                logger.error(f"Failed to initialize/register plugin {safe_name}: {e}")
-
-        logger.info(f"Loaded {loaded_count}/{len(plugin_dirs)} plugins")
-        return loaded_count
-
     def resolve_plugin_dir(self, plugin_name: str) -> Path:
         """Resolve a plugin directory by logical plugin name or filesystem name."""
         # Never join an unvalidated identifier onto the plugins root: a name
@@ -414,8 +383,19 @@ class PluginLoader:
 
         raise FileNotFoundError(f"Plugin directory not found for '{plugin_name}'")
 
-    def _sort_by_dependencies(self, plugins: dict[str, Plugin]) -> list[str]:
-        """Sort plugin names by dependencies (see :func:`sort_by_dependencies`)."""
+    def sort_by_dependencies(self, plugins: dict[str, Plugin]) -> list[str]:
+        """Order plugin names so each plugin follows its dependencies.
+
+        Args:
+            plugins: Instantiated plugins keyed by manifest name.
+
+        Returns:
+            The names in initialization order.
+
+        Raises:
+            Exception: Propagated from the topological sort on a dependency
+                cycle; the caller decides whether that aborts the whole load.
+        """
         return sort_by_dependencies(plugins)
 
     async def reload_plugin(self, plugin_name: str) -> bool:
@@ -459,14 +439,24 @@ class PluginLoader:
         return False
 
     def _unload_module(self, plugin_name: str) -> None:
-        """Remove cached import state for a plugin."""
+        """Remove cached import state for a plugin.
+
+        Purges **every** ``sys.modules`` entry under the plugin's package, not
+        just ``plugins.<name>`` and ``plugins.<name>.plugin``. Leaving the
+        submodules behind meant a reload re-executed only the top module while
+        its helpers stayed on the old code — the reload appeared to succeed and
+        served a mix of both versions.
+        """
         package_name = self._module_packages.get(plugin_name, plugin_name)
-        for module_name in (
-            f"plugins.{package_name}.plugin",
-            f"plugins.{package_name}",
-        ):
-            if module_name in sys.modules:
-                del sys.modules[module_name]
+        root = f"plugins.{package_name}"
+        prefix = f"{root}."
+        stale = [
+            module_name
+            for module_name in sys.modules
+            if module_name == root or module_name.startswith(prefix)
+        ]
+        for module_name in stale:
+            sys.modules.pop(module_name, None)
 
         self._loaded_modules.pop(plugin_name, None)
         self._module_packages.pop(plugin_name, None)

@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     FastAPI Lifecycle:
     - initializes DB
-    - creates Qdrant collection
+    - creates the configured vector store's collection (Qdrant or pgvector)
     - indexes documents (full scan on first startup)
     """
     logger.info(
@@ -119,10 +119,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             should_run_core_schema_init,
         )
         from core.di.lazy_registry import get_lazy_registry
+        from core.plugins.discovery import iter_entry_point_plugin_dirs
         from core.plugins.resource_analyzer import ResourceAnalyzer
 
         analyzer = ResourceAnalyzer(Path("plugins/"))
-        resource_requirements = analyzer.analyze_requirements(plugin_configs)
+        # Entry-point plugins ship no directory under plugins/, so their
+        # required_resources have to be threaded in explicitly here — otherwise
+        # such a plugin is discovered below but activates against a resource
+        # (postgres, redis, ...) that lazy-init never brought up.
+        entry_point_plugin_dirs = iter_entry_point_plugin_dirs()
+        resource_requirements = analyzer.analyze_requirements(
+            plugin_configs, extra_dirs=entry_point_plugin_dirs
+        )
         required_resources = resource_requirements["required"]
         optional_resources = resource_requirements["optional"]
 
@@ -160,7 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 core_resources_initialized.add("postgres")
 
         if "vectorstore" in required_resources:
-            logger.info("📦 Initializing Qdrant (required by plugins)...")
+            logger.info("📦 Initializing vector store (required by plugins)...")
             vectorstore_service: Any = await lazy_registry.get_or_create("vectorstore")
             core_resources_initialized.add("vectorstore")
 
@@ -268,7 +276,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
     hot_reload_controller.set_runtime_activation_hook(hooks.on_plugin_activated)
 
-    discoveries = analyzer.discover_plugins(plugin_configs) if analyzer else {}
+    # Feed the loader's merged view (directory scan + the ``baselith.plugins``
+    # entry-point group) into discovery, so a plugin shipped as a wheel is
+    # visible to the lazy-import path and not only to an explicit
+    # ``load_all_plugins`` call. The directory scan still wins on a name clash.
+    discoveries = (
+        analyzer.discover_plugins(
+            plugin_configs, extra_dirs=plugin_loader.discover_plugins()
+        )
+        if analyzer
+        else {}
+    )
     for plugin_name, discovery in discoveries.items():
         plugin_registry.register_discovered_plugin(discovery)
         await lifecycle_manager.transition_to_discovered(

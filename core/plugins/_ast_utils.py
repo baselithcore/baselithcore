@@ -79,7 +79,10 @@ def static_eval(node: ast.AST) -> Any:
         return tuple(static_eval(item) for item in node.elts)
     if isinstance(node, ast.Dict):
         result = {}
-        for key, value in zip(node.keys, node.values, strict=False):
+        # CPython guarantees ``keys`` and ``values`` are the same length
+        # (a ``{**spread}`` entry contributes a ``None`` key, not a gap),
+        # so a length mismatch here means a malformed tree, not a spread.
+        for key, value in zip(node.keys, node.values, strict=True):
             if key is not None:
                 result[static_eval(key)] = static_eval(value)
         return result

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ class BaseFetcher(ABC):
             status_code=status_code,
             html="",
             headers={},
-            fetched_at=datetime.now(),
+            fetched_at=datetime.now(UTC),
             fetch_time_ms=0.0,
             error=error,
         )

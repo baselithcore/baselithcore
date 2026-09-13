@@ -17,12 +17,18 @@ class ReasoningAgentPlugin(AgentPlugin):
     Plugin that exposes the Reasoning Agent (Tree of Thoughts).
     """
 
-    def get_intent_patterns(self) -> list[tuple[str, str, float]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         """
         Return intent recognition patterns for the orchestrator.
 
+        The annotation used to claim ``list[tuple[str, str, float]]``, which
+        matched neither the value returned below nor the base-class contract
+        (``Plugin.get_intent_patterns``); the orchestrator reads these as
+        mappings.
+
         Returns:
-            List of (pattern, intent, confidence) tuples.
+            List of intent definitions with ``name``, ``patterns``,
+            ``description`` and ``priority``.
         """
         return [
             {

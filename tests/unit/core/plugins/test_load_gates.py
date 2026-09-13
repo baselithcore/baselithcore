@@ -1,11 +1,17 @@
 """Tests for plugin load-time admission gates (version compat + config schema)."""
 
+import pytest
+
 from core.plugins.config_validation import (
     is_config_enforcement_enabled,
     validate_plugin_config,
 )
 from core.plugins.interface import Plugin, PluginMetadata
-from core.plugins.load_gates import compat_gate, config_gate
+from core.plugins.load_gates import (
+    compat_gate,
+    config_gate,
+    is_config_gate_enforced,
+)
 from core.plugins.version import (
     check_plugin_compatibility,
     is_compat_enforcement_enabled,
@@ -127,16 +133,29 @@ class TestCompatGate:
         plugin = _FakePlugin(_md())
         assert compat_gate(plugin, {}) is True
 
-    def test_incompatible_warns_only_by_default(self, monkeypatch):
+    def test_incompatible_skipped_by_default(self, monkeypatch):
+        """Fail-closed: an unsatisfied ``min_core_version`` refuses the plugin."""
         monkeypatch.delenv("BASELITH_ENFORCE_PLUGIN_COMPAT", raising=False)
         plugin = _FakePlugin(_md(min_core_version="999.0.0"))
-        assert compat_gate(plugin, {}) is True
+        assert compat_gate(plugin, {}) is False
+        assert is_compat_enforcement_enabled() is True
 
     def test_incompatible_skipped_when_enforced(self, monkeypatch):
         monkeypatch.setenv("BASELITH_ENFORCE_PLUGIN_COMPAT", "true")
         plugin = _FakePlugin(_md(min_core_version="999.0.0"))
         assert compat_gate(plugin, {}) is False
         assert is_compat_enforcement_enabled() is True
+
+    def test_explicit_downgrade_flag_restores_warn_only(self, monkeypatch):
+        monkeypatch.setenv("BASELITH_ENFORCE_PLUGIN_COMPAT", "false")
+        plugin = _FakePlugin(_md(min_core_version="999.0.0"))
+        assert compat_gate(plugin, {}) is True
+        assert is_compat_enforcement_enabled() is False
+
+    def test_missing_plugin_dependency_is_fatal_by_default(self, monkeypatch):
+        monkeypatch.delenv("BASELITH_ENFORCE_PLUGIN_COMPAT", raising=False)
+        plugin = _FakePlugin(_md(plugin_dependencies={"other": ">=1.0.0"}))
+        assert compat_gate(plugin, {}) is False
 
 
 class TestConfigGate:
@@ -149,11 +168,13 @@ class TestConfigGate:
         plugin = _FakePlugin(_md(), schema=schema)
         assert config_gate(plugin, {"x": 1}) is True
 
-    def test_invalid_warns_only_by_default(self, monkeypatch):
+    def test_invalid_skipped_by_default(self, monkeypatch):
+        """Fail-closed: a config that violates the declared schema is refused."""
         monkeypatch.delenv("BASELITH_ENFORCE_PLUGIN_CONFIG", raising=False)
         schema = {"type": "object", "required": ["x"]}
         plugin = _FakePlugin(_md(), schema=schema)
-        assert config_gate(plugin, {}) is True
+        assert config_gate(plugin, {}) is False
+        assert is_config_gate_enforced() is True
 
     def test_invalid_skipped_when_enforced(self, monkeypatch):
         monkeypatch.setenv("BASELITH_ENFORCE_PLUGIN_CONFIG", "true")
@@ -162,6 +183,13 @@ class TestConfigGate:
         assert config_gate(plugin, {}) is False
         assert is_config_enforcement_enabled() is True
 
+    def test_explicit_downgrade_flag_restores_warn_only(self, monkeypatch):
+        monkeypatch.setenv("BASELITH_ENFORCE_PLUGIN_CONFIG", "false")
+        schema = {"type": "object", "required": ["x"]}
+        plugin = _FakePlugin(_md(), schema=schema)
+        assert config_gate(plugin, {}) is True
+        assert is_config_gate_enforced() is False
+
     def test_broken_schema_hook_does_not_block(self):
         class _Broken(_FakePlugin):
             def get_config_schema(self):
@@ -169,3 +197,41 @@ class TestConfigGate:
 
         plugin = _Broken(_md())
         assert config_gate(plugin, {}) is True
+
+
+class TestOneSwitchOneAnswer:
+    """``BASELITH_ENFORCE_PLUGIN_CONFIG`` means one thing.
+
+    ``config_validation.is_config_enforcement_enabled`` (legacy, opt-in) and
+    ``load_gates.is_config_gate_enforced`` (fail-closed) read the same variable
+    and answered differently for an unset environment, so the honest answer to
+    "is plugin config enforced here?" depended on which function the reader
+    happened to call. Both now return the fail-closed reading.
+    """
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, True),
+            ("", True),
+            ("true", True),
+            ("1", True),
+            ("false", False),
+            ("0", False),
+            ("no", False),
+            ("off", False),
+            ("  OFF  ", False),
+        ],
+    )
+    def test_both_readings_agree(self, monkeypatch, value, expected):
+        if value is None:
+            monkeypatch.delenv("BASELITH_ENFORCE_PLUGIN_CONFIG", raising=False)
+        else:
+            monkeypatch.setenv("BASELITH_ENFORCE_PLUGIN_CONFIG", value)
+
+        assert is_config_enforcement_enabled() is expected
+        assert is_config_gate_enforced() is expected
+
+    def test_the_legacy_name_is_fail_closed_on_an_unset_environment(self, monkeypatch):
+        monkeypatch.delenv("BASELITH_ENFORCE_PLUGIN_CONFIG", raising=False)
+        assert is_config_enforcement_enabled() is True

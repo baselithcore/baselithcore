@@ -8,7 +8,7 @@ Standardized for Baselith Marketplace coherence.
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -85,8 +85,8 @@ class PluginRegistry:
         # 2. Check local disk cache
         if self.cache_path.exists() and not force:
             try:
-                mtime = datetime.fromtimestamp(self.cache_path.stat().st_mtime)
-                if datetime.now() - mtime < timedelta(
+                mtime = datetime.fromtimestamp(self.cache_path.stat().st_mtime, UTC)
+                if datetime.now(UTC) - mtime < timedelta(
                     seconds=self.config.registry_cache_ttl
                 ):
                     with open(self.cache_path) as f:  # noqa: ASYNC230 - small local cache file read once per registry refresh

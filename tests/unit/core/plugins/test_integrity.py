@@ -131,8 +131,13 @@ def test_compute_hash_excludes_node_modules_and_ui_build_inputs(
     assert compute_plugin_hash(plugin_dir) == baseline
 
 
-def test_compute_hash_excludes_manifest(plugin_dir: Path) -> None:
-    """Manifest is excluded so publishers can inject integrity_sha256 post-hash."""
+def test_compute_hash_tolerates_injected_integrity_field(plugin_dir: Path) -> None:
+    """Publishers can still inject integrity_sha256 after computing the digest.
+
+    From V5 the manifest *is* hashed, but through a canonical projection that
+    blanks the three self-referential supply-chain keys — see
+    ``test_integrity_manifest_surface.py`` for the coverage this buys.
+    """
     baseline = compute_plugin_hash(plugin_dir)
     (plugin_dir / "manifest.yaml").write_text(
         "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
@@ -207,14 +212,14 @@ def test_compute_hash_covers_build_files(plugin_dir: Path) -> None:
     assert compute_plugin_hash(plugin_dir) != before_reqs
 
 
-def test_compute_hash_still_excludes_manifest(plugin_dir: Path) -> None:
-    """Manifest stays outside the digest so hash injection stays valid."""
+def test_compute_hash_covers_the_manifest_body(plugin_dir: Path) -> None:
+    """Anything but the injected supply-chain keys moves the digest (V5)."""
     base = compute_plugin_hash(plugin_dir)
     (plugin_dir / "manifest.yaml").write_text(
-        "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
+        "name: demo\nversion: 1.0.1\nintegrity_sha256: deadbeef\n",
         encoding="utf-8",
     )
-    assert compute_plugin_hash(plugin_dir) == base
+    assert compute_plugin_hash(plugin_dir) != base
 
 
 def test_verify_rejects_tampered_build_file(plugin_dir: Path) -> None:
@@ -354,12 +359,12 @@ def test_v2_signature_accepted_outside_strict_but_not_in_strict(
     assert verify_plugin_integrity(plugin_dir, v2, strict=True) is False
 
 
-def test_current_surface_is_v4(plugin_dir: Path) -> None:
+def test_current_surface_is_v5(plugin_dir: Path) -> None:
     from core.plugins.integrity import CURRENT_HASH_SURFACE, HashSurface
 
-    assert CURRENT_HASH_SURFACE is HashSurface.V4_UI_EXPORT
+    assert CURRENT_HASH_SURFACE is HashSurface.V5_MANIFEST
     assert compute_plugin_hash(plugin_dir) == compute_plugin_hash(
-        plugin_dir, surface=HashSurface.V4_UI_EXPORT
+        plugin_dir, surface=HashSurface.V5_MANIFEST
     )
 
 

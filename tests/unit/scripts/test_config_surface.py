@@ -203,3 +203,50 @@ class TestRenderSurvivesMarkdownlint:
 
         # MD034, also unfixable by --fix; the trailing stop stays outside.
         assert "`http://localhost:11434`." in page
+
+
+class TestEveryShippedTemplateIsChecked:
+    """The "binds nothing" check must cover every template we tell people to copy.
+
+    It only ever read ``.env.example``. But ``baselith doctor`` tells an operator
+    to run ``cp configs/.env.base .env``, and the baselithbot docs call that file
+    the reference template — so it is a template people actually start from, and
+    it had rotted unobserved: ten entries naming a removed OCR backend and a
+    widget API that no longer exists, none of which bind anything.
+    """
+
+    def test_env_base_is_in_the_checked_set(self):
+        """The file `baselith doctor` recommends is one of the checked templates."""
+        from scripts.check_config_surface import CHECKED_TEMPLATES
+
+        names = {path.name for path in CHECKED_TEMPLATES}
+        assert ".env.example" in names
+        assert ".env.base" in names
+
+    def test_a_template_entry_that_binds_nothing_is_reported(self, tmp_path):
+        """The finding names the file, so an operator knows which to edit."""
+        from scripts.check_config_surface import check_template
+
+        template = tmp_path / ".env.base"
+        template.write_text("REAL_SETTING=1\nGHOST_SETTING=2\n", encoding="utf-8")
+
+        findings = check_template(template, {"REAL_SETTING"})
+
+        assert len(findings) == 1
+        assert ".env.base:2:" in findings[0]
+        assert "GHOST_SETTING" in findings[0]
+
+    def test_the_shipped_templates_are_actually_clean(self):
+        """Regression guard on the real files, not a synthetic one."""
+        from scripts.check_config_surface import (
+            CHECKED_TEMPLATES,
+            check_template,
+            known_env_names,
+        )
+
+        known = known_env_names()
+        findings = [
+            f for path in CHECKED_TEMPLATES for f in check_template(path, known)
+        ]
+
+        assert findings == []

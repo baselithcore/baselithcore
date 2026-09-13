@@ -3,9 +3,71 @@
 import os
 import re
 
+from packaging.version import InvalidVersion
+from packaging.version import Version as PackagingVersion
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+#: A prerelease identifier made only of digits (semver: compares numerically).
+_NUMERIC_IDENTIFIER = re.compile(r"^\d+$")
+
+
+def _pep440_prerelease(prerelease: str) -> PackagingVersion | None:
+    """Parse a semver prerelease as a PEP 440 prerelease, or return ``None``.
+
+    ``packaging.version.Version`` is the reference implementation for ordering
+    the prerelease shapes people actually write (``beta.2`` vs ``beta.10``,
+    ``alpha`` < ``beta`` < ``rc``), which a string compare gets wrong. It is
+    only trusted when it really read the segment *as a prerelease*: PEP 440
+    also parses ``-1`` as an implicit post-release, whose ordering contradicts
+    semver, so anything carrying a post/dev/local component is rejected here
+    and handled by the semver fallback instead.
+
+    Args:
+        prerelease: The prerelease segment, without the leading ``-``.
+
+    Returns:
+        The parsed version, or ``None`` when PEP 440 cannot express it.
+    """
+    try:
+        parsed = PackagingVersion(f"0.0.0-{prerelease}")
+    except InvalidVersion:
+        return None
+    if parsed.pre is None or parsed.post is not None or parsed.dev is not None:
+        return None
+    if parsed.local is not None:
+        return None
+    return parsed
+
+
+def _semver_prerelease_key(prerelease: str) -> tuple[tuple[int, int, str], ...]:
+    """Build the semver §11 precedence key for a prerelease segment.
+
+    Identifiers are compared field by field: numeric ones numerically, and
+    always below alphanumeric ones; a shorter prefix sorts below the longer
+    string that extends it.
+    """
+    key: list[tuple[int, int, str]] = []
+    for identifier in prerelease.split("."):
+        if _NUMERIC_IDENTIFIER.match(identifier):
+            key.append((0, int(identifier), ""))
+        else:
+            key.append((1, 0, identifier))
+    return tuple(key)
+
+
+def _compare_prerelease(left: str, right: str) -> int:
+    """Order two non-empty prerelease segments (-1, 0 or 1)."""
+    left_pep440 = _pep440_prerelease(left)
+    right_pep440 = _pep440_prerelease(right)
+    if left_pep440 is not None and right_pep440 is not None:
+        return (left_pep440 > right_pep440) - (left_pep440 < right_pep440)
+
+    left_key = _semver_prerelease_key(left)
+    right_key = _semver_prerelease_key(right)
+    return (left_key > right_key) - (left_key < right_key)
 
 
 class SemanticVersion:
@@ -44,41 +106,35 @@ class SemanticVersion:
         major, minor, patch, prerelease, build = match.groups()
         return int(major), int(minor), int(patch), prerelease, build
 
+    def _compare(self, other: "SemanticVersion") -> int:
+        """Total order over two versions (-1, 0 or 1), ignoring build metadata.
+
+        Build metadata is excluded from precedence by the semver spec, so
+        ``1.0.0+a`` and ``1.0.0+b`` compare equal.
+        """
+        mine = (self.major, self.minor, self.patch)
+        theirs = (other.major, other.minor, other.patch)
+        if mine != theirs:
+            return -1 if mine < theirs else 1
+
+        if self.prerelease == other.prerelease:
+            return 0
+        # A prerelease always precedes the release it leads up to.
+        if self.prerelease and not other.prerelease:
+            return -1
+        if not self.prerelease and other.prerelease:
+            return 1
+        return _compare_prerelease(self.prerelease or "", other.prerelease or "")
+
     def __eq__(self, other: object) -> bool:
         """Check equality (ignores build metadata)."""
         if not isinstance(other, SemanticVersion):
             return False
-        return (
-            self.major == other.major
-            and self.minor == other.minor
-            and self.patch == other.patch
-            and self.prerelease == other.prerelease
-        )
+        return self._compare(other) == 0
 
     def __lt__(self, other: "SemanticVersion") -> bool:
         """Check if this version is less than another."""
-        # Compare major.minor.patch
-        if (self.major, self.minor, self.patch) != (
-            other.major,
-            other.minor,
-            other.patch,
-        ):
-            return (self.major, self.minor, self.patch) < (
-                other.major,
-                other.minor,
-                other.patch,
-            )
-
-        # If versions are equal, check prerelease
-        # Version with prerelease < version without prerelease
-        if self.prerelease and not other.prerelease:
-            return True
-        if not self.prerelease and other.prerelease:
-            return False
-        if self.prerelease and other.prerelease:
-            return self.prerelease < other.prerelease
-
-        return False
+        return self._compare(other) < 0
 
     def __le__(self, other: "SemanticVersion") -> bool:
         return self < other or self == other
@@ -252,16 +308,26 @@ def check_plugin_dependency(available_version: str, required_constraint: str) ->
         return False
 
 
+#: Values that explicitly *downgrade* a fail-closed gate to warn-only.
+_FALSEY = ("0", "false", "no", "off")
+
+
 def is_compat_enforcement_enabled() -> bool:
     """Whether to refuse loading version-incompatible plugins.
 
-    When ``BASELITH_ENFORCE_PLUGIN_COMPAT`` is truthy the loader skips plugins
-    whose declared core-version bounds or plugin dependencies are not satisfied.
-    Default (unset) is warn-only, so an existing deployment with loose or
-    incorrect manifest bounds keeps loading exactly as before.
+    **Fail-closed.** A plugin whose declared core-version bounds or plugin
+    dependencies are not satisfied is skipped, because the declaration is the
+    plugin author's statement about what it is safe to run against — running
+    it anyway and hoping was never a safe default. Set
+    ``BASELITH_ENFORCE_PLUGIN_COMPAT=false`` (or ``0``/``no``/``off``) as an
+    explicit, temporary downgrade to restore the old warn-only behaviour while
+    a manifest's bounds are corrected.
+
+    Returns:
+        True unless the environment explicitly disables enforcement.
     """
     raw = os.environ.get("BASELITH_ENFORCE_PLUGIN_COMPAT", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    return raw not in _FALSEY
 
 
 def check_plugin_compatibility(

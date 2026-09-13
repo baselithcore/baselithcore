@@ -9,6 +9,7 @@ The registry architecture uses Mixins to separate concerns:
 - `RegistrationMixin`: High-level logic for binding plugins and their components.
 - `HealthMixin`: Operational monitoring and reloading capabilities.
 - `LookupMixin`: Query interface for retrieving agents, routers, and handlers.
+- `RouteMatchMixin`: Request-path → owning-plugin attribution.
 """
 
 from __future__ import annotations
@@ -23,14 +24,18 @@ from core.observability.logging import get_logger
 from ._audit import audit_plugin_unload
 from .health import HealthMixin
 from .interface import Plugin
-from .lookup import RESERVED_ROUTE_SEGMENTS, LookupMixin
+from .lookup import LookupMixin
+from .nursery import PluginTaskNursery, TaskNurseryMixin
 from .registration import RegistrationMixin, _LazyFlowHandlerProxy
 from .resource_analyzer import PluginDiscovery
+from .route_matching import RouteMatchMixin
 
 logger = get_logger(__name__)
 
 
-class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
+class PluginRegistry(
+    RegistrationMixin, HealthMixin, LookupMixin, RouteMatchMixin, TaskNurseryMixin
+):
     """
     Centralized Hub for BaselithCore Extensibility.
 
@@ -94,6 +99,10 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         # read path never needs the lock (which every request was taking).
         self._route_snapshot: tuple[tuple[str, str], ...] | None = None
         self._activation_callback: Callable[[str], Awaitable[bool]] | None = None
+        # Background work each plugin has spawned. Owned here rather than by
+        # the plugin so unregister/reload can actually stop it — see
+        # core.plugins.nursery.
+        self._nursery = PluginTaskNursery()
 
     def set_activation_callback(
         self, callback: Callable[[str], Awaitable[bool]]
@@ -206,71 +215,6 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         with self._lock:
             return self._discovered_plugins.get(plugin_name)
 
-    def match_plugin_route(self, request_path: str) -> str | None:
-        """Match a request path against discovered router prefixes.
-
-        Hot path (runs for every HTTP request via PluginContextMiddleware): reads
-        an immutable, pre-sorted snapshot lock-free. The snapshot is (prefix,
-        plugin_name) entries ordered longest-prefix-first, so the first match wins
-        without per-request sorting or lock acquisition.
-        """
-        snapshot = self._route_snapshot
-        if snapshot is None:
-            snapshot = self._rebuild_route_snapshot()
-        for prefix, plugin_name in snapshot:
-            if request_path == prefix or request_path.startswith(f"{prefix}/"):
-                return plugin_name
-        return None
-
-    def _rebuild_route_snapshot(self) -> tuple[tuple[str, str], ...]:
-        """Recompute and cache the sorted route-prefix snapshot (under lock)."""
-        with self._lock:
-            # Re-check inside the lock: a concurrent rebuild may have populated it.
-            if self._route_snapshot is not None:
-                return self._route_snapshot
-            routes: list[tuple[int, str, str]] = []
-            for plugin_name, discovery in self._discovered_plugins.items():
-                if plugin_name in self._suppressed_discovered_plugins:
-                    continue
-                if not discovery.provides_routes or not discovery.router_prefix:
-                    continue
-                prefix = discovery.router_prefix.rstrip("/")
-                # Skip prefixes too generic to identify a single plugin. A bare
-                # "" / "/" (catch-all router) or "/api" matches (almost) every
-                # request, so it would shadow unrelated plugin/core routes and
-                # mis-attribute them to this plugin: a "/api"-prefixed plugin
-                # would otherwise claim every unmatched "/api/*" request and bind
-                # the wrong owner into the request's plugin context, corrupting
-                # every context consumer (per-plugin model policy, tenancy
-                # scoping, and any other seam keyed on the active plugin). Such a
-                # prefix cannot express ownership; leave those requests
-                # unattributed (None) rather than mislabelled.
-                segments = [seg for seg in prefix.split("/") if seg]
-                if not segments or (
-                    len(segments) == 1 and segments[0] in RESERVED_ROUTE_SEGMENTS
-                ):
-                    warned = (plugin_name, discovery.router_prefix)
-                    if warned not in self._warned_generic_prefixes:
-                        self._warned_generic_prefixes.add(warned)
-                        logger.warning(
-                            "Ignoring route prefix %r for plugin %s: it is empty or "
-                            "collides with a core/framework route namespace, so it "
-                            "cannot attribute request ownership (a plugin claiming "
-                            "it would bind the wrong owner into the plugin context "
-                            "for core traffic). Requests under it stay unattributed; "
-                            "reported once per process.",
-                            discovery.router_prefix,
-                            plugin_name,
-                        )
-                    continue
-                routes.append((len(prefix), prefix, plugin_name))
-            # Longest prefix first (most specific route wins); ties break on
-            # plugin_name descending, matching the previous sort semantics.
-            routes.sort(key=lambda r: (r[0], r[2]), reverse=True)
-            snapshot = tuple((prefix, name) for _, prefix, name in routes)
-            self._route_snapshot = snapshot
-            return snapshot
-
     def register(self, plugin: Plugin, require_initialized: bool = True) -> None:
         """
         Add a plugin instance to the active registry.
@@ -338,8 +282,44 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
             # 1. Component Cleanup: Remove agents, routes, etc., from global collections.
             self._cleanup_plugin_components(plugin_name)
 
-            # 2. Lifecycle Stop: Call shutdown sequence on the plugin itself.
-            await plugin.shutdown()
+            # 2. Background work: cancel and await every task the plugin spawned
+            #    through the nursery, *before* shutdown() runs. A task still
+            #    touching the plugin's state while it tears down is exactly the
+            #    interleaving the nursery exists to prevent.
+            #
+            #    The closing block spans the shutdown as well: a plugin that
+            #    spawns from inside shutdown() would otherwise land a task the
+            #    cancellation above has already passed, and it would outlive the
+            #    generation being torn down.
+            with self._nursery.closing(plugin_name):
+                cancelled = await self._nursery.cancel_all(plugin_name)
+                if cancelled:
+                    logger.info(
+                        "Cancelled %d background task(s) for plugin %s",
+                        cancelled,
+                        plugin_name,
+                    )
+
+                # 3. Lifecycle Stop: shutdown the plugin, isolated. A raising
+                #    shutdown() must not abort teardown half-way — the
+                #    components are already unwired above, so bailing out here
+                #    leaves an entry for a plugin that serves nothing, still
+                #    answers health checks, and cannot be re-registered because
+                #    the name is taken. The sharp case: a plugin that spawns
+                #    background work from inside shutdown() and lets the
+                #    nursery's ``PluginTaskClosedError`` escape (the refusal is
+                #    correct — the enclosing ``closing`` block is what makes it
+                #    so). ``hotreload._do_disable`` isolates its call the same
+                #    way.
+                try:
+                    await plugin.shutdown()
+                except Exception:
+                    logger.error(
+                        "Plugin %s raised during shutdown(); unregistering it "
+                        "anyway — its components are already unwired.",
+                        plugin_name,
+                        exc_info=True,
+                    )
             del self._plugins[plugin_name]
 
             logger.info(f"Unregistered plugin: {plugin_name}")
@@ -365,6 +345,17 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         """
         with self._lock:
             return HealthMixin.health_check(self, plugin_name)
+
+    async def check_health(self, plugin_name: str | None = None) -> dict[str, Any]:
+        """
+        Operational status including each plugin's own ``health()`` hook.
+
+        The registry's ``RLock`` is deliberately **not** held across the awaits:
+        a plugin's health hook may do I/O, and blocking every other registry
+        caller for the duration would turn a slow upstream into a stalled
+        process. The synchronous snapshot it builds on is taken under the lock.
+        """
+        return await HealthMixin.check_health(self, plugin_name)
 
     def get_plugin_version(self, plugin_name: str) -> str | None:
         """
