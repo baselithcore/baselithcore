@@ -374,9 +374,30 @@ Dopo il fallimento documentato nella sezione 20 sono stati applicati fix mirati,
 - Gli shim legacy verso `plugins/api_routers` sono diventati opzionali. Se il plugin legacy esiste, il comportamento resta quello precedente; se manca, il Core non crasha.
 - Il fallback del router status espone `/health` e `/health/ready` anche in Core pulito. Queste route sono contratti del Core e non devono dipendere da un plugin legacy.
 - `core.doc_sources` ha un fallback minimale: se `plugins/document_sources` non e' installato, `create_document_sources()` restituisce lista vuota e il bootstrap indexing resta idle invece di generare traceback.
-- Il manifest del plugin `auth` locale e' stato aggiornato con le dipendenze runtime Python effettive, inclusi `pyotp`, `qrcode[pil]`, `webauthn`, `argon2-cffi` e `httpx`.
+- Il manifest del plugin `auth` e' stato aggiornato con le dipendenze runtime Python effettive, inclusi `pyotp`, `qrcode[pil]`, `webauthn`, `argon2-cffi` e `httpx`.
 
-Nota importante: il commit del plugin `auth` e' locale nel repository separato `plugins/auth`. Il push verso `https://github.com/baselithcore/plugin-auth` non e' stato eseguito perche' richiede approvazione esplicita su un secondo repository esterno e sul branch `main`.
+### Evidenza della modifica `auth`
+
+La correzione e' isolata nel repository `https://github.com/baselithcore/plugin-auth`:
+
+| Voce | Valore |
+| --- | --- |
+| Branch | `fix/runtime-python-dependencies` |
+| Commit | `e7e75ca` (`fix(auth): declare runtime python dependencies`) |
+| File modificato | `manifest.yaml` |
+| Versione plugin | `3.18.0` -> `3.18.1` |
+| Diff | 7 righe aggiunte, 1 modificata |
+
+Il branch `main` non e' stato modificato. Il commit dichiara nel manifest cinque librerie gia' importate dal codice di `auth`: `pyotp`, `qrcode[pil]`, `webauthn`, `argon2-cffi` e `httpx`. Non cambia route, autenticazione, RBAC, configurazione o interfaccia.
+
+Motivo: il nuovo installer Docker costruisce il runtime dalle dipendenze dichiarate nei manifest. Prima queste librerie erano implicite nell'ambiente; in un'installazione pulita potevano quindi mancare. Ora Baselith puo' inserirle in modo riproducibile nell'immagine API.
+
+Controlli eseguiti sul branch:
+
+- integrita' del plugin valida;
+- manifest YAML leggibile e dipendenze attese presenti;
+- diff limitato al manifest;
+- precedente prova E2E completata con lo stesso commit `auth` e doCheck raggiungibile con HTTP `200`.
 
 ### Prova E2E corretta
 
@@ -457,7 +478,7 @@ Le dipendenze Python del plugin entrano nell'immagine API tramite `configs/plugi
 
 Resta da completare il flusso remoto puro:
 
-- pushare il commit `auth` nel repository `plugin-auth`, oppure usare un branch dedicato e aggiornare la dipendenza plugin;
+- aprire e revisionare la PR del branch `fix/runtime-python-dependencies`, quindi decidere quando integrarla in `plugin-auth`;
 - ripetere il test clonando doCheck e auth solo da GitHub, senza redirect locale;
 - implementare `plugin sync --docker` con fingerprint per evitare reinstall e rebuild quando nulla cambia;
 - migliorare la diagnostica host/container: oggi `plugin add --docker` mostra ancora warning sulle dipendenze mancanti nel venv host, anche se poi il Docker runtime le installa correttamente;
