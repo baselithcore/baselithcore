@@ -79,6 +79,12 @@ class TestStartupWarning:
     """Startup reporting warns and never raises."""
 
     def test_warns_once_per_suspect(self, monkeypatch, caplog):
+        # Hermetic environment, for the same reason the next test spells out:
+        # the assertion below is an exact match on the suspect list, and any
+        # ambient near-miss variable (an earlier test loading `.env` into
+        # os.environ, a developer's shell) adds a second entry and fails a test
+        # that has nothing to do with what broke.
+        monkeypatch.setattr(os, "environ", {"PATH": "/usr/bin"})
         monkeypatch.setenv("CORE_LOG_LEVL", "DEBUG")
 
         with caplog.at_level(logging.WARNING, logger="core.config.drift"):
