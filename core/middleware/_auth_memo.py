@@ -70,7 +70,7 @@ def effective_auth_header(scope: Scope) -> str | None:
     headers = Headers(raw=list(scope.get("headers") or []))
     header = headers.get("authorization")
     if header:
-        return header
+        return str(header)
     api_key = headers.get("x-api-key")
     if api_key:
         return f"ApiKey {api_key.strip()}"

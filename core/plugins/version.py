@@ -63,7 +63,7 @@ def _compare_prerelease(left: str, right: str) -> int:
     left_pep440 = _pep440_prerelease(left)
     right_pep440 = _pep440_prerelease(right)
     if left_pep440 is not None and right_pep440 is not None:
-        return (left_pep440 > right_pep440) - (left_pep440 < right_pep440)
+        return int(left_pep440 > right_pep440) - int(left_pep440 < right_pep440)
 
     left_key = _semver_prerelease_key(left)
     right_key = _semver_prerelease_key(right)
