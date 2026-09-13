@@ -107,7 +107,14 @@ async def init_db() -> None:
     With ``DB_MIGRATIONS_ON_STARTUP=false`` the Alembic upgrade is skipped:
     deployments running migrations as a pre-deploy Job (Helm hook /
     initContainer) must not repeat them in every pod's lifespan.
+
+    Runs inside :func:`core.db.connection.system_tenant_scope`: schema work
+    happens at boot, outside any request, so there is no tenant to inherit.
+    With ``DB_RLS_ENABLED`` the session binding refuses to invent one rather
+    than silently binding ``default`` — another tenant's rows — so migrations
+    have to name themselves as system work.
     """
+    from core.db.connection import system_tenant_scope
 
     if not POSTGRES_ENABLED:
         return
@@ -119,7 +126,8 @@ async def init_db() -> None:
         )
         return
 
-    await ensure_schema()
+    with system_tenant_scope():
+        await ensure_schema()
 
 
 def should_run_core_schema_init(

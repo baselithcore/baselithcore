@@ -2,8 +2,20 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from core.context import ReservedTenantError, is_reserved_tenant
 from core.db.connection import get_async_connection
 from core.resilience.retry import retry
+
+
+class ReservedTenantIdError(ReservedTenantError):
+    """A provisioning call named a tenant id the framework reserves.
+
+    The provisioning-specific form of :class:`core.context.ReservedTenantError`
+    (itself a ``ValueError``, so handlers that already catch ``ValueError``
+    around tenant creation keep working). Kept as its own type so a caller can
+    answer 400 rather than 500 without catching every refusal in the framework.
+    """
+
 
 #: Rows returned by :meth:`TenantService.list_tenants` when the caller does not
 #: ask for a specific page. Large enough that every small/medium deployment
@@ -53,8 +65,22 @@ class TenantService:
             Tenant: The newly created tenant record.
 
         Raises:
+            ReservedTenantIdError: The id is reserved by the framework. The
+                check lives here rather than in the admin router because this
+                is the one door every provisioning path goes through, and the
+                consequence is not cosmetic: ``system`` is the identity
+                maintenance work binds, which migration
+                ``010_system_tenant_rls_exemption`` grants visibility of every
+                tenant's rows. Minting a principal for it would hand that
+                principal the whole database.
             ValueError: If creation fails or ID is taken.
         """
+        if is_reserved_tenant(tenant_id):
+            raise ReservedTenantIdError(
+                f"'{tenant_id}' is a reserved tenant identifier and cannot be "
+                "provisioned. It belongs to the framework's own maintenance "
+                "context."
+            )
         async with get_async_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(

@@ -14,14 +14,30 @@ from psycopg import AsyncConnection, Connection, Cursor
 from psycopg.rows import AsyncRowFactory, RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from core.config import get_app_config, get_storage_config
+from core.config import get_storage_config
 from core.db._tracking import TrackingAsyncCursor, TrackingCursor, _track_db_query
+
+# Re-exported for import compatibility: these used to live in this module and
+# are referenced (and monkeypatched) as ``core.db.connection.<name>``.
+from core.db.session_setup import (
+    APP_TIMEZONE_NAME,
+    SYSTEM_TENANT_ID,
+    _async_apply_timezone,
+    _sync_apply_timezone,
+    system_tenant_scope,
+)
 from core.observability.logging import get_logger
 
-__all__ = ["TrackingAsyncCursor", "TrackingCursor", "_track_db_query"]
+__all__ = [
+    "APP_TIMEZONE_NAME",
+    "SYSTEM_TENANT_ID",
+    "TrackingAsyncCursor",
+    "TrackingCursor",
+    "_track_db_query",
+    "system_tenant_scope",
+]
 
 _storage_config = get_storage_config()
-_app_config = get_app_config()
 
 POSTGRES_ENABLED = _storage_config.postgres_enabled
 DB_CONNINFO = _storage_config.conninfo
@@ -30,7 +46,6 @@ DB_POOL_MIN_SIZE = _storage_config.db_pool_min_size
 DB_POOL_MAX_SIZE = _storage_config.db_pool_max_size
 DB_POOL_TIMEOUT = _storage_config.db_pool_timeout
 DB_POOL_CHECK = _storage_config.db_pool_check
-APP_TIMEZONE_NAME = _app_config.app_timezone
 # Opt-in Row-Level-Security: bind the request tenant to the DB session on every
 # checkout so RLS policies can isolate rows. OFF by default → the apply hook is
 # skipped entirely and the connection path is byte-identical to before.
@@ -50,43 +65,44 @@ _REPLICA_POOL_OPENED: bool = False
 _ASYNC_REPLICA_POOL_OPENED: bool = False
 
 
-def _sync_apply_timezone(connection: Connection[object]) -> None:
-    """Apply the configured timezone to a sync connection once per checkout."""
-    if getattr(connection, "_app_timezone", None) == APP_TIMEZONE_NAME:
-        return
-
-    with connection.cursor() as cursor:
-        # PostgreSQL doesn't accept bind placeholders in `SET TIME ZONE`,
-        # but `set_config()` does and avoids string interpolation here.
-        cursor.execute("SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,))
-
-    # Dynamic marker attribute — psycopg's Connection doesn't declare it.
-    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)  # noqa: B010
-
-
-async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
-    """Apply the configured timezone to an async connection once per checkout."""
-    if getattr(connection, "_app_timezone", None) == APP_TIMEZONE_NAME:
-        return
-
-    async with connection.cursor() as cursor:
-        await cursor.execute(
-            "SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,)
-        )
-
-    # Dynamic marker attribute — psycopg's AsyncConnection doesn't declare it.
-    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)  # noqa: B010
-
-
 def _current_tenant_for_session() -> str:
-    """Resolve the tenant to bind to the DB session, defensively.
+    """Resolve the tenant to bind to the DB session.
 
     Outside a request (background task, script) the tenant contextvar may be
-    unset; under ``strict_tenant_isolation`` that raises. RLS session binding
-    must never break such callers, so we degrade to ``"default"`` rather than
-    propagate. Request traffic always has a tenant bound upstream.
+    unset. What that should mean depends on whether row-level security is on:
+
+    * **RLS off** — nothing downstream reads ``app.tenant_id`` for access
+      control, so an unbound caller degrades to ``"default"`` exactly as
+      before and its work is not broken by a missing context.
+    * **RLS on** — ``"default"`` is the worst possible answer. Every RLS
+      policy would then match the ``default`` tenant's rows, so an unbound
+      background job reads and writes another tenant's data while the database
+      reports that isolation is enforced. Such a caller must say what it is:
+      wrap it in :func:`system_tenant_scope`.
+
+    Returns:
+        The tenant id to bind to ``app.tenant_id``.
+
+    Raises:
+        core.context.TenantContextError: RLS is enabled and no tenant is bound.
     """
-    from core.context import TenantContextError, get_current_tenant_id
+    from core.context import (
+        TenantContextError,
+        get_current_tenant_id,
+        tenant_is_bound,
+    )
+
+    # Ask whether a tenant is *bound*, not what it resolves to:
+    # ``get_current_tenant_id`` only distinguishes bound from unbound when
+    # ``strict_tenant_isolation`` is on, and RLS must fail closed regardless of
+    # that unrelated switch.
+    if DB_RLS_ENABLED and not tenant_is_bound():
+        raise TenantContextError(
+            "Row-level security is enabled (DB_RLS_ENABLED=true) but no tenant "
+            "is bound to this context, so app.tenant_id cannot be set. Bind the "
+            "request tenant upstream, or wrap out-of-request work in "
+            "core.db.connection.system_tenant_scope()."
+        )
 
     try:
         return get_current_tenant_id()

@@ -278,3 +278,75 @@ class TestJWTHandlerAndAPIKeys:
         validator.register_key(key, "new-user")
         user = await validator.validate_key(key)
         assert user is not None
+
+
+class TestReservedTenantCannotBeMinted:
+    """A claim that can never be issued beats one that is merely refused.
+
+    ``system`` is the identity framework maintenance binds, and migration
+    ``010_system_tenant_rls_exemption`` grants it visibility of every tenant's
+    rows — so a token asserting it is a total-access credential. Both request
+    boundaries refuse such a claim on arrival (``TenantMiddleware`` for HTTP,
+    ``SecurityManager.enforce_auth`` for everything else including WebSockets),
+    but refusing it at *issuance* is the half that does not depend on every
+    future consumer remembering to check.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        from core.auth.jwt import JWTHandler
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+            yield JWTHandler(secret_key="secret-with-at-least-thirty-two-chars")
+
+    def test_an_access_token_cannot_assert_it(self, handler):
+        from core.context import ReservedTenantError
+
+        with pytest.raises(ReservedTenantError, match="reserved"):
+            handler.create_token("u1", roles={AuthRole.USER}, tenant_id="system")
+
+    def test_a_refresh_token_cannot_assert_it_either(self, handler):
+        """Rotation preserves the tenant, so the refresh path is a second door
+        into the same claim."""
+        from core.context import ReservedTenantError
+
+        with pytest.raises(ReservedTenantError):
+            handler.create_refresh_token(
+                "u1", roles={AuthRole.USER}, tenant_id="system"
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_manager_refuses_too(self, security_config):
+        """``AuthManager.create_token`` is the door most callers use; it mints
+        through the handler, so the guard covers it."""
+        from core.context import ReservedTenantError
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+            manager = AuthManager(config=security_config)
+
+            with pytest.raises(ReservedTenantError):
+                await manager.create_token(
+                    "u1", roles={AuthRole.USER}, tenant_id="system"
+                )
+
+    def test_an_ordinary_tenant_still_mints(self, handler):
+        token = handler.create_token("u1", roles={AuthRole.USER}, tenant_id="acme")
+        assert token
+
+    def test_a_tenant_named_after_the_word_still_mints(self, handler):
+        assert handler.create_token(
+            "u1", roles={AuthRole.USER}, tenant_id="system-integrators"
+        )
+
+    def test_it_is_a_value_error(self):
+        """So a provisioning endpoint that already answers 400 on ``ValueError``
+        keeps doing the right thing."""
+        from core.context import ReservedTenantError
+
+        assert issubclass(ReservedTenantError, ValueError)

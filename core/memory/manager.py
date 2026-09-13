@@ -16,6 +16,7 @@ from .mixins.context import ContextMixin
 from .mixins.optimization import OptimizationMixin
 from .mixins.search import SearchMixin
 from .mixins.storage import StorageMixin
+from .tenant_state import TenantScopedState
 from .types import MemoryItem
 
 if TYPE_CHECKING:
@@ -39,7 +40,25 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
     Patterns:
     - Layered Memory: Dynamic switching between episodic and semantic stores.
     - Proactive Compression: Folding and summarization via OptimizationMixin.
+
+    Tenancy:
+        The working-memory buffer is **per tenant**. An ``AgentMemory`` is
+        commonly a process-wide singleton (:func:`core.memory.get_memory`), so
+        a single shared list handed one tenant's turns to the next tenant's
+        context builder. Both buffers below resolve to the tenant bound to the
+        current context (see :mod:`core.memory.tenant_state`); every method
+        keeps its signature and its per-tenant view of the data.
     """
+
+    # Data descriptors, not instance attributes: reads, writes, ``append``,
+    # ``pop`` and whole-list rebinds by the mixins all land in the calling
+    # tenant's buffer.
+    _working_memory: TenantScopedState[list[MemoryItem]] = TenantScopedState(
+        lambda _self: []
+    )
+    _working_memory_embeddings: TenantScopedState[list[list[float]]] = (
+        TenantScopedState(lambda _self: [])
+    )
 
     def __init__(
         self,
@@ -87,7 +106,9 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
             except Exception:  # pragma: no cover - config unavailable
                 context_folder = None
         self.context_folder = context_folder
-        # In-memory working memory (previously short_term_buffer)
-        self._working_memory: list[MemoryItem] = []
-        self._working_memory_embeddings: list[list[float]] = []
+        # The working-memory buffers are class-level tenant-scoped descriptors
+        # (see above) — created lazily per tenant on first access, so nothing
+        # is initialized here. Initializing them would also bind a tenant at
+        # construction time, which for a process-wide singleton is exactly the
+        # wrong moment to resolve one.
         self._working_memory_limit = working_memory_limit or 10
