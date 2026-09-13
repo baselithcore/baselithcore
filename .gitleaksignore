@@ -26,8 +26,8 @@ d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-
 2cccc127c9cbab30603705ffcd746360e1d27ce2:mkdocs-site/docs/api/rest.md:curl-auth-header:458
 2cccc127c9cbab30603705ffcd746360e1d27ce2:mkdocs-site/docs/api/rest.md:curl-auth-header:528
 
-# Triaged false positives (2026-09-13): a fake "sk-live-..." test fixture, and
-# the dict-key constant `SIGNATURE_KEY = "signature_ed25519"` (a field name,
+# Triaged false positives (2026-09-13): a fake test fixture value, and a
+# dict-key name constant in core/plugins/manifest_rewrite.py (a field name,
 # not a credential) both trip the entropy heuristic on the word "KEY".
 31897c2eae3dbb9f358de0c2454e4a3adfd1815c:tests/unit/core/task_queue/test_dead_letter_hardening.py:generic-api-key:176
 ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generic-api-key:30
@@ -37,3 +37,9 @@ ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generi
 # separately to the user — the file itself (branch `core-ale`) names a
 # private-repo plugin and looks like a stray personal note, not gitleaks' concern.
 03877e1c4b643a89de33f265f87740ce95c61fd7:baselithcore-report-lavoro.md:generic-api-key:276
+
+# Triaged false positive (2026-09-13): the previous entry's own explanatory
+# comment quoted the flagged literal, which retriggered the same rule in the
+# commit that added it. Reworded going forward (no more quoted literal); this
+# one historical commit stays allowlisted since it is already pushed.
+9fa7fed3de1b681046b02294bbf31867180c9802:.gitleaksignore:generic-api-key:30
