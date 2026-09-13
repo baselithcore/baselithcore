@@ -28,6 +28,7 @@ from typing import Any, AsyncIterator, Iterator
 
 import httpx
 
+from ._sse import ChatStreamError, _aiter_sse_chunks, _iter_sse_chunks  # noqa: F401
 from .errors import (
     APIConnectionError,
     BaselithConfigError,
@@ -195,7 +196,12 @@ class BaselithClient(_ClientBase):
         return ChatResponse.model_validate(resp.json())
 
     def chat_stream(self, query: str, **kwargs: Any) -> Iterator[str]:
-        """Stream the agent's answer as text chunks."""
+        """Stream the agent's answer as text chunks.
+
+        The wire format is Server-Sent Events (see ``ChatStreamError`` for the
+        mid-stream failure case); this decodes the frames and yields just the
+        text.
+        """
         req = ChatRequest(query=query, **kwargs)
         url = self._url("/chat/stream")
         with self._http.stream(
@@ -211,7 +217,7 @@ class BaselithClient(_ClientBase):
                     _decode_body(resp),
                     request_id=resp.headers.get("X-Request-ID"),
                 )
-            yield from resp.iter_text()
+            yield from _iter_sse_chunks(resp.iter_text())
 
     def submit_feedback(
         self, *, idempotency_key: str | None = None, **kwargs: Any
@@ -309,7 +315,12 @@ class AsyncBaselithClient(_ClientBase):
         return ChatResponse.model_validate(resp.json())
 
     async def chat_stream(self, query: str, **kwargs: Any) -> AsyncIterator[str]:
-        """Stream the agent's answer as text chunks."""
+        """Stream the agent's answer as text chunks.
+
+        The wire format is Server-Sent Events (see ``ChatStreamError`` for the
+        mid-stream failure case); this decodes the frames and yields just the
+        text.
+        """
         req = ChatRequest(query=query, **kwargs)
         url = self._url("/chat/stream")
         async with self._http.stream(
@@ -325,7 +336,7 @@ class AsyncBaselithClient(_ClientBase):
                     _decode_body(resp),
                     request_id=resp.headers.get("X-Request-ID"),
                 )
-            async for chunk in resp.aiter_text():
+            async for chunk in _aiter_sse_chunks(resp.aiter_text()):
                 yield chunk
 
     async def submit_feedback(

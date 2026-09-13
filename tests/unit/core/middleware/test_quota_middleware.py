@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import core.middleware._auth_memo as auth_memo
 import core.middleware.quota as qm
 from core.auth import AuthRole, AuthUser
 from core.quotas.manager import QuotaExceededError, QuotaWindow
@@ -72,7 +73,9 @@ def _patch(monkeypatch, *, enabled, user, quota):
     monkeypatch.setattr(
         qm, "get_quota_config", lambda: SimpleNamespace(enabled=enabled)
     )
-    monkeypatch.setattr(qm, "get_auth_manager", lambda: _FakeAuth(user))
+    # Credential verification is shared with the tenant middleware and the
+    # route dependency; patch it where it lives.
+    monkeypatch.setattr(auth_memo, "auth_manager", lambda: _FakeAuth(user))
     monkeypatch.setattr(qm, "get_quota_manager", lambda: quota)
 
 
@@ -141,8 +144,8 @@ async def test_api_key_caller_is_quota_scoped(monkeypatch):
     q = _FakeQuota()
     monkeypatch.setattr(qm, "get_quota_config", lambda: SimpleNamespace(enabled=True))
     monkeypatch.setattr(
-        qm,
-        "get_auth_manager",
+        auth_memo,
+        "auth_manager",
         lambda: _StrictHeaderAuth(_USER, "ApiKey sk_live_123"),
     )
     monkeypatch.setattr(qm, "get_quota_manager", lambda: q)

@@ -414,10 +414,12 @@ class TestGenericRoutePrefixWarning:
         assert registry.match_plugin_route("/api/anything/else") is None
 
     def test_generic_prefix_warning_is_emitted_once_per_plugin(self, monkeypatch):
-        from core.plugins import registry as registry_module
+        # The route snapshot lives in RouteMatchMixin (split out of registry.py
+        # for the 500-line cap), so that is where the warning is emitted.
+        from core.plugins import route_matching as route_module
 
         fake_logger = MagicMock()
-        monkeypatch.setattr(registry_module, "logger", fake_logger)
+        monkeypatch.setattr(route_module, "logger", fake_logger)
         registry = PluginRegistry()
         registry.register_discovered_plugin(self._discovery("auth", "/api"))
         registry.match_plugin_route("/api/x")

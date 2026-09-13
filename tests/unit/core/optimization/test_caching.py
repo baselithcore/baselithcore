@@ -59,7 +59,10 @@ async def test_redis_cache_get_many(redis_cache, mock_redis):
     # All keys are namespaced/tenant-scoped before hitting Redis.
     full_keys = mock_redis.mget.call_args.args[0]
     assert len(full_keys) == 3
-    assert all(k.endswith(suffix) for k, suffix in zip(full_keys, ["k1", "k2", "k3"]))
+    assert all(
+        k.endswith(suffix)
+        for k, suffix in zip(full_keys, ["k1", "k2", "k3"], strict=True)
+    )
 
     # Empty input short-circuits without touching Redis.
     mock_redis.mget.reset_mock()

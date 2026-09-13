@@ -7,7 +7,7 @@ and TTL analysis.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.observability.logging import get_logger
 
@@ -39,7 +39,7 @@ class CacheMetrics:
     max_size_seen: int = 0
 
     # Timing
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_reset_at: datetime | None = None
 
     @property
@@ -127,7 +127,7 @@ class CacheMetrics:
         self.total_ttl_seconds = 0.0
         self.ttl_count = 0
         self.current_size = 0
-        self.last_reset_at = datetime.now()
+        self.last_reset_at = datetime.now(UTC)
 
     def to_dict(self) -> dict[str, float]:
         """

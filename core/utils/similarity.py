@@ -92,7 +92,7 @@ def cosine_similarity_many(
     dots = matrix @ q
     with np.errstate(divide="ignore", invalid="ignore"):
         sims = np.where(norms > 0.0, dots / (norms * q_norm), 0.0)
-    for i, sim in zip(valid_indices, sims):
+    for i, sim in zip(valid_indices, sims, strict=True):
         scores[i] = float(sim)
     return scores
 

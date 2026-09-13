@@ -65,6 +65,9 @@ class Scope:
         self._container = container
         self._instances: dict[type, Any] = {}
         self._lock = threading.Lock()
+        # Token from the ``_current_scope.set`` that entered this scope, so exit
+        # can restore whatever was current *before* — see ``_exit``.
+        self._token: contextvars.Token[Scope | None] | None = None
 
     def resolve(self, interface: type[T]) -> T:
         """Resolve a service within this scope."""
@@ -78,21 +81,40 @@ class Scope:
                 logger.debug(f"Created scoped instance: {interface.__name__}")
             return cast(T, self._instances[interface])
 
-    async def __aenter__(self) -> "Scope":
-        _current_scope.set(self)
+    def _enter(self) -> "Scope":
+        self._token = _current_scope.set(self)
         return self
+
+    def _exit(self) -> None:
+        """Restore the previously current scope and drop cached instances.
+
+        ``_current_scope.set(None)`` would detach a still-open *outer* scope:
+        after a nested scope exited, every later ``resolve`` of a SCOPED
+        service raised ``ScopeNotActiveError`` — or silently built a second
+        instance in a fresh scope. Resetting the token puts the exact previous
+        value back, so scopes nest correctly.
+        """
+        token, self._token = self._token, None
+        if token is not None:
+            try:
+                _current_scope.reset(token)
+            except ValueError:
+                # Token created in a different Context (scope entered in one
+                # task and exited in another). Nothing to restore there; clear.
+                _current_scope.set(None)
+        self._instances.clear()
+
+    async def __aenter__(self) -> "Scope":
+        return self._enter()
 
     async def __aexit__(self, *args: object) -> None:
-        _current_scope.set(None)
-        self._instances.clear()
+        self._exit()
 
     def __enter__(self) -> "Scope":
-        _current_scope.set(self)
-        return self
+        return self._enter()
 
     def __exit__(self, *args: object) -> None:
-        _current_scope.set(None)
-        self._instances.clear()
+        self._exit()
 
 
 class ServiceRegistry:

@@ -227,7 +227,7 @@ class RedisTTLCache(Generic[K, V]):
             return [None] * len(redis_keys)
 
         results: list[V | None] = []
-        for redis_key, payload in zip(redis_keys, payloads):
+        for redis_key, payload in zip(redis_keys, payloads, strict=True):
             if payload is None:
                 results.append(None)
                 continue

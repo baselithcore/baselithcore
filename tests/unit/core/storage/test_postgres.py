@@ -5,7 +5,7 @@ Unit tests for PostgresStorage.
 import json
 import os
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -136,7 +136,7 @@ async def test_get_interaction(storage, mock_async_cursor):
         "input_transcription": "hello",
         "output_transcription": "hi",
         "metadata": {},
-        "timestamp": datetime.now(),
+        "timestamp": datetime.now(UTC),
     }
     cursor.fetchone.return_value = mock_data
 

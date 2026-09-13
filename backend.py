@@ -1,3 +1,5 @@
+import os
+
 import uvicorn
 from dotenv import load_dotenv
 
@@ -25,4 +27,21 @@ if __name__ == "__main__":
         PORT,
         core_config.debug,
     )
-    uvicorn.run("backend:app", host=HOST, port=PORT, reload=core_config.debug)
+    uvicorn.run(
+        "backend:app",
+        host=HOST,
+        port=PORT,
+        reload=core_config.debug,
+        # Mirror the container CMD (see Dockerfile). Without proxy_headers,
+        # request.client.host behind a load balancer is the proxy for every
+        # caller, collapsing the per-IP rate limiter, the failed-auth throttle
+        # and the admin lockout into ONE shared bucket. Trust stays limited to
+        # FORWARDED_ALLOW_IPS (uvicorn's own default is 127.0.0.1) — widen it
+        # only to your LB/ingress address(es), never to "*".
+        proxy_headers=True,
+        forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        # Bounded drain so SIGTERM with open SSE streams still runs lifespan
+        # cleanup before the supervisor SIGKILLs (k8s default grace: 30s).
+        # Same env knob as the container CMD, so tuning it once covers both.
+        timeout_graceful_shutdown=int(os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "30")),
+    )
