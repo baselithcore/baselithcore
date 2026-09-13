@@ -80,7 +80,12 @@ if rollback.can_rollback:
 For multi-step lookahead, `MCTSSimulator` runs Monte Carlo Tree Search over
 candidate action paths (`await simulator.search(...)` returns a
 `SimulationResult`), and `StatePredictor.predict_sequence(...)` chains
-predictions across a list of actions.
+predictions across a list of actions. `StatePredictor.compare_outcomes(state,
+actions)` instead predicts every alternative concurrently from the *same*
+state (see [Performance Optimizations](../advanced/performance-optimizations.md))
+and pairs each result back to its action with `zip(actions, result_states,
+strict=True)`, so a length mismatch between the two raises instead of
+mis-attributing an outcome to the wrong action.
 
 ## Integration with Reasoning
 

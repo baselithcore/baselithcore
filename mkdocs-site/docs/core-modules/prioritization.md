@@ -72,8 +72,8 @@ weights.
 | `importance`   | `float`            | `0.5`            | 0.0–1.0, how critical it is                                |
 | `effort`       | `float`            | `0.5`            | 0.0–1.0, **lower is cheaper** — quick wins score higher    |
 | `dependencies` | `list[str]`        | `[]`             | Ids of tasks that must complete first                      |
-| `created_at`   | `datetime`         | `datetime.now()` | Naive local timestamp                                      |
-| `deadline`     | `datetime \| None` | `None`           | Naive local datetime (see the warning under Scoring)       |
+| `created_at`   | `datetime`         | `datetime.now(UTC)` | UTC-aware timestamp                                     |
+| `deadline`     | `datetime \| None` | `None`           | Naive or aware; naive values are read as UTC when scored (see the note under Scoring) |
 | `tags`         | `list[str]`        | `[]`             | Free-form labels                                           |
 | `metadata`     | `dict`             | `{}`             | Free-form payload                                          |
 
@@ -128,11 +128,14 @@ TaskPrioritizer(config=PrioritizationConfig(weight_deadline=0.4))
 TaskPrioritizer(weight_urgency=0.5)  # other four weights: env or defaults
 ```
 
-!!! warning "Deadlines are naive local datetimes"
-    The deadline score subtracts a naive `datetime.now()` from `task.deadline`.
-    Pass a naive local datetime; a timezone-aware one raises `TypeError`
+!!! note "Deadline scoring is UTC-aware"
+    `_calculate_deadline_score` compares `task.deadline` against
+    `datetime.now(UTC)`. A naive `deadline` (no `tzinfo`) is read as UTC
+    before the subtraction; an aware `deadline` in any timezone is accepted
+    as-is. Earlier releases subtracted a naive `datetime.now()`, so a
+    timezone-aware `deadline` raised `TypeError`
     (`can't subtract offset-naive and offset-aware datetimes`) inside
-    `score()`.
+    `score()` — that no longer happens.
 
 ---
 

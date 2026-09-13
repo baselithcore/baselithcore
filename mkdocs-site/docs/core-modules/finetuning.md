@@ -146,6 +146,10 @@ Other `FineTuningPipeline` methods: `get_job_status(job_id)`,
 `test_model(model_id, prompt, system_prompt="")`,
 `evaluate_model(model_id, test_dataset)`, and the `supported_models` property.
 
+`wait_for_completion`'s elapsed-time check and the temp filename generated
+when `start_training` is handed a `DatasetBuilder` both timestamp with
+`datetime.now(UTC)`, not naive local time.
+
 ## Provider Support
 
 Providers live in `core/finetuning/providers.py`:

@@ -44,6 +44,11 @@ from core.learning import (
 
 `ExperienceReplay`, `RewardModel`, `PolicyOptimizer` and the `types` are
 internal building blocks — import them from their submodules if needed.
+`Experience.timestamp`, `Reward.timestamp` and `Episode.started_at`/
+`ended_at` default to `datetime.now(UTC)` (UTC-aware, not naive local time).
+`ExperienceReplay.update_priorities(indices, td_errors)` now zips the two
+lists with `strict=True`, raising `ValueError` on a length mismatch instead
+of silently truncating to the shorter one.
 
 ---
 

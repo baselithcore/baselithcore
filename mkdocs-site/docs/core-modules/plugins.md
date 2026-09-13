@@ -527,7 +527,10 @@ while a manifest is corrected.
 declared `min_core_version` / `max_core_version` against the running core version
 (`core._version.__version__`) and each entry in `plugin_dependencies` (a map of
 plugin name → version constraint such as `">=0.1.0"`) against the versions of the
-plugins actually present.
+plugins actually present. Prerelease ordering (`_compare_prerelease`) prefers PEP
+440 semantics and falls back to semver §11 precedence only when a segment isn't
+expressible as one; the comparison result is coerced to an explicit `int` rather
+than relying on `packaging.version.Version`'s untyped `__gt__`/`__lt__`.
 
 **Config schema validation** (`validate_plugin_config`,
 `core/plugins/config_validation.py`) validates the

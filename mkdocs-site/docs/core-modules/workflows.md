@@ -152,7 +152,11 @@ Supported AST constructs:
 - **Ternary**: `a if cond else b`
 - **Whitelisted calls only**: `len`, `str`, `int`, `float`, `bool` — any other call raises `ValueError`
 
-Any unsupported node or an undefined variable raises `ValueError`.
+Any unsupported node or an undefined variable raises `ValueError`. Chained
+comparisons (`a < b < c`) pair each operator with its right-hand comparator
+via `zip(node.ops, node.comparators, strict=True)` — the two lists are always
+the same length for a well-formed AST, and `strict=True` makes that invariant
+explicit rather than silently truncating if it were ever violated.
 
 ---
 

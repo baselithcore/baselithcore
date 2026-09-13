@@ -11,13 +11,21 @@ classes here.
 
 ```txt
 core/db/
-├── connection.py   # Sync + async connection / cursor helpers and pool management
-├── documents.py    # Document feedback aggregation helpers
-├── feedback.py     # Feedback persistence and analytics functions
-├── schema.py       # Schema bootstrap via Alembic migrations
-├── serializers.py  # Source/row (de)serialization helpers
+├── connection.py     # Sync + async connection / cursor helpers and pool management
+├── session_setup.py  # Per-checkout session setup: timezone + RLS tenant binding
+├── documents.py       # Document feedback aggregation helpers
+├── feedback.py        # Feedback persistence and analytics functions
+├── schema.py          # Schema bootstrap via Alembic migrations
+├── serializers.py     # Source/row (de)serialization helpers
 └── ...
 ```
+
+`session_setup.py` holds what used to live directly in `connection.py` — the
+timezone-apply helpers and, now, `system_tenant_scope()` — split out purely to
+keep `connection.py` under the file-size cap. `connection.py` re-exports every
+name (`APP_TIMEZONE_NAME`, `SYSTEM_TENANT_ID`, `system_tenant_scope`, plus the
+private `_sync_apply_timezone`/`_async_apply_timezone`), so existing imports
+and test monkeypatches against `core.db.connection.<name>` are unaffected.
 
 ---
 
@@ -65,6 +73,43 @@ a health endpoint can't trigger a connection. Keys are the pool roles:
 telemetry: a pool whose counters cannot be read is skipped and logged at
 `debug` as `pool_stats_unavailable` with its role, never raised.
 
+### Row-Level Security session binding
+
+Opt-in via `DB_RLS_ENABLED` (default `false`, byte-identical connection path
+when off). When enabled, every pool checkout — primary and read-replica, sync
+and async — binds `app.tenant_id` to the current request's tenant with
+`SELECT set_config('app.tenant_id', …, false)`, memoized on the connection so
+an unchanged tenant costs no extra round-trip on repeat checkouts from the
+same physical connection. This is the session half of row-level security; see
+[Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
+for the policies and the role setup that make it actually isolate rows.
+
+Outside a request (a background task, a script) the tenant contextvar may be
+unbound, and what that means now depends on the flag:
+
+| `DB_RLS_ENABLED` | Unbound caller |
+| --- | --- |
+| `false` (default) | Binds `"default"`, exactly as before |
+| `true` | Raises `core.context.TenantContextError` — no tenant is bound, so `app.tenant_id` cannot be set |
+
+The check asks `core.context.tenant_is_bound()`, not what
+`get_current_tenant_id()` resolves to, so it fails closed regardless of
+`strict_tenant_isolation`. Work that legitimately runs outside a request wraps
+itself in `system_tenant_scope()` instead of being guessed at:
+
+```python
+from core.db.connection import system_tenant_scope
+
+with system_tenant_scope():
+    await run_maintenance()
+```
+
+`system_tenant_scope()` binds the tenant context to `SYSTEM_TENANT_ID`
+(`"system"`) for the whole block and restores the previous value on exit, even
+if the body raises — a plain `contextmanager`, so it works in both sync and
+async code. Because it binds the tenant *context* (not just the DB session),
+everything else that scopes by tenant sees the same explicit identity too.
+
 ### Who creates the schema
 
 `core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
@@ -94,7 +139,11 @@ for the two-role deployment that makes those policies effective.
 
 `init_db()` runs the Alembic upgrade at boot unless
 `DB_MIGRATIONS_ON_STARTUP=false` (the pre-deploy migration-job mode the Helm
-chart uses).
+chart uses). The upgrade itself runs inside `system_tenant_scope()`: schema
+work happens at boot, outside any request, so there is no tenant to inherit —
+with `DB_RLS_ENABLED=true` the [session binding](#row-level-security-session-binding)
+above refuses to invent one, so migrations have to name themselves as system
+work.
 
 The app's startup path initializes Postgres eagerly only when a **plugin**
 declares it a required resource. Core's own tables — `chat_feedback`,
@@ -265,7 +314,10 @@ base_delay=0.5, exponential_base=2.0)` restricted to
 
 Schema is managed through Alembic migrations. `ensure_schema()` runs
 `alembic upgrade head`; `init_db()` wraps it and is a no-op when PostgreSQL
-is disabled.
+is disabled. `init_db()` additionally runs that call inside
+[`system_tenant_scope()`](#who-runs-the-migrations) — `ensure_schema()` called
+directly does not, so a caller invoking it outside `init_db()` under
+`DB_RLS_ENABLED=true` must bind its own tenant context first.
 
 ```python
 from core.db.schema import init_db, ensure_schema
@@ -295,6 +347,7 @@ DB_POOL_MIN_SIZE=1                 # Minimum connections in pool
 DB_POOL_MAX_SIZE=20                # Maximum connections in pool
 DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
 DB_STATEMENT_TIMEOUT_MS=30000      # Server-side cap per statement (0 = unbounded)
+DB_RLS_ENABLED=false               # Bind app.tenant_id per checkout for row-level security — see below
 DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
 ```
 

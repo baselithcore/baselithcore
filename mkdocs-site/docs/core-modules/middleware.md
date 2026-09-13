@@ -440,6 +440,14 @@ on every liveness poll and Prometheus scrape.
     entirely. The verified user is memoized on `scope["state"]` so the route's
     own auth dependency does not re-verify the same token.
 
+`QuotaMiddleware` and `TenantMiddleware` both resolve that credential through
+the shared helper in `core/middleware/_auth_memo.py`: `effective_auth_header()`
+builds the same `Authorization`/`ApiKey <key>` value the route dependency would
+see (so the two middlewares and the dependency memo-match on an identical
+string), and `auth_manager()` resolves the app-configured `AuthManager` with a
+core-global fallback. `effective_auth_header()` coerces its return to an
+explicit `str` rather than passing through `Headers.get()`'s untyped result.
+
 ---
 
 ## Authentication & authorization

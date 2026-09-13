@@ -222,7 +222,9 @@ in [Packaging › Vendor extensions](packaging.md#vendor-extensions).
 
     Both manifest spellings feed the sort: the current `plugin_dependencies`
     map and the legacy `dependencies` list of bare names. Prefer
-    `plugin_dependencies` — it also carries the version constraint.
+    `plugin_dependencies` — it also carries the version constraint, ordered
+    per PEP 440 where expressible and semver §11 precedence otherwise (see
+    [Version compatibility](../core-modules/plugins.md#load-time-admission-gates)).
 
 !!! warning "An absent dependency now skips your plugin"
     The topological **sort** ignores a dependency that is not present, so it never

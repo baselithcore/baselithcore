@@ -167,6 +167,27 @@ async with container.create_scope() as scope:
 Inside an active scope, calling `container.resolve(...)` also picks up the
 current scope automatically via a `ContextVar`.
 
+### Nested scopes
+
+Scopes nest correctly: entering a scope records the `ContextVar` token from
+before it, and exiting resets to that exact prior value (rather than clearing
+it to `None`) — so a still-open outer scope keeps resolving its `SCOPED`
+services after an inner one exits, instead of raising `ScopeNotActiveError` or
+silently building a second instance in a fresh scope.
+
+```python
+async with container.create_scope() as outer:
+    outer.resolve(DbSession)
+    async with container.create_scope() as inner:
+        inner.resolve(DbSession)  # a different instance — inner's own scope
+    # outer is still the active scope here
+    outer.resolve(DbSession)      # same instance as before `inner` opened
+```
+
+If a scope is entered in one `asyncio` task and exited in another, the
+`ContextVar` token belongs to a different context and cannot be reset; `Scope`
+falls back to clearing the current scope in that case rather than raising.
+
 ---
 
 ## ServiceRegistry

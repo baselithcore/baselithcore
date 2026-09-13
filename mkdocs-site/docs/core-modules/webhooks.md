@@ -119,7 +119,12 @@ ok = verify_signature(
 - A delivery that exhausts its attempts is stored in the `FAILED` state — the
   dead-letter equivalent — and can be replayed via the API or
   `service.replay_delivery(delivery_id)`.
-- Deliveries run concurrently; one failing subscriber never blocks the others.
+- Deliveries run concurrently (`asyncio.gather` over one `deliver()` call per
+  endpoint); one failing subscriber never blocks the others. `emit()` pairs
+  each result back to its endpoint with `zip(endpoints, results,
+  strict=True)`, so a length mismatch between the two — which would mean a
+  delivery got silently dropped or misattributed — raises instead of pairing
+  wrong.
 
 ## SSRF protection
 
