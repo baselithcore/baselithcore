@@ -39,7 +39,7 @@ def _exotic_state() -> dict[str, Any]:
     """Values whose JSON encoding is lossy, plus ordinary JSON data."""
     return {
         "tuple": (1, "two", (3.0,)),
-        "datetime": datetime.datetime(2024, 5, 17, 12, 30, 1),
+        "datetime": datetime.datetime(2024, 5, 17, 12, 30, 1, tzinfo=datetime.UTC),
         "uuid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
         "set": {1, 2, 3},
         "bytes": b"\x00binary",
@@ -123,7 +123,7 @@ class TestCopyState:
         """
         state = {
             "tuple": ("a", "b"),
-            "datetime": datetime.datetime(2024, 1, 1),
+            "datetime": datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC),
             "uuid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
             "nan": float("nan"),
             "inf": float("-inf"),

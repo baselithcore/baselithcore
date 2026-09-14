@@ -23,8 +23,11 @@ Two properties of this module are load-bearing and easy to lose:
   answering from two different models, with nothing on screen to say so.
 """
 
+import os
 import sys
+from contextlib import AbstractContextManager, nullcontext
 from multiprocessing import Process
+from typing import Any
 
 from redis import Redis
 from rq import Queue, Worker
@@ -37,8 +40,55 @@ from core.context import (
     set_user_context,
 )
 from core.observability.logging import get_logger, redact_url_credentials
+from core.task_queue.trace_context import consumer_span
 
 logger = get_logger(__name__)
+
+
+def _rls_enabled() -> bool:
+    """Whether row-level security is switched on for this deployment."""
+    try:
+        from core.db.connection import DB_RLS_ENABLED
+    except ImportError:  # pragma: no cover - depends on the installed core
+        return False
+    return bool(DB_RLS_ENABLED)
+
+
+def _system_tenant_scope() -> AbstractContextManager[Any] | None:
+    """``core.db.connection.system_tenant_scope()``, when this core has it.
+
+    Imported lazily and guarded: the helper is a newer addition, and a worker
+    must keep draining its queue on a core that predates it.
+    """
+    try:
+        from core.db.connection import system_tenant_scope
+    except ImportError:  # pragma: no cover - depends on the installed core
+        return None
+    return system_tenant_scope()
+
+
+def _tenant_for(
+    meta: dict[str, Any],
+) -> tuple[str | None, AbstractContextManager | None]:
+    """Resolve how to bind identity for a job, from its metadata.
+
+    Returns ``(tenant_id, system_scope)`` — exactly one is set.
+
+    A job that names a tenant simply gets it. A job that names none is
+    out-of-request work, and what that should mean depends on RLS:
+
+    * **RLS off** — nothing reads ``app.tenant_id`` for access control, so the
+      historical ``"default"`` fallback is kept. Switching such a job to a new
+      tenant id would silently move its cache and memory namespaces.
+    * **RLS on** — ``"default"`` is another tenant's rows, and
+      ``_current_tenant_for_session`` refuses to invent a tenant at all, so the
+      job needs an explicit identity: ``system_tenant_scope()``.
+    """
+    tenant_id = meta.get("tenant_id")
+    if tenant_id:
+        return str(tenant_id), None
+    scope = _system_tenant_scope() if _rls_enabled() else None
+    return (None, scope) if scope is not None else ("default", None)
 
 
 class TenantAwareWorker(Worker):
@@ -52,7 +102,19 @@ class TenantAwareWorker(Worker):
     """
 
     def perform_job(self, job, queue):
-        """Wraps job execution with the context it was enqueued under."""
+        """Wraps job execution with the context it was enqueued under.
+
+        Three things happen around ``super().perform_job``:
+
+        1. **Identity** — tenant, user, plugin and the plugin's pinned LLM
+           policy are restored from the job's metadata; see :func:`_tenant_for`
+           for what a job that names no tenant resolves to.
+        2. **Trace** — a ``CONSUMER`` span parented on the ``traceparent`` the
+           enqueuer left in the metadata, so the job appears inside the trace
+           that asked for it instead of starting an orphan.
+        3. **Teardown** — every context token is released in ``finally``, in
+           reverse order, even when the job raises.
+        """
         from core.context import reset_plugin_context, set_plugin_context
         from core.services.llm.policy import (
             bind_llm_policy,
@@ -61,20 +123,26 @@ class TenantAwareWorker(Worker):
         )
 
         meta = job.meta or {}
-        tenant_id = meta.get("tenant_id", "default")
+        tenant_id, system_scope = _tenant_for(meta)
         user_id = meta.get("user_id")
         plugin = meta.get("plugin")
         policy = policy_from_meta(meta.get("llm_policy"))
 
-        token = set_tenant_context(tenant_id)
+        token = set_tenant_context(tenant_id) if tenant_id else None
         user_token = set_user_context(user_id) if user_id else None
         plugin_token = set_plugin_context(plugin) if plugin else None
         # Bound, not resolved: this process has no policy resolver installed.
         policy_token = bind_llm_policy(policy) if policy is not None else None
+        queue_name = str(
+            getattr(queue, "name", None) or getattr(job, "origin", None) or "default"
+        )
         try:
-            return super().perform_job(job, queue)
+            with system_scope or nullcontext():
+                with consumer_span(job, queue_name):
+                    return super().perform_job(job, queue)
         finally:
-            reset_tenant_context(token)
+            if token is not None:
+                reset_tenant_context(token)
             if user_token is not None:
                 reset_user_context(user_token)
             if plugin_token is not None:
@@ -85,6 +153,12 @@ class TenantAwareWorker(Worker):
 
 def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker:
     """Create a tenant-aware worker wired to the dead-letter handler.
+
+    ``RQ_WORKER_NAME`` names the worker in Redis instead of RQ's random hex.
+    Without it a worker's registration cannot be tied back to the process that
+    owns it, so nothing outside the process can answer "is *my* worker still
+    alive?" — which is exactly what a container liveness check has to ask. Set
+    it to the pod name and the check becomes an equality test.
 
     Args:
         queue_names: Queues to listen on, in priority order.
@@ -97,7 +171,10 @@ def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker
 
     queues = [Queue(name, connection=connection) for name in queue_names]
     return TenantAwareWorker(
-        queues, connection=connection, exception_handlers=[dead_letter_handler]
+        queues,
+        connection=connection,
+        name=os.getenv("RQ_WORKER_NAME") or None,
+        exception_handlers=[dead_letter_handler],
     )
 
 

@@ -32,18 +32,37 @@ pheromones) drop down to :mod:`core.swarm`.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final, cast
 
 from core.agent.agent import Agent, AgentResult
 from core.observability.logging import get_logger
+from core.utils.concurrency import bounded_gather
 
 logger = get_logger(__name__)
 
 _PROCESSES = ("sequential", "parallel", "hierarchical")
+
+DEFAULT_CREW_MAX_PARALLEL: Final[int] = 8
+"""Fallback ceiling on concurrent tasks in ``process="parallel"`` crews."""
+
+
+def _configured_max_parallel() -> int:
+    """The deployment's crew fan-out ceiling (``ORCHESTRATOR_CREW_MAX_PARALLEL``).
+
+    Read at call time, not import time, so a test or a late config reload is
+    honoured; falls back to :data:`DEFAULT_CREW_MAX_PARALLEL` when the config
+    layer is unavailable.
+    """
+    try:
+        from core.config.orchestration import get_orchestration_config
+
+        return int(get_orchestration_config().crew_max_parallel)
+    except Exception:  # silent-ok: a missing/unloadable config layer must not break crews; the documented default is the safe answer
+        return DEFAULT_CREW_MAX_PARALLEL
+
 
 CostFn = Callable[["Task", Any], float]
 """Optional injected cost estimator: ``cost_fn(task, output) -> float`` USD."""
@@ -174,6 +193,11 @@ class Crew:
         cost_fn: Optional ``cost_fn(task, output) -> float`` USD estimator
             applied to each task's accepted output. Defaults to ``0.0`` per
             task when omitted; latency is always measured.
+        max_parallel: Ceiling on concurrently running tasks in
+            ``process="parallel"``. Defaults to
+            ``OrchestrationConfig.crew_max_parallel`` (8). Each task is a
+            full LLM call, so the whole task list must never be gathered at
+            once. ``<= 0`` degrades to serial execution.
 
     Raises:
         ValueError: Empty task list, unknown ``process``, hierarchical
@@ -189,6 +213,7 @@ class Crew:
         process: str = "sequential",
         manager: Agent | None = None,
         cost_fn: CostFn | None = None,
+        max_parallel: int | None = None,
     ) -> None:
         if not tasks:
             raise ValueError("Crew needs at least one task.")
@@ -206,6 +231,7 @@ class Crew:
         self.process = process
         self.manager = manager
         self.cost_fn = cost_fn
+        self.max_parallel = max_parallel
         for index, task in enumerate(self.tasks):
             if task.agent is None:
                 if len(self.agents) == 1:
@@ -281,13 +307,22 @@ class Crew:
 
             return await run_hierarchical(self, inputs)
         if self.process == "parallel":
-            results = await asyncio.gather(
-                *(
+            # Bounded, not a bare gather: every task is a full LLM call, so a
+            # caller-sized task list would otherwise open that many
+            # simultaneous provider calls. Order is preserved.
+            limit = (
+                _configured_max_parallel()
+                if self.max_parallel is None
+                else self.max_parallel
+            )
+            results = await bounded_gather(
+                [
                     self._run_task(i, task, inputs, [])
                     for i, task in enumerate(self.tasks)
-                )
+                ],
+                limit=limit,
             )
-            return CrewResult(task_results=list(results))
+            return CrewResult(task_results=cast(list[TaskResult], results))
 
         context: list[tuple[str, str]] = []
         task_results: list[TaskResult] = []
@@ -298,4 +333,12 @@ class Crew:
         return CrewResult(task_results=task_results)
 
 
-__all__ = ["AgentUsage", "CostFn", "Crew", "CrewResult", "Task", "TaskResult"]
+__all__ = [
+    "DEFAULT_CREW_MAX_PARALLEL",
+    "AgentUsage",
+    "CostFn",
+    "Crew",
+    "CrewResult",
+    "Task",
+    "TaskResult",
+]

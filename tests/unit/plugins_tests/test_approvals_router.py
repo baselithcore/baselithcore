@@ -71,20 +71,51 @@ class TestListPending:
 
 
 class TestDecision:
-    def test_records_decision(self, client, store):
+    """Who approved is decided by the authenticated identity, never by the
+    request body: an approval attributed to whatever string the client typed
+    answers none of the questions an auditor asks afterwards."""
+
+    def test_records_decision_against_the_authenticated_identity(self, client, store):
         import anyio
 
         anyio.run(lambda: _paused_run(store))
         resp = client.post(
             "/approvals/run-1/decision",
-            json={"approved": True, "approver": "gippo", "reason": "ok"},
+            json={"approved": True, "reason": "ok"},
         )
         assert resp.status_code == 200
         assert resp.json()["recorded"] is True
 
         loaded = anyio.run(store.load, "run-1")
-        assert loaded.pending_approval["decision"]["approved"] is True
-        assert loaded.pending_approval["decision"]["approver"] == "gippo"
+        decision = loaded.pending_approval["decision"]
+        assert decision["approved"] is True
+        assert decision["approver"] == "admin"  # the authenticated user
+        assert decision["approver_auth_method"] == "http_basic_admin"
+
+    def test_client_supplied_approver_cannot_forge_the_identity(self, client, store):
+        import anyio
+
+        anyio.run(lambda: _paused_run(store))
+        resp = client.post(
+            "/approvals/run-1/decision",
+            json={"approved": True, "approver": "someone-else"},
+        )
+        assert resp.status_code == 200
+
+        loaded = anyio.run(store.load, "run-1")
+        decision = loaded.pending_approval["decision"]
+        assert decision["approver"] == "admin"
+        assert decision["approver_auth_method"] == "http_basic_admin"
+        # Kept only as a display label, clearly separated from the identity.
+        assert decision["approver_label"] == "someone-else"
+
+    def test_no_label_when_the_body_omits_one(self, client, store):
+        import anyio
+
+        anyio.run(lambda: _paused_run(store))
+        client.post("/approvals/run-1/decision", json={"approved": False})
+        loaded = anyio.run(store.load, "run-1")
+        assert loaded.pending_approval["decision"]["approver_label"] is None
 
     def test_404_for_unknown_run(self, client):
         resp = client.post("/approvals/nope/decision", json={"approved": False})

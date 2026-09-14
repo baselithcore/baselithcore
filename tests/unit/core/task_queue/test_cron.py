@@ -134,7 +134,7 @@ class TestNextAfter:
 
     def test_naive_input_treated_as_utc(self) -> None:
         expr = CronExpression.parse("30 14 * * *")
-        result = expr.next_after(datetime(2026, 1, 5, 10, 0))
+        result = expr.next_after(datetime(2026, 1, 5, 10, 0))  # noqa: DTZ001 - a naive input is exactly what this test feeds in
         assert result.tzinfo is not None
         assert result == _dt(2026, 1, 5, 14, 30)
 

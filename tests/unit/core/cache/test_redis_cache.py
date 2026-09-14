@@ -1,5 +1,6 @@
 """Tests for Redis cache connection pooling helpers."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,3 +72,47 @@ async def test_close_redis_pools_disconnects_all_shared_pools():
     pool_one.disconnect.assert_awaited_once()
     pool_two.disconnect.assert_awaited_once()
     assert redis_cache._shared_pools == {}
+
+
+def test_pools_are_not_shared_across_event_loops():
+    """Each event loop gets its own pool.
+
+    ``redis.asyncio`` connections are bound to the loop that opened them. One
+    process-global pool let a connection opened on a since-closed loop (an
+    ``asyncio.run`` in a worker thread) be handed to the serving loop, where
+    every command then failed with ``RuntimeError: Event loop is closed``.
+    """
+    with (
+        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "Redis") as mock_redis,
+    ):
+        mock_connection_pool.from_url.side_effect = lambda *a, **k: MagicMock()
+
+        async def make() -> None:
+            redis_cache.create_redis_client("redis://localhost:6379/0")
+
+        asyncio.run(make())
+        asyncio.run(make())
+
+    first, second = (c.kwargs["connection_pool"] for c in mock_redis.call_args_list)
+    assert first is not second
+    assert mock_connection_pool.from_url.call_count == 2
+    # The first loop is closed, so its pool is no longer offered to anyone.
+    assert len(redis_cache._shared_pools) == 1
+
+
+def test_same_loop_reuses_one_pool():
+    """Within one loop the pool stays shared (bounded connections, no churn)."""
+    with (
+        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "Redis"),
+    ):
+        mock_connection_pool.from_url.return_value = MagicMock()
+
+        async def make_two() -> None:
+            redis_cache.create_redis_client("redis://localhost:6379/0")
+            redis_cache.create_redis_client("redis://localhost:6379/0")
+
+        asyncio.run(make_two())
+
+    assert mock_connection_pool.from_url.call_count == 1

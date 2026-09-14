@@ -80,7 +80,7 @@ export function sameConfig(left: ComputerUseConfig, right: ComputerUseConfig): b
 
 export function summariseAllowlist(entries: string[]): string {
   if (entries.length === 0) return 'No commands allowlisted';
-  if (entries.length === 1) return entries[0];
+  if (entries.length === 1) return entries[0]!;
   if (entries.length === 2) return `${entries[0]} and ${entries[1]}`;
   return `${entries[0]}, ${entries[1]}, +${entries.length - 2} more`;
 }

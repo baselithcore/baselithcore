@@ -23,6 +23,9 @@ method → ``404`` + ``-32601``.
 response header; every subsequent request must carry it and an unknown or
 expired id yields ``404`` (the client then re-initializes). Non-initialize
 requests carrying an unsupported ``MCP-Protocol-Version`` header get ``400``.
+Those sessions live in Redis whenever the deployment already runs a Redis
+cache, and in process memory otherwise — see
+:func:`core.mcp.http_sessions.build_session_store`.
 
 Security (spec requirements for HTTP transports):
 
@@ -43,6 +46,11 @@ Security (spec requirements for HTTP transports):
   also hold ``MCP_HTTP_REQUIRED_SCOPE`` (default ``mcp:invoke``), otherwise
   ``403``. The admin, service, user and job roles carry it by default, so only
   least-privilege scoped keys and read-only guests are newly refused.
+* **Audience binding** — RFC 8707: a bearer token whose ``aud`` names a
+  different resource than the one published below is refused with ``401``,
+  because that token was minted for somebody else. A token carrying no ``aud``
+  is refused when ``MCP_REQUIRE_TOKEN_AUDIENCE`` resolves true (production by
+  default). API keys are exempt — they are not OAuth tokens.
 * **Rate limiting** — each request is metered per identity against
   ``MCP_HTTP_RATE_LIMIT_PER_MINUTE``, so an authenticated caller cannot flood
   the endpoint (every request spawns server-side work).
@@ -56,18 +64,22 @@ Security (spec requirements for HTTP transports):
 from __future__ import annotations
 
 import asyncio
-import secrets
-import time
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import get_mcp_config
+from core.mcp.dispatch import RequestDispatcher
 from core.mcp.errors import MCPProtocolError
 from core.mcp.handlers import SUPPORTED_PROTOCOL_VERSIONS
-from core.mcp.http_authz import METADATA_PATH, build_gate
+from core.mcp.http_authz import METADATA_PATH, build_gate, resource_identifier
 from core.mcp.http_headers import validate_modern_headers, validate_param_headers
+from core.mcp.http_sessions import (
+    RedisSessionStore,
+    SessionStore,
+    build_session_store,
+)
 from core.mcp.modern import is_modern, parse_request_meta
 from core.mcp.progress import progress_context
 from core.mcp.server import MCPServer
@@ -79,77 +91,8 @@ logger = get_logger(__name__)
 SESSION_HEADER = "Mcp-Session-Id"
 PROTOCOL_HEADER = "MCP-Protocol-Version"
 # METADATA_PATH (RFC 9728 well-known location) is defined alongside the gate in
-# core.mcp.http_authz and re-exported here for existing importers.
-
-
-class SessionStore:
-    """In-memory MCP session registry with TTL-based expiry.
-
-    Each session is bound to the identity that created it (the authenticated
-    ``user_id``, or ``None`` when auth is disabled). ``touch``/``terminate``
-    verify the presenting caller owns the session, so one client cannot ride
-    another's id (the 2025-06-18 transport requires binding the session id to
-    user-specific information). A per-owner cap bounds how many live sessions a
-    single identity can hold, so a client cannot mint sessions unbounded and
-    pin memory for the whole TTL.
-
-    Process-local by design: Streamable HTTP sessions are an affinity
-    contract between one client and one server instance. Deployments running
-    multiple replicas need session-affine routing (the spec's recovery path —
-    a 404 answered by re-initializing — covers failover).
-    """
-
-    def __init__(self, ttl_seconds: float, max_per_owner: int = 0) -> None:
-        self._ttl = ttl_seconds
-        self._max_per_owner = max_per_owner
-        # session_id -> (owner, last_seen)
-        self._sessions: dict[str, tuple[str | None, float]] = {}
-
-    def create(self, owner: str | None) -> str | None:
-        """Mint a random session id bound to *owner*.
-
-        Returns None when *owner* already holds ``max_per_owner`` live sessions.
-        """
-        self._prune()
-        if self._max_per_owner and self._count_for(owner) >= self._max_per_owner:
-            return None
-        session_id = secrets.token_urlsafe(32)
-        self._sessions[session_id] = (owner, time.monotonic())
-        return session_id
-
-    def touch(self, session_id: str, owner: str | None) -> bool:
-        """Refresh *session_id*; False when unknown, expired, or not *owner*'s."""
-        entry = self._sessions.get(session_id)
-        if entry is None:
-            return False
-        stored_owner, last_seen = entry
-        if time.monotonic() - last_seen > self._ttl:
-            del self._sessions[session_id]
-            return False
-        if stored_owner != owner:
-            # Belongs to a different identity — refuse (no session takeover).
-            return False
-        self._sessions[session_id] = (stored_owner, time.monotonic())
-        return True
-
-    def terminate(self, session_id: str, owner: str | None) -> bool:
-        """Drop *session_id*; False when not active or not *owner*'s."""
-        entry = self._sessions.get(session_id)
-        if entry is None or entry[0] != owner:
-            return False
-        del self._sessions[session_id]
-        return True
-
-    def _count_for(self, owner: str | None) -> int:
-        return sum(1 for stored, _ in self._sessions.values() if stored == owner)
-
-    def _prune(self) -> None:
-        now = time.monotonic()
-        expired = [
-            s for s, (_, seen) in self._sessions.items() if now - seen > self._ttl
-        ]
-        for session_id in expired:
-            del self._sessions[session_id]
+# core.mcp.http_authz, and SessionStore alongside its Redis sibling in
+# core.mcp.http_sessions; both are re-exported here for existing importers.
 
 
 def _jsonrpc_error(
@@ -209,7 +152,7 @@ async def _serve_modern(
     if wants_stream(message):
         return await _serve_stream(server, message)
 
-    response = await server.handle_message(message)
+    response = await _dispatch_once(server, message)
     if response is None:
         return Response(status_code=202)
 
@@ -219,6 +162,62 @@ async def _serve_modern(
     error_code = (response.get("error") or {}).get("code")
     status = 404 if error_code == -32601 else 200
     return JSONResponse(status_code=status, content=response)
+
+
+async def _dispatch_once(
+    server: MCPServer, message: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Serve one non-streaming request through the shared dispatcher.
+
+    Both HTTP paths used to call ``handle_message`` inline, so HTTP was the one
+    transport that did not get what :class:`~core.mcp.dispatch.RequestDispatcher`
+    provides: the handler runs as a task (a client that disconnects takes its
+    work with it rather than leaving it to finish into nothing) and the
+    progress context is established the same way it is on stdio, instead of
+    only on the streaming branch.
+
+    The sender is deliberately withheld from the handler: there is no stream on
+    this branch, so ``subscriptions/listen`` must keep answering "requires a
+    streaming transport" rather than registering a subscription that writes
+    into a response that has already been sent.
+
+    The dispatcher nonetheless installs that same sender as the request's
+    progress channel, so a handler calling
+    :func:`~core.mcp.progress.report_progress` emits a
+    ``notifications/progress`` through the very collector the response arrives
+    on. Only the **response** — a message carrying no ``method``, correlated to
+    this request's id — is returned; notifications are dropped, because a
+    single JSON body has nowhere to carry them (a client that wants them asks
+    for a stream, which `wants_stream` routes elsewhere).
+    """
+    collected: list[dict[str, Any]] = []
+
+    async def _collect(outbound: dict[str, Any]) -> None:
+        collected.append(outbound)
+
+    async def _handle(
+        msg: dict[str, Any], _send: Any | None = None
+    ) -> dict[str, Any] | None:
+        return await server.handle_message(msg)
+
+    dispatcher = RequestDispatcher(_handle, _collect)
+    await dispatcher.dispatch(message)
+    await dispatcher.drain()
+
+    msg_id = message.get("id")
+    for outbound in collected:
+        # A JSON-RPC response has no `method`; a notification does. Match the
+        # id too, so a stray correlated-to-nothing message cannot be served as
+        # this request's answer.
+        if "method" not in outbound and outbound.get("id") == msg_id:
+            return outbound
+    if collected:
+        logger.debug(
+            "mcp_http_notifications_dropped",
+            count=len(collected),
+            hint="Ask for a stream (params._meta.progressToken) to receive them.",
+        )
+    return None
 
 
 async def _serve_stream(server: MCPServer, message: dict[str, Any]) -> Response:
@@ -282,10 +281,7 @@ def create_mcp_http_router(
     """
     cfg = config or get_mcp_config()
     path = cfg.mcp_http_path
-    sessions = SessionStore(
-        ttl_seconds=float(cfg.mcp_http_session_ttl_seconds),
-        max_per_owner=cfg.mcp_http_max_sessions_per_client,
-    )
+    sessions: SessionStore | RedisSessionStore = build_session_store(cfg)
     allowed_origins = cfg.http_allowed_origin_set
     router = APIRouter(tags=["mcp"])
 
@@ -315,7 +311,7 @@ def create_mcp_http_router(
         headers: dict[str, str] = {}
 
         if is_initialize:
-            new_session = sessions.create(owner)
+            new_session = await sessions.create(owner)
             if new_session is None:
                 return _jsonrpc_error(
                     message.get("id"), -32000, "Session limit exceeded", 429
@@ -334,14 +330,14 @@ def create_mcp_http_router(
                     400,
                 )
             session_id = request.headers.get(SESSION_HEADER)
-            if not session_id or not sessions.touch(session_id, owner):
+            if not session_id or not await sessions.touch(session_id, owner):
                 # Spec: 404 tells the client to start a new session (also the
                 # response when the id belongs to a different identity).
                 return _jsonrpc_error(
                     message.get("id"), -32001, "Session not found", 404
                 )
 
-        response = await server.handle_message(message)
+        response = await _dispatch_once(server, message)
         if response is None:
             # Notification (or response-only message): accepted, no body.
             return Response(status_code=202, headers=headers)
@@ -353,7 +349,7 @@ def create_mcp_http_router(
         if rejection is not None:
             return rejection
         session_id = request.headers.get(SESSION_HEADER)
-        if not session_id or not sessions.terminate(session_id, owner):
+        if not session_id or not await sessions.terminate(session_id, owner):
             return _jsonrpc_error(None, -32001, "Session not found", 404)
         return Response(status_code=204)
 
@@ -371,7 +367,10 @@ def create_mcp_http_router(
 
         def _metadata(request: Request) -> JSONResponse:
             document: dict[str, Any] = {
-                "resource": f"{str(request.base_url).rstrip('/')}{path}",
+                # The same value the gate validates a token's `aud` against —
+                # one function, so the advertised resource and the enforced
+                # one cannot drift apart.
+                "resource": resource_identifier(request, path, cfg),
                 "bearer_methods_supported": ["header"],
             }
             if authorization_servers:
@@ -401,6 +400,8 @@ def create_mcp_http_router(
 __all__ = [
     "PROTOCOL_HEADER",
     "SESSION_HEADER",
+    "RedisSessionStore",
     "SessionStore",
+    "build_session_store",
     "create_mcp_http_router",
 ]

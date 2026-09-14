@@ -241,3 +241,28 @@ class TestGetTracer:
         tracer1 = get_tracer("service-a")
         tracer2 = get_tracer("service-b")
         assert tracer1 is not tracer2
+
+
+class TestTracerConcurrency:
+    """The current span is per task, not per tracer instance."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_tasks_keep_their_own_parent(self):
+        import asyncio
+
+        tracer = Tracer("test-service", exporter=InMemoryExporter())
+
+        async def work(name: str):
+            with tracer.start_span(f"{name}.root") as root:
+                await asyncio.sleep(0.01)
+                with tracer.start_span(f"{name}.child") as child:
+                    await asyncio.sleep(0.01)
+                    return root, child
+
+        results = await asyncio.gather(*(work(n) for n in "abc"))
+
+        for root, child in results:
+            assert root.context.parent_span_id is None
+            assert child.context.parent_span_id == root.context.span_id
+            assert child.context.trace_id == root.context.trace_id
+        assert len({root.context.trace_id for root, _ in results}) == 3

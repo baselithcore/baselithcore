@@ -91,4 +91,14 @@ Comprehensive testing strategies.
 
 </div>
 
+<div class="feature-card" markdown>
+
+### :material-alert-decagram: Upgrade Notes
+
+Behaviour changes to read before rolling a release forward.
+
+[:octicons-arrow-right-24: Read](upgrade-notes.md)
+
+</div>
+
 </div>

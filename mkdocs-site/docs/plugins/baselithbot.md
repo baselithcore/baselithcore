@@ -92,9 +92,10 @@ python -m zipfile -l /tmp/baselithbot-wheel/*.whl | grep -c node_modules
 # → 0
 ```
 
-!!! warning "Re-sign after a UI build"
-    `ui/dist/**` is part of the plugin integrity surface since 0.27, so
-    `npm run build` changes the plugin hash. Run
+!!! warning "Re-sign after a UI build — or a manifest edit"
+    `ui/dist/**` is part of the plugin integrity surface since 0.27 and the
+    manifest since hash surface V5, so both `npm run build` and an edit to
+    `permissions:` change the plugin hash. Run
     `baselith plugin sign plugins/baselithbot` after rebuilding — before the
     wheel, before publishing — otherwise the declared `integrity_sha256` no
     longer matches the tree and the loader refuses it. During local development

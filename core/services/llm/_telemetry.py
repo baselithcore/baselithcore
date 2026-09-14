@@ -10,6 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from core.middleware.cost_control import cost_controller
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 # OTel GenAI semantic-convention `gen_ai.system` values for our providers
 # (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Falls back to the raw
@@ -74,12 +77,68 @@ def report_tokens_to_middleware(count: int, model: str) -> None:
                 pass
 
 
+#: Model ids the funnel uses to mean "these were prompt tokens" (paired with a
+#: following real-model report so a consumer can reconstruct one call).
+_INPUT_SENTINEL = "input"
+_INPUT_STREAM_SENTINEL = "input_stream"
+
+
+def report_external_usage(
+    model: str,
+    *,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    stream: bool = False,
+) -> None:
+    """Report token usage measured **outside** this funnel.
+
+    For callers that do not go through ``core.services.llm`` at all — a
+    vendored engine with its own provider client, an out-of-process child that
+    returns its own counts — but whose usage must still reach every consumer of
+    the report seam (per-plugin cost attribution, per-user accounting, the
+    Gen AI metrics). Without it such an engine reports nothing and every
+    consumer shows it as having spent zero.
+
+    Emits the funnel's own **paired** reports in the funnel's own order: the
+    prompt count under the ``input`` sentinel (``input_stream`` when *stream*),
+    then the completion count under the real ``model`` id. A consumer pairs the
+    two to reconstruct one call, so the order is load-bearing.
+
+    Unlike :func:`report_tokens_to_middleware` this never raises: the tokens
+    were already spent by an engine this process does not gate, so a budget
+    rejection must neither corrupt a response that is already paid for nor
+    swallow the second half of the pair.
+
+    Args:
+        model: The real model id the completion came from.
+        prompt_tokens: Measured prompt/input tokens (skipped when <= 0).
+        completion_tokens: Measured completion/output tokens (skipped when <= 0).
+        stream: True when the completion was streamed, which selects the
+            ``input_stream`` sentinel the streaming funnel path uses.
+    """
+    input_label = _INPUT_STREAM_SENTINEL if stream else _INPUT_SENTINEL
+    for count, label in ((prompt_tokens, input_label), (completion_tokens, model)):
+        if count <= 0:
+            continue
+        try:
+            report_tokens_to_middleware(int(count), label)
+        except Exception as exc:
+            logger.debug(
+                "external LLM usage report rejected",
+                model=label,
+                error=str(exc),
+            )
+
+
 def record_genai_metrics(
     system: str,
     model: str,
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    batch: bool = False,
     duration_seconds: float | None = None,
     operation: str = "chat",
 ) -> None:
@@ -89,6 +148,13 @@ def record_genai_metrics(
     ``gen_ai_client_operation_duration_seconds``) so semconv-aware dashboards
     light up without bespoke queries. Best-effort: metric registration/emit
     failures never break the request path.
+
+    ``input_tokens`` is *fresh* input; cached prompt tokens are reported under
+    their own ``gen_ai_token_type`` label values and priced at their own
+    tier, so ``gen_ai_client_cost_usd_total`` agrees with the ``LoopBudget``
+    and the tenant ledger instead of billing every cache read as full input.
+    ``batch`` applies the batch API's 50% discount to the cost counter for
+    the same reason: one price per call, in every ledger that reports it.
     """
     try:
         from core.observability.metrics import (
@@ -96,20 +162,31 @@ def record_genai_metrics(
             GEN_AI_TOKEN_USAGE,
         )
 
-        if input_tokens > 0:
-            GEN_AI_TOKEN_USAGE.labels(system, model, "input").observe(input_tokens)
-        if output_tokens > 0:
-            GEN_AI_TOKEN_USAGE.labels(system, model, "output").observe(output_tokens)
+        for count, token_type in (
+            (input_tokens, "input"),
+            (output_tokens, "output"),
+            (cache_read_tokens, "cache_read"),
+            (cache_write_tokens, "cache_write"),
+        ):
+            if count > 0:
+                GEN_AI_TOKEN_USAGE.labels(system, model, token_type).observe(count)
         if duration_seconds is not None:
             GEN_AI_OPERATION_DURATION.labels(system, model, operation).observe(
                 duration_seconds
             )
-        if input_tokens > 0 or output_tokens > 0:
+        if input_tokens > 0 or output_tokens > 0 or cache_read_tokens > 0:
             from core.models.pricing import DEFAULT_PRICING, estimate_cost
             from core.observability.metrics import GEN_AI_COST_USD
 
             if model in DEFAULT_PRICING:
-                cost = estimate_cost(model, max(input_tokens, 0), max(output_tokens, 0))
+                cost = estimate_cost(
+                    model,
+                    max(input_tokens, 0),
+                    max(output_tokens, 0),
+                    cache_read_tokens=max(cache_read_tokens, 0),
+                    cache_write_tokens=max(cache_write_tokens, 0),
+                    batch=batch,
+                )
                 if cost > 0:
                     GEN_AI_COST_USD.labels(system, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests
@@ -120,6 +197,7 @@ __all__ = [
     "gen_ai_system",
     "record_genai_metrics",
     "register_token_sink",
+    "report_external_usage",
     "report_tokens_to_middleware",
     "unregister_token_sink",
 ]

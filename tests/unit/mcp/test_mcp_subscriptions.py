@@ -179,9 +179,17 @@ class TestNotifications:
 
 class TestCapability:
     @pytest.mark.asyncio
-    async def test_list_changed_is_now_advertised(self) -> None:
-        """The server does emit the notifications, so the flag is honest."""
-        result = await MCPServer()._handle_initialize({})
+    async def test_list_changed_is_advertised_to_clients_that_can_receive_it(
+        self,
+    ) -> None:
+        """Honest either way: the notifications ride a subscriptions/listen
+        stream, which only the 2026-07-28 era has."""
+        modern = await MCPServer()._handle_discover()
 
-        assert result["capabilities"]["tools"] == {"listChanged": True}
-        assert result["capabilities"]["resources"] == {"listChanged": True}
+        assert modern["capabilities"]["tools"] == {"listChanged": True}
+        assert modern["capabilities"]["resources"] == {"listChanged": True}
+
+        legacy = await MCPServer()._handle_initialize({})
+
+        assert legacy["capabilities"]["tools"] == {}
+        assert legacy["capabilities"]["resources"] == {}

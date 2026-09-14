@@ -495,7 +495,7 @@ from core.chat.agent_state import AgentState
 
 state = AgentState(request=req)
 state.iteration_count += 1
-state.cost_usd += estimate_cost(model_id, prompt_tokens, completion_tokens)
+state.cost_usd += estimate_cost(model_id, input_tokens, output_tokens)
 state.record_tool_call({"name": "search", "args": {"q": q}, "ok": True})
 ```
 

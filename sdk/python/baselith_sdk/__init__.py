@@ -1,6 +1,6 @@
 """BaselithCore Python SDK — a typed client for the BaselithCore API."""
 
-from .client import AsyncBaselithClient, BaselithClient
+from .client import AsyncBaselithClient, BaselithClient, ChatStreamError
 from .errors import (
     APIConnectionError,
     AuthenticationError,
@@ -24,6 +24,7 @@ from .version import __version__
 __all__ = [
     "BaselithClient",
     "AsyncBaselithClient",
+    "ChatStreamError",
     "ChatRequest",
     "ChatResponse",
     "FeedbackRequest",

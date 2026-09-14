@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
+    ApprovalPrincipal,
     record_approval_decision,
 )
 from core.orchestration.checkpoint_factory import get_default_checkpoint_store
@@ -35,11 +36,28 @@ router = APIRouter(
 )
 
 
+#: How this router's reviewers authenticate. The whole router sits behind the
+#: admin Basic Auth dependency, so every decision recorded here was made by
+#: whoever holds the admin credentials — and the audit trail says so.
+_AUTH_METHOD = "http_basic_admin"
+
+
 class ApprovalDecision(BaseModel):
-    """Reviewer decision payload for a paused run."""
+    """Reviewer decision payload for a paused run.
+
+    ``approver`` is **not** the identity. Who decided comes from the
+    authenticated request; a body field is a string the client chose, which
+    answers none of the questions an auditor asks. It is kept only as an
+    optional display label recorded beside the real principal.
+    """
 
     approved: bool
-    approver: str | None = Field(default=None, max_length=200)
+    approver: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Optional display label. The recorded identity always "
+        "comes from the authenticated request, never from this field.",
+    )
     reason: str | None = Field(default=None, max_length=2000)
 
 
@@ -79,19 +97,31 @@ async def list_pending_approvals(tenant_id: str | None = None) -> dict[str, Any]
 
 
 @router.post("/{run_id}/decision")
-async def decide(run_id: str, decision: ApprovalDecision) -> dict[str, Any]:
+async def decide(
+    run_id: str,
+    decision: ApprovalDecision,
+    reviewer: str = Depends(verify_credentials),
+) -> dict[str, Any]:
     """Record an approve/deny decision on a paused run.
 
     The decision is consumed by the approval gate on the next resume: the run
     continues (approved) or aborts with a denial (denied).
+
+    The reviewer is the **authenticated** admin the Basic Auth dependency
+    established, not anything the request body claims: an approval is a human
+    taking responsibility for a side effect the policy refused to let the
+    agent take alone, and an identity the caller typed is not evidence of who
+    that human was.
     """
     store = _require_store()
+    principal = ApprovalPrincipal(id=reviewer, auth_method=_AUTH_METHOD)
     recorded = await record_approval_decision(
         store,
         run_id,
         decision.approved,
-        approver=decision.approver,
+        approver=principal,
         reason=decision.reason,
+        approver_label=decision.approver,
     )
     if not recorded:
         raise HTTPException(
@@ -99,10 +129,11 @@ async def decide(run_id: str, decision: ApprovalDecision) -> dict[str, Any]:
             detail=f"Run '{run_id}' not found or has no pending approval.",
         )
     logger.info(
-        "approval_decision_recorded run=%s approved=%s approver=%s",
+        "approval_decision_recorded run=%s approved=%s approver=%s auth=%s",
         run_id,
         decision.approved,
-        decision.approver,
+        principal.id,
+        principal.auth_method,
     )
     return {"run_id": run_id, "recorded": True, "approved": decision.approved}
 

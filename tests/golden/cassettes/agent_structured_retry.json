@@ -1,11 +1,12 @@
 {
   "name": "agent_structured_retry",
-  "description": "Agent.run with output_type: an invalid first answer is fed back with the validation error and corrected on retry.",
+  "description": "Agent.run with output_type: the invalid answer stays in the history as the assistant turn it was, and the validation error comes back as a new user turn.",
   "turns": [
     {
       "expect": {
         "prompt_contains": ["Rome"],
-        "response_format": "CityInfo"
+        "response_format": "CityInfo",
+        "roles": ["user"]
       },
       "result": {
         "text": "{\"city\": \"Rome\", \"population\": \"about three million\"}",
@@ -17,13 +18,14 @@
     {
       "expect": {
         "prompt_contains": [
-          "Your previous answer was:",
-          "about three million",
-          "failed validation against the required schema",
+          "Give me population data for Rome",
+          "assistant: {\"city\": \"Rome\", \"population\": \"about three million\"}",
+          "That failed validation against the required schema",
           "population",
           "Reply again with ONLY a JSON object"
         ],
-        "response_format": "CityInfo"
+        "response_format": "CityInfo",
+        "roles": ["user", "assistant", "user"]
       },
       "result": {
         "text": "```json\n{\"city\": \"Rome\", \"population\": 2870000}\n```",

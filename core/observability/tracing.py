@@ -11,6 +11,7 @@ import time
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -164,7 +165,12 @@ class Tracer:
     ) -> None:
         self._service_name = service_name
         self._exporter = exporter or ConsoleExporter()
-        self._current_span: Span | None = None
+        # Per task/thread, not per tracer: an instance attribute was shared by
+        # every concurrent request, so a child opened in one task took the span
+        # another task had just started as its parent, and traces merged.
+        self._current: ContextVar[Span | None] = ContextVar(
+            f"baselith.tracer.{service_name}", default=None
+        )
         self._completed_spans: list[Span] = []
         self._enabled = True
 
@@ -178,8 +184,8 @@ class Tracer:
 
     @property
     def current_span(self) -> Span | None:
-        """Get current active span."""
-        return self._current_span
+        """Get the span active in the current task/thread, if any."""
+        return self._current.get()
 
     def _generate_id(self) -> str:
         """Generate a span/trace ID."""
@@ -212,7 +218,7 @@ class Tracer:
             return
 
         # Determine parent
-        parent = parent or self._current_span
+        parent = parent or self._current.get()
 
         # Create context
         if parent:
@@ -236,9 +242,8 @@ class Tracer:
         if attributes:
             span.set_attributes(attributes)
 
-        # Set as current
-        previous_span = self._current_span
-        self._current_span = span
+        # Set as current (for this task/thread only)
+        token = self._current.set(span)
 
         # Bridge: when the real OTel SDK is installed, open a matching span so
         # custom spans reach the OTLP collector and nest under auto-instrumented
@@ -266,7 +271,10 @@ class Tracer:
             raise
         finally:
             span.end()
-            self._current_span = previous_span
+            try:
+                self._current.reset(token)
+            except ValueError:  # exited in a different context than entered
+                self._current.set(None)
             self._completed_spans.append(span)
             # In-process observers (dashboards, debug readers). Only when the
             # OTel SDK is absent: with it active the same span already reaches

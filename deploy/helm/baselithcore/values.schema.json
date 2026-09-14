@@ -1,0 +1,866 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "BaselithCore Helm values",
+  "description": "Validated by Helm on install/upgrade/template/lint. The point is to turn the failure modes this chart has learned about into errors at render time rather than at 3am: a mistyped key silently ignored, a quantity written as a number, an enum spelled wrong. `additionalProperties: false` is deliberate \u2014 an unknown top-level key is almost always a typo, and Helm would otherwise accept it without a word.",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "quantity": {
+      "type": ["string", "integer"],
+      "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$",
+      "description": "Kubernetes quantity. Written unquoted in YAML, `2` is an integer and `2Gi` a string; both are accepted, `2 Gi` and `2gb` are not."
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "$ref": "#/definitions/quantity"
+            },
+            "memory": {
+              "$ref": "#/definitions/quantity"
+            },
+            "ephemeral-storage": {
+              "$ref": "#/definitions/quantity"
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "$ref": "#/definitions/quantity"
+            },
+            "memory": {
+              "$ref": "#/definitions/quantity"
+            },
+            "ephemeral-storage": {
+              "$ref": "#/definitions/quantity"
+            }
+          }
+        }
+      }
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$"
+    },
+    "labelMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "successThreshold": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
+    },
+    "revisionHistoryLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "containerPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "webConcurrency": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "forwardedAllowIps": {
+      "type": "string"
+    },
+    "probeHost": {
+      "type": "string"
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pullSecrets": {
+      "type": "array"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "extraEnv": {
+      "type": "array"
+    },
+    "extraVolumes": {
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "type": "array"
+    },
+    "nodeSelector": {
+      "$ref": "#/definitions/labelMap"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$",
+          "description": "Empty, or a full sha256 digest. A truncated digest is rejected here rather than by the kubelet after the rollout has started."
+        },
+        "pullPolicy": {
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "$ref": "#/definitions/labelMap"
+        },
+        "automountToken": {
+          "type": "boolean"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "$ref": "#/definitions/labelMap"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host"],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "pathType"],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "enum": ["Exact", "Prefix", "ImplementationSpecific"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array"
+        }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetCPUUtilizationPercentage": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 100
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Null by default on purpose: this pod's memory is dominated by a constant that does not shrink per replica, so a memory target parks the HPA at maxReplicas."
+        },
+        "behavior": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": ["integer", "string"]
+        },
+        "maxUnavailable": {
+          "type": ["integer", "string"]
+        },
+        "unhealthyPodEvictionPolicy": {
+          "enum": ["IfHealthyBudget", "AlwaysAllow"]
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "securityContext": {
+      "type": "object"
+    },
+    "tmpVolumes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "sizeLimit": {
+          "$ref": "#/definitions/quantity"
+        }
+      }
+    },
+    "startupProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "livenessProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "readinessProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "topologySpreadConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "zoneAware": {
+          "type": "boolean",
+          "description": "Adds a second constraint over topology.kubernetes.io/zone. Harmless on a single-zone cluster, where every node reports the same value."
+        },
+        "whenUnsatisfiable": {
+          "enum": ["DoNotSchedule", "ScheduleAnyway"]
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "strategy": {
+          "type": "object"
+        },
+        "livenessProbe": {
+          "type": "object"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxUnavailable": {
+              "type": ["integer", "string"]
+            },
+            "unhealthyPodEvictionPolicy": {
+              "enum": ["IfHealthyBudget", "AlwaysAllow"]
+            }
+          }
+        },
+        "keda": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicaCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxReplicaCount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pollingInterval": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cooldownPeriod": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scaleUpPodsPerMinute": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "redis": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "databaseIndex": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "enableTLS": {
+                  "enum": ["true", "false"]
+                },
+                "passwordFromEnv": {
+                  "type": "string"
+                }
+              }
+            },
+            "queues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "listLength"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "listLength": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OpenTelemetry traces/metrics. `enabled: false` installs no providers and no auto-instrumentation, so no spans exist at all \u2014 not even for in-process consumers such as the control-plane trace viewer.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://[^\\s]+$",
+          "description": "OTLP/gRPC collector endpoint. Empty is a supported mode, not a mistake: instrumentation stays on, no exporter is attached, spans stay in-process for local consumers."
+        },
+        "tracesSampleRate": {
+          "type": ["number", "string"],
+          "minimum": 0,
+          "maximum": 1,
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "0..1. A string is accepted because `--set` cannot produce a float: `--set telemetry.tracesSampleRate=0.1` reaches the chart as the string \"0.1\". `minimum`/`maximum` constrain the number form, the pattern the string form."
+        },
+        "metricsEnabled": {
+          "type": "boolean"
+        },
+        "environment": {
+          "type": "string"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "boolean", "number"]
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "seedFromImage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declarative plugin set. `config` is the plugins.yaml content (plugin name -> its block); when non-empty it is mounted read-only over /app/configs/plugins.yaml and runtime toggles are refused. Mutually exclusive with config.PLUGIN_CONFIG_PATH.",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "$ref": "#/definitions/duration"
+        },
+        "scrapeTimeout": {
+          "$ref": "#/definitions/duration"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "labels": {
+          "$ref": "#/definitions/labelMap"
+        },
+        "trustPodIP": {
+          "type": "boolean"
+        },
+        "basicAuth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": "string"
+            },
+            "usernameKey": {
+              "type": "string"
+            },
+            "passwordKey": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/definitions/labelMap",
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+        },
+        "interval": {
+          "oneOf": [{ "$ref": "#/definitions/duration" }, { "type": "string", "maxLength": 0 }],
+          "description": "Group evaluation interval. Empty means Prometheus' global default, which is the right answer unless you have measured otherwise."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "httpErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of 5xx responses that fires the alert. A ratio and not a count on purpose: an absolute threshold is either useless on a cell serving ten requests a minute or deaf on one serving ten thousand. Measured on http_requests_total, which is also the availability SLI in deploy/prometheus/slo-rules.yml."
+            },
+            "llmErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "httpSlowRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of non-streaming requests slower than the 1s objective. The streaming routes are excluded in the rule: they are designed to stay open for minutes, so leaving them in turns the ratio into a measure of how much streaming the deployment does."
+            },
+            "securityEventsPerSecond": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "volumeUsedRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "containerRestarts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backupMaxAgeHours": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Longer than the schedule plus one missed run, so a single skipped backup does not page and two do."
+            }
+          }
+        },
+        "disabledAlerts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Alert names to leave out. Silencing here rather than in Alertmanager keeps the reason in git."
+        },
+        "extraRules": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Extra rule objects appended to the group verbatim, for deployment-specific alerts that have no business in the chart."
+        }
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array"
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowDNS": {
+              "type": "boolean"
+            },
+            "rules": {
+              "type": "array"
+            },
+            "presets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sameNamespace": {
+                  "type": "boolean"
+                },
+                "internetHttps": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "successfulJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failedJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "waitForDatabaseSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pg": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "database": {
+              "type": "string"
+            },
+            "user": {
+              "type": "string"
+            },
+            "passwordSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "volume": {
+          "type": "object"
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "podLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "offsite": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Copy each dump to an object store with rclone. `remote` is the rclone backend definition (each key becomes RCLONE_CONFIG_OFFSITE_<KEY>), `path` the bucket/prefix on it.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
+            "remote": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["string", "boolean", "integer", "number"]
+              }
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^$|^[^/].*$",
+              "description": "bucket/prefix on the remote, no leading slash"
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "credentialsSecret": {
+              "type": "string"
+            },
+            "extraArgs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

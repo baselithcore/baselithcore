@@ -9,6 +9,7 @@ from core.cli.commands import doctor_plugin_checks as plugin_checks
 from core.cli.commands.doctor_checks import CheckResult, apply_fixes
 from core.cli.ui import Timer, console, print_header, print_timing
 
+_ENV_CONFIG_MARKERS = checks._ENV_CONFIG_MARKERS
 check_port = checks.check_port
 check_python_runtime = checks.check_python_runtime
 check_env_file = checks.check_env_file

@@ -15,8 +15,36 @@ from core.context import get_current_tenant_id
 from core.observability.logging import get_logger
 from core.task_queue import get_queue
 from core.task_queue.status import TaskStatus, get_task_tracker
+from core.task_queue.trace_context import inject_trace_context
 
 logger = get_logger(__name__)
+
+#: Ceiling for one retry backoff step. Beyond an hour the queue is no longer
+#: retrying, it is holding the job hostage — at that point the dead-letter queue
+#: and an operator are the right answer.
+MAX_RETRY_INTERVAL_SECONDS = 3600
+
+
+def retry_intervals(
+    count: int, base_delay: int, cap: int = MAX_RETRY_INTERVAL_SECONDS
+) -> list[int]:
+    """Exponential backoff schedule for ``count`` retries.
+
+    ``Retry(max=n)`` alone retries with no delay at all, so a job whose
+    dependency is down exhausts its entire budget within a second and is
+    dead-lettered before that dependency could plausibly have recovered. RQ
+    takes one interval per attempt, so the schedule is returned as a list
+    ``[base, 2*base, 4*base, ...]`` clamped at ``cap``.
+
+    Args:
+        count: Number of retries (not attempts). ``<= 0`` yields an empty list.
+        base_delay: Seconds to wait before the first retry.
+        cap: Upper bound for any single interval.
+
+    Returns:
+        One delay per retry, in order.
+    """
+    return [min(base_delay * (2**step), cap) for step in range(max(count, 0))]
 
 
 @dataclass
@@ -42,11 +70,14 @@ def ambient_job_meta() -> dict[str, Any]:
     work depends on has to travel *with* the work, or the same code silently
     behaves differently in the background than it does under a request.
 
-    Carries the current tenant, the plugin the call runs on behalf of, and the
-    LLM policy resolved for it (``core.services.llm.policy``). Best-effort by
-    construction: a missing piece is simply absent from the metadata.
+    Carries the current tenant, the plugin the call runs on behalf of, the LLM
+    policy resolved for it (``core.services.llm.policy``), and the W3C trace
+    context so the worker's span joins the enqueuer's trace instead of starting
+    an unrelated one. Best-effort by construction: a missing piece is simply
+    absent from the metadata.
     """
     meta: dict[str, Any] = {}
+    inject_trace_context(meta)
     try:
         from core.context import get_current_plugin, get_current_tenant_id
 
@@ -109,6 +140,7 @@ class TaskScheduler:
         retry_count: int | None = None,
         retry_delay: int | None = None,
         meta: dict[str, Any] | None = None,
+        job_id: str | None = None,
         **kwargs: Any,
     ) -> str:
         """
@@ -122,8 +154,12 @@ class TaskScheduler:
             result_ttl: How long to keep results (seconds)
             failure_ttl: How long to keep failed job info (seconds)
             retry_count: Number of retries on failure
-            retry_delay: Delay between retries (seconds) - NOTE: RQ standard retry doesn't support delay easily in simple enqueue
+            retry_delay: Base delay before the first retry (seconds). Later
+                retries back off exponentially — see :func:`retry_intervals`.
             meta: Optional metadata to attach to job
+            job_id: Explicit RQ job id. Enqueueing the same id twice replaces
+                the pending job rather than queueing a second one, which is how
+                a caller makes an enqueue idempotent across its own retries.
             **kwargs: Keyword arguments for the function
 
         Returns:
@@ -138,15 +174,18 @@ class TaskScheduler:
         res_ttl = result_ttl if result_ttl is not None else config.result_ttl
         fail_ttl = failure_ttl if failure_ttl is not None else config.failure_ttl
         retries = retry_count if retry_count is not None else config.default_retry_count
+        delay = retry_delay if retry_delay is not None else config.default_retry_delay
 
         queue = get_queue(queue_name)
 
-        # Build RQ Retry object (rq expects Retry, not a plain int)
+        # Build RQ Retry object (rq expects Retry, not a plain int). The
+        # interval list is what turns "retry 3 times" into a backoff instead of
+        # three instant re-attempts against a dependency that is still down.
         retry_config = None
         if retries and retries > 0:
             from rq import Retry
 
-            retry_config = Retry(max=retries)
+            retry_config = Retry(max=retries, interval=retry_intervals(retries, delay))
 
         job = queue.enqueue(
             func,
@@ -156,6 +195,7 @@ class TaskScheduler:
             failure_ttl=fail_ttl,
             retry=retry_config,
             meta=_merge_meta(meta),
+            job_id=job_id,
             **kwargs,
         )
 
@@ -178,6 +218,7 @@ class TaskScheduler:
         job_timeout: int | None = None,
         result_ttl: int | None = None,
         failure_ttl: int | None = None,
+        job_id: str | None = None,
         **kwargs: Any,
     ) -> str:
         """
@@ -199,6 +240,7 @@ class TaskScheduler:
             job_timeout: Max execution time in seconds (config default)
             result_ttl: How long to keep results (config default)
             failure_ttl: How long to keep failed job info (config default)
+            job_id: Explicit RQ job id (see :meth:`enqueue`)
             **kwargs: Keyword arguments
 
         Returns:
@@ -221,6 +263,7 @@ class TaskScheduler:
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
             meta=_merge_meta(kwargs.pop("meta", None)),
+            job_id=job_id,
             **kwargs,
         )
 

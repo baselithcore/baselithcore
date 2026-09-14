@@ -106,7 +106,7 @@ async def index_documents(
         doc_vectors = all_vectors[offset : offset + len(chunks)]
 
         doc_points = []
-        for idx, (chunk, vector) in enumerate(zip(chunks, doc_vectors)):
+        for idx, (chunk, vector) in enumerate(zip(chunks, doc_vectors, strict=True)):
             payload = {
                 "text": chunk,
                 "source": getattr(doc, "clean_path", doc.id),

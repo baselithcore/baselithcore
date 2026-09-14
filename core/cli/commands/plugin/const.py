@@ -14,7 +14,7 @@ category: AI
 readiness: alpha
 tenancy: shared
 min_core_version: 0.31.0
-entrypoint: __init__.py
+entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources: []
 optional_resources: []
@@ -108,7 +108,7 @@ category: Utilities
 readiness: alpha
 tenancy: shared
 min_core_version: 0.31.0
-entrypoint: __init__.py
+entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources: []
 optional_resources: []
@@ -176,7 +176,7 @@ category: Knowledge
 readiness: alpha
 tenancy: shared
 min_core_version: 0.31.0
-entrypoint: __init__.py
+entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources:
 - graph

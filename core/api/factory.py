@@ -7,6 +7,7 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI
@@ -41,6 +42,11 @@ from core.plugins.api import router as plugin_management_router
 from core.routers import chat, console, feedback, index, metrics, status
 from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
+
+#: Static asset root, resolved from this module's location so the mount never
+#: depends on the process working directory. ``parents[2]`` is the repo/package
+#: root: core/api/factory.py -> core/api -> core -> <root>.
+_STATIC_DIR = Path(__file__).resolve().parents[2] / "core" / "static"
 
 
 def _build_agent_card(app_config: AppConfig) -> AgentCard:
@@ -191,37 +197,9 @@ def create_app() -> FastAPI:
     # === Lazy plugin activation on first request (pure ASGI) ===
     app.add_middleware(PluginActivationMiddleware)
 
-    # === Middleware CORS (Last added = First executed) ===
-    allow_origins_list = ALLOW_ORIGINS
-    # Standard CORS convention: credentials cannot be used with wildcard origins.
-    # We allow credentials for specific listed origins, but disable them for '*'.
-    use_wildcard = "*" in allow_origins_list
-
-    # Annotated: the mixed bool/list values otherwise infer as dict[str, object],
-    # which no longer matches CORSMiddleware's per-parameter types once splatted.
-    cors_params: dict[str, Any] = {
-        "allow_credentials": not use_wildcard,
-        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": [
-            "Content-Type",
-            "Authorization",
-            "X-Requested-With",
-            "X-Request-ID",
-            "Idempotency-Key",
-            "Accept",
-            "Origin",
-        ],
-        "expose_headers": ["Idempotency-Replayed", "Retry-After"],
-    }
-
-    if use_wildcard:
-        cors_params["allow_origins"] = ["*"]
-    else:
-        cors_params["allow_origins"] = allow_origins_list
-
-    app.add_middleware(CORSMiddleware, **cors_params)
-
-    # === Tenant Middleware (Post-CORS, Pre-Route) ===
+    # === Tenant Middleware (Pre-Route) ===
+    # Resolves the caller's tenant from the credential (shared auth memo) and
+    # binds it for every inner layer and log line.
     app.add_middleware(TenantMiddleware)
 
     # === Plugin context: attribute each request to its owning plugin ===
@@ -244,8 +222,8 @@ def create_app() -> FastAPI:
         _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
 
     # === Perimeter guards: Host + CSRF Origin validation (pure ASGI) ===
-    # Registered here (outer to Quota/Idempotency/CORS/Tenant/plugin layers, but
-    # inner to RequestSizeLimit + SecurityHeaders) so a spoofed-Host or
+    # Registered here (outer to Quota/Idempotency/Tenant/plugin layers, but
+    # inner to RequestSizeLimit + CORS + SecurityHeaders) so a spoofed-Host or
     # CSRF-failing request is rejected by a single cheap header compare *before*
     # it can consume a quota unit, take an Idempotency lock, or match a plugin
     # route. Added CSRF-then-TrustedHost so TrustedHost runs outermost of the
@@ -264,16 +242,58 @@ def create_app() -> FastAPI:
         RequestSizeLimitMiddleware,
         max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
     )
+    # === CORS (outer to every perimeter guard, inner to SecurityHeaders) ===
+    # Registered after the guards = OUTER to all of them. A browser can only
+    # read a response it is allowed to read: with CORS inside the guards, a
+    # TrustedHost 400, a CSRF 403 or a 413 came back without
+    # ``Access-Control-Allow-Origin`` and the browser surfaced an opaque "CORS
+    # error" instead of the status the API actually chose — and preflights were
+    # answered only after four guards had run. SecurityHeaders stays one layer
+    # further out (see below) so CSP/HSTS/nosniff still reach everything CORS
+    # emits, preflights included.
+    allow_origins_list = ALLOW_ORIGINS
+    # Standard CORS convention: credentials cannot be used with wildcard origins.
+    # We allow credentials for specific listed origins, but disable them for '*'.
+    use_wildcard = "*" in allow_origins_list
+
+    # Annotated: the mixed bool/list values otherwise infer as dict[str, object],
+    # which no longer matches CORSMiddleware's per-parameter types once splatted.
+    cors_params: dict[str, Any] = {
+        "allow_credentials": not use_wildcard,
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": [
+            "Content-Type",
+            "Authorization",
+            "X-Requested-With",
+            "X-Request-ID",
+            "Idempotency-Key",
+            "Accept",
+            "Origin",
+        ],
+        # X-Request-ID is the correlation id an operator asks a reporter for;
+        # a browser client cannot read it off the response unless it is exposed.
+        "expose_headers": ["Idempotency-Replayed", "Retry-After", "X-Request-ID"],
+    }
+
+    if use_wildcard:
+        cors_params["allow_origins"] = ["*"]
+    else:
+        cors_params["allow_origins"] = allow_origins_list
+
+    app.add_middleware(CORSMiddleware, **cors_params)
+
     # === Security headers (configurable CSP/HSTS) ===
-    # Registered near-outermost (inside only RequestId/HTTPMetrics, which never
-    # short-circuit) so CSP/HSTS/nosniff also land on responses emitted by the
-    # inner guards — TrustedHost 400s, CSRF 403s, 413s and CORS preflights —
+    # Registered outside CORS and every guard (inside only RequestId/HTTPMetrics,
+    # which never short-circuit) so CSP/HSTS/nosniff land on every response the
+    # stack can emit — TrustedHost 400s, CSRF 403s, 413s and CORS preflights —
     # not just on responses that reach the routes.
     app.add_middleware(SecurityHeadersMiddleware)
+
     # === Request ID middleware to correlate logs/metrics ===
-    # Registered LAST = outermost, so every response — including short-
-    # circuited errors from quota/CSRF/TrustedHost layers — carries an
-    # X-Request-ID and every inner log line can bind it.
+    # Registered outside CORS and every guard, so every response — CORS
+    # preflights and short-circuited errors from the quota/CSRF/TrustedHost
+    # layers included — carries an X-Request-ID and every inner log line can
+    # bind it. CORS exposes the header so browser clients can read it back.
     app.add_middleware(RequestIdMiddleware)
 
     # === HTTP RED metrics (Rate/Errors/Duration) ===
@@ -285,7 +305,12 @@ def create_app() -> FastAPI:
     app.add_middleware(HTTPMetricsMiddleware)
 
     # === Serve static files (dashboard admin, css, js) ===
-    app.mount("/static", StaticFiles(directory="core/static"), name="static")
+    # Anchored to this file, not the process working directory: a relative
+    # "core/static" only resolved when the server happened to be started from
+    # the repo root, so systemd units, containers with a different WORKDIR and
+    # `baselith serve` from anywhere else crashed at import with "Directory
+    # 'core/static' does not exist".
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get(
         "/api/plugins/frontend-manifest",
@@ -321,7 +346,7 @@ def create_app() -> FastAPI:
     # === A2A discovery (/.well-known/agent.json) ===
     app.include_router(create_wellknown_router(_build_agent_card(_app_config)))
 
-    # === MCP Streamable HTTP transport (opt-in, spec 2025-06-18) ===
+    # === MCP Streamable HTTP transport (opt-in, spec 2025-11-25) ===
     from core.config import get_mcp_config
 
     if get_mcp_config().mcp_http_transport_enabled:
@@ -362,5 +387,32 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
 
     _declare_security_schemes(app)
+
+    # === OpenTelemetry ===
+    # Here, and not in the lifespan, because of *when* Starlette freezes its
+    # middleware stack. The FastAPI instrumentation works by wrapping
+    # ``build_middleware_stack``, and Starlette builds that stack lazily on the
+    # first call into the app — which the lifespan message itself already is.
+    # Instrumenting from the lifespan therefore patched a function that would
+    # never run again: telemetry logged itself as enabled and not one HTTP
+    # server span was ever produced. The class-level patch does not help
+    # either, since this module holds a direct reference to ``FastAPI``.
+    #
+    # Registered after every ``add_middleware`` call so the OTel span wraps the
+    # whole stack and measures true end-to-end latency. Idempotent and gated on
+    # ``telemetry_enabled``; the lifespan still calls it, and finds it done.
+    if getattr(_app_config, "telemetry_enabled", False):
+        try:
+            from core.observability.otel import setup_telemetry
+
+            setup_telemetry(
+                service_name="baselith-core",
+                otlp_endpoint=getattr(_app_config, "telemetry_otel_endpoint", None),
+                app=app,
+            )
+        except Exception as exc:  # pragma: no cover - telemetry is never fatal
+            from core.observability.logging import get_logger as _get_logger
+
+            _get_logger(__name__).warning("[OTEL] setup skipped: %s", exc)
 
     return app

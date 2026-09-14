@@ -6,10 +6,31 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/baselithcore/baselithcore
-  # `slim` excludes heavy browser/OCR extras; use `full` if you need them.
+  # There is ONE image. This used to say "`slim` excludes heavy browser/OCR
+  # extras; use `full` if you need them" — no build ever produced either tag,
+  # and the two Dockerfiles behind those names installed the same Playwright,
+  # Chromium and pytesseract. Both are gone; the repository has one Dockerfile.
   tag: ""              # defaults to .Chart.AppVersion when empty
+  # Pin by content, not by name. A tag is a mutable pointer: the image the
+  # admission controller verified and the image that starts three weeks later
+  # after a re-push are not necessarily the same bytes, and nothing in the
+  # cluster notices. Set this to the digest your release pipeline signed
+  # ("sha256:…") and it wins over `tag`, which is then only documentation.
+  digest: ""
   pullPolicy: IfNotPresent
 pullSecrets: []
+
+# Kept ReplicaSets per Deployment. The default of 10 keeps ten rollouts' worth
+# of pod templates around in etcd for no operational benefit; three is enough
+# to roll back the mistake you just made.
+revisionHistoryLimit: 3
+
+# PriorityClass for the API and worker pods. Empty means the global default,
+# which on a contended node makes the API exactly as evictable as any batch
+# job that happens to share it. Point this at a cluster PriorityClass to say
+# otherwise (the chart does not create one — priority is a cluster-wide policy
+# decision, not a per-release one).
+priorityClassName: ""
 
 nameOverride: ""
 fullnameOverride: ""
@@ -76,7 +97,17 @@ ingress:
 # downloaded the models.
 resources:
   requests:
-    cpu: 250m
+    # requests.cpu is not only a scheduling reservation: it is the HPA's
+    # *denominator*. With `targetCPUUtilizationPercentage: 70` a 250m request
+    # scales the deployment up the moment a pod passes 175m — and this app
+    # idles around 65m but crosses that on any burst, including its own cold
+    # start. The autoscaler then answers a burst one pod could absorb by
+    # creating another pod that costs a multi-GB cold start to become useful.
+    # 500m moves the trigger to 350m: above the idle band, below the 1.1-1.3
+    # cores measured under real request load. Raise it further if your pods
+    # genuinely run hotter — but move `targetCPUUtilizationPercentage` with it
+    # deliberately, not by accident.
+    cpu: 500m
     memory: 1536Mi
   limits:
     # No CPU limit on purpose. CPU is compressible: a limit cannot prevent
@@ -93,16 +124,72 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
+  # Memory-based autoscaling is OFF on purpose, and turning it on is almost
+  # always a mistake here. HPA computes utilization as usage/request, and this
+  # pod's memory is dominated by a *constant* — resident model weights, plugin
+  # state, the interpreter — that does not shrink when you add replicas. So a
+  # pod sitting near its (correctly sized) request reads as permanently over
+  # target, HPA scales to maxReplicas, each new pod loads the same constant,
+  # the average never drops, and the deployment parks at maximum size forever
+  # while paying several GB per replica. Memory pressure is a sizing problem,
+  # solved by resources above; CPU is the signal that actually tracks load.
+  targetMemoryUtilizationPercentage: null
+
+  # Rendered verbatim into the HPA. The defaults are shaped by this app's cold
+  # start: a new pod needs plugin activation plus embedder warmup before it
+  # serves anything (up to the startupProbe's 300s budget), and it costs GBs.
+  # So scale up in small steps — flooding in eight pods buys eight cold starts
+  # competing for the same node, not eight times the capacity — and scale down
+  # slowly, because every removed pod throws away a warm model cache that the
+  # next scale-up has to rebuild from scratch.
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 180
 
 # PodDisruptionBudget keeps a minimum available during voluntary disruptions
 # (node drains, rollouts) — essential for the HA story.
+#
+# It has to stay strictly below the smallest replica count the deployment can
+# reach, or the eviction API denies everything and node drains hang forever.
+# The chart refuses to render a budget that can never be satisfied. Set either
+# minAvailable or maxUnavailable, never both.
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+  maxUnavailable: ""
+  # k8s 1.27+; older API servers drop the field. AlwaysAllow keeps a broken
+  # pod from holding a drain hostage — see the comment in templates/pdb.yaml.
+  unhealthyPodEvictionPolicy: AlwaysAllow
 
 # Hardened pod/container security context. Matches the image's non-root
 # appuser (uid 1000) and a read-only root filesystem.
+#
+# Together these satisfy the Pod Security Standards `restricted` profile, but
+# satisfying it and having it enforced are different claims — and only the
+# second one survives somebody adding a pod later. Enforcement is a label on
+# the namespace, which this chart deliberately does not own (a chart that
+# creates its own namespace fights `helm --create-namespace` and every GitOps
+# tool). Put it wherever the namespace is created:
+#
+#   kubectl label namespace <ns> \
+#     pod-security.kubernetes.io/enforce=restricted \
+#     pod-security.kubernetes.io/enforce-version=latest \
+#     pod-security.kubernetes.io/audit=restricted \
+#     pod-security.kubernetes.io/warn=restricted
+#
+# Anything else you run in that namespace has to comply too — an in-cluster
+# Postgres or Redis usually needs a uid and a couple of writable volumes
+# before it does.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -158,9 +245,21 @@ readinessProbe:
   timeoutSeconds: 5
   failureThreshold: 3
 
-# Spread replicas across nodes/zones for availability.
+# Spread replicas across failure domains. The hostname constraint is what
+# stops a single node taking the whole deployment with it; the zone one is
+# what stops a single availability zone doing the same, and it is the half
+# most charts forget.
 topologySpreadConstraints:
   enabled: true
+  # Harmless on a single-zone cluster — every node reports the same value for
+  # topology.kubernetes.io/zone, so the constraint is trivially satisfied.
+  zoneAware: true
+  # ScheduleAnyway keeps a pod schedulable when the spread cannot be honoured
+  # (a small cluster, a zone at capacity) — availability of the pod wins over
+  # the shape of the spread. DoNotSchedule is the stronger guarantee and the
+  # right choice once you genuinely have more nodes than replicas per zone;
+  # set it there and understand that a pod may stay Pending instead.
+  whenUnsatisfiable: ScheduleAnyway
 
 nodeSelector: {}
 tolerations: []
@@ -178,14 +277,85 @@ worker:
     - baselith
     - queue
     - worker
+
+  # A worker's own grace period, separate from the API's. RQ answers SIGTERM
+  # with a *warm* shutdown: it stops taking new jobs and finishes the one in
+  # flight. Inheriting the API's 45s — tuned for draining HTTP requests — means
+  # SIGKILL lands in the middle of a job that was going to finish, and the work
+  # comes back only if the job was written to be idempotent. Raise this above
+  # your slowest job; lower it and you are choosing to lose work on every
+  # rollout and node drain.
+  terminationGracePeriodSeconds: 120
+
+  # maxSurge 0: a queue consumer gains nothing from an extra pod during a roll,
+  # and surging doubles a multi-GB footprint on the node for the length of the
+  # rollout. Take one down, bring one up.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+
+  # Queue-depth autoscaling via KEDA (requires the KEDA operator in the
+  # cluster; the chart renders a ScaledObject, nothing more).
+  #
+  # CPU is the wrong signal for a queue consumer: a worker with a thousand
+  # jobs waiting and one in flight looks exactly like an idle one to the HPA,
+  # because the backlog lives in Redis, not in the pod. KEDA reads the list
+  # length and drives a normal HPA from it.
+  keda:
+    enabled: false
+    # **Read this before setting 0.** Scale-to-zero is KEDA's headline feature
+    # and an idle worker reserves over a gigabyte, so it is tempting. But this
+    # worker also hosts RQ's *scheduler*: at zero replicas nothing fires the
+    # scheduled and cron jobs — including the ones that would have created the
+    # queue depth to scale back up on. Zero is right only when every job is
+    # enqueued by something else (the API, a webhook).
+    minReplicaCount: 1
+    maxReplicaCount: 5
+    pollingInterval: 15
+    # How long the backlog must stay empty before the last surplus replica
+    # goes. A worker that has just loaded an embedder is expensive to discard.
+    cooldownPeriod: 300
+    scaleUpPodsPerMinute: 2
+    redis:
+      # host:port, not a URL, and **fully qualified**: KEDA connects from the
+      # operator's own pod, in its own namespace, so a short Service name does
+      # not resolve — the ScaledObject then sits Ready=False with "no such
+      # host" and the worker silently never scales. Use
+      # <service>.<namespace>.svc.cluster.local:<port>. Required when enabled;
+      # the chart refuses to render without it.
+      address: ""
+      databaseIndex: "0"
+      enableTLS: "false"
+      # Name of an env var on the worker pod holding the password, if any.
+      passwordFromEnv: ""
+    # One trigger per RQ queue. `listLength` is jobs per replica: KEDA targets
+    # depth/listLength replicas, so it reads as "how deep a backlog one worker
+    # is allowed to own".
+    queues:
+      - name: default
+        listLength: "5"
+
+  # Off by default because the default is a single worker, and a budget over
+  # one pod denies every eviction and hangs node drains. Turn it on together
+  # with replicaCount >= 2; the chart refuses the unsatisfiable combination.
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+    unhealthyPodEvictionPolicy: AlwaysAllow
   # Optional liveness probe, rendered verbatim into the worker container when
   # set. Leave empty and the worker has none: a hung RQ worker then keeps
   # running with its queue undrained, which is the current behaviour.
   #
   # RQ workers renew a heartbeat key in Redis and drop out of `Worker.all()`
   # once it expires, so "is this pod's worker still registered" is a real
-  # liveness signal. Validate the command against your own deployment before
-  # enabling it — a probe that cannot reach Redis restarts healthy workers.
+  # liveness signal. It only works because the chart sets `RQ_WORKER_NAME` to
+  # the pod name: RQ otherwise registers a random hex id that no probe can tie
+  # back to the pod it is checking, and a probe matching on the hostname then
+  # fails on a healthy worker and restarts it every failureThreshold periods.
+  # Still validate against your own deployment before enabling — a probe that
+  # cannot reach Redis restarts healthy workers just as effectively.
   #
   #   livenessProbe:
   #     exec:
@@ -193,12 +363,12 @@ worker:
   #         - python
   #         - -c
   #         - |
-  #           import os, socket, sys
+  #           import os, sys
   #           from redis import Redis
   #           from rq import Worker
   #           conn = Redis.from_url(os.environ["QUEUE_REDIS_URL"])
-  #           host = socket.gethostname()
-  #           alive = any(w.name.startswith(host) for w in Worker.all(connection=conn))
+  #           me = os.environ["RQ_WORKER_NAME"]
+  #           alive = any(w.name == me for w in Worker.all(connection=conn))
   #           sys.exit(0 if alive else 1)
   #     initialDelaySeconds: 60
   #     periodSeconds: 60
@@ -213,6 +383,10 @@ worker:
   # queue-empty reading.
   resources:
     requests:
+      # Left at 250m against a measured 0.58-core peak during ingestion: a
+      # worker's CPU is bursty by nature and nothing autoscales on it here
+      # (queue depth does — see worker.keda), so the request is a share of a
+      # contended node rather than a trigger.
       cpu: 250m
       memory: 1536Mi
     limits:
@@ -221,9 +395,59 @@ worker:
       memory: 3Gi
 
 # -------------------------------------------------------------------------
+# Telemetry (OpenTelemetry traces + metrics)
+# -------------------------------------------------------------------------
+# Off by default, and off means *nothing is instrumented*: no TracerProvider,
+# no FastAPI/HTTPX/Redis auto-instrumentation, therefore no HTTP, database or
+# client spans anywhere — including in-process consumers such as the
+# BaselithControl "Traces" tab, which then correctly reports that the SDK is
+# not active and shows an empty list. Turning tracing on is this block; it is
+# not something the app infers from having the SDK installed.
+telemetry:
+  # Installs the providers and the auto-instrumentation at boot.
+  enabled: false
+
+  # OTLP/gRPC collector endpoint (e.g. "http://tempo.monitoring:4317",
+  # "http://otel-collector:4317").
+  #
+  # EMPTY IS A SUPPORTED MODE, and the right one for a cluster with no trace
+  # backend: the providers and every instrumentor are still installed, spans
+  # are still produced and still reach in-process consumers (the Traces tab),
+  # they simply are not shipped anywhere. Pointing the exporter at a collector
+  # that is not deployed is strictly worse than leaving this empty — the gRPC
+  # exporter retries every batch with backoff, burning CPU on the export
+  # thread and filling the log, and you still have no trace backend.
+  #
+  # A collector outside this namespace also needs a NetworkPolicy egress rule
+  # when networkPolicy.egress.enabled is on: presets.sameNamespace does not
+  # cover it, and the export then fails silently at the CNI.
+  otlpEndpoint: ""
+
+  # Head-based sampling ratio, ParentBased(TraceIdRatio). 1.0 traces every
+  # request: fine for a lab or a low-traffic staging, but on a busy deployment
+  # it is the single most expensive knob here — every sampled span costs
+  # attribute allocation, queue space and (with a collector) egress. Lower it
+  # in production; the trace you keep is still a complete one, because the
+  # decision is taken once at the root and inherited by every child.
+  tracesSampleRate: 1.0
+
+  # Push OTel-native metrics over OTLP. Independent of the Prometheus /metrics
+  # scrape, which is always available and is what serviceMonitor uses — so
+  # this is duplicate cost unless a collector actually consumes it. Requires
+  # otlpEndpoint (metrics have no in-process consumer; the chart refuses the
+  # combination rather than starting an export thread that exports nowhere).
+  metricsEnabled: false
+
+  # `deployment.environment` resource attribute on every span/metric. Empty
+  # leaves the app default ("development"), which mislabels a production
+  # deployment in whatever backend receives it.
+  environment: ""
+
+# -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-# Non-secret environment variables -> ConfigMap.
+# Non-secret environment variables -> ConfigMap. Keys set here always win over
+# the blocks above, so an operator can still drive TELEMETRY_* by hand.
 config:
   CORE_LOG_LEVEL: INFO
   CORE_LOG_FORMAT: json
@@ -271,6 +495,68 @@ extraEnv: []
 extraVolumes: []
 extraVolumeMounts: []
 
+# One-shot copies from the image into a mounted volume, run in an initContainer
+# before the app starts. `readOnlyRootFilesystem: true` makes every path inside
+# the image tree read-only, so a file the app *rewrites* at runtime has to live
+# on a volume — pointed at by env — instead. The catch is that a fresh volume is
+# empty, and the app needs the image's copy as its starting point:
+#
+#   configs/plugins.yaml is rewritten whenever a plugin is enabled or disabled
+#   (`baselith plugin config set`, or any admin surface that does the same).
+#   Left on the image tree every toggle fails with "Read-only file system";
+#   moved to an empty volume every plugin boots unconfigured. It needs both
+#   halves:
+#
+#     config:
+#       PLUGIN_CONFIG_PATH: /app/data/configs/plugins.yaml   # must be under CWD
+#     seedFromImage:
+#       - from: /app/configs/plugins.yaml
+#         to: /app/data/configs/plugins.yaml
+#
+# `from` may be a file or a directory. A destination that already exists is
+# never touched, so restarts and upgrades keep whatever the running deployment
+# wrote — a changed image default reaches an existing volume only if you delete
+# the destination yourself.
+seedFromImage: []
+
+# Declarative plugin set. The other way round from `seedFromImage` above: that
+# one makes configs/plugins.yaml writable so an admin can toggle plugins at
+# runtime; this one makes the plugin set a property of the release. When
+# `config` is non-empty it is rendered into a ConfigMap and mounted read-only
+# over /app/configs/plugins.yaml in the api and worker pods (subPath, so the
+# rest of configs/ stays as shipped). The app reads that path by default, so
+# no PLUGIN_CONFIG_PATH is involved, and the pods roll whenever the content
+# changes. Every console or CLI toggle then fails with "Read-only file
+# system" — deliberately: the set of plugins a release runs is decided by
+# whoever renders the values (a customer spec, a GitOps overlay), not by a
+# click in a pod, and the running state can never drift from the manifest.
+#
+# The map is the plugins.yaml content verbatim: plugin name -> its block. Note
+# the loader's rule (core/api/lifespan.py): when the file has any entries, a
+# plugin absent from it is NOT loaded, so list every plugin the release needs,
+# system plugins included.
+#
+#   plugins:
+#     config:
+#       auth: {enabled: true}
+#       api_routers: {enabled: true}
+#       baselithcontrol: {enabled: true, require_admin: false}
+#       compliance: {enabled: true, require_admin: true}
+#
+# Mutually exclusive with `config.PLUGIN_CONFIG_PATH` and with a
+# `seedFromImage` entry from /app/configs/plugins.yaml; the chart refuses to
+# render the combination.
+plugins:
+  config: {}
+
+# `helm test <release>` — the smoke test that asks the one question a
+# successful install cannot answer: does a request reaching the Service get an
+# answer. It retries rather than sampling once, because a cold start (plugin
+# activation, embedder warmup) can outlast the first attempt and a flaky test
+# is worse than no test.
+tests:
+  timeoutSeconds: 300
+
 # ServiceMonitor for the Prometheus Operator (scrapes /metrics).
 serviceMonitor:
   enabled: false
@@ -297,6 +583,56 @@ serviceMonitor:
   #  usernameKey: username
   #  passwordKey: password
 
+# PrometheusRule for the Prometheus Operator — the alerts that go with the
+# ServiceMonitor above. Off by default: a rule object referencing a Prometheus
+# that is not there is dead YAML, and a chart that ships alerts nobody routed
+# teaches operators to ignore the ones that do fire.
+#
+# `labels` is usually what decides whether the rules are picked up at all:
+# kube-prometheus-stack selects PrometheusRule objects by label (commonly
+# `release: <stack release>`), so an object without it is created, accepted and
+# never evaluated. Check the Prometheus resource's `ruleSelector` before
+# concluding the alerts do not work.
+prometheusRule:
+  enabled: false
+  # Rules can live in the Prometheus namespace instead of the release's, for
+  # setups whose ruleNamespaceSelector is narrow. Empty = the release namespace.
+  namespace: ""
+  labels: {}
+  #  release: kube-prometheus-stack
+  # Group evaluation interval. Empty = Prometheus' global default, which is the
+  # right answer unless you have measured otherwise.
+  interval: ""
+  # Thresholds. Every one of them is a judgement about THIS deployment's
+  # traffic, so they are values and not constants in the template.
+  thresholds:
+    # Ratios, not counts: an absolute error threshold is either useless on a
+    # cell serving ten requests a minute or deaf on one serving ten thousand.
+    # Measured on the RED HTTP counter, which is also the availability SLI in
+    # deploy/prometheus/slo-rules.yml, so the two cannot disagree.
+    httpErrorRatio: 0.05
+    llmErrorRatio: 0.10
+    # Fraction of NON-streaming requests slower than the 1s latency objective.
+    # The streaming routes are excluded in the rule: they are designed to stay
+    # open for minutes, so leaving them in makes the ratio a measure of how
+    # much streaming a deployment does.
+    httpSlowRatio: 0.05
+    # Auth failures, rate-limit rejections and oversized requests share one
+    # counter, so this is a spike detector, not a policy.
+    securityEventsPerSecond: 1
+    volumeUsedRatio: 0.85
+    containerRestarts: 3
+    # Longer than the daily schedule plus one missed run, so a single skipped
+    # backup does not page and two do.
+    backupMaxAgeHours: 26
+  # Alert names to leave out, for the one a given deployment cannot act on —
+  # silencing here rather than in Alertmanager keeps the reason in git.
+  disabledAlerts: []
+  #  - BaselithcoreHttpLatencyHigh
+  # Extra rule objects, appended to the group verbatim. For deployment-specific
+  # alerts that have no business in the chart.
+  extraRules: []
+
 # Pre-deploy Alembic migrations (helm hook Job). When enabled, api pods boot
 # with DB_MIGRATIONS_ON_STARTUP=false — a bad migration fails the Job (and
 # the upgrade) instead of crash-looping the ReplicaSet.
@@ -315,26 +651,51 @@ migrations:
 networkPolicy:
   enabled: false
   # Ingress peers allowed to reach the API port. Empty means "any pod in this
-  # namespace", which is what an in-namespace ingress controller needs but also
-  # admits a compromised neighbour. Narrow it to the controller, e.g.:
+  # namespace" — which admits a compromised neighbour, and, more often, locks
+  # out the two callers that actually matter, because both usually live
+  # somewhere else: the ingress controller (its own namespace) and Prometheus
+  # (the monitoring namespace). Turning networkPolicy on with this left empty
+  # is how a deployment goes dark and every ServiceMonitor target goes red at
+  # the same moment. Name them:
+  #
   #   ingressFrom:
   #     - namespaceSelector:
   #         matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
   #       podSelector:
   #         matchLabels: {app.kubernetes.io/name: ingress-nginx}
+  #     - namespaceSelector:
+  #         matchLabels: {kubernetes.io/metadata.name: monitoring}
+  #       podSelector:
+  #         matchLabels: {app.kubernetes.io/name: prometheus}
+  #
+  # The kubelet's probes are not affected: they come from the node, and a
+  # NetworkPolicy does not apply to host-network traffic to a pod on that node.
   ingressFrom: []
   egress:
     # Off by default because enabling it is deny-by-default outbound: anything
-    # not listed below stops working, and the right list is deployment
-    # knowledge (which LLM endpoints, which object store, which SMTP relay).
-    # It is the half that matters for an agent runtime — with egress
+    # not listed below stops working, and the last mile is always deployment
+    # knowledge. It is the half that matters for an agent runtime — with egress
     # unrestricted, a prompt-injected agent or a hostile tool result can reach
-    # whatever the pod network routes to, cloud metadata included.
+    # whatever the pod network routes to, cloud metadata included. Turn it on:
+    # the presets below cover what a standard install of this chart needs.
     enabled: false
     # Keep DNS open, or every other rule fails to resolve. Assumes the standard
     # `k8s-app: kube-dns` label (CoreDNS); set false and add your own rule if
     # your cluster labels it differently.
     allowDNS: true
+    # The rules a standard install needs, so switching egress on is a flag
+    # rather than a YAML exercise nobody has time for — which is the real
+    # reason egress policies stay off everywhere.
+    presets:
+      # Every pod in this release's namespace: the in-cluster Postgres, Redis /
+      # FalkorDB and vector store the chart's own config points at.
+      sameNamespace: true
+      # Outbound TCP/443 to the public internet, with cloud metadata
+      # (169.254.0.0/16) and the RFC1918 / CGNAT / loopback ranges carved out.
+      # **Datastores outside the cluster live in those ranges**: a managed
+      # Postgres, an internal object store or a private LLM gateway needs its
+      # own entry under `rules` — the preset deliberately will not reach it.
+      internetHttps: true
     # Verbatim NetworkPolicy egress rules. Example — in-namespace Postgres and
     # Redis plus HTTPS to the internet for LLM providers:
     #   rules:
@@ -350,15 +711,63 @@ networkPolicy:
     rules: []
 
 # Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
-# prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the
-# directory offsite for true DR. Disabled by default.
+# prunes by age; with `offsite` on, every dump is then copied to an object
+# store, which is what makes it a backup rather than a file on the node that
+# just died. Disabled by default.
 backup:
   enabled: false
+  # Identity the backup pod runs as. Kept apart from the app's ServiceAccount
+  # so a cloud role for the bucket (IRSA on EKS, Workload Identity on GKE,
+  # AKS workload identity) is granted to the backup alone, never to the pods
+  # that serve requests. `annotations` carries the binding
+  # (`eks.amazonaws.com/role-arn`, `iam.gke.io/gcp-service-account`, ...).
+  serviceAccount:
+    create: false
+    name: ""                     # defaults to <fullname>-backup when created
+    annotations: {}
+  # Extra labels on the backup pod. Some identity webhooks key on a pod
+  # label rather than on the ServiceAccount alone: AKS workload identity
+  # injects its token only into pods labelled
+  # `azure.workload.identity/use: "true"`.
+  podLabels: {}
+  # Copy each dump to an object store with rclone. Any rclone backend works:
+  # `remote` is the backend definition (every key becomes an
+  # RCLONE_CONFIG_OFFSITE_<KEY> variable, so `type: s3, provider: AWS,
+  # env_auth: true, region: eu-west-1` is an S3 remote authenticated through
+  # the pod's cloud identity; `type: gcs, env_auth: true` a GCS one;
+  # `type: azureblob, env_auth: true, account: <name>` Azure Blob; an S3-
+  # compatible store such as OVH or MinIO adds `provider: Other` and
+  # `endpoint`). `path` is "bucket/prefix" on that remote. Static keys, where
+  # the provider has no pod identity, go in `credentialsSecret`: a Secret
+  # whose keys are the same RCLONE_CONFIG_OFFSITE_* variables
+  # (RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID / _SECRET_ACCESS_KEY for S3).
+  #
+  # The local `retentionDays` still applies to the volume; `offsite.retentionDays`
+  # prunes the remote copy too, and 0 leaves that to the bucket's own lifecycle
+  # rules (the platform Terraform sets those on the backups bucket).
+  offsite:
+    enabled: false
+    image: rclone/rclone:1.75.1
+    remote: {}
+    path: ""
+    retentionDays: 0
+    credentialsSecret: ""
+    extraArgs: []
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
+  backoffLimit: 2
+  # `concurrencyPolicy: Forbid` means a job that hangs blocks every schedule
+  # after it, so the run is bounded. Has to cover waitForDatabaseSeconds plus
+  # the dump of the largest database this is pointed at.
+  activeDeadlineSeconds: 3600
+  # How long to wait for the database to accept connections before the dump.
+  # A CronJob replays its missed schedules when a cluster comes back up, so
+  # the nightly run routinely starts mid-boot, ahead of CoreDNS: without this
+  # pg_dump dies on the first name-resolution failure and the day is lost.
+  waitForDatabaseSeconds: 300
   pg:
     host: postgres
     port: 5432
@@ -367,7 +776,14 @@ backup:
     passwordSecret:
       name: ""                   # defaults to the release secret
       key: DB_PASSWORD
-  # Where dumps land. Replace with a persistentVolumeClaim for durability.
+  # Where dumps land. Replace with a persistentVolumeClaim for durability —
+  # and null the emptyDir when you do. Values merge rather than replace, so a
+  # claim added on top of this default renders a volume with two types and the
+  # API server rejects the CronJob outright:
+  #   backup:
+  #     volume:
+  #       emptyDir: null
+  #       persistentVolumeClaim: {claimName: baselithcore-backups}
   volume:
     emptyDir: {}
     # persistentVolumeClaim:

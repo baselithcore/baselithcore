@@ -18,7 +18,10 @@ jobs:
   judge_evals:
     name: LLM-as-Judge Eval Run
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, not 30: the judge now scores each case k=3 times and takes the median
+    # (see EVAL_JUDGE_SAMPLES below), so the wall clock is roughly 3x what this
+    # budget was set for — minus whatever the parallelism below wins back.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -34,6 +37,15 @@ jobs:
           # Unset secrets leave these empty; the script then skips green.
           LLM_PROVIDER: openai
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Judge scoring is nondeterministic: a single sample makes a case flip
+          # verdict between nightly runs on noise alone, which is how a quality
+          # signal turns into background alarm nobody reads. k=3 with a median
+          # discards the odd outlier.
+          EVAL_JUDGE_SAMPLES: "3"
+          # ... and 3x the calls only costs 3x the wall clock if they are
+          # serial. Bounded rather than unbounded so a large corpus cannot
+          # stampede the provider into rate-limiting the whole run.
+          EVAL_JUDGE_MAX_PARALLEL: "4"
         run: python scripts/run_judge_evals.py --report judge-report.json
       - name: Upload report
         if: always()

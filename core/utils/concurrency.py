@@ -10,12 +10,15 @@ round-trips and exhaust connections/memory.
 reranking) to a **dedicated** thread pool instead of the interpreter default,
 so a burst of inference cannot starve the unrelated short tasks that also live
 on the default executor — SSRF DNS resolution, audit-log appends, tokenization.
+It carries the caller's ``contextvars`` across the thread hop (tenant, trace,
+budget) the way ``asyncio.to_thread`` does; a bare ``run_in_executor`` does not.
 """
 
 from __future__ import annotations
 
 import asyncio
 import atexit
+import contextvars
 import os
 from collections.abc import Awaitable, Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -103,12 +106,38 @@ async def run_inference(
     """Run a blocking inference call on the dedicated pool.
 
     Drop-in replacement for ``asyncio.to_thread`` / ``run_in_executor(None, …)``
-    at model-inference call sites.
+    at model-inference call sites — including the ``contextvars`` copy that
+    ``asyncio.to_thread`` performs and a bare ``run_in_executor`` does not.
+
+    Without that copy the worker thread runs in an *empty* context: every span
+    opened inside the offloaded call is orphaned (a new trace root rather than
+    a child of the caller's span), and every contextvar-carried value is
+    absent. The tenant is one of those values, so tenant-scoped state read
+    inside the call resolved to whatever an unbound context means — a shared
+    ``default`` bucket, or a ``TenantContextError`` under strict isolation.
+
+    The copy is taken on the calling thread, so the worker observes exactly
+    what the caller had bound. It is a *copy*: anything the callable binds
+    stays in the worker, so an offloaded call can never rewrite the caller's
+    tenant, span or budget.
+
+    That isolation is **shallow**, and the distinction matters for whoever adds
+    the next offload site. Rebinding a contextvar in the worker is isolated;
+    *mutating* an object it inherited is not. The copy holds the same
+    ``LoopBudget``, DI ``Scope``, ``Colony`` and span objects the caller holds,
+    so a callable that charges a budget or registers an agent from the worker
+    thread mutates shared state off the event loop, with no lock and none of
+    the single-threaded ordering the rest of the framework assumes. No current
+    call site does — every one is pure CPU over data it was handed, bar
+    ``_fuse_recall``, which only reads. Keep it that way: offload computation,
+    not bookkeeping.
     """
     from functools import partial
 
     loop = asyncio.get_running_loop()
-    call: Callable[[], _T] = partial(fn, *args, **kwargs)
+    context = contextvars.copy_context()
+    bound: Callable[[], _T] = partial(fn, *args, **kwargs)
+    call: Callable[[], _T] = partial(context.run, bound)
     return await loop.run_in_executor(get_inference_executor(), call)
 
 

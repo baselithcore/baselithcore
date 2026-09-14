@@ -103,6 +103,11 @@ class MessageHandlerMixin(
         params = message.get("params", {})
         msg_id = message.get("id")
         modern = is_modern(message)
+        # JSON-RPC 2.0: a Notification is a request object *without* an ``id``
+        # member. An explicit ``"id": null`` is a (malformed) request and is
+        # still answered — the distinction is the member's presence, not its
+        # value.
+        notification = "id" not in message
 
         logger.debug(f"MCP message received: method={method}, id={msg_id}")
 
@@ -115,9 +120,7 @@ class MessageHandlerMixin(
                     parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
                 )
                 if method in REMOVED_IN_MODERN:
-                    return self._error_response(
-                        msg_id, -32601, f"Method not found: {method}"
-                    )
+                    return self._method_not_found(method, msg_id, notification)
 
             # Route to appropriate handler
             if method == "server/discover":
@@ -142,9 +145,7 @@ class MessageHandlerMixin(
                 result = await self._handle_complete(params)
             elif method.startswith("tasks/") and not modern:
                 # The tasks extension exists only in the modern revision.
-                return self._error_response(
-                    msg_id, -32601, f"Method not found: {method}"
-                )
+                return self._method_not_found(method, msg_id, notification)
             elif method == "subscriptions/listen":
                 if send is None:
                     # Nothing to deliver on: better an explicit error than a
@@ -171,9 +172,7 @@ class MessageHandlerMixin(
                 logger.info("MCP client initialized")
                 return None
             else:
-                return self._error_response(
-                    msg_id, -32601, f"Method not found: {method}"
-                )
+                return self._method_not_found(method, msg_id, notification)
 
             # `server/discover` exists only in the modern revision, so its
             # result always takes the modern shape — including when a client
@@ -202,6 +201,21 @@ class MessageHandlerMixin(
             if meta_token is not None:
                 request_meta.reset(meta_token)
 
+    def _method_not_found(
+        self, method: str, msg_id: Any, notification: bool
+    ) -> dict[str, Any] | None:
+        """Refuse an unknown method — silently when it arrived as a notification.
+
+        JSON-RPC 2.0 is explicit that a notification gets no reply *of any
+        kind*: answering one with an error whose ``id`` is ``null`` hands the
+        client a response to a request it never made, which a strict client
+        either drops with a warning or treats as a protocol violation.
+        """
+        if notification:
+            logger.debug("mcp_unknown_notification_ignored", method=method)
+            return None
+        return self._error_response(msg_id, -32601, f"Method not found: {method}")
+
     async def _handle_initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle initialize request with protocol-version negotiation."""
         client_info = params.get("clientInfo", {})
@@ -228,34 +242,61 @@ class MessageHandlerMixin(
                 "version": self.info.version,
                 "description": self.info.description,
             },
-            "capabilities": self._capabilities(),
+            "capabilities": self._capabilities(modern=False),
         }
 
-    def _capabilities(self) -> dict[str, Any]:
-        """Build the advertised `ServerCapabilities`.
+    def _capabilities(self, *, modern: bool) -> dict[str, Any]:
+        """Build the advertised `ServerCapabilities` for one protocol era.
 
         Members are objects or absent — never JSON null, which strictly-typed
         clients reject. Sub-capabilities are advertised only when actually
-        implemented.
+        implemented *and reachable by the client being answered*: a capability
+        is a promise, and the two eras of this protocol can honour different
+        ones.
+
+        What the era decides:
+
+        * ``listChanged`` — this server pushes list-changed notifications on a
+          ``subscriptions/listen`` response stream, which only 2026-07-28 has.
+          A legacy client was being promised notifications it has no channel
+          to receive; it is told to re-list instead.
+        * ``extensions`` — every ``tasks/*`` method is answered with
+          ``method not found`` outside the modern era, so advertising the
+          tasks extension to a legacy client described a surface it could not
+          call.
+        * ``logging`` — ``logging/setLevel`` was removed in 2026-07-28 (a
+          modern client carries its level in each request's ``_meta``), so the
+          capability belongs to the legacy era only.
+
+        The era is read off the *message*, not off connection state:
+        ``initialize`` is a legacy-only method and ``server/discover`` a
+        modern-only one, so each caller already knows which era it is answering
+        without a handshake to consult. That is what makes this safe on a
+        stateless transport — there is no negotiated state to go stale, and a
+        client that speaks both eras gets the honest answer for whichever one
+        it asked in.
+
+        Args:
+            modern: Whether the client being answered speaks 2026-07-28.
         """
         declared = self.info.capabilities
         capabilities: dict[str, Any] = {}
-        # `listChanged` is advertised because the server really does emit the
-        # notifications, on any subscriptions/listen stream that opted in.
+        streams = {"listChanged": True} if modern else {}
         if declared.tools:
-            capabilities["tools"] = {"listChanged": True}
+            capabilities["tools"] = dict(streams)
         if declared.resources:
-            capabilities["resources"] = {"listChanged": True}
+            capabilities["resources"] = dict(streams)
         # Prompts and completions follow what is actually registered: neither
         # is a static server trait the way tools/resources support is.
         if declared.prompts or self._prompts:
-            capabilities["prompts"] = {"listChanged": True}
+            capabilities["prompts"] = dict(streams)
         if self._has_completions():
             capabilities["completions"] = {}
-        if declared.logging:
+        if declared.logging and not modern:
             capabilities["logging"] = {}
-        # Extensions this server implements; a client opts in per request.
-        capabilities["extensions"] = {TASKS_EXTENSION_ID: {}}
+        if modern:
+            # Extensions this server implements; a client opts in per request.
+            capabilities["extensions"] = {TASKS_EXTENSION_ID: {}}
         return capabilities
 
     async def _handle_set_level(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -296,7 +337,10 @@ class MessageHandlerMixin(
         """
         result: dict[str, Any] = {
             "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
-            "capabilities": self._capabilities(),
+            # ``server/discover`` is a modern-revision method, so its answer
+            # always describes the modern surface — even when a legacy stdio
+            # client sends it bare as an era probe.
+            "capabilities": self._capabilities(modern=True),
         }
         instructions = getattr(self.config, "mcp_server_instructions", "")
         if instructions:

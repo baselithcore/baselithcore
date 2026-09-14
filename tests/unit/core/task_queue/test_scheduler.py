@@ -193,7 +193,7 @@ class TestTaskScheduler:
                 mock_job.result = "test-result"
 
                 # Mock datetimes
-                now = datetime.now()
+                now = datetime.now(UTC)
                 mock_job.created_at = now
                 mock_job.enqueued_at = now
                 mock_job.started_at = now

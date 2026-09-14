@@ -1,17 +1,25 @@
-# Container dependency list — consumed by Dockerfile-slim and Dockerfile-full.
+# Human-readable mirror of the dependency surface the container image carries.
 #
-# It is NOT a lockfile (transitives are unpinned; `uv.lock` owns reproducible
-# resolution). Its only job is to give the images the same dependency surface
-# the wheel declares, so keep every spec below IDENTICAL to the matching entry
-# in pyproject.toml. Exact `==` pins here silently froze the images on older
-# releases than `pip install baselith-core` resolved — two different test
-# surfaces from one repo.
+# NOT a lockfile, and — since the uv-export change — no longer what the image
+# installs either. `uv.lock` owns reproducible resolution, and the Dockerfile
+# materialises it with `uv export --frozen` so the image gets the exact
+# transitive set CI tested. Installing from this file instead re-resolved every
+# transitive to whatever was newest that morning, which made two builds of one
+# commit two different images.
+#
+# What it is still for: reading. One flat list of what the image ships and why
+# each floor is where it is, without expanding a 600-line lock export. That is
+# only worth anything if it stays true, so keep every spec below IDENTICAL to
+# the matching entry in pyproject.toml — `scripts/check_requirements_sync.py`
+# (CI job `requirements_sync`) fails the build otherwise. Exact `==` pins here
+# would drift from the library contract, which is what the gate compares.
 #
 # Section 1 mirrors `[project].dependencies`.
-# Section 2 mirrors the optional extras the images bake in (huggingface, rag,
-# nlp, web/browser, documents, ocr, computer_use, memory) — Dockerfile-slim
-# pre-caches sentence-transformers models and installs Playwright Chromium at
-# build time, so these cannot move to an opt-in install.
+# Section 2 mirrors the optional extras the image bakes in (huggingface, rag,
+# nlp, web/browser, documents, ocr, computer_use, memory, qdrant) — the same
+# set the Dockerfile passes to `uv export` as `--extra` flags. The image
+# pre-caches the sentence-transformers models and installs Playwright Chromium
+# at build time, so these cannot move to an opt-in install.
 
 # --- Section 1: base runtime (mirror of [project].dependencies) -------------
 # <3.9.4: CVE-2024-23334 (path traversal), CVE-2024-30251 (multipart DoS)

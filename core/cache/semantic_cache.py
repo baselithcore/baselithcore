@@ -13,6 +13,12 @@ Usage:
     # Later, a semantically similar query:
     result = await cache.get_similar("Tell me about Python", threshold=0.85)
     # Returns the cached response if similarity > threshold
+
+Entries are bucketed per tenant, and the bucket is resolved leniently
+(:func:`core.context.get_tenant_or_default`): the tenant partitions the cache,
+it is not an access boundary, so an out-of-request caller (a background task, a
+scheduler, a script) lands in the shared ``"default"`` bucket instead of raising
+under ``strict_tenant_isolation`` and failing the generation it was caching for.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ import numpy as np
 from core.cache.fingerprint import best_fingerprint_match, ngram_fingerprint
 from core.cache.semantic_embedding import PromptEmbeddingMixin
 from core.cache.semantic_maintenance import EntryMaintenanceMixin
-from core.context import get_current_tenant_id
+from core.context import get_tenant_or_default
 from core.observability.logging import get_logger
 from core.utils.text_canon import canonicalize
 
@@ -191,7 +197,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             prompt: The input prompt
             response: The LLM response
         """
-        tenant_id = get_current_tenant_id()
+        tenant_id = get_tenant_or_default()
         # Compute embedding first (outside lock)
         try:
             embedding = await self._compute_embedding(prompt)
@@ -231,7 +237,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
         Returns:
             Cached response or None
         """
-        tenant_id = get_current_tenant_id()
+        tenant_id = get_tenant_or_default()
         async with self._lock:
             if tenant_id not in self._entries:
                 return None
@@ -345,7 +351,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
 
     async def delete(self, key: str) -> None:
         """Support standard CacheProtocol delete."""
-        tenant_id = get_current_tenant_id()
+        tenant_id = get_tenant_or_default()
         async with self._lock:
             if tenant_id in self._entries:
                 prompt_hash = self._hash_prompt(key)
@@ -382,7 +388,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             Tuple of (response or None, similarity score)
         """
         threshold = threshold or self._threshold
-        tenant_id = get_current_tenant_id()
+        tenant_id = get_tenant_or_default()
 
         # Check exact match first
         exact = await self.get_exact(prompt, **kwargs)

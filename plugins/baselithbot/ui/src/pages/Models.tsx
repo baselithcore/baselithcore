@@ -124,8 +124,10 @@ export function Models() {
     const target = index + dir;
     if (target < 0 || target >= form.failover_chain.length) return;
     const next = [...form.failover_chain];
+    // index is always a valid in-bounds position (callers pass an existing
+    // array index), so the removed item is guaranteed to exist.
     const [item] = next.splice(index, 1);
-    next.splice(target, 0, item);
+    next.splice(target, 0, item!);
     update('failover_chain', next);
   };
 

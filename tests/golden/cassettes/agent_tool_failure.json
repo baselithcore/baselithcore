@@ -1,0 +1,46 @@
+{
+  "name": "agent_tool_failure",
+  "description": "Agent.run: a raising tool comes back as a tool_result with is_error set, so the model can see the failure and answer around it.",
+  "turns": [
+    {
+      "expect": {
+        "prompt_contains": ["capital of Italy"],
+        "tools": ["broken_lookup"],
+        "roles": ["user"]
+      },
+      "result": {
+        "text": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "name": "broken_lookup",
+            "arguments": {
+              "country": "Italy"
+            }
+          }
+        ],
+        "stop_reason": "tool_use",
+        "tokens_used": 90
+      }
+    },
+    {
+      "expect": {
+        "tools": ["broken_lookup"],
+        "roles": ["user", "assistant", "user"],
+        "tool_results": [
+          {
+            "tool_use_id": "call_1",
+            "contains": ["upstream registry unavailable"],
+            "is_error": true
+          }
+        ]
+      },
+      "result": {
+        "text": "I could not reach the registry.",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 112
+      }
+    }
+  ]
+}

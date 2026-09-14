@@ -14,7 +14,7 @@ cat <<'EOF'
 ✅ BaselithCore dev environment ready.
 
 Next steps:
-  docker compose up -d        # Redis, Qdrant, Postgres (docker-outside-of-docker)
+  docker compose up -d postgres redis qdrant   # backing stores only; the API runs from the checkout below
   baselith doctor             # verify configuration
   python backend.py           # start the API on :8000  →  /console, /docs
 

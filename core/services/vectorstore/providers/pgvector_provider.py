@@ -26,6 +26,7 @@ from typing import Any
 import orjson
 from psycopg.rows import dict_row
 
+from core.config.vectorstore import get_vectorstore_config
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
 from core.services.vectorstore.exceptions import VectorStoreError
@@ -33,6 +34,21 @@ from core.services.vectorstore.exceptions import VectorStoreError
 logger = get_logger(__name__)
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
+#: Name of the vector column every collection table uses.
+_VECTOR_COLUMN = "embedding"
+
+#: Declared width of an existing ``vector`` column. pgvector stores the
+#: dimension directly in ``atttypmod``; an unconstrained ``vector`` column
+#: reports ``-1``, which is "unknown", not "zero".
+_DIMENSION_SQL = (
+    "SELECT a.atttypmod FROM pg_attribute a "
+    "JOIN pg_class c ON c.oid = a.attrelid "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE c.relname = %s AND a.attname = %s "
+    "AND a.attnum > 0 AND NOT a.attisdropped "
+    "AND n.nspname = ANY(current_schemas(false))"
+)
 
 
 def _table(collection_name: str) -> str:
@@ -135,28 +151,73 @@ def _filter_where(
 class PgVectorProvider:
     """Vector store provider backed by PostgreSQL + pgvector."""
 
+    async def _existing_dimension(self, table: str) -> int | None:
+        """Declared width of ``table``'s vector column, or ``None``.
+
+        ``None`` means "no such table/column yet" (first boot) or "width not
+        constrained" — neither is a conflict.
+        """
+        async with get_async_cursor() as cur:
+            await cur.execute(_DIMENSION_SQL, (table, _VECTOR_COLUMN))
+            row = await cur.fetchone()
+        if not row:
+            return None
+        typmod = int(row[0])
+        return typmod if typmod > 0 else None
+
+    async def _assert_dimension(self, table: str, size: int) -> None:
+        """Fail loudly when the live column disagrees with the configuration.
+
+        ``CREATE TABLE IF NOT EXISTS`` is a no-op against an existing table, so
+        changing ``VECTORSTORE_EMBEDDING_DIM`` (or the embedding model behind
+        it) used to be silent here and surface much later as a per-row insert
+        failure, once a batch of documents had already been chunked and
+        embedded. Checking the column up front turns that into one clear error
+        at collection setup.
+        """
+        existing = await self._existing_dimension(table)
+        if existing is not None and existing != size:
+            raise VectorStoreError(
+                f"pgvector collection table {table} stores vector({existing}) "
+                f"but the configured embedding dimension is {size}. Re-index "
+                f"into a new collection, or set VECTORSTORE_EMBEDDING_DIM="
+                f"{existing} to match the existing column."
+            )
+
     async def create_collection(
         self, collection_name: str, vector_size: int, **kwargs: Any
     ) -> None:
-        """Create the collection table, extension, and HNSW index (idempotent)."""
+        """Create the collection table, extension, and HNSW index (idempotent).
+
+        Asserts the existing column width first (see :meth:`_assert_dimension`)
+        and builds the HNSW index with the configured ``m`` /
+        ``ef_construction``. Note that ``CREATE INDEX IF NOT EXISTS`` will not
+        *rebuild* an index that already exists: changing those two settings on
+        a populated collection requires dropping the index by hand.
+        """
         table = _table(collection_name)
         size = int(vector_size)
-        ddl = (
-            "CREATE EXTENSION IF NOT EXISTS vector;\n"
-            f"CREATE TABLE IF NOT EXISTS {table} (\n"
-            "    id TEXT PRIMARY KEY,\n"
-            f"    embedding vector({size}) NOT NULL,\n"
-            "    payload JSONB NOT NULL DEFAULT '{}'::jsonb\n"
-            ");\n"
-            f"CREATE INDEX IF NOT EXISTS idx_{table}_hnsw ON {table} "
-            "USING hnsw (embedding vector_cosine_ops);\n"
-            # jsonb_path_ops: smaller/faster GIN variant that supports exactly
-            # the @> containment operator every tenant-scoped search ANDs in —
-            # without it multi-tenant filtering seq-scans the payload column.
-            f"CREATE INDEX IF NOT EXISTS idx_{table}_payload_gin ON {table} "
-            "USING gin (payload jsonb_path_ops);"
-        )
+        config = get_vectorstore_config()
+        hnsw_m = int(config.hnsw_m)
+        hnsw_ef_construction = int(config.hnsw_ef_construction)
         try:
+            await self._assert_dimension(table, size)
+            ddl = (
+                "CREATE EXTENSION IF NOT EXISTS vector;\n"
+                f"CREATE TABLE IF NOT EXISTS {table} (\n"
+                "    id TEXT PRIMARY KEY,\n"
+                f"    {_VECTOR_COLUMN} vector({size}) NOT NULL,\n"
+                "    payload JSONB NOT NULL DEFAULT '{}'::jsonb\n"
+                ");\n"
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_hnsw ON {table} "
+                "USING hnsw (embedding vector_cosine_ops) "
+                f"WITH (m = {hnsw_m}, ef_construction = {hnsw_ef_construction});\n"
+                # jsonb_path_ops: smaller/faster GIN variant that supports exactly
+                # the @> containment operator every tenant-scoped search ANDs in —
+                # without it multi-tenant filtering seq-scans the payload column.
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_payload_gin ON {table} "
+                "USING gin (payload jsonb_path_ops);"
+            )
             async with get_async_cursor() as cur:
                 await cur.execute(ddl)
         except VectorStoreError:
@@ -165,7 +226,13 @@ class PgVectorProvider:
             raise VectorStoreError(
                 f"pgvector collection creation failed for {collection_name!r}: {exc}"
             ) from exc
-        logger.info(f"pgvector collection '{collection_name}' ready ({table})")
+        logger.info(
+            "pgvector collection '%s' ready (%s, hnsw m=%d ef_construction=%d)",
+            collection_name,
+            table,
+            hnsw_m,
+            hnsw_ef_construction,
+        )
 
     async def upsert(
         self, collection_name: str, points: list[dict[str, Any]], **kwargs: Any
@@ -208,6 +275,12 @@ class PgVectorProvider:
         payload-equality dict or a qdrant-style Filter with
         must/must_not FieldConditions), and ``score_threshold`` (minimum
         similarity). Other kwargs (e.g. ``with_payload``) are ignored.
+
+        ``VECTORSTORE_HNSW_EF_SEARCH`` is applied per query so recall is a
+        property of this deployment rather than of whatever the DBA left in
+        ``postgresql.conf``. ``SET LOCAL`` only takes effect inside a
+        transaction and the pool runs in autocommit, so the search opens one;
+        set the value to 0 to skip both and use the server default.
         """
         table = _table(collection_name)
         encoded = _encode_vector(query_vector)
@@ -228,9 +301,21 @@ class PgVectorProvider:
             "ORDER BY embedding <=> %s::vector LIMIT %s"
         )
         params.extend([encoded, int(limit)])
+        ef_search = int(get_vectorstore_config().hnsw_ef_search)
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
-            await cur.execute(sql, params)
-            rows = await cur.fetchall()
+            if ef_search > 0:
+                async with cur.connection.transaction():
+                    # SET takes no bind parameters; the value is an int coerced
+                    # from a range-validated setting, so nothing else can reach
+                    # the statement text.
+                    await cur.execute(
+                        f"SET LOCAL hnsw.ef_search = {ef_search}"  # nosec B608
+                    )
+                    await cur.execute(sql, params)
+                    rows = await cur.fetchall()
+            else:
+                await cur.execute(sql, params)
+                rows = await cur.fetchall()
         return [
             PgVectorPoint(
                 id=row["id"], payload=_row_payload(row), score=float(row["score"])

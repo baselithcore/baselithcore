@@ -109,7 +109,7 @@ adds, in order:
 | Added in factory | Class | Purpose |
 | ---------------- | ----- | ------- |
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
-| `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
+| `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` (header pre-encoded once at construction) |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
@@ -117,7 +117,7 @@ adds, in order:
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
-| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot) |
+| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot). Only plugins the enable-list in `configs/plugins.yaml` allows are consulted — the same rule the lifespan applies to routers, read through `core/plugins/config_file.py`, so a plugin disabled there installs no middleware and mounts no SPA either |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** — a single cheap header compare that rejects before a quota unit is consumed, an idempotency lock taken or a plugin route matched |
 | `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); added after CSRF so it runs outermost of the two; see the note below |
 | `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work |
@@ -331,7 +331,26 @@ catches it and, if the response has not started, returns `429` with a
 - **`SmartGzipMiddleware`** subclasses Starlette's `GZipMiddleware` but skips
   compression entirely for configured `excluded_paths` (the factory excludes
   both `/chat/stream` and `/v1/chat/stream`) to preserve the streaming
-  "typewriter" effect.
+  "typewriter" effect. Requests whose `Accept` names `text/event-stream` are
+  bypassed too. Every other streamed response is caught from the *response*
+  side: a streaming media type (`text/event-stream`, `application/x-ndjson`,
+  `application/stream+json`, `application/jsonl`, `application/x-jsonlines`)
+  or an `X-Accel-Buffering: no` header on `http.response.start` flips the
+  responder into raw pass-through for the rest of that response, so a
+  `fetch`-based NDJSON reader (which sends `Accept-Encoding: gzip` and no
+  event-stream `Accept`) still gets each frame the moment it is written.
+
+    That decision lives in an ASGI `send` wrapper installed by the responder's
+    `__call__`, on purpose not in an override of the parent's compression
+    hook: Starlette renamed that hook (`send_with_gzip` up to 0.38,
+    `send_with_compression` from 1.x) and an override keyed on one name
+    matches nothing on the other, silently. Through the stock compressor a
+    28-byte heartbeat frame leaves as a **0-byte** body write — every one of
+    them, until the response ends — and a reverse proxy with a read timeout
+    cuts a minutes-long stream while the worker is still busy. Non-streaming
+    responses are forwarded to whichever hook the installed Starlette
+    provides. `tests/unit/core/optimization/test_gzip_sse.py` runs the
+    streaming cases under both hook names.
 
 ---
 
@@ -420,6 +439,14 @@ on every liveness poll and Prometheus scrape.
     caller — without this, API-key traffic would slip past `QUOTAS_ENABLED`
     entirely. The verified user is memoized on `scope["state"]` so the route's
     own auth dependency does not re-verify the same token.
+
+`QuotaMiddleware` and `TenantMiddleware` both resolve that credential through
+the shared helper in `core/middleware/_auth_memo.py`: `effective_auth_header()`
+builds the same `Authorization`/`ApiKey <key>` value the route dependency would
+see (so the two middlewares and the dependency memo-match on an identical
+string), and `auth_manager()` resolves the app-configured `AuthManager` with a
+core-global fallback. `effective_auth_header()` coerces its return to an
+explicit `str` rather than passing through `Headers.get()`'s untyped result.
 
 ---
 
@@ -529,7 +556,14 @@ backed by `SecurityManager`:
 - `clear_admin_failures(username)` — clears it after a successful login.
 
 Lockout policy: **5 failures** within a 60s window locks the account for
-**15 minutes**, tracked in Redis with an in-memory fallback. The admin router
+**15 minutes**, tracked in Redis with an in-memory fallback. Recording a
+failure is **one atomic Lua step** (`INCR`, arm the 60s window on the first
+hit, stretch the TTL to the full lockout at the threshold) rather than an
+`INCR` followed by separate `EXPIRE` calls: the old pair cost up to three
+round trips per bad login and, if the process died between the two, left a
+counter with **no TTL** — a permanent lockout for that IP. The script also
+re-arms the window on any key it finds without a TTL, healing such
+leftovers. The admin router
 (`plugins/api_routers/admin.py`) wires these into its `verify_credentials`
 dependency. The lockout state and checks live in `AdminLockoutMixin`
 (`core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the

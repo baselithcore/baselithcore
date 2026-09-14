@@ -118,7 +118,7 @@ def partition_expired(
     alive_embeddings: list[list[float]] = []
     expired = 0
     paired = embeddings if embeddings is not None else [[] for _ in items]
-    for item, embedding in zip(items, paired):
+    for item, embedding in zip(items, paired, strict=True):
         if is_expired(item, ttl_seconds, now):
             expired += 1
             continue
@@ -161,7 +161,7 @@ def prune_low_relevance(memory: object, calculator: object = None) -> dict[str, 
         if doomed:
             kept = [
                 (item, emb)
-                for item, emb in zip(mtm, memory._mtm_embeddings)  # type: ignore[attr-defined]
+                for item, emb in zip(mtm, memory._mtm_embeddings, strict=True)  # type: ignore[attr-defined]
                 if str(item.id) not in doomed
             ]
             counts["mtm"] = len(mtm) - len(kept)

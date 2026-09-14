@@ -1,0 +1,14 @@
+/*
+ * Self-hosted fonts (replaces the Google Fonts <link> tags in index.html,
+ * which the platform CSP blocks). Weights mirror what was previously
+ * requested from fonts.googleapis.com. --font-sans / --font-mono in
+ * tokens.css already carry a system-font fallback stack, so the UI stays
+ * legible even if a font file fails to load.
+ */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';

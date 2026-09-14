@@ -7,15 +7,27 @@ metadata:
     {{- include "baselithcore.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
+  {{- if not .Values.worker.keda.enabled }}
+  # Omitted when KEDA owns the count: leaving it here makes Helm and the
+  # ScaledObject's HPA overwrite each other on every upgrade.
   replicas: {{ .Values.worker.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "baselithcore.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
+  {{- with .Values.worker.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.plugins.config }}
+        checksum/plugins: {{ include (print $.Template.BasePath "/plugins-configmap.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "baselithcore.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
@@ -26,15 +38,30 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      # The worker's own period, not the API's: RQ finishes the job in flight
+      # on SIGTERM, and cutting that short loses work. See worker.
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.topologySpreadConstraints.enabled (gt (int .Values.worker.replicaCount) 1) }}
+      topologySpreadConstraints:
+        {{- include "baselithcore.topologySpread" (dict "root" . "component" "worker") | trim | nindent 8 }}
+      {{- end }}
+      {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
         - name: worker
           image: {{ include "baselithcore.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          # A crashed container's message comes from /dev/termination-log,
+          # which nothing here writes — so the pod's status says nothing.
+          # Falling back to the tail of the log puts the actual traceback in
+          # `kubectl describe`, where the person debugging is already looking.
+          terminationMessagePolicy: FallbackToLogsOnError
           command:
             {{- toYaml .Values.worker.command | nindent 12 }}
           envFrom:
@@ -43,10 +70,19 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.secretName" . }}
                 optional: true
-          {{- with .Values.extraEnv }}
           env:
+            # Names the RQ worker in Redis after the pod. RQ otherwise
+            # registers a random hex id, which nothing outside the process can
+            # match back to it — so `worker.livenessProbe` has no way to ask
+            # whether *this* pod's worker is still alive, and a probe that
+            # matches on the hostname prefix fails on a perfectly healthy pod.
+            - name: RQ_WORKER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           {{- with .Values.worker.livenessProbe }}
@@ -59,22 +95,28 @@ spec:
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.tmpVolumes.enabled .Values.extraVolumeMounts }}
+          {{- if or .Values.tmpVolumes.enabled .Values.extraVolumeMounts .Values.plugins.config }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
               mountPath: /tmp
             {{- end }}
+            {{- if .Values.plugins.config }}
+            {{- include "baselithcore.pluginsConfigVolumeMount" . | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or .Values.tmpVolumes.enabled .Values.extraVolumes }}
+      {{- if or .Values.tmpVolumes.enabled .Values.extraVolumes .Values.plugins.config }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.tmpVolumes.sizeLimit }}
+        {{- end }}
+        {{- if .Values.plugins.config }}
+        {{- include "baselithcore.pluginsConfigVolume" . | nindent 8 }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
@@ -82,6 +124,10 @@ spec:
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}

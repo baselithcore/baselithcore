@@ -71,15 +71,59 @@ graph TB
 
 ## Docker Compose
 
-The `docker-compose.prod.yml` file defines the entire infrastructure, including reverse proxy and observability.
+### Which file is which
 
-```yaml title="docker-compose.prod.yml"
+Four files, and each one answers a different question. There used to be six,
+with `api` and `worker` defined four times over, Jaeger and Prometheus twice,
+and two files both claiming in their own headers to be the production stack.
+
+| File | What it is |
+|---|---|
+| `compose.yaml` | The single-host stack: API, worker, Postgres, FalkorDB, Qdrant. `docker compose up -d`. Optional groups are **profiles**, not files: `--profile observability` (Jaeger, Prometheus, Grafana) and `--profile local-llm` (Ollama) |
+| `compose.prod.yaml` | The hardened production stack, used on its own (`-f compose.prod.yaml`). Deliberately **not** an overlay on `compose.yaml`: Compose *appends* list fields when merging, so an overlay cannot take a published port or a capability away — a production file expressed as a delta would silently inherit the base's host port bindings. Explicit beats inherited here |
+| `compose.dev.yaml` | Live-reload overlay: mounts the working tree over the image. `-f compose.yaml -f compose.dev.yaml` |
+| `compose.sandbox.yaml` | Opt-in Docker-in-Docker overlay for sandboxed agent code. `-f compose.yaml -f compose.sandbox.yaml` |
+
+The names are the Compose Specification's canonical ones: Compose looks for
+`compose.yaml` ahead of the legacy docker-compose spelling, so a bare
+`docker compose up` finds this stack with no `-f`. No file carries the obsolete
+`version:` key.
+
+Two files were removed rather than renamed:
+
+- **The infrastructure-only dev file.** Its job — start Postgres, Redis and
+  Qdrant while the backend runs on the host — is what
+  `docker compose up -d postgres redis qdrant` already does from
+  `compose.yaml`, correctly. As written it also published both stores on
+  `0.0.0.0` instead of loopback, pinned `falkordb/falkordb:latest` against a
+  repository rule that every runtime image is pinned, and used plain
+  `postgres:16-alpine` where the main stack uses `pgvector/pgvector:pg16` — so
+  the `pgvector` backend could not work in the environment meant for
+  developing against it. Nothing in the repository referenced the file. (The
+  production stack carried the same image divergence; see below.)
+- **The observability overlay.** It is now the `observability` profile of
+  `compose.yaml`. As a separate file it declared Jaeger and Prometheus a second
+  time, with different port exposure from the production stack's copies, and
+  required a network created elsewhere.
+
+Ollama is now behind the `local-llm` profile and is no longer a startup
+dependency of `api`/`worker`. It reserves 4GB for a runtime most deployments
+replace with a hosted provider, and `depends_on: ollama: service_healthy` made
+every `up` wait for a model runtime to report healthy before the API could
+start — for something nothing touches until a request arrives.
+
+### The production stack
+
+The `compose.prod.yaml` file defines the entire infrastructure, including reverse proxy and observability.
+
+```yaml title="compose.prod.yaml"
 services:
   # Main service: API Backend
   api:
     build:
+      # One Dockerfile for every environment: multi-stage, so the compiler
+      # toolchain stays in the build stage and never ships.
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
     environment:
@@ -119,10 +163,17 @@ services:
           cpus: '1.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # No curl in the runtime stage (and pulling one in only for the probe
+      # would widen the image): probe with the interpreter already there.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 3
+      # Cold start loads the embedder + reranker before /health answers —
+      # measured at ~100s on a laptop. Without a start period those probes
+      # count as failures and the container is flagged unhealthy while it is
+      # still booting normally.
+      start_period: 150s
 
   # Cache and Message Queue
   # Graph Database and Cache (Redis compatible)
@@ -166,7 +217,9 @@ services:
 
   # Relational Database
   postgres:
-    image: postgres:16-alpine
+    # Same image as compose.yaml — see "Postgres image and the vector store"
+    # below for the collation step an EXISTING volume needs.
+    image: pgvector/pgvector:pg16
     # Publish to host loopback so a natively-deployed app (running on the host,
     # not in a container) can reach Postgres at 127.0.0.1. Bound to 127.0.0.1
     # only — not exposed on any external interface. Harmless for the
@@ -213,7 +266,6 @@ services:
   worker:
     build:
       context: .
-      dockerfile: Dockerfile-slim
     container_name: baselith-core-worker
     env_file: configs/.env.production
     command: python -m core.task_queue.worker
@@ -343,9 +395,139 @@ networks:
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
-    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `docker-compose.yml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `docker-compose.sandbox.yml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
-    Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. The default stack also adds healthchecks for Qdrant (TCP connect probe — the image ships no curl) and Ollama (`ollama ls`), and `api`/`worker` now gate on `condition: service_healthy` for all four dependencies instead of `service_started`.
+    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `compose.yaml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `compose.sandbox.yaml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
+    Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. Both stacks carry healthchecks for Qdrant (TCP connect probe — the image ships no curl), and `api`/`worker` gate on `condition: service_healthy` rather than `service_started`. In the production stack the `api` service used the bare list form of `depends_on`, which waits only for the container to be *created*, so it could take its first requests against a Postgres still running `initdb`; it now gates on health like the worker always did.
     Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). Both compose files pass it through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
+
+### Container Image Build
+
+There is **one** `Dockerfile`, multi-stage, and local, dev and production all
+build it. It replaced a pair of files — a single-stage one suffixed *slim* and
+a multi-stage one suffixed *full* — that installed the same `requirements.txt`.
+That was not two products; it was one product and a drift source, and it had
+drifted in both directions:
+
+- **The names were backwards.** The *slim* one was the *bigger* image (5.26GB
+  against 4.83GB), because it kept `build-essential`, `git`, `curl`, `wget` and
+  `make` in its shipped layer; the *full* one was the hardened multi-stage
+  build.
+- **The `slim` / `full` tags never existed.** The Helm chart told operators to
+  pick a `slim` tag that "excludes heavy browser/OCR extras" and a `full` tag
+  for when they need them. No build produced either, and both files installed
+  the same Playwright, Chromium and pytesseract.
+- **The released image had no `baselith` command.** The multi-stage build never
+  ran `pip install .`, so the console script was absent — while the chart's
+  worker Deployment runs `["baselith", "queue", "worker"]`. That pod could only
+  CrashLoop with `baselith: not found`, and `baselith doctor` was equally
+  unavailable in the one image a production deployment actually pulls.
+- **The released image had no thread caps.** `OMP_NUM_THREADS`,
+  `OPENBLAS_NUM_THREADS` and `TOKENIZERS_PARALLELISM` were set only in the
+  local/dev file, so in production torch and OpenBLAS sized their pools from
+  the *host's* core count and ignored the container's CPU limit.
+- **Three of the dev image's baked settings bound nothing.** `OLLAMA_API_BASE`
+  and `OLLAMA_MODEL` match no setting alias (the field reads
+  `LLM_OLLAMA_API_BASE`), and `QDRANT_MODE=embedded` is not one of the two
+  values that field accepts (`server`, `local`). They are not carried over;
+  configuration belongs in the environment, not baked into the image.
+
+The consolidated file keeps the multi-stage layout, which is the part that was
+worth keeping: dependencies and the project distribution are built in earlier
+stages and only their install prefixes are copied forward, so no compiler
+toolchain reaches the shipped layers. `--target deps` still gets you a shell
+with the toolchain when a dependency build needs debugging.
+
+#### What the layer rewrite changed
+
+Both files closed with `chown -R appuser:appuser /app /install /ms-playwright`,
+which is the one instruction that silently doubles an image: changing a file's
+owner copies it up out of its earlier layer, so the image held a second copy of
+the installed dependencies and of the whole Chromium install. On `docker
+history` that single layer measured **3.14GB of a 9.04GB image**.
+
+Ownership is now handed over as the files arrive — `COPY --chown`, or a `chown`
+inside the same `RUN` that created them — and the dependencies under `/install`
+stay root-owned, because the process only reads them (a compromised process
+cannot rewrite its own `site-packages`). `/app` keeps the ownership it had,
+since the app rewrites `configs/plugins.yaml` on every plugin toggle and a
+plugin may persist state under its own directory.
+
+| | Before | After |
+|---|---|---|
+| Released image | 9.04GB | **4.85GB** |
+
+Two further changes to the same effect:
+
+- **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
+  imports it (the tree's only `torch` import is the Hugging Face provider, and
+  `sentence-transformers` needs torchvision only for image models, which no
+  plugin loads). The only thing in `uv.lock` that wants it is mineru's
+  *optional* `pipeline` extra, which `requirements.txt` does not install.
+- **The Chromium install moved above the source `COPY`s.** It is the largest
+  single step (1.39GB) and depends on nothing but the installed dependencies;
+  sitting below them, a one-line code change invalidated it and the build
+  reinstalled the browser and its ~100 apt packages from scratch.
+
+`git`, `ssdeep` and `libfuzzy-dev` are no longer installed at all: no
+requirement is a VCS URL, and nothing in the repository references the fuzzy
+hashing library — the released image never carried it at runtime, so nothing
+could have been linking it.
+
+#### Release pipeline
+
+The workflow builds each platform on a runner of its own architecture
+(`ubuntu-latest` and `ubuntu-24.04-arm`) and merges the two into one multi-arch
+index with `docker buildx imagetools create`. It previously built
+`linux/amd64,linux/arm64` on a single amd64 runner, which runs the arm64 half
+under QEMU emulation — torch, the apt set, Chromium and two model downloads,
+all interpreted. It also keeps a per-platform layer cache in the registry
+(`:buildcache-amd64` / `:buildcache-arm64`), so a release that only changes code
+reuses the dependency, model and browser layers instead of rebuilding them.
+
+Signing, the Trivy gate and the provenance attestation all run against the
+**index** digest, which is what a puller of the tag resolves — not against
+either platform digest.
+
+### Postgres image and the vector store
+
+Two gaps in the production stack, both of the same shape: a default that looked
+harmless and produced no error.
+
+**One Postgres image everywhere.** Production ran `postgres:16-alpine` while the
+single-host stack ran `pgvector/pgvector:pg16` — a different Postgres build from
+the one everything is developed against, and one in which the documented
+optional backend `VECTORSTORE_PROVIDER=pgvector` could not work at all, because
+the extension was not in the image. Both stacks now use
+`pgvector/pgvector:pg16`, which is the official `postgres:16` plus that
+extension. Verified on the running container: extension `vector` 0.8.6 installs
+and `'[1,2,3]'::vector <-> '[3,2,1]'::vector` answers.
+
+!!! warning "Migrating an existing production volume"
+    alpine links musl, this image links glibc, and the two sort text
+    differently. The data files are compatible (same major version), but every
+    index on a text column is ordered by the old collation and must be rebuilt,
+    or lookups silently miss rows:
+
+    ```bash
+    docker compose -f compose.prod.yaml up -d postgres
+    docker compose -f compose.prod.yaml exec postgres \
+      psql -U baselithcore -d baselithcore -c 'REINDEX DATABASE baselithcore;'
+    ```
+
+    A fresh deployment needs none of this.
+
+**The production stack had no vector store.** `VectorStoreConfig` defaults to
+provider `qdrant`, `compose.prod.yaml` shipped no `qdrant` service, and
+`configs/.env.production` pointed `VECTORSTORE_QDRANT_HOST` at `localhost` —
+which inside the `api` container is the container itself, where nothing
+listens. The pgvector alternative was unavailable for the reason above. Nothing
+failed at boot, because the store is resolved lazily, so retrieval and
+long-term memory broke at request time on a stack whose whole premise is that
+everything else is bundled.
+
+A hardened `qdrant` service is now part of it (loopback publish, TCP healthcheck,
+`cap_drop: ALL`, resource limits, its own volume), `api` and `worker` gate on its
+health, and the host defaults to that service. Set `QDRANT_HOST` to point at a
+managed instance instead.
 
 ### Uvicorn Runtime Flags
 
@@ -355,7 +537,7 @@ The production image's entrypoint runs Uvicorn with proxy-aware and shutdown fla
 uvicorn backend:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-server-header \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
-    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
+    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-30}" \
     --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
 ```
 
@@ -373,8 +555,11 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
   passes upstream headers through would otherwise advertise the exact server
   stack to every caller.
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
-  SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
-  pod drains cleanly instead of being force-killed.
+  SIGTERM (default 30s, the same value `backend.py` uses so one variable cannot
+  mean two drains). Keep it **below** your termination grace so the pod drains
+  cleanly instead of being force-killed: the Helm chart sets
+  `terminationGracePeriodSeconds: 45` for the API, and 30 also matches the bare
+  Kubernetes default of 30s. Raise the grace period first if you raise this.
 - **`--timeout-keep-alive`** — how long an idle client connection is kept
   open (default 75s). Uvicorn's own default is 5s, *shorter* than the idle
   timeout of the upstream keepalive pool of every common reverse proxy
@@ -452,15 +637,15 @@ Production code execution is expected to run on a separate sandbox host or node.
 
 #### Opt-In Sandbox Overlay (Single Host)
 
-The default `docker-compose.yml` stack ships **without** a sandbox daemon. The
+The default `compose.yaml` stack ships **without** a sandbox daemon. The
 Docker-in-Docker service needs `privileged: true`, which is root-equivalent on
 the compose host — a container escape from sandboxed agent code would
 compromise every other service, including the Postgres volume — so it lives in
-a separate opt-in overlay, `docker-compose.sandbox.yml`. Enable sandboxed agent
+a separate opt-in overlay, `compose.sandbox.yaml`. Enable sandboxed agent
 code execution with:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+docker compose -f compose.yaml -f compose.sandbox.yaml up -d
 ```
 
 The overlay starts the `sandbox-daemon` service (`docker:24-dind`, mutual TLS
@@ -477,14 +662,15 @@ client-certificate volume into the `api` and `worker` services.
 #### Dev Override Overlay (Explicit Only)
 
 The live-reload development overlay is named
-`docker-compose.dev.override.yml` — **deliberately not**
-`docker-compose.override.yml`. Compose auto-merges a file with the stock
+`compose.dev.yaml` — **deliberately not**
+`compose.override.yaml`. Compose auto-merges a file with either stock
+override name (`compose.override.yaml`, `docker-compose.override.yml`)
 override name into every plain `docker compose up`, which silently
 bind-mounted the source tree over the production image, converting the stack
 into a dev deploy without any visible flag. Dev usage is now explicit:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.override.yml up -d
+docker compose -f compose.yaml -f compose.dev.yaml up -d
 ```
 
 A plain `docker compose up -d` runs the image as built, with no source
@@ -502,7 +688,7 @@ $EDITOR configs/.env.production
 ./scripts/prod-preflight.sh
 
 # Point every docker compose command below at the production stack
-export COMPOSE_FILE=docker-compose.prod.yml
+export COMPOSE_FILE=compose.prod.yaml
 
 # Start all services. --env-file feeds compose interpolation
 # (DB_PASSWORD, SANDBOX_DOCKER_HOST, SANDBOX_CERTS_DIR, REDIS_PASSWORD, SENTRY_DSN)
@@ -543,7 +729,7 @@ One of the system's strengths is horizontal scalability to handle increasing loa
 Launch multiple API instances to distribute load. The load balancer (Nginx, Traefik, or cloud LB) distributes requests.
 
 !!! warning "`--scale` and fixed container names"
-    `docker-compose.prod.yml` pins `container_name: baselith-core-api` on `api`
+    `compose.prod.yaml` pins `container_name: baselith-core-api` on `api`
     (and `baselith-core-worker` on `worker`), and Compose refuses to scale a
     service with a fixed container name. To run several replicas on one host,
     drop `container_name` from the service in an override file and add the
@@ -612,8 +798,18 @@ upstream backend {
     server 127.0.0.1:8001;
     server 127.0.0.1:8002;
 
-    # Keepalive connections
+    # Keepalive connections — only honoured when the proxied request carries
+    # NO `Connection: close` (see the map below and `proxy_http_version 1.1`).
     keepalive 32;
+}
+
+# WebSocket upgrade passthrough that keeps the upstream keepalive pool alive.
+# The textbook `'' close` sends `Connection: close` upstream on every ordinary
+# request, so nginx opens a fresh TCP connection to uvicorn per request and the
+# pool above never holds a socket. An empty value omits the header instead.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' "";
 }
 
 server {
@@ -632,17 +828,22 @@ server {
     ssl_certificate /etc/letsencrypt/live/baselith.ai/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/baselith.ai/privkey.pem;
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    # Security headers. Each value must EQUAL what SecurityHeadersMiddleware
+    # sends: add_header appends a second copy rather than replacing the
+    # upstream one, and browsers apply the last (X-Frame-Options: conflicting
+    # values are treated as DENY, so a looser edge value cannot relax the app,
+    # but a stricter app value cannot be relaxed by the edge either).
+    add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "0" always;   # legacy auditor off — matches the app
+    add_header Referrer-Policy "same-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         # Let nginx compress (gzip on, in C, off the app's event loop) instead
         # of the app's Python gzip middleware: strip the client's
@@ -660,8 +861,14 @@ server {
     # SSE / chat streaming: disable proxy buffering to preserve token-by-token
     # delivery. Regex so the versioned alias /v1/chat/stream is covered too —
     # a plain prefix location would let it fall through to `location /` and
-    # its shorter read timeout.
-    location ~ ^/(v1/)?chat/stream$ {
+    # its shorter read timeout. The other long-lived streams are listed as
+    # well: the run event feed (GET /runs/{id}/events), the MCP Streamable
+    # HTTP transport (POST /mcp, SSE responses) and the baselithbot dashboard
+    # event feed (`/dash/events/stream`, a mounted sub-app) — under
+    # `location /` each of them was cut
+    # by the read timeout after a minute of silence (an agent waiting on a
+    # slow LLM call).
+    location ~ ^/(v1/)?(chat/stream|runs/[^/]+/events|mcp|dash/events/stream)$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -670,11 +877,21 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
-        add_header X-Accel-Buffering no;
+        # NOT `add_header X-Accel-Buffering no` here: one add_header inside a
+        # location cancels EVERY header inherited from the server block, so
+        # the streams would ship without any security header. The app already
+        # emits X-Accel-Buffering on every stream; just pass it through.
+        proxy_pass_header X-Accel-Buffering;
         proxy_read_timeout 300s;
     }
 }
 ```
+
+The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
+`compose.prod.yaml`) applies the same three rules — empty `Connection`
+for non-upgrade requests so `keepalive 32` is actually used, the extended
+streaming location, and no `add_header` inside a location — and is checked
+with `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
 
 ### SSL Certificate Setup (Let's Encrypt)
 
@@ -770,7 +987,7 @@ MAX_REQUEST_SIZE_BYTES=10485760
 # CIDR; the production compose defaults it to the app_net subnet)
 WEB_CONCURRENCY=4
 FORWARDED_ALLOW_IPS=172.28.0.0/24
-GRACEFUL_SHUTDOWN_TIMEOUT=25
+GRACEFUL_SHUTDOWN_TIMEOUT=30
 
 # Database
 DB_HOST=postgres
@@ -889,7 +1106,7 @@ docker compose exec api env | grep -E '^(DB_|CACHE_REDIS_URL|QUEUE_REDIS_URL|GRA
 
 - **Database unreachable** -> Verify `DB_HOST` / `DB_PASSWORD` (or `DATABASE_URL`) and that `postgres` is healthy
 - **Redis unreachable** -> Verify `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` (including the `REDIS_PASSWORD` embedded in them)
-- **Port already in use** -> Change port in docker-compose
+- **Port already in use** -> Change the published port in `compose.yaml`
 - **Missing dependencies** -> Rebuild image: `docker compose build --no-cache`
 
 ### Performance Degradation
@@ -960,16 +1177,30 @@ docker compose exec postgres psql -U baselithcore -d baselithcore -c \
 
 ```bash title="scripts/backup-db.sh"
 #!/bin/bash
+# pipefail, or `set -e` only sees gzip: a pg_dump that dies mid-pipe exits 0.
+set -euo pipefail
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="/backups/postgres"
+OUT="${BACKUP_DIR}/backup_${DATE}.sql.gz"
+TMP="${BACKUP_DIR}/.backup_${DATE}.sql.gz.partial"
+trap 'rm -f "${TMP}"' EXIT
 
-# Create backup
-docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U baselithcore baselithcore \
-  | gzip > "${BACKUP_DIR}/backup_${DATE}.sql.gz"
+# Create backup under a temporary name, publish it only on success
+docker compose -f compose.prod.yaml exec -T postgres pg_dump -U baselithcore baselithcore \
+  | gzip > "${TMP}"
+mv "${TMP}" "${OUT}"
 
 # Retain last 30 days
 find "${BACKUP_DIR}" -name "backup_*.sql.gz" -mtime +30 -delete
 ```
+
+!!! warning "A failed backup must look like a missing one"
+    Dumping straight to the final name creates the file before `pg_dump` can
+    fail, so a failed run leaves a 20-byte gzip of nothing — newer than every
+    real backup, kept for the whole retention window, and the first thing
+    picked by anyone restoring "the latest". Dump to a temporary name and
+    rename only after the dump exits 0. The chart's backup CronJob does the
+    same.
 
 **Cron configuration:**
 
@@ -1016,7 +1247,7 @@ down even though the pod keeps serving. See
 
 ### Prometheus Metrics
 
-Prometheus is already part of `docker-compose.prod.yml` (`prom/prometheus:v3.5.5`,
+Prometheus is already part of `compose.prod.yaml` (`prom/prometheus:v3.5.5`,
 no host port published — reach the UI over `app_net` or an SSH tunnel). It loads
 the repository's `prometheus.yml` plus the rule files mounted from
 `deploy/prometheus/` (`alert-rules.yml`, `slo-rules.yml`) and scrapes the API
@@ -1064,7 +1295,7 @@ grafana:
 Access Grafana at `http://localhost:3000` and import pre-built dashboards for FastAPI applications.
 
 !!! warning "No default Grafana password"
-    The bundled observability stack (`docker-compose.observability.yml`)
+    The bundled observability stack (the `observability` profile of `compose.yaml`)
     **requires** `GRAFANA_ADMIN_PASSWORD` — compose aborts when it is unset,
     instead of falling back to `admin`/`admin`. Whatever compose file you use,
     never ship the default credential: a reachable Grafana on `admin`/`admin`

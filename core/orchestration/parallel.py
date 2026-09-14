@@ -21,7 +21,10 @@ from core.orchestration.autonomy import (
 )
 from core.orchestration.contract import ContractViolationError
 from core.orchestration.limits import BudgetExceededError
-from core.orchestration.tool_output import sanitize_tool_output
+from core.orchestration.tool_output import (
+    sanitize_tool_output,
+    truncate_tool_output,
+)
 
 logger = get_logger(__name__)
 
@@ -99,6 +102,7 @@ class ParallelToolExecutor:
         human_intervention: Any | None = None,
         loop_budget: Any | None = None,
         contract_validator: Any | None = None,
+        tool_hooks: Any | None = None,
     ):
         """
         Initialize parallel executor.
@@ -119,6 +123,10 @@ class ParallelToolExecutor:
                 ``core.orchestration.contract.ContractValidator``. When set, a
                 tool absent from ``allowed_tools`` or listed in ``must_not`` is
                 rejected before execution.
+            tool_hooks: Optional
+                ``core.orchestration.hooks.ToolHookRegistry`` whose ``post``
+                hooks observe every finished call. ``None`` uses the
+                process-wide default registry (a no-op when empty).
         """
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
@@ -132,6 +140,7 @@ class ParallelToolExecutor:
         self.human_intervention = human_intervention
         self.loop_budget = loop_budget
         self.contract_validator = contract_validator
+        self.tool_hooks = tool_hooks
         self._tools: dict[str, Callable] = {}
         self._tool_categories: dict[str, str] = {}
         # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
@@ -256,7 +265,7 @@ class ParallelToolExecutor:
             )
 
             # Process results
-            for call, result in zip(group_calls, group_results):
+            for call, result in zip(group_calls, group_results, strict=True):
                 if isinstance(result, BaseException):
                     results_map[call.id] = ToolResult(
                         call_id=call.id,
@@ -385,10 +394,16 @@ class ParallelToolExecutor:
                 call.status = ToolStatus.COMPLETED
 
                 if isinstance(result, str):
-                    # Opt-in indirect-injection scan of the observation
-                    # (no-op unless BASELITH_INDIRECT_SCAN_TOOL_OUTPUT is on).
-                    result = sanitize_tool_output(result, source=call.tool_name)
+                    # Same observation hygiene as the sequential ReAct path:
+                    # bound the size first (an oversized result overflows the
+                    # next reasoning turn), then scan it for indirect-injection
+                    # smuggling. Non-string results are structured payloads for
+                    # downstream code, not prompt text — left untouched.
+                    result = sanitize_tool_output(
+                        truncate_tool_output(result), source=call.tool_name
+                    )
                 elapsed_ms = (time.perf_counter() - start) * 1000
+                await self._dispatch_post(call, ok=True, elapsed_ms=elapsed_ms)
                 return ToolResult(
                     call_id=call.id,
                     tool_name=call.tool_name,
@@ -399,6 +414,9 @@ class ParallelToolExecutor:
 
             except TimeoutError:
                 call.status = ToolStatus.FAILED
+                await self._dispatch_post(
+                    call, ok=False, elapsed_ms=(time.perf_counter() - start) * 1000
+                )
                 return ToolResult(
                     call_id=call.id,
                     tool_name=call.tool_name,
@@ -408,12 +426,42 @@ class ParallelToolExecutor:
             except Exception as e:
                 call.status = ToolStatus.FAILED
                 logger.error(f"Tool {call.tool_name} failed: {e}")
+                await self._dispatch_post(
+                    call, ok=False, elapsed_ms=(time.perf_counter() - start) * 1000
+                )
                 return ToolResult(
                     call_id=call.id,
                     tool_name=call.tool_name,
                     success=False,
                     error=str(e),
                 )
+
+    async def _dispatch_post(
+        self, call: ToolCall, *, ok: bool, elapsed_ms: float
+    ) -> None:
+        """Fire ``post`` hooks for a finished call.
+
+        Post hooks are observers by contract (the registry swallows their
+        failures), so this never affects the tool's result. Without it the
+        deterministic side-effect bus was write-only: operators could register
+        "always audit writes" hooks that core never called.
+        """
+        from core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
+
+        hooks = self.tool_hooks
+        if hooks is None:
+            hooks = get_tool_hook_registry()
+        try:
+            await hooks.dispatch_post(
+                ToolHookEvent(
+                    tool_name=call.tool_name,
+                    category=self._tool_categories.get(call.tool_name, DESTRUCTIVE),
+                    phase="post",
+                    metadata={"ok": ok, "elapsed_ms": round(elapsed_ms, 3)},
+                )
+            )
+        except Exception:  # pragma: no cover - observers never break a tool
+            logger.debug("tool_post_hook_dispatch_failed", exc_info=True)
 
     def get_stats(self) -> dict[str, Any]:
         """

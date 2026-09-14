@@ -76,11 +76,17 @@ class ScoreRerankerProtocol(Protocol):
         """
         Predict relevance scores for query-document pairs.
 
+        Implementations MUST return **exactly one score per input pair, in the
+        input order** — callers zip the result back against ``pairs`` under
+        ``strict=True`` to attach each score to its document, so a short or
+        reordered return is a contract violation, not a partial result.
+
         Args:
             pairs: List of (query, document) tuples
 
         Returns:
-            Relevance scores (array-like, supporting .tolist() if needed)
+            Relevance scores (array-like, supporting .tolist() if needed);
+            ``len(result) == len(pairs)``.
         """
         ...
 

@@ -16,26 +16,33 @@ except ImportError:
 
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
+from core.services.llm.errors import LLMRefusalError, map_provider_exception
 from core.services.llm.exceptions import LLMProviderError, describe_exception
+from core.services.llm.messages import Message
 from core.services.llm.providers._anthropic_mapping import (
-    _apply_tool_cache_control,
     _build_system_param,
-    _to_anthropic_tool_choice,
-    _to_anthropic_tools,
 )
-from core.services.llm.thinking import resolve_thinking
+from core.services.llm.providers._anthropic_request import (
+    RESERVED_KWARGS,
+    build_request_kwargs,
+    forwardable_kwargs,
+)
+from core.services.llm.providers._anthropic_response import check_stop_reason
+from core.services.llm.stop_reasons import (
+    MAX_PAUSE_TURN_CONTINUATIONS,
+    is_paused,
+)
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
     ResponseFormat,
-    ToolCall,
     ToolChoice,
 )
+from core.services.llm.usage import Usage
 
-# Provider-specific kwargs handled explicitly (not forwarded verbatim).
-_RESERVED_KWARGS = frozenset(
-    {"max_tokens", "system", "temperature", "thinking", "effort", "thinking_budget"}
-)
+# Kept under the historical private name: external call sites (and tests)
+# import it to know which kwargs the provider consumes itself.
+_RESERVED_KWARGS = RESERVED_KWARGS
 
 logger = get_logger(__name__)
 
@@ -46,6 +53,12 @@ class AnthropicProvider:
     # Anthropic maps tool specs to its native ``tools`` API and parses
     # ``tool_use`` content blocks back into structured tool calls.
     supports_native_tools: bool = True
+
+    # Anthropic's Messages API is the native shape for an agentic loop:
+    # tool_use/tool_result blocks correlate by id, failures carry is_error,
+    # thinking replays verbatim, and an append-only history keeps the prompt
+    # prefix cacheable across iterations.
+    supports_messages: bool = True
 
     #: Serving backends. ``api`` (default) needs an Anthropic key; ``bedrock``
     #: and ``vertex`` use the Anthropic SDK's native cloud clients, which
@@ -62,6 +75,9 @@ class AnthropicProvider:
         aws_region: str | None = None,
         vertex_project: str | None = None,
         vertex_region: str | None = None,
+        betas: list[str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         """
         Initialize Anthropic provider.
@@ -78,6 +94,14 @@ class AnthropicProvider:
                 ``GOOGLE_CLOUD_PROJECT``.
             vertex_region: Vertex region; ``None`` defers to
                 ``CLOUD_ML_REGION``.
+            betas: Beta feature flags applied to every call. When set, requests
+                route through ``client.beta.messages`` and carry ``betas``.
+                Per-call ``betas=`` are merged on top.
+            extra_headers: Headers added to every request (gateway routing,
+                cost attribution, org-specific tags).
+            extra_body: Extra top-level request fields, for API surface this
+                provider does not model yet — the escape hatch that keeps a new
+                API feature from requiring a provider release.
         """
         if backend not in self.BACKENDS:
             raise LLMProviderError(
@@ -105,6 +129,9 @@ class AnthropicProvider:
         self._aws_region = aws_region
         self._vertex_project = vertex_project
         self._vertex_region = vertex_region
+        self._betas: list[str] = list(betas or [])
+        self._extra_headers: dict[str, str] = dict(extra_headers or {})
+        self._extra_body: dict[str, Any] = dict(extra_body or {})
         self.client: anthropic.AsyncAnthropic | None = None
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
@@ -144,6 +171,120 @@ class AnthropicProvider:
             except Exception as e:
                 logger.warning(f"Error closing Anthropic client: {e}")
 
+    def _messages_api(self, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        """Resolve the messages endpoint and its transport-level extras.
+
+        Beta features live on ``client.beta.messages`` and are selected per
+        request with ``betas=``; without any, the stable endpoint is used so a
+        beta header is never sent by accident.
+
+        Args:
+            kwargs: Caller kwargs (``betas``, ``extra_headers``,
+                ``extra_body``).
+
+        Returns:
+            tuple: The endpoint object and the extras to splat into the call.
+        """
+        client = self._ensure_client()
+        extra: dict[str, Any] = {}
+        headers = {**self._extra_headers, **(kwargs.get("extra_headers") or {})}
+        if headers:
+            extra["extra_headers"] = headers
+        body = {**self._extra_body, **(kwargs.get("extra_body") or {})}
+        if body:
+            extra["extra_body"] = body
+
+        betas = list(self._betas)
+        betas.extend(b for b in (kwargs.get("betas") or []) if b not in betas)
+        if betas:
+            extra["betas"] = betas
+            return client.beta.messages, extra
+        return client.messages, extra
+
+    async def _create(
+        self, kwargs: dict[str, Any], create_kwargs: dict[str, Any]
+    ) -> tuple[Any, list[Any], Usage]:
+        """Run one turn, resuming ``pause_turn`` up to the continuation budget.
+
+        A long-running turn can come back with ``stop_reason == "pause_turn"``
+        and *no* end to the work: the API expects the conversation to be resent
+        with the partial assistant content appended. Returning it as a finished
+        answer silently truncates whatever the model was doing, so the loop is
+        closed here — the only layer holding the wire-level message list.
+
+        Args:
+            kwargs: Caller kwargs (for betas/headers routing).
+            create_kwargs: Fully-shaped request for ``messages.create``.
+
+        A continuation that fails is NOT fatal: the turns already completed
+        were billed and their content is real, so the partial answer is
+        returned with ``stop_reason == "pause_turn"`` (the caller can see it is
+        unfinished) instead of discarding paid-for work. A failure on the first
+        call has nothing to fall back on and propagates.
+
+        Returns:
+            tuple: the final response, every content block across turns, and
+            the merged usage (each continuation is billed separately).
+        """
+        api, extra = self._messages_api(kwargs)
+        messages = list(create_kwargs.get("messages") or [])
+        blocks: list[Any] = []
+        usage = Usage()
+        response: Any = None
+        #: The last response that asked to be resumed; the answer a failed
+        #: continuation falls back to (always set once turn > 0).
+        paused_response: Any = None
+
+        for turn in range(MAX_PAUSE_TURN_CONTINUATIONS + 1):
+            try:
+                response = await api.create(
+                    **{**create_kwargs, "messages": messages}, **extra
+                )
+            except Exception as exc:
+                if turn == 0:
+                    raise
+                logger.warning(
+                    "anthropic_pause_turn_continuation_failed",
+                    extra={
+                        "model": create_kwargs.get("model"),
+                        "turn": turn,
+                        "error": describe_exception(exc),
+                    },
+                )
+                return paused_response, blocks, usage
+            turn_blocks = list(response.content or [])
+            blocks.extend(turn_blocks)
+            usage = usage.merge(Usage.from_anthropic(getattr(response, "usage", None)))
+            if not is_paused(getattr(response, "stop_reason", None)):
+                return response, blocks, usage
+            # Held so a failed continuation can still answer with the paused
+            # stop reason rather than a success the model never reached.
+            paused_response = response
+            messages = [*messages, {"role": "assistant", "content": turn_blocks}]
+
+        logger.warning(
+            "anthropic_pause_turn_budget_exhausted",
+            extra={
+                "model": create_kwargs.get("model"),
+                "continuations": MAX_PAUSE_TURN_CONTINUATIONS,
+            },
+        )
+        return response, blocks, usage
+
+    @staticmethod
+    def _record_usage(kwargs: dict[str, Any], usage: Usage) -> None:
+        """Publish exact usage to a caller-supplied sink, when there is one.
+
+        The legacy ``generate`` contract returns ``(text, total_tokens)``, from
+        which the orchestration layer used to re-derive the input/output split
+        by subtracting a tokenizer estimate — mispricing every call, since
+        output bills at up to 5x input. An opt-in list lets a caller receive
+        the metered record without changing that return type.
+        """
+        sink = kwargs.get("usage_sink")
+        if isinstance(sink, list):
+            sink.append(usage)
+
     # Single retry owner is LLMService._generate_with_retry (rate-limit
     # aware). A provider-level blanket retry on Exception would multiply
     # attempts (3x3 upstream calls per request) and pointlessly retry
@@ -158,75 +299,57 @@ class AnthropicProvider:
 
         Args:
             prompt: Input prompt
-            model: Model name (e.g., 'claude-3-5-sonnet-20240620')
-            json_mode: Whether to request JSON output (handled via system prompt for Claude)
-            **kwargs: Additional parameters
+            model: Model name (e.g., 'claude-opus-5')
+            json_mode: Whether to request JSON output (handled via system prompt)
+            **kwargs: ``system``, ``max_tokens``, sampling parameters (forwarded
+                only where the family accepts them), ``effort`` /
+                ``thinking_budget``, ``betas``, ``extra_headers``,
+                ``extra_body``, ``allow_refusal`` and ``usage_sink``.
 
         Returns:
             Tuple of (response_text, tokens_used)
+
+        Raises:
+            LLMRefusalError: The model declined to answer and the caller did
+                not pass ``allow_refusal=True``.
+            LLMProviderError: Any other provider failure, mapped to the neutral
+                taxonomy in :mod:`core.services.llm.errors`.
         """
-        client = self._ensure_client()
         try:
-            messages: list[Any] = [{"role": "user", "content": prompt}]
-
-            # If json_mode is requested, we should ideally use a system prompt
-            # but for consistency with OpenAI/Ollama providers in this core,
-            # we keep it simple or follow their pattern if they have specific json support.
-            # Claude currently supports JSON mode via prefilling or system instructions.
-
             system_prompt = kwargs.get("system", "")
             if json_mode and "json" not in system_prompt.lower():
                 system_prompt += "\nOutput MUST be a valid JSON object."
 
-            # Optional extended-thinking budget. Off by default, so callers
-            # that pass neither ``effort`` nor ``thinking_budget`` keep the
-            # previous behaviour (temperature honoured, no thinking block).
-            plan = resolve_thinking(
-                effort=kwargs.get("effort"),
-                thinking_budget=kwargs.get("thinking_budget"),
-                max_tokens=kwargs.get("max_tokens", 4096),
-            )
-            thinking_kwargs = plan.to_anthropic_kwargs()
-            if not plan.enabled:
-                thinking_kwargs["temperature"] = kwargs.get("temperature", 0.7)
+            create_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "system": _build_system_param(system_prompt),
+                **build_request_kwargs(model, kwargs),
+                **forwardable_kwargs(kwargs),
+            }
+            response, blocks, usage = await self._create(kwargs, create_kwargs)
 
-            response = await client.messages.create(
-                model=model,
-                messages=messages,
-                system=_build_system_param(system_prompt),  # type: ignore[arg-type]
-                **thinking_kwargs,
-                **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
-            )
+            content = "".join(
+                block.text for block in blocks if block.type == "text"
+            ).strip()
 
-            # Anthropic returns a list of content blocks
-            content = ""
-            for block in response.content:
-                if block.type == "text":
-                    content += block.text
-
-            content = content.strip()
-
-            # Get exact token usage if available. With prompt caching, cached
-            # input arrives as cache_read/cache_creation counters that are NOT
-            # included in ``input_tokens``; sum them so usage isn't undercounted
-            # on a cache hit.
-            usage = response.usage
-            if usage:
-                cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-                tokens_used = (
-                    usage.input_tokens + usage.output_tokens + cache_write + cache_read
+            if usage.is_empty:
+                usage = Usage.estimate(
+                    estimate_tokens(prompt, model), estimate_tokens(content, model)
                 )
-            else:
-                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
-                    content, model
-                )
+            self._record_usage(kwargs, usage)
+            check_stop_reason(response, model=model, kwargs=kwargs)
+            return content, usage.total
 
-            return content, tokens_used
-
+        except LLMRefusalError:
+            # The call succeeded and was billed; the model simply declined.
+            # ``raise_for_refusal`` already logged it at warning with the
+            # refusal category, so an error-level "generation error" here
+            # would both double-report it and misclassify it.
+            raise
         except Exception as e:
             logger.error(f"Anthropic generation error: {describe_exception(e)}")
-            raise LLMProviderError(f"Anthropic error: {describe_exception(e)}") from e
+            raise map_provider_exception(e, provider="Anthropic") from e
 
     @get_circuit_breaker("anthropic_provider")
     async def generate_structured(
@@ -239,12 +362,9 @@ class AnthropicProvider:
         response_format: ResponseFormat | None = None,
         **kwargs: Any,
     ) -> LLMResult:
-        """
-        Generate using Anthropic's native tool-calling / structured-output API.
+        """Generate using Anthropic's native tool-calling / structured API.
 
-        Tool specs map to ``tools`` and are selected via ``tool_choice``;
-        ``response_format`` maps to ``output_config.format`` (json_schema).
-        ``tool_use`` content blocks are parsed back into :class:`ToolCall`.
+        Body lives in ``_anthropic_structured`` (module size cap).
 
         Args:
             prompt: User turn.
@@ -252,86 +372,64 @@ class AnthropicProvider:
             tools: Tools the model may call.
             tool_choice: Selection policy (defaults to auto when tools present).
             response_format: Optional structured-output constraint.
-            **kwargs: ``system``, ``temperature``, ``max_tokens``.
+            **kwargs: Same surface as :meth:`generate`.
 
         Returns:
-            LLMResult: text and/or structured tool calls with token usage.
+            LLMResult: text and/or structured tool calls, with the metered
+            usage split and the stop reason the caller needs to interpret it.
         """
-        client = self._ensure_client()
-        try:
-            create_kwargs: dict[str, Any] = {
-                "model": model,
-                "max_tokens": kwargs.get("max_tokens", 4096),
-                "messages": [{"role": "user", "content": prompt}],
-                "system": _build_system_param(kwargs.get("system", "")),
-                "temperature": kwargs.get("temperature", 0.7),
-            }
-            if tools:
-                create_kwargs["tools"] = _apply_tool_cache_control(
-                    _to_anthropic_tools(tools)
-                )
-                choice = tool_choice or ToolChoice(mode="auto")
-                create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
-            if response_format is not None:
-                # Modern structured-outputs surface (output_config.format), not
-                # the deprecated top-level output_format. Requires a
-                # structured-outputs-capable model.
-                create_kwargs["output_config"] = {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": response_format.schema,
-                    }
-                }
+        from core.services.llm.providers._anthropic_structured import (
+            generate_structured,
+        )
 
-            response = await client.messages.create(**create_kwargs)
+        return await generate_structured(
+            self,
+            prompt,
+            model,
+            tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
+            **kwargs,
+        )
 
-            text_parts: list[str] = []
-            tool_calls: list[ToolCall] = []
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_calls.append(
-                        ToolCall(
-                            id=block.id,
-                            name=block.name,
-                            # Anthropic returns parsed input; never re-parse.
-                            arguments=dict(block.input or {}),
-                        )
-                    )
+    @get_circuit_breaker("anthropic_provider")
+    async def generate_messages(
+        self,
+        messages: list[Message],
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        system: str | None = None,
+        **kwargs: Any,
+    ) -> LLMResult:
+        """Generate one turn from a neutral message history.
 
-            usage = response.usage
-            if usage:
-                cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-                tokens_used = (
-                    usage.input_tokens + usage.output_tokens + cache_write + cache_read
-                )
-            else:
-                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
-                    "".join(text_parts), model
-                )
+        Body lives in ``_anthropic_messages`` (module size cap).
 
-            text = "".join(text_parts).strip() or None
-            return LLMResult(
-                text=text,
-                tool_calls=tool_calls,
-                stop_reason=getattr(response, "stop_reason", None),
-                tokens_used=tokens_used,
-                native=True,
-                raw=response,
-            )
+        Args:
+            messages: Conversation so far, oldest first.
+            model: Model name.
+            tools: Tools the model may call.
+            system: System prompt; carries the prompt-cache breakpoint.
+            **kwargs: ``tool_choice``, ``response_format``, and the same
+                surface as :meth:`generate`.
 
-        except Exception as e:
-            logger.error(
-                f"Anthropic structured generation error: {describe_exception(e)}"
-            )
-            raise LLMProviderError(f"Anthropic error: {describe_exception(e)}") from e
+        Returns:
+            LLMResult: text and/or tool calls, plus ``message`` — the assistant
+            turn verbatim, thinking blocks included, for replay on the next
+            iteration.
+        """
+        from core.services.llm.providers._anthropic_messages import generate_messages
+
+        return await generate_messages(
+            self, messages, model, tools=tools, system=system, **kwargs
+        )
 
     # No @retry on the streaming generators: decorating an async generator
     # never retried anything (errors surface during iteration, outside the
     # wrapper) and retrying a partially consumed stream would duplicate
-    # already-yielded events.
+    # already-yielded events. Bodies live in ``_anthropic_streaming`` for the
+    # module size cap.
     async def generate_structured_stream(
         self,
         prompt: str,
@@ -340,103 +438,26 @@ class AnthropicProvider:
         tools: list[LLMToolSpec] | None = None,
         tool_choice: ToolChoice | None = None,
         **kwargs: Any,
-    ) -> "AsyncIterator[Any]":
+    ) -> AsyncIterator[Any]:
         """Stream a structured generation as neutral ``StreamEvent``s.
 
-        Emits ``TextDelta`` per text chunk, ``ToolCallStarted`` /
-        ``ToolCallDelta`` while the model writes a tool invocation, then a
-        terminal ``StreamEnd`` built from the SDK's accumulated final message
-        (parsed tool inputs, exact usage) — identical ``LLMResult`` shape to
-        :meth:`generate_structured`.
+        Args:
+            prompt: User turn.
+            model: Model name.
+            tools: Tools the model may call.
+            tool_choice: Selection policy (defaults to auto when tools present).
+            **kwargs: Same surface as :meth:`generate`.
+
+        Yields:
+            ``TextDelta`` / ``ToolCallStarted`` / ``ToolCallDelta`` events, then
+            exactly one ``StreamEnd`` carrying the authoritative result.
         """
-        # Lazy: stream_events imports the service layer (avoid import cycle).
-        from core.services.llm.stream_events import (
-            StreamEnd,
-            TextDelta,
-            ToolCallDelta,
-            ToolCallStarted,
-        )
+        from core.services.llm.providers._anthropic_streaming import stream_structured
 
-        client = self._ensure_client()
-        create_kwargs: dict[str, Any] = {
-            "model": model,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "messages": [{"role": "user", "content": prompt}],
-            "system": _build_system_param(kwargs.get("system", "")),
-            "temperature": kwargs.get("temperature", 0.7),
-        }
-        if tools:
-            create_kwargs["tools"] = _apply_tool_cache_control(
-                _to_anthropic_tools(tools)
-            )
-            choice = tool_choice or ToolChoice(mode="auto")
-            create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
-
-        try:
-            async with client.messages.stream(**create_kwargs) as stream:
-                # Track tool_use block ids by content-block index so the
-                # partial-JSON deltas can be attributed to their call.
-                open_tools: dict[int, str] = {}
-                async for event in stream:
-                    # The SDK stream yields a wide event union; getattr-based
-                    # dispatch keeps this tolerant of SDK additions.
-                    ev: Any = event
-                    etype = getattr(ev, "type", "")
-                    if etype == "content_block_start":
-                        block = getattr(ev, "content_block", None)
-                        if block is not None and getattr(block, "type", "") == (
-                            "tool_use"
-                        ):
-                            open_tools[getattr(ev, "index", -1)] = block.id
-                            yield ToolCallStarted(id=block.id, name=block.name)
-                    elif etype == "text_delta":
-                        yield TextDelta(ev.text)
-                    elif etype == "input_json_delta":
-                        call_id = open_tools.get(getattr(ev, "index", -1))
-                        if call_id is not None:
-                            yield ToolCallDelta(
-                                id=call_id,
-                                arguments_delta=ev.partial_json,
-                            )
-
-                final = await stream.get_final_message()
-
-            text_parts: list[str] = []
-            tool_calls: list[ToolCall] = []
-            for block in final.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_calls.append(
-                        ToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=dict(block.input or {}),
-                        )
-                    )
-            usage = final.usage
-            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-            tokens_used = (
-                usage.input_tokens + usage.output_tokens + cache_write + cache_read
-            )
-            yield StreamEnd(
-                LLMResult(
-                    text="".join(text_parts).strip() or None,
-                    tool_calls=tool_calls,
-                    stop_reason=getattr(final, "stop_reason", None),
-                    tokens_used=tokens_used,
-                    native=True,
-                    raw=final,
-                )
-            )
-        except Exception as e:
-            logger.error(
-                f"Anthropic structured streaming error: {describe_exception(e)}"
-            )
-            raise LLMProviderError(
-                f"Anthropic streaming error: {describe_exception(e)}"
-            ) from e
+        async for event in stream_structured(
+            self, prompt, model, tools=tools, tool_choice=tool_choice, **kwargs
+        ):
+            yield event
 
     @get_circuit_breaker("anthropic_provider")
     async def generate_stream(
@@ -448,37 +469,13 @@ class AnthropicProvider:
         Args:
             prompt: Input prompt
             model: Model name
-            **kwargs: Additional parameters
+            **kwargs: Same surface as :meth:`generate`.
 
         Yields:
-            Tuples of (chunk_text, accumulated_tokens)
+            Tuples of (chunk_text, accumulated_tokens); the count becomes the
+            provider's metered figure once the usage events arrive.
         """
-        client = self._ensure_client()
-        try:
-            system_prompt = kwargs.get("system", "")
+        from core.services.llm.providers._anthropic_streaming import stream_text
 
-            async with client.messages.stream(
-                model=model,
-                max_tokens=kwargs.get("max_tokens", 4096),
-                messages=[{"role": "user", "content": prompt}],  # type: ignore[arg-type]
-                system=_build_system_param(system_prompt),  # type: ignore[arg-type]
-                temperature=kwargs.get("temperature", 0.7),
-                **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
-            ) as stream:
-                # Estimate prompt tokens once; accumulate per-delta instead of
-                # re-tokenizing the full accumulated text on every chunk
-                # (which is O(n^2) over the stream).
-                tokens = estimate_tokens(prompt, model)
-                async for chunk in stream:
-                    # Anthropic stream events: TextEvent, ContentBlockStartEvent, etc.
-                    # For text content, we want the delta text from 'text_delta' events
-                    if chunk.type == "text_delta":
-                        text = chunk.text
-                        tokens += estimate_tokens(text, model)
-                        yield text, tokens
-
-        except Exception as e:
-            logger.error(f"Anthropic streaming error: {describe_exception(e)}")
-            raise LLMProviderError(
-                f"Anthropic streaming error: {describe_exception(e)}"
-            ) from e
+        async for chunk in stream_text(self, prompt, model, **kwargs):
+            yield chunk

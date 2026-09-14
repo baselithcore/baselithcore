@@ -5,7 +5,7 @@ Data models for task prioritization.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -38,7 +38,7 @@ class Task:
     dependencies: list[str] = field(default_factory=list)  # Task IDs
 
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     deadline: datetime | None = None
 
     # Metadata

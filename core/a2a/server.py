@@ -14,6 +14,8 @@ from core.observability.logging import get_logger
 
 from .agent_card import AgentCard
 from .protocol import (
+    DEPRECATED_PUSH_NOTIFICATION_METHODS,
+    PUSH_NOTIFICATION_METHODS,
     A2AMethod,
     ErrorCode,
     JSONRPCError,
@@ -276,14 +278,16 @@ class A2AServer(ABC):
             from core.a2a.task_streams import handle_tasks_resubscribe
 
             return await handle_tasks_resubscribe(self, request)
-        elif method in (
-            A2AMethod.TASKS_PUSH_NOTIFICATION_SET.value,
-            A2AMethod.TASKS_PUSH_NOTIFICATION_GET.value,
-        ):
+        elif method in PUSH_NOTIFICATION_METHODS:
             # Spec error (-32007), not method_not_found: the card advertises
-            # pushNotifications=false, and this is the conformant answer.
+            # pushNotifications=false, and this is the conformant answer. Both
+            # the 0.3.0 ``tasks/pushNotificationConfig/*`` names and the 0.2
+            # ``tasks/pushNotification/*`` spellings land here, so a peer
+            # pinned to either gets the same conformant answer.
             from core.a2a.task_streams import push_notification_unsupported
 
+            if method in DEPRECATED_PUSH_NOTIFICATION_METHODS:
+                logger.warning("a2a_deprecated_push_notification_method", method=method)
             return push_notification_unsupported(request)
         else:
             return JSONRPCResponse.failure(

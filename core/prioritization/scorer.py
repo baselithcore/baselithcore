@@ -5,7 +5,7 @@ Calculates priority scores based on multiple factors.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -153,7 +153,11 @@ class TaskPrioritizer:
         if deadline is None:
             return 0.5  # Neutral score for no deadline
 
-        now = datetime.now()
+        # ``deadline`` is caller-supplied and may still be naive; read it as UTC
+        # rather than raising, so an aware "now" cannot break existing callers.
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
         days_remaining = (deadline - now).total_seconds() / 86400
 
         if days_remaining <= 0:

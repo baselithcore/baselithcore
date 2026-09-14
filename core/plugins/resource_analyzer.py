@@ -4,12 +4,16 @@ Resource analyzer for plugin dependencies and static capabilities.
 Analyzes plugin configurations to determine which core services
 need to be initialized and extracts plugin capabilities without
 importing plugin code at startup.
+
+
+``PluginDiscovery`` and the static capability scan itself live in
+:mod:`core.plugins.capability_scan` (500-line cap); both are re-exported here so
+every existing import path keeps working.
 """
 
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,29 +21,16 @@ from core.observability.logging import get_logger
 from core.plugins import _ast_utils
 
 from ._resolve import safe_plugin_path
+from .capability_scan import (
+    PluginDiscovery,
+    get_plugin_source_path,
+    parse_plugin_ast,
+    scan_plugin_capabilities,
+)
+from .discovery import find_manifest, merge_plugin_dirs
 from .interface import PluginMetadata
 
 logger = get_logger(__name__)
-
-
-@dataclass(slots=True)
-class PluginDiscovery:
-    """Static plugin capabilities extracted without importing the module."""
-
-    name: str
-    directory_name: str
-    plugin_dir: Path
-    metadata: PluginMetadata
-    provides_routes: bool = False
-    router_prefix: str | None = None
-    entity_types: dict[str, dict[str, Any]] = field(default_factory=dict)
-    relationship_types: dict[str, dict[str, Any]] = field(default_factory=dict)
-    intent_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
-    flow_handler_names: list[str] = field(default_factory=list)
-    static_path: Path | None = None
-    stylesheets: list[str] = field(default_factory=list)
-    scripts: list[str] = field(default_factory=list)
-    ui_tabs: list[dict[str, str]] = field(default_factory=list)
 
 
 class ResourceAnalyzer:
@@ -78,33 +69,21 @@ class ResourceAnalyzer:
         ] = {}
 
     def _get_manifest_path(self, plugin_dir: Path) -> Path | None:
-        """Return the preferred manifest path for a plugin directory."""
-        for filename in ("manifest.yaml", "manifest.yml", "manifest.json"):
-            manifest_path = plugin_dir / filename
-            if manifest_path.exists():
-                return manifest_path
-        return None
+        """Return the preferred manifest path for a plugin directory.
+
+        Delegates to :func:`core.plugins.discovery.find_manifest` so the
+        accepted filenames are declared exactly once
+        (:data:`~core.plugins.discovery.MANIFEST_FILENAMES`).
+        """
+        return find_manifest(plugin_dir)
 
     def _get_plugin_source_path(self, plugin_dir: Path) -> Path | None:
         """Return the plugin module path used for static AST analysis."""
-        for filename in ("plugin.py", "__init__.py"):
-            source_path = plugin_dir / filename
-            if source_path.exists():
-                return source_path
-        return None
+        return get_plugin_source_path(plugin_dir)
 
     def _parse_plugin_ast(self, plugin_dir: Path) -> ast.Module | None:
         """Parse the plugin source file without importing it."""
-        source_path = self._get_plugin_source_path(plugin_dir)
-        if source_path is None:
-            return None
-
-        try:
-            source = source_path.read_text(encoding="utf-8")
-            return ast.parse(source, filename=str(source_path))
-        except Exception as exc:
-            logger.debug("AST parsing failed for %s: %s", plugin_dir.name, exc)
-            return None
+        return parse_plugin_ast(plugin_dir)
 
     # Static AST helpers live in core.plugins._ast_utils (500-line cap);
     # exposed as staticmethods for backward compatibility.
@@ -202,142 +181,47 @@ class ResourceAnalyzer:
         self, plugin_dir: Path, manifest_path: Path
     ) -> PluginDiscovery | None:
         """Parse manifest + plugin AST for ``discover_plugin`` (uncached)."""
-        try:
-            metadata = PluginMetadata.from_file(manifest_path)
-        except Exception as exc:
-            logger.error(
-                "Failed to load metadata for plugin %s: %s",
-                plugin_dir.name,
-                exc,
-                exc_info=True,
-            )
-            return None
-
-        module_ast = self._parse_plugin_ast(plugin_dir)
-        class_node = self._find_plugin_class(module_ast) if module_ast else None
-
-        provides_routes = False
-        router_prefix: str | None = None
-        entity_types: dict[str, dict[str, Any]] = {}
-        relationship_types: dict[str, dict[str, Any]] = {}
-        intent_patterns: dict[str, dict[str, Any]] = {}
-        flow_handler_names: list[str] = []
-        stylesheets: list[str] = []
-        scripts: list[str] = []
-        ui_tabs: list[dict[str, str]] = []
-
-        if class_node is not None:
-            base_names = {self._base_name(base) for base in class_node.bases}
-            provides_routes = (
-                "RouterPlugin" in base_names
-                or self._get_method_node(class_node, "create_router") is not None
-                or self._get_method_node(class_node, "get_routers") is not None
-            )
-
-            router_prefix_value = self._literal_return_value(
-                class_node, "get_router_prefix"
-            )
-            if isinstance(router_prefix_value, str):
-                router_prefix = router_prefix_value
-
-            entity_items = self._literal_return_value(
-                class_node, "register_entity_types"
-            )
-            if entity_items is None:
-                entity_items = self._literal_return_value(
-                    class_node, "get_entity_types"
-                )
-            if isinstance(entity_items, list):
-                entity_types = self._dict_by_key(entity_items, "type")
-
-            relationship_items = self._literal_return_value(
-                class_node, "register_relationship_types"
-            )
-            if relationship_items is None:
-                relationship_items = self._literal_return_value(
-                    class_node, "get_relationship_types"
-                )
-            if isinstance(relationship_items, list):
-                relationship_types = self._dict_by_key(relationship_items, "type")
-
-            intent_items = self._literal_return_value(class_node, "get_intent_patterns")
-            if isinstance(intent_items, list):
-                intent_patterns = self._dict_by_key(intent_items, "name")
-
-            flow_handlers = self._literal_return_value(class_node, "get_flow_handlers")
-            if isinstance(flow_handlers, dict):
-                flow_handler_names = [
-                    intent_name
-                    for intent_name in flow_handlers.keys()
-                    if isinstance(intent_name, str)
-                ]
-            elif not flow_handler_names:
-                flow_handler_names = self._dict_return_keys(
-                    class_node, "get_flow_handlers"
-                )
-
-            stylesheets_value = self._literal_return_value(
-                class_node, "get_stylesheets"
-            )
-            if isinstance(stylesheets_value, list):
-                stylesheets = [
-                    item for item in stylesheets_value if isinstance(item, str)
-                ]
-
-            scripts_value = self._literal_return_value(class_node, "get_scripts")
-            if isinstance(scripts_value, list):
-                scripts = [item for item in scripts_value if isinstance(item, str)]
-
-            ui_tabs_value = self._literal_return_value(class_node, "get_ui_tabs")
-            if isinstance(ui_tabs_value, list):
-                ui_tabs = [item for item in ui_tabs_value if isinstance(item, dict)]
-
-        if router_prefix is None and provides_routes:
-            router_prefix = f"/api/{metadata.name}"
-
-        static_dir = plugin_dir / "static"
-        static_path = static_dir if static_dir.exists() else None
-
-        return PluginDiscovery(
-            name=metadata.name,
-            directory_name=plugin_dir.name,
-            plugin_dir=plugin_dir,
-            metadata=metadata,
-            provides_routes=provides_routes,
-            router_prefix=router_prefix,
-            entity_types=entity_types,
-            relationship_types=relationship_types,
-            intent_patterns=intent_patterns,
-            flow_handler_names=flow_handler_names,
-            static_path=static_path,
-            stylesheets=stylesheets,
-            scripts=scripts,
-            ui_tabs=ui_tabs,
-        )
+        return scan_plugin_capabilities(plugin_dir, manifest_path)
 
     def discover_plugins(
-        self, plugin_configs: dict[str, dict[str, Any]]
+        self,
+        plugin_configs: dict[str, dict[str, Any]],
+        extra_dirs: list[Path] | None = None,
     ) -> dict[str, PluginDiscovery]:
         """
         Discover enabled plugins and their static capabilities.
 
         Args:
             plugin_configs: Dictionary mapping plugin names to config
+            extra_dirs: Plugin directories found outside ``plugins_dir`` — in
+                practice the ``baselith.plugins`` entry-point group resolved by
+                :func:`core.plugins.discovery.iter_entry_point_plugin_dirs`, or
+                the already-merged list from
+                :meth:`core.plugins.loader.PluginLoader.discover_plugins`.
+                Merged in with the directory scan winning on a name clash (and
+                warning), so a locally dropped-in tree is never shadowed by an
+                installed wheel.
 
         Returns:
             Mapping of logical plugin name to PluginDiscovery
         """
         discoveries: dict[str, PluginDiscovery] = {}
 
-        if not self.plugins_dir.exists():
+        candidate_dirs: list[Path] = []
+        if self.plugins_dir.exists():
+            candidate_dirs = [
+                plugin_dir
+                for plugin_dir in self.plugins_dir.iterdir()
+                if plugin_dir.is_dir() and not plugin_dir.name.startswith((".", "_"))
+            ]
+        if extra_dirs:
+            candidate_dirs = merge_plugin_dirs(candidate_dirs, list(extra_dirs))
+        if not candidate_dirs:
             return discoveries
 
         filter_by_config = len(plugin_configs) > 0
 
-        for plugin_dir in self.plugins_dir.iterdir():
-            if not plugin_dir.is_dir() or plugin_dir.name.startswith((".", "_")):
-                continue
-
+        for plugin_dir in candidate_dirs:
             discovery = self.discover_plugin(plugin_dir)
             if discovery is None:
                 continue
@@ -363,7 +247,9 @@ class ResourceAnalyzer:
         return discoveries
 
     def analyze_requirements(
-        self, plugin_configs: dict[str, dict[str, Any]]
+        self,
+        plugin_configs: dict[str, dict[str, Any]],
+        extra_dirs: list[Path] | None = None,
     ) -> dict[str, set[str]]:
         """
         Analyze plugin configurations to determine resource requirements.
@@ -371,6 +257,11 @@ class ResourceAnalyzer:
         Args:
             plugin_configs: Dictionary mapping plugin names to their configs
                 Format: {"plugin_name": {"enabled": True, ...}}
+            extra_dirs: Plugin directories outside ``plugins_dir`` — see
+                :meth:`discover_plugins`. Without them an entry-point plugin is
+                *discovered* but its ``required_resources`` never reach the
+                lazy-init order, so it activates against a resource (postgres,
+                redis, …) that was never brought up.
 
         Returns:
             Dictionary with 'required' and 'optional' resource sets:
@@ -382,7 +273,7 @@ class ResourceAnalyzer:
         required_resources: set[str] = set()
         optional_resources: set[str] = set()
 
-        discoveries = self.discover_plugins(plugin_configs)
+        discoveries = self.discover_plugins(plugin_configs, extra_dirs=extra_dirs)
 
         for plugin_name, discovery in discoveries.items():
             metadata = discovery.metadata
@@ -478,3 +369,10 @@ def analyze_plugin_resources(
     """
     analyzer = ResourceAnalyzer(plugins_dir)
     return analyzer.analyze_requirements(plugin_configs)
+
+
+__all__ = [
+    "PluginDiscovery",
+    "ResourceAnalyzer",
+    "analyze_plugin_resources",
+]

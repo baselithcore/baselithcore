@@ -1,4 +1,24 @@
 {{- if .Values.podDisruptionBudget.enabled }}
+{{- $pdb := .Values.podDisruptionBudget -}}
+{{- if and $pdb.minAvailable $pdb.maxUnavailable -}}
+{{- fail "podDisruptionBudget: set either minAvailable or maxUnavailable, not both — the API rejects a budget carrying both." -}}
+{{- end -}}
+{{- if not (or $pdb.minAvailable $pdb.maxUnavailable) -}}
+{{- fail "podDisruptionBudget.enabled is on but neither minAvailable nor maxUnavailable is set." -}}
+{{- end -}}
+{{- /*
+A budget that can never be satisfied does not protect the service, it freezes
+the cluster: `minAvailable: 1` against a single replica means the eviction API
+refuses forever, and a node drain (upgrade, autoscaler, spot reclaim) hangs
+until someone finds the PDB at 3am. Caught at render time instead. Percentages
+are left to the operator — the arithmetic depends on the live replica count.
+*/ -}}
+{{- if and $pdb.minAvailable (not (kindIs "string" $pdb.minAvailable)) -}}
+{{- $floor := ternary (int .Values.autoscaling.minReplicas) (int .Values.replicaCount) .Values.autoscaling.enabled -}}
+{{- if ge (int $pdb.minAvailable) $floor -}}
+{{- fail (printf "podDisruptionBudget.minAvailable (%d) is not below the smallest replica count the deployment can reach (%d): every voluntary eviction would be denied and node drains would hang. Lower minAvailable, raise the replica floor, or use maxUnavailable instead." (int $pdb.minAvailable) $floor) -}}
+{{- end -}}
+{{- end -}}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -6,9 +26,42 @@ metadata:
   labels:
     {{- include "baselithcore.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- with $pdb.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with $pdb.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  # Without this (k8s 1.27+, ignored by older API servers) a pod that is
+  # already broken still counts against the budget, so a drain can be blocked
+  # by the very pods that are not serving anything. AlwaysAllow lets an
+  # unhealthy pod be evicted and rescheduled, which is what you want during
+  # exactly the incident where the budget would otherwise get in the way.
+  unhealthyPodEvictionPolicy: {{ $pdb.unhealthyPodEvictionPolicy | default "AlwaysAllow" }}
   selector:
     matchLabels:
       {{- include "baselithcore.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
+{{- end }}
+{{- if and .Values.worker.enabled .Values.worker.podDisruptionBudget.enabled }}
+{{- if lt (int .Values.worker.replicaCount) 2 -}}
+{{- fail "worker.podDisruptionBudget.enabled with worker.replicaCount < 2: a budget over a single worker denies every eviction and hangs node drains. Run at least two workers or leave the budget off." -}}
+{{- end -}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "baselithcore.fullname" . }}-worker
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # maxUnavailable, not minAvailable: a queue consumer cares that the pool is
+  # never fully drained at once, not that a fixed number stays up.
+  maxUnavailable: {{ .Values.worker.podDisruptionBudget.maxUnavailable }}
+  unhealthyPodEvictionPolicy: {{ .Values.worker.podDisruptionBudget.unhealthyPodEvictionPolicy | default "AlwaysAllow" }}
+  selector:
+    matchLabels:
+      {{- include "baselithcore.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
 {{- end }}

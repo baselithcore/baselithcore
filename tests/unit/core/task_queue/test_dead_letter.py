@@ -4,7 +4,7 @@ Uses an in-memory fake implementing the Redis surface the DLQ relies on
 (hash + sorted-set ops and pipelines).
 """
 
-import base64
+import json
 import types
 
 import pytest
@@ -42,6 +42,14 @@ class FakePipeline:
         self._ops.append(("zrem", key, member))
         return self
 
+    def expire(self, key, seconds):
+        self._ops.append(("expire", key, seconds))
+        return self
+
+    def zremrangebyscore(self, key, low, high):
+        self._ops.append(("zremrangebyscore", key, low, high))
+        return self
+
     def execute(self):
         results = []
         for op in self._ops:
@@ -55,6 +63,7 @@ class FakeRedis:
     def __init__(self):
         self.hashes = {}
         self.zsets = {}
+        self.expiries = {}
 
     def pipeline(self):
         return FakePipeline(self)
@@ -87,6 +96,17 @@ class FakeRedis:
 
     def zrem(self, key, member):
         return 1 if self.zsets.get(key, {}).pop(member, None) is not None else 0
+
+    def zremrangebyscore(self, key, low, high):
+        bucket = self.zsets.get(key, {})
+        stale = [k for k, score in bucket.items() if low <= score <= high]
+        for member in stale:
+            bucket.pop(member)
+        return len(stale)
+
+    def expire(self, key, seconds):
+        self.expiries[key] = seconds
+        return 1
 
     def delete(self, key):
         existed = key in self.hashes or key in self.zsets
@@ -123,7 +143,10 @@ class TestRecordAndInspect:
         assert fetched.origin_queue == "documents"
         assert fetched.tenant_id == "acme"
         assert fetched.error == "boom"
-        assert base64.b64decode(fetched.payload_b64) == b"\x80\x04serialized"
+        # The pickled RQ payload is deliberately no longer persisted — replay
+        # rebuilds the call from func_name + JSON instead of unpickling it.
+        assert fetched.payload_b64 == ""
+        assert json.loads(fetched.args_json) == [1, "x"]
 
     def test_count(self, dlq):
         assert dlq.count() == 0
@@ -167,10 +190,10 @@ class TestReplay:
         with pytest.raises(DeadLetterError, match="No dead-letter record"):
             dlq.replay("ghost")
 
-    def test_replay_from_payload_when_no_payload(self, dlq):
+    def test_replay_rejects_an_unusable_function_reference(self, dlq):
         rec = DeadLetterRecord(
             job_id="np",
-            func_name="m.f",
+            func_name="",
             origin_queue="default",
             error="e",
             traceback="",
@@ -178,10 +201,9 @@ class TestReplay:
             tenant_id="t",
             args_repr="()",
             kwargs_repr="{}",
-            payload_b64="",
         )
-        with pytest.raises(DeadLetterError, match="no stored payload"):
-            dlq._replay_from_payload(rec)
+        with pytest.raises(DeadLetterError, match="function reference"):
+            dlq._replay_from_record(rec)
 
 
 class TestHandler:

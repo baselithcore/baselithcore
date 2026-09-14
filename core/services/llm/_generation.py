@@ -17,14 +17,21 @@ from core.middleware.cost_control import (
 )
 from core.observability.logging import get_logger
 from core.quotas.manager import CostBudgetExceededError
+from core.services.llm._accounting import (
+    charge_usage_to_budget,
+    record_usage_cost,
+    set_usage_span_attributes,
+)
 from core.services.llm._telemetry import (
     gen_ai_system,
     record_genai_metrics,
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
+from core.services.llm.errors import LLMRefusalError
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
 from core.services.llm.fallback_runtime import maybe_run_with_fallback
+from core.services.llm.usage import Usage, billed_usage
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -77,6 +84,40 @@ def _build_span_attributes(
     return attributes
 
 
+async def _account_refusal(
+    service: LLMService,
+    span: Any,
+    *,
+    model: str,
+    usage: Usage,
+    input_tokens: int,
+    started: float,
+) -> None:
+    """Book a refused turn against every ledger before the error propagates.
+
+    Args:
+        service: The owning :class:`LLMService`.
+        span: The active generation span.
+        model: The model that refused.
+        usage: What the provider metered before refusing (possibly empty).
+        input_tokens: The prompt estimate already booked pre-call.
+        started: ``time.perf_counter()`` at the start of the call.
+    """
+    from core.services.llm._accounting import account_turn
+    from core.services.llm.stop_reasons import STOP_REFUSAL
+    from core.services.llm.tool_calling import LLMResult
+
+    billed = account_turn(
+        service,
+        span,
+        model=model,
+        result=LLMResult(stop_reason=STOP_REFUSAL, usage=usage),
+        input_tokens=input_tokens,
+        started=started,
+    )
+    await record_usage_cost(model, billed)
+
+
 def _build_cache_key(
     *,
     model: str,
@@ -93,9 +134,16 @@ def _build_cache_key(
     and sampling params, not just the user prompt) so two callers with the same
     prompt but different system prompts never share a cached answer.
     """
-    from core.context import get_current_tenant_id
+    from core.context import get_tenant_or_default
 
-    tenant_id = get_current_tenant_id()
+    # Lenient on purpose: the tenant only *namespaces* the cache key, it is not
+    # an access boundary (the entry is keyed by the prompt hash and never read
+    # across prefixes). Under ``strict_tenant_isolation`` the strict lookup
+    # raised here for every out-of-request caller — a plugin's background task,
+    # a scheduler, a CLI script — killing the whole generation before the
+    # provider was ever called. Unbound callers share the ``"default"`` bucket,
+    # exactly like the cost ledger (``enforce_tenant_cost_budget``) does.
+    tenant_id = get_tenant_or_default()
     key_material = "\x1f".join(
         (prompt, system_prompt or "", repr(temperature), repr(max_tokens))
     )
@@ -117,6 +165,8 @@ async def generate_response(
     max_tokens: int | None = None,
     task_category: str | None = None,
     effort: str | None = None,
+    allow_refusal: bool = False,
+    usage_sink: list[Usage] | None = None,
 ) -> str:
     """Run the cached, traced text-generation path for *service*.
 
@@ -195,7 +245,7 @@ async def generate_response(
             # fails open on store errors).
             from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
-            await enforce_tenant_cost_budget()
+            await enforce_tenant_cost_budget(model=resolved_model)
 
             # Track input tokens (large prompts encode off the event loop)
             input_tokens = await estimate_tokens_async(prompt)
@@ -213,18 +263,55 @@ async def generate_response(
             if effort is not None:
                 extra_kwargs["effort"] = effort
                 span.set_attribute("gen_ai.baselith.thinking_effort", effort)
+            if allow_refusal:
+                extra_kwargs["allow_refusal"] = True
+            # Providers that meter usage publish the exact per-bucket split
+            # here; the ``(text, total)`` return type cannot carry it, and
+            # re-deriving output as "total minus an estimated prompt"
+            # misprices every call (output bills at up to 5x input).
+            provider_usage: list[Usage] = []
+            extra_kwargs["usage_sink"] = provider_usage
             started = time.perf_counter()
-            content, tokens_used, serving_provider = await maybe_run_with_fallback(
-                service,
-                prompt=prompt,
-                model=resolved_model,
-                json_mode=json,
-                **extra_kwargs,
-            )
+            try:
+                content, tokens_used, serving_provider = await maybe_run_with_fallback(
+                    service,
+                    prompt=prompt,
+                    model=resolved_model,
+                    json_mode=json,
+                    **extra_kwargs,
+                )
+            except LLMRefusalError:
+                # A refusal is generated output: the model ran and the call was
+                # billed. Book it before the error propagates — the same policy
+                # the structured and streamed paths apply — or the spend
+                # disappears from the ledgers for every one of this function's
+                # callers.
+                await _account_refusal(
+                    service,
+                    span,
+                    model=resolved_model,
+                    usage=provider_usage[-1] if provider_usage else Usage(),
+                    input_tokens=input_tokens,
+                    started=started,
+                )
+                raise
 
+            # Middleware and the cost tracker keep a running total: the prompt
+            # estimate was already booked pre-call, so only the remainder may
+            # be added. Pricing and telemetry use the metered split instead.
             output_tokens = max(tokens_used - input_tokens, 0)
-            span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
-            span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+            metered = provider_usage[-1] if provider_usage else None
+            billed = billed_usage(
+                metered,
+                fallback_input=input_tokens,
+                fallback_total=tokens_used,
+            )
+            if usage_sink is not None:
+                # The caller asked to cost this call: hand back the provider's
+                # record, or an explicitly-flagged estimate when it reported
+                # nothing, so the caller can tell the two apart.
+                usage_sink.append(metered if metered is not None else billed)
+            set_usage_span_attributes(span, billed)
             span.set_attribute("gen_ai.baselith.response_length", len(content))
             span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
 
@@ -235,8 +322,11 @@ async def generate_response(
             for key, value in openinference_llm_attributes(
                 model=resolved_model,
                 provider=serving_provider,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                # OpenInference has no cache tiers: its prompt count means
+                # "tokens in the prompt", so it gets the whole prompt side
+                # (the cost split lives in the gen_ai.* attributes above).
+                input_tokens=billed.prompt_tokens,
+                output_tokens=billed.output_tokens,
                 prompt=prompt,
                 completion=content,
             ).items():
@@ -247,30 +337,25 @@ async def generate_response(
             record_genai_metrics(
                 gen_ai_system(serving_provider),
                 resolved_model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                input_tokens=billed.input_tokens,
+                output_tokens=billed.output_tokens,
+                cache_read_tokens=billed.cache_read_tokens,
+                cache_write_tokens=billed.cache_write_tokens,
                 duration_seconds=time.perf_counter() - started,
             )
 
             # Charge real dollar cost against the ambient per-request
             # LoopBudget (no-op outside an orchestrated request). Raises
             # LoopBudgetExceededError when the request blows its USD cap.
-            from core.orchestration.budget_context import charge_llm_cost
-
-            charge_llm_cost(resolved_model, input_tokens, output_tokens)
+            # Every bucket is forwarded: a cache read bills at ~0.1x input,
+            # so pricing it as fresh input aborted well-cached runs early.
+            charge_usage_to_budget(resolved_model, billed)
 
             # Book the cost on the tenant's cumulative ledger (enforced by
             # the pre-call gate above on the NEXT call; never raises).
             # Priced independently of the LoopBudget charge, which returns 0
             # outside an orchestrated request — background jobs meter too.
-            from core.quotas.cost_enforcement import (
-                llm_call_cost_usd,
-                record_tenant_llm_cost,
-            )
-
-            await record_tenant_llm_cost(
-                llm_call_cost_usd(resolved_model, input_tokens, output_tokens)
-            )
+            await record_usage_cost(resolved_model, billed)
 
             # Cache response (exact match)
             if service.cache is not None:
@@ -293,6 +378,18 @@ async def generate_response(
             raise
         except CostBudgetExceededError:
             span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
+            raise
+        except LLMRefusalError:
+            # A model decision, not a failure: it keeps its class (callers
+            # branch on it) and its warning-level log from the stop-reason
+            # policy, instead of becoming a generic error logged at error.
+            span.set_attribute("gen_ai.baselith.stop_reason", "refusal")
+            raise
+        except LLMProviderError as e:
+            # Already neutral and typed (rate limit, 5xx, connection, client
+            # error): re-wrapping it as "Generation failed" destroys the class
+            # the retry layer and the caller decide on.
+            span.set_attribute("gen_ai.baselith.error", str(e))
             raise
         except Exception as e:
             span.set_attribute("gen_ai.baselith.error", str(e))

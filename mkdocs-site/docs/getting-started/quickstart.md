@@ -37,7 +37,7 @@ docker compose logs -f api
 
 !!! tip "Performance Tip: Native Ollama"
     While `ollama` is provided in the Docker stack for convenience (CI/CD, headless Linux), running the **[Ollama Native App](https://ollama.com/)** is significantly faster on macOS (Metal) and Windows/Linux with dedicated GPUs.
-    To use a native instance, simply disable the `ollama` service in `docker-compose.yml` and set `LLM_API_BASE=http://host.docker.internal:11434` in your `.env`.
+    To use a native instance, leave the `local-llm` profile off (Ollama is opt-in) and set `LLM_API_BASE=http://host.docker.internal:11434` in your `.env`.
 
 ---
 
@@ -274,7 +274,7 @@ CORE_LOG_FORMAT=text  # Use 'json' for production-style parsing
 ```bash
 # Start Jaeger (plus Prometheus and Grafana). Publishes the OTLP gRPC
 # collector on 127.0.0.1:4317 and the Jaeger UI on 127.0.0.1:16686.
-docker compose -f docker-compose.observability.yml up -d
+docker compose --profile observability up -d
 ```
 
 Then point the exporter at the collector in `.env`:

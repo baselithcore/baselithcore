@@ -71,7 +71,7 @@ readiness: alpha
 environment_variables: []
 ```
 
-The scaffold also includes installation metadata such as `min_core_version`, `entrypoint` and dependency declarations. Preserve these fields and complete them for your plugin. `Plugin.metadata` reads this file from the plugin directory automatically, so nothing in code repeats it. See the [Docker workflow](docker-core.md) for installation and build requirements.
+The scaffold also includes installation metadata such as `min_core_version`, `entry_point` and dependency declarations. Preserve these fields and complete them for your plugin. `Plugin.metadata` reads this file from the plugin directory automatically, so nothing in code repeats it. See the [Docker workflow](docker-core.md) for installation and build requirements.
 
 !!! tip "YAML vs JSON"
     YAML is preferred when multiple manifest formats exist. Keep one authoritative manifest per plugin.

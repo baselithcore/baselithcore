@@ -114,7 +114,7 @@ class ConsensusEvaluator:
         per_judge: dict[str, float] = {}
         failed: list[str] = []
 
-        for judge, outcome in zip(self._judges, settled):
+        for judge, outcome in zip(self._judges, settled, strict=True):
             name = type(judge).__name__
             if isinstance(outcome, BaseException):
                 logger.warning("Consensus judge %s failed: %s", name, outcome)

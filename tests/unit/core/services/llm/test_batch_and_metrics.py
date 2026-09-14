@@ -170,11 +170,18 @@ def test_record_genai_metrics_emits_histograms():
 def test_record_genai_metrics_emits_usd_cost_for_priced_models():
     from prometheus_client import REGISTRY
 
+    from core.observability.metric_context import resolve_tenant_label
     from core.services.llm._telemetry import record_genai_metrics
 
     labels = {
         "gen_ai_system": "anthropic",
         "gen_ai_request_model": "claude-opus-4-8",
+        # The cost counter carries a bounded `tenant` label (see
+        # core.observability.metric_context). Which series this call lands on
+        # depends on whether a tenant happens to be bound, so resolve it the
+        # same way the emitter does rather than hard-coding a value that only
+        # holds in one test order.
+        "tenant": resolve_tenant_label(),
     }
     before = REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels) or 0.0
     record_genai_metrics(
@@ -256,3 +263,85 @@ def test_xfetch_missing_or_persistent_ttl_never_early():
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# generate_batch — per-entry usage
+# ---------------------------------------------------------------------------
+
+
+def _success_with_usage(custom_id, text, usage):
+    block = SimpleNamespace(type="text", text=text)
+    message = SimpleNamespace(content=[block], usage=usage)
+    return SimpleNamespace(
+        custom_id=custom_id,
+        result=SimpleNamespace(type="succeeded", message=message),
+    )
+
+
+async def test_batch_records_usage_per_custom_id():
+    """``message.usage`` was discarded, so a batch job could not be costed."""
+    from core.services.llm.usage import Usage
+
+    usage = SimpleNamespace(
+        input_tokens=100,
+        output_tokens=20,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=10,
+    )
+    batches = FakeBatchesAPI([_success_with_usage("a", "alpha", usage)])
+    service = FakeAnthropicService(batches)
+
+    out = await generate_batch(service, [BatchPrompt("a", "A?")], poll_seconds=0.01)
+
+    assert out[0].usage == Usage(
+        input_tokens=100, output_tokens=20, cache_read_tokens=10
+    )
+    assert out[0].usage.total == 130
+
+
+async def test_failed_entries_carry_empty_usage():
+    batches = FakeBatchesAPI([_errored("a")])
+    service = FakeAnthropicService(batches)
+    out = await generate_batch(service, [BatchPrompt("a", "A?")], poll_seconds=0.01)
+    assert out[0].usage.is_empty
+
+
+async def test_batch_max_tokens_defaults_to_the_capability_value():
+    """4096 was a third of the recommended cap — long entries were cut off."""
+    batches = FakeBatchesAPI([_success("a", "alpha")])
+    service = FakeAnthropicService(batches)
+    await generate_batch(service, [BatchPrompt("a", "A?")], poll_seconds=0.01)
+    assert batches.created_requests[0]["params"]["max_tokens"] == 16000
+
+
+async def test_batch_caller_max_tokens_is_honoured():
+    batches = FakeBatchesAPI([_success("a", "alpha")])
+    service = FakeAnthropicService(batches)
+    await generate_batch(
+        service, [BatchPrompt("a", "A?", max_tokens=256)], poll_seconds=0.01
+    )
+    assert batches.created_requests[0]["params"]["max_tokens"] == 256
+
+
+async def test_sequential_fallback_records_usage_per_item():
+    """The non-Anthropic path must cost its entries too, not just the batch API."""
+    from core.services.llm.usage import Usage
+
+    class SeqService:
+        config = SimpleNamespace(provider="ollama", model="llama")
+        provider = SimpleNamespace()
+
+        def _resolve_model(self, model):
+            return model or "llama"
+
+        async def generate_response(self, prompt, **kwargs):
+            sink = kwargs.get("usage_sink")
+            if sink is not None:
+                sink.append(Usage(input_tokens=11, output_tokens=3))
+            return f"echo:{prompt}"
+
+    out = await generate_batch(SeqService(), [BatchPrompt("a", "hi")])
+
+    assert out[0].usage == Usage(input_tokens=11, output_tokens=3)
+    assert out[0].usage.total == 14

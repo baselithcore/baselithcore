@@ -56,6 +56,7 @@ core/task_queue/
 ├── status.py       # TaskTracker, TaskStatus, TaskInfo, get_task_tracker, helpers
 ├── monitor.py      # WorkerMonitor, WorkerInfo, QueueInfo, get_worker_monitor
 ├── dead_letter.py  # DeadLetterQueue, DeadLetterRecord, get_dead_letter_queue, dead_letter_handler
+├── trace_context.py # W3C traceparent propagation across the queue boundary
 ├── cron.py         # CronExpression — pure-stdlib 5-field cron parser
 ├── worker.py       # Worker process entry point
 └── jobs/           # Job definitions (incl. agent_run.py — async agent runs)
@@ -96,6 +97,11 @@ the current tenant id into the job metadata.
     worker rebinds the user context too — so plugins declaring `tenancy: personal`
     resolve the right per-user tenant inside the job. See
     [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared).
+    A job enqueued with no `tenant_id` in its metadata (out-of-request work)
+    falls back to `"default"` when `DB_RLS_ENABLED` is off. With RLS on,
+    `"default"` is another tenant's rows, so the worker instead binds
+    [`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope)
+    around the job — no tenant id is set at all.
 
 ```python
 from core.task_queue import enqueue_task, schedule_task
@@ -135,8 +141,10 @@ job_id = scheduler.enqueue(
     job_timeout=300,     # seconds
     result_ttl=86400,
     failure_ttl=604800,
-    retry_count=3,       # wraps rq.Retry(max=3)
+    retry_count=3,       # exponential backoff — see Retry Configuration below
+    retry_delay=60,      # base delay before the first retry (seconds)
     meta={"source": "api"},
+    job_id="ingest-doc-123",  # explicit id: re-enqueuing it replaces the pending job
     kwarg1="value",
 )
 
@@ -154,22 +162,33 @@ scheduler.cancel_job(job_id)         # bool
 ### Retry Configuration
 
 The scheduler uses RQ's native `Retry` object internally. Pass `retry_count=N`
-when enqueuing — the scheduler builds `rq.Retry(max=N)` for you:
+when enqueuing — the scheduler builds an `rq.Retry` with an **exponential
+backoff schedule**, not a bare `max=N`:
 
 ```python
 job_id = scheduler.enqueue(
     my_task_fn,
     arg1, arg2,
-    retry_count=3,    # rq.Retry(max=3)
-    job_timeout=300,  # 5 minute timeout
+    retry_count=3,     # 3 retries, backing off from retry_delay
+    retry_delay=60,    # base delay before the first retry (seconds)
+    job_timeout=300,   # 5 minute timeout
 )
 ```
 
-!!! note "`retry_delay`"
-    `enqueue` accepts a `retry_delay` parameter, but RQ's simple `Retry`
-    does not support a per-attempt delay in this path — it is currently a
-    no-op placeholder. Use a custom worker exception handler if you need
-    backoff between attempts.
+`retry_delay` (default `TASK_QUEUE_DEFAULT_RETRY_DELAY`, `60`) is the base of
+`core.task_queue.scheduler.retry_intervals(count, base_delay)`, which returns
+one interval per retry — `[base, 2*base, 4*base, ...]` — capped at
+`MAX_RETRY_INTERVAL_SECONDS` (3600s). `Retry(max=n)` alone retries with no
+delay at all, so a job whose dependency is briefly down would previously
+exhaust its whole retry budget in under a second and be dead-lettered before
+that dependency could plausibly recover.
+
+### Idempotent enqueue (`job_id`)
+
+`enqueue`/`enqueue_at`/`enqueue_in` accept an explicit `job_id`. Enqueueing
+the same id twice **replaces** the pending job in RQ rather than queueing a
+second one — the way a caller makes its own retries idempotent (e.g. a
+webhook handler that may be invoked more than once for the same event).
 
 ---
 
@@ -359,7 +378,7 @@ def update_metrics() -> None:
 
 RQ keeps failed jobs in a per-queue `FailedJobRegistry` that expires after
 `failure_ttl` (7 days). The DLQ adds a **durable** store for jobs that exhaust
-their retries, with full failure context and first-class replay.
+their retries, with failure context and first-class replay.
 
 The worker wires it automatically: `start_worker()` registers
 `dead_letter_handler` as an RQ exception handler, so any job that fails with no
@@ -380,10 +399,42 @@ dlq.purge_all()                   # clear the DLQ
 ```
 
 Each `DeadLetterRecord` stores `func_name`, `origin_queue`, `error`,
-`traceback`, `failed_at`, `tenant_id`, arg reprs, and the serialized RQ payload
-(`payload_b64`). Replay requeues the live RQ job when it still exists, otherwise
-reconstructs it from the stored payload — so jobs can be replayed even after the
-RQ `failure_ttl` window.
+`traceback`, `failed_at`, `tenant_id`, redacted `args_repr`/`kwargs_repr` (for
+a human reading a dashboard) and redacted `args_json`/`kwargs_json` (for
+replay). Replay requeues the live RQ job when it still exists; once that has
+expired, it rebuilds the call from `func_name` plus the stored JSON — so a job
+can still be replayed after the RQ `failure_ttl` window.
+
+!!! warning "Hardened against unpickle-RCE and secret leakage"
+    - **No more pickle.** Older records also carried `payload_b64`, a base64
+      dump of the RQ job's pickled payload, replayed by unpickling it through
+      `Job.restore`. Anyone who could write to the queue's Redis could shape
+      those bytes — a replay click away from arbitrary code execution.
+      `payload_b64` is **no longer written** (kept only so pre-upgrade
+      records still load) and replay never unpickles anything.
+    - **Redacted before storage.** Call arguments cross
+      `core.observability.redaction.redact_sensitive` before they are stored,
+      so a job that took an API key does not sit in Redis under a key with no
+      TTL. Replay re-runs with the *redacted* values — a job whose argument
+      really was a secret must be re-enqueued by its owner, not replayed.
+    - **A dotted reference is not enough to import.** Replay checks
+      `func_name` against `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` — a
+      well-formed dotted path (`os.system` qualifies) is refused before
+      anything is imported unless its module prefix is allow-listed.
+    - **Unavailable is not empty.** A call whose arguments could not be
+      captured (unserialisable, over ~4000 encoded characters, or a redaction
+      failure) stores a sentinel and is **refused at replay** rather than
+      replayed as a no-argument call — silently dropping every argument the
+      job was supposed to carry would be worse than not replaying it at all.
+      A genuinely empty call (`args=()`, `kwargs={}`) still replays fine.
+      `DeadLetterError` is raised for every refusal above (missing/malformed
+      function reference, disallowed module, unreadable or uncaptured
+      arguments), always before the queue is touched.
+
+Records also expire: `dlq_retention_seconds` (default 7 days, matching
+`failure_ttl`) bounds the Redis hash's TTL, and the sorted-set index is pruned
+of anything past that horizon on every write, so it cannot outlive the hashes
+it points at. `0` disables expiry for a deployment that prunes the DLQ by hand.
 
 Admin HTTP endpoints (Basic Auth) expose the same operations:
 
@@ -394,6 +445,32 @@ Admin HTTP endpoints (Basic Auth) expose the same operations:
 | `POST`   | `/admin/dlq/{job_id}/replay`| Re-enqueue |
 | `DELETE` | `/admin/dlq/{job_id}`       | Purge one |
 | `DELETE` | `/admin/dlq`                | Purge all |
+
+---
+
+## Trace propagation across the queue boundary
+
+A queued job runs minutes later in another process, and until
+`core/task_queue/trace_context.py` existed it started a trace of its own — the
+request that enqueued it and the work it caused were two unrelated traces, so
+a failure in the background job was invisible from the span that asked for it.
+
+`ambient_job_meta()` (used by every `TaskScheduler.enqueue*` call) now also
+calls `inject_trace_context(meta)`, which writes the active span's W3C
+`traceparent` (plus `tracestate`/`baggage` when present) into the job's
+metadata — the same carrier HTTP uses. On the worker side, `TenantAwareWorker`
+wraps every `perform_job` in `consumer_span(job, queue_name)`
+(`core.task_queue.trace_context`): a `CONSUMER`-kind OTel span parented on
+that carrier, tagged with the standard `messaging.*` semantic-convention
+attributes (`messaging.system="rq"`, `messaging.destination.name`,
+`messaging.message.id`, `code.function.name`) — never the job's arguments,
+since those can carry user content or credentials and a span is not an audit
+record.
+
+Everything here is best-effort by construction: no OTel SDK, a broken tracer,
+or a malformed carrier degrades to "no span" — never a failed job. See
+[Observability](../advanced/observability.md) for the collector/exporter side
+of the same trace.
 
 ---
 
@@ -423,9 +500,11 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 | `result_ttl`                | `TASK_QUEUE_RESULT_TTL` | `86400` | Result retention (s) |
 | `failure_ttl`               | `TASK_QUEUE_FAILURE_TTL` | `604800` | Failed-job retention (s) |
 | `default_retry_count`       | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `3` | Retries when not overridden |
-| `default_retry_delay`       | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `60` | Delay between retries (s) |
+| `default_retry_delay`       | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `60` | Base delay before the first retry (s); later retries back off exponentially — see [Retry Configuration](#retry-configuration) |
 | `max_connections`           | `TASK_QUEUE_MAX_CONNECTIONS` | `50` | Broker connection-pool ceiling |
 | `health_check_interval`     | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `30.0` | Idle-connection health check (s) |
+| `dlq_retention_seconds`     | `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `604800` | DLQ record TTL (s); `0` keeps records forever |
+| `dlq_replay_allowed_modules` | `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `["core.", "plugins."]` | Module prefixes a dead-lettered job may be replayed from; empty refuses every replay |
 
 !!! warning "Generic environment names are not read"
     `TaskQueueConfig` used to declare an empty `env_prefix`, which bound every

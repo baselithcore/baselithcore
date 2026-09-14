@@ -255,29 +255,42 @@ verification per request instead of two, with no trust widening.
 
 ## Container build reproducibility
 
-`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched pair
-(`torch==2.13.0` + `torchvision==0.28.0`, CPU wheels, in step with `uv.lock`) so
-the largest dependency no longer floats between builds; `torchaudio` is not a
-dependency of anything shipped and is no longer installed. In the multi-stage
-`Dockerfile-full` both installs target the `/install` prefix the runtime stage
-copies, with that tree on `PYTHONPATH` for the second install — otherwise pip
-would consider a torch living in the builder's own site-packages "already
-installed" and resolve nothing into the runtime, or fetch the CUDA build from
-PyPI. The builder is no longer pinned to `$BUILDPLATFORM`: it produces native
-wheels that are copied verbatim, so it must run on the target architecture or
-the arm64 image of a multi-arch push would carry amd64 `.so` files.
+There is one `Dockerfile`, multi-stage, and local, dev and production all
+build it. It pins PyTorch (`torch==2.13.0`, CPU wheels, in step with
+`uv.lock`) so the largest dependency no longer floats between builds; neither
+`torchaudio` nor `torchvision` is installed, because nothing in `core/` or
+`plugins/` imports them. Every install targets the `/install` prefix the
+runtime stage copies, with that tree on `PYTHONPATH` for the later installs —
+otherwise pip would consider a torch living in the build stage's own
+site-packages "already installed" and resolve nothing into the runtime, or
+fetch the CUDA build from PyPI. The build stage is not pinned to
+`$BUILDPLATFORM`: it produces native wheels that are copied verbatim, so it
+must run on the target architecture or the arm64 image of a multi-arch push
+would carry amd64 `.so` files — which is why the release workflow builds each
+platform on a runner of that architecture.
 
-Both images precompile the application tree (`python -m compileall
+The image precompiles the application tree (`python -m compileall
 --invalidation-mode checked-hash`) — pip already ships bytecode for
 site-packages, but `core/` and `plugins/` are copied as source and every
 worker recompiled them on boot. Hash-checked `.pyc` files stay valid
 regardless of mtimes and are re-validated against the source, so a bind-mounted
 edit in development is never served from a stale cache.
 
-Remaining hardening (tracked as follow-up): pin the rest of `requirements.txt`
-from `uv.lock` via `uv export --frozen` (needs the intended optional-extra set
-decided) and give `Dockerfile-slim` the same multi-stage layout so the compiler
-toolchain stays out of its runtime layer.
+The second half of that follow-up is closed by the consolidation: there is no
+longer a single-stage image whose runtime layer carries the compiler
+toolchain, because there is no longer a second image. What remains is pinning
+the rest of `requirements.txt` from `uv.lock` via `uv export --frozen`, which
+needs the intended optional-extra set decided first.
+
+The runtime also caps the numerical thread pools (`OMP_NUM_THREADS=1`,
+`OPENBLAS_NUM_THREADS=1`, `TOKENIZERS_PARALLELISM=false`). torch and OpenBLAS
+otherwise size their pools from the number of CPUs they can see, which is the
+**host's** count and not the container's CPU limit, so every uvicorn worker
+started a pool per host core and they contended for a fraction of a core. The
+released image was missing these — only the local/dev one had them — which is
+the kind of divergence that disappears when there is one file. Raise them
+deliberately, together with the pod's CPU request, if you profile a CPU-bound
+embedding path.
 
 ## OpenTelemetry GenAI semantic conventions
 

@@ -141,7 +141,7 @@ class WebhookService:
             return_exceptions=True,
         )
         deliveries: list[WebhookDelivery] = []
-        for ep, res in zip(endpoints, results):
+        for ep, res in zip(endpoints, results, strict=True):
             if isinstance(res, WebhookDelivery):
                 deliveries.append(res)
             else:  # pragma: no cover - dispatcher.deliver does not raise

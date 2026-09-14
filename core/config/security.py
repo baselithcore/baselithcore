@@ -6,18 +6,22 @@ Authentication, Security Headers, and Rate Limiting.
 
 import logging
 import os
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-logger = logging.getLogger(__name__)
+from core.config._collections import csv_list
+from core.config._security_parsers import (
+    coerce_to_secret_set,
+    parse_algorithms,
+    parse_encryption_keys,
+    parse_role_map,
+    parse_scoped_keys,
+)
+from core.config._security_posture import check_insecure_defaults
 
-# Below this many characters, a configured API key stops being a random token
-# and starts being a guessable secret — see ``_warn_insecure_defaults``. The
-# name deliberately avoids "key"/"token"/"secret": CodeQL classifies data as
-# sensitive by variable name, and logging the threshold is not a leak.
-_MIN_API_ENTROPY_CHARS = 32
+logger = logging.getLogger(__name__)
 
 
 class SecurityConfig(BaseSettings):
@@ -84,11 +88,37 @@ class SecurityConfig(BaseSettings):
             "AUTH_ACCESS_TOKEN_LIFETIME", "AUTH_SESSION_LIFETIME"
         ),
         ge=60,
-        description="Access-token lifetime in seconds (default 1h).",
+        description=(
+            "Access-token lifetime in seconds (default 1h; legacy alias "
+            "AUTH_SESSION_LIFETIME). Refresh tokens keep the JWTHandler default "
+            "of 7 days."
+        ),
     )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
+        description=(
+            "Master switch for API-key authentication. When false, API keys are "
+            "rejected entirely."
+        ),
+    )
+    # Behaviour when the shared revocation denylist (Redis) cannot be read:
+    #   closed — treat the key as revoked, i.e. reject the request. A revoked
+    #            key stays revoked even while the denylist is unreachable.
+    #   open   — trust process-local state, i.e. accept the key. Availability
+    #            over revocation: an outage cannot lock out API clients, but it
+    #            also un-revokes every key revoked elsewhere for its duration.
+    # ``closed`` is the default because revocation is a security control and an
+    # attacker who can make Redis unreachable must not thereby restore a key
+    # that was taken away from them.
+    api_key_revocation_fail_mode: Literal["closed", "open"] = Field(
+        default="closed",
+        alias="API_KEY_REVOCATION_FAIL_MODE",
+        description=(
+            "What to do when the shared API-key revocation denylist is "
+            "unreadable: 'closed' (default) rejects the key, 'open' accepts it "
+            "on process-local state."
+        ),
     )
 
     # === Multi-factor authentication (TOTP / RFC 6238) ===
@@ -111,7 +141,12 @@ class SecurityConfig(BaseSettings):
     # Optional explicit JWKS endpoint; if unset it is discovered from
     # ``{issuer}/.well-known/openid-configuration``.
     oidc_jwks_url: str | None = Field(default=None, alias="OIDC_JWKS_URL")
-    oidc_algorithms: list[str] = Field(
+    # ``NoDecode`` on every collection field below: pydantic-settings
+    # JSON-decodes complex types inside EnvSettingsSource *before* any
+    # validator runs, so the coercers these fields already declare never saw
+    # the raw string and a plain ``RS256,ES256`` raised SettingsError out of
+    # the whole SecurityConfig — i.e. no API at all.
+    oidc_algorithms: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["RS256"], alias="OIDC_ALGORITHMS"
     )
     # Claim names to read identity/authorization from (IdP-specific).
@@ -126,14 +161,47 @@ class SecurityConfig(BaseSettings):
         default_factory=dict, alias="OIDC_ROLE_MAP"
     )
 
-    # CORS — defaults to empty (block all cross-origin) for safety
-    allow_origins: list[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
-    trusted_hosts: list[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
+    # NoDecode is load-bearing: ``.env.example`` documents this as a plain
+    # comma-separated origin list, and pydantic-settings' default list decoder
+    # tries to JSON-parse it, so following the template took the entire
+    # SecurityConfig down at import time.
+    #
+    # The description below is explicit rather than inherited from this comment
+    # because the generated reference page (``scripts/check_config_surface.py``)
+    # renders it into a table cell, where a literal origin URL trips
+    # markdownlint's MD034. Keep the prose URL-free.
+    allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="ALLOW_ORIGINS",
+        description=(
+            "Comma-separated list of browser origins allowed to make "
+            "cross-origin requests, each written scheme-and-host (no trailing "
+            "path). Empty — the default — blocks every cross-origin request, "
+            "which is the safe posture for an API with no browser front end."
+        ),
+    )
+    trusted_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="TRUSTED_HOSTS",
+        description=(
+            "Host allowlist. Empty — the default — leaves TrustedHostMiddleware "
+            "unmounted and the Host header unvalidated, so a spoofed Host "
+            "poisons absolute URLs built from the request (reset and "
+            "verification links) and host-keyed caches. Production logs an "
+            "ERROR at startup while this is empty."
+        ),
+    )
 
     # API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry)
-    api_keys_user: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
-    api_keys_admin: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
-    api_keys_job: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
+    api_keys_user: Annotated[set[SecretStr], NoDecode] = Field(
+        default_factory=set, alias="API_KEYS_USER"
+    )
+    api_keys_admin: Annotated[set[SecretStr], NoDecode] = Field(
+        default_factory=set, alias="API_KEYS_ADMIN"
+    )
+    api_keys_job: Annotated[set[SecretStr], NoDecode] = Field(
+        default_factory=set, alias="API_KEYS_JOB"
+    )
 
     # Least-privilege scoped API keys: map of key -> set of capability scopes
     # (see core.auth.scopes). Supplied as
@@ -272,99 +340,44 @@ class SecurityConfig(BaseSettings):
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
     def _coerce_to_secret_set(cls, v: Any) -> Any:
-        """Coerce comma-separated strings or iterables of mixed types to ``Set[SecretStr]``."""
-        if v is None or v == "":
-            return set()
-        if isinstance(v, str):
-            items = [s.strip() for s in v.split(",") if s.strip()]
-            return {SecretStr(s) for s in items}
-        if isinstance(v, (list, set, tuple)):
-            return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in v}
-        return v
+        """Coerce comma-separated strings or mixed iterables to ``set[SecretStr]``."""
+        return coerce_to_secret_set(v)
 
     @field_validator("oidc_role_map", mode="before")
     @classmethod
     def _parse_role_map(cls, v: Any) -> Any:
         """Parse ``idp_role:app_role`` pairs (comma-separated) into a dict."""
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {str(k): str(val) for k, val in v.items()}
-        if isinstance(v, str):
-            parsed: dict[str, str] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry or ":" not in entry:
-                    continue
-                idp_role, _, app_role = entry.partition(":")
-                if idp_role.strip() and app_role.strip():
-                    parsed[idp_role.strip()] = app_role.strip().lower()
-            return parsed
-        return v
+        return parse_role_map(v)
 
     @field_validator("oidc_algorithms", mode="before")
     @classmethod
     def _parse_algorithms(cls, v: Any) -> Any:
         """Allow a comma-separated string for OIDC_ALGORITHMS."""
-        if isinstance(v, str):
-            return [a.strip() for a in v.split(",") if a.strip()]
-        return v
+        return parse_algorithms(v)
+
+    @field_validator("allow_origins", "trusted_hosts", mode="before")
+    @classmethod
+    def _parse_origin_lists(cls, v: Any) -> Any:
+        """Accept ``a,b`` and a blank value, as well as a JSON array.
+
+        Paired with ``NoDecode`` on both fields. JSON stays supported because
+        ``.env.example`` itself ships ``TRUSTED_HOSTS=["app.example.com"]`` and
+        deployments configured against the old behaviour have arrays in their
+        environment.
+        """
+        return csv_list(v)
 
     @field_validator("api_keys_scoped", mode="before")
     @classmethod
     def _parse_scoped_keys(cls, v: Any) -> Any:
-        """Parse ``key=scope|scope,...`` into ``Dict[SecretStr, Set[str]]``.
-
-        Already-parsed dicts pass through (keys wrapped in ``SecretStr``,
-        scope values coerced to a set). Empty/malformed entries are skipped
-        rather than raising, so a stray trailing comma does not break startup.
-        """
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {
-                (k if isinstance(k, SecretStr) else SecretStr(str(k))): set(val)
-                for k, val in v.items()
-            }
-        if isinstance(v, str):
-            parsed: dict[SecretStr, set[str]] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry or "=" not in entry:
-                    continue
-                key, _, scope_str = entry.partition("=")
-                key = key.strip()
-                scopes = {s.strip().lower() for s in scope_str.split("|") if s.strip()}
-                if key and scopes:
-                    parsed[SecretStr(key)] = scopes
-            return parsed
-        return v
+        """Parse ``key=scope|scope,...`` into ``dict[SecretStr, set[str]]``."""
+        return parse_scoped_keys(v)
 
     @field_validator("data_encryption_keys", mode="before")
     @classmethod
     def _parse_encryption_keys(cls, v: Any) -> Any:
-        """Parse ``id:secret`` pairs (comma-separated) into ``Dict[str, SecretStr]``.
-
-        A bare value without ``:`` is loaded under the id ``default`` so the
-        common single-key case stays simple. Already-parsed dicts pass through.
-        """
-        if v is None or v == "":
-            return {}
-        if isinstance(v, dict):
-            return {
-                str(k): (val if isinstance(val, SecretStr) else SecretStr(str(val)))
-                for k, val in v.items()
-            }
-        if isinstance(v, str):
-            parsed: dict[str, SecretStr] = {}
-            for entry in (e.strip() for e in v.split(",")):
-                if not entry:
-                    continue
-                if ":" in entry:
-                    key_id, secret = entry.split(":", 1)
-                    parsed[key_id.strip()] = SecretStr(secret)
-                else:
-                    parsed["default"] = SecretStr(entry)
-            return parsed
-        return v
+        """Parse ``kid:secret`` pairs (comma-separated) into ``dict[str, SecretStr]``."""
+        return parse_encryption_keys(v)
 
     @model_validator(mode="after")
     def _validate_encryption_keys(self) -> "SecurityConfig":
@@ -416,70 +429,8 @@ class SecurityConfig(BaseSettings):
 
     @model_validator(mode="after")
     def _warn_insecure_defaults(self) -> "SecurityConfig":
-        """Emit loud warnings for dangerous default configurations."""
-        if self.auth_required and not self.secret_key:
-            raise ValueError(
-                "SECRET_KEY is required when AUTH_REQUIRED=true. "
-                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
-            )
-        if self.secret_key and len(self.secret_key.get_secret_value()) < 32:
-            raise ValueError(
-                "SECRET_KEY is too short. Minimum length is 32 characters."
-            )
-        if self.admin_pass and self.admin_pass.get_secret_value() in (
-            "password",
-            "changeme",
-            "admin",
-        ):
-            raise ValueError(
-                "SECURITY: ADMIN_PASS is set to an insecure default ('password', 'changeme', or 'admin'). "
-                "Change it before deploying to production."
-            )
-        # The API-key path hashes with SHA-256 rather than a password KDF
-        # (core/auth/api_keys.py), which is only sound while the keys are
-        # high-entropy random tokens. Nothing enforced that premise, so a
-        # hand-typed short key silently got password-grade treatment from a
-        # fast hash. Warn rather than raise: existing deployments (and tests)
-        # carry short keys, and locking them out at import time is worse than
-        # telling the operator to rotate. Only the minimum length is logged —
-        # never a count or any value derived from the keys themselves.
-        has_short_key = any(
-            len(key.get_secret_value()) < _MIN_API_ENTROPY_CHARS
-            for key in (
-                *self.api_keys_user,
-                *self.api_keys_admin,
-                *self.api_keys_job,
-                *self.api_keys_scoped,
-            )
-        )
-        if has_short_key:
-            logger.warning(
-                "SECURITY: at least one configured API key is shorter than %d "
-                "characters. API keys are hashed with SHA-256 (fast, correct for "
-                "random tokens) — a short or guessable key is brute-forceable. "
-                'Mint keys with: python -c "import secrets; '
-                'print(secrets.token_urlsafe(32))"',
-                _MIN_API_ENTROPY_CHARS,
-            )
-
-        if "*" in self.allow_origins:
-            if self.admin_pass or self.admin_pass_hashed:
-                # Wildcard + admin credentials (plain or hashed) is a critical
-                # vulnerability: the CSRF Origin check becomes a no-op under
-                # wildcard, while browsers replay cached Basic-auth credentials
-                # on cross-site form POSTs against the admin router/console.
-                raise ValueError(
-                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while "
-                    "'ADMIN_PASS' or 'ADMIN_PASS_HASHED' is set. "
-                    "Cross-origin credentialed requests (CORS) are disabled for wildcards, which will "
-                    "break the Admin Console. You MUST explicitly list allowed origins or use a specific domain "
-                    "for production."
-                )
-            logger.warning(
-                "SECURITY: 'ALLOW_ORIGINS' contains '*' (wildcard). "
-                "Cross-origin requests will be allowed from ANY site, but credentials (cookies/auth) "
-                "will be disabled by the framework for security."
-            )
+        """Refuse or warn about dangerous configuration (see _security_posture)."""
+        check_insecure_defaults(self)
         return self
 
 

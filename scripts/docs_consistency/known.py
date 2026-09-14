@@ -40,7 +40,9 @@ LITERAL_SCAN = (
     "pyproject.toml",
     "prometheus.yml",
 )
-LITERAL_SCAN_GLOBS = ("docker-compose*.yml", "Dockerfile*")
+# `compose*.yaml` is the canonical Compose Specification name the repository
+# now uses; the legacy spelling stays so a checkout mid-rename still scans.
+LITERAL_SCAN_GLOBS = ("compose*.yaml", "docker-compose*.yml", "Dockerfile*")
 LITERAL_SUFFIXES = frozenset(
     {".py", ".yaml", ".yml", ".toml", ".example", ".env", ".json"}
 )
@@ -81,7 +83,7 @@ def _settings_fields(tree: ast.AST) -> tuple[set[str], set[str]]:
                         ):
                             prefix = str(kw.value.value)
                 elif isinstance(value, ast.Dict):  # {"env_prefix": "..."}
-                    for key, val in zip(value.keys, value.values, strict=False):
+                    for key, val in zip(value.keys, value.values, strict=True):
                         if (
                             isinstance(key, ast.Constant)
                             and key.value == "env_prefix"

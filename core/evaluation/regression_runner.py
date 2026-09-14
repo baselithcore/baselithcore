@@ -220,6 +220,37 @@ def run_regression(
 
 
 DEFAULT_JUDGE_MIN_SCORE: Final[float] = 0.7
+#: Judge evaluations per case. LLM scoring is nondeterministic, so a single
+#: sample makes each verdict a coin flip — one unlucky draw fails a good case
+#: and one lucky draw passes a bad one. Scoring k times and gating on the
+#: median makes the outcome stable without pretending the judge is exact.
+DEFAULT_JUDGE_SAMPLES: Final[int] = 3
+#: Judge calls in flight at once across the whole suite.
+DEFAULT_JUDGE_MAX_PARALLEL: Final[int] = 4
+
+
+def _judge_defaults() -> tuple[int, int]:
+    """``(samples, max_parallel)`` from settings, falling back to the constants.
+
+    Read at call time so ``EVAL_JUDGE_SAMPLES`` / ``EVAL_JUDGE_MAX_PARALLEL``
+    are honoured without an import-time snapshot.
+    """
+    try:
+        from core.config.evaluation import get_evaluation_config
+
+        config = get_evaluation_config()
+        return int(config.judge_samples), int(config.judge_max_parallel)
+    except Exception:  # silent-ok: the runner is used from CI scripts without an app config; the documented defaults are the safe answer
+        return DEFAULT_JUDGE_SAMPLES, DEFAULT_JUDGE_MAX_PARALLEL
+
+
+def _median(values: list[float]) -> float:
+    """Median of a non-empty score list (mean of the middle pair when even)."""
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 async def run_regression_async(
@@ -229,80 +260,113 @@ async def run_regression_async(
     threshold: float = DEFAULT_PASS_THRESHOLD,
     judge: Any | None = None,
     judge_min_score: float = DEFAULT_JUDGE_MIN_SCORE,
-    judge_concurrency: int = 8,
+    judge_concurrency: int | None = None,
+    judge_samples: int | None = None,
 ) -> RegressionReport:
     """Deterministic regression pass, optionally gated by an LLM judge.
 
     With ``judge`` (an ``core.evaluation.judges`` evaluator — anything
     exposing ``await evaluate(response, query) -> EvaluationResult``) each
-    case that passes the deterministic checks is additionally scored; a
-    score below ``judge_min_score`` fails the case. Judge scores land in
+    case that passes the deterministic checks is additionally scored
+    ``judge_samples`` times and gated on the **median** of those scores; a
+    median below ``judge_min_score`` fails the case. Judge scores land in
     ``RegressionReport.judge_scores``.
 
     Failure semantics are deliberately asymmetric:
 
-    * a **low judge score** fails the case (that is the gate);
+    * a **low median judge score** fails the case (that is the gate);
     * a **judge error** (provider down, malformed reply) does NOT flip the
-      deterministic verdict — the case keeps its deterministic result and
-      the case id is recorded in ``judge_errors``, so a flaky judge can
-      never turn CI red on its own. Judging is inherently nondeterministic,
-      which is why this gate is a separate opt-in entry point.
+      deterministic verdict — a case whose samples all errored keeps its
+      deterministic result and its id is recorded in ``judge_errors``, so a
+      flaky judge can never turn CI red on its own. A case with *some*
+      surviving samples is scored on those. Judging is inherently
+      nondeterministic, which is why this gate is a separate opt-in entry
+      point.
+
+    Args:
+        cases: Trajectory cases to evaluate.
+        recorded: Recorded runs keyed by ``case_id``.
+        threshold: Pass-rate floor for ``RegressionReport.meets_threshold``.
+        judge: Optional LLM judge; ``None`` runs the deterministic pass only.
+        judge_min_score: Median score below which a case fails.
+        judge_concurrency: Maximum judge calls in flight; defaults to
+            ``EvaluationConfig.judge_max_parallel`` (4).
+        judge_samples: Judge evaluations per case; defaults to
+            ``EvaluationConfig.judge_samples`` (3). Values below 1 are
+            clamped to 1.
     """
     case_list = list(cases)  # may be a generator; consumed twice below
     base = run_regression(case_list, recorded, threshold=threshold)
     if judge is None:
         return base
 
-    import asyncio
     from dataclasses import replace
 
     from core.observability.logging import get_logger
+    from core.utils.concurrency import bounded_gather
 
     logger = get_logger(__name__)
+    default_samples, default_parallel = _judge_defaults()
+    samples = max(1, default_samples if judge_samples is None else judge_samples)
+    limit = max(1, default_parallel if judge_concurrency is None else judge_concurrency)
+    cases_by_id = {case.get("case_id", ""): case for case in case_list}
+
+    async def _sample(case_id: str, output_text: str, question: str) -> float | None:
+        """One judge draw; ``None`` when the call errored."""
+        try:
+            outcome = await judge.evaluate(output_text, question)
+            return float(outcome.score)
+        except Exception as exc:  # judge flake must not turn CI red
+            logger.warning(
+                "LLM judge failed for case %s: %s (keeping deterministic verdict)",
+                case_id,
+                exc,
+            )
+            return None
+
+    # Flatten every (case, sample) pair into ONE bounded fan-out. Bounding the
+    # cases and their samples separately would multiply into
+    # ``limit * samples`` simultaneous provider calls; flattening keeps the
+    # ceiling literal no matter how the suite grows.
+    # Keyed by the result's POSITION, never by case_id: a corpus may repeat an
+    # id, and grouping by id merged two distinct cases' draws into one median
+    # that then decided both.
+    pending: list[int] = []
+    coroutines: list[Any] = []
+    for index, result in enumerate(base.results):
+        run = recorded.get(result.case_id)
+        if not result.passed or run is None:
+            continue  # no wasted LLM call on an already-failed case
+        question = str(cases_by_id.get(result.case_id, {}).get("input", ""))
+        for _ in range(samples):
+            pending.append(index)
+            coroutines.append(_sample(result.case_id, run.output_text, question))
+
+    drawn = await bounded_gather(coroutines, limit=limit)
+    by_index: dict[int, list[float]] = {index: [] for index in pending}
+    for index, value in zip(pending, drawn, strict=True):
+        if isinstance(value, float):
+            by_index[index].append(value)
+
     judge_scores: dict[str, float] = {}
     judge_errors: list[str] = []
     adjusted: list[TrajectoryResult] = []
-    cases_by_id = {case.get("case_id", ""): case for case in case_list}
-
-    # Judge evaluations are independent LLM calls: fan them out with bounded
-    # concurrency instead of paying one serial round-trip per case (a suite of
-    # N cases went from N× to ~N/judge_concurrency× judge latency). gather
-    # preserves input order, so the report's results stay aligned with the
-    # deterministic pass.
-    semaphore = asyncio.Semaphore(max(1, judge_concurrency))
-
-    async def _judge_one(
-        result: TrajectoryResult,
-    ) -> tuple[TrajectoryResult, float | None, bool]:
-        """Return (result, score-or-None, judge_errored)."""
-        run = recorded.get(result.case_id)
-        case = cases_by_id.get(result.case_id, {})
-        if not result.passed or run is None:
-            return result, None, False
-        async with semaphore:
-            try:
-                outcome = await judge.evaluate(run.output_text, case.get("input", ""))
-                return result, float(outcome.score), False
-            except Exception as exc:  # judge flake must not turn CI red
-                logger.warning(
-                    "LLM judge failed for case %s: %s (keeping deterministic verdict)",
-                    result.case_id,
-                    exc,
-                )
-                return result, None, True
-
-    judged = await asyncio.gather(*(_judge_one(r) for r in base.results))
-    for result, score, errored in judged:
-        if errored:
+    for index, result in enumerate(base.results):
+        scores = by_index.get(index)
+        if scores is None:  # case was never judged
+            adjusted.append(result)
+            continue
+        if not scores:  # every sample errored — keep the deterministic verdict
             judge_errors.append(result.case_id)
             adjusted.append(result)
             continue
-        if score is None:
-            adjusted.append(result)
-            continue
-        judge_scores[result.case_id] = score
+        median = _median(scores)
+        # ``judge_scores`` is id-keyed for the report's JSON shape; with a
+        # duplicated id the last occurrence wins there, but each case keeps
+        # its own verdict above.
+        judge_scores[result.case_id] = median
         adjusted.append(
-            replace(result, passed=False) if score < judge_min_score else result
+            replace(result, passed=False) if median < judge_min_score else result
         )
 
     passed = sum(1 for r in adjusted if r.passed)

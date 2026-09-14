@@ -1,6 +1,6 @@
 /** BaselithCore TypeScript SDK — a typed client for the BaselithCore API. */
 
-export { BaselithClient } from './client.js';
+export { BaselithClient, ChatStreamError } from './client.js';
 export type { BaselithClientOptions } from './client.js';
 export type {
   ChatRequest,

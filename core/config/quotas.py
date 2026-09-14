@@ -19,7 +19,14 @@ class QuotaConfig(BaseSettings):
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
-    enabled: bool = Field(default=False, alias="QUOTAS_ENABLED")
+    enabled: bool = Field(
+        default=False,
+        alias="QUOTAS_ENABLED",
+        description=(
+            "Cumulative LLM spend caps per tenant over calendar windows. "
+            "Distinct from the per-run LoopBudget USD cap."
+        ),
+    )
     # Default budgets applied to every identity. ``None`` (or 0) = unlimited.
     daily_request_limit: int | None = Field(
         default=None, alias="QUOTA_DAILY_REQUESTS", ge=0

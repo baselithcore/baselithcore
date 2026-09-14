@@ -39,7 +39,13 @@ class AgentState:
     context: str = ""
     doc_sources: list[dict[str, Any]] = field(default_factory=list)
     source_metrics: dict[str, Any] = field(default_factory=dict)
-    cache_key: tuple[str, str] | None = None
+    # ``(tenant, normalized_query, context_hash)`` — widened from a 2-tuple
+    # when the tenant was prefixed onto the key (see
+    # ``core.chat.mixins.retrieval_context``). Kept open-ended: the key is only
+    # ever built in one place and passed through to the response cache, which is
+    # generic in its key type, so pinning an arity here buys nothing and costs a
+    # ``type: ignore`` at the one site that writes it.
+    cache_key: tuple[str, ...] | None = None
     # Key for the opt-in pre-retrieval answer cache (see core.chat.precheck).
     # Set by ``check_precheck_cache``; reused by the answer writer so both
     # cache layers are populated from the same request.

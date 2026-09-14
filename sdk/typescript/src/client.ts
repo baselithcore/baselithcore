@@ -29,7 +29,7 @@ type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const VERSION = '0.1.0';
+const VERSION = '0.33.0';
 const USER_AGENT = `baselith-sdk-ts/${VERSION}`;
 
 export interface BaselithClientOptions {
@@ -77,6 +77,137 @@ async function decodeBody(res: Response): Promise<unknown> {
     }
   }
   return await res.text();
+}
+
+/**
+ * Raised when `/chat/stream` frames an `event: error` mid-stream.
+ *
+ * The server has already committed to a 200 response by the time a provider
+ * read fails, so the only way to report it is in-band (see
+ * `plugins/api_routers/chat.py`'s `SSE_ERROR_EVENT`). The message is
+ * deliberately generic — the server never puts provider detail on the wire.
+ */
+export class ChatStreamError extends Error {
+  constructor(message = 'stream failed') {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/** One decoded SSE event: an optional `event:` name and its `data:` payload. */
+interface SseEvent {
+  event: string | null;
+  data: string;
+}
+
+/**
+ * Parse one blank-line-delimited SSE block into an event.
+ *
+ * Returns `null` for a block that carries no event at all — e.g. one made
+ * only of `: keepalive`-style comment lines.
+ */
+function parseSseBlock(block: string): SseEvent | null {
+  let event: string | null = null;
+  const dataLines: string[] = [];
+  for (const line of block.split('\n')) {
+    if (!line || line.startsWith(':')) continue; // blank line, or a comment (keepalive)
+    if (line.startsWith('event:')) {
+      event = line.slice('event:'.length).trim();
+    } else if (line.startsWith('data:')) {
+      let value = line.slice('data:'.length);
+      if (value.startsWith(' ')) value = value.slice(1);
+      dataLines.push(value);
+    }
+  }
+  if (event === null && dataLines.length === 0) return null;
+  return { event, data: dataLines.join('\n') };
+}
+
+/**
+ * Incremental text -> SSE-event decoder.
+ *
+ * Buffers raw text across chunk boundaries (a `data:` line, or the blank
+ * line ending an event, can arrive split across two reads) and yields one
+ * {@link SseEvent} per complete, blank-line-terminated block.
+ */
+class SseDecoder {
+  private buffer = '';
+  // A chunk boundary can fall exactly between a "\r" and its "\n": normalising
+  // a trailing "\r" on the spot would make a "\n" arriving at the start of the
+  // *next* feed() read as a second, spurious line break instead of completing
+  // the same "\r\n". So a trailing bare "\r" is held back (not normalised yet)
+  // until the next feed() or flush() resolves it, one way or the other.
+  private pendingCr = false;
+
+  *feed(text: string): Generator<SseEvent> {
+    if (this.pendingCr) {
+      text = '\r' + text;
+      this.pendingCr = false;
+    }
+    if (text.endsWith('\r')) {
+      text = text.slice(0, -1);
+      this.pendingCr = true;
+    }
+    this.buffer += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    let idx: number;
+    while ((idx = this.buffer.indexOf('\n\n')) !== -1) {
+      const block = this.buffer.slice(0, idx);
+      this.buffer = this.buffer.slice(idx + 2);
+      const event = parseSseBlock(block);
+      if (event) yield event;
+    }
+  }
+
+  /** Yield one final event from a trailing, unterminated buffer (if any). */
+  *flush(): Generator<SseEvent> {
+    if (this.pendingCr) {
+      this.buffer += '\n';
+      this.pendingCr = false;
+    }
+    if (this.buffer.trim()) {
+      const event = parseSseBlock(this.buffer);
+      this.buffer = '';
+      if (event) yield event;
+    }
+  }
+}
+
+/**
+ * Decode a raw `/chat/stream` text stream into plain text chunks.
+ *
+ * Frames the wire format emitted by `plugins/api_routers/chat.py`: splits on
+ * blank lines, reassembles multi-line `data:` fields, ignores `: keepalive`
+ * comment lines, stops at `event: done` and throws {@link ChatStreamError} on
+ * `event: error`.
+ */
+async function* decodeSseStream(rawChunks: AsyncIterable<string> | Iterable<string>): AsyncGenerator<string> {
+  const sse = new SseDecoder();
+  for await (const raw of rawChunks) {
+    for (const event of sse.feed(raw)) {
+      if (event.event === 'done') return;
+      if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
+      yield event.data;
+    }
+  }
+  for (const event of sse.flush()) {
+    if (event.event === 'done') return;
+    if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
+    yield event.data;
+  }
+}
+
+/** Yield decoded text chunks from a `ReadableStream<Uint8Array>` reader. */
+async function* readTextChunks(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) yield decoder.decode(value, { stream: true });
+  }
+  const tail = decoder.decode();
+  if (tail) yield tail;
 }
 
 export class BaselithClient {
@@ -186,7 +317,13 @@ export class BaselithClient {
     return (await res.json()) as ChatResponse;
   }
 
-  /** Stream the agent's answer as text chunks. */
+  /**
+   * Stream the agent's answer as text chunks.
+   *
+   * The wire format is Server-Sent Events (see {@link ChatStreamError} for
+   * the mid-stream failure case); this decodes the frames and yields just
+   * the text.
+   */
   async *chatStream(query: string, opts: Partial<ChatRequest> = {}): AsyncGenerator<string> {
     const body: ChatRequest = { query, ...opts };
     const res = await this.rawFetch(this.url('/chat/stream'), {
@@ -203,18 +340,10 @@ export class BaselithClient {
     }
     if (!res.body) {
       const text = await res.text();
-      if (text) yield text;
+      yield* decodeSseStream(text ? [text] : []);
       return;
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) yield decoder.decode(value, { stream: true });
-    }
-    const tail = decoder.decode();
-    if (tail) yield tail;
+    yield* decodeSseStream(readTextChunks(res.body.getReader()));
   }
 
   /** Record feedback on a generated answer (idempotency key auto-generated). */

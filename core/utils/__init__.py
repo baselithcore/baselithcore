@@ -16,6 +16,7 @@ _EXPORTS: dict[str, str] = {
     "canonicalize": "core.utils.text_canon",
     "cosine_similarity": "core.utils.similarity",
     "cosine_similarity_many": "core.utils.similarity",
+    "count_tokens_exact_available": "core.utils.tokens",
     "estimate_tokens": "core.utils.tokens",
     "sanitize_log_value": "core.utils.logsafe",
     "sniff_audio_type": "core.utils.media",
@@ -28,6 +29,7 @@ __all__ = [
     "canonicalize",
     "cosine_similarity",
     "cosine_similarity_many",
+    "count_tokens_exact_available",
     "estimate_tokens",
     "sanitize_log_value",
     "sniff_audio_type",
@@ -41,7 +43,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
     from core.utils.media import sniff_audio_type, sniff_document_type
     from core.utils.similarity import cosine_similarity, cosine_similarity_many
     from core.utils.text_canon import canonical_key, canonicalize
-    from core.utils.tokens import estimate_tokens
+    from core.utils.tokens import count_tokens_exact_available, estimate_tokens
 
 
 def __getattr__(name: str) -> Any:

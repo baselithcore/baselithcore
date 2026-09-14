@@ -273,7 +273,7 @@ class ExperienceReplay:
         if not self.prioritized:
             return
 
-        for idx, td_error in zip(indices, td_errors):
+        for idx, td_error in zip(indices, td_errors, strict=True):
             # Priority = |TD-error| + epsilon
             priority = (abs(td_error) + self.priority_epsilon) ** self.priority_alpha
             self._tree.update(idx, priority)

@@ -24,6 +24,17 @@ def env_file_candidates() -> list[Path]:
     return [Path.cwd() / ".env", Path.cwd() / "configs" / ".env"]
 
 
+_ENV_CONFIG_MARKERS: tuple[str, ...] = (
+    "SECRET_KEY",
+    "DATABASE_URL",
+    "DB_HOST",
+    "DB_PASSWORD",
+    "CACHE_REDIS_URL",
+    "QUEUE_REDIS_URL",
+    "QDRANT_URL",
+)
+
+
 def read_env_values() -> dict[str, str]:
     """Read simple KEY=VALUE pairs from local env files."""
     values: dict[str, str] = {}
@@ -178,6 +189,14 @@ def check_env_file() -> CheckResult:
     for env_path in env_file_candidates():
         if env_path.exists():
             return CheckResult("Environment", True, f"Found config at {env_path}")
+    configured = [name for name in _ENV_CONFIG_MARKERS if os.environ.get(name)]
+    if configured:
+        return CheckResult(
+            "Environment",
+            True,
+            "Configuration provided by environment variables",
+            ", ".join(configured),
+        )
     return CheckResult(
         "Environment",
         False,

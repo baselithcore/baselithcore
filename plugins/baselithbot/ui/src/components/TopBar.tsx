@@ -29,7 +29,7 @@ interface Props {
 export function TopBar({ open, onMenu }: Props) {
   const location = useLocation();
   const sub = useMemo(() => {
-    const seg = location.pathname.replace(/^\//, '').split('/')[0];
+    const seg = location.pathname.replace(/^\//, '').split('/')[0] ?? '';
     return TITLES[seg] ?? seg;
   }, [location.pathname]);
 

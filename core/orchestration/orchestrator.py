@@ -32,6 +32,23 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Intents the orchestrator registers itself, with no plugin involved.
+#:
+#: Constructing an ``Orchestrator`` is the only way to observe these at runtime,
+#: and it is expensive and stateful — it builds a colony, a classifier and a
+#: memory manager. A reader that only needs to know *which agents the framework
+#: ships* (a catalogue, a topology view) can read this instead. Kept honest by
+#: ``tests/unit/core/orchestration/test_builtin_intents.py``, which asserts it
+#: matches what a real orchestrator ends up registering.
+BUILTIN_INTENTS: tuple[str, ...] = (
+    "qa_docs",
+    "complex_reasoning",
+    "vision_analysis",
+    "multimodal_reasoning",
+    "collaborative_task",
+    "scenario_simulation",
+)
+
 
 class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
     """

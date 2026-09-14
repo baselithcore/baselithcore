@@ -1,6 +1,6 @@
 """Tests for Worker Monitor."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,12 +32,12 @@ def test_worker_info_to_dict():
         current_job="job1",
         successful_jobs=10,
         failed_jobs=1,
-        birth_date=datetime(2023, 1, 1),
-        last_heartbeat=datetime(2023, 1, 2),
+        birth_date=datetime(2023, 1, 1, tzinfo=UTC),
+        last_heartbeat=datetime(2023, 1, 2, tzinfo=UTC),
     )
     d = info.to_dict()
     assert d["name"] == "worker1"
-    assert d["birth_date"] == "2023-01-01T00:00:00"
+    assert d["birth_date"] == "2023-01-01T00:00:00+00:00"
 
 
 def test_queue_info_to_dict():

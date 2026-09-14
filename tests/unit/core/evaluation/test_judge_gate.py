@@ -40,8 +40,12 @@ async def test_without_judge_identical_to_sync_runner():
 
 
 async def test_judge_high_score_keeps_pass():
+    # judge_samples=1 pins the single-draw contract; the default is k samples
+    # gated on the median (see test_judge_sampling.py).
     judge = StubJudge(score=0.95)
-    report = await run_regression_async([_case()], {"c1": _run()}, judge=judge)
+    report = await run_regression_async(
+        [_case()], {"c1": _run()}, judge=judge, judge_samples=1
+    )
     assert report.passed == 1
     assert report.judge_scores == {"c1": 0.95}
     assert judge.calls == [("a fine answer", "question?")]

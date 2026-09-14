@@ -1,7 +1,10 @@
-"""Plugin integrity verification.
+"""Plugin integrity hashing — what a plugin signature actually covers.
 
-Provides SHA-256 hashing of plugin source trees and verification against an
-``integrity_sha256`` field declared in the plugin manifest.
+Provides SHA-256 hashing of plugin source trees. The verification policy that
+consumes the digest (strict mode, the production fail-closed default, the
+legacy-surface migration path) lives in :mod:`core.plugins.integrity_policy`
+and is re-exported from here, so ``from core.plugins.integrity import
+verify_plugin_integrity`` keeps working.
 
 Operators may enforce signed plugins by setting the environment variable
 ``BASELITH_REQUIRE_SIGNED_PLUGINS=true``. When strict mode is active, plugins
@@ -15,8 +18,24 @@ signature, so :func:`verify_plugin_integrity` re-computes the older surfaces
 as a fallback: a plugin signed against a superseded surface still loads
 outside strict mode, with a warning naming what its signature does *not*
 cover. Strict mode (``BASELITH_REQUIRE_SIGNED_PLUGINS=true``) accepts the
-current surface only. Re-sign with ``baselith plugin sign <path>`` (or the
-``sign-changed-plugins`` pre-commit hook) to clear the warning.
+current surface only. Re-sign with ``baselith plugin sign <path>`` (or
+``python scripts/sign_changed_plugins.py <path>``) to clear the warning.
+
+The manifest is signed too (V5)
+-------------------------------
+Up to V4 the manifest was deliberately excluded from the digest so a publisher
+could inject ``integrity_sha256`` after computing it. The price was that the
+manifest — which decides the plugin's *name*, its declared ``permissions``
+(network egress, tool and secret grants), its ``python_dependencies`` and its
+``min_core_version`` — was unsigned: anyone able to edit ``manifest.yaml``
+could widen a signed plugin's egress without breaking the hash or the Ed25519
+signature over it.
+
+V5 folds a *canonical projection* of the manifest into the digest instead of
+its bytes: the parsed mapping with ``integrity_sha256``, ``signature_ed25519``
+and ``hash_surface_version`` removed, dumped as compact sorted JSON. Injection
+therefore still works (those three keys are exactly the self-referential ones),
+comments and key order stay free, and every other key is covered.
 
 Shipped front-end assets (0.27)
 -------------------------------
@@ -30,15 +49,28 @@ Consequence for developers: building the dashboard (``npm run build``) adds
 files to the hashed surface and therefore changes the plugin hash. A tree
 whose ``ui/dist/`` was built after signing must be re-signed — or loaded with
 ``BASELITH_SKIP_INTEGRITY_CHECK=true`` (dev only, inert in production).
+
+Lightweight loading
+-------------------
+``scripts/check_plugin_integrity.py`` and ``scripts/sign_changed_plugins.py``
+load *this file* directly (``importlib.util.spec_from_file_location``) so a CI
+gate needs only ``hashlib``/``pathlib``/PyYAML rather than the whole
+pydantic + structlog stack that ``core.plugins.__init__`` pulls in. Everything
+those gates need — :func:`compute_plugin_hash`, :func:`is_hashed_path`,
+:func:`is_manifest_path` — is therefore defined here with stdlib imports only.
+In that mode the relative import of the policy half at the bottom of this file
+cannot resolve (there is no package), which is caught and ignored: the gates
+never verify, they only hash.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
-import os
 from enum import IntEnum
 from pathlib import Path
+from typing import Any
 
 # Use stdlib logging here (rather than ``core.observability.logging``) so this
 # module can be loaded by lightweight CI tooling without dragging in
@@ -64,11 +96,27 @@ class HashSurface(IntEnum):
     V3_SHIPPED = 3
     """0.27+: adds shipped executables and served front-end assets."""
 
+    V4_UI_EXPORT = 4
+    """0.31+: also covers front-end bundles a build tool writes somewhere other
+    than ``ui/dist`` — a Next.js ``output: 'export'`` console in ``ui/out``, a
+    Create React App build in ``ui/build``. V3 hardcoded ``dist``, so a plugin
+    whose toolchain picks a different directory shipped a console the operator
+    executes in their browser and no signature covered."""
 
-CURRENT_HASH_SURFACE = HashSurface.V3_SHIPPED
+    V5_MANIFEST = 5
+    """0.33+: adds the canonicalised manifest. Up to V4 the manifest was the
+    one file a signed plugin could rewrite freely — which meant its declared
+    ``permissions`` (egress, tools, secrets), ``python_dependencies``,
+    ``min_core_version`` and ``name`` were attacker-controlled on a tree whose
+    hash and Ed25519 signature both still verified."""
+
+
+CURRENT_HASH_SURFACE = HashSurface.V5_MANIFEST
 # Superseded surfaces accepted (with a warning) outside strict mode, newest
 # first so the closest match is reported.
 _LEGACY_SURFACES: tuple[HashSurface, ...] = (
+    HashSurface.V4_UI_EXPORT,
+    HashSurface.V3_SHIPPED,
     HashSurface.V2_BUILD,
     HashSurface.V1_SOURCE,
 )
@@ -77,9 +125,7 @@ _HASHED_SUFFIXES = frozenset({".py", ".pyi"})
 # Build/packaging files steer ``pip install`` (build backend selection,
 # dependency pins): leaving them unhashed would let a tree whose ``*.py``
 # files still match the signature execute tampered build config at install
-# time. Names are matched case-insensitively. The plugin manifest itself
-# (manifest.yaml|yml|json) stays excluded so the publisher can inject
-# ``integrity_sha256`` after computing the digest.
+# time. Names are matched case-insensitively.
 _HASHED_BUILD_FILENAMES = frozenset({"pyproject.toml", "setup.cfg", "manifest.in"})
 # Declarative skill bodies (SKILL.md) are injected into agent prompts on
 # activation — an unhashed skill file would let a tree whose ``*.py`` files
@@ -99,17 +145,73 @@ _HASHED_ASSET_SUFFIXES = frozenset(
     {".js", ".mjs", ".cjs", ".wasm", ".html", ".htm", ".svg", ".css"}
 )
 
-_EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules"})
+# The plugin contract. Hashed from V5 on, but never by its bytes — see
+# :func:`canonical_manifest_bytes`. Ordered: the first one present at the
+# plugin root is the manifest, mirroring the loader's own lookup.
+MANIFEST_FILENAMES: tuple[str, ...] = ("manifest.yaml", "manifest.yml", "manifest.json")
+# Keys removed from the canonical projection because they describe the digest
+# rather than the plugin: a publisher computes the hash, signs it, stamps the
+# surface version, and writes all three back into the very file being hashed.
+_BLANKED_MANIFEST_KEYS: tuple[str, ...] = (
+    "integrity_sha256",
+    "signature_ed25519",
+    "hash_surface_version",
+)
+# Digest label for the canonical manifest. A NUL cannot occur in a POSIX path,
+# so this can never collide with a real file's relative path.
+_MANIFEST_DIGEST_LABEL = "\x00manifest"
+
+# ``target`` is Cargo's build directory, the Rust counterpart of
+# ``node_modules``: gitignored, never distributed, and full of ``.dylib`` /
+# ``.so`` / ``.sh`` files that the executable-surface rules below would
+# otherwise hash. Leaving it in made the signature of any plugin carrying a
+# Rust component depend on whether ``cargo build`` had been run locally — the
+# same tree hashed differently before and after compiling.
+_EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "target"})
 # Pre-V3 the whole ``ui/`` tree was excluded — which left the compiled,
 # shipped dashboard bundle outside the signature. Kept here only to
 # reproduce V1/V2 digests byte-for-byte.
 _LEGACY_EXCLUDED_DIRS = _EXCLUDED_DIRS | {"ui"}
-# From V3 on, ``ui/`` is scoped instead of excluded: only ``ui/dist/**``
-# ships (see ``[tool.setuptools.package-data]`` / ``exclude-package-data``),
-# so only ``ui/dist/**`` is hashed. ``ui/src``, ``ui/node_modules`` and the
+# From V3 on, ``ui/`` is scoped instead of excluded: only the compiled bundle
+# ships (see ``[tool.setuptools.package-data]`` / ``exclude-package-data``), so
+# only the bundle is hashed. ``ui/src``, ``ui/node_modules`` and the
 # tsconfig/vite build inputs are never distributed and stay out.
+#
+# V3 hardcoded ``dist``, which is Vite's default and wrong for everything else:
+# a Next.js static export lands in ``ui/out`` and Create React App writes
+# ``ui/build``. Those consoles shipped and were served while no signature
+# covered a byte of them. V4 covers all three.
 _UI_DIR = "ui"
-_UI_SHIPPED_SUBDIR = "dist"
+_UI_SHIPPED_SUBDIRS_V3 = frozenset({"dist"})
+_UI_SHIPPED_SUBDIRS = frozenset({"dist", "out", "build"})
+
+
+def is_manifest_path(path: Path) -> bool:
+    """Whether ``path`` names a plugin manifest.
+
+    Args:
+        path: Any path; only its file name is inspected.
+
+    Returns:
+        ``True`` for ``manifest.yaml``/``.yml``/``.json`` (case-insensitively).
+    """
+    return path.name.lower() in MANIFEST_FILENAMES
+
+
+def find_manifest_file(plugin_dir: Path) -> Path | None:
+    """Return the plugin's manifest, in the loader's own lookup order.
+
+    Args:
+        plugin_dir: Plugin root directory.
+
+    Returns:
+        The first existing ``manifest.yaml``/``.yml``/``.json``, or ``None``.
+    """
+    for name in MANIFEST_FILENAMES:
+        candidate = plugin_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def is_hashed_path(
@@ -118,10 +220,14 @@ def is_hashed_path(
     legacy: bool = False,
     surface: HashSurface | None = None,
 ) -> bool:
-    """Whether ``path`` belongs to the hashed surface (by name only).
+    """Whether ``path`` contributes its **raw bytes** to the digest (by name only).
 
     Directory exclusions (``__pycache__``, ``ui/src``, ...) are applied by
-    the tree walk, not here.
+    the tree walk, not here. The manifest is deliberately excluded from this
+    predicate even at V5+: from V5 on it is covered, but by its canonical
+    parsed form rather than its bytes (see :func:`canonical_manifest_bytes`),
+    so callers that want "does this file move the digest?" must also test
+    :func:`is_manifest_path`.
 
     Args:
         path: File path whose name/suffix is inspected.
@@ -156,7 +262,101 @@ def _is_excluded(parts: tuple[str, ...], surface: HashSurface) -> bool:
         return True
     # Everything under ``ui/`` except the compiled, shipped bundle is build
     # input that never leaves the developer's machine.
-    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] != _UI_SHIPPED_SUBDIR)
+    shipped = (
+        _UI_SHIPPED_SUBDIRS
+        if surface >= HashSurface.V4_UI_EXPORT
+        else _UI_SHIPPED_SUBDIRS_V3
+    )
+    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] not in shipped)
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce a parsed YAML/JSON value into something ``json.dumps`` can sort.
+
+    YAML admits non-string mapping keys and scalars JSON has no notion of
+    (``date``, ``datetime``). Both are rendered through ``str`` so the digest
+    stays computable and deterministic instead of raising on an exotic
+    manifest.
+    """
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    return str(value)
+
+
+def canonical_manifest_bytes(manifest: Path) -> bytes:
+    """Render a manifest as the bytes that feed the V5 digest.
+
+    The manifest is parsed, the three self-referential supply-chain keys
+    (``integrity_sha256``, ``signature_ed25519``, ``hash_surface_version``) are
+    dropped, and what remains is dumped as compact JSON with sorted keys. So:
+
+    * injecting a hash/signature/surface version after computing the digest
+      leaves the digest unchanged — the publishing workflow still works;
+    * comments, key order, quoting style and YAML-vs-JSON spelling are free;
+    * every other key — ``permissions``, ``python_dependencies``,
+      ``min_core_version``, ``name``, ``entry_point`` — is covered.
+
+    Args:
+        manifest: Path to the plugin's manifest file.
+
+    Returns:
+        The canonical byte string. A manifest that will not parse contributes
+        its raw bytes instead, so a broken manifest is still covered (and the
+        tree still hashes deterministically) rather than being skipped. Those
+        bytes cannot collide with the canonical form: canonical JSON is valid
+        YAML, so anything that reaches this fallback would not have.
+    """
+    raw = manifest.read_bytes()
+    try:
+        import yaml
+
+        data = yaml.safe_load(raw.decode("utf-8"))
+    except Exception:  # silent-ok: raw bytes cover an unparseable manifest
+        return raw
+    if isinstance(data, dict):
+        data = {k: v for k, v in data.items() if k not in _BLANKED_MANIFEST_KEYS}
+    return json.dumps(
+        _json_safe(data),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def read_declared_surface(plugin_dir: Path) -> int | None:
+    """Read ``hash_surface_version`` from a plugin's manifest.
+
+    Advisory only: the key sits outside the digest (it has to — it is written
+    after the digest is computed), so it is documentation for tooling and for
+    the operator, never an input to verification. Verification always tries
+    the current surface first and falls back through the superseded ones, so a
+    tampered version number buys an attacker nothing.
+
+    Args:
+        plugin_dir: Plugin root directory.
+
+    Returns:
+        The declared surface generation, or ``None`` when absent or unreadable.
+    """
+    manifest = find_manifest_file(plugin_dir)
+    if manifest is None:
+        return None
+    try:
+        import yaml
+
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    except Exception:  # silent-ok: advisory field; unreadable == absent
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return int(data["hash_surface_version"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _compute_hash(plugin_dir: Path, *, surface: HashSurface) -> str:
@@ -168,6 +368,10 @@ def _compute_hash(plugin_dir: Path, *, surface: HashSurface) -> str:
             continue
         if _is_excluded(path.relative_to(base).parts, surface):
             continue
+        # The manifest never contributes its bytes: at V5+ it contributes its
+        # canonical form below, and before V5 it contributed nothing at all.
+        if is_manifest_path(path):
+            continue
         if is_hashed_path(path, surface=surface):
             files.append(path)
 
@@ -177,6 +381,14 @@ def _compute_hash(plugin_dir: Path, *, surface: HashSurface) -> str:
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
+
+    if surface >= HashSurface.V5_MANIFEST:
+        manifest = find_manifest_file(base)
+        if manifest is not None:
+            digest.update(_MANIFEST_DIGEST_LABEL.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(canonical_manifest_bytes(manifest))
+            digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -188,13 +400,13 @@ def compute_plugin_hash(plugin_dir: Path, *, surface: HashSurface | None = None)
     (``pyproject.toml``, ``setup.cfg``, ``MANIFEST.in``,
     ``requirements*.txt``), declarative skill bodies (``SKILL.md``) whose
     contents reach the model's prompt, compiled extension modules and shell
-    scripts, and the front-end assets that ship and are served to the
-    operator (``ui/dist/**``, ``static/**``: JS/HTML/CSS/SVG/WASM). The
-    manifest is intentionally excluded so the marketplace publisher can
-    inject an ``integrity_sha256`` field into the manifest after computing
-    the digest without invalidating it. Each included file contributes its
-    POSIX-relative path and raw bytes to the digest in sorted order so the
-    hash is reproducible across platforms.
+    scripts, the front-end assets that ship and are served to the operator
+    (``ui/{dist,out,build}/**``, ``static/**``: JS/HTML/CSS/SVG/WASM), and —
+    from V5 — the canonicalised manifest (:func:`canonical_manifest_bytes`),
+    which carries the plugin's declared permissions, dependencies and version
+    floor. Each included file contributes its POSIX-relative path and raw
+    bytes to the digest in sorted order so the hash is reproducible across
+    platforms; the manifest contributes last, under a reserved label.
 
     Args:
         plugin_dir: Resolved path to the plugin root directory.
@@ -217,202 +429,45 @@ def compute_legacy_plugin_hash(plugin_dir: Path) -> str:
     return _compute_hash(plugin_dir, surface=HashSurface.V1_SOURCE)
 
 
-def is_strict_mode_enabled() -> bool:
-    """Return True when ``BASELITH_REQUIRE_SIGNED_PLUGINS`` is set to a truthy value."""
-    raw = os.environ.get("BASELITH_REQUIRE_SIGNED_PLUGINS", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
-
-
-def _is_production() -> bool:
-    """Whether the runtime environment is production.
-
-    Delegates to :mod:`core.utils.runtime_env`, which is stdlib-only and so
-    keeps this module free of the pydantic/config import the lightweight-CI
-    constraint at the top of the file rules out. The hand-rolled copy this
-    replaced matched the literal ``"production"`` only, so ``APP_ENV=prod``
-    silently disabled the signing gate below.
-    """
-    from core.utils.runtime_env import is_production_env
-
-    return is_production_env()
-
-
-def _allow_unsigned_in_prod() -> bool:
-    """Explicit, insecure opt-out to permit unsigned plugins in production.
-
-    The production default is fail-closed (unsigned plugins refuse to load).
-    Operators who genuinely need to run an unsigned plugin in production must
-    set ``BASELITH_ALLOW_UNSIGNED_IN_PROD=true`` — a deliberate, auditable
-    downgrade rather than a silent one.
-    """
-    raw = os.environ.get("BASELITH_ALLOW_UNSIGNED_IN_PROD", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
-
-
-def enforce_signing_policy() -> None:
-    """Surface an insecure plugin-signing posture before loading plugins.
-
-    Production is fail-closed by default: ``verify_plugin_integrity`` refuses to
-    load a plugin that has no ``integrity_sha256`` (see below). The only way to
-    weaken that in production is the explicit ``BASELITH_ALLOW_UNSIGNED_IN_PROD``
-    opt-out — and when it is set we log a single CRITICAL so the downgrade is
-    never silent. Outside production this is a no-op (unsigned plugins load, as
-    the hot-reload dev loop needs).
-    """
-    if not _is_production() or is_strict_mode_enabled():
-        return
-    if _allow_unsigned_in_prod():
-        logger.critical(
-            "BASELITH_ALLOW_UNSIGNED_IN_PROD is set: unsigned plugins will load "
-            "UNVERIFIED in production (supply-chain risk). Remove this flag and "
-            "sign all plugins (integrity_sha256) to restore fail-closed loading."
-        )
-
-
-def is_skip_check_enabled() -> bool:
-    """Return True when ``BASELITH_SKIP_INTEGRITY_CHECK`` is set to a truthy value.
-
-    Dev escape hatch: skips hash verification entirely so the hot-reload loop
-    does not require recomputing ``integrity_sha256`` after every source edit.
-    It is NEVER honored in production (returns False regardless of the flag), and
-    strict mode (``BASELITH_REQUIRE_SIGNED_PLUGINS``) overrides it everywhere — a
-    single env var must not be able to disable the whole supply-chain control in
-    a hardened environment.
-    """
-    if _is_production():
-        return False
-    raw = os.environ.get("BASELITH_SKIP_INTEGRITY_CHECK", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
-
-
-# What a signature produced against each superseded surface leaves
-# unprotected — surfaced verbatim in the migration warning so an operator can
-# judge the residual risk without reading this module.
-_SURFACE_GAPS: dict[HashSurface, str] = {
-    HashSurface.V1_SOURCE: (
-        "build and packaging files (pyproject.toml, requirements*.txt, ...), "
-        "SKILL.md prompt bodies, native extension modules and shipped "
-        "front-end assets (ui/dist, static: JS/HTML/CSS)"
-    ),
-    HashSurface.V2_BUILD: (
-        "native extension modules (*.so/*.pyd/*.dylib), shell scripts and "
-        "shipped front-end assets (ui/dist, static: JS/HTML/CSS) — code that "
-        "runs on the host or in the operator's browser"
-    ),
-}
-
-
-def _match_legacy_surface(plugin_dir: Path, expected_hash: str) -> HashSurface | None:
-    """Return the superseded surface ``expected_hash`` was computed over, if any."""
-    wanted = expected_hash.lower()
-    for surface in _LEGACY_SURFACES:
-        if _compute_hash(plugin_dir, surface=surface).lower() == wanted:
-            return surface
-    return None
-
-
-def _handle_legacy_match(surface: HashSurface, safe_name: str, *, strict: bool) -> bool:
-    """Log and decide on a signature that only matches a superseded surface."""
-    gap = _SURFACE_GAPS[surface]
-    if strict:
-        logger.error(
-            "Refusing plugin %s: integrity_sha256 matches only the superseded "
-            "hash surface %s, but BASELITH_REQUIRE_SIGNED_PLUGINS demands %s. "
-            "Re-sign the plugin.",
-            safe_name,
-            surface.name,
-            CURRENT_HASH_SURFACE.name,
-        )
-        return False
-    logger.warning(
-        "Plugin %s is signed against the superseded hash surface %s: %s are "
-        "NOT covered by its signature. Re-sign the plugin to extend coverage.",
-        safe_name,
-        surface.name,
-        gap,
+try:
+    # The verification policy half. Relative, so this raises ImportError when
+    # the file is direct-loaded outside the package by the CI gates (see the
+    # module docstring) — which is fine: those gates only hash.
+    from .integrity_policy import (
+        enforce_signing_policy as enforce_signing_policy,
     )
-    return True
+    from .integrity_policy import (
+        is_skip_check_enabled as is_skip_check_enabled,
+    )
+    from .integrity_policy import (
+        is_strict_mode_enabled as is_strict_mode_enabled,
+    )
+    from .integrity_policy import (
+        verify_plugin_integrity as verify_plugin_integrity,
+    )
+except ImportError:
+    # Only the direct-load path may fail here. With a package context an
+    # ImportError means something is genuinely broken *inside*
+    # ``integrity_policy`` — swallowing that would silently delete
+    # ``verify_plugin_integrity`` from the public surface and load every
+    # plugin unverified.
+    if __package__:
+        raise
 
 
-def verify_plugin_integrity(
-    plugin_dir: Path,
-    expected_hash: str | None,
-    *,
-    strict: bool | None = None,
-) -> bool:
-    """Verify a plugin directory against its declared manifest hash.
-
-    Args:
-        plugin_dir: Plugin directory.
-        expected_hash: Hex SHA-256 declared in ``manifest.integrity_sha256``,
-            or ``None`` if absent.
-        strict: Override for strict mode. Defaults to the
-            ``BASELITH_REQUIRE_SIGNED_PLUGINS`` environment flag.
-
-    Returns:
-        ``True`` when the plugin is permitted to load, ``False`` otherwise.
-    """
-    if strict is None:
-        strict = is_strict_mode_enabled()
-
-    # Directory and manifest values are untrusted input: escape them so a
-    # crafted name or hash cannot forge extra log entries. Imported lazily to
-    # keep this module importable by lightweight tooling.
-    from core.utils.logsafe import sanitize_log_value
-
-    safe_name = sanitize_log_value(plugin_dir.name)
-
-    if is_skip_check_enabled() and not strict:
-        logger.warning(
-            "Plugin %s integrity check SKIPPED (BASELITH_SKIP_INTEGRITY_CHECK=true). "
-            "Never enable this flag in production.",
-            safe_name,
-        )
-        return True
-
-    if not expected_hash:
-        if strict:
-            logger.error(
-                "Refusing to load unsigned plugin %s: integrity_sha256 missing "
-                "and BASELITH_REQUIRE_SIGNED_PLUGINS is enabled.",
-                safe_name,
-            )
-            return False
-        # Fail-closed in production by default: an unsigned plugin is a
-        # supply-chain risk, so refuse it unless an operator sets the explicit
-        # BASELITH_ALLOW_UNSIGNED_IN_PROD opt-out. Outside production, unsigned
-        # plugins still load (dev/hot-reload convenience).
-        if _is_production() and not _allow_unsigned_in_prod():
-            logger.error(
-                "Refusing to load unsigned plugin %s in production: "
-                "integrity_sha256 missing. Sign the plugin or set "
-                "BASELITH_ALLOW_UNSIGNED_IN_PROD=true to override (insecure).",
-                safe_name,
-            )
-            return False
-        logger.info(
-            "Plugin %s has no integrity_sha256 in manifest; loading anyway.",
-            safe_name,
-        )
-        return True
-
-    actual_hash = compute_plugin_hash(plugin_dir)
-    if actual_hash.lower() != expected_hash.lower():
-        # Migration path: a signature produced against a superseded surface
-        # (see HashSurface) still loads outside strict mode, with a warning
-        # naming what it fails to cover. Strict mode demands the current
-        # surface. Re-sign with ``baselith plugin sign`` /
-        # ``scripts/sign_changed_plugins.py`` to clear the warning.
-        matched = _match_legacy_surface(plugin_dir, expected_hash)
-        if matched is not None:
-            return _handle_legacy_match(matched, safe_name, strict=strict)
-        logger.error(
-            "Plugin %s integrity check FAILED: manifest=%s computed=%s",
-            safe_name,
-            sanitize_log_value(expected_hash, max_length=80),
-            actual_hash,
-        )
-        return False
-
-    logger.debug("Plugin %s integrity verified.", safe_name)
-    return True
+__all__ = [
+    "CURRENT_HASH_SURFACE",
+    "MANIFEST_FILENAMES",
+    "HashSurface",
+    "canonical_manifest_bytes",
+    "compute_legacy_plugin_hash",
+    "compute_plugin_hash",
+    "enforce_signing_policy",
+    "find_manifest_file",
+    "is_hashed_path",
+    "is_manifest_path",
+    "is_skip_check_enabled",
+    "is_strict_mode_enabled",
+    "read_declared_surface",
+    "verify_plugin_integrity",
+]

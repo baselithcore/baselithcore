@@ -122,7 +122,7 @@ async def insert_feedback(
                 *[_record_with_timeout(doc_id) for doc_id in doc_ids_list],
                 return_exceptions=True,
             )
-            for doc_id, result in zip(doc_ids_list, results):
+            for doc_id, result in zip(doc_ids_list, results, strict=True):
                 if isinstance(result, BaseException):
                     logger.warning(
                         "graph_feedback_record_failed",

@@ -58,6 +58,7 @@ class LookupMixin:
     _relationship_types: dict[str, dict[str, Any]]
     _intent_patterns: dict[str, dict[str, Any]]
     _flow_handlers: dict[str, Any]
+    _intent_pattern_owners: dict[str, str]
     _static_paths: dict[str, Path]
     _ui_tabs: dict[str, list[dict[str, str]]]
     _discovered_plugins: dict[str, PluginDiscovery]
@@ -244,6 +245,26 @@ class LookupMixin:
         intent_patterns = self._visible_discovered_intent_patterns()
         intent_patterns.update(self._intent_patterns)
         return intent_patterns
+
+    def get_intent_pattern_owner(self, intent_name: str) -> str | None:
+        """Get the plugin that declared an intent's patterns.
+
+        The counterpart to ``get_flow_handler_owner``, for the declarative half
+        of the same relationship. A plugin declares its intents in the manifest,
+        while its flow handler is only registered once the plugin is active — so
+        an intent can have a known owner here with no handler registered yet.
+        That is precisely the case a reader listing "what *can* run" has to
+        attribute, and the handler-owner lookup cannot answer it.
+
+        Args:
+            intent_name: The intent to attribute.
+
+        Returns:
+            The declaring plugin's name, or ``None`` when core-owned or unknown.
+        """
+        return self._intent_pattern_owners.get(
+            intent_name
+        ) or self._discovered_intent_pattern_owners.get(intent_name)
 
     def get_flow_handler(self, intent_name: str) -> Any | None:
         """

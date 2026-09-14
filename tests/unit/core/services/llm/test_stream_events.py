@@ -136,7 +136,9 @@ class FakeSDKStream:
 async def test_anthropic_provider_maps_sdk_events(monkeypatch):
     from core.services.llm.providers.anthropic_provider import AnthropicProvider
 
-    provider = AnthropicProvider.__new__(AnthropicProvider)  # skip __init__
+    # Fully constructed (no network: the fake client below replaces the SDK's
+    # before any call is made).
+    provider = AnthropicProvider(api_key="sk-ant-test")
 
     sdk_events = [
         SimpleNamespace(
@@ -186,3 +188,95 @@ async def test_anthropic_provider_maps_sdk_events(monkeypatch):
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Stop-reason policy on the streamed path
+# ---------------------------------------------------------------------------
+
+
+async def test_streamed_max_tokens_marks_the_result_truncated():
+    """A streamed answer cut off by the cap must say so, like a buffered one."""
+    provider = NativeStreamProvider(
+        [StreamEnd(LLMResult(text="half an ans", stop_reason="max_tokens"))]
+    )
+    got = [e async for e in generate_stream_events(_service(provider), "hi")]
+    assert got[-1].result.truncated is True
+
+
+async def test_streamed_refusal_follows_the_same_policy():
+    from core.services.llm.errors import LLMRefusalError
+
+    provider = NativeStreamProvider(
+        [
+            StreamEnd(
+                LLMResult(
+                    stop_reason="refusal",
+                    stop_details={"category": "safety", "explanation": "no"},
+                )
+            )
+        ]
+    )
+    with pytest.raises(LLMRefusalError):
+        _ = [e async for e in generate_stream_events(_service(provider), "hi")]
+
+
+async def test_streamed_refusal_can_be_allowed():
+    provider = NativeStreamProvider([StreamEnd(LLMResult(stop_reason="refusal"))])
+    got = [
+        e
+        async for e in generate_stream_events(
+            _service(provider), "hi", allow_refusal=True
+        )
+    ]
+    assert got[-1].result.stop_reason == "refusal"
+    # The flag reaches the provider too, so it does not raise on the wire.
+    assert provider.calls[-1][2]["allow_refusal"] is True
+
+
+async def test_a_streamed_refusal_is_accounted_for_before_it_raises():
+    """A refusal was generated and billed — the spend must not vanish."""
+    from unittest.mock import patch
+
+    from core.services.llm.errors import LLMRefusalError
+
+    provider = NativeStreamProvider(
+        [StreamEnd(LLMResult(stop_reason="refusal", tokens_used=120))]
+    )
+    charged: list[tuple] = []
+    with patch(
+        "core.orchestration.budget_context.charge_llm_cost",
+        side_effect=lambda *a, **kw: charged.append(a),
+    ):
+        with pytest.raises(LLMRefusalError):
+            _ = [e async for e in generate_stream_events(_service(provider), "hi")]
+
+    assert charged, "a billed refusal must still charge the turn"
+
+
+async def test_the_truncation_flag_is_set_before_stream_end_reaches_the_consumer():
+    provider = NativeStreamProvider(
+        [StreamEnd(LLMResult(text="half", stop_reason="max_tokens"))]
+    )
+    seen: list[bool] = []
+    async for event in generate_stream_events(_service(provider), "hi"):
+        if isinstance(event, StreamEnd):
+            seen.append(event.result.truncated)
+    assert seen == [True]
+
+
+async def test_truncation_is_logged_once_not_twice():
+    """The policy runs in exactly one place on the streamed path."""
+    from unittest.mock import patch
+
+    from core.services.llm import stop_reasons
+
+    provider = NativeStreamProvider(
+        [StreamEnd(LLMResult(text="half", stop_reason="max_tokens"))]
+    )
+    with patch.object(stop_reasons.logger, "warning") as warn:
+        _ = [e async for e in generate_stream_events(_service(provider), "hi")]
+    truncation_logs = [
+        call for call in warn.call_args_list if call.args[0] == "llm_response_truncated"
+    ]
+    assert len(truncation_logs) == 1

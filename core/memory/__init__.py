@@ -21,6 +21,9 @@ from .metrics import MemoryMetrics, MemoryMetricsCollector
 
 # Supermemory intelligent memory layer
 from .supermemory_provider import SupermemoryContextProvider, SupermemoryProvider
+
+# Tenant scoping for the in-process tiers (working memory, STM/MTM/LTM)
+from .tenant_state import TenantScopedState, current_memory_tenant
 from .types import MemoryItem, MemoryType
 
 # Alias for backward compatibility
@@ -63,4 +66,7 @@ __all__ = [
     # Supermemory intelligent memory layer
     "SupermemoryProvider",
     "SupermemoryContextProvider",
+    # Tenant scoping of the in-process tiers
+    "TenantScopedState",
+    "current_memory_tenant",
 ]

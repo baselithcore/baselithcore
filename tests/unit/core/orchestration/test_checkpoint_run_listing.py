@@ -100,3 +100,21 @@ async def test_store_without_list_runs_falls_back_to_resumable_ids() -> None:
 
     rows = await list_runs(store)  # type: ignore[arg-type]
     assert [r["run_id"] for r in rows] == ["a"]  # only resumable ids are reachable
+
+
+async def test_postgres_run_list_types_its_nullable_filters() -> None:
+    """Untyped placeholders in an ``IS NULL`` test are rejected by Postgres.
+
+    ``WHERE (%(tenant_id)s IS NULL OR tenant_id = %(tenant_id)s)`` sends the
+    filter twice as two independent parameters; the one that only appears in
+    the ``IS NULL`` test has no type context, so the server answers
+    ``42P18 could not determine data type of parameter $1`` and the whole run
+    explorer 500s. Every nullable filter must carry an explicit cast.
+    """
+    import re
+
+    from core.orchestration.checkpoint_postgres import _RUN_LIST
+
+    assert not re.search(r"%\(\w+\)s\s+IS\s+NULL", _RUN_LIST, re.IGNORECASE)
+    assert re.search(r"%\(tenant_id\)s::\w+\s+IS\s+NULL", _RUN_LIST)
+    assert re.search(r"%\(status\)s::\w+\s+IS\s+NULL", _RUN_LIST)

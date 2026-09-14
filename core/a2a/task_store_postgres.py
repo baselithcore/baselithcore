@@ -23,7 +23,7 @@ from psycopg.rows import dict_row
 from core.a2a.server import TaskStore
 from core.a2a.types import Task
 from core.context import get_current_tenant_id
-from core.db.connection import get_async_cursor
+from core.db.connection import get_async_cursor, system_tenant_scope
 from core.db.ddl import skip_runtime_ddl
 from core.observability.logging import get_logger
 
@@ -63,11 +63,19 @@ class PostgresTaskStore(TaskStore):
     """Durable A2A task persistence backed by PostgreSQL."""
 
     async def initialize(self) -> None:
-        """Create the task table and index if absent (idempotent)."""
+        """Create the task table and index if absent (idempotent).
+
+        Runs inside :func:`core.db.connection.system_tenant_scope`: the first
+        touch of this store is often out of request (a worker, a script, an
+        import-time bootstrap), and under ``DB_RLS_ENABLED`` the pool refuses to
+        bind a tenant nobody declared. Schema work belongs to the deployment,
+        not to a tenant.
+        """
         if skip_runtime_ddl("a2a task store", "a2a_tasks"):
             return
-        async with get_async_cursor() as cur:
-            await cur.execute(_DDL)
+        with system_tenant_scope():
+            async with get_async_cursor() as cur:
+                await cur.execute(_DDL)
         logger.info("a2a_tasks schema initialized")
 
     async def get(self, task_id: str) -> Task | None:

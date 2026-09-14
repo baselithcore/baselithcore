@@ -119,7 +119,7 @@ class BackstageProvider:
         a link to an unconfigured host is a broken link in the catalog UI.
     plugin_link_template:
         Optional "Manage Plugin" link template (``{plugin}`` placeholder,
-        e.g. ``http://host:8000/baselithcontrol/#/plugin/{plugin}``); ``None``
+        e.g. ``http://host:8000/<console>/#/plugin/{plugin}``); ``None``
         omits it.  Links must be browser-renderable — API endpoints stay in
         annotations.
     """

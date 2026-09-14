@@ -1,3 +1,9 @@
+"""World-model configuration (``WORLD_MODEL_``).
+
+Risk thresholds, rollback behaviour and simulation limits for actions the
+agent takes against the outside world.
+"""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

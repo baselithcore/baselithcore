@@ -16,6 +16,11 @@ The version lives in `core/_version.py` (single source of truth) and is written
 by the release pipeline. The [CHANGELOG](https://keepachangelog.com) is generated
 and committed automatically.
 
+The CHANGELOG lists *what* changed. [Upgrade Notes](upgrade-notes.md) lists the
+changes that alter how a running deployment behaves — a default that flipped, a
+call that now refuses, a signature that moved. Add an entry there whenever a
+change would surprise an operator who only read the commit subject.
+
 ## What counts as a breaking change
 
 - Removing or renaming a public symbol exported from a `core.*` package

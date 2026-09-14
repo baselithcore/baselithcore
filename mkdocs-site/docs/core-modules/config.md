@@ -2,6 +2,7 @@
 title: Configuration
 description: Centralized configuration system with Pydantic Settings
 ---
+<!-- markdownlint-disable MD046 -->
 
 ## Overview
 
@@ -47,10 +48,15 @@ core/config/
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
+├── _security_parsers.py  # env-string -> typed credential coercion for security.py
+├── _security_posture.py  # Startup refuse/warn checks over a finished SecurityConfig
+├── _collections.py       # csv_list — the parser every NoDecode collection field uses
+├── observability.py      # ObservabilityConfig (metric cardinality, trace exemplars)
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
+├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
 ├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
@@ -122,6 +128,103 @@ model = config.model
 import os
 model = os.getenv("LLM_MODEL")  # NO!
 ```
+
+---
+
+## Collection settings: the `NoDecode` + `csv_list` contract {#collection-settings}
+
+**Every new settings field holding a collection of *strings* must follow this
+contract.** It is not a style preference — omitting either half reintroduces a
+bug that has already shipped. (A field holding a mapping of nested *objects* is
+a different case; see [Nested-object settings](#nested-object-settings) below.)
+
+pydantic-settings treats any collection-typed field as *complex* and
+JSON-decodes its raw environment value inside `EnvSettingsSource` — **before any
+`field_validator` runs**. So a field that looks like it accepts a comma-separated
+list does not: `FOO=a,b` raises `SettingsError` out of the **whole settings
+class**, not just that field, and a class is usually a whole subsystem's
+configuration. A blank value fails identically, which means an operator who
+copies `.env.example` verbatim can break a subsystem by leaving a key empty.
+
+Both halves are required:
+
+```python
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode
+
+from core.config._collections import csv_list
+
+
+class ObservabilityConfig(BaseSettings):
+    # 1. NoDecode — hand the raw string through untouched
+    metrics_tenant_label_allowlist: Annotated[set[str], NoDecode] = Field(
+        default_factory=set,
+        alias="METRICS_TENANT_LABEL_ALLOWLIST",
+    )
+
+    # 2. a mode="before" validator that actually parses it
+    @field_validator("metrics_tenant_label_allowlist", mode="before")
+    @classmethod
+    def _parse_allowlist(cls, value: object) -> object:
+        return csv_list(value)
+```
+
+`csv_list` (`core/config/_collections.py`) normalises to a list of trimmed,
+non-empty strings:
+
+| Input | Result |
+|---|---|
+| `"core.,plugins."` | `['core.', 'plugins.']` |
+| `"  "` (blank) | `[]` |
+| `'["a", "b"]'` | `['a', 'b']` |
+| an already-built list, or any non-string | returned unchanged |
+
+The JSON form is still accepted on purpose: deployments configured against the
+previous behaviour have one in their environment (`.env.example` itself ships
+`TRUSTED_HOSTS=["app.example.com"]`), and `NoDecode` would otherwise hand them
+the single-element list `['["app.example.com"]']`.
+
+!!! warning "`csv_list` splits on a literal comma"
+    A value that legitimately contains a comma cannot be expressed in the CSV
+    form — a credential, an algorithm token, a description. Use the **JSON array**
+    form for those:
+
+    ```bash
+    # Wrong: split into two useless entries
+    SOME_KEYS=abc,def-with,comma
+
+    # Right
+    SOME_KEYS=["abc", "def-with,comma"]
+    ```
+
+### Nested-object settings are JSON-only {#nested-object-settings}
+
+The contract above covers collections of **strings**, where a comma-separated
+spelling is meaningful. A setting whose value is a mapping of *objects* has no CSV
+spelling, so it keeps pydantic-settings' JSON decoding untouched — and a non-JSON
+value still raises `SettingsError` out of the whole settings class:
+
+| Setting | Shape | Module |
+|---|---|---|
+| `MCP_SERVERS` | `dict[str, MCPServerSpec]` | `core/config/mcp.py` |
+| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | `core/config/plugins.py` |
+| `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` | `core/config/world_model.py` |
+
+```bash
+# Raises SettingsError out of the whole MCPConfig
+MCP_SERVERS=weather
+
+# The only accepted form
+MCP_SERVERS='{"weather": {"command": "python", "args": ["weather_server.py"]}}'
+```
+
+Adding a `csv_list` validator to one of these would be wrong, not merely
+unnecessary: `csv_list` returns a list of strings, and the field needs a mapping.
+If a future nested-object setting needs a friendlier spelling, give it its own
+`mode="before"` validator — `OIDC_ROLE_MAP` is the precedent, parsing
+`idp_role:app_role` pairs into a `dict[str, str]` under the same `NoDecode`.
 
 ---
 
@@ -748,6 +851,84 @@ SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
     does not affect startup until the provider is actually used.
 
 ---
+
+## Environment drift
+
+Every settings class is declared with `extra="ignore"`. That is what lets one
+process carry variables meant for another, and it is also why a misspelled
+variable produces no error: `CORE_LOG_LEVL=DEBUG` is accepted, ignored, and the
+operator sees the default with no hint why.
+
+`core/config/drift.py` closes that gap by reporting *suspected typos* rather
+than unknown variables. A name that closely resembles a declared setting without
+matching one is almost always a mistake; a name that resembles nothing is
+usually a variable read through `os.getenv`, so it stays silent. Precision is
+the point — a check that cries wolf gets ignored.
+
+```python
+from core.config.drift import suspected_typos
+
+suspected_typos({"CORE_LOG_LEVL": "DEBUG"})
+# [EnvSuspect(name='CORE_LOG_LEVL', suggestion='CORE_LOG_LEVEL')]
+```
+
+The known names come from the live `BaseSettings` class tree, so a plugin that
+declares its own settings is covered as soon as it is imported. Two families are
+skipped because their suffix is chosen at runtime and no declared name exists to
+compare against: `BASELITH_FLAG_<FLAG>` and `BASELITH_PROMPT_VARIANTS_<PROMPT>`.
+
+The application logs one warning per suspect at startup — never an exception, so
+a false positive cannot stop a deployment — and the same report is available on
+demand:
+
+```bash
+baselith config env
+```
+
+### What belongs in `.env.example`
+
+The template is not the manual. It once carried an entry for nearly every
+setting, so ~110 of its lines restated a default the code already had, and its
+prose drifted out of step with the descriptions on the fields. Three kinds of
+line survive there now:
+
+- credentials the operator must supply (`__CHANGE_ME__`);
+- values the template deliberately sets **away** from the code default — it is a
+  profile as much as an example, and dropping those would silently change what
+  `cp .env.example .env` produces;
+- flags read straight from the environment rather than through a settings field,
+  where a wrong value is a security incident (the `BASELITH_A2A_*` family, the
+  SSRF and plugin-signature switches). Those have no `Field` to carry their
+  description, so their prose stays in the template.
+
+Everything else lives on the generated reference page. When a template entry is
+removed, its documentation moves into the field's `description=` first — the
+reference is generated from those, so prose deleted from the template without
+that step would simply be lost.
+
+### Keeping the surface honest
+
+`scripts/check_config_surface.py` audits the three artefacts that describe the
+same settings: the classes that bind the environment, the `.env.example`
+template, and the generated reference page. It fails when a template entry binds
+nothing, and when the reference page is stale.
+
+```bash
+python scripts/check_config_surface.py           # gate
+python scripts/check_config_surface.py --write   # restamp the reference page
+```
+
+The gate reads the sources with `ast` rather than importing them: importing
+`core.config` loads the repository `.env`, which would publish a developer's
+local overrides as the shipped defaults.
+
+It found real drift when introduced. `VISION_ANTHROPIC_API_KEY`,
+`VOICE_ELEVENLABS_API_KEY`, `FINETUNE_OPENAI_API_KEY` and their neighbours were
+documented but bound nothing: an explicit `alias=` **replaces** the class's
+`env_prefix` instead of adding to it, so the prefixed names never reached the
+field, and the fine-tuning credentials silently shared the chat provider's key.
+Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
+field should answer to both.
 
 ## Validation
 

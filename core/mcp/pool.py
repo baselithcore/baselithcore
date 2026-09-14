@@ -113,7 +113,7 @@ class MCPConnectionPool:
             return_exceptions=True,
         )
         result: dict[str, list[MCPToolInfo]] = {}
-        for name, outcome in zip(names, outcomes):
+        for name, outcome in zip(names, outcomes, strict=True):
             if isinstance(outcome, BaseException):
                 logger.warning(
                     "mcp_list_tools_failed", server_name=name, error=str(outcome)

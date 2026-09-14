@@ -170,7 +170,9 @@ class TestTOTPProvider:
         assert len(enrollment.recovery_codes) == 10
         assert len(enrollment.recovery_code_hashes) == 10
         # Hashes correspond to the plaintext codes.
-        for code, h in zip(enrollment.recovery_codes, enrollment.recovery_code_hashes):
+        for code, h in zip(
+            enrollment.recovery_codes, enrollment.recovery_code_hashes, strict=True
+        ):
             assert hash_recovery_code(code) == h
 
     def test_enrolled_secret_verifies(self):

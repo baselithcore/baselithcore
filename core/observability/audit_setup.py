@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from pydantic import ValidationError
+
 from core.config.audit import get_audit_config
 from core.observability.audit import (
     AuditLogger,
@@ -22,7 +24,11 @@ from core.observability.audit import (
     LoggerAuditSink,
     set_audit_logger,
 )
-from core.observability.audit_chain import SQLiteAuditSink
+from core.observability.audit_chain import (
+    AuditChainKeyError,
+    SQLiteAuditSink,
+    require_chain_key_from_env,
+)
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,11 +42,30 @@ def configure_audit_logging() -> AuditLogger | None:
     """Install the configured audit logger as the global instance.
 
     Returns the configured logger, or ``None`` when the subsystem is disabled
-    (in which case the pre-existing global logger is left alone). Never raises:
-    a misconfigured audit trail must not stop the application from starting —
-    it is logged loudly instead.
+    (in which case the pre-existing global logger is left alone).
+
+    Almost never raises: a misconfigured audit trail must not stop the
+    application from starting, it is logged loudly instead. The one exception
+    is :class:`~core.observability.audit_chain.AuditChainKeyError` — a
+    deployment that set ``AUDIT_CHAIN_REQUIRE_KEY`` asked for a *tamper-evident*
+    trail, and "boots fine, audit silently off" is the one outcome that setting
+    exists to prevent. That error propagates.
+
+    Raises:
+        AuditChainKeyError: ``AUDIT_CHAIN_REQUIRE_KEY`` is set and no usable
+            ``AUDIT_CHAIN_HMAC_KEY`` could be resolved.
     """
-    config = get_audit_config()
+    try:
+        config = get_audit_config()
+    except ValidationError as exc:
+        # The settings class refuses to validate in exactly the require-key /
+        # no-key state. Degrading to "audit disabled" here would defeat it.
+        if require_chain_key_from_env():
+            raise AuditChainKeyError(
+                "AUDIT_CHAIN_REQUIRE_KEY is set but the audit configuration is "
+                f"invalid, so no keyed chain can be opened: {exc}"
+            ) from exc
+        raise
     if not config.enabled:
         return None
 
@@ -71,6 +96,8 @@ def configure_audit_logging() -> AuditLogger | None:
             },
         )
         return audit_logger
+    except AuditChainKeyError:
+        raise
     except Exception as exc:
         logger.error("audit_trail_setup_failed", extra={"error": str(exc)})
         return None
@@ -144,6 +171,11 @@ def start_audit_trail(app: Any) -> None:
 
     Best-effort: stores the scheduler on ``app.state.audit_retention_scheduler``
     (``None`` when not started) so :func:`stop_audit_trail` can tear it down.
+
+    Raises:
+        AuditChainKeyError: ``AUDIT_CHAIN_REQUIRE_KEY`` is set and no key is
+            available — see :func:`configure_audit_logging`. This is the only
+            failure here that stops startup, deliberately.
     """
     app.state.audit_retention_scheduler = None
     try:
@@ -156,6 +188,8 @@ def start_audit_trail(app: Any) -> None:
         scheduler = AuditRetentionScheduler(config.retention_days)
         scheduler.start()
         app.state.audit_retention_scheduler = scheduler
+    except AuditChainKeyError:
+        raise
     except Exception as exc:
         logger.warning("audit_trail_startup_failed", extra={"error": str(exc)})
 

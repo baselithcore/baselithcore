@@ -16,7 +16,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile-slim
+      dockerfile: Dockerfile
     env_file:
       - ${BASELITH_DOCKER_ENV_FILE:-configs/.env.docker.core.example}
     environment:

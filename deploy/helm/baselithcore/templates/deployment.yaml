@@ -10,6 +10,7 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "baselithcore.selectorLabels" . | nindent 6 }}
@@ -27,6 +28,9 @@ spec:
         {{- if .Values.secrets.create }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- end }}
+        {{- if .Values.plugins.config }}
+        checksum/plugins: {{ include (print $.Template.BasePath "/plugins-configmap.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "baselithcore.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
@@ -38,24 +42,27 @@ spec:
       serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              {{- include "baselithcore.selectorLabels" . | nindent 14 }}
-              app.kubernetes.io/component: api
+        {{- include "baselithcore.topologySpread" (dict "root" . "component" "api") | trim | nindent 8 }}
       {{- end }}
+      {{- include "baselithcore.seedInitContainers" . | nindent 6 }}
       containers:
         - name: api
           image: {{ include "baselithcore.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          # A crashed container's message comes from /dev/termination-log,
+          # which nothing here writes — so the pod's status says nothing.
+          # Falling back to the tail of the log puts the actual traceback in
+          # `kubectl describe`, where the person debugging is already looking.
+          terminationMessagePolicy: FallbackToLogsOnError
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
@@ -137,7 +144,7 @@ spec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumeMounts }}
+          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumeMounts .Values.plugins.config }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
@@ -149,11 +156,14 @@ spec:
             - name: prometheus-multiproc
               mountPath: /tmp/prometheus
             {{- end }}
+            {{- if .Values.plugins.config }}
+            {{- include "baselithcore.pluginsConfigVolumeMount" . | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumes }}
+      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) .Values.extraVolumes .Values.plugins.config }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
@@ -164,6 +174,9 @@ spec:
         - name: prometheus-multiproc
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- if .Values.plugins.config }}
+        {{- include "baselithcore.pluginsConfigVolume" . | nindent 8 }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

@@ -114,3 +114,93 @@ def test_sink_fires_even_when_budget_check_raises(
     finally:
         unregister_token_sink(sink)
     assert seen == [11]
+
+
+class TestReportExternalUsage:
+    """``report_external_usage``: the seam for engines outside the funnel.
+
+    Plugins that drive their own LLM client (a vendored engine, a child
+    process) measure usage themselves; without this they reported nothing and
+    every consumer of the seam — per-plugin cost attribution, per-user budget
+    accounting — showed them as having spent zero.
+    """
+
+    def test_emits_the_paired_input_then_model_reports(self) -> None:
+        from core.services.llm import report_external_usage
+
+        seen: list[tuple[int, str]] = []
+
+        def sink(count: int, model: str) -> None:
+            seen.append((count, model))
+
+        register_token_sink(sink)
+        try:
+            report_external_usage("qwen3:8b", prompt_tokens=900, completion_tokens=120)
+        finally:
+            unregister_token_sink(sink)
+
+        # Order is load-bearing: consumers pair an ``input`` report with the
+        # next real-model report to reconstruct one call.
+        assert seen == [(900, "input"), (120, "qwen3:8b")]
+
+    def test_streaming_uses_the_input_stream_sentinel(self) -> None:
+        from core.services.llm import report_external_usage
+
+        seen: list[tuple[int, str]] = []
+
+        def sink(count: int, model: str) -> None:
+            seen.append((count, model))
+
+        register_token_sink(sink)
+        try:
+            report_external_usage(
+                "gpt-4o-mini", prompt_tokens=10, completion_tokens=2, stream=True
+            )
+        finally:
+            unregister_token_sink(sink)
+
+        assert seen == [(10, "input_stream"), (2, "gpt-4o-mini")]
+
+    def test_skips_missing_counts(self) -> None:
+        from core.services.llm import report_external_usage
+
+        seen: list[tuple[int, str]] = []
+
+        def sink(count: int, model: str) -> None:
+            seen.append((count, model))
+
+        register_token_sink(sink)
+        try:
+            report_external_usage("m", prompt_tokens=0, completion_tokens=5)
+            report_external_usage("m", prompt_tokens=-3, completion_tokens=0)
+        finally:
+            unregister_token_sink(sink)
+
+        assert seen == [(5, "m")]
+
+    def test_budget_rejection_never_reaches_the_caller(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The tokens were already spent by an engine this process does not
+        # gate, so a budget raise must not corrupt a paid-for response — and
+        # must not swallow the second half of the pair either.
+        import core.services.llm._telemetry as telemetry
+
+        class _Boom:
+            def track_tokens(self, count: int, model: str = "unknown") -> None:
+                raise RuntimeError("budget exceeded")
+
+        monkeypatch.setattr(telemetry, "cost_controller", _Boom())
+
+        seen: list[tuple[int, str]] = []
+
+        def sink(count: int, model: str) -> None:
+            seen.append((count, model))
+
+        register_token_sink(sink)
+        try:
+            telemetry.report_external_usage("m", prompt_tokens=4, completion_tokens=6)
+        finally:
+            unregister_token_sink(sink)
+
+        assert seen == [(4, "input"), (6, "m")]

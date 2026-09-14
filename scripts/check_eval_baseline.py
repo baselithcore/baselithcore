@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Eval-corpus ratchet: the eval suites may grow, never silently shrink.
+"""Eval-corpus ratchet: the eval suites may grow, never silently change.
 
 The CI quality gates are only as strong as their corpora — a deleted
 red-team case or a trimmed regression suite weakens the gate without any
@@ -9,6 +9,14 @@ test failing. This script freezes the current per-suite case counts in
 than its baselined count. Growing a suite is always allowed; after growing
 it, refresh the baseline with ``--update-baseline`` so the new floor sticks.
 
+Counts alone, however, only catch *deletion*. Editing a case in place — an
+assertion relaxed, an expected keyword removed, an adversarial prompt
+defanged — keeps the count identical and weakens the gate just as much. The
+baseline therefore also carries ``dataset_sha256``, a hash over every corpus
+file's path and contents, and ``dataset_version``, an integer bumped each
+time that hash changes. A corpus edit that does not come with a refreshed
+baseline fails the gate, so the change has to be declared in the diff.
+
 Usage:
     python scripts/check_eval_baseline.py
     python scripts/check_eval_baseline.py --update-baseline
@@ -17,9 +25,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -34,6 +44,31 @@ _SUITES: dict[str, str] = {
     "red_team": "*.yaml",
     "runs": "*.json",
 }
+
+#: Baseline keys that carry metadata rather than a per-suite case count.
+DATASET_HASH_KEY = "dataset_sha256"
+DATASET_VERSION_KEY = "dataset_version"
+_METADATA_KEYS = frozenset({DATASET_HASH_KEY, DATASET_VERSION_KEY})
+
+
+def dataset_sha256(evals_dir: Path) -> str:
+    """Content hash over every ratcheted corpus file, path included.
+
+    The digest folds in each file's suite-relative path before its bytes, so
+    renaming, splitting or merging corpus files registers as drift just like
+    editing one. Files are visited in sorted order, making the hash
+    reproducible across filesystems.
+    """
+    digest = hashlib.sha256()
+    for suite, pattern in sorted(_SUITES.items()):
+        suite_dir = evals_dir / suite
+        if not suite_dir.is_dir():
+            continue
+        for file in sorted(suite_dir.glob(pattern)):
+            digest.update(f"{suite}/{file.name}\0".encode())
+            digest.update(file.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _count_file(path: Path) -> int:
@@ -61,37 +96,73 @@ def count_suites(evals_dir: Path) -> dict[str, int]:
     return counts
 
 
-def load_baseline(baseline_file: Path) -> dict[str, int]:
-    """The committed baseline counts ({} when the file is absent)."""
+def load_baseline_document(baseline_file: Path) -> dict[str, Any]:
+    """The committed baseline verbatim, metadata included ({} when absent)."""
     try:
         data = json.loads(baseline_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    return {k: int(v) for k, v in data.items()}
+    return data if isinstance(data, dict) else {}
 
 
-def check_eval_baseline(evals_dir: Path, baseline: dict[str, int]) -> list[str]:
-    """Return one violation line per suite that shrank below its baseline."""
+def load_baseline(baseline_file: Path) -> dict[str, int]:
+    """The committed per-suite floors, without the metadata keys."""
+    document = load_baseline_document(baseline_file)
+    return {k: int(v) for k, v in document.items() if k not in _METADATA_KEYS}
+
+
+def check_eval_baseline(evals_dir: Path, baseline: dict[str, Any]) -> list[str]:
+    """Violations: a suite below its floor, or a drifted corpus hash.
+
+    Accepts either the full baseline document or the counts-only mapping; a
+    baseline written before ``dataset_sha256`` existed simply skips the
+    content check.
+    """
     counts = count_suites(evals_dir)
     violations: list[str] = []
     for suite, floor in baseline.items():
+        if suite in _METADATA_KEYS:
+            continue
         current = counts.get(suite, 0)
-        if current < floor:
+        if current < int(floor):
             violations.append(
                 f"evals/{suite}: {current} case(s), baseline floor is {floor} "
                 "— eval corpora are a ratchet: restore the deleted cases or "
                 "replace them with equivalents"
             )
+
+    expected_hash = baseline.get(DATASET_HASH_KEY)
+    if expected_hash:
+        actual = dataset_sha256(evals_dir)
+        if actual != expected_hash:
+            violations.append(
+                f"evals: dataset_sha256 drifted ({actual[:12]}… vs baselined "
+                f"{str(expected_hash)[:12]}…) — a corpus file was edited, "
+                "renamed or added. Review the change, then re-stamp the "
+                "baseline with: python scripts/check_eval_baseline.py "
+                "--update-baseline"
+            )
     return violations
 
 
-def write_baseline(evals_dir: Path, baseline_file: Path) -> dict[str, int]:
-    """Freeze the current counts as the new baseline."""
-    counts = count_suites(evals_dir)
+def write_baseline(evals_dir: Path, baseline_file: Path) -> dict[str, Any]:
+    """Freeze the current counts, corpus hash and dataset version.
+
+    ``dataset_version`` increments only when the corpus hash actually
+    changed, so re-stamping an unchanged baseline is a no-op.
+    """
+    previous = load_baseline_document(baseline_file)
+    digest = dataset_sha256(evals_dir)
+    version = int(previous.get(DATASET_VERSION_KEY, 0) or 0)
+    if not previous or previous.get(DATASET_HASH_KEY) != digest:
+        version += 1
+    document: dict[str, Any] = dict(count_suites(evals_dir))
+    document[DATASET_HASH_KEY] = digest
+    document[DATASET_VERSION_KEY] = version
     baseline_file.write_text(
-        json.dumps(counts, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    return counts
+    return document
 
 
 def main() -> int:
@@ -104,11 +175,11 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.update_baseline:
-        counts = write_baseline(EVALS_DIR, BASELINE_FILE)
-        print(f"Baseline updated: {counts}")
+        document = write_baseline(EVALS_DIR, BASELINE_FILE)
+        print(f"Baseline updated: {document}")
         return 0
 
-    baseline = load_baseline(BASELINE_FILE)
+    baseline = load_baseline_document(BASELINE_FILE)
     if not baseline:
         print(
             "No evals/baseline.json found — create one with --update-baseline.",

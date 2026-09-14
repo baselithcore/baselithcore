@@ -173,11 +173,21 @@ def annotate_modality(context: dict[str, Any]) -> None:
     )
 
 
-def inject_capabilities(orchestrator: Any, context: dict[str, Any]) -> None:
+def inject_capabilities(
+    orchestrator: Any, context: dict[str, Any], *, query: str | None = None
+) -> None:
     """Expose the orchestrator's optional capabilities on *context*.
 
     Includes the declarative skill service plus a prompt-ready catalog — cards
     only, since skill bodies load on activation (progressive disclosure).
+
+    Args:
+        orchestrator: The orchestrator whose capabilities are being exposed.
+        context: The orchestration context to populate.
+        query: The request text. Passed to ``render_catalog`` so the catalog is
+            *ranked by relevance* to this request instead of dumping every
+            card — which is what makes progressive disclosure a saving rather
+            than a rename. ``None`` keeps the unranked full catalog.
     """
     if orchestrator.human_intervention:
         context["human_intervention"] = orchestrator.human_intervention
@@ -189,7 +199,13 @@ def inject_capabilities(orchestrator: Any, context: dict[str, Any]) -> None:
     if skill_service is not None:
         context["skill_service"] = skill_service
         try:
-            catalog = skill_service.render_catalog()
+            # Ask the signature whether the query is accepted, rather than
+            # calling and treating TypeError as "not accepted": a TypeError
+            # raised *inside* a query-aware renderer is a real bug, and
+            # retrying without the query would hide it behind a silently
+            # unranked catalog.
+            render = skill_service.render_catalog
+            catalog = render(query) if _accepts_query(render) and query else render()
             if catalog:
                 context["skills_catalog"] = catalog
         except Exception as e:

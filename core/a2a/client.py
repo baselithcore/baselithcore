@@ -445,4 +445,4 @@ class A2AClientPool:
         checks = await asyncio.gather(
             *(self._clients[name].health_check() for name in names)
         )
-        return dict(zip(names, checks))
+        return dict(zip(names, checks, strict=True))

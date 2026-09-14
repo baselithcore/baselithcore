@@ -223,5 +223,5 @@ VARIABLE: new_value
         )
         return {
             action.name: result_state
-            for action, result_state in zip(actions, result_states)
+            for action, result_state in zip(actions, result_states, strict=True)
         }

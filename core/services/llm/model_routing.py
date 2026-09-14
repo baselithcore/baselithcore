@@ -9,6 +9,12 @@ Routing is a hint, never an error: unknown categories, invalid policy JSON,
 or a disabled router all resolve to ``None`` so the caller falls back to the
 config default model. Explicit per-call models and policy-pinned models are
 resolved *before* routing in ``LLMService._resolve_model``.
+
+An optional ``routing_max_cost_per_1k_usd`` config attribute (read via
+``getattr`` so it works whether or not ``LLMConfig`` declares the field yet)
+is forwarded as the router's ``max_cost_per_1k_usd`` budget hint: when the
+category's normal pick is pricier than the hint, the router substitutes the
+cheapest candidate in its policy pool that fits instead.
 """
 
 from __future__ import annotations
@@ -56,9 +62,10 @@ def routed_model(config: object, task_category: str | None) -> str | None:
     router = _router_for(policy_json)
     if router is None:
         return None
+    max_cost_per_1k_usd = getattr(config, "routing_max_cost_per_1k_usd", None)
     try:
         category = TaskCategory(task_category)
-        return router.select(category).model_id
+        return router.select(category, max_cost_per_1k_usd=max_cost_per_1k_usd).model_id
     except (ValueError, KeyError):
         # Unknown category or category absent from the policy.
         return None

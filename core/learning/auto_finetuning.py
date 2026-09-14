@@ -334,7 +334,7 @@ class AutoFineTuningService:
 
             config = FineTuneConfig(
                 base_model=self.config.base_model,
-                suffix=f"auto-{datetime.now().strftime('%Y%m%d-%H%M')}",
+                suffix=f"auto-{datetime.now(UTC).strftime('%Y%m%d-%H%M')}",
             )
 
             result = await pipeline.start_training(
@@ -370,7 +370,7 @@ class AutoFineTuningService:
             output_dir = Path(self.config.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             filename = f"auto_finetune_{timestamp}.jsonl"
             filepath = output_dir / filename
 

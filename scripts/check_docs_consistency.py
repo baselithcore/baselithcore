@@ -56,6 +56,9 @@ ILLUSTRATIVE_PATHS: frozenset[str] = frozenset(
         "tests/test_orders.py",
         "configs/plugins.dev.yaml",
         ".github/workflows/publish.yml",
+        # The stock auto-merge override names, cited as a warning about what
+        # NOT to call a file — neither exists here, deliberately.
+        "compose.override.yaml",
         "docker-compose.override.yml",
     }
 )

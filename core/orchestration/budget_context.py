@@ -9,11 +9,16 @@ module exposes the active budget through a ``ContextVar`` so the LLM
 service can charge real dollar cost against the request that triggered it,
 making ``LoopLimits.budget_usd`` an enforced cap instead of an advisory one.
 
-Charging policy: only models present in the pricing table are charged.
-The pricing table's punitive ``UNKNOWN_PRICE`` fallback is right for cost
-*reporting* (missing entries become visible) but wrong for *enforcement* —
-a self-hosted or unlisted model would burn any realistic budget within a
-few thousand tokens and abort production requests spuriously.
+Charging policy: a model absent from the pricing table is priced via
+:func:`core.quotas.cost_enforcement.price_unknown_model`, so this seam and
+tenant/identity metering share one ``BASELITH_UNKNOWN_MODEL_COST_POLICY``
+knob (default ``charge``, i.e. ``UNKNOWN_PRICE`` — visible in cost
+dashboards instead of silently free). A ``reject``-policy rejection
+(:class:`~core.quotas.cost_enforcement.UnknownModelCostRejected`) is guarded
+here and treated as a zero charge: this module's only charging exception is
+:class:`~core.orchestration.limits.BudgetExceededError`. Regardless of
+policy or whether a budget is even active, an unpriced model id gets a
+one-time warning per process so a missing pricing entry stays visible.
 """
 
 from __future__ import annotations
@@ -28,6 +33,17 @@ logger = get_logger(__name__)
 _active_budget: ContextVar[LoopBudget | None] = ContextVar(
     "active_loop_budget", default=None
 )
+
+# Models we have already warned about missing a pricing entry in this
+# process. One loud log line per model id, not one per call.
+_warned_unpriced_model_ids: set[str] = set()
+
+
+def _warn_unpriced_model_once(model: str) -> None:
+    if model in _warned_unpriced_model_ids:
+        return
+    _warned_unpriced_model_ids.add(model)
+    logger.warning("llm_cost_not_charged_unknown_model", extra={"model": model})
 
 
 def activate_budget(budget: LoopBudget) -> Token:
@@ -45,14 +61,33 @@ def get_active_budget() -> LoopBudget | None:
     return _active_budget.get()
 
 
-def charge_llm_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+def charge_llm_cost(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    batch: bool = False,
+) -> float:
     """Charge an LLM call against the ambient budget, if one is active.
 
-    Returns the USD cost charged (0.0 when no budget is active or the model
-    is not in the pricing table). Raises
+    ``cache_read_tokens``/``cache_write_tokens`` line up with the field names
+    on the LLM service's ``Usage`` dataclass, so a caller can forward
+    ``usage.cache_read_tokens`` / ``usage.cache_write_tokens`` directly.
+
+    Returns the USD cost charged (0.0 when no budget is active). Raises
     :class:`~core.orchestration.limits.BudgetExceededError` when the charge
     pushes the request over its ``budget_usd`` cap.
     """
+    from core.models.pricing import DEFAULT_PRICING
+
+    unpriced = model not in DEFAULT_PRICING
+    if unpriced:
+        # Visibility into a missing pricing entry must not depend on whether
+        # an orchestrated request happens to be running.
+        _warn_unpriced_model_once(model)
+
     budget = _active_budget.get()
     if budget is None:
         return 0.0
@@ -63,13 +98,37 @@ def charge_llm_cost(model: str, prompt_tokens: int, completion_tokens: int) -> f
     # raise BudgetExceededError("max_tokens").
     budget.record_tokens(max(prompt_tokens, 0) + max(completion_tokens, 0))
 
-    from core.models.pricing import DEFAULT_PRICING, estimate_cost
+    if unpriced:
+        from core.quotas.cost_enforcement import (
+            UnknownModelCostRejected,
+            price_unknown_model,
+        )
 
-    if model not in DEFAULT_PRICING:
-        logger.debug("llm_cost_not_charged_unknown_model", extra={"model": model})
-        return 0.0
+        try:
+            cost = price_unknown_model(
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                batch=batch,
+            )
+        except UnknownModelCostRejected:
+            # This seam's only charging exception is BudgetExceededError; a
+            # policy rejection is a "don't charge", not a run-aborting error.
+            return 0.0
+    else:
+        from core.models.pricing import estimate_cost
 
-    cost = estimate_cost(model, max(prompt_tokens, 0), max(completion_tokens, 0))
+        cost = estimate_cost(
+            model,
+            max(prompt_tokens, 0),
+            max(completion_tokens, 0),
+            cache_read_tokens=max(cache_read_tokens, 0),
+            cache_write_tokens=max(cache_write_tokens, 0),
+            batch=batch,
+        )
+
     if cost > 0:
         budget.charge(cost)
     return cost

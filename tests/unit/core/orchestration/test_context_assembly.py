@@ -77,3 +77,42 @@ async def test_no_memory_manager_records_nothing():
     await inject_memory_context(_Orchestrator(None), "query", {}, budget)
 
     assert budget.context_tokens == 0
+
+
+class _SkillService:
+    """Stands in for the declarative skill service."""
+
+    def __init__(self) -> None:
+        self.catalog_calls: list[str | None] = []
+
+    def render_catalog(self, query: str | None = None) -> str:
+        self.catalog_calls.append(query)
+        return "- skill: do a thing"
+
+
+class _CapabilityHost:
+    def __init__(self, skill_service: Any) -> None:
+        self.memory_manager = None
+        self.human_intervention = None
+        self.feedback_collector = None
+        self.skill_service = skill_service
+
+
+def test_skill_catalog_is_rendered_for_the_request_query() -> None:
+    """Progressive disclosure only works when the catalog is ranked by the
+    request: ``render_catalog()`` with no query dumps every card."""
+    from core.orchestration.mixins._context_assembly import inject_capabilities
+
+    service = _SkillService()
+    context: dict[str, Any] = {}
+    inject_capabilities(_CapabilityHost(service), context, query="reset the cache")
+    assert service.catalog_calls == ["reset the cache"]
+    assert context["skills_catalog"] == "- skill: do a thing"
+
+
+def test_skill_catalog_query_is_optional() -> None:
+    from core.orchestration.mixins._context_assembly import inject_capabilities
+
+    service = _SkillService()
+    inject_capabilities(_CapabilityHost(service), {})
+    assert service.catalog_calls == [None]

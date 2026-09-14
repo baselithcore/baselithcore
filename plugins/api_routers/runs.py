@@ -108,7 +108,16 @@ async def run_events(run_id: str) -> StreamingResponse:
                 if event.type in TERMINAL_EVENT_TYPES:
                     break
 
-    return StreamingResponse(event_frames(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_frames(),
+        media_type="text/event-stream",
+        # Same pair the chat stream sends: `no-cache` keeps intermediaries from
+        # storing a live feed, and `X-Accel-Buffering: no` makes nginx (and the
+        # app's own gzip middleware) pass frames through instead of buffering
+        # them until the stream ends — without it a run's events reached the
+        # subscriber in one burst at termination whenever a proxy sat between.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{run_id}/fork")

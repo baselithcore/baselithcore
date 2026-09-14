@@ -73,7 +73,13 @@ def test_chat_endpoint_validation_error(client, mock_chat_service):
     mock_chat_service.handle_chat_async.assert_not_called()
 
 
-def test_chat_stream_endpoint(client, mock_chat_service):
+def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
+    """The stream is SSE: one ``data:`` frame per chunk, then ``event: done``.
+
+    It answered ``text/plain`` with the chunks concatenated, so a client had no
+    frame boundaries and no way to distinguish "finished" from "disconnected".
+    """
+
     # Setup
     async def fake_stream():
         yield "Hello"
@@ -88,8 +94,10 @@ def test_chat_stream_endpoint(client, mock_chat_service):
 
     # Verify
     assert response.status_code == 200
-    assert response.text == "Hello World"
-    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text == (
+        "data: Hello\n\ndata:  World\n\n" + chat_router_module.SSE_DONE_EVENT
+    )
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["x-accel-buffering"] == "no"
 
     # Verify mock call

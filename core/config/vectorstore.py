@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,10 @@ class VectorStoreConfig(BaseSettings):
     )
 
     # Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk.
-    qdrant_mode: str = Field(default="server", alias="QDRANT_MODE")
+    qdrant_mode: str = Field(
+        default="server",
+        validation_alias=AliasChoices("VECTORSTORE_QDRANT_MODE", "QDRANT_MODE"),
+    )
     qdrant_path: str | None = Field(default=None, alias="QDRANT_PATH")
 
     # Managed/remote Qdrant: API key + TLS. Both unset for the loopback
@@ -102,6 +105,61 @@ class VectorStoreConfig(BaseSettings):
     # docs per index() call, and max concurrent vector-store delete round-trips.
     index_batch_size: int = Field(default=32, ge=1, alias="INDEX_BATCH_SIZE")
     index_max_concurrency: int = Field(default=8, ge=1, alias="INDEX_MAX_CONCURRENCY")
+
+    # == pgvector HNSW tuning ==
+    # Defaults are pgvector's own, so a deployment that never touches these
+    # behaves exactly as before. ``m`` and ``ef_construction`` are *build*
+    # parameters baked into the index (raising them costs build time and index
+    # size, and buys recall); ``ef_search`` is a *query* parameter applied per
+    # search, trading latency for recall without a rebuild.
+    hnsw_m: int = Field(
+        default=16,
+        ge=2,
+        le=100,
+        description="HNSW graph connectivity (pgvector 'm'); build-time.",
+    )
+    hnsw_ef_construction: int = Field(
+        default=64,
+        ge=4,
+        le=1000,
+        description="HNSW build-time candidate list size (pgvector "
+        "'ef_construction'); must be >= 2 * hnsw_m.",
+    )
+    hnsw_ef_search: int = Field(
+        default=40,
+        ge=0,
+        le=1000,
+        description="HNSW query-time candidate list size, applied as "
+        "SET LOCAL hnsw.ef_search per search. 0 leaves the server default "
+        "alone and skips the enclosing transaction.",
+    )
+
+    # Span token usage costs a second tokenizer pass over the texts that miss
+    # the cache. That is cheap next to the transformer forward pass, but it is
+    # not free and it buys nothing unless someone is reading the spans — so it
+    # is opt-in, and when on it runs on the inference pool rather than on the
+    # event loop.
+    embedding_token_usage_enabled: bool = Field(
+        default=False,
+        description="Record gen_ai.usage.input_tokens on embedding spans. Costs "
+        "an extra tokenizer pass per cache miss; off by default.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_hnsw(self) -> VectorStoreConfig:
+        """Reject an index build pgvector itself would refuse.
+
+        pgvector requires ``ef_construction >= 2 * m``; catching it here turns
+        a failed ``CREATE INDEX`` during the first indexing run into a
+        configuration error at startup.
+        """
+        if self.hnsw_ef_construction < 2 * self.hnsw_m:
+            raise ValueError(
+                f"VECTORSTORE_HNSW_EF_CONSTRUCTION={self.hnsw_ef_construction} "
+                f"must be at least 2 * VECTORSTORE_HNSW_M ({2 * self.hnsw_m}); "
+                "pgvector rejects the index build otherwise."
+            )
+        return self
 
 
 _vectorstore_config: VectorStoreConfig | None = None

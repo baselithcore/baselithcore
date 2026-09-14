@@ -12,6 +12,14 @@ The recurring rule in both methods is that security-bearing claims are
 and ``family`` all decide something an attacker would like to decide, so they
 are stripped from caller-supplied extras (see ``core.auth._jwt_claims``) and
 threaded explicitly instead.
+
+``tenant_id`` carries one extra rule: the framework's reserved identities
+(:data:`core.context.RESERVED_TENANT_IDS`) can never be minted. ``system`` is
+what maintenance work binds, and migration ``010_system_tenant_rls_exemption``
+grants it visibility of every tenant's row, so a token asserting it would be a
+total-access credential. The request boundary refuses such a claim on arrival;
+refusing it at *issuance* is the stronger half — a claim that cannot be minted
+does not depend on every consumer remembering to check it.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from typing import Any
 from core.auth._jwt_claims import _sanitize_extra_claims
 from core.auth._jwt_keys import JWTKeyRing
 from core.auth.types import AuthRole
+from core.context import ReservedTenantError, is_reserved_tenant
 
 
 class TokenIssuanceMixin:
@@ -100,6 +109,12 @@ class TokenIssuanceMixin:
             # indistinguishable from a legacy token, and therefore immune
             # to that bump — the one that usually matters most.
             payload["tv"] = token_epoch
+        if is_reserved_tenant(tenant_id):
+            raise ReservedTenantError(
+                f"'{tenant_id}' is a reserved tenant identifier and cannot be "
+                "asserted by a token. It belongs to the framework's own "
+                "maintenance context."
+            )
         if tenant_id:
             payload["tenant_id"] = tenant_id
         if act:
@@ -147,6 +162,12 @@ class TokenIssuanceMixin:
         }
         if roles:
             payload["roles"] = [r.value for r in roles]
+        if is_reserved_tenant(tenant_id):
+            raise ReservedTenantError(
+                f"'{tenant_id}' is a reserved tenant identifier and cannot be "
+                "asserted by a token. It belongs to the framework's own "
+                "maintenance context."
+            )
         if tenant_id:
             payload["tenant_id"] = tenant_id
         if self._issuer:

@@ -98,8 +98,23 @@ Prices are USD per 1M tokens, kept as a data table so a refresh is a single PR.
 
 ### `ModelPrice`
 
-Frozen dataclass with `input_usd_per_million` and `output_usd_per_million`, plus
-`estimate(prompt_tokens, completion_tokens) -> float`.
+Frozen dataclass. Rates are USD per 1M tokens:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `input_usd_per_million` | — | Standard (non-cached) input rate |
+| `output_usd_per_million` | — | Output rate |
+| `cache_read_usd_per_million` | `None` → `0.1 ×` input | Tokens served from a prompt-cache hit |
+| `cache_write_usd_per_million` | `None` → `1.25 ×` input | Tokens newly written into the prompt cache |
+| `batch_multiplier` | `0.5` | Applied to the **whole** estimate (input, output and both cache tiers) when a call is priced via the Message Batches API |
+
+The two derived defaults are exposed as `effective_cache_read_usd_per_million` /
+`effective_cache_write_usd_per_million`, so a model that does not publish its own
+cache rates still prices correctly.
+
+`estimate(prompt_tokens, completion_tokens, *, cache_read_tokens=0,
+cache_write_tokens=0, batch=False) -> float`. A negative token count raises
+`ValueError`.
 
 ### Table & helpers
 
@@ -112,14 +127,31 @@ Frozen dataclass with `input_usd_per_million` and `output_usd_per_million`, plus
 - `UNKNOWN_PRICE` — a deliberately high fallback so missing entries are visible.
 - `get_price(model_id, *, table=DEFAULT_PRICING)` — returns the `ModelPrice` or
   `UNKNOWN_PRICE`.
-- `estimate_cost(model_id, prompt_tokens, completion_tokens, *, table=...)` —
-  one-call USD estimate.
+- `estimate_cost(model_id, input_tokens, output_tokens, *, cache_read_tokens=0,
+  cache_write_tokens=0, batch=False, table=...)` — one-call USD estimate.
 
 ```python
 from core.models.pricing import estimate_cost
 
-usd = estimate_cost("claude-sonnet-4-6", prompt_tokens=1200, completion_tokens=400)
+usd = estimate_cost("claude-sonnet-5", 1200, 400)
+
+# Forward the service layer's Usage fields straight through
+usd = estimate_cost(
+    "claude-sonnet-5",
+    usage.input_tokens,
+    usage.output_tokens,
+    cache_read_tokens=usage.cache_read_tokens,
+    cache_write_tokens=usage.cache_write_tokens,
+)
 ```
+
+!!! warning "`estimate_cost`'s first two parameters were renamed"
+    They are now `input_tokens` / `output_tokens` (they were
+    `prompt_tokens` / `completion_tokens`), matching the `Usage` fields the LLM
+    service layer produces. **Positional callers are unaffected; keyword callers
+    are not** — `estimate_cost(model, prompt_tokens=..., completion_tokens=...)`
+    now raises `TypeError`. `ModelPrice.estimate` keeps the older parameter
+    names.
 
 ---
 

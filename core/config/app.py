@@ -7,10 +7,13 @@ observability (logging/telemetry), cost controls, and safety guardrails.
 """
 
 import logging
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
-from pydantic import AliasChoices, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from core.config._collections import csv_list
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +182,10 @@ class AppConfig(BaseSettings):
         default=10000,
         validation_alias=AliasChoices("AGENT_MAX_TOKENS", "LLM_BUDGET_MAX_TOKENS"),
         ge=100,
+        description=(
+            "Per-agent-run runaway cap, not a monthly budget: one chat run that "
+            "burns more than this is aborted by CostControlMiddleware."
+        ),
     )
 
     # === Caching (Logic limits) ===
@@ -199,7 +206,21 @@ class AppConfig(BaseSettings):
     # feature is opt-in, namespaced apart from the response cache and given a
     # deliberately short TTL. See docs/core-modules/chat.md.
     chat_rag_precheck_enabled: bool = Field(
-        default=False, alias="CHAT_RAG_PRECHECK_ENABLED"
+        default=False,
+        alias="CHAT_RAG_PRECHECK_ENABLED",
+        description=(
+            "Pre-retrieval answer cache, probed right after history load and "
+            "keyed WITHOUT the retrieved context, so a hit skips vector search, "
+            "cross-encoder rerank and context building — not just generation. "
+            "That key cannot observe a corpus change through the query alone: "
+            "the indexing service's index_version is folded in, which "
+            "invalidates on an in-process reindex, but a reindex performed by "
+            "ANOTHER process is invisible here and the short TTL is the only "
+            "defence. Leave it off unless answers up to "
+            "CHAT_RAG_PRECHECK_TTL seconds stale are acceptable. Keys live in "
+            "their own namespace and flush independently of the response cache. "
+            "See docs/core-modules/chat.md."
+        ),
     )
     chat_rag_precheck_ttl: float = Field(
         default=60.0, alias="CHAT_RAG_PRECHECK_TTL", gt=0
@@ -242,6 +263,14 @@ class AppConfig(BaseSettings):
     )
 
     # === Guardrails ===
+    # Wall-clock cap on a single ``POST /chat/stream`` SSE response. A hung or
+    # very slow provider otherwise holds the connection — and the worker slot
+    # behind it — open indefinitely; on expiry the stream is closed cleanly with
+    # its terminal ``event: done`` frame rather than dropped mid-token.
+    chat_stream_timeout_seconds: float = Field(
+        default=300.0, alias="CHAT_STREAM_TIMEOUT_SECONDS", gt=0
+    )
+
     chat_guardrails_enabled: bool = Field(default=True, alias="CHAT_GUARDRAILS_ENABLED")
     chat_guardrails_block_message: str = Field(
         default="I cannot assist you with this request.",
@@ -251,14 +280,27 @@ class AppConfig(BaseSettings):
         default="I can only answer questions related to indexed documents.",
         alias="CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE",
     )
-    # List of prohibited keywords (Regex supported).
-    chat_guardrails_block_keywords: list[str] = Field(
+    # List of prohibited keywords (Regex supported). NoDecode + csv_list so a
+    # comma-separated (or blank) value parses instead of raising a
+    # SettingsError out of the entire AppConfig — see
+    # :mod:`core.config._collections`.
+    chat_guardrails_block_keywords: Annotated[list[str], NoDecode] = Field(
         default_factory=list, alias="CHAT_GUARDRAILS_BLOCK_KEYWORDS"
     )
     # Patterns to detect off-topic queries.
-    chat_guardrails_out_of_scope_patterns: list[str] = Field(
+    chat_guardrails_out_of_scope_patterns: Annotated[list[str], NoDecode] = Field(
         default_factory=list, alias="CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS"
     )
+
+    @field_validator(
+        "chat_guardrails_block_keywords",
+        "chat_guardrails_out_of_scope_patterns",
+        mode="before",
+    )
+    @classmethod
+    def _parse_csv_lists(cls, value: Any) -> Any:
+        """Accept ``a,b`` and a blank value, as well as a JSON array."""
+        return csv_list(value)
 
 
 # Internal singleton for app configuration.

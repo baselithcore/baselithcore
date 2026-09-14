@@ -32,7 +32,7 @@ When Prometheus triggers a **HighErrorRate** alert (HTTP 5xx > 5%):
 1. Check the logs for the `api` and `worker` services:
 
    ```bash
-   docker compose -f docker-compose.prod.yml logs --tail 200 api worker
+   docker compose -f compose.prod.yaml logs --tail 200 api worker
    ```
 
 2. Identify the source of the 5xx errors. Common causes include:
@@ -68,6 +68,13 @@ BaselithCore uses circuit breakers to protect against cascading failures from ex
 - **Kubernetes:** enable the chart's backup CronJob — `backup.enabled=true`
   (daily 02:00 by default, configurable `backup.schedule` / `backup.retentionDays`).
   Point `backup.volume` at a PVC and sync it offsite (object storage) for true DR.
+  The Job waits up to `backup.waitForDatabaseSeconds` (300s) for Postgres to
+  answer before dumping: a CronJob replays the schedules it missed as soon as a
+  cluster comes back, so the nightly run routinely starts mid-boot, ahead of the
+  CoreDNS that has to resolve the database for it — and `pg_dump` exits on the
+  first `could not translate host name`. `backup.activeDeadlineSeconds` (1h)
+  bounds the run, which `concurrencyPolicy: Forbid` makes mandatory: a Job that
+  hangs forever is not a slow backup, it is the end of all of them.
 
 ### Verify backups (don't trust untested backups)
 

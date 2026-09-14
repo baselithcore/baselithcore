@@ -67,7 +67,13 @@ class BatchCacheProtocol(CacheProtocol[K, V], Protocol[K, V]):  # type: ignore[m
     """Optional protocol for caches that support batch operations."""
 
     async def get_many(self, keys: Sequence[K]) -> list[V | None]:
-        """Fetch many values in a single cache round-trip."""
+        """Fetch many values in a single cache round-trip.
+
+        Implementations MUST return **exactly one entry per key, in the key
+        order**, using ``None`` for a miss — callers zip the result back
+        against ``keys`` under ``strict=True``, so dropping misses instead of
+        holding their slot silently misaligns every value after the first one.
+        """
         ...
 
     async def set_many(self, items: Sequence[tuple[K, V]]) -> None:

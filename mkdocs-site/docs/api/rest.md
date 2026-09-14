@@ -303,6 +303,8 @@ Streaming response useful for long answers displayed progressively.
 
 - **Total response size**: hard-capped at **4 MB** per stream to prevent unbounded memory growth. Streams exceeding this are truncated and a `chat_stream_truncated` warning is logged.
 - **Per-chunk size**: hard-capped at **64 KB**. Oversized chunks are split transparently.
+- **Wall clock**: `CHAT_STREAM_TIMEOUT_SECONDS` (default `300.0`) bounds the whole response; on expiry the stream is closed cleanly with its terminal `event: done` frame rather than dropped mid-token.
+- **Client disconnect**: the generator stops as soon as the client is gone, releasing the upstream LLM call instead of leaving it running (and billing).
 - **`max_response_tokens`** (optional request field, `1–16000`): client-side upper bound on the number of response tokens. Useful to enforce stricter budgets per request.
 
 **Request**:
@@ -314,15 +316,39 @@ curl -X POST http://localhost:8000/chat/stream \
   -d '{"query": "Tell me a long story", "max_response_tokens": 2000}'
 ```
 
-**Response** (`text/plain` chunked stream):
+**Response** (`text/event-stream`):
 
-The endpoint streams the answer as raw UTF-8 text chunks (media type
-`text/plain`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`). Each chunk
-is part of the answer and can be appended directly:
+The endpoint streams the answer as **Server-Sent Events**
+(`Cache-Control: no-cache`, `X-Accel-Buffering: no`). One `data:` frame per
+model chunk — a chunk containing newlines becomes one `data:` line per line —
+and a terminal `event: done` that lets a client tell "the model finished" apart
+from "the connection died":
 
 ```text
-Once upon a time...
+data: Once upon a time...
+
+data: and they lived happily ever after.
+
+event: done
+data: [DONE]
+
 ```
+
+If the stream fails mid-flight, an `event: error` frame goes out before the
+terminal event:
+
+```text
+event: error
+data: stream failed
+
+event: done
+data: [DONE]
+
+```
+
+The error payload is deliberately fixed — the exception text can carry provider
+detail, prompt fragments or credentials, and it is already in the server log
+under `chat_stream_failed`.
 
 ---
 
@@ -621,10 +647,11 @@ under `/api/backstage`. All endpoints require admin or job credentials.
 Agent-to-agent discovery card (`core/a2a/router.py`), advertising this
 instance's capabilities. No authentication required.
 
-| Method & path                  | Description                          |
-| ------------------------------ | ------------------------------------ |
-| `GET /.well-known/agent.json`  | Standard A2A agent-card discovery     |
-| `GET /a2a/agent-card`          | Alias for the agent card              |
+| Method & path                       | Description                                        |
+| ----------------------------------- | -------------------------------------------------- |
+| `GET /.well-known/agent-card.json`  | A2A 0.3.0 agent-card discovery (canonical path)     |
+| `GET /.well-known/agent.json`       | Pre-0.3.0 alias, identical body                     |
+| `GET /a2a/agent-card`               | Alias for the agent card                            |
 
 ---
 
@@ -819,18 +846,27 @@ print(data["answer"])
 
 ```python
 import requests
-import json
 
 response = requests.post(
     "http://localhost:8000/chat/stream",
     headers={"X-API-Key": "your-api-key"},
     json={"query": "Tell me a story"},
-    stream=True
+    stream=True,
 )
 
-# /chat/stream emits raw text chunks (media type text/plain), not SSE events.
-for chunk in response.iter_content(chunk_size=None):
-    print(chunk.decode("utf-8", errors="replace"), end="", flush=True)
+event = ""
+for line in response.iter_lines(decode_unicode=True):
+    if line is None or line == "":
+        event = ""                      # blank line terminates the event
+    elif line.startswith("event: "):
+        event = line[len("event: "):]
+    elif line.startswith("data: "):
+        data = line[len("data: "):]
+        if event == "done":
+            break
+        if event == "error":
+            raise RuntimeError(data)
+        print(data, end="", flush=True)
 ```
 
 ---

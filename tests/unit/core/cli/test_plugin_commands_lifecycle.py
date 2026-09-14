@@ -103,6 +103,8 @@ class TestPluginCreateInteractive:
         )
         assert manifest["name"] == "my-new-plugin"
         assert manifest["min_core_version"]
+        assert manifest["entry_point"] == "plugin:MyNewPluginPlugin"
+        assert "entrypoint" not in manifest
         assert "python_dependencies" in manifest
 
     def test_create_class_name_splits_on_dash_and_underscore(

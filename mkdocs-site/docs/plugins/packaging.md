@@ -89,7 +89,9 @@ permissions:                      # Optional. What this plugin is allowed to do.
   tools: ["search_knowledge_base"]
   secrets: ["MY_PLUGIN_API_KEY"]
   filesystem: ["./data/plugins/my-plugin"]
-integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin ships and runs (manifest excluded).
+entry_point: plugin:MyPlugin      # Optional. Which class to instantiate.
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin ships and runs, this manifest included.
+hash_surface_version: 5           # Written by `baselith plugin sign`. Advisory.
 ```
 
 ### Manifest Fields
@@ -109,11 +111,99 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin s
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables: names, or mappings with `name`, `description`, `required` |
+| `entry_point`           | ❌        | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`). The module half resolves inside the plugin's own package. Without it the loader falls back to finding the single concrete `Plugin` subclass in `plugin.py` — see [Entry points](#entry-point). |
 | `permissions`           | ❌        | What the plugin is allowed to do — see [Permissions](#permissions). `integrity_sha256` proves *which code* runs; this declares what that code may do. |
-| `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs — see [What is hashed](#integrity) for the exact surface. The manifest itself is **excluded**, so the publisher can inject this field after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs, **this manifest included** — see [What is hashed](#integrity) for the exact surface. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `signature_ed25519`     | ❌        | Hex Ed25519 signature over `integrity_sha256`, written by the signing tools. Checked against the trust roots / trust store when `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true` — see [Trusted publishers](../advanced/security.md#plugin-trust-store). |
+| `hash_surface_version`  | ❌        | Which generation of the hashed surface `integrity_sha256` was computed under — currently `5`. **Advisory only**: it is written after the digest and excluded from it, so verification never reads it. Use it for display and "needs re-signing" nudges. |
+| `x-…`                   | ❌        | **Vendor extensions.** Any top-level key prefixed `x-` is legal, carried verbatim and never interpreted by the core — see [Vendor extensions](#vendor-extensions). |
 
 The class in `plugin.py` carries no identity of its own: `name`, `version` and every other
 field are read from the manifest next to it (`core/plugins/_metadata.py`).
+
+!!! warning "Unknown keys are refused"
+    The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
+    `extra="forbid"`: a key outside the table above fails validation and the plugin is
+    refused in every environment, with a did-you-mean hint —
+    `unknown manifest key(s): 'min_core_verison' (did you mean 'min_core_version'?)`.
+    A plugin with **no** manifest at all still loads; a plugin with a *broken* one never
+    does, because a manifest that will not parse declares no `permissions` and would
+    otherwise be loaded with more authority than its author asked for.
+
+    If the key is **not** a typo — data your own plugin reads and the core does not
+    interpret — the legal home for it is the `x-` prefix, and the error says so:
+    `'control' (vendor data? declare it as 'x-control')`. See
+    [Vendor extensions](#vendor-extensions).
+
+### Vendor extensions (`x-`) {#vendor-extensions}
+
+A fail-closed schema has exactly as many legal keys as the *core* understands,
+which left nowhere to put data only your plugin reads. Any top-level key starting
+with **`x-`** is now legal, kept verbatim, and never interpreted by the core:
+
+```yaml title="manifest.yaml"
+name: my-plugin
+version: 1.0.0
+description: Brief but informative plugin description
+
+x-control:                     # yours; the core carries it and ignores it
+  mode: strict
+  refresh_seconds: 30
+x-acme.io/feature-2: enabled   # reverse-DNS style also fits the key grammar
+```
+
+Read it back from your own plugin code, with or without the prefix:
+
+```python
+class MyPlugin(Plugin):
+    async def initialize(self, config: dict[str, Any]) -> None:
+        await super().initialize(config)
+        control = self.metadata.extension("control")             # -> {"mode": …} | None
+        limits = self.metadata.extension("x-acme.io/feature-2", default=[])
+```
+
+`PluginMetadata.extensions` is the whole mapping, keyed as written; `to_dict()`
+re-emits the keys at top level, so a metadata round-trip is still a valid manifest.
+
+**The two properties that make this a namespace and not a loophole:**
+
+- **A typo in a known key is still refused.** The prefix is checked *before*
+  validation, and no core key starts with `x-`, so the two namespaces are
+  syntactically disjoint. `min_core_verison` cannot accidentally acquire a prefix
+  — it still fails with `did you mean 'min_core_version'?`, and that hint wins
+  whenever a close known key exists.
+- **An extension is still signed.** V5 hashes the canonicalised manifest minus the
+  three self-referential keys, so `x-` keys are inside the digest by construction.
+  Adding, editing or removing one changes `integrity_sha256` — widening
+  `x-control` on a signed plugin breaks its signature exactly like widening
+  `permissions` does. Re-sign after editing an extension.
+
+| Rule | Detail |
+| --- | --- |
+| Grammar | `^x-[A-Za-z0-9][A-Za-z0-9._/-]*$` — a letter or digit after the prefix, then letters, digits, `.`, `_`, `-` or `/`. A bare `x-` is a **malformed extension key**, not an unknown one, and says so. |
+| Case and separator | Lowercase `x-` only. `X-Control` and `x_control` are **refused**, with the legal spelling suggested (`declare it as 'x-control'`). |
+| Shadowing | `x-permissions` is fine. The namespaces are disjoint by definition, so rejecting shadows would make every future core key a breaking change for plugins already using the prefixed name. |
+| Collisions between plugins | Not policed — two plugins may both use `x-control` with different meanings. Extensions are per-plugin and never merged, so this is harmless; a reverse-DNS name (`x-acme.control`) avoids ambiguity and the grammar already allows it. |
+
+!!! note "`x-` keys are not part of the documented key surface"
+    `known_manifest_keys()` — what the CLI validator and the marketplace read —
+    stays exactly the set of keys the core interprets. Extensions are deliberately
+    outside it, and there is no `extensions:` block: that would be a second,
+    unprefixed door.
+
+### Entry points {#entry-point}
+
+Two things called "entry point" meet here; they are unrelated.
+
+- **`entry_point:` in the manifest** names the class inside the plugin's own package.
+  Declare it whenever `plugin.py` exposes more than one concrete `Plugin` subclass —
+  ambiguity is a hard error (`PluginClassError`), not an alphabetical coin flip, and the
+  message tells the author to add this key.
+- **`entrypoint:`** is accepted only as a legacy spelling for existing plugin
+  manifests. New plugins should declare `entry_point:`.
+- **The `baselith.plugins` distribution entry-point group** lets an *installed* package
+  publish a plugin without dropping a directory into `plugins/` — see
+  [Shipping a plugin as a distribution](#distribution-entry-points).
 
 ### Docker Installation Contract
 
@@ -121,7 +211,7 @@ field are read from the manifest next to it (`core/plugins/_metadata.py`).
 version fields plus optional frontend and health metadata:
 
 ```yaml
-entrypoint: __init__.py
+entry_point: plugin:MyPlugin
 frontend:
   path: ui
   package_manager: pnpm
@@ -141,13 +231,13 @@ The declared health path must return 200 without authentication or redirects.
 Otherwise use a dedicated readiness route. An agent-only plugin should not rely
 on the default `/<name>/` probe unless it actually serves that route.
 
-Installation still expects `plugin.py`; `entrypoint` does not enable arbitrary
+Installation still expects `plugin.py`; `entry_point` does not enable arbitrary
 Python package layouts. Python dependencies are installed into the API image,
 with a final `pip check`. Version conflicts fail the build. Missing Core bounds
 remain a legacy warning; invalid or incompatible declared bounds fail installation.
 See [Docker Core and Plugins](../getting-started/docker-core.md) for the runbook.
 
-### Dependency Versions
+### Dependencies
 
 Specify dependencies with version ranges in `manifest.yaml`:
 
@@ -170,11 +260,17 @@ Two different grammars apply:
   one operator — `==`, `!=`, `>`, `>=`, `<`, `<=`, `^` (same major) or `~` (same
   major.minor). `^1.0` or `>=1.0,<2.0` are rejected as invalid versions.
 
-!!! note "Warn-only by default"
+!!! warning "Fail-closed by default"
     Core-version bounds and `plugin_dependencies` are checked when the plugin loads
-    (`core/plugins/load_gates.py`). Problems are logged as warnings and the plugin still
-    loads unless `BASELITH_ENFORCE_PLUGIN_COMPAT=true` is set, in which case an
-    incompatible plugin is skipped.
+    (`core/plugins/load_gates.py`), and an unsatisfied declaration **skips the plugin**.
+    `BASELITH_ENFORCE_PLUGIN_COMPAT=false` (or `0`/`no`/`off`) is the explicit downgrade
+    back to warn-only, meant for booting a deployment while a manifest is corrected —
+    setting it to `true` changes nothing, because that is already the default.
+    `BASELITH_ENFORCE_PLUGIN_CONFIG` reads the same way for the config-schema gate.
+
+    `plugin_dependencies` are part of the gate, so **disabling a dependency disables its
+    dependents**: turning `browser_agent` off in `configs/plugins.yaml` now skips
+    `baselithbot`, where previously it logged a warning and loaded anyway.
 
 ---
 
@@ -303,46 +399,93 @@ across platforms.
 | Native modules and shell scripts                | `*.so`, `*.pyd`, `*.dylib`, `*.sh`                                 |
 | Front-end assets served from the plugin origin  | `*.js`, `*.mjs`, `*.cjs`, `*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` |
 
-In practice the last row means `ui/dist/**` and `static/**`. `.svg` counts as
-executable because a same-origin SVG opened top-level runs its embedded script,
-and `.css` because it rewrites what the operator sees and clicks.
+In practice the last row means `ui/{dist,out,build}/**` and `static/**`. `.svg`
+counts as executable because a same-origin SVG opened top-level runs its embedded
+script, and `.css` because it rewrites what the operator sees and clicks.
+
+The **manifest** is covered too, and is the one input that does not contribute its
+raw bytes — see [The manifest is signed](#manifest-in-digest) below.
 
 Excluded from the digest:
 
-- The **manifest** itself — this is what lets `sign` write the hash back into it
-  without invalidating it.
-- `__pycache__/`, `.git/`, `node_modules/`.
-- Everything under `ui/` **except** the compiled bundle `ui/dist/**`. `ui/src/`,
+- `__pycache__/`, `.git/`, `node_modules/`, and `target/` (Cargo's build directory —
+  it is gitignored, never distributed, and full of `.dylib`/`.so`/`.sh` files that
+  would otherwise make a plugin's hash depend on whether `cargo build` had been run).
+- Everything under `ui/` **except** the compiled bundles `ui/dist/**`, `ui/out/**`
+  and `ui/build/**` (Vite, a Next.js static export, Create React App). `ui/src/`,
   `ui/node_modules/` and the tsconfig/vite build inputs never ship (mirroring
   `[tool.setuptools.exclude-package-data]` in the plugin's `pyproject.toml`), so
   they stay out.
 - `*.json`, `*.ts`/`*.tsx`, images, and Markdown other than `SKILL.md`.
 
-!!! warning "Re-sign after `npm run build`"
+#### The manifest is signed {#manifest-in-digest}
+
+Up to V4 the manifest was deliberately left out of the digest, so that a publisher
+could inject `integrity_sha256` after computing it. The price was that the file
+deciding the plugin's `name`, its declared `permissions` (egress, tools, secrets),
+its `python_dependencies` and its `min_core_version` was the one file a signed
+plugin could rewrite freely: anyone able to edit `manifest.yaml` could widen a
+signed plugin's egress without breaking either the hash or the Ed25519 signature
+over it.
+
+From V5 the digest covers a **canonical projection** of the manifest rather than
+its bytes (`core.plugins.integrity.canonical_manifest_bytes`): the file is parsed,
+`integrity_sha256`, `signature_ed25519` and `hash_surface_version` are dropped, and
+what remains is dumped as compact JSON with sorted keys and appended last under a
+reserved label. So:
+
+- injecting the three supply-chain keys after computing the digest still leaves the
+  digest unchanged — the publishing workflow is untouched;
+- comments, key order, quoting style and YAML-vs-JSON spelling are free; a JSON
+  manifest hashes identically to its YAML twin;
+- **every other key moves the hash.** Editing `permissions:` on a signed plugin now
+  breaks verification, which is the entire point of the change.
+
+A manifest that will not parse contributes its raw bytes instead of being skipped,
+so a broken manifest is still covered. A directory with no manifest at all hashes
+exactly as it did under V4.
+
+!!! warning "Re-sign after `npm run build`, and after editing the manifest"
     Since 0.27 the compiled dashboard (`ui/dist/**`) is part of the hashed
-    surface, so rebuilding a plugin's UI changes its hash. Re-sign the tree with
-    `baselith plugin sign <path>`, or load it with
+    surface, so rebuilding a plugin's UI changes its hash — and since V5 so does
+    editing any manifest key other than the three supply-chain ones. Re-sign the
+    tree with `baselith plugin sign <path>`, or load it with
     `BASELITH_SKIP_INTEGRITY_CHECK=true` during development (the flag is inert in
     production).
 
 ### Hash surface generations
 
-The hashed surface has widened twice. Each generation is a superset of the
+The hashed surface has widened several times. Each generation is a superset of the
 previous one and is named by `core.plugins.integrity.HashSurface`:
 
-| Surface      | Releases  | Adds                                                                                   |
-| ------------ | --------- | --------------------------------------------------------------------------------------- |
-| `V1_SOURCE`  | pre-0.17  | `*.py`/`*.pyi` only                                                                    |
-| `V2_BUILD`   | 0.17–0.26 | Build and packaging files, `SKILL.md` bodies                                           |
-| `V3_SHIPPED` | 0.27+     | Native modules, shell scripts, served front-end assets (`ui/dist/**`, `static/**`)     |
+| Surface         | Releases  | Adds                                                                                   |
+| --------------- | --------- | --------------------------------------------------------------------------------------- |
+| `V1_SOURCE`     | pre-0.17  | `*.py`/`*.pyi` only                                                                    |
+| `V2_BUILD`      | 0.17–0.26 | Build and packaging files, `SKILL.md` bodies                                           |
+| `V3_SHIPPED`    | 0.27+     | Native modules, shell scripts, served front-end assets (`ui/dist/**`, `static/**`)     |
+| `V4_UI_EXPORT`  | 0.31+     | Front-end bundles written outside `ui/dist` — `ui/out/**` (Next.js export), `ui/build/**` (CRA) |
+| `V5_MANIFEST`   | 0.33+     | The canonicalised manifest — `permissions`, `python_dependencies`, `min_core_version`, `name`, `entry_point` |
 
-`CURRENT_HASH_SURFACE` is what the signing tools produce (`V3_SHIPPED`). A
-signature that matches only a superseded surface still loads **outside** strict
-mode, with a warning naming what its signature does *not* cover; under
-`BASELITH_REQUIRE_SIGNED_PLUGINS=true` it is **refused** until the plugin is
-re-signed. Re-sign with `baselith plugin sign <path>`; the `sign-changed-plugins`
-pre-commit hook does the same automatically, but only when a `*.py`/`*.pyi` file
-changed — a UI-only or asset-only change still needs the manual run.
+`CURRENT_HASH_SURFACE` is what the signing tools produce (`V5_MANIFEST`), and every
+signed tree under `plugins/` now declares `hash_surface_version: 5` — the **nine**
+official plugins covered by `scripts/check_official_plugin_typing.py`, plus the
+`example-plugin` authoring reference. (`example-plugin` is signed but outside the
+typing gate: its hyphenated name is not a Python identifier, so mypy cannot name
+the package.) A signature that matches
+only a superseded surface still loads **outside** strict mode, with a warning naming
+what its signature does *not* cover; under `BASELITH_REQUIRE_SIGNED_PLUGINS=true` it
+is **refused** until the plugin is re-signed. Re-sign with
+`baselith plugin sign <path>`, or `python scripts/sign_changed_plugins.py <path>`
+(also `--all`); the `sign-changed-plugins` pre-commit hook does the same
+automatically for any staged change to a hashed path *or* to a manifest.
+
+!!! danger "A V4 signature does not cover the manifest"
+    `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true` **without**
+    `BASELITH_REQUIRE_SIGNED_PLUGINS=true` still accepts a V4-era signature, and a V4
+    signature says nothing about `permissions:` — so the egress-widening this change
+    closes is still open on any plugin that has not been re-signed. Re-sign your
+    plugins at V5, or turn on `BASELITH_REQUIRE_SIGNED_PLUGINS` as well, which refuses
+    every superseded surface.
 
 !!! warning "Enforcing signatures"
     In **production** the loader is fail-closed by default: a plugin lacking a valid
@@ -355,6 +498,39 @@ changed — a UI-only or asset-only change still needs the manual run.
     The framework ships no `plugin package` command. To distribute a plugin, publish it to
     the marketplace with `baselith plugin marketplace publish <path>` (which packages and
     uploads it for you), or distribute the plugin directory / a standard archive yourself.
+
+---
+
+## Shipping a plugin as a distribution {#distribution-entry-points}
+
+A plugin installed as a wheel has no directory under `plugins/`, so the filesystem
+scan never saw it. A distribution can now advertise itself through the standard
+`baselith.plugins` entry-point group (`core/plugins/discovery.py`):
+
+```toml title="pyproject.toml"
+[project.entry-points."baselith.plugins"]
+my-plugin = "my_package.my_plugin"
+```
+
+The value names an **importable package whose directory contains a manifest** — a
+`:Class` suffix or an `[extra]` marker is tolerated and ignored, because the target
+is the directory, not the class. Which class to instantiate is still the manifest's
+`entry_point`.
+
+| Rule | Behaviour |
+| --- | --- |
+| Precedence | The `plugins/` directory scan wins. A name clash keeps the local tree, ignores the installed package and logs a warning naming both paths. |
+| Failure containment | Broken distribution metadata, an entry point that no longer imports, or a package with no manifest is logged and skipped. Discovery can never be the reason the process fails to start. |
+| Kill switch | `BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` considers only the `plugins/` directory (default `false`). |
+| Config | The `configs/plugins.yaml` filter and `enabled: false` apply to entry-point plugins exactly as they do to directory ones. |
+
+!!! warning "Resolution imports the parent package"
+    `importlib.util.find_spec("pkg.sub")` imports `pkg`, before any integrity check
+    runs. The distribution is already installed in the interpreter's environment and
+    opted in by declaring the entry point, and the plugin's own code is still
+    integrity- and signature-verified in `PluginLoader.load_plugin` before
+    `exec_module`. A deployment that wants zero tolerance for that should set the kill
+    switch.
 
 ---
 
@@ -575,7 +751,11 @@ Before publishing, verify:
 
 - [ ] No hardcoded secrets
 - [ ] Input validation on all endpoints
-- [ ] `integrity_sha256` refreshed with `baselith plugin sign`
+- [ ] `integrity_sha256` refreshed with `baselith plugin sign` — **after** the last
+      manifest edit and the last `npm run build`, both of which move the digest
+- [ ] `hash_surface_version: 5` present (the signing tools stamp it for you)
+- [ ] `permissions:` reflects what the plugin actually does, now that the block is
+      inside the signature
 
 ---
 
@@ -624,7 +804,33 @@ class MyPlugin(Plugin):
 ```
 
 Identity is not declared on the class — `name`, `version` and the rest come from the
-manifest in the same directory, which must exist or the plugin fails to load.
+manifest in the same directory. A plugin with no manifest at all is the legacy shape
+and still loads with framework defaults; a plugin whose manifest is present but
+**invalid** is refused outright, in every environment.
+
+### "module exposes more than one Plugin subclass"
+
+**Problem**: `plugin.py` defines (or imports) two concrete `Plugin` subclasses, so the
+loader will not guess which one is the plugin.
+
+**Solution**: Name it in the manifest:
+
+```yaml title="manifest.yaml"
+entry_point: plugin:WidgetPlugin
+```
+
+A class imported from a library the plugin depends on does not create ambiguity by
+itself: when several candidates exist, the ones defined inside the plugin's own
+package win, and a lone candidate is accepted wherever it was defined.
+
+### "unknown manifest key(s)"
+
+**Problem**: The manifest carries a key the schema does not define — usually a typo.
+
+**Solution**: The message names every offending key at once and suggests the closest
+valid one. Fix the spelling or delete the key; there is no "ignore unknown keys" mode,
+because a silently-dropped `permissions` or `min_core_version` is exactly the failure
+the strict schema exists to prevent.
 
 ---
 

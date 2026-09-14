@@ -11,7 +11,9 @@ request instead of failing.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid
 from typing import Any
 
 from core.mcp.errors import InvalidParams
@@ -27,6 +29,35 @@ from core.mcp.tasks import TaskHandlerMixin
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Applied when the config object does not declare the setting (partial test
+# doubles): the production defaults, never "no limit".
+DEFAULT_TOOL_CALL_TIMEOUT_SECONDS = 60.0
+DEFAULT_MAX_TOOL_RESULT_BYTES = 1024 * 1024
+
+
+class _DeadlineExceeded(Exception):
+    """The server-side ``wait_for`` budget ran out.
+
+    Private, and deliberately *not* a ``TimeoutError``: a tool that times out
+    on its own (an upstream HTTP read, a lock acquisition) raises
+    ``TimeoutError`` too, and it reaches the very same boundary. Telling an
+    operator the server cut the call off after N seconds when it did not sends
+    them hunting for a deadline that never fired.
+    """
+
+
+class _ToolRaisedTimeout(Exception):
+    """A ``TimeoutError`` the *tool* raised, carried past the deadline check.
+
+    Wrapping it is what makes the two cases distinguishable at the boundary;
+    ``original`` is unwrapped again before anything is logged, so the log still
+    names ``TimeoutError``.
+    """
+
+    def __init__(self, original: Exception) -> None:
+        super().__init__(str(original))
+        self.original = original
 
 
 def _tool_annotations(category: str) -> dict[str, Any]:
@@ -166,22 +197,92 @@ class ToolHandlerMixin(RoundTripMixin, TaskHandlerMixin):
         # error: the model needs to see them to retry or route around them.
         tokens = self._enter_round_trip(params, "tools/call")
         try:
-            result = await tool.handler(**arguments)
+            result = await self._run_handler(tool, arguments)
         except InputRequired as exc:
             try:
                 return self._input_required(exc, "tools/call")
             except LegacyInputUnsupported as legacy:
                 # The revision the client speaks has no way to carry the ask.
                 return self._tool_execution_error(str(legacy))
+        except _DeadlineExceeded:
+            return self._timeout_error(tool_name)
+        except _ToolRaisedTimeout as exc:
+            return self._opaque_failure(tool_name, exc.original)
         except Exception as exc:
-            logger.warning(
-                "mcp_tool_execution_failed", tool_name=tool_name, error=str(exc)
-            )
-            return self._tool_execution_error(f"Tool '{tool_name}' failed: {exc}")
+            return self._opaque_failure(tool_name, exc)
         finally:
             self._exit_round_trip(tokens)
 
         return self._format_tool_result(tool, result)
+
+    async def _run_handler(self, tool: Any, arguments: dict[str, Any]) -> Any:
+        """Invoke a tool handler under the server-side deadline.
+
+        Without a deadline a handler that never returns pins the request — and
+        on HTTP the connection behind it — for the life of the process. The
+        wait is cancelled rather than abandoned, so the handler's own cleanup
+        runs.
+        """
+        timeout = float(
+            getattr(
+                self.config,
+                "mcp_tool_call_timeout_seconds",
+                DEFAULT_TOOL_CALL_TIMEOUT_SECONDS,
+            )
+            or 0
+        )
+        if timeout <= 0:
+            return await tool.handler(**arguments)
+        try:
+            return await asyncio.wait_for(
+                self._guarded(tool, arguments), timeout=timeout
+            )
+        except TimeoutError as exc:
+            # Only ``wait_for`` can raise a bare TimeoutError here: the tool's
+            # own is already wrapped by ``_guarded``.
+            raise _DeadlineExceeded(str(timeout)) from exc
+
+    @staticmethod
+    async def _guarded(tool: Any, arguments: dict[str, Any]) -> Any:
+        """Run the handler, keeping its own ``TimeoutError`` from looking like ours."""
+        try:
+            return await tool.handler(**arguments)
+        except TimeoutError as exc:
+            raise _ToolRaisedTimeout(exc) from exc
+
+    def _timeout_error(self, tool_name: str) -> dict[str, Any]:
+        """A deadline breach, reported as an execution error the model can act on."""
+        timeout = getattr(
+            self.config,
+            "mcp_tool_call_timeout_seconds",
+            DEFAULT_TOOL_CALL_TIMEOUT_SECONDS,
+        )
+        logger.warning(
+            "mcp_tool_call_timed_out", tool_name=tool_name, timeout_seconds=timeout
+        )
+        return self._tool_execution_error(
+            f"Tool '{tool_name}' timed out after {timeout}s and was cancelled."
+        )
+
+    def _opaque_failure(self, tool_name: str, exc: Exception) -> dict[str, Any]:
+        """Report a handler exception without handing its text to the model.
+
+        An exception message names DSNs, filesystem paths and driver
+        internals; ``tools/call`` results cross a trust boundary to an external
+        client. The model gets a correlation id instead, and the log line that
+        carries the full text carries the same id.
+        """
+        correlation_id = uuid.uuid4().hex[:12]
+        logger.warning(
+            "mcp_tool_execution_failed",
+            tool_name=tool_name,
+            correlation_id=correlation_id,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return self._tool_execution_error(
+            f"Tool '{tool_name}' failed. Error id: {correlation_id}"
+        )
 
     def _task_runner(self, tool: Any, arguments: dict[str, Any]) -> Any:
         """Build the coroutine a task drives, answers injected on each round.
@@ -193,11 +294,15 @@ class ToolHandlerMixin(RoundTripMixin, TaskHandlerMixin):
         async def run(answers: dict[str, Any]) -> dict[str, Any]:
             tokens = (input_responses.set(answers), request_state.set(None))
             try:
-                result = await tool.handler(**arguments)
+                result = await self._run_handler(tool, arguments)
             except InputRequired:
                 raise
+            except _DeadlineExceeded:
+                return self._timeout_error(tool.name)
+            except _ToolRaisedTimeout as exc:
+                return self._opaque_failure(tool.name, exc.original)
             except Exception as exc:
-                return self._tool_execution_error(f"Tool '{tool.name}' failed: {exc}")
+                return self._opaque_failure(tool.name, exc)
             finally:
                 self._exit_round_trip(tokens)
             return self._format_tool_result(tool, result)
@@ -215,11 +320,13 @@ class ToolHandlerMixin(RoundTripMixin, TaskHandlerMixin):
             error = self._validate_tool_output(tool, result)
             if error is not None:
                 return error
-            return {
-                "content": [{"type": "text", "text": json.dumps(result)}],
-                "structuredContent": result,
-                "isError": False,
-            }
+            return self._cap_result(
+                {
+                    "content": [{"type": "text", "text": json.dumps(result)}],
+                    "structuredContent": result,
+                    "isError": False,
+                }
+            )
 
         if isinstance(result, str):
             content = [{"type": "text", "text": result}]
@@ -228,7 +335,70 @@ class ToolHandlerMixin(RoundTripMixin, TaskHandlerMixin):
         else:
             content = [{"type": "text", "text": str(result)}]
 
-        return {"content": content, "isError": False}
+        return self._cap_result({"content": content, "isError": False})
+
+    def _cap_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Bound the serialized size of a ``tools/call`` result.
+
+        A tool returning an unbounded blob used to be serialized verbatim,
+        which exhausts the calling model's context long before it exhausts the
+        transport. Over the cap the text blocks are collapsed into one
+        truncated block plus a notice, ``structuredContent`` is dropped — a cut
+        object would violate the schema the tool promised — and ``_meta``
+        records that it happened. ``isError`` stays false: the call succeeded,
+        the model simply is not seeing all of it.
+        """
+        limit = int(
+            getattr(
+                self.config, "mcp_max_tool_result_bytes", DEFAULT_MAX_TOOL_RESULT_BYTES
+            )
+            or 0
+        )
+        if limit <= 0:
+            return result
+        original = len(json.dumps(result).encode())
+        if original <= limit:
+            return result
+
+        text = "".join(
+            block.get("text", "")
+            for block in result.get("content", [])
+            if block.get("type") == "text"
+        )
+        notice = (
+            f"\n\n[truncated: the result was {original} bytes, over the "
+            f"{limit}-byte cap; the rest was dropped]"
+        )
+        capped: dict[str, Any] = {
+            "content": [{"type": "text", "text": notice}],
+            "isError": bool(result.get("isError", False)),
+            "_meta": {
+                "truncated": True,
+                "originalBytes": original,
+                "maxBytes": limit,
+            },
+        }
+        # Bisect on the *serialized* size rather than on raw UTF-8 bytes.
+        # `json.dumps` escapes a non-ASCII character to six bytes (\uXXXX) and
+        # a quote or backslash to two, so a raw-byte budget overshot the cap by
+        # up to ~6x. Measuring with the default (ensure_ascii) serializer is
+        # also the conservative direction: the compact, non-escaping form
+        # Starlette actually puts on the wire is never larger.
+        low, high, best = 0, len(text), 0
+        while low <= high:
+            mid = (low + high) // 2
+            capped["content"][0]["text"] = text[:mid] + notice
+            if len(json.dumps(capped).encode()) <= limit:
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        kept = text[:best]
+        capped["content"][0]["text"] = kept + notice
+        logger.warning(
+            "mcp_tool_result_truncated", original_bytes=original, max_bytes=limit
+        )
+        return capped
 
     def _validate_tool_output(self, tool: Any, result: Any) -> dict[str, Any] | None:
         """Check *result* against the tool's declared output schema.

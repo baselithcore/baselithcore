@@ -21,33 +21,51 @@ async def initialize_postgres() -> Any:
     Initializes the database schema if necessary and returns the main storage
     interface for persistence.
 
+    Runs inside :func:`core.db.connection.system_tenant_scope`: this is boot
+    work with no request behind it, and under ``DB_RLS_ENABLED`` an unbound
+    tenant is refused rather than degraded to ``default``.
+
     Returns:
         Any: The initialized core storage instance.
     """
+    from core.db.connection import system_tenant_scope
     from core.storage import get_storage, init_db
 
     logger.info("🗄️ Lazy initializing Postgres connection...")
-    await init_db()
-    core_storage = await get_storage()
+    with system_tenant_scope():
+        await init_db()
+        core_storage = await get_storage()
     logger.info("✅ Postgres initialized")
     return core_storage
 
 
 async def initialize_vectorstore() -> Any:
     """
-    Lazy initialize the vector store service (typically Qdrant).
+    Lazy initialize the configured vector store service (Qdrant or pgvector).
 
     Ensures the required collections are created before returning the service.
+
+    Runs inside :func:`core.db.connection.system_tenant_scope`, exactly like
+    :func:`initialize_postgres`. Collection setup is not always a remote call:
+    the pgvector backend creates its extension, table and indexes through the
+    *shared Postgres pool*, and under ``DB_RLS_ENABLED`` that checkout refuses
+    to invent a tenant nobody bound. Unscoped, the resulting
+    ``TenantContextError`` was rewrapped as ``VectorStoreError`` by
+    ``VectorStoreService.create_collection`` and escaped the ``except
+    ImportError`` in :mod:`core.api.lifespan`, so the app did not boot at all.
+    The scope is a contextvar set, so the Qdrant path is unaffected.
 
     Returns:
         Any: The initialized VectorStore service instance.
     """
+    from core.db.connection import system_tenant_scope
     from core.services.vectorstore import get_vectorstore_service
 
-    logger.info("📦 Lazy initializing Qdrant vectorstore...")
+    logger.info("📦 Lazy initializing vectorstore...")
     vectorstore_service = get_vectorstore_service()
-    await vectorstore_service.create_collection()
-    logger.info("✅ Qdrant vectorstore initialized")
+    with system_tenant_scope():
+        await vectorstore_service.create_collection()
+    logger.info("✅ Vectorstore initialized")
     return vectorstore_service
 
 

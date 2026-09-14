@@ -7,7 +7,7 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: false,
+    sourcemap: 'hidden',
     chunkSizeWarningLimit: 900,
   },
   server: {

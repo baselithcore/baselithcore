@@ -46,7 +46,8 @@ PATH_RE = re.compile(
     r"[\w\-./]+\.(?:py|yaml|yml|json|toml|md|sh|ini|txt|env|ts|tsx|js|cfg|lock))"
 )
 ROOT_FILE_RE = re.compile(
-    r"(?<![\w/.-])((?:docker-compose[\w.-]*\.ya?ml|Dockerfile[\w.-]*|pyproject\.toml|"
+    r"(?<![\w/.-])((?:compose[\w.-]*\.ya?ml|docker-compose[\w.-]*\.ya?ml|"
+    r"Dockerfile[\w.-]*|pyproject\.toml|"
     r"pytest\.ini|\.env\.example|\.releaserc|uv\.lock|backend\.py|alembic\.ini))"
     r"(?![\w/-])"
 )

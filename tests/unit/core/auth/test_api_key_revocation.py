@@ -36,10 +36,20 @@ async def test_validate_rejects_key_revoked_by_another_worker():
     assert await validator.validate_key("k-123") is None
 
 
-async def test_validate_survives_redis_outage():
+async def test_validate_survives_redis_outage_when_opened():
+    """Fail-open is now an explicit opt-in (API_KEY_REVOCATION_FAIL_MODE).
+
+    The default is ``closed`` — see
+    ``tests/unit/core/auth/test_api_key_revocation_fail_mode.py`` — because an
+    unreadable denylist otherwise un-revokes every key revoked elsewhere.
+    """
     redis = AsyncMock()
     redis.exists = AsyncMock(side_effect=ConnectionError("redis down"))
-    validator = _validator_with_redis(redis)
+    validator = APIKeyValidator(
+        config=SecurityConfig(API_KEY_REVOCATION_FAIL_MODE="open")
+    )
+    validator._redis = redis
+    validator.register_key("k-123", "svc", {AuthRole.SERVICE})
 
     user = await validator.validate_key("k-123")
     assert user is not None

@@ -105,6 +105,16 @@ class InMemoryCheckpointStore:
         self._history: dict[str, list[dict[str, Any]]] = {}
         self._max_entries = max_entries
 
+    @property
+    def history_enabled(self) -> bool:
+        """Whether every save also records an immutable per-version snapshot.
+
+        Every store exposes ``list_snapshots``; only a store built with
+        ``history_enabled=True`` ever fills it, so readers ask this instead of
+        inferring history from the method's presence.
+        """
+        return self._history_enabled
+
     def _evict_over_cap(self) -> None:
         """Drop the oldest runs beyond ``max_entries`` (finished ones first)."""
         cap = self._max_entries

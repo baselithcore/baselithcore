@@ -17,11 +17,22 @@ license = "AGPL-3.0-only"
 # distribution it actually accompanies (LICENSE.exception §5), so the wheel
 # must carry it deterministically, not by convention.
 license-files = ["LICENSE", "LICENSE.exception"]
+# `requires-python = ">=3.12"` has no upper cap and CI runs the suite on 3.12,
+# 3.13 and (advisory) 3.14, so the trove list says the same thing: a classifier
+# set that stops at 3.12 makes PyPI's "Programming Language" facet under-report
+# what is actually tested. `Typing :: Typed` is the trove counterpart of the
+# `core/py.typed` marker shipped in the wheel — without it, tooling that filters
+# on the classifier treats the package as untyped even though it ships PEP 561
+# inline types.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Framework :: FastAPI",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
 ]
 keywords = ["ai", "agents", "framework"]
 
@@ -68,6 +79,11 @@ dependencies = [
   "opentelemetry-instrumentation-redis>=0.42b0",
   "opentelemetry-sdk>=1.21.0",
   "orjson>=3.11.7,<4.0",
+  # Direct import in core/plugins/version.py: PEP 440 parsing is what orders
+  # plugin prereleases correctly (a string compare put `beta.10` before
+  # `beta.2`). It arrives transitively via several deps today — declare it so a
+  # resolver change cannot break plugin version comparison.
+  "packaging>=23.2",
   "prometheus-client>=0.20.0,<1.0",
   "psycopg[binary,pool]>=3.2.1,<4.0",
   "pydantic-settings>=2.0.0",
@@ -291,6 +307,21 @@ conflicts = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "plugins*"]
+# In-repo FIXTURES, not product. `plugins/example-plugin` is the reference
+# scaffold the authoring guide walks through and `plugins/test-project` is the
+# throwaway tree the plugin CLI tests scaffold against; `include = ["plugins*"]`
+# swept both into the distribution, so every `pip install baselith-core` shipped
+# a loadable plugin whose handlers exist to be asserted on. They stay in the
+# repository (the docs and the tests need them) and out of the wheel.
+# `scripts/check_distribution_artifacts.py` asserts the exclusion on the built
+# artifact, because a pattern that silently stops matching is exactly how they
+# got shipped the first time.
+exclude = [
+    "plugins.example-plugin",
+    "plugins.example-plugin.*",
+    "plugins.test-project",
+    "plugins.test-project.*",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "core._version.__version__"}
@@ -307,6 +338,24 @@ version = {attr = "core._version.__version__"}
     "prompts/**/*.md",
     "catalog/**/*.md",
     "examples/**/*.yaml",
+]
+
+# `ui/dist/**/*` above is a deliberately broad include — it has to be, because
+# the bundle's filenames are content-hashed and cannot be enumerated. That
+# breadth is what makes this table necessary.
+#
+# Source maps: the UI builds with `sourcemap: 'hidden'`, which still WRITES the
+# .map files (it only drops the `//# sourceMappingURL=` comment from the
+# bundle). They exist so they can be uploaded to an error tracker, not so they
+# can be served: shipped in the wheel they would roughly triple the packaged
+# dashboard and hand anyone who installs `baselith-core` the dashboard's
+# original TypeScript sources. `hidden` means nothing would ever request them,
+# so they would be pure dead weight with a disclosure downside.
+# scripts/check_distribution_artifacts.py asserts the exclusion on the built
+# wheel.
+[tool.setuptools.exclude-package-data]
+"*" = [
+    "ui/dist/**/*.map",
 ]
 
 [tool.bandit]
@@ -339,13 +388,15 @@ select = [
     "LOG",    # flake8-logging
     "RUF",    # ruff-specific (incl. RUF006 asyncio-dangling-task)
     "S",      # flake8-bandit (see note above)
+    "DTZ",    # flake8-datetimez — a naive datetime.now() reads the pod's local
+              # clock, and this engine schedules crons, rolls quota windows,
+              # chains audit timestamps and does TTL arithmetic on those values.
 ]
 ignore = [
     "E501",     # line length — owned by the formatter, not worth reflowing legacy
     "ASYNC109", # allow explicit `timeout` params on async funcs (deliberate API shape)
     "B008",     # FastAPI Depends()/Query() in defaults is the framework idiom
     # --- Backlog: valuable but too noisy to gate on today; fix incrementally. ---
-    "B905",     # zip() without explicit strict= — audit each call before flipping
     "B007",     # unused loop control variable
     "B024",     # ABC without abstract methods
     "UP007",    # Union[...] → X | Y  (residual, manual)

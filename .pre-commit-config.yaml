@@ -84,6 +84,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^core/.*__init__\.py$
+      # DROP TABLE/COLUMN inside a migration's upgrade() destroys data the
+      # moment it runs, and downgrade() recreates the structure, not the rows.
+      # Deliberate ones carry `# migration-guard: allow-drop` plus a reason.
+      - id: migration-guard
+        name: migration-guard
+        entry: python scripts/check_migrations.py
+        language: system
+        pass_filenames: false
+        files: ^migrations/
       # The hand-written SDKs must keep calling routes the spec still declares.
       - id: sdk-contract
         name: sdk-contract
@@ -91,6 +100,21 @@ repos:
         language: system
         pass_filenames: false
         files: ^sdk/
+      # Settings classes vs the shipped templates vs the generated reference
+      # page. An explicit ``alias=`` replaces a class's ``env_prefix``, so a
+      # template entry can look right and bind nothing; this catches that.
+      #
+      # Both templates are listed. `configs/.env.base` is checked by the script
+      # too (`baselith doctor` tells operators to copy it), and a commit
+      # touching only that file must still fire the hook — CI runs the gate
+      # unconditionally, but a local half wired to one template lets the other
+      # rot until push.
+      - id: config-surface
+        name: config-surface
+        entry: python scripts/check_config_surface.py
+        language: system
+        pass_filenames: false
+        files: ^(core/config/|plugins/|\.env\.example|configs/\.env\.base|mkdocs-site/docs/getting-started/configuration\.md)
       # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
       # exist. Import and route verification (needs the app importable) runs in
       # the CI job `docs_consistency`.
@@ -99,7 +123,7 @@ repos:
         entry: python scripts/check_docs_consistency.py --fast
         language: system
         pass_filenames: false
-        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|migrations/|\.env\.example|docker-compose|Dockerfile)
+        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|migrations/|\.env\.example|compose|docker-compose|Dockerfile)
       # The two typing gates run in a pre-commit-managed venv (`language:
       # python`) instead of `language: system`. Two reasons:
       #   1. `system` resolves `python` from whatever PATH launched git — a GUI

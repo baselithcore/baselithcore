@@ -1,8 +1,150 @@
 {
   "components": {
     "schemas": {
+      "AgentCardResponse": {
+        "additionalProperties": true,
+        "description": "The agent card as served at the discovery endpoints.\n\nMirrors :meth:`core.a2a.agent_card.AgentCard.to_dict`; unknown members are\npassed through untouched.",
+        "properties": {
+          "capabilities": {
+            "additionalProperties": true,
+            "description": "Protocol features: streaming, pushNotifications, stateTransitionHistory.",
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "defaultInputModes": {
+            "description": "Content types the agent accepts.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Defaultinputmodes",
+            "type": "array"
+          },
+          "defaultOutputModes": {
+            "description": "Content types the agent produces.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Defaultoutputmodes",
+            "type": "array"
+          },
+          "description": {
+            "description": "What this agent does.",
+            "title": "Description",
+            "type": "string"
+          },
+          "documentationUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable documentation for this agent.",
+            "title": "Documentationurl"
+          },
+          "name": {
+            "description": "Unique agent name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "preferredTransport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transport a peer should try first.",
+            "title": "Preferredtransport"
+          },
+          "protocolVersion": {
+            "default": "0.3.0",
+            "description": "A2A protocol revision this agent implements.",
+            "title": "Protocolversion",
+            "type": "string"
+          },
+          "security": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which of those schemes a peer must satisfy.",
+            "title": "Security"
+          },
+          "securitySchemes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Named OpenAPI security schemes the agent accepts.",
+            "title": "Securityschemes"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A2A skill definitions this agent offers.",
+            "title": "Skills"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Base URL for A2A communication.",
+            "title": "Url"
+          },
+          "version": {
+            "description": "The agent's own semantic version.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "version"
+        ],
+        "title": "AgentCardResponse",
+        "type": "object"
+      },
       "ApprovalDecision": {
-        "description": "Reviewer decision payload for a paused run.",
+        "description": "Reviewer decision payload for a paused run.\n\n``approver`` is **not** the identity. Who decided comes from the\nauthenticated request; a body field is a string the client chose, which\nanswers none of the questions an auditor asks. It is kept only as an\noptional display label recorded beside the real principal.",
         "properties": {
           "approved": {
             "title": "Approved",
@@ -18,6 +160,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional display label. The recorded identity always comes from the authenticated request, never from this field.",
             "title": "Approver"
           },
           "reason": {
@@ -876,22 +1019,20 @@
   },
   "info": {
     "title": "Baselith-Core",
-    "version": "0.31.0"
+    "version": "0.33.0"
   },
   "openapi": "3.1.0",
   "paths": {
-    "/.well-known/agent.json": {
+    "/.well-known/agent-card.json": {
       "get": {
-        "description": "Standard A2A agent-card discovery endpoint.",
-        "operationId": "wellknown_agent_card__well_known_agent_json_get",
+        "description": "Standard A2A agent-card discovery endpoint (0.3.0).",
+        "operationId": "wellknown_agent_card__well_known_agent_card_json_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Wellknown Agent Card  Well Known Agent Json Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentCardResponse"
                 }
               }
             },
@@ -899,6 +1040,28 @@
           }
         },
         "summary": "Wellknown Agent Card",
+        "tags": [
+          "A2A Discovery"
+        ]
+      }
+    },
+    "/.well-known/agent.json": {
+      "get": {
+        "description": "Pre-0.3.0 discovery path, kept so existing peers still resolve.",
+        "operationId": "legacy_wellknown_agent_card__well_known_agent_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Legacy Wellknown Agent Card",
         "tags": [
           "A2A Discovery"
         ]
@@ -913,9 +1076,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Agent Card Alias A2A Agent Card Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentCardResponse"
                 }
               }
             },
@@ -2239,7 +2400,7 @@
     },
     "/approvals/{run_id}/decision": {
       "post": {
-        "description": "Record an approve/deny decision on a paused run.\n\nThe decision is consumed by the approval gate on the next resume: the run\ncontinues (approved) or aborts with a denial (denied).",
+        "description": "Record an approve/deny decision on a paused run.\n\nThe decision is consumed by the approval gate on the next resume: the run\ncontinues (approved) or aborts with a denial (denied).\n\nThe reviewer is the **authenticated** admin the Basic Auth dependency\nestablished, not anything the request body claims: an approval is a human\ntaking responsibility for a side effect the policy refused to let the\nagent take alone, and an identity the caller typed is not evidence of who\nthat human was.",
         "operationId": "decide_approvals__run_id__decision_post",
         "parameters": [
           {
@@ -2386,7 +2547,7 @@
     },
     "/chat/stream": {
       "post": {
-        "description": "Returns the agent response as a stream (text chunks).",
+        "description": "Stream the agent response as Server-Sent Events.\n\nEmits one ``data:`` frame per model chunk and a final ``event: done``.\nThe response is cut short \u2014 cleanly \u2014 when the client disconnects or when\n``CHAT_STREAM_TIMEOUT_SECONDS`` elapses.",
         "operationId": "chat_stream_chat_stream_post",
         "requestBody": {
           "content": {
@@ -2401,8 +2562,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -4800,7 +4963,7 @@
     },
     "/v1/chat/stream": {
       "post": {
-        "description": "Returns the agent response as a stream (text chunks).",
+        "description": "Stream the agent response as Server-Sent Events.\n\nEmits one ``data:`` frame per model chunk and a final ``event: done``.\nThe response is cut short \u2014 cleanly \u2014 when the client disconnects or when\n``CHAT_STREAM_TIMEOUT_SECONDS`` elapses.",
         "operationId": "chat_stream_v1_chat_stream_post",
         "requestBody": {
           "content": {
@@ -4815,8 +4978,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"

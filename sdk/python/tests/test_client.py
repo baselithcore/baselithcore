@@ -12,6 +12,7 @@ from baselith_sdk import (
     PermissionError_,
     ServerError,
 )
+from baselith_sdk.client import ChatStreamError, _aiter_sse_chunks, _iter_sse_chunks
 from baselith_sdk.errors import APIConnectionError, BaselithConfigError
 
 BASE = "https://api.test"
@@ -113,12 +114,71 @@ def test_chat_returns_typed_response():
 
 
 def test_chat_stream_yields_chunks():
+    """Real server SSE frames decode to their plain-text payload, sans [DONE]."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="Hello world")
+        body = "data: Hello\n\ndata:  world\n\nevent: done\ndata: [DONE]\n\n"
+        return httpx.Response(200, text=body)
 
     with BaselithClient(BASE, api_key="k", transport=httpx.MockTransport(handler)) as c:
-        chunks = "".join(c.chat_stream("q"))
-    assert chunks == "Hello world"
+        chunks = list(c.chat_stream("q"))
+    assert "".join(chunks) == "Hello world"
+
+
+def test_chat_stream_tolerates_keepalive_and_multiline():
+    """A ``: keepalive`` comment is ignored; a multi-line chunk reassembles."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            ": keepalive\n\n"
+            "data: line1\ndata: line2\n\n"
+            ": keepalive\n\n"
+            "event: done\ndata: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    with BaselithClient(BASE, api_key="k", transport=httpx.MockTransport(handler)) as c:
+        chunks = list(c.chat_stream("q"))
+    assert chunks == ["line1\nline2"]
+
+
+def test_chat_stream_surfaces_error_event():
+    """``event: error`` raises ``ChatStreamError`` instead of leaking as text."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = "data: partial\n\nevent: error\ndata: stream failed\n\nevent: done\ndata: [DONE]\n\n"
+        return httpx.Response(200, text=body)
+
+    with BaselithClient(BASE, api_key="k", transport=httpx.MockTransport(handler)) as c:
+        gen = c.chat_stream("q")
+        assert next(gen) == "partial"
+        with pytest.raises(ChatStreamError) as ei:
+            next(gen)
+    assert "stream failed" in str(ei.value)
+
+
+def test_iter_sse_chunks_handles_events_split_across_reads():
+    """White-box: the decoder buffers a frame split across arbitrary reads."""
+    raw = ["data: hel", "lo\n", "\nevent: don", "e\ndata: [DONE]\n\n"]
+    assert list(_iter_sse_chunks(iter(raw))) == ["hello"]
+
+
+def test_iter_sse_chunks_merges_crlf_split_exactly_at_the_boundary():
+    """Regression: a read boundary between a "\\r" and its "\\n" must not
+    fragment one logical ``data:`` block into two."""
+    raw = ["data: hello\r", "\ndata: world\r\n\r\n"]
+    assert list(_iter_sse_chunks(iter(raw))) == ["hello\nworld"]
+
+
+@pytest.mark.asyncio
+async def test_aiter_sse_chunks_merges_crlf_split_exactly_at_the_boundary():
+    """Async counterpart of the CRLF-boundary regression above."""
+
+    async def raw():
+        for piece in ["data: hello\r", "\ndata: world\r\n\r\n"]:
+            yield piece
+
+    assert [c async for c in _aiter_sse_chunks(raw())] == ["hello\nworld"]
 
 
 # === Feedback + idempotency ===
@@ -312,13 +372,47 @@ async def test_async_chat():
 @pytest.mark.asyncio
 async def test_async_stream():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="a-b-c")
+        body = "data: a\n\ndata: b\n\ndata: c\n\nevent: done\ndata: [DONE]\n\n"
+        return httpx.Response(200, text=body)
 
     async with AsyncBaselithClient(
         BASE, api_key="k", transport=httpx.MockTransport(handler)
     ) as c:
         chunks = [chunk async for chunk in c.chat_stream("q")]
-    assert "".join(chunks) == "a-b-c"
+    assert chunks == ["a", "b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_async_stream_tolerates_keepalive_and_multiline():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            ": keepalive\n\n"
+            "data: line1\ndata: line2\n\n"
+            ": keepalive\n\n"
+            "event: done\ndata: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    async with AsyncBaselithClient(
+        BASE, api_key="k", transport=httpx.MockTransport(handler)
+    ) as c:
+        chunks = [chunk async for chunk in c.chat_stream("q")]
+    assert chunks == ["line1\nline2"]
+
+
+@pytest.mark.asyncio
+async def test_async_stream_surfaces_error_event():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = "data: partial\n\nevent: error\ndata: stream failed\n\nevent: done\ndata: [DONE]\n\n"
+        return httpx.Response(200, text=body)
+
+    async with AsyncBaselithClient(
+        BASE, api_key="k", transport=httpx.MockTransport(handler)
+    ) as c:
+        gen = c.chat_stream("q")
+        assert await gen.__anext__() == "partial"
+        with pytest.raises(ChatStreamError):
+            await gen.__anext__()
 
 
 @pytest.mark.asyncio

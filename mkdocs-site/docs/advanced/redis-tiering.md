@@ -135,7 +135,10 @@ baselithcore:tenant-456:search:<query-hash>
    and API-key-denylist keys derived from it. Change both if you share one
    Redis between deployments.
 2. **Tenant Isolation**: `RedisCache` and `SemanticLLMCache` partition entries by
-   `get_current_tenant_id()`; `RedisTTLCache` keys are not tenant-scoped.
+   `get_tenant_or_default()` — the tenant namespaces the key, it is not an
+   access boundary, so an out-of-request caller lands in the `"default"` bucket
+   instead of raising under strict isolation; `RedisTTLCache` keys are not
+   tenant-scoped.
 3. **Namespace Separation**: Never mix data of different nature in the same database.
 
 ---

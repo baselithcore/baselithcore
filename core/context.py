@@ -64,6 +64,103 @@ def get_current_tenant_id() -> str:
     return tenant_id
 
 
+#: Tenant ids the framework reserves for itself. ``system`` is the identity
+#: :func:`core.db.connection.system_tenant_scope` binds for maintenance work,
+#: and migration ``010_system_tenant_rls_exemption`` grants it visibility of
+#: **every** tenant's rows. A principal that managed to carry it — a JWT claim,
+#: an API-key record, a provisioning call that took the id from input — would
+#: therefore read and write everything. Naming it here gives the request
+#: boundary and the provisioning path one authority to check against instead of
+#: a literal in each.
+#:
+#: Kept as a literal rather than imported from ``core.db.session_setup``: that
+#: module pulls in psycopg and the app config, which this one must not.
+#: ``tests/unit/core/test_reserved_tenants.py`` fails if the two drift.
+RESERVED_TENANT_IDS: frozenset[str] = frozenset({"system"})
+
+
+class ReservedTenantError(ValueError):
+    """A reserved tenant id arrived from outside the framework.
+
+    Raised where such an id would otherwise be *accepted* — minting a token that
+    asserts it, provisioning a tenant record for it. A ``ValueError`` subclass so
+    callers that already treat bad input that way keep working.
+    """
+
+
+def is_reserved_tenant(tenant_id: str | None) -> bool:
+    """Whether *tenant_id* is a framework-reserved identity.
+
+    Args:
+        tenant_id: The candidate id — a token claim, a provisioning request
+            field, anything that did not come from the framework itself.
+
+    Returns:
+        True when the id is reserved and must not be accepted from outside.
+    """
+    return tenant_id in RESERVED_TENANT_IDS
+
+
+def bind_principal_tenant(tenant_id: str) -> contextvars.Token:
+    """Bind a tenant that came from a **principal**, refusing reserved ids.
+
+    The only correct way to bind a tenant derived from a caller's identity — a
+    JWT or OIDC claim, an API-key record, anything a request, connection or
+    token asserted. Use it at every such site; use the plain
+    :func:`set_tenant_context` only for a value the framework already owns (the
+    maintenance identity via :func:`core.db.connection.system_tenant_scope`, a
+    job's enqueued metadata, an event record, a checkpoint's stored tenant).
+
+    The distinction is not stylistic. ``system`` is what maintenance work binds,
+    and migration ``010_system_tenant_rls_exemption`` grants it visibility of
+    every tenant's rows, so a principal that carried it would read and write
+    everything. Tokens asserting it cannot be minted here
+    (:mod:`core.auth._jwt_issue`), but an external issuer — an OIDC directory
+    mapping a group onto the tenant claim — is outside this repository's reach,
+    and so is any deployment that adds its own authenticating entry point. A
+    per-site ``if is_reserved_tenant(...)`` check only protects the sites
+    somebody remembered; making the *binding call itself* refuse protects the
+    ones nobody thought of, including the ones in another checkout that shares
+    this ``core``.
+
+    Args:
+        tenant_id: The tenant the principal asserts.
+
+    Returns:
+        contextvars.Token: token to restore the previous value via
+        :func:`reset_tenant_context`, exactly like :func:`set_tenant_context`.
+
+    Raises:
+        ReservedTenantError: The id is framework-reserved. Callers translate
+            this into their own refusal — a 403 for an HTTP request, a closed
+            socket for a connection — and must never fall back to binding it.
+    """
+    if is_reserved_tenant(tenant_id):
+        raise ReservedTenantError(
+            f"'{tenant_id}' is a reserved tenant identifier and cannot be bound "
+            "from a principal. It belongs to the framework's own maintenance "
+            "context."
+        )
+    return _tenant_context.set(tenant_id)
+
+
+def tenant_is_bound() -> bool:
+    """Whether a tenant is bound to the current execution context.
+
+    The public answer to "did someone upstream actually say which tenant this
+    work belongs to?", as opposed to :func:`get_current_tenant_id`, which
+    conflates *unbound* with the ``"default"`` fallback unless
+    ``strict_tenant_isolation`` happens to be on. Fail-closed callers that must
+    refuse unattributed work regardless of that unrelated switch — row-level
+    security binding the DB session, for one — ask this instead of reaching
+    into the module-private contextvar.
+
+    Returns:
+        True when a tenant id is bound to this context, False otherwise.
+    """
+    return _tenant_context.get() is not None
+
+
 def get_tenant_or_default() -> str:
     """Like :func:`get_current_tenant_id` but never raises.
 

@@ -1,0 +1,35 @@
+---
+# ============================================================
+# DEV ONLY — compose.dev.yaml
+# ============================================================
+# Bind-mounts the working tree over the image for live-reload
+# development. NOT named compose.override.yaml, on purpose:
+# Compose auto-merges a file with that name into every plain
+# `docker compose up`, silently turning any stack into a dev
+# deploy with the host's source mounted over the image.
+#
+# Usage:
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      # Mount logs to see them locally
+      - ./logs:/app/logs
+
+  worker:
+    build:
+      context: .
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      - ./logs:/app/logs

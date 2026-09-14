@@ -147,12 +147,36 @@ report = await run_regression_async(
 )
 ```
 
-A judge score below `judge_min_score` fails the case (scores land in
-`report.judge_scores`). Failure semantics are deliberately asymmetric: a
-**judge error** (provider down, malformed reply) keeps the deterministic
-verdict and records the case in `report.judge_errors` — a flaky judge can
-never turn CI red on its own. Deterministically failed cases are not judged
-(no wasted LLM calls).
+LLM scoring is nondeterministic, so a single sample per case makes the
+verdict a coin flip. Each case that passes the deterministic checks is
+instead judged `judge_samples` times and gated on the **median** of those
+draws; a median below `judge_min_score` fails the case. Median scores land in
+`report.judge_scores`.
+
+Failure semantics are deliberately asymmetric: a **judge error** (provider
+down, malformed reply) on one draw does not flip the verdict — a case is
+scored on whatever samples survived, and only a case whose samples *all*
+errored keeps its deterministic result and is recorded in
+`report.judge_errors`. A flaky judge can never turn CI red on its own.
+Deterministically failed cases are not judged (no wasted LLM calls).
+
+`judge_samples` and `judge_concurrency` default to
+`EvaluationConfig.judge_samples` (`3`, env `EVAL_JUDGE_SAMPLES`) and
+`EvaluationConfig.judge_max_parallel` (`4`, env `EVAL_JUDGE_MAX_PARALLEL`) — see
+[Evaluation configuration](../getting-started/configuration.md#evaluation-configuration-eval_)
+— and can be overridden per call:
+
+```python
+report = await run_regression_async(
+    cases, recorded, judge=CompositeEvaluator(),
+    judge_min_score=0.7, judge_samples=5, judge_concurrency=8,
+)
+```
+
+Every `(case, sample)` pair is flattened into **one** bounded fan-out via
+`core.utils.concurrency.bounded_gather`, so `judge_concurrency` caps the total
+number of judge calls in flight across the whole suite — not per case — no
+matter how many samples or cases the run has.
 
 ### Evaluator & Case Definition
 
@@ -335,8 +359,12 @@ when the pass rate dips below the configured gate.
 | `load_recorded_runs(path)` | Load the JSON capture file, keyed by `case_id` |
 | `RecordedRun` | Per-case capture: `output_text`, `trajectory`, `latency_ms`, `cost_usd` |
 | `run_regression(cases, recorded, threshold)` | Evaluate and return a `RegressionReport` |
-| `RegressionReport` | `total`, `passed`, `failed`, `pass_rate`, `threshold`, `meets_threshold`, `to_json()` |
+| `run_regression_async(cases, recorded, ..., judge=None, judge_min_score=0.7, judge_concurrency=None, judge_samples=None)` | Deterministic pass, plus the optional [judge gate](#llm-as-judge-gate-opt-in) |
+| `RegressionReport` | `total`, `passed`, `failed`, `pass_rate`, `threshold`, `meets_threshold`, `judge_scores`, `judge_errors`, `to_json()` |
 | `DEFAULT_PASS_THRESHOLD` | Default 0.90 |
+| `DEFAULT_JUDGE_MIN_SCORE` | Default 0.7 |
+| `DEFAULT_JUDGE_SAMPLES` | Default 3 — the constant `_judge_defaults()` falls back to when `EvaluationConfig` cannot be loaded |
+| `DEFAULT_JUDGE_MAX_PARALLEL` | Default 4 — same fallback role, for judge concurrency |
 | `RegressionLoadError` | Raised on malformed case/run input |
 
 ### Example: CI job

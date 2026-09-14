@@ -140,7 +140,61 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
 | `environment_variables` | No       | Required environment variables, reported by `baselith doctor` — a list of names, or a list of mappings with `name`, `description` and `required` (only the names are used). Also **widens the plugin `.env` allowlist** to these exact keys, for names the plugin does not own (`SLACK_SIGNING_SECRET`); framework-protected keys can never be declared this way. See [the policy](../core-modules/plugins.md#two-gates-namespace-allowlist-then-protected-key-denylist) |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
+| `plugin_dependencies`   | No       | Map of plugin name to version constraint (e.g. `my_plugin: '>=2.0.0'`). Declares that this plugin needs another one, and **orders initialization** — see below |
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
+| `entry_point`           | No       | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`), resolved inside the plugin's own package. Required when `plugin.py` exposes more than one concrete `Plugin` subclass — ambiguity is a hard error, not a guess. |
+
+!!! danger "Unknown manifest keys are refused"
+    The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
+    `extra="forbid"`. A key outside the table above — a typo, or a key from another
+    framework — fails validation and the plugin is **refused in every environment**,
+    with a did-you-mean hint:
+
+    ```text
+    manifest.yaml: unknown manifest key(s): 'min_core_verison' (did you mean
+    'min_core_version'?). Remove the key or fix the spelling — the loader ignores
+    nothing.
+    ```
+
+    A plugin with **no** manifest at all is the legacy shape and still loads. A
+    plugin whose manifest is present but broken never does — a manifest that will
+    not parse declares no `permissions` and no version bounds, so loading it anyway
+    would grant more authority than its author asked for.
+    See [Packaging › Manifest Fields](packaging.md#manifest-fields) for the full key
+    list.
+
+#### Your own keys: the `x-` namespace
+
+The strict schema covers the keys the **core** interprets, which leaves nowhere to
+put data only your plugin reads. Prefix it with `x-`:
+
+```yaml title="plugins/my-plugin/manifest.yaml"
+name: "my-plugin"
+version: "1.0.0"
+description: "My custom plugin"
+
+x-control:
+  mode: strict
+  refresh_seconds: 30
+```
+
+```python
+control = self.metadata.extension("control")        # prefix optional on read
+mode = (control or {}).get("mode", "lenient")
+```
+
+The core carries these verbatim and never interprets them. Two consequences worth
+knowing before you use one:
+
+* a **typo in a known key is still refused** — `x-` is checked before validation
+  and no core key carries the prefix, so `min_core_verison` cannot slip through as
+  an extension;
+* an extension is **inside the integrity digest**, so editing `x-control` on a
+  signed plugin breaks its `integrity_sha256` exactly like editing `permissions`
+  does. Re-sign afterwards (see [Signing](#signing)).
+
+Full rules — key grammar, case sensitivity, shadowing, cross-plugin collisions —
+in [Packaging › Vendor extensions](packaging.md#vendor-extensions).
 
 !!! danger "Name must equal the directory name"
     The manifest `name` is the plugin's **canonical key** — the loader, the lifecycle
@@ -156,6 +210,31 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
     lowercase — static/SPA assets are only mounted for names matching
     `^[a-z0-9][a-z0-9._-]{0,63}$`. If another plugin declares `plugin_dependencies`
     against yours, the dependency key must be this exact string.
+
+!!! tip "`plugin_dependencies` decides who initializes first"
+    The loader topologically sorts plugins before initializing them, so a plugin
+    named in your `plugin_dependencies` is guaranteed to have completed
+    `initialize()` — and therefore to have registered its services in the
+    `ServiceRegistry` — before yours runs. Declare it whenever you resolve
+    another plugin's service, even lazily inside a request: without the
+    declaration the order is arbitrary, and your guard may observe a service
+    that is simply not registered yet.
+
+    Both manifest spellings feed the sort: the current `plugin_dependencies`
+    map and the legacy `dependencies` list of bare names. Prefer
+    `plugin_dependencies` — it also carries the version constraint, ordered
+    per PEP 440 where expressible and semver §11 precedence otherwise (see
+    [Version compatibility](../core-modules/plugins.md#load-time-admission-gates)).
+
+!!! warning "An absent dependency now skips your plugin"
+    The topological **sort** ignores a dependency that is not present, so it never
+    blocks ordering — but the compat **gate** does not: it is fail-closed, and a
+    `plugin_dependencies` entry missing from the load set refuses your plugin.
+    Declare only what you genuinely need; a truly optional integration should be
+    resolved defensively at call time rather than declared. Operators can downgrade
+    the gate to warn-only with `BASELITH_ENFORCE_PLUGIN_COMPAT=false` while a
+    manifest is corrected. See
+    [Packaging › Dependencies](packaging.md#dependencies).
 
 ---
 
@@ -321,7 +400,10 @@ When a plugin implements `create_router()`, its endpoints are automatically:
 * Mounted under `get_router_prefix()` — `/api/{plugin-name}` by default. The prefix
   is passed verbatim to `include_router`, and any `prefix=` set on the `APIRouter`
   is appended after it: `APIRouter(prefix="/my-plugin")` would end up at
-  `/api/my-plugin/my-plugin/status`, so leave the router prefix empty.
+  `/api/my-plugin/my-plugin/status`, so leave the router prefix empty. Keep
+  `get_router_prefix()` plugin-specific: a bare core-owned segment such as
+  `/api` cannot express ownership, so the registry logs a warning (once) and
+  leaves requests under it unattributed for the plugin context.
 * Included in OpenAPI documentation
 * Tagged for easy discovery in Swagger UI
 
@@ -471,6 +553,57 @@ Expected output:
   Endpoints: /api/my-plugin/status
 ```
 
+### Reporting your own health
+
+The framework only knows whether `initialize()` completed. Override the optional
+async `health()` hook to report what only your plugin knows — a stale upstream, an
+expired credential, a drained queue:
+
+```python
+from core.plugins import AgentPlugin, PluginHealth
+
+
+class MyPlugin(AgentPlugin):
+    async def health(self) -> PluginHealth:
+        lag = await self._feed.seconds_behind()
+        return PluginHealth(
+            healthy=lag < 300,
+            detail=f"feed {lag:.0f}s behind",
+            data={"lag_seconds": lag},   # must be JSON-serialisable
+        )
+```
+
+`await registry.check_health()` awaits the hook **only when you override it**, so
+not implementing it costs nothing. A hook that raises marks your plugin unhealthy
+and is logged — it never takes the health endpoint down. The synchronous
+`registry.health_check()` is unchanged.
+
+### Background tasks
+
+Never start a bare `asyncio.create_task` from a plugin: it outlives your own
+reload, so the new generation initializes while the old one's loop keeps touching
+shared state. Spawn through the registry instead, and the task is owned by your
+plugin — cancelled *and awaited* on unregister, reload and hot reload:
+
+```python
+from core.di import ServiceRegistry
+from core.plugins import PluginRegistry
+
+
+class MyPlugin(AgentPlugin):
+    async def initialize(self, config: dict[str, Any]) -> None:
+        await super().initialize(config)
+        registry = ServiceRegistry.get(PluginRegistry)
+        registry.spawn_task(self.metadata.name, self._poll_forever())
+```
+
+The teardown wait is bounded by `BASELITH_PLUGIN_TASK_CANCEL_TIMEOUT` (default
+`10` seconds; `0` means cancel and do not wait). While teardown is in flight
+`spawn_task` raises `PluginTaskClosedError` rather than accepting work that would
+outlive the generation being torn down — catch it in a `shutdown()` that still
+wants to schedule something, or simply do the work inline there. See
+[Plugin System › Background tasks](../core-modules/plugins.md#background-tasks).
+
 ---
 
 ## 8. Custom CLI Commands
@@ -614,6 +747,43 @@ Before deploying or testing, validate that your plugin conforms to the framework
 
 ```bash
 baselith plugin validate my-plugin
+```
+
+### Signing
+
+A plugin that declares `integrity_sha256` in its manifest is verified against
+its own tree before the loader executes it, so the hash has to be recomputed
+whenever the executable surface changes:
+
+```bash
+baselith plugin sign plugins/my-plugin
+```
+
+The hash covers what the plugin ships **and** executes — Python sources, the
+packaging files `pip install` trusts, `SKILL.md` bodies, native extensions and
+shell scripts, and the front-end assets the console serves. Build directories
+are excluded, because their contents are neither shipped nor reproducible
+between machines: `node_modules` for the JavaScript toolchain, `target` for
+Cargo's. Without that, the signature of a plugin with a Rust component depended
+on whether `cargo build` had been run locally, and the same tree hashed
+differently before and after compiling. The full surface is listed under
+[Plugin integrity](../core-modules/plugins.md).
+
+Since hash surface **V5** the digest also covers a canonical projection of the
+manifest itself — `permissions`, `python_dependencies`, `min_core_version`,
+`name`, `entry_point`. Editing any of those is a re-signing event, exactly like
+rebuilding the UI. The three supply-chain keys `integrity_sha256`,
+`signature_ed25519` and `hash_surface_version` are excluded from the projection,
+so the signing tools can still write them back without invalidating the hash.
+
+In a checkout with `pre-commit install` done, a change to a hashed path *or* to a
+manifest re-signs the affected plugin automatically and stages the manifest with
+it; without the hook the CI gate `check_plugin_integrity.py` is what catches the
+drift. To re-sign on demand:
+
+```bash
+python scripts/sign_changed_plugins.py plugins/my-plugin   # one tree
+python scripts/sign_changed_plugins.py --all               # every plugin
 ```
 
 ### Disabling/Enabling

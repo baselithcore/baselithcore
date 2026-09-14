@@ -13,6 +13,17 @@ from core.services.vectorstore import VectorStoreService
 from core.services.vectorstore.exceptions import VectorStoreError
 
 
+def _one_vector_per_text(_embedder, texts, _cache, **_kwargs):
+    """Faithful stub for ``get_embeddings_cached``.
+
+    The real function rebuilds its result by index over ``texts``, so it always
+    returns exactly one vector per input. ``index_documents`` relies on that
+    (``zip(chunks, doc_vectors, strict=True)``); a stub that returns fewer
+    would silently drop chunks from the upsert.
+    """
+    return [[0.1, 0.2] for _ in texts]
+
+
 @pytest.fixture(autouse=True)
 def mock_redis_cache():
     """Mock RedisCache to avoid connection issues during tests."""
@@ -143,8 +154,9 @@ class TestVectorStoreService:
         # Mock embedder
         mock_embedder = Mock()
 
-        # Mock cached embeddings return
-        mock_get_embeddings.return_value = [[0.1, 0.2]]
+        # Mock cached embeddings return (one vector per chunk, as the real
+        # function guarantees).
+        mock_get_embeddings.side_effect = _one_vector_per_text
 
         documents = [
             Document(
@@ -185,7 +197,7 @@ class TestVectorStoreService:
         )
         mock_provider = AsyncMock()
         service = VectorStoreService(config=mock_config, provider=mock_provider)
-        mock_get_embeddings.return_value = [[0.1, 0.2]]
+        mock_get_embeddings.side_effect = _one_vector_per_text
 
         await service.index(
             [Document(id="doc1", content="content " * 50)], embedder=Mock()
@@ -206,7 +218,7 @@ class TestVectorStoreService:
         )
         mock_provider = AsyncMock()
         service = VectorStoreService(config=mock_config, provider=mock_provider)
-        mock_get_embeddings.return_value = [[0.1, 0.2]]
+        mock_get_embeddings.side_effect = _one_vector_per_text
 
         await service.index(
             [Document(id="doc1", content="content " * 50)],

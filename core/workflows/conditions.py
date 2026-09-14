@@ -80,7 +80,7 @@ def _ast_interpret(node: ast.AST, env: dict[str, Any]) -> Any:
         return obj[key]
     if isinstance(node, ast.Compare):
         left = _ast_interpret(node.left, env)
-        for op_node, comparator in zip(node.ops, node.comparators):
+        for op_node, comparator in zip(node.ops, node.comparators, strict=True):
             right = _ast_interpret(comparator, env)
             op_fn = _SAFE_OPS.get(type(op_node))
             if op_fn is None:
