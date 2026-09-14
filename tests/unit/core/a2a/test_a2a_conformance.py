@@ -280,6 +280,42 @@ class TestStreamKeepalive:
         data = [frame for frame in frames if frame.startswith("data: ")]
         assert json.loads(data[-1].removeprefix("data: ").strip())["id"] == 1
 
+    async def test_an_event_queued_as_the_keepalive_fires_is_not_dropped(
+        self, monkeypatch
+    ) -> None:
+        """The timeout can fire in the same scheduling round as the producer's
+        last ``put``: the event stays queued while the wait is cancelled, so
+        ending the stream on ``producer.done()`` alone loses the final event of
+        every stream that was quiet long enough to need one keepalive."""
+        import core.a2a.router as router_module
+
+        produced = asyncio.Event()
+
+        async def _quiet_then_final(_body):
+            yield {"jsonrpc": "2.0", "id": 1, "result": {"final": True}}
+            produced.set()
+
+        async def _time_out_once_the_producer_has_finished(awaitable, timeout):
+            # The consumer's ``queue.get()`` never runs: it is what a real
+            # ``wait_for`` cancels when its deadline wins the race.
+            awaitable.close()
+            await produced.wait()
+            await asyncio.sleep(0)  # let the producer queue its sentinel too
+            raise TimeoutError
+
+        monkeypatch.setattr(
+            asyncio, "wait_for", _time_out_once_the_producer_has_finished
+        )
+
+        frames = [
+            frame async for frame in router_module.sse_frames(_quiet_then_final(None))
+        ]
+
+        data = [frame for frame in frames if frame.startswith("data: ")]
+        assert [
+            json.loads(frame.removeprefix("data: ").strip())["id"] for frame in data
+        ] == [1]
+
     async def test_producer_is_cancelled_when_the_consumer_leaves(self) -> None:
         """Client gone: the work behind the stream must not keep running."""
         import core.a2a.router as router_module

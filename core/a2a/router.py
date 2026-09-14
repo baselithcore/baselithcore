@@ -134,6 +134,13 @@ async def sse_frames(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator[str
                         queue.get(), timeout=SSE_KEEPALIVE_SECONDS
                     )
                 except TimeoutError:
+                    # The timeout can fire in the same scheduling round as a
+                    # ``put``, so the queue is checked before the producer: an
+                    # event that landed while the wait was being cancelled stays
+                    # queued, and ending the stream on ``producer.done()`` alone
+                    # would drop the final event of every quiet stream.
+                    if not queue.empty():
+                        continue
                     # Nothing arrived. Either the producer is merely slow — keep
                     # the connection warm — or it finished and its sentinel did
                     # not fit, in which case end the stream rather than sit out

@@ -202,6 +202,15 @@ task snapshot followed by a terminal `status-update` event carrying
 `final: true`. Conformant peers read until `final: true` — previously this
 method returned `UNSUPPORTED_OPERATION`, which broke those peers.
 
+A quiet stream is kept warm: while the agent produces nothing, the framer
+(`core.a2a.router.sse_frames`) emits an SSE comment frame (`:`) every
+`SSE_KEEPALIVE_SECONDS` (15s) so intermediaries do not drop the connection, and
+the producer runs as its own task behind a bounded 64-event queue — a peer that
+reads slower than the agent emits applies backpressure to the agent rather than
+to the process's memory. A trailing comment frame after the last `data:` frame
+is conformant; clients ignore it. When the consumer goes away the producer task
+is cancelled, so no agent turn outlives the peer that asked for it.
+
 `A2AServer.dispatch_stream(request)` is the async-iterator counterpart to
 `dispatch(request)`; a sync `dispatch()` of `message/stream` still returns the
 final task in one response. The card also carries a `protocolVersion` field

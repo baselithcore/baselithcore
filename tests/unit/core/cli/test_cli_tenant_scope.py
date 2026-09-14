@@ -252,6 +252,22 @@ class TestPluginRegisteredCommands:
         assert "result: Any = handler(args)" not in source
 
 
+def _core_commands() -> set[str]:
+    """The commands ``core.cli.__main__`` itself declares.
+
+    The dispatch map is the live one, and a plugin CLI injects into it at
+    parser-registration time (``baselithbot``), so enumerating it whole makes
+    the classification assertion depend on whether some earlier import
+    registered a plugin. The handlers declared here are the module's own
+    lambdas; an injected one belongs to the plugin module.
+    """
+    return {
+        command
+        for command, handler in cli_main.COMMAND_HANDLERS_MAP.items()
+        if getattr(handler, "__module__", None) == cli_main.__name__
+    }
+
+
 class TestCoverage:
     """Asserted against the map that actually dispatches."""
 
@@ -259,7 +275,7 @@ class TestCoverage:
         assert handlers.UNSCOPED_COMMANDS <= set(cli_main.COMMAND_HANDLERS_MAP)
 
     def test_the_core_commands_that_touch_persistence_are_scoped(self):
-        scoped = set(cli_main.COMMAND_HANDLERS_MAP) - handlers.UNSCOPED_COMMANDS
+        scoped = _core_commands() - handlers.UNSCOPED_COMMANDS
         assert scoped == {
             "plugin",
             "config",
