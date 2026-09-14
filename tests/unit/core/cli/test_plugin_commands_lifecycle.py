@@ -7,6 +7,8 @@ the ``baselith plugin ...`` argv dispatch.
 
 from unittest.mock import patch
 
+import yaml
+
 from ._plugin_commands_helpers import _make_config, _make_plugin
 
 # ──────────────────────────────────────────
@@ -116,6 +118,26 @@ class TestPluginCreateInteractive:
         plugin_py = (tmp_path / "plugins" / "weather_agent" / "plugin.py").read_text()
         assert "class WeatherAgentPlugin" in plugin_py
         assert "Weather_agent" not in plugin_py
+
+    def test_create_router_plugin_matches_declared_health_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Router scaffold should expose the health path declared in the manifest."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "plugins").mkdir()
+
+        from core.cli.commands.plugin.create import create_plugin
+
+        assert create_plugin("testplugin", "router") == 0
+
+        plugin_dir = tmp_path / "plugins" / "testplugin"
+        manifest = yaml.safe_load((plugin_dir / "manifest.yaml").read_text())
+        plugin_py = (plugin_dir / "plugin.py").read_text()
+        router_py = (plugin_dir / "router.py").read_text()
+
+        assert manifest["health_endpoint"] == "/testplugin/health"
+        assert 'def get_router_prefix(self) -> str:\n        return ""' in plugin_py
+        assert 'APIRouter(prefix="/testplugin"' in router_py
 
     def test_create_duplicate(self, tmp_path, monkeypatch):
         """Test creating a plugin with an existing name fails."""

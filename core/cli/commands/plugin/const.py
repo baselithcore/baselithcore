@@ -142,6 +142,9 @@ class {class_name}Plugin(RouterPlugin):
     async def initialize(self, config: Dict[str, Any]) -> None:
         await super().initialize(config)
 
+    def get_router_prefix(self) -> str:
+        return ""
+
     def create_router(self) -> APIRouter:
         return router
 ''',

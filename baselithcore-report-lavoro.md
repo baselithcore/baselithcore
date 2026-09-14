@@ -153,7 +153,7 @@ in un virtualenv temporaneo separato dall'ambiente di lavoro:
 
 | Controllo | Esito |
 | --- | --- |
-| Gate installazione, inclusi quattro controlli statici | 156 test passati |
+| Gate installazione, inclusi quattro controlli statici | 157 test passati |
 | Loader, signing, registry e attivazione plugin | 56 test passati |
 | mypy Core | Passato, 837 file |
 | Typing strict Core e plugin ufficiali previsti dal gate | Passato |
@@ -179,9 +179,20 @@ per farli passare. Restano da preparare fixture isolate o un ambiente integrato
 dedicato prima di dichiarare l'intero ecosistema verificato. Nessuno skip viene
 contato come pass. La copertura globale non e' stata certificata.
 
-La prova definitiva Docker non e' stata rieseguita. In particolare, il nuovo
-controllo `pip check` e l'orchestrazione frontend sono verificati staticamente
-e tramite test mirati, ma attendono ancora la build e la prova reale finali.
+La prova Docker pulita e' stata poi avviata su un checkout separato
+`baselithcore-clean-final`. Il Core ha risposto su `/health`; `doCheck`, dal
+branch `chore/standardize-manifest`, e' arrivato a `Plugin ready` dopo build
+frontend e rebuild dell'immagine API. La prova con un router plugin creato da
+zero ha evidenziato due punti: la dipendenza `auth` deve arrivare da un ref con
+`python_dependencies` dichiarate, altrimenti manca `pyotp`; inoltre il template
+router aggiungeva un doppio prefisso (`/api/<name>` + `/<name>`) mentre il
+manifest dichiarava `/<name>/health`. Corretto il template, il comando
+`baselith plugin add testplugin --docker` ha terminato con `Plugin ready` e
+`/testplugin/health` ha risposto `200 {"healthy": true}` dentro il container.
+
+Il controllo `pip check` e l'orchestrazione frontend sono quindi stati coperti
+anche da una prova Docker reale; resta da ripetere la stessa prova dopo un clone
+fresco del commit correttivo e con i riferimenti plugin definitivi pubblicati.
 
 ## Limiti e ordine dei prossimi passi
 
@@ -190,7 +201,9 @@ e tramite test mirati, ma attendono ancora la build e la prova reale finali.
    skill non esiste in questo branch; non e' stato dichiarato superato.
 2. Rendere disponibili i manifest corretti dai riferimenti Git scelti.
    La risoluzione automatica usa ancora `baselithcore/plugin-<nome>` e il
-   branch predefinito; non gestisce repository private e ref per dipendenza.
+   branch predefinito; se una dipendenza come `auth` ha il manifest corretto
+   solo su un branch dedicato, quel ref deve essere pubblicato/mergiato oppure
+   va aggiunto un meccanismo generico di ref per dipendenza.
 3. Completare `sync --docker` con fingerprint e update/remove Docker uniformi.
    La stabilita' del file requirements e la cache Docker non equivalgono a questo:
    oggi le build vengono ancora invocate a ogni add.
