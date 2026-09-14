@@ -5,6 +5,46 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.33.0](https://github.com/baselithcore/baselithcore/compare/v0.32.0...v0.33.0) (2026-09-14)
+
+
+### Bug Fixes
+
+* **a2a,tests:** stop dropping the final SSE event, isolate the CLI dispatch map ([23c459c](https://github.com/baselithcore/baselithcore/commit/23c459c561db2492d3c12f62ae1de92cd0420730))
+* **baselithbot:** stop leaking the dashboard token into URLs, and unblock the UI under CSP ([dffd63f](https://github.com/baselithcore/baselithcore/commit/dffd63f411d712a9f11e130f5356e73401c7ce39))
+* **chart:** stop shipping a stale image tag, keep streams alive, validate the chart ([6f54329](https://github.com/baselithcore/baselithcore/commit/6f54329b0d61f345f019147dceba8a558b4c6047))
+* **compose:** four files instead of six, and a production stack with a vector store ([60173df](https://github.com/baselithcore/baselithcore/commit/60173df7e00dc9b9d47cc8210faad9ff19441d28))
+* **config,tests:** honour ObservabilityConfig kwargs, drop an SSE ordering assumption ([c50f33c](https://github.com/baselithcore/baselithcore/commit/c50f33c11a4511e4677ff9d3f15a621808acecd3))
+* **core,chart:** honour the plugin enable-list in create_app, persist embedded Qdrant by path, ship plugins.yaml from the chart ([6215669](https://github.com/baselithcore/baselithcore/commit/62156691f09bedcf8294e82bb08e12c424b57897))
+* **core:** resolve no-any-return mypy errors in version.py and _auth_memo.py ([14cf85e](https://github.com/baselithcore/baselithcore/commit/14cf85e37c2fe0a26ee587b94dc84a3b0c012f9e))
+* **docker:** apply Debian security updates on top of the pinned base ([b6f82b1](https://github.com/baselithcore/baselithcore/commit/b6f82b1ced9a56d2d094e9e662a4329a3731af6e))
+* **docker:** one Dockerfile, with the CLI and the thread caps it was missing ([7c6bc35](https://github.com/baselithcore/baselithcore/commit/7c6bc355d229918e7e17511249c40f0f3bdec94e))
+* **docker:** run the security upgrade last, so it happens more than once ([afadc89](https://github.com/baselithcore/baselithcore/commit/afadc89a34fbf9e8601b0b3d4d19e8e75301e6c9))
+* **mcp,a2a:** bring both protocol surfaces up to their declared versions ([4737ebf](https://github.com/baselithcore/baselithcore/commit/4737ebf4aa0234136df377d106b59afce182433f))
+* **plugins:** keep Cargo's build directory out of the signed surface ([c3f1b85](https://github.com/baselithcore/baselithcore/commit/c3f1b85aff3335faccde865b67c5efef72044c69))
+* **security:** make the Semgrep suppressions in core/nlp/models.py effective ([eda412a](https://github.com/baselithcore/baselithcore/commit/eda412a2185aaae089a1f2bfed108ab99cfe2376))
+* **tenancy:** close two cross-tenant paths and make out-of-request work declare itself ([3fbbea5](https://github.com/baselithcore/baselithcore/commit/3fbbea5b83950e05f6b993af36673bccedff91b5))
+* **tests:** mock the API-key denylist Redis client, add CI env for it ([8d80d90](https://github.com/baselithcore/baselithcore/commit/8d80d9068681bcded80f11c80eadfaa092a03684))
+
+
+### Features
+
+* **agent:** drive the typed agent loop with real message history ([4d82cc8](https://github.com/baselithcore/baselithcore/commit/4d82cc870379f30923babd89b30f41b3aa7812c5))
+* **api,sdk:** make the streaming chat endpoint speak SSE, and fix the stack order around it ([4d485aa](https://github.com/baselithcore/baselithcore/commit/4d485aac1852f2e04d80beb89d300fd6645794fb))
+* **chart:** offsite backups — copy each dump to an object store, dedicated backup ServiceAccount ([cb5d072](https://github.com/baselithcore/baselithcore/commit/cb5d072ed11d88c1141bde442afb7755ecc0465f))
+* **chart:** ship the alert rules that go with the ServiceMonitor ([23fe19a](https://github.com/baselithcore/baselithcore/commit/23fe19a136b61d2953978686b3820bbbd0199d1f))
+* **llm:** modernise the provider layer for the current Anthropic API ([1a83306](https://github.com/baselithcore/baselithcore/commit/1a833066b46e58db497e66959ea314fd90f2a49b))
+* **llm:** report token usage measured outside the LLM funnel ([8bb574a](https://github.com/baselithcore/baselithcore/commit/8bb574aefa54129c70617f68d7ede74368116f5e))
+* **observability:** correlate background work, and stop the config from refusing to load ([31897c2](https://github.com/baselithcore/baselithcore/commit/31897c2eae3dbb9f358de0c2454e4a3adfd1815c))
+* **orchestration:** make the agentic safety machinery actually run ([97e77c8](https://github.com/baselithcore/baselithcore/commit/97e77c83494b0530b4a31a2b8e15d3d75e72d550))
+* **plugins,orchestration:** make the registered agents readable without an orchestrator ([c74ba1f](https://github.com/baselithcore/baselithcore/commit/c74ba1fd3fde7748f6e57da1e3e8ec7802f669d4))
+* **plugins:** sign the manifest, validate it strictly, and give vendors a namespace ([ce05817](https://github.com/baselithcore/baselithcore/commit/ce05817f025e1f05dc8e12dce18302224bb51c53))
+
+
+### Performance Improvements
+
+* **nginx:** let the health and metrics locations use the upstream keepalive pool ([169c59f](https://github.com/baselithcore/baselithcore/commit/169c59f06468c669d85dc774cebb215c7b0b908a))
+
 # [0.32.0](https://github.com/baselithcore/baselithcore/compare/v0.31.1...v0.32.0) (2026-09-09)
 
 

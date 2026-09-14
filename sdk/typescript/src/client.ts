@@ -29,7 +29,7 @@ type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const VERSION = '0.1.0';
+const VERSION = '0.33.0';
 const USER_AGENT = `baselith-sdk-ts/${VERSION}`;
 
 export interface BaselithClientOptions {
