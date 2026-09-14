@@ -40,7 +40,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -352,7 +352,7 @@ def make_context_block(
     Returns:
         Formatted context string ready for ``render(context=...)``.
     """
-    date_str = current_date or datetime.now().strftime("%Y-%m-%d")
+    date_str = current_date or datetime.now(UTC).strftime("%Y-%m-%d")
     summary_line = (
         session_summary.strip()
         if session_summary.strip()

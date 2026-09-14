@@ -19,7 +19,8 @@ def extract_value(node):
         return [extract_value(elt) for elt in node.elts]
     elif isinstance(node, ast.Dict):
         return {
-            extract_value(k): extract_value(v) for k, v in zip(node.keys, node.values)
+            extract_value(k): extract_value(v)
+            for k, v in zip(node.keys, node.values, strict=True)
         }
     return None
 

@@ -123,7 +123,7 @@ async def get_embeddings_cached(
 
         # Update cache and map
         cache_updates: list[tuple[str, Any]] = []
-        for i, vector in zip(missing_indices, new_vectors):
+        for i, vector in zip(missing_indices, new_vectors, strict=True):
             cache_updates.append((cache_keys[i], vector))
             vectors_map[i] = vector
 

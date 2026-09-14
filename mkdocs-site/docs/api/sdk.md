@@ -32,7 +32,7 @@ with BaselithClient("https://api.example.com", api_key="sk-...") as client:
     resp = client.chat("What is BaselithCore?")
     print(resp.answer)
 
-    # Streaming (raw text chunks)
+    # Streaming — SSE framing is decoded for you; you get the model's text
     for chunk in client.chat_stream("Tell me a story"):
         print(chunk, end="")
 
@@ -125,6 +125,42 @@ except RateLimitError as e:
     print("slow down; retry after", e.retry_after)
 except AuthenticationError as e:
     print("bad credentials", e.request_id)
+```
+
+### Streaming errors
+
+`POST /chat/stream` is [Server-Sent Events](rest.md#post-chatstream-sse-streaming),
+and both clients decode the wire format for you: `data:` frames become text
+chunks, multi-line frames are rejoined, `: keepalive` comments are ignored, and
+`event: done` ends the iteration. A stream that fails *after* the 200 headers
+went out carries `event: error` instead — which the clients raise rather than
+yield, so a failure can never masquerade as model output:
+
+```python
+from baselith_sdk import BaselithClient, ChatStreamError
+
+try:
+    for chunk in client.chat_stream("Tell me a story"):
+        print(chunk, end="")
+except ChatStreamError as e:
+    print("\nstream failed:", e)
+```
+
+`ChatStreamError` subclasses `BaselithError`, so an `except BaselithError`
+already catches it. The TypeScript client throws its own `ChatStreamError`
+(exported from `baselith-sdk`) in the same situation:
+
+```typescript
+import { BaselithClient, ChatStreamError } from "baselith-sdk";
+
+try {
+  for await (const chunk of client.chatStream("Tell me a story")) {
+    process.stdout.write(chunk);
+  }
+} catch (err) {
+  if (err instanceof ChatStreamError) console.error("stream failed:", err.message);
+  else throw err;
+}
 ```
 
 ---

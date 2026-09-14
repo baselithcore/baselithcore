@@ -8,9 +8,8 @@ of information across different storage layers.
 """
 
 import asyncio
-import time
 from collections import deque
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import (
     Any,
@@ -22,6 +21,8 @@ from .embedding_compat import encode_flexible
 from .hierarchy_config import HierarchyConfig, MemoryTier, TierConfig, TierStats
 from .hierarchy_context import HierarchyContextMixin
 from .hierarchy_search import HierarchySearchMixin
+from .hierarchy_stats import HierarchyStatsMixin
+from .hierarchy_tiers import HierarchyTiersMixin, new_ltm_container
 from .lifecycle import (
     decay_prune_enabled,
     drop_duplicates,
@@ -31,6 +32,7 @@ from .lifecycle import (
     summarize_items,
     ttl_enforcement_enabled,
 )
+from .tenant_state import TenantScopedState, current_memory_tenant
 from .types import MemoryItem, MemoryType
 
 logger = get_logger(__name__)
@@ -44,7 +46,12 @@ __all__ = [
 ]
 
 
-class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
+class HierarchicalMemory(
+    HierarchyTiersMixin,
+    HierarchySearchMixin,
+    HierarchyContextMixin,
+    HierarchyStatsMixin,
+):
     """
     Advanced three-tier hierarchical memory implementation.
 
@@ -61,7 +68,17 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         >>> hierarchy = HierarchicalMemory()
         >>> await hierarchy.add("User prefers dark mode")
         >>> context = await hierarchy.get_context(max_tokens=2000)
+
+    Tenancy:
+        Every tier is scoped to the tenant bound to the current context (see
+        :mod:`core.memory.tenant_state`), so a store shared across requests
+        cannot promote one tenant's context into another's prompt.
     """
+
+    # Bounded deque per tenant: narrows the ``Iterable[MemoryItem]`` the
+    # search/context mixins declare, exactly as the old ``__init__``
+    # annotation did.
+    _ltm: TenantScopedState[deque[MemoryItem]] = TenantScopedState(new_ltm_container)
 
     def __init__(
         self,
@@ -84,13 +101,11 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         self._llm_service = llm_service
         self.provider = provider
 
-        # Initialize tier storage. LTM uses a bounded deque so eviction at
-        # cap (default 500) is O(1) instead of O(n).
-        self._stm: list[MemoryItem] = []
-        self._stm_embeddings: list[list[float]] = []
-        self._mtm: list[MemoryItem] = []
-        self._mtm_embeddings: list[list[float]] = []
-        self._ltm: deque[MemoryItem] = deque(maxlen=self.config.ltm.max_items)
+        # Tier storage lives on HierarchyTiersMixin as tenant-scoped
+        # descriptors: one set of containers per tenant, created lazily on
+        # first access. Nothing is initialized here — a store built at import
+        # time has no tenant to resolve, and pre-creating containers would
+        # both pick the wrong one and defeat the isolation.
 
         # Overflow-triggered maintenance runs as tracked background tasks
         # (single-flighted per tier) so an add() on the request path never
@@ -107,6 +122,11 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         garbage-collected mid-run) and failures are logged via the done
         callback instead of vanishing.
         """
+        # Single-flighted per tier *and per tenant*: the tiers are per-tenant,
+        # so a name shared across tenants would let one tenant's in-flight
+        # consolidation suppress another's — leaving that tenant's tier over
+        # capacity until the first finished.
+        name = f"{name}:{current_memory_tenant()}"
         existing = self._maintenance_tasks.get(name)
         if existing is not None and not existing.done():
             return
@@ -130,6 +150,13 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         pending = [t for t in self._maintenance_tasks.values() if not t.done()]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+    # ``recall`` offloads ``_fuse_recall`` to the inference thread pool, and the
+    # tiers it reads are tenant-scoped through the tenant contextvar. This class
+    # used to wrap the method in a ``contextvars.copy_context()`` shim so the
+    # worker saw the caller's tenant; ``core.utils.concurrency.run_inference``
+    # now takes that copy for every offload site, so the shim is gone and the
+    # inherited ``HierarchySearchMixin._fuse_recall`` is used directly.
 
     @property
     def llm_service(self) -> Any | None:
@@ -210,8 +237,15 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         embedding: list[float] | None = None,
     ) -> None:
         """Add item to short-term memory with FIFO eviction."""
+        # Resolve before appending: the two lists are zipped under strict=True
+        # by consolidation and the TTL sweep, and an ``await`` *between* the
+        # appends is a cancellation point — a cancelled encode would leave a
+        # permanent one-element skew that then raises out of every later
+        # maintenance pass. ``list.append`` never suspends, so doing both
+        # after the await makes the pair atomic.
+        resolved = await self._resolve_embedding(item, embedding)
         self._stm.append(item)
-        self._stm_embeddings.append(await self._resolve_embedding(item, embedding))
+        self._stm_embeddings.append(resolved)
 
         # Check capacity and auto-consolidate. Consolidation runs in the
         # background: it cascades into MTM compression (an LLM summarization
@@ -230,8 +264,10 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         embedding: list[float] | None = None,
     ) -> None:
         """Add item to mid-term memory with embedding cache."""
+        # Same atomicity requirement as ``_add_to_stm`` above.
+        resolved = await self._resolve_embedding(item, embedding)
         self._mtm.append(item)
-        self._mtm_embeddings.append(await self._resolve_embedding(item, embedding))
+        self._mtm_embeddings.append(resolved)
 
         # Check capacity and compress if needed. Compression summarizes via
         # the LLM — background task, never inline on the caller's request.
@@ -286,6 +322,7 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
             zip(
                 self._stm[:items_to_migrate],
                 self._stm_embeddings[:items_to_migrate],
+                strict=True,
             )
         )
         promotable, evicted = select_promotable(
@@ -411,70 +448,6 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         when ``BASELITH_MEMORY_DECAY_PRUNE=true`` (default off).
         """
         return prune_low_relevance(self, calculator)
-
-    _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
-
-    def get_tier_stats(self) -> list[TierStats]:
-        """Get statistics for all tiers.
-
-        LTM holds up to ``ltm.max_items`` (default 500) entries, so the
-        ``min(created_at)`` + ``mean(importance)`` pass is O(n). Endpoints
-        like ``/metrics`` may scrape this multiple times per second; cache
-        the computed snapshot for one second to coalesce bursts.
-        """
-        cached: tuple[float, list[TierStats]] | None = getattr(
-            self, "_stats_cache", None
-        )
-        if cached is not None:
-            cached_at, snapshot = cached
-            if time.monotonic() - cached_at < self._STATS_CACHE_TTL:
-                return snapshot
-
-        now = datetime.now(UTC)
-        tier_map = {
-            MemoryTier.STM: "stm",
-            MemoryTier.MTM: "mtm",
-            MemoryTier.LTM: "ltm",
-        }
-
-        def calc_stats(tier: MemoryTier, items: Iterable[MemoryItem]) -> TierStats:
-            tier_config = getattr(self.config, tier_map.get(tier, "stm"))
-
-            count = 0
-            oldest: datetime | None = None
-            importance_sum = 0.0
-            for item in items:
-                count += 1
-                if oldest is None or item.created_at < oldest:
-                    oldest = item.created_at
-                importance_sum += item.metadata.get("importance", 0.5)
-
-            if count == 0:
-                return TierStats(
-                    tier=tier,
-                    item_count=0,
-                    capacity=tier_config.max_items,
-                )
-
-            assert oldest is not None  # guaranteed by count > 0
-            return TierStats(
-                tier=tier,
-                item_count=count,
-                capacity=tier_config.max_items,
-                oldest_item_age_seconds=(now - oldest).total_seconds(),
-                avg_importance=importance_sum / count,
-            )
-
-        snapshot = [
-            calc_stats(MemoryTier.STM, self._stm),
-            calc_stats(MemoryTier.MTM, self._mtm),
-            calc_stats(MemoryTier.LTM, self._ltm),
-        ]
-        self._stats_cache: tuple[float, list[TierStats]] = (
-            time.monotonic(),
-            snapshot,
-        )
-        return snapshot
 
     def clear_all(self) -> dict[str, int]:
         """Clear all tier storage. Returns counts per tier."""

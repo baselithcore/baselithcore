@@ -15,7 +15,7 @@ name/version/checksum so LLM spans are attributable to a prompt version.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.observability.logging import get_logger
@@ -148,7 +148,7 @@ def build_prompt(
     Returns:
         Formatted prompt string
     """
-    current_date = datetime.now().strftime("%d/%m/%Y")
+    current_date = datetime.now(UTC).strftime("%d/%m/%Y")
     system_prompt = _system_prompt(current_date)
     history_section = _render_history(history_text)
 

@@ -139,7 +139,7 @@ class CompositeEvaluator(BaseLLMEvaluator):
             *(judge.evaluate(response, query, context) for judge in self.evaluators)
         )
 
-        for judge, result in zip(self.evaluators, results):
+        for judge, result in zip(self.evaluators, results, strict=True):
             name = judge.__class__.__name__.replace("Evaluator", "").lower()
             aspects[name] = result.score
             total_score += result.score

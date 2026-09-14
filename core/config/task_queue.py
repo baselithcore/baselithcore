@@ -3,8 +3,12 @@
 Broker endpoint, worker concurrency and retry policy for deferred work.
 """
 
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, Any
+
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from core.config._collections import csv_list
 
 
 class TaskQueueConfig(BaseSettings):
@@ -53,7 +57,12 @@ class TaskQueueConfig(BaseSettings):
             or "redis://localhost:6379/2"
         )
 
-    queues: list[str] = ["default", "documents", "analysis"]
+    # NoDecode + csv_list, same reason as dlq_replay_allowed_modules below:
+    # `TASK_QUEUE_QUEUES=default,documents` must configure the queues, not
+    # raise a SettingsError out of the whole task-queue configuration.
+    queues: Annotated[list[str], NoDecode] = Field(
+        default=["default", "documents", "analysis"]
+    )
     default_queue: str = "default"
 
     # Task execution settings
@@ -64,6 +73,43 @@ class TaskQueueConfig(BaseSettings):
     # Retry settings
     default_retry_count: int = 3
     default_retry_delay: int = 60
+
+    # Dead-letter retention. The DLQ is a diagnosis and replay aid, not an
+    # archive: without a horizon every terminally-failed job stays in Redis
+    # forever, so one bad deploy's failures sit in memory indefinitely.
+    # Matches ``failure_ttl`` so the two views of a failed job expire together.
+    # 0 disables expiry (keep forever) — only for a deployment that prunes the
+    # DLQ by hand.
+    dlq_retention_seconds: int = 604800  # 7 days
+
+    # Replay allowlist. A DLQ row is data read back out of Redis, and RQ
+    # resolves whatever dotted path it is handed — so a row naming `os.system`
+    # is an import away from running. Replay refuses any reference that does
+    # not start with one of these module prefixes. Empty list = no replay at
+    # all, which is the fail-closed reading of "nothing is allowed".
+    # ``NoDecode``: without it pydantic-settings JSON-decodes complex fields in
+    # ``EnvSettingsSource`` *before* any validator runs, so the documented
+    # ``core.,plugins.`` raises SettingsError out of the whole class — taking
+    # enqueue, the worker, the monitor and the CLI down with it, not just
+    # replay. Same idiom as core/config/security.py.
+    dlq_replay_allowed_modules: Annotated[list[str], NoDecode] = Field(
+        default=["core.", "plugins."],
+        description=(
+            "Comma-separated module prefixes a dead-lettered job may be "
+            "replayed from. A stored function reference outside them is "
+            "refused before any import happens."
+        ),
+    )
+
+    @field_validator("queues", "dlq_replay_allowed_modules", mode="before")
+    @classmethod
+    def _parse_csv_lists(cls, value: Any) -> Any:
+        """Accept ``a,b`` and a blank value, as well as a JSON array.
+
+        Paired with ``NoDecode`` on both fields — see
+        :mod:`core.config._collections` for why both halves are needed.
+        """
+        return csv_list(value)
 
     # Connection pool settings
     max_connections: int = 50  # cap connections on the shared queue Redis pool

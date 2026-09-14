@@ -223,7 +223,13 @@ def _reference_ranking(
     """
     from core.memory.hybrid_search import _tokenize, bm25_doc_stats
 
-    docs = dict(zip(idx._doc_ids, zip(idx._doc_freqs, idx._doc_lengths)))
+    docs = dict(
+        zip(
+            idx._doc_ids,
+            zip(idx._doc_freqs, idx._doc_lengths, strict=True),
+            strict=True,
+        )
+    )
     docs.update({d: bm25_doc_stats(t) for d, t in (extra or {}).items()})
     n_docs = len(docs)
     total_len = sum(length for _, length in docs.values())

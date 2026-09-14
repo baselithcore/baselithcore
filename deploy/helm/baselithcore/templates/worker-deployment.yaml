@@ -25,6 +25,9 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.plugins.config }}
+        checksum/plugins: {{ include (print $.Template.BasePath "/plugins-configmap.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "baselithcore.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
@@ -92,22 +95,28 @@ spec:
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.tmpVolumes.enabled .Values.extraVolumeMounts }}
+          {{- if or .Values.tmpVolumes.enabled .Values.extraVolumeMounts .Values.plugins.config }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
               mountPath: /tmp
             {{- end }}
+            {{- if .Values.plugins.config }}
+            {{- include "baselithcore.pluginsConfigVolumeMount" . | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or .Values.tmpVolumes.enabled .Values.extraVolumes }}
+      {{- if or .Values.tmpVolumes.enabled .Values.extraVolumes .Values.plugins.config }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.tmpVolumes.sizeLimit }}
+        {{- end }}
+        {{- if .Values.plugins.config }}
+        {{- include "baselithcore.pluginsConfigVolume" . | nindent 8 }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

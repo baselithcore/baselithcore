@@ -3,7 +3,7 @@
 Pydantic models used by the plugin for validation and data structure.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -14,7 +14,7 @@ class ExampleItem(BaseModel):
 
     id: str | None = Field(None, description="Unique identifier")
     name: str = Field(..., description="Name of the item")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tags: list[str] = Field(default_factory=list, description="Associated tags")
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"

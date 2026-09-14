@@ -8,6 +8,7 @@ using the Swarm Colony.
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.orchestration.handlers.swarm_colony import request_colony_scope
 from core.orchestration.handlers.swarm_handler import SwarmHandler
 
 logger = get_logger(__name__)
@@ -25,9 +26,43 @@ class SimulationHandler(SwarmHandler):
     async def handle_simulation(
         self, query: str, context: dict[str, Any], rounds: int = 3
     ) -> dict[str, Any]:
+        """Handle a multi-round simulation.
+
+        Runs inside its own :func:`~core.orchestration.handlers.swarm_colony.request_colony_scope`,
+        exactly like :meth:`SwarmHandler.handle`. This entry point had none, so
+        every ``self._colony`` read fell through to the bounded per-tenant
+        registry — and resolved *independently*. A simulation is multi-round and
+        long-lived, so on a deployment churning more tenants than that registry
+        holds, the LRU could evict and rebuild the colony between the read that
+        registered a dynamic agent and the ``finally`` that unregisters it: the
+        cleanup then ran against a different colony while the agent stayed
+        registered in the original one, competing in its auctions. It also meant
+        round N+1 could bid in a colony that had lost round N's pheromone field.
+        One scope pins one colony for the whole simulation.
+
+        Note the deliberate change of lifetime this brings: the colony is now
+        **minted per simulation** rather than borrowed from the tenant-keyed
+        registry, so pheromone and dynamic agents no longer carry from one
+        simulation to the next for the same tenant. That matches
+        :meth:`SwarmHandler.handle` — a simulation's failure signals are about
+        the scenario it was given, and letting them steer the next, unrelated
+        scenario was the cross-request bleed the request scope exists to stop.
+
+        Args:
+            query: The scenario to simulate.
+            context: Orchestration context (carries the per-request loop budget).
+            rounds: How many evolution rounds to run.
+
+        Returns:
+            The final report, the per-round history and run metadata.
         """
-        Handle a multi-round simulation.
-        """
+        with request_colony_scope(self.new_colony()):
+            return await self._simulate_in_colony(query, context, rounds)
+
+    async def _simulate_in_colony(
+        self, query: str, context: dict[str, Any], rounds: int
+    ) -> dict[str, Any]:
+        """Body of :meth:`handle_simulation`, with a request colony bound."""
         # DEBUG, truncated: the raw user query is free-text PII — it must
         # not land in INFO-level aggregated logs.
         logger.debug(f"Starting multi-round simulation: {query[:80]} ({rounds} rounds)")
@@ -35,11 +70,11 @@ class SimulationHandler(SwarmHandler):
         current_state = query
         all_round_results = []
 
-        # Ids of agents minted for THIS simulation. The colony outlives the
-        # request, so anything registered by decomposition must be
-        # unregistered on the way out (same contract as SwarmHandler.handle —
-        # this override used to drop the list, leaking up to
-        # max_dynamic_subtasks agents per round into every later auction).
+        # Ids of agents minted for THIS simulation. Belt and braces on top of
+        # the request scope: subclasses with their own entry point still rely
+        # on the explicit cleanup (same contract as SwarmHandler.handle — this
+        # override used to drop the list, leaking up to max_dynamic_subtasks
+        # agents per round into every later auction).
         dynamic_agent_ids: list[str] = []
         try:
             for r in range(1, rounds + 1):

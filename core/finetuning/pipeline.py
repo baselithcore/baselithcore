@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Union
 
@@ -142,7 +142,7 @@ class FineTuningPipeline:
             # Save dataset to temp file
             fd, temp_path_str = tempfile.mkstemp(
                 suffix=".jsonl",
-                prefix=f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_",
+                prefix=f"{prefix}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_",
             )
             os.close(fd)
             temp_path = Path(temp_path_str)
@@ -198,7 +198,7 @@ class FineTuningPipeline:
         Returns:
             Final job status
         """
-        start_time = datetime.now()
+        start_time = datetime.now(UTC)
 
         while True:
             job = await self.get_job_status(job_id)
@@ -208,7 +208,7 @@ class FineTuningPipeline:
             if job.is_complete:
                 return job
 
-            elapsed = (datetime.now() - start_time).total_seconds()
+            elapsed = (datetime.now(UTC) - start_time).total_seconds()
             if elapsed > timeout:
                 raise TimeoutError(f"Job {job_id} did not complete within {timeout}s")
 

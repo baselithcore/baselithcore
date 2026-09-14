@@ -205,6 +205,8 @@ def max_dynamic_subtasks() -> int:
 
 __all__ = [
     "DECOMPOSITION_PROMPT_TEMPLATE",
+    "gather_memory_context",
+    "resolve_agent_persona",
     "DEFAULT_MAX_DYNAMIC_SUBTASKS",
     "build_decomposition_prompt",
     "contract_for_spec",
@@ -213,6 +215,59 @@ __all__ = [
     "VirtualAgentSpec",
     "max_dynamic_subtasks",
 ]
+
+
+async def gather_memory_context(colony: Any, description: str) -> str:
+    """Recall memories (and graph relations) relevant to one sub-task.
+
+    Returns a Markdown fragment to splice into the virtual agent's prompt, or
+    an empty string when the colony has no memory manager or recall fails —
+    memory is an enrichment, never a precondition for executing the task.
+    """
+    from core.observability.logging import get_logger
+
+    logger = get_logger(__name__)
+    if not getattr(colony, "memory_manager", None):
+        return ""
+
+    memory_context = ""
+    try:
+        memories = await colony.memory_manager.recall(query=description, limit=5)
+        if memories:
+            memory_context = "\n## Relevant Memories\n" + "\n".join(
+                f"- {m.content}" for m in memories
+            )
+
+        # Graph expansion (GraphRAG)
+        if colony.memory_manager.graph_provider:
+            graph_results = await colony.memory_manager.graph_provider.query_graph(
+                query=description
+            )
+            if graph_results:
+                memory_context += "\n## Entity Relationships\n" + "\n".join(
+                    f"- {r['source']} {r['relation']} {r['target']}"
+                    for r in graph_results
+                )
+    except Exception as e:
+        logger.warning(f"Memory retrieval failed during sub-task execution: {e}")
+    return memory_context
+
+
+def resolve_agent_persona(
+    specs: list[VirtualAgentSpec], agent: Any
+) -> tuple[str, str | None]:
+    """Return ``(system_prompt, model_override)`` for an assigned agent.
+
+    The profile's metadata wins (dynamic agents carry their generated prompt
+    there); otherwise the matching static spec supplies the persona and the
+    per-agent model override — the cheap-executor / strong-reviewer split.
+    """
+    spec = next((a for a in specs if f"virtual_{a.role}" == agent.id), None)
+    system_prompt = agent.metadata.get("system_prompt")
+    if not system_prompt:
+        system_prompt = spec.system_prompt if spec else "You are a helpful assistant."
+    model_override = agent.metadata.get("model") or (spec.model if spec else None)
+    return str(system_prompt), model_override
 
 
 def register_dynamic_agent(colony: Any, spec: VirtualAgentSpec) -> str:

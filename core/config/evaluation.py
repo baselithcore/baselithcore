@@ -4,7 +4,7 @@ Judge model, dataset location and thresholds for the trajectory-aware case
 evaluation and the CI replay runner.
 """
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,19 @@ class EvaluationConfig(BaseSettings):
     # never print the key (project-wide credential rule).
     openai_api_key: SecretStr | None = None
     model: str = "gpt-4-turbo-preview"  # Default evaluator model
+    # LLM-as-judge scoring is nondeterministic: one sample per case makes the
+    # verdict a coin flip, so the scheduled run scores each case k times and
+    # gates on the median (EVAL_JUDGE_SAMPLES).
+    judge_samples: int = Field(
+        default=3,
+        ge=1,
+        description="Judge evaluations per case; the median score gates.",
+    )
+    judge_max_parallel: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum judge calls in flight at once across the suite.",
+    )
 
     @property
     def is_enabled(self) -> bool:

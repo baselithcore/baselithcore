@@ -71,10 +71,12 @@ class TestServerCapabilities:
         assert "prompts" not in capabilities
         assert "logging" not in capabilities
         assert None not in capabilities.values()
-        # `listChanged` is advertised because the server does emit the
-        # notifications — on any subscriptions/listen stream that opted in.
-        assert capabilities["tools"] == {"listChanged": True}
-        assert capabilities["resources"] == {"listChanged": True}
+        # `listChanged` is NOT advertised here: this is the legacy handshake,
+        # and the notifications only flow on a subscriptions/listen stream,
+        # which is a 2026-07-28 construct. See
+        # tests/unit/mcp/test_era_capabilities.py for the era split.
+        assert capabilities["tools"] == {}
+        assert capabilities["resources"] == {}
 
     @pytest.mark.asyncio
     async def test_logging_capability_implies_set_level_support(self) -> None:

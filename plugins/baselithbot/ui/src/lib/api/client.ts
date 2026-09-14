@@ -1,43 +1,22 @@
 export const API_BASE = '/baselithbot';
 export const DASH = `${API_BASE}/dash`;
-const DASHBOARD_TOKEN_STORAGE_KEY = 'baselithbot.dashboard.token';
+// Exported for tests only; not part of the intended public surface.
+export const DASHBOARD_TOKEN_STORAGE_KEY = 'baselithbot.dashboard.token';
 
-function readDashboardTokenFromQuery(): string | null {
-  if (typeof window === 'undefined') return null;
-  const token = new URLSearchParams(window.location.search).get('token')?.trim();
-  return token || null;
-}
-
+// The dashboard token is read from sessionStorage ONLY and sent as an
+// `Authorization: Bearer` header. It must never be appended to a URL as a
+// `?token=` query parameter: that would leak it into access logs, browser
+// history and Referer headers (see plugins/baselithbot/policies/dashboard_auth.py,
+// which never accepts a query-string token for regular requests — only the
+// SSE stream ticket flow uses a short-lived, single-use query value).
 function getDashboardToken(): string | null {
   if (typeof window === 'undefined') return null;
-
-  const queryToken = readDashboardTokenFromQuery();
-  if (queryToken) {
-    try {
-      window.sessionStorage.setItem(DASHBOARD_TOKEN_STORAGE_KEY, queryToken);
-    } catch {
-      /* ignore sessionStorage failures */
-    }
-    return queryToken;
-  }
-
   try {
     const stored = window.sessionStorage.getItem(DASHBOARD_TOKEN_STORAGE_KEY)?.trim();
     return stored || null;
   } catch {
     return null;
   }
-}
-
-export function withDashboardToken(path: string): string {
-  const token = getDashboardToken();
-  if (!token || typeof window === 'undefined') return path;
-
-  const url = new URL(path, window.location.origin);
-  if (!url.searchParams.has('token')) {
-    url.searchParams.set('token', token);
-  }
-  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export class ApiError extends Error {
@@ -52,7 +31,7 @@ export class ApiError extends Error {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getDashboardToken();
-  const res = await fetch(withDashboardToken(path), {
+  const res = await fetch(path, {
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',

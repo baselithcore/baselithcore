@@ -90,7 +90,8 @@
   "properties": {
     "replicaCount": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 0,
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
     },
     "revisionHistoryLimit": {
       "type": "integer",
@@ -455,6 +456,34 @@
         }
       }
     },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OpenTelemetry traces/metrics. `enabled: false` installs no providers and no auto-instrumentation, so no spans exist at all \u2014 not even for in-process consumers such as the control-plane trace viewer.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://[^\\s]+$",
+          "description": "OTLP/gRPC collector endpoint. Empty is a supported mode, not a mistake: instrumentation stays on, no exporter is attached, spans stay in-process for local consumers."
+        },
+        "tracesSampleRate": {
+          "type": ["number", "string"],
+          "minimum": 0,
+          "maximum": 1,
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "0..1. A string is accepted because `--set` cannot produce a float: `--set telemetry.tracesSampleRate=0.1` reaches the chart as the string \"0.1\". `minimum`/`maximum` constrain the number form, the pattern the string form."
+        },
+        "metricsEnabled": {
+          "type": "boolean"
+        },
+        "environment": {
+          "type": "string"
+        }
+      }
+    },
     "config": {
       "type": "object",
       "additionalProperties": {
@@ -497,6 +526,24 @@
         }
       }
     },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declarative plugin set. `config` is the plugins.yaml content (plugin name -> its block); when non-empty it is mounted read-only over /app/configs/plugins.yaml and runtime toggles are refused. Mutually exclusive with config.PLUGIN_CONFIG_PATH.",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
     "serviceMonitor": {
       "type": "object",
       "additionalProperties": false,
@@ -534,6 +581,77 @@
               "type": "string"
             }
           }
+        }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/definitions/labelMap",
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+        },
+        "interval": {
+          "oneOf": [{ "$ref": "#/definitions/duration" }, { "type": "string", "maxLength": 0 }],
+          "description": "Group evaluation interval. Empty means Prometheus' global default, which is the right answer unless you have measured otherwise."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "httpErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of 5xx responses that fires the alert. A ratio and not a count on purpose: an absolute threshold is either useless on a cell serving ten requests a minute or deaf on one serving ten thousand. Measured on http_requests_total, which is also the availability SLI in deploy/prometheus/slo-rules.yml."
+            },
+            "llmErrorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "httpSlowRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of non-streaming requests slower than the 1s objective. The streaming routes are excluded in the rule: they are designed to stay open for minutes, so leaving them in turns the ratio into a measure of how much streaming the deployment does."
+            },
+            "securityEventsPerSecond": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "volumeUsedRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "containerRestarts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backupMaxAgeHours": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Longer than the schedule plus one missed run, so a single skipped backup does not page and two do."
+            }
+          }
+        },
+        "disabledAlerts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Alert names to leave out. Silencing here rather than in Alertmanager keeps the reason in git."
+        },
+        "extraRules": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Extra rule objects appended to the group verbatim, for deployment-specific alerts that have no business in the chart."
         }
       }
     },
@@ -623,6 +741,18 @@
           "type": "integer",
           "minimum": 0
         },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "waitForDatabaseSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pg": {
           "type": "object",
           "additionalProperties": false,
@@ -657,6 +787,68 @@
         },
         "volume": {
           "type": "object"
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "podLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "offsite": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Copy each dump to an object store with rclone. `remote` is the rclone backend definition (each key becomes RCLONE_CONFIG_OFFSITE_<KEY>), `path` the bucket/prefix on it.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
+            "remote": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["string", "boolean", "integer", "number"]
+              }
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^$|^[^/].*$",
+              "description": "bucket/prefix on the remote, no leading slash"
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "credentialsSecret": {
+              "type": "string"
+            },
+            "extraArgs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

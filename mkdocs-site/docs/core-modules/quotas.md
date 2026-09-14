@@ -155,12 +155,16 @@ compatibility import path: `CostBudgetExceededError`, `CostWindowStatus`,
 ### Automatic enforcement in the LLM service
 
 `core/quotas/cost_enforcement.py` is the ambient seam wired into
-[`LLMService`](services.md#cost-control) — both the generation and the
-streaming path:
+[`LLMService`](services.md#cost-control) on **all five** generation paths:
+plain generation (`_generation.py`), streaming (`_streaming.py`), stream events
+(`stream_events.py`), the [message API](messages.md) (`message_runtime.py`) and
+structured output (`structured.py`).
 
-- `enforce_tenant_cost_budget()` gates each call **before** any provider
-  spend (at stream start for streaming); `record_tenant_llm_cost(usd)` books
-  the call's real USD cost afterwards (at stream end for streaming).
+- `enforce_tenant_cost_budget(model=...)` gates each call **before** any
+  provider spend (at stream start for streaming);
+  `record_usage_cost(model, usage)` books the call's real USD cost afterwards
+  (at stream end for streaming), pricing the whole four-bucket `Usage` record so
+  a cache read is billed at its own tier.
 - The tenant is resolved from the ambient context
   (`core.context.get_tenant_or_default()`), same as tenant request quotas —
   no plumbing through call sites. When an ambient user id is bound
@@ -174,6 +178,33 @@ streaming path:
   `gen_ai.baselith.error=tenant_cost_budget_exceeded`; on the streaming path
   the gate runs before the span's error handling, so the rejection propagates
   without that attribute.
+
+### Unknown-model pricing {#unknown-model-pricing}
+
+`BASELITH_UNKNOWN_MODEL_COST_POLICY` decides how a call to a model absent from
+the pricing table is priced:
+
+| Value | Behaviour |
+| --- | --- |
+| `charge` *(default)* | Bills `UNKNOWN_PRICE`, so a missing entry stays visible in cost dashboards instead of silently billing $0. |
+| `zero` | Treats the call as free — a self-hosted model with no meaningful USD cost. |
+| `reject` | Raises `UnknownModelCostRejected` instead of billing anything. |
+
+The `reject` wording is now literally true, because the policy is applied at a
+genuine **pre-call gate**: passing `model=` to `enforce_tenant_cost_budget()`
+runs the check before the provider is called, so an unpriceable call is refused
+while refusing it still costs nothing.
+
+`UnknownModelCostRejected` is deliberately raised **outside** the fail-open
+guard — a configured refusal to run a call is a decision, not an infrastructure
+failure, and swallowing it would run exactly the call the operator asked to
+block.
+
+!!! note "The post-call booking cannot honour `reject`, and does not try"
+    `record_usage_cost()` runs *after* the provider has answered and been paid.
+    Raising there would destroy a completed generation the user already owes
+    money for, so an unpriced model under `reject` is a "don't meter" on that
+    path. The policy is enforced where it can actually hold — the gate above.
 
 ## Identity USD cost budgets
 

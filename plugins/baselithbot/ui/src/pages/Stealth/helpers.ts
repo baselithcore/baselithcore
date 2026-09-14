@@ -61,7 +61,7 @@ export function activeUserAgent(config: StealthConfig): string {
   if (!config.enabled) return 'Browser default fingerprint path';
   if (config.user_agents.length === 0) return 'No custom User-Agent override';
   if (config.rotate_user_agent) return 'Random from pool on each agent rebuild';
-  return config.user_agents[0];
+  return config.user_agents[0]!;
 }
 
 export function browserContextPreview(
@@ -72,11 +72,11 @@ export function browserContextPreview(
   if (config.user_agents.length > 0) {
     preview.push({
       label: 'user_agent',
-      value: config.rotate_user_agent ? 'randomized from pool' : config.user_agents[0],
+      value: config.rotate_user_agent ? 'randomized from pool' : config.user_agents[0]!,
     });
   }
   if (config.spoof_languages.length > 0) {
-    preview.push({ label: 'locale', value: config.spoof_languages[0] });
+    preview.push({ label: 'locale', value: config.spoof_languages[0]! });
   }
   if (config.spoof_timezone.trim()) {
     preview.push({ label: 'timezone_id', value: config.spoof_timezone.trim() });

@@ -125,6 +125,27 @@ pool and leave them queued behind multi-second model calls.
 cross-encoder rerank paths (`core/chat/reranking.py`,
 `core/memory/hierarchy_search.py`).
 
+`run_inference` also carries the caller's `contextvars` across the thread hop —
+the way `asyncio.to_thread` does and a bare `run_in_executor(pool, fn)` does not.
+Without that copy the worker runs in an **empty** context: every span opened
+inside an offloaded call becomes a new trace root instead of a child of the
+caller's span, and every contextvar-carried value — the tenant above all — is
+unbound, so tenant-scoped state read inside the call resolves to a shared
+`default` bucket, or raises under `strict_tenant_isolation`.
+
+The copy is taken on the calling thread and is one-directional: anything the
+callable *binds* stays in the worker, so an offload can never rewrite the caller's
+tenant, span or budget.
+
+!!! warning "The isolation is shallow — offload computation, not bookkeeping"
+    Rebinding a contextvar in the worker is isolated; **mutating an object it
+    inherited is not**. The copy holds the same `LoopBudget`, DI `Scope`, `Colony`
+    and span objects the caller holds, so a callable that charges a budget or
+    registers an agent from the worker thread mutates shared state off the event
+    loop — no lock, and none of the single-threaded ordering the rest of the
+    framework assumes. No current call site does: every one is pure CPU over data
+    it was handed. Keep it that way when adding the next offload.
+
 | Setting | Default | Notes |
 | ------- | ------- | ----- |
 | `BASELITH_INFERENCE_THREADS` | `min(4, cpu_count // 2)` | Small on purpose: torch and sentence-transformers parallelise internally, so extra threads buy contention rather than throughput. Raise it only with a measurement to justify it. |

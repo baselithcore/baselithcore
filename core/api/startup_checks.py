@@ -215,14 +215,19 @@ async def run_startup_health_checks() -> None:
 
     if POSTGRES_ENABLED:
         try:
-            from core.db.connection import get_async_connection
+            from core.db.connection import get_async_connection, system_tenant_scope
 
             # Warm the pool first: the health-check checkout then reuses a
             # warmed connection, and the first real request after a deploy
             # doesn't pay TCP+TLS+auth for min_size connections inline.
             await warm_db_pool()
-            async with get_async_connection() as conn:
-                await conn.execute("SELECT 1")
+            # Startup has no request and therefore no tenant. With
+            # DB_RLS_ENABLED the session binding refuses to invent one, so
+            # this probe declares itself as system work — otherwise a healthy
+            # database is reported unreachable (at ERROR level in production).
+            with system_tenant_scope():
+                async with get_async_connection() as conn:
+                    await conn.execute("SELECT 1")
             logger.info("✅ Startup health check: PostgreSQL OK")
         except Exception as exc:
             log_fn(

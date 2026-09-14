@@ -25,8 +25,9 @@ class APIKeyValidator:
     persistent tombstone to Redis, so every worker/replica sharing the cache
     rejects the key and a restart cannot resurrect it. Without Redis the
     validator degrades to process-local revocation (single-node behavior).
-    Redis *read* failures fail open to local state: an outage must not take
-    the whole authenticated API down.
+    Redis *read* failures resolve per ``API_KEY_REVOCATION_FAIL_MODE``:
+    ``closed`` (the default) rejects the key, ``open`` accepts it on local
+    state — see :meth:`_is_denylisted`.
     """
 
     def __init__(self, config: SecurityConfig | None = None) -> None:
@@ -144,14 +145,49 @@ class APIKeyValidator:
                 logger.error("api_key_denylist_clear_failed", error=str(exc))
 
     async def _is_denylisted(self, hashed: str) -> bool:
-        """Check the shared denylist; fail open to local state on Redis errors."""
+        """Check the shared denylist, honouring the configured fail mode.
+
+        A read failure is ambiguous: the key may or may not be revoked. Which
+        way that ambiguity resolves is a policy decision, so it is a setting
+        (``API_KEY_REVOCATION_FAIL_MODE``) rather than a hard-coded default:
+
+        * ``closed`` (the default) treats the key as revoked. The caller sees
+          the same rejection it already handles for an unknown key, so a
+          revocation performed on another worker survives a cache outage.
+        * ``open`` trusts process-local state, which is what this method used
+          to do unconditionally — convenient, but it means anyone able to make
+          Redis unreachable un-revokes every key revoked elsewhere.
+
+        No denylist backend at all (``self._redis is None``) is not an outage
+        but a deployment choice — single-node, process-local revocation — and
+        is unaffected by the fail mode.
+
+        Args:
+            hashed: The digest of the presented key.
+
+        Returns:
+            True when the key must be rejected.
+        """
         if self._redis is None:
             return False
         try:
             return bool(await self._redis.exists(self._denylist_prefix + hashed))
         except Exception as exc:
-            logger.warning("api_key_denylist_read_failed", error=str(exc))
-            return False
+            if self._config.api_key_revocation_fail_mode == "open":
+                logger.warning(
+                    "api_key_denylist_read_failed",
+                    error=str(exc),
+                    fail_mode="open",
+                    note="key accepted on process-local state",
+                )
+                return False
+            logger.error(
+                "api_key_denylist_read_failed",
+                error=str(exc),
+                fail_mode="closed",
+                note="key rejected: revocation state is unknown",
+            )
+            return True
 
     def _hash_key(self, api_key: str) -> str:
         """Hash an API key for use as a lookup/index key.

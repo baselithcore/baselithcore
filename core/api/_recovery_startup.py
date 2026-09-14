@@ -51,11 +51,18 @@ def _build_recovery_lock() -> Any | None:
 async def start_checkpoint_recovery(
     background_tasks: set[asyncio.Task[Any]],
 ) -> None:
-    """Init the shared checkpoint store and schedule the recovery sweep.
+    """Init the shared checkpoint store and schedule the recovery sweeps.
 
-    No-op unless ``ORCHESTRATOR_CHECKPOINT_ENABLED``; the sweep additionally
-    requires ``checkpoint_resume_on_startup``. The sweep task is registered in
-    ``background_tasks`` so the event loop cannot garbage-collect it.
+    No-op unless ``ORCHESTRATOR_CHECKPOINT_ENABLED``; the sweeps additionally
+    require ``checkpoint_resume_on_startup``. The sweep task is registered in
+    ``background_tasks`` so the event loop cannot garbage-collect it, and it
+    is cancelled with the rest of them at shutdown.
+
+    The task is a *loop*, not a one-shot: it re-enters interrupted runs and
+    fails wedged ones every ``recovery_sweep_interval_seconds``. A boot-only
+    sweep left every post-startup wedge to the next restart — a ``running``
+    checkpoint that stopped making progress stayed invisible to liveness
+    probes, which only ever see that the process still answers HTTP.
     """
     try:
         from core.orchestration.checkpoint_factory import (
@@ -69,27 +76,29 @@ async def start_checkpoint_recovery(
 
         from core.config.orchestration import get_orchestration_config
 
-        if not get_orchestration_config().checkpoint_resume_on_startup:
+        config = get_orchestration_config()
+        if not config.checkpoint_resume_on_startup:
             return
 
         async def _recover() -> None:
             from core.chat import chat_service
-            from core.orchestration.recovery import resume_interrupted_runs
+            from core.orchestration.recovery import recovery_sweep_loop
 
-            try:
-                report = await resume_interrupted_runs(
-                    chat_service.agent,
-                    checkpoint_store,
-                    lock=_build_recovery_lock(),
-                )
-                logger.info(
-                    "🧬 Crash recovery: %d resumed, %d failed, %d skipped",
-                    len(report.resumed),
-                    len(report.failed),
-                    len(report.skipped),
-                )
-            except Exception as recovery_exc:
-                logger.warning("Crash recovery sweep failed: %s", recovery_exc)
+            logger.info(
+                "🧬 Crash recovery sweeps every %.0fs "
+                "(resume after %.0fs idle, fail after %.0fs)",
+                config.recovery_sweep_interval_seconds,
+                config.recovery_resume_after_seconds,
+                config.recovery_stale_after_seconds,
+            )
+            await recovery_sweep_loop(
+                chat_service.agent,
+                checkpoint_store,
+                interval_seconds=config.recovery_sweep_interval_seconds,
+                stale_after_seconds=config.recovery_stale_after_seconds,
+                resume_after_seconds=config.recovery_resume_after_seconds,
+                lock_factory=_build_recovery_lock,
+            )
 
         recovery_task = asyncio.create_task(_recover())
         background_tasks.add(recovery_task)

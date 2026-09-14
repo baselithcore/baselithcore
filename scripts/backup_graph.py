@@ -8,7 +8,7 @@ This allows rollback if migration fails.
 
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import redis
@@ -27,7 +27,7 @@ GRAPH_DB_NAME = _storage_config.graph_db_name
 def backup_graph(output_file: Path = None):
     """Backup graph database to JSON file."""
     if output_file is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         output_file = Path(f"data/graph_backup_{timestamp}.json")
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +54,7 @@ def backup_graph(output_file: Path = None):
     graph = Graph(r, GRAPH_DB_NAME)
 
     backup_data = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "graph_name": GRAPH_DB_NAME,
         "nodes": [],
         "relationships": [],

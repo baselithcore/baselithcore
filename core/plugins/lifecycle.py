@@ -275,8 +275,14 @@ class PluginLifecycleManager:
         async with self._lock:
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.FAILED
-            self._metadata[plugin_name]["failed_at"] = datetime.now(UTC)
-            self._metadata[plugin_name]["error"] = str(error)
+            # setdefault, like every other transition: a plugin can fail before
+            # it was ever tracked (a manifest refused at the very start of
+            # load_plugin), and indexing a missing key here raised KeyError
+            # *after* the state was already set — leaving FAILED with no
+            # recorded reason and no hooks or metrics fired.
+            failed = self._metadata.setdefault(plugin_name, {})
+            failed["failed_at"] = datetime.now(UTC)
+            failed["error"] = str(error)
             await self._hooks.invoke_hooks(plugin_name, "on_error", error)
 
             # Record state change and error in metrics
@@ -292,7 +298,11 @@ class PluginLifecycleManager:
         async with self._lock:
             await self._hooks.invoke_hooks(plugin_name, "on_before_unload")
             self._states[plugin_name] = PluginState.UNLOADING
-            self._metadata[plugin_name]["unload_started_at"] = datetime.now(UTC)
+            # Same reasoning as transition_to_failed: never index a key the
+            # plugin may never have had.
+            self._metadata.setdefault(plugin_name, {})["unload_started_at"] = (
+                datetime.now(UTC)
+            )
             logger.debug(f"Plugin {plugin_name}: → UNLOADING")
 
     async def remove_plugin(self, plugin_name: str) -> None:

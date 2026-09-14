@@ -72,14 +72,81 @@ def test_infer_parameters_from_signature():
     assert schema["required"] == ["query"]
 
 
-def test_infer_parameters_string_annotations_and_unknown_default_to_string():
+def test_infer_parameters_string_annotations_and_unknown_stay_unconstrained():
+    """An annotation the runtime cannot resolve gets NO ``type``.
+
+    Guessing ``string`` was harmless while the schema was advisory; once
+    ``additionalProperties``/type checking actually gates the call, a wrong
+    guess refuses a correct invocation. An unconstrained property accepts the
+    value and the model still sees the parameter.
+    """
+
     def fn(a: "str", b: "SomeCustomType", c=None):  # noqa: F821
         return a
 
     schema = infer_tool_parameters(ToolDefinition("t", fn, "d"))
     assert schema["properties"]["a"] == {"type": "string"}
-    assert schema["properties"]["b"] == {"type": "string"}
+    assert schema["properties"]["b"] == {}
+    assert schema["properties"]["c"] == {}
     assert "c" not in schema.get("required", [])
+
+
+def test_infer_parameters_maps_containers_and_optionals():
+    from typing import Any
+
+    def fn(
+        payload: dict[str, Any],
+        tags: list[str],
+        limit: int | None = None,
+        ratio: float = 1.0,
+        flag: bool = False,
+    ):
+        return payload
+
+    schema = infer_tool_parameters(ToolDefinition("t", fn, "d"))
+    props = schema["properties"]
+    assert props["payload"] == {"type": "object"}
+    assert props["tags"] == {"type": "array"}
+    assert props["limit"] == {"type": "integer"}
+    assert props["ratio"] == {"type": "number"}
+    assert props["flag"] == {"type": "boolean"}
+    # An optional-typed parameter is never required, even without a default.
+    assert schema["required"] == ["payload", "tags"]
+
+
+def test_optional_without_a_default_is_not_required():
+    def fn(a: str, b: int | None):
+        return a
+
+    schema = infer_tool_parameters(ToolDefinition("t", fn, "d"))
+    assert schema["properties"]["b"] == {"type": "integer"}
+    assert schema["required"] == ["a"]
+
+
+def test_textual_container_annotations_are_mapped():
+    """Callables defined under ``from __future__ import annotations`` hand us
+    the literal text; unresolvable names must still map by shape."""
+
+    def fn(a: "dict[str, Unresolvable]", b: "list[int]", c: "int | None" = None):  # noqa: F821
+        return a
+
+    schema = infer_tool_parameters(ToolDefinition("t", fn, "d"))
+    assert schema["properties"]["a"] == {"type": "object"}
+    assert schema["properties"]["b"] == {"type": "array"}
+    assert schema["properties"]["c"] == {"type": "integer"}
+
+
+def test_abstract_containers_are_mapped():
+    from collections.abc import Mapping, Sequence
+
+    def fn(a: Mapping[str, int], b: Sequence[str], c: str):
+        return a
+
+    schema = infer_tool_parameters(ToolDefinition("t", fn, "d"))
+    assert schema["properties"]["a"] == {"type": "object"}
+    assert schema["properties"]["b"] == {"type": "array"}
+    # str is a Sequence — it must not be mistaken for an array.
+    assert schema["properties"]["c"] == {"type": "string"}
 
 
 def test_explicit_parameters_win_over_inference():
@@ -215,7 +282,8 @@ async def test_native_loop_multiple_calls_one_turn_execute_in_order():
     observations = [
         s.content for s in result.trace if s.step_type is StepType.OBSERVATION
     ]
-    assert observations == ["ra", "rb"]
+    # Observations arrive sealed in the untrusted-content envelope.
+    assert "ra" in observations[0] and "rb" in observations[1]
 
 
 async def test_native_loop_unknown_tool_becomes_observation():
@@ -241,7 +309,7 @@ async def test_native_loop_hit_limit_returns_last_observation():
     result = await agent.run("q")
     assert result.hit_limit is True
     assert result.iterations_used == 3
-    assert result.final_answer == "obs"
+    assert "obs" in result.final_answer
 
 
 async def test_native_loop_llm_error_degrades_gracefully():
@@ -272,7 +340,7 @@ async def test_native_loop_sync_tool_and_transient_retry():
     result = await agent.run("q")
     assert attempts["n"] == 2
     obs = next(s for s in result.trace if s.step_type is StepType.OBSERVATION)
-    assert obs.content == "recovered"
+    assert "recovered" in obs.content
     assert result.final_answer == "fin"
 
 
@@ -331,7 +399,7 @@ class TestParallelToolCalls:
         )
         elapsed = time.monotonic() - started
 
-        assert observations == ["done", "done", "done"]
+        assert all("done" in o for o in observations)
         # Sequential would be >= 0.3s; concurrent is one sleep plus overhead.
         assert elapsed < 0.25
 
@@ -358,7 +426,7 @@ class TestParallelToolCalls:
 
         observations = await agent._execute_tool_calls([("slow", {}), ("fast", {})])
 
-        assert observations == ["slow", "fast"]
+        assert "slow" in observations[0] and "fast" in observations[1]
 
     async def test_unknown_tool_does_not_abort_the_turn(self):
         async def ok(**kwargs):
@@ -371,7 +439,7 @@ class TestParallelToolCalls:
         observations = await agent._execute_tool_calls([("nope", {}), ("ok", {})])
 
         assert "unknown tool" in observations[0]
-        assert observations[1] == "ok"
+        assert "ok" in observations[1]
 
     async def test_gates_run_before_any_tool_executes(self):
         """A fail-closed refusal (approval pending, budget exhausted) must abort
@@ -401,7 +469,7 @@ class TestParallelToolCalls:
             ]
         )
 
-        async def _deny(tool):
+        async def _deny(tool, args=None):
             raise ApprovalPendingError("awaiting operator", "destructive", "run-1")
 
         agent._enforce_tool_gates = _deny  # type: ignore[method-assign]

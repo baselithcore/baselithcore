@@ -1,7 +1,7 @@
 """Tests for Scraper FilesystemStorage."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -28,7 +28,7 @@ def sample_data():
         final_url="http://example.com",
         status_code=200,
         html="<html></html>",
-        fetched_at=datetime.now(),
+        fetched_at=datetime.now(UTC),
         fetch_time_ms=100,
     )
     from core.scraper.models import PageMetadata

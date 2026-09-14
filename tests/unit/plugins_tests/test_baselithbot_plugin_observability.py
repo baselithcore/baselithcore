@@ -106,6 +106,32 @@ def test_trace_span_noop_or_real() -> None:
     assert isinstance(is_tracing_enabled(), bool)
 
 
+def test_energy_threshold_wake_creates_callable() -> None:
+    from plugins.baselithbot.voice import (
+        EnergyThresholdWake,
+        SoundDeviceAudioBackend,
+    )
+
+    backend = SoundDeviceAudioBackend()
+    wake = EnergyThresholdWake(backend, threshold_rms=1500.0)
+    fn = wake.make_async_callable()
+    assert callable(fn)
+
+
+# --- /metrics exposition negotiation ----------------------------------------
+#
+# Same defect the core /metrics router carried: this exporter shares the default
+# prometheus_client registry, so the trace_id exemplars that
+# core.observability.metric_context attaches are present in it — and returning
+# the Prometheus text format unconditionally dropped every one of them. It also
+# labelled 0.0.4 bytes as `version=1.0.0`.
+
+BOT_OPENMETRICS_ACCEPT = (
+    "application/openmetrics-text;version=1.0.0;q=0.75,"
+    "text/plain;version=0.0.4;q=0.5,*/*;q=0.1"
+)
+
+
 def test_metrics_render_returns_payload() -> None:
     from plugins.baselithbot.observability.metrics import (
         is_prometheus_available,
@@ -118,13 +144,93 @@ def test_metrics_render_returns_payload() -> None:
     assert isinstance(is_prometheus_available(), bool)
 
 
-def test_energy_threshold_wake_creates_callable() -> None:
-    from plugins.baselithbot.voice import (
-        EnergyThresholdWake,
-        SoundDeviceAudioBackend,
+def test_metrics_render_serves_openmetrics_with_exemplars() -> None:
+    """An exemplar recorded on the shared registry must reach the body."""
+    prom = pytest.importorskip("prometheus_client")
+
+    from plugins.baselithbot.observability import metrics as metrics_module
+
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    registry = prom.CollectorRegistry()
+    histogram = prom.Histogram(
+        "bot_demo_latency_seconds",
+        "Demo latency.",
+        registry=registry,
+        buckets=(0.1, float("inf")),
+    )
+    histogram.observe(0.05, exemplar={"trace_id": trace_id})
+
+    payload, content_type = metrics_module.render_metrics(
+        BOT_OPENMETRICS_ACCEPT, registry=registry
     )
 
-    backend = SoundDeviceAudioBackend()
-    wake = EnergyThresholdWake(backend, threshold_rms=1500.0)
-    fn = wake.make_async_callable()
-    assert callable(fn)
+    assert content_type.startswith("application/openmetrics-text")
+    body = payload.decode()
+    assert f'trace_id="{trace_id}"' in body
+    # OpenMetrics is a terminated format; Prometheus rejects a body without it.
+    assert body.endswith("# EOF\n")
+
+
+def test_metrics_render_defaults_to_plain_text() -> None:
+    """No Accept header — the diagnostics passthrough — stays on text/plain.
+
+    That caller decodes the payload into a JSON string field for display, so it
+    must never be handed the OpenMetrics encoding.
+    """
+    pytest.importorskip("prometheus_client")
+
+    from plugins.baselithbot.observability.metrics import render_metrics
+
+    payload, content_type = render_metrics()
+
+    assert content_type.startswith("text/plain")
+    assert "# EOF" not in payload.decode()
+
+
+def test_metrics_render_labels_the_plain_fallback_honestly() -> None:
+    """0.0.4 bytes must not be labelled version=1.0.0."""
+    pytest.importorskip("prometheus_client")
+
+    from plugins.baselithbot.observability.metrics import render_metrics
+
+    assert render_metrics("*/*")[1] == "text/plain; version=0.0.4; charset=utf-8"
+
+
+def test_metrics_render_never_claims_openmetrics_without_prometheus() -> None:
+    """Without prometheus_client the stub must not advertise what it cannot emit.
+
+    Negotiation added a `choose_encoder` stub to the ImportError branch. If it
+    echoed the requested OpenMetrics content type it would hand a scraper a
+    plain-text note labelled `application/openmetrics-text`, which fails the
+    scrape on a parse error instead of degrading to "no data here".
+
+    The module's only third-party import is prometheus_client and it has no
+    intra-package imports, so its source is exec'd in a clean namespace with
+    that one import blocked — the rest of the plugin is not involved.
+    """
+    import builtins
+    import pathlib
+
+    src = pathlib.Path("plugins/baselithbot/observability/metrics.py").read_text(
+        encoding="utf-8"
+    )
+    real_import = builtins.__import__
+
+    def blocked(name: str, *args: object, **kwargs: object) -> object:
+        if name.startswith("prometheus_client"):
+            raise ImportError("simulated: prometheus_client absent")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    namespace: dict[str, object] = {"__name__": "metrics_fallback_probe"}
+    builtins.__import__ = blocked  # type: ignore[assignment]
+    try:
+        exec(compile(src, "metrics.py", "exec"), namespace)
+    finally:
+        builtins.__import__ = real_import
+
+    render = namespace["render_metrics"]
+    assert namespace["is_prometheus_available"]() is False  # type: ignore[operator]
+    for accept in ("", "application/openmetrics-text;version=1.0.0"):
+        payload, content_type = render(accept)  # type: ignore[operator]
+        assert content_type == "text/plain"
+        assert b"not installed" in payload

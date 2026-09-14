@@ -20,6 +20,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from core.services.llm.messages import Message
+from core.services.llm.usage import Usage
+
 if TYPE_CHECKING:
     from core.mcp.types import MCPTool
 
@@ -72,12 +75,19 @@ class LLMToolSpec:
         strict: When True, request strict schema enforcement where the provider
             supports it (adds ``additionalProperties: false`` semantics so the
             emitted arguments validate exactly).
+        annotations: Behavioural hints about the tool, in MCP's vocabulary
+            (``readOnlyHint``, ``destructiveHint``). Derived from the tool's
+            autonomy category so the *same* fact that drives the approval gate
+            is visible to whatever renders or reviews the tool list. Neutral
+            metadata only: no provider takes an ``annotations`` field on a tool
+            definition today, so it is deliberately not sent on the wire.
     """
 
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object"})
     strict: bool = False
+    annotations: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -127,13 +137,28 @@ class LLMResult:
     Attributes:
         text: Assistant text, if any.
         tool_calls: Structured tool invocations the model requested.
-        stop_reason: Normalized stop reason (e.g. ``tool_use``, ``end_turn``,
-            ``max_tokens``) when the provider reports one.
-        tokens_used: Total tokens attributed to the call (input + output).
+        stop_reason: Normalized stop reason (``end_turn``, ``max_tokens``,
+            ``stop_sequence``, ``tool_use``, ``pause_turn``, ``refusal``) when
+            the provider reports one.
+        tokens_used: Total tokens attributed to the call (every billed
+            bucket). Kept for backward compatibility; prefer :attr:`usage`,
+            which carries the split needed to price the call.
+        usage: Per-bucket token accounting for the call.
+        stop_details: Provider payload attached to the stop reason; populated
+            for a refusal (``category``, ``explanation``).
+        truncated: True when the answer was cut short by the output cap
+            (``stop_reason == "max_tokens"``), so a consumer knows not to
+            parse it as complete.
         native: True when produced by a provider's native tool API; False when
             produced by the prompt-coercion fallback.
         raw: Provider-native response object, retained for debugging/tracing.
             Excluded from equality and repr.
+        message: The assistant turn exactly as the provider produced it —
+            thinking blocks included — for a loop that replays the history
+            rather than rebuilding a prompt. Set by the message API; ``None``
+            on the legacy paths, where
+            :func:`core.services.llm.messages.message_from_result`
+            reconstructs it from ``raw`` or from ``text``/``tool_calls``.
     """
 
     text: str | None = None
@@ -142,6 +167,21 @@ class LLMResult:
     tokens_used: int = 0
     native: bool = True
     raw: Any = field(default=None, repr=False, compare=False)
+    usage: Usage = field(default_factory=Usage)
+    stop_details: dict[str, Any] | None = None
+    truncated: bool = False
+    message: Message | None = None
+
+    def __post_init__(self) -> None:
+        """Keep ``tokens_used`` and ``usage`` consistent for either spelling.
+
+        Callers (and a decade of test doubles) build results with
+        ``tokens_used=N`` alone; providers now fill ``usage``. Whichever side
+        is given wins, so neither construction style has to know about the
+        other.
+        """
+        if self.tokens_used <= 0 and not self.usage.is_empty:
+            self.tokens_used = self.usage.total
 
     @property
     def has_tool_calls(self) -> bool:
@@ -171,6 +211,8 @@ __all__ = [
     "ResponseFormat",
     "ToolCall",
     "ToolChoice",
+    "Message",
     "ToolChoiceMode",
+    "Usage",
     "tool_spec_from_mcp",
 ]

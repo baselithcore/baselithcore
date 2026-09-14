@@ -6,6 +6,7 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import os
@@ -28,8 +29,37 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 logger = get_logger(__name__)
-_shared_pools: dict[tuple[str, bool], ConnectionPool] = {}
+
+# Pools are keyed by the event loop they serve, then URL and decoding mode.
+# ``redis.asyncio`` connections are bound to the loop that opened them. One
+# process-wide pool let a connection opened on a short-lived loop (an
+# ``asyncio.run`` in a worker thread) be handed to the serving loop, where
+# every command failed with "Event loop is closed" — and the failing
+# connection went straight back into the pool for the next caller, so one
+# stray call poisoned the pool for the rest of the process. One pool per loop
+# keeps each loop's connections to itself; pools of closed loops are dropped
+# on the next request. The loop object is kept alongside so its ``id`` cannot
+# be recycled for a new loop while the entry exists.
+_PoolKey = tuple[int | None, str, bool]
+_shared_pools: dict[_PoolKey, ConnectionPool] = {}
+_pool_loops: dict[_PoolKey, Any] = {}
 _shared_pools_lock = Lock()
+
+
+def _current_loop() -> Any | None:
+    """The running event loop, or ``None`` outside any loop."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def _prune_closed_pools_locked() -> None:
+    """Forget pools whose event loop is closed (caller holds the lock)."""
+    for key, loop in list(_pool_loops.items()):
+        if loop is not None and loop.is_closed():
+            _pool_loops.pop(key, None)
+            _shared_pools.pop(key, None)
 
 
 def _json_default(obj: Any) -> Any:
@@ -197,7 +227,7 @@ class RedisTTLCache(Generic[K, V]):
             return [None] * len(redis_keys)
 
         results: list[V | None] = []
-        for redis_key, payload in zip(redis_keys, payloads):
+        for redis_key, payload in zip(redis_keys, payloads, strict=True):
             if payload is None:
                 results.append(None)
                 continue
@@ -268,9 +298,11 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
     from core.config.cache import get_redis_cache_config
 
     config = get_redis_cache_config()
-    pool_key = (url, decode_responses)
+    loop = _current_loop()
+    pool_key: _PoolKey = (id(loop) if loop is not None else None, url, decode_responses)
 
     with _shared_pools_lock:
+        _prune_closed_pools_locked()
         pool = _shared_pools.get(pool_key)
         if pool is None:
             # Bound the pool so a burst of concurrent callers can't open an
@@ -288,6 +320,7 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
                 decode_responses=decode_responses,
             )
             _shared_pools[pool_key] = pool
+            _pool_loops[pool_key] = loop
 
     return Redis(connection_pool=pool)
 
@@ -300,6 +333,10 @@ async def close_redis_pools() -> None:
     with _shared_pools_lock:
         pools = list(_shared_pools.values())
         _shared_pools.clear()
+        _pool_loops.clear()
 
     for pool in pools:
-        await pool.disconnect()
+        try:
+            await pool.disconnect()
+        except Exception as exc:  # a pool of an already-closed loop
+            logger.debug("redis pool disconnect skipped: %s", exc)

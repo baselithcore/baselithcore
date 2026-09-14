@@ -10,13 +10,12 @@ statistics tracking for observability.
 from __future__ import annotations
 
 import asyncio
-import functools
 from collections import defaultdict, deque
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
+from core.events._dispatch import call_async_handler, call_sync_handler
 from core.events.types import (
-    AsyncHandler,
     Event,
     EventStats,
     Handler,
@@ -81,6 +80,9 @@ class EventBus:
 
         self._stats = EventStats()
         self._lock: asyncio.Lock | None = None
+        # The loop handlers run on. Bound by the first ``emit`` issued from a
+        # running loop; ``emit_sync`` marshals onto it from foreign threads.
+        self._loop: asyncio.AbstractEventLoop | None = None
         # Strong refs to fire-and-forget handler tasks so the event loop does
         # not garbage-collect them mid-flight (and silently drop exceptions).
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -229,6 +231,7 @@ class EventBus:
             Number of handlers invoked
         """
         data = data or {}
+        self._bind_loop()
 
         if self._schema_registry is not None:
             is_valid, error = self._schema_registry.validate(event_name, data)
@@ -277,19 +280,28 @@ class EventBus:
         for handler in handlers:
             if asyncio.iscoroutinefunction(handler):
                 tasks.append(
-                    self._call_async_handler(
-                        handler, data, event_name, tenant_id, user_id
+                    call_async_handler(
+                        handler,
+                        data,
+                        event_name,
+                        tenant_id,
+                        user_id,
+                        timeout=self._handler_timeout,
+                        stats=self._stats,
+                        dlq=self._dlq,
                     )
                 )
             else:
                 # Handler is sync since iscoroutinefunction returned False
                 tasks.append(
-                    self._call_sync_handler(
-                        handler,  # type: ignore[arg-type]
+                    call_sync_handler(
+                        cast(SyncHandler, handler),
                         data,
                         event_name,
                         tenant_id,
                         user_id,
+                        stats=self._stats,
+                        dlq=self._dlq,
                     )
                 )
 
@@ -302,85 +314,6 @@ class EventBus:
                 bg.add_done_callback(self._background_tasks.discard)
 
         return len(handlers)
-
-    async def _call_async_handler(
-        self,
-        handler: AsyncHandler,
-        data: dict[str, Any],
-        event_name: str,
-        tenant_id: str,
-        user_id: str | None = None,
-    ) -> None:
-        """Call an async handler with error handling."""
-        from core.context import (
-            reset_tenant_context,
-            reset_user_context,
-            set_tenant_context,
-            set_user_context,
-        )
-
-        token = set_tenant_context(tenant_id)
-        user_token = set_user_context(user_id) if user_id else None
-        try:
-            await asyncio.wait_for(handler(data), timeout=self._handler_timeout)
-            self._stats.events_handled += 1
-        except TimeoutError:
-            self._stats.errors += 1
-            handler_name = getattr(handler, "__name__", str(handler))
-            logger.error(
-                f"Handler '{handler_name}' for '{event_name}' timed out "
-                f"after {self._handler_timeout}s"
-            )
-            if self._dlq:
-                self._dlq.add(event_name, data, "TimeoutError", handler_name)
-        except Exception as e:
-            self._stats.errors += 1
-            logger.error(f"Error in handler for '{event_name}': {e}")
-            if self._dlq:
-                handler_name = getattr(handler, "__name__", str(handler))
-                self._dlq.add(event_name, data, str(e), handler_name)
-        finally:
-            reset_tenant_context(token)
-            if user_token is not None:
-                reset_user_context(user_token)
-
-    async def _call_sync_handler(
-        self,
-        handler: SyncHandler,
-        data: dict[str, Any],
-        event_name: str,
-        tenant_id: str,
-        user_id: str | None = None,
-    ) -> None:
-        """Call a sync handler in executor with error handling."""
-
-        def sync_wrapper(event_data: dict[str, Any]) -> None:
-            from core.context import (
-                reset_tenant_context,
-                reset_user_context,
-                set_tenant_context,
-                set_user_context,
-            )
-
-            tok = set_tenant_context(tenant_id)
-            user_tok = set_user_context(user_id) if user_id else None
-            try:
-                handler(event_data)
-            finally:
-                reset_tenant_context(tok)
-                if user_tok is not None:
-                    reset_user_context(user_tok)
-
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, functools.partial(sync_wrapper, data))
-            self._stats.events_handled += 1
-        except Exception as e:
-            self._stats.errors += 1
-            logger.error(f"Error in sync handler for '{event_name}': {e}")
-            if self._dlq:
-                handler_name = getattr(handler, "__name__", str(handler))
-                self._dlq.add(event_name, data, str(e), handler_name)
 
     def emit_sync(
         self,
@@ -401,15 +334,50 @@ class EventBus:
         """
         try:
             asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
             # Schedule as task if loop is running. Keep a strong reference until
             # completion so the event loop can't GC the task mid-flight.
             task = asyncio.ensure_future(self.emit(event_name, data, **kwargs))
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
             return 0  # Can't wait in sync context
+
+        # Called from a thread with no loop of its own (``asyncio.to_thread``
+        # workers, sync persistence code). Handlers are written for the
+        # application's loop — they hold loop-bound resources such as async
+        # Redis pools — so they must run *there*, not on a throwaway loop that
+        # ``asyncio.run`` tears down the moment ``emit`` returns. That pattern
+        # left pooled connections bound to a closed loop for the rest of the
+        # process. The standalone path stays for processes without any loop.
+        loop = self._loop
+        if loop is not None and loop.is_running() and not loop.is_closed():
+            future = asyncio.run_coroutine_threadsafe(
+                self.emit(event_name, data, **kwargs), loop
+            )
+            if not kwargs.get("wait", True):
+                return 0
+            try:
+                return future.result(timeout=self._handler_timeout + 1.0)
+            except Exception as exc:
+                logger.warning(f"emit_sync of '{event_name}' did not complete: {exc}")
+                return 0
+        return asyncio.run(self.emit(event_name, data, **kwargs))
+
+    def _bind_loop(self) -> None:
+        """Remember the running loop as the one handlers execute on.
+
+        The first live loop wins and stays bound while it is open, so a
+        temporary loop (a sync ``emit_sync`` before the app started) never
+        displaces the application's.
+        """
+        if self._loop is not None and not self._loop.is_closed():
+            return
+        try:
+            self._loop = asyncio.get_running_loop()
         except RuntimeError:
-            # No running event loop, safe to use asyncio.run
-            return asyncio.run(self.emit(event_name, data, **kwargs))
+            pass
 
     def clear_handlers(self, event_name: str | None = None) -> None:
         """

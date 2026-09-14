@@ -105,7 +105,9 @@ async def test_denied_resume_fails_the_workflow():
 
     with pytest.raises(ApprovalPendingError):
         await executor.execute(workflow, initial_input="x", checkpoint=manager)
-    assert await record_approval_decision(store, "hg-3", False, reason="nope")
+    assert await record_approval_decision(
+        store, "hg-3", False, approver="op", reason="nope"
+    )
 
     resumed = CheckpointManager(store, await store.load("hg-3"))
     result = await executor.execute(workflow, initial_input="x", checkpoint=resumed)
@@ -144,12 +146,12 @@ async def test_two_gates_approve_sequentially():
 
     with pytest.raises(ApprovalPendingError):
         await executor.execute(workflow, initial_input="x", checkpoint=manager)
-    assert await record_approval_decision(store, "hg-4", True)
+    assert await record_approval_decision(store, "hg-4", True, approver="op")
 
     resumed = CheckpointManager(store, await store.load("hg-4"))
     with pytest.raises(ApprovalPendingError):
         await executor.execute(workflow, initial_input="x", checkpoint=resumed)
-    assert await record_approval_decision(store, "hg-4", True)
+    assert await record_approval_decision(store, "hg-4", True, approver="op")
 
     resumed2 = CheckpointManager(store, await store.load("hg-4"))
     result = await executor.execute(workflow, initial_input="x", checkpoint=resumed2)

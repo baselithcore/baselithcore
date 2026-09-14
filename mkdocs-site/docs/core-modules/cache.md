@@ -199,8 +199,11 @@ and return something `np.asarray` can consume.
     A synchronous embedder goes to the **dedicated inference pool**
     (`run_inference`), never `run_in_executor(None, …)`. The default executor
     serves latency-critical short tasks; parking a multi-tens-of-milliseconds
-    sentence-transformer forward pass there starves them. Follow the same rule
-    in any plugin that wraps a local model.
+    sentence-transformer forward pass there starves them. `run_inference` also
+    propagates the caller's contextvars, so a span opened by the embedder nests
+    under the request instead of starting a new trace — see
+    [NLP › Where inference runs](nlp.md#where-inference-runs). Follow the same
+    rule in any plugin that wraps a local model.
 
 !!! danger "A swallowed embedding error is a silently dead cache"
     `set()` and `get_similar_with_score()` both wrap the embedding step in a
@@ -242,8 +245,18 @@ from a bare `Redis.from_url()`:
 
 | Client | Factory | Registry keyed by |
 | ------ | ------- | ----------------- |
-| `redis.asyncio` | `create_redis_client()` | `(url, decode_responses)` |
+| `redis.asyncio` | `create_redis_client()` | `(event loop, url, decode_responses)` |
 | `redis` (sync) | `create_sync_redis_client()` | `(url, decode_responses, socket_timeout)` |
+
+The asyncio registry is keyed by the **running event loop** as well.
+`redis.asyncio` connections are bound to the loop that opened them, so a
+single process-wide pool let a connection opened on a short-lived loop — an
+`asyncio.run()` inside a worker thread — be handed to the serving loop, where
+every command failed with `RuntimeError: Event loop is closed` and the failing
+connection went straight back into the pool for the next caller. One stray
+call poisoned the pool for the rest of the process. Each loop now gets its own
+pool; pools whose loop has closed are dropped on the next request, and a call
+outside any loop gets a loop-less pool of its own.
 
 Both apply the same limits from the cache config: `max_connections`,
 `health_check_interval`, `socket_timeout` and `socket_connect_timeout`. The

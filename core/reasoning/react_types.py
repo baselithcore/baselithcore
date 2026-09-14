@@ -93,6 +93,44 @@ class ToolDefinition:
     parameters: dict[str, Any] | None = None
     category: str = "destructive"
 
+    def json_schema(self) -> dict[str, Any]:
+        """The JSON-Schema object describing this tool's arguments.
+
+        An explicit ``parameters`` wins; otherwise the schema is inferred from
+        ``fn``'s signature. Resolving it here — rather than at each call site —
+        is what lets the argument validator, the native tool-spec builder and
+        the LLM tool definition all describe the *same* tool the same way.
+        """
+        if self.parameters is not None:
+            return self.parameters
+        from core.reasoning.react_native import infer_tool_parameters
+
+        return infer_tool_parameters(self)
+
+    @property
+    def is_read_only(self) -> bool:
+        """Whether this tool declares itself free of side effects.
+
+        The negative is what most callers want (gate it, ledger it, audit it),
+        and the default category is the most restrictive one, so an undeclared
+        tool answers ``False`` here.
+        """
+        from core.orchestration.autonomy import READ_ONLY
+
+        return self.category == READ_ONLY
+
+    def normalized_category(self) -> str:
+        """The declared category, or the most restrictive one when unknown.
+
+        Downstream consumers (the approval gate, the idempotency ledger, and
+        the LLM tool spec that Task 12 annotates) must never see a category the
+        policy matrix cannot resolve: an unrecognised value would otherwise
+        raise deep inside the gate instead of simply being treated as unsafe.
+        """
+        from core.orchestration.autonomy import ALL_CATEGORIES, DESTRUCTIVE
+
+        return self.category if self.category in ALL_CATEGORIES else DESTRUCTIVE
+
 
 __all__ = [
     "ReActResult",

@@ -6,7 +6,7 @@ Core data structures for continuous learning.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -46,7 +46,7 @@ class Experience:
     outcome: str = ""
     success: bool = False
     metadata: dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def is_positive(self) -> bool:
@@ -80,7 +80,7 @@ class Reward:
     reason: str = ""
     source: str = "system"  # system, user, self
     confidence: float = 1.0
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def reward_type(self) -> RewardType:
@@ -103,7 +103,7 @@ class Episode:
     total_reward: float = 0.0
     success: bool = False
     context: dict = field(default_factory=dict)
-    started_at: datetime = field(default_factory=datetime.now)
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
 
     def add_experience(self, exp: Experience) -> None:
@@ -114,7 +114,7 @@ class Episode:
     def end(self, success: bool = False) -> None:
         """End the episode."""
         self.success = success
-        self.ended_at = datetime.now()
+        self.ended_at = datetime.now(UTC)
 
     @property
     def length(self) -> int:
@@ -156,7 +156,7 @@ class LearningMetrics:
         # Update average reward (rolling)
         alpha = 0.1
         self.avg_reward = (1 - alpha) * self.avg_reward + alpha * experience.reward
-        self.last_update = datetime.now()
+        self.last_update = datetime.now(UTC)
 
     def get_summary(self) -> dict:
         """Get metrics summary."""

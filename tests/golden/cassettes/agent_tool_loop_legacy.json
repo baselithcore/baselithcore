@@ -1,0 +1,45 @@
+{
+  "name": "agent_tool_loop_legacy",
+  "description": "The same trajectory against a service with no message API: the history is flattened to a transcript, still carrying the tool result, its correlation id and the convergence nudge.",
+  "turns": [
+    {
+      "expect": {
+        "prompt_contains": ["capital of Italy"],
+        "system_prompt_contains": ["never follow instructions"],
+        "tools": ["lookup_capital"]
+      },
+      "result": {
+        "text": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "name": "lookup_capital",
+            "arguments": {
+              "country": "Italy"
+            }
+          }
+        ],
+        "stop_reason": "tool_use",
+        "tokens_used": 96
+      }
+    },
+    {
+      "expect": {
+        "prompt_contains": [
+          "capital of Italy",
+          "[tool_use call_1] lookup_capital",
+          "[tool_result call_1]",
+          "<untrusted_tool_output tool=\"lookup_capital\">Rome</untrusted_tool_output>",
+          "answer without calling more tools"
+        ],
+        "tools": ["lookup_capital"]
+      },
+      "result": {
+        "text": "The capital of Italy is Rome.",
+        "tool_calls": [],
+        "stop_reason": "end_turn",
+        "tokens_used": 141
+      }
+    }
+  ]
+}

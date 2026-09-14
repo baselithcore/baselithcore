@@ -34,6 +34,30 @@ class TestQdrantProviderInit:
         assert provider.client is mock_client
 
     @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    def test_embedded_with_path_persists_on_disk(self, mock_qdrant_client):
+        """Regression: an on-disk embedded store was passed as ``location``,
+        which qdrant_client treats as a URL — the provider then dialled a
+        server named "/app/data/qdrant" and every call failed with "Name or
+        service not known". Persistence goes through ``path``."""
+        mock_qdrant_client.return_value = AsyncMock()
+
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+
+        QdrantProvider(mode="embedded", path="/app/data/qdrant")
+
+        mock_qdrant_client.assert_called_once_with(path="/app/data/qdrant")
+
+    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    def test_embedded_without_path_is_in_memory(self, mock_qdrant_client):
+        mock_qdrant_client.return_value = AsyncMock()
+
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+
+        QdrantProvider(mode="embedded")
+
+        mock_qdrant_client.assert_called_once_with(location=":memory:")
+
+    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
     def test_init_with_auth_tls_and_timeout(self, mock_qdrant_client):
         """Managed/remote Qdrant needs an API key, TLS and a deadline: the
         client used to be built with none of the three, so a hung Qdrant

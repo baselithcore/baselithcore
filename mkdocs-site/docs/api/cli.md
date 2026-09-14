@@ -90,6 +90,15 @@ baselith doctor
 | --------------- | ----------------------------------------------------- |
 | `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
 
+A failed check carries the command that fixes it in its Details column. Those
+hints name the backing store they need — for the bundled stack that is
+`docker compose up -d postgres redis qdrant` from `compose.yaml`, the Compose v2
+command (`docker-compose`, the v1 Python wrapper, is deprecated and the hints no
+longer suggest it). The environment check is the one exception: it accepts
+configuration from the environment as readily as from a `.env` file, because a
+container deployment injects a ConfigMap and Secret through `envFrom` and has
+deliberately no file on disk.
+
 **Example Output**:
 
 ```text
@@ -151,6 +160,15 @@ baselith --format json info   # Machine-readable JSON for CI
 | --------------- | ----------------------------------------------------- |
 | `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
 
+A failed check carries the command that fixes it in its Details column. Those
+hints name the backing store they need — for the bundled stack that is
+`docker compose up -d postgres redis qdrant` from `compose.yaml`, the Compose v2
+command (`docker-compose`, the v1 Python wrapper, is deprecated and the hints no
+longer suggest it). The environment check is the one exception: it accepts
+configuration from the environment as readily as from a `.env` file, because a
+container deployment injects a ConfigMap and Secret through `envFrom` and has
+deliberately no file on disk.
+
 **Example Output**:
 
 ```text
@@ -179,6 +197,15 @@ baselith --format json verify   # Machine-readable JSON for CI
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
 | `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+
+A failed check carries the command that fixes it in its Details column. Those
+hints name the backing store they need — for the bundled stack that is
+`docker compose up -d postgres redis qdrant` from `compose.yaml`, the Compose v2
+command (`docker-compose`, the v1 Python wrapper, is deprecated and the hints no
+longer suggest it). The environment check is the one exception: it accepts
+configuration from the environment as readily as from a `.env` file, because a
+container deployment injects a ConfigMap and Secret through `envFrom` and has
+deliberately no file on disk.
 
 ---
 

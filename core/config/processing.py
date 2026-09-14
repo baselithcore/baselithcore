@@ -5,10 +5,12 @@ Document ingestion, Web Crawling, OCR, and NLP settings.
 """
 
 import logging
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from core.config._collections import csv_list
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,11 @@ class ProcessingConfig(BaseSettings):
     )
 
     # === Documents ===
-    documents_extensions: tuple[str, ...] = Field(
+    # NoDecode + csv_list: ``.env.example`` documents
+    # ``DOCUMENTS_EXTENSIONS=pdf,docx,txt,md``, and a tuple is a "complex" type
+    # to pydantic-settings exactly like a list — so the documented value raised
+    # a SettingsError out of the whole ProcessingConfig.
+    documents_extensions: Annotated[tuple[str, ...], NoDecode] = Field(
         default=(
             ".md",
             ".markdown",
@@ -49,7 +55,10 @@ class ProcessingConfig(BaseSettings):
 
     # === Web Crawling ===
     web_documents_enabled: bool = Field(default=False, alias="WEB_DOCUMENTS_ENABLED")
-    web_documents_urls: list[str] = Field(
+    # NoDecode + csv_list: ``.env.example`` ships this key blank, and a blank
+    # value JSON-decodes to a SettingsError that takes the whole
+    # ProcessingConfig — every document/OCR/NLP setting — down with it.
+    web_documents_urls: Annotated[list[str], NoDecode] = Field(
         default_factory=list, alias="WEB_DOCUMENTS_URLS"
     )
     web_documents_max_pages: int = Field(
@@ -68,7 +77,7 @@ class ProcessingConfig(BaseSettings):
         default="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         alias="WEB_DOCUMENTS_USER_AGENT",
     )
-    web_documents_allowlist: list[str] = Field(
+    web_documents_allowlist: Annotated[list[str], NoDecode] = Field(
         default_factory=list, alias="WEB_DOCUMENTS_ALLOWLIST"
     )
 
@@ -122,7 +131,12 @@ class ProcessingConfig(BaseSettings):
         ),
     )
     mineru_model_source: Literal["huggingface", "modelscope", "local"] | None = Field(
-        default=None, alias="MINERU_MODEL_SOURCE"
+        default=None,
+        alias="MINERU_MODEL_SOURCE",
+        description=(
+            "Model download source. Empty means 'auto' — the documented "
+            "meaning of the blank value ``.env.example`` ships."
+        ),
     )
     # Untrusted-document guards for the MinerU OCR path (documents may arrive
     # from the web crawler). 0 disables an individual cap.
@@ -143,6 +157,52 @@ class ProcessingConfig(BaseSettings):
         default=300.0, ge=0, alias="MINERU_TIMEOUT_SECONDS"
     )
     mineru_max_concurrency: int = Field(default=2, ge=1, alias="MINERU_MAX_CONCURRENCY")
+
+    @field_validator("mineru_model_source", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: Any) -> Any:
+        """Treat a blank value as "not configured", as the template documents.
+
+        ``.env.example`` ships ``MINERU_MODEL_SOURCE=`` with the comment
+        "empty = auto", but an empty string is not one of the Literal members —
+        so copying the template rejected the whole ProcessingConfig.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("documents_extensions", mode="after")
+    @classmethod
+    def _normalise_extensions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Give every extension a leading dot and lowercase it.
+
+        ``.env.example`` documents ``DOCUMENTS_EXTENSIONS=pdf,docx,txt,md``
+        without dots, but the filesystem source matches against
+        ``Path.suffix`` — which always carries one. A dotless entry therefore
+        matches nothing, and since the value now parses cleanly the failure is
+        silent: indexing simply finds zero documents. Accepting both spellings
+        is cheaper than making the operator guess which one is meant.
+        """
+        return tuple(
+            item if item.startswith(".") else f".{item}"
+            for item in (raw.strip().lower() for raw in value)
+            if item
+        )
+
+    @field_validator(
+        "documents_extensions",
+        "web_documents_urls",
+        "web_documents_allowlist",
+        mode="before",
+    )
+    @classmethod
+    def _parse_csv_lists(cls, value: Any) -> Any:
+        """Accept ``a,b`` and a blank value, as well as a JSON array.
+
+        Paired with ``NoDecode`` on the fields — see
+        :mod:`core.config._collections` for why both halves are needed.
+        """
+        return csv_list(value)
 
     @field_validator("pdf_ocr_backend", mode="before")
     @classmethod

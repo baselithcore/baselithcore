@@ -7,10 +7,23 @@ Settings for the Model Context Protocol (MCP) server and client.
 import logging
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+#: Smallest honourable value for ``MCP_MAX_TOOL_RESULT_BYTES``.
+#:
+#: When a ``tools/call`` result is over the cap, the truncation path in
+#: :meth:`core.mcp.tool_handlers.ToolHandlerMixin._cap_result` does not just
+#: cut the payload: it emits a replacement envelope -- a human-readable
+#: ``[truncated: ...]`` notice plus a ``_meta`` record carrying
+#: ``originalBytes``/``maxBytes``. That envelope alone serializes to roughly
+#: 220-240 bytes. A cap below that cannot be met at all: the bisection keeps
+#: zero characters of payload and the result still exceeds the limit, with
+#: nothing telling the operator the cap is not holding. 512 leaves the
+#: envelope room plus a usable slice of the tool's own output.
+MIN_TOOL_RESULT_BYTES = 512
 
 
 class MCPServerSpec(BaseModel):
@@ -167,7 +180,46 @@ class MCPConfig(BaseSettings):
         default="", alias="MCP_HTTP_AUTHORIZATION_SERVERS"
     )
 
+    # Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728):
+    # the value published as `resource` in the protected-resource metadata AND
+    # the value a token's `aud` is checked against — one setting, so the two
+    # can never disagree. Unset, it is derived from the request's base URL,
+    # which comes from the Host header: behind a proxy that does not pin the
+    # host (ALLOWED_HOSTS unset), a caller controls what the endpoint claims to
+    # be. Set it to the public URL, e.g. https://api.example.com/mcp.
+    mcp_resource_url: str = Field(default="", alias="MCP_RESOURCE_URL")
+
+    # Whether an OAuth access token must name this MCP endpoint in its ``aud``
+    # claim (RFC 8707 resource indicators / RFC 9728). When on, a token whose
+    # ``aud`` names a *different* resource is refused — that is a token minted
+    # for somebody else, replayed here — and so is a token carrying no ``aud``
+    # at all. ``None`` (the default) resolves at request time to the runtime
+    # posture: enforced in production, off elsewhere. Setting it to ``false``
+    # is the operator override that stands the whole check down, which matters
+    # because JWT_AUDIENCE is pinned per deployment: if the issued audience is
+    # not this endpoint's resource URL, *every* token mismatches and the
+    # endpoint is unreachable until the tokens are reissued (or MCP_RESOURCE_URL
+    # is set to the audience they already carry). API keys are never subject to
+    # the check: they are not OAuth tokens and carry no audience.
+    mcp_require_token_audience: bool | None = Field(
+        default=None, alias="MCP_REQUIRE_TOKEN_AUDIENCE"
+    )
+
     # === Tool Settings ===
+    # Server-side deadline on one ``tools/call`` handler. Without it a hung
+    # tool holds the request (and, on HTTP, the connection) indefinitely. 0
+    # disables the deadline.
+    mcp_tool_call_timeout_seconds: float = Field(
+        default=60.0, alias="MCP_TOOL_CALL_TIMEOUT_SECONDS", ge=0
+    )
+    # Upper bound on the serialized size of one ``tools/call`` result. A larger
+    # result is truncated with an explicit notice rather than refused: the call
+    # succeeded, and the model is told what it is missing. 0 disables the cap;
+    # any other value must clear MIN_TOOL_RESULT_BYTES, the cost of the
+    # truncation envelope itself.
+    mcp_max_tool_result_bytes: int = Field(
+        default=1_048_576, alias="MCP_MAX_TOOL_RESULT_BYTES", ge=0
+    )
     mcp_execute_code_timeout: int = Field(
         default=30, alias="MCP_EXECUTE_CODE_TIMEOUT", ge=1
     )
@@ -215,6 +267,50 @@ class MCPConfig(BaseSettings):
             "plus an autonomy_category applied to the server's tools)."
         ),
     )
+
+    @field_validator("mcp_max_tool_result_bytes")
+    @classmethod
+    def _tool_result_cap_clears_the_envelope(cls, value: int) -> int:
+        """Reject a tool-result cap the truncation envelope cannot fit inside.
+
+        Truncation does not merely shorten the payload: it replaces the result
+        with a notice block plus a ``_meta`` record that together cost roughly
+        220-240 serialized bytes. Below that, the cap is unenforceable -- the
+        emitted "capped" result is still over the limit and nothing says so --
+        which is worse than no cap at all, because the operator believes one is
+        in force. 0 keeps its documented meaning: no cap.
+
+        Args:
+            value: Candidate value for ``MCP_MAX_TOOL_RESULT_BYTES``.
+
+        Returns:
+            The value unchanged when it is enforceable.
+
+        Raises:
+            ValueError: The value is positive but under
+                :data:`MIN_TOOL_RESULT_BYTES`.
+
+        Note:
+            ``validate_assignment`` is deliberately **not** enabled on this
+            class, so assigning a smaller value to an already-built config
+            would skip this check. That is accepted: the class has exactly one
+            construction site (:func:`get_mcp_config`, fully validated), no
+            code assigns to the field, and nothing builds it through the
+            validation-skipping idioms (``model_construct`` /
+            ``model_copy(update=...)``). Enabling it here alone would also give
+            false assurance about the path that actually reads the value —
+            ``ToolHandlerMixin._cap_result`` resolves it with ``getattr`` on a
+            duck-typed config object, which Pydantic cannot police at all.
+        """
+        if 0 < value < MIN_TOOL_RESULT_BYTES:
+            raise ValueError(
+                f"MCP_MAX_TOOL_RESULT_BYTES={value} is below the "
+                f"{MIN_TOOL_RESULT_BYTES}-byte floor: the truncation notice "
+                "and its _meta envelope alone cost ~220-240 bytes, so a cap "
+                "this small cannot be honoured. Use 0 to disable the cap, or "
+                f"a value >= {MIN_TOOL_RESULT_BYTES}."
+            )
+        return value
 
     @property
     def allowed_command_basenames(self) -> frozenset[str]:

@@ -26,14 +26,21 @@ from typing import TYPE_CHECKING, Any, cast
 from core.observability import get_tracer
 from core.observability.logging import get_logger
 from core.resilience import retry
+from core.services.llm._accounting import account_turn, record_usage_cost
 from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import (
     gen_ai_system,
-    record_genai_metrics,
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
+from core.services.llm.errors import (
+    RETRYABLE_ERRORS,
+    LLMRefusalError,
+    is_retryable,
+    retry_after_from_exception,
+)
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
+from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -41,6 +48,7 @@ from core.services.llm.tool_calling import (
     ToolCall,
     ToolChoice,
 )
+from core.services.llm.usage import Usage
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -48,17 +56,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+#: Same eligibility as the text path: transient classes retry, client errors
+#: and refusals do not.
+_RETRYABLE = RETRYABLE_ERRORS
+
+
 def _is_rate_limit(exc: Exception) -> bool:
-    """Match the rate-limit heuristic used by the legacy retry layer."""
-    error_str = str(exc).lower()
-    return "429" in error_str or "rate limit" in error_str or "too many" in error_str
+    """Whether *exc* is worth retrying.
+
+    Kept under its historical name for callers that import it; the decision
+    now comes from the neutral error taxonomy, with the substring heuristic
+    only as the fallback for unmapped exception types.
+    """
+    return is_retryable(exc)
 
 
 @retry(
     max_attempts=3,
     base_delay=1.0,
     max_delay=30.0,
-    retryable_exceptions=(RateLimitError,),
+    retryable_exceptions=_RETRYABLE,
 )
 async def _native_with_retry(
     service: LLMService,
@@ -88,11 +105,19 @@ async def _native_with_retry(
                 **kwargs,
             )
         )
-    except Exception as e:
-        if _is_rate_limit(e):
-            logger.warning(f"Rate limit hit (structured), will retry: {e}")
-            raise RateLimitError(str(e)) from e
+    except _RETRYABLE as e:
+        # Already typed by the provider's error mapping.
+        logger.warning(
+            "Transient provider failure (structured, %s), will retry: %s",
+            type(e).__name__,
+            e,
+        )
         raise
+    except Exception as e:
+        if not is_retryable(e):
+            raise
+        logger.warning(f"Rate limit hit (structured), will retry: {e}")
+        raise RateLimitError(str(e), retry_after=retry_after_from_exception(e)) from e
 
 
 def _render_tools(tools: list[LLMToolSpec]) -> str:
@@ -202,8 +227,16 @@ async def _generate_fallback(
     system_prompt: str | None,
     temperature: float | None,
     max_tokens: int | None,
+    allow_refusal: bool = False,
+    usage_sink: list[Usage] | None = None,
 ) -> LLMResult:
-    """Prompt-coercion path for providers without native tool calling."""
+    """Prompt-coercion path for providers without native tool calling.
+
+    ``allow_refusal`` is forwarded as a provider kwarg rather than applied
+    here: this path returns through the legacy text API, where the provider
+    itself decides whether a refusal raises (it has the stop reason; the
+    ``(text, tokens)`` return type does not carry one back).
+    """
     augmented_system = _build_fallback_system(
         system_prompt, tools, tool_choice, response_format
     )
@@ -216,12 +249,23 @@ async def _generate_fallback(
         extra["temperature"] = temperature
     if max_tokens is not None:
         extra["max_tokens"] = max_tokens
+    if allow_refusal:
+        extra["allow_refusal"] = True
 
+    # Owned by the caller when it passed one: a refusal raises out of this
+    # function, and the turn still has to be accounted for.
+    usage_sink = [] if usage_sink is None else usage_sink
     content, tokens_used = await service._generate_with_retry(
-        prompt=prompt, model=model, json_mode=want_json, **extra
+        prompt=prompt,
+        model=model,
+        json_mode=want_json,
+        usage_sink=usage_sink,
+        **extra,
     )
     result = _parse_fallback(content, has_tools=bool(tools))
     result.tokens_used = tokens_used
+    if usage_sink:
+        result.usage = usage_sink[-1]
     return result
 
 
@@ -237,6 +281,7 @@ async def generate_structured(
     temperature: float | None = None,
     max_tokens: int | None = None,
     task_category: str | None = None,
+    allow_refusal: bool = False,
 ) -> LLMResult:
     """Generate a structured response (tool calls and/or text).
 
@@ -258,15 +303,22 @@ async def generate_structured(
         max_tokens: Optional output token cap.
         task_category: Optional task category hint for cost-aware routing
             (ignored unless routing is enabled).
+        allow_refusal: When True a model refusal is returned on the result
+            instead of raising ``LLMRefusalError``.
 
     Returns:
         LLMResult: text and/or structured tool calls with usage.
+
+    Raises:
+        LLMRefusalError: The model declined to answer and ``allow_refusal``
+            is False.
     """
     # Lazy: a module-level import of core.orchestration would be circular.
-    from core.orchestration.budget_context import charge_llm_cost
     from core.orchestration.limits import (
         BudgetExceededError as LoopBudgetExceededError,
     )
+    from core.quotas.cost_enforcement import enforce_tenant_cost_budget
+    from core.quotas.manager import CostBudgetExceededError
 
     model = service._resolve_model(model, task_category)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
@@ -285,6 +337,18 @@ async def generate_structured(
     }
 
     with tracer.start_span(f"chat {model}", attributes=span_attributes) as span:
+        # Gate on the ambient tenant's cumulative USD budget BEFORE any
+        # provider spend (no-op unless tenant cost limits are configured;
+        # fails open on store errors). The text and streaming paths have
+        # always done this; native tool calling did not, so a deployment
+        # whose traffic is agentic wrote a ledger nothing ever read and the
+        # cap could not trip.
+        try:
+            await enforce_tenant_cost_budget(model=model)
+        except CostBudgetExceededError:
+            span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
+            raise
+
         input_tokens = await estimate_tokens_async(prompt)
         report_tokens_to_middleware(input_tokens, model="input")
         if service.cost_tracker:
@@ -293,6 +357,9 @@ async def generate_structured(
         import time
 
         started = time.perf_counter()
+        # Held by this frame so a refusal raised out of the coercion path
+        # still carries the provider's metered usage to the accounting below.
+        fallback_usage: list[Usage] = []
         try:
             if use_native:
                 extra: dict[str, Any] = {}
@@ -335,7 +402,29 @@ async def generate_structured(
                     system_prompt=system_prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    allow_refusal=allow_refusal,
+                    usage_sink=fallback_usage,
                 )
+        except LLMRefusalError:
+            # A refusal is generated output: the provider ran the model and
+            # billed for it. Account for the turn before the error propagates,
+            # or the spend disappears from the middleware ledger, the metrics
+            # and the request budget. (The native path never lands here — its
+            # refusal is raised by ``apply_stop_reason`` *after* accounting.)
+            billed = account_turn(
+                service,
+                span,
+                model=model,
+                result=LLMResult(
+                    stop_reason=STOP_REFUSAL,
+                    usage=fallback_usage[-1] if fallback_usage else Usage(),
+                    native=use_native,
+                ),
+                input_tokens=input_tokens,
+                started=started,
+            )
+            await record_usage_cost(model, billed)
+            raise
         except (LoopBudgetExceededError, RateLimitError):
             span.set_attribute("gen_ai.baselith.error", "budget_or_rate_limit")
             raise
@@ -346,118 +435,31 @@ async def generate_structured(
             logger.error(f"Structured generation failed: {e}")
             raise LLMProviderError(f"Structured generation failed: {e}") from e
 
-        output_tokens = max(result.tokens_used - input_tokens, 0)
-        span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
-        span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
-        span.set_attribute("gen_ai.baselith.tool_calls", len(result.tool_calls))
-        if result.stop_reason:
-            span.set_attribute("gen_ai.response.finish_reason", result.stop_reason)
-
-        report_tokens_to_middleware(output_tokens, model=model)
-        if service.cost_tracker:
-            service.cost_tracker.track_tokens(output_tokens, model=model)
-        record_genai_metrics(
-            gen_ai_system(service.config.provider),
-            model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            duration_seconds=time.perf_counter() - started,
-        )
-
-        # Charge real dollar cost against the ambient per-request LoopBudget
-        # (no-op outside an orchestrated request).
-        charge_llm_cost(model, input_tokens, output_tokens)
-
-        return result
-
-
-__all__ = ["generate_structured"]
-
-
-def _extract_json_payload(text: str) -> str:
-    """Strip Markdown code fences some models wrap around JSON output."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1 :]
-        if stripped.rstrip().endswith("```"):
-            stripped = stripped.rstrip()[:-3]
-    return stripped.strip()
-
-
-async def generate_typed(
-    service: LLMService,
-    prompt: str,
-    response_model: type[Any],
-    *,
-    model: str | None = None,
-    system_prompt: str | None = None,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-    task_category: str | None = None,
-    retries: int = 1,
-) -> Any:
-    """Generate a validated instance of a Pydantic model (typed output).
-
-    The Pydantic bridge over :func:`generate_structured`: the JSON Schema is
-    derived from ``response_model`` (``model_json_schema()``), the response is
-    parsed and validated (``model_validate``), and a schema-violating answer
-    is retried with the validation error fed back to the model — the caller
-    never touches raw JSON text.
-
-    Args:
-        service: The owning :class:`LLMService`.
-        prompt: User turn.
-        response_model: A ``pydantic.BaseModel`` subclass describing the
-            expected response shape.
-        model / system_prompt / temperature / max_tokens / task_category:
-            Same semantics as :func:`generate_structured`.
-        retries: Extra attempts on JSON/validation failure (the error text is
-            appended to the retry prompt so the model can repair its output).
-
-    Returns:
-        A validated ``response_model`` instance.
-
-    Raises:
-        LLMProviderError: When no valid instance is produced within
-            ``retries + 1`` attempts (carries the last validation error).
-    """
-    from pydantic import ValidationError
-
-    response_format = ResponseFormat(
-        schema=response_model.model_json_schema(),
-        name=response_model.__name__,
-    )
-    attempt_prompt = prompt
-    last_error = ""
-    for _attempt in range(max(0, retries) + 1):
-        result = await generate_structured(
+        billed = account_turn(
             service,
-            attempt_prompt,
+            span,
             model=model,
-            response_format=response_format,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            task_category=task_category,
+            result=result,
+            input_tokens=input_tokens,
+            started=started,
         )
-        payload = _extract_json_payload(result.text or "")
-        try:
-            return response_model.model_validate(json.loads(payload))
-        except (json.JSONDecodeError, ValidationError) as exc:
-            last_error = str(exc)
-            logger.warning(
-                "generate_typed validation failed (%s), attempt %d",
-                type(exc).__name__,
-                _attempt + 1,
-            )
-            attempt_prompt = (
-                f"{prompt}\n\nYour previous response was not valid for the "
-                f"required schema. Error: {last_error}\n"
-                "Respond again with ONLY a JSON object matching the schema."
-            )
-    raise LLMProviderError(
-        f"Typed generation failed validation after {max(0, retries) + 1} "
-        f"attempts: {last_error}"
-    )
+        # Book the cost on the tenant's cumulative ledger, exactly as the text
+        # and streaming paths do. ``account_turn`` deliberately stops at the
+        # per-request ledgers (middleware, metrics, LoopBudget) and hands back
+        # the billed split for this; structured generation never took it, so a
+        # deployment whose agents use tool calling metered a fraction of its
+        # real spend and the tenant cost cap never tripped. Priced
+        # independently of the LoopBudget charge, which returns 0 outside an
+        # orchestrated request — background jobs meter too. Never raises.
+        await record_usage_cost(model, billed)
+
+        # Stop-reason policy last: the call is accounted for either way (it was
+        # billed), and only then does a refusal abort the caller.
+        return apply_stop_reason(result, model=model, allow_refusal=allow_refusal)
+
+
+# ``generate_typed`` (the Pydantic bridge) lives in ``typed`` for the
+# module size cap; re-exported here for the historical import path.
+from core.services.llm.typed import generate_typed  # noqa: E402
+
+__all__ = ["generate_structured", "generate_typed"]

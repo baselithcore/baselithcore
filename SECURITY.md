@@ -13,10 +13,14 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.29.x  | :white_check_mark: |
-| < 0.29  | :x:                |
+| 0.33.x  | :white_check_mark: |
+| < 0.33  | :x:                |
 
-The exact version is recorded in [`core/_version.py`](core/_version.py).
+The exact version is recorded in [`core/_version.py`](core/_version.py). The
+table above is rewritten by semantic-release on every release (see the
+`@semantic-release/exec` `prepareCmd` in [`.releaserc`](.releaserc)) — it used
+to be hand-maintained and had drifted three minors behind, telling operators
+that a release we no longer patch was the supported one.
 
 ## Reporting a Vulnerability
 

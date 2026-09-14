@@ -9,7 +9,6 @@ delegations over a standardized wire format.
 Based on JSON-RPC 2.0 as per Google A2A specification.
 """
 
-import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -36,7 +35,7 @@ class MessageType(str, Enum):
 
 class A2AMethod(str, Enum):
     """
-    Standard A2A RPC methods per Google A2A specification.
+    Standard A2A RPC methods per the A2A specification (0.3.0).
 
     Methods:
         MESSAGE_SEND: Send a message (sync request/response)
@@ -44,8 +43,17 @@ class A2AMethod(str, Enum):
         TASKS_GET: Get task status and results
         TASKS_CANCEL: Cancel a running task
         TASKS_RESUBSCRIBE: Resubscribe to task updates
-        TASKS_PUSH_NOTIFICATION_SET: Set push notification config
-        TASKS_PUSH_NOTIFICATION_GET: Get push notification config
+        TASKS_PUSH_NOTIFICATION_CONFIG_SET: Set a push-notification config
+        TASKS_PUSH_NOTIFICATION_CONFIG_GET: Read a push-notification config
+        TASKS_PUSH_NOTIFICATION_CONFIG_LIST: List push-notification configs
+        TASKS_PUSH_NOTIFICATION_CONFIG_DELETE: Delete a push-notification config
+
+    The card advertises ``protocolVersion: 0.3.0``, where the
+    push-notification methods live under ``tasks/pushNotificationConfig/*``
+    and gained ``list``/``delete``. ``TASKS_PUSH_NOTIFICATION_SET`` and
+    ``TASKS_PUSH_NOTIFICATION_GET`` keep the 0.2 wire names and are
+    **deprecated**: the server still answers them so peers pinned to the older
+    spelling keep working, but new code should use the ``…Config…`` members.
     """
 
     MESSAGE_SEND = "message/send"
@@ -53,8 +61,36 @@ class A2AMethod(str, Enum):
     TASKS_GET = "tasks/get"
     TASKS_CANCEL = "tasks/cancel"
     TASKS_RESUBSCRIBE = "tasks/resubscribe"
+    TASKS_PUSH_NOTIFICATION_CONFIG_SET = "tasks/pushNotificationConfig/set"
+    TASKS_PUSH_NOTIFICATION_CONFIG_GET = "tasks/pushNotificationConfig/get"
+    TASKS_PUSH_NOTIFICATION_CONFIG_LIST = "tasks/pushNotificationConfig/list"
+    TASKS_PUSH_NOTIFICATION_CONFIG_DELETE = "tasks/pushNotificationConfig/delete"
+    # Deprecated 0.2 spellings — accepted on the wire, not to be emitted.
     TASKS_PUSH_NOTIFICATION_SET = "tasks/pushNotification/set"
     TASKS_PUSH_NOTIFICATION_GET = "tasks/pushNotification/get"
+
+
+#: Every spelling of the push-notification configuration methods this server
+#: answers, current first. Kept beside the enum so the server and any peer
+#: tooling agree on the accepted set instead of each listing its own.
+PUSH_NOTIFICATION_METHODS: frozenset[str] = frozenset(
+    {
+        A2AMethod.TASKS_PUSH_NOTIFICATION_CONFIG_SET.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_CONFIG_GET.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_CONFIG_LIST.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_CONFIG_DELETE.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_SET.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_GET.value,
+    }
+)
+
+#: The subset a peer should stop sending; answered, but logged once per call.
+DEPRECATED_PUSH_NOTIFICATION_METHODS: frozenset[str] = frozenset(
+    {
+        A2AMethod.TASKS_PUSH_NOTIFICATION_SET.value,
+        A2AMethod.TASKS_PUSH_NOTIFICATION_GET.value,
+    }
+)
 
 
 # =============================================================================
@@ -294,172 +330,28 @@ class JSONRPCResponse:
         return self.error is None
 
 
-# =============================================================================
-# Legacy A2A Message (Backward Compatible)
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Legacy (pre-JSON-RPC) wrappers
+# ---------------------------------------------------------------------------
+# Re-exported at their original import path; the definitions moved to
+# core.a2a.protocol_legacy to keep this module under the 500-line cap. The
+# import is at the bottom because that module imports MessageType from here.
+from core.a2a.protocol_legacy import (  # noqa: E402
+    A2AMessage,
+    A2ARequest,
+    A2AResponse,
+)
 
-
-@dataclass
-class A2AMessage:
-    """
-    Standard A2A protocol message (legacy format).
-
-    Supports request/response patterns and notifications.
-    For new code, prefer JSONRPCRequest/JSONRPCResponse.
-    """
-
-    type: MessageType
-    method: str
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    params: dict[str, Any] | None = None
-    result: Any | None = None
-    error: dict[str, Any] | None = None
-    timestamp: float = field(default_factory=time.time)
-
-    # Routing
-    from_agent: str | None = None
-    to_agent: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dictionary."""
-        data: dict[str, Any] = {
-            "type": self.type.value,
-            "method": self.method,
-            "id": self.id,
-            "timestamp": self.timestamp,
-        }
-        if self.params is not None:
-            data["params"] = self.params
-        if self.result is not None:
-            data["result"] = self.result
-        if self.error is not None:
-            data["error"] = self.error
-        if self.from_agent:
-            data["from_agent"] = self.from_agent
-        if self.to_agent:
-            data["to_agent"] = self.to_agent
-        return data
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "A2AMessage":
-        """Deserialize from dictionary."""
-        return cls(
-            type=MessageType(data["type"]),
-            method=data["method"],
-            id=data.get("id", str(uuid.uuid4())),
-            params=data.get("params"),
-            result=data.get("result"),
-            error=data.get("error"),
-            timestamp=data.get("timestamp", time.time()),
-            from_agent=data.get("from_agent"),
-            to_agent=data.get("to_agent"),
-        )
-
-    @classmethod
-    def request(
-        cls,
-        method: str,
-        params: dict[str, Any] | None = None,
-        from_agent: str | None = None,
-        to_agent: str | None = None,
-    ) -> "A2AMessage":
-        """Create a request message."""
-        return cls(
-            type=MessageType.REQUEST,
-            method=method,
-            params=params,
-            from_agent=from_agent,
-            to_agent=to_agent,
-        )
-
-    @classmethod
-    def response(
-        cls,
-        request_id: str,
-        result: Any,
-        from_agent: str | None = None,
-    ) -> "A2AMessage":
-        """Create a response message."""
-        return cls(
-            type=MessageType.RESPONSE,
-            method="response",
-            id=request_id,
-            result=result,
-            from_agent=from_agent,
-        )
-
-    @classmethod
-    def error_response(
-        cls,
-        request_id: str,
-        code: int,
-        message: str,
-        data: Any | None = None,
-    ) -> "A2AMessage":
-        """Create an error response."""
-        return cls(
-            type=MessageType.ERROR,
-            method="error",
-            id=request_id,
-            error={"code": code, "message": message, "data": data},
-        )
-
-
-# =============================================================================
-# Legacy Request/Response Wrappers
-# =============================================================================
-
-
-@dataclass
-class A2ARequest:
-    """
-    High-level request wrapper (legacy).
-
-    Provides convenience methods for common patterns.
-    For new code, prefer JSONRPCRequest.
-    """
-
-    method: str
-    params: dict[str, Any] = field(default_factory=dict)
-    timeout: float = 30.0
-    retries: int = 3
-
-    def to_message(
-        self,
-        from_agent: str | None = None,
-        to_agent: str | None = None,
-    ) -> A2AMessage:
-        """Convert to A2A message."""
-        return A2AMessage.request(
-            method=self.method,
-            params=self.params,
-            from_agent=from_agent,
-            to_agent=to_agent,
-        )
-
-
-@dataclass
-class A2AResponse:
-    """
-    High-level response wrapper (legacy).
-
-    For new code, prefer JSONRPCResponse.
-    """
-
-    success: bool
-    result: Any | None = None
-    error_code: int | None = None
-    error_message: str | None = None
-    latency_ms: float = 0.0
-
-    @classmethod
-    def from_message(cls, msg: A2AMessage, latency_ms: float = 0.0) -> "A2AResponse":
-        """Create from A2A message."""
-        if msg.type == MessageType.ERROR:
-            return cls(
-                success=False,
-                error_code=msg.error.get("code") if msg.error else None,
-                error_message=msg.error.get("message") if msg.error else None,
-                latency_ms=latency_ms,
-            )
-        return cls(success=True, result=msg.result, latency_ms=latency_ms)
+__all__ = [
+    "DEPRECATED_PUSH_NOTIFICATION_METHODS",
+    "PUSH_NOTIFICATION_METHODS",
+    "A2AMessage",
+    "A2AMethod",
+    "A2ARequest",
+    "A2AResponse",
+    "ErrorCode",
+    "JSONRPCError",
+    "JSONRPCRequest",
+    "JSONRPCResponse",
+    "MessageType",
+]

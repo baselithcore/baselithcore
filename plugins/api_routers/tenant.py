@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from core.services.tenant import (
     DEFAULT_TENANT_PAGE_SIZE,
     MAX_TENANT_PAGE_SIZE,
+    ReservedTenantIdError,
     Tenant,
     get_tenant_service,
 )
@@ -58,6 +59,14 @@ async def create_tenant(
                 detail=f"Tenant with ID {request.id} already exists",
             )
         return await service.create_tenant(request.id, request.name)
+    except ReservedTenantIdError as e:
+        # A client error, not a server one: the id is well-formed, it is simply
+        # not the caller's to take. Without this it fell into the generic
+        # handler below and came back as a 500 "internal error", which tells an
+        # operator nothing about what to change.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e

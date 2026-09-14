@@ -10,7 +10,17 @@ Usage:
         Recomputes the plugin integrity hash, signs it with the hex private
         key read from the given environment variable (never from argv, so the
         key does not leak into shell history / process listings), and writes
-        both integrity_sha256 and signature_ed25519 into the manifest.
+        integrity_sha256, signature_ed25519 and hash_surface_version into the
+        manifest.
+
+This is the command ``baselith plugin sign`` and the pre-commit hook name in
+their blank-signature warning, so it has to write exactly what they write. It
+used to skip ``hash_surface_version``: an advisory field, but the one a
+reviewer reads to tell a digest computed over the current surface from one
+computed over an older, narrower one — and re-signing here *removed* the stamp
+the other two tools had left. The manifest rewrite is therefore delegated to
+``core.plugins.manifest_rewrite``, the module both of them already use, rather
+than kept as a third private implementation.
 
 Verification is enforced at load time when BASELITH_REQUIRE_PLUGIN_SIGNATURES
 is enabled (see core/plugins/signing.py).
@@ -19,13 +29,18 @@ is enabled (see core/plugins/signing.py).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.plugins.integrity import compute_plugin_hash
+from core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
+from core.plugins.manifest_rewrite import set_manifest_fields, supply_chain_fields
 from core.plugins.signing import (
     generate_keypair_hex,
     sign_plugin_hash,
@@ -41,30 +56,43 @@ def _find_manifest(plugin_dir: Path) -> Path:
     raise SystemExit(f"error: no manifest found in {plugin_dir}")
 
 
+def _read_manifest(manifest: Path) -> dict[str, Any]:
+    """Parse a manifest, tolerating an empty or non-mapping document.
+
+    Args:
+        manifest: Path to ``manifest.yaml``/``.yml``/``.json``.
+
+    Returns:
+        The parsed mapping, or ``{}`` when the file is empty or holds
+        something other than a mapping — either way there are no existing
+        supply-chain values to compare against.
+    """
+    raw = manifest.read_text(encoding="utf-8")
+    data = json.loads(raw) if manifest.suffix == ".json" else yaml.safe_load(raw)
+    return data if isinstance(data, dict) else {}
+
+
 def _write_manifest_fields(manifest: Path, hash_hex: str, signature_hex: str) -> None:
-    if manifest.suffix == ".json":
-        import json
+    """Stamp the three supply-chain keys, preserving the file's formatting.
 
-        data = json.loads(manifest.read_text())
-        data["integrity_sha256"] = hash_hex
-        data["signature_ed25519"] = signature_hex
-        manifest.write_text(json.dumps(data, indent=2) + "\n")
-        return
+    Delegates to :mod:`core.plugins.manifest_rewrite` so this tool, the CLI and
+    the pre-commit hook produce byte-identical manifests: the same three keys,
+    the same line-by-line rewrite that keeps a manifest's comments (which carry
+    the rationale for its declared permissions), and the same idempotence — an
+    unchanged tree re-signed here does not churn the file.
 
-    import re
-
-    text = manifest.read_text()
-    for key, value in (
-        ("integrity_sha256", hash_hex),
-        ("signature_ed25519", signature_hex),
-    ):
-        pattern = re.compile(rf"^{key}:.*$", flags=re.MULTILINE)
-        line = f"{key}: {value}"
-        if pattern.search(text):
-            text = pattern.sub(line, text)
-        else:
-            text = text.rstrip("\n") + f"\n{line}\n"
-    manifest.write_text(text)
+    Args:
+        manifest: Path to the plugin's manifest.
+        hash_hex: The freshly computed integrity digest.
+        signature_hex: The publisher signature over that digest.
+    """
+    fields = supply_chain_fields(
+        _read_manifest(manifest),
+        hash_hex,
+        signature=signature_hex,
+        surface_version=int(CURRENT_HASH_SURFACE),
+    )
+    set_manifest_fields(manifest, fields)
 
 
 def main() -> int:

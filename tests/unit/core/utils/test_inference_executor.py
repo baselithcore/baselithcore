@@ -10,6 +10,7 @@ calls. Inference therefore gets its own small, bounded pool.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import threading
 
 import pytest
@@ -116,3 +117,66 @@ def test_thread_count_env_override(monkeypatch, raw: str, expected: int) -> None
 def test_malformed_thread_count_falls_back(monkeypatch) -> None:
     monkeypatch.setenv("BASELITH_INFERENCE_THREADS", "many")
     assert _inference_thread_count() == _DEFAULT_INFERENCE_THREADS
+
+
+class TestContextPropagation:
+    """The thread hop must carry the caller's ``contextvars``.
+
+    ``asyncio.to_thread`` copies the context; a bare ``run_in_executor`` does
+    not, and ``run_inference`` replaces exactly those call sites. Without the
+    copy every span opened inside an offloaded call is a new trace root and
+    every contextvar-carried value (tenant above all) is unbound in the worker.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tenant_context_reaches_the_worker(self) -> None:
+        from core.context import (
+            get_current_tenant_id,
+            reset_tenant_context,
+            set_tenant_context,
+        )
+
+        token = set_tenant_context("tenant-alpha")
+        try:
+            assert await run_inference(get_current_tenant_id) == "tenant-alpha"
+        finally:
+            reset_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_a_span_started_in_the_worker_parents_to_the_caller(self) -> None:
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("inference-context-test")
+
+        def _offloaded() -> None:
+            with tracer.start_as_current_span("worker"):
+                pass
+
+        with tracer.start_as_current_span("caller"):
+            await run_inference(_offloaded)
+
+        spans = {span.name: span for span in exporter.get_finished_spans()}
+        assert spans["worker"].parent is not None
+        assert spans["worker"].parent.span_id == spans["caller"].context.span_id
+        assert spans["worker"].context.trace_id == spans["caller"].context.trace_id
+
+    @pytest.mark.asyncio
+    async def test_worker_writes_do_not_leak_back_to_the_caller(self) -> None:
+        """It is a copy, not a share: an offload cannot rebind the caller."""
+        probe: contextvars.ContextVar[str] = contextvars.ContextVar(
+            "inference_probe", default="caller"
+        )
+
+        def _rebind() -> str:
+            probe.set("worker")
+            return probe.get()
+
+        assert await run_inference(_rebind) == "worker"
+        assert probe.get() == "caller"

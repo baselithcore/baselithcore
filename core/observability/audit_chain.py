@@ -19,13 +19,29 @@ loop and worker threads; writes are offloaded to the default executor so a
 disk-bound append never blocks the request path.
 
 **Tamper evidence.** Each row stores ``prev_hash`` (the predecessor's
-``entry_hash``) and ``entry_hash = SHA-256(prev_hash || canonical_json(event))``.
+``entry_hash``) and ``entry_hash = MAC(prev_hash || canonical_json(event))``.
 Editing or removing a record inside the chain breaks every downstream link, and
 :meth:`SQLiteAuditSink.verify_chain` reports the first broken sequence number.
-This is *detection*, not prevention — an attacker with write access to the file
-can rebuild the whole chain. Anchor the digest externally (ship
-:meth:`SQLiteAuditSink.head_hash` to a WORM store or a separate SIEM) when the
-threat model includes a compromised host.
+
+``MAC`` is **HMAC-SHA256 under ``AUDIT_CHAIN_HMAC_KEY``** when one is
+configured, and a plain SHA-256 otherwise. The difference is the whole point of
+the chain: an unkeyed digest is reproducible by anyone holding the file, so an
+attacker with write access simply recomputes every link and the trail verifies
+again — it detects corruption and accidents, not adversaries. With a key the
+database does not contain, forgery needs the key too. Deployments where the
+trail is evidence should set ``AUDIT_CHAIN_REQUIRE_KEY=true`` so an unkeyed
+sink refuses to start.
+
+*Rotating or first enabling the key does not re-key existing rows.* Records
+written under a different key (or none) fail verification from then on —
+verification is strict by design, because retrying unkeyed on failure would
+hand an attacker exactly the downgrade they want. Rotate at a chain boundary:
+archive the current database with its verification report, then start a new
+one.
+
+Even keyed, this is *detection*, not prevention. Anchor the digest externally
+(ship :meth:`SQLiteAuditSink.head_hash` to a WORM store or a separate SIEM)
+when the threat model includes a compromised host.
 
 **Retention and truncation.** Purging by definition removes the chain's oldest
 links. Verification therefore treats the earliest *surviving* row's stored
@@ -36,7 +52,7 @@ retention sweep does not masquerade as tampering.
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import hmac
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -45,13 +61,20 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from pydantic import SecretStr, ValidationError
+
+from core.config.audit import get_audit_config
 from core.observability.audit import AuditEvent
+from core.observability.audit_digest import (
+    GENESIS_HASH,
+    AuditChainKeyError,
+    coerce_chain_key,
+    compute_entry_hash,
+    require_chain_key_from_env,
+)
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-#: ``prev_hash`` of the very first record in a fresh chain.
-GENESIS_HASH = "0" * 64
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -80,16 +103,6 @@ _COLUMNS = (
     "seq, event_id, timestamp, event_type, user_id, tenant_id, session_id, "
     "resource, action, success, ip_address, details, prev_hash, entry_hash"
 )
-
-
-def compute_entry_hash(prev_hash: str, payload: dict[str, Any]) -> str:
-    """Return ``SHA-256(prev_hash || canonical_json(payload))``.
-
-    The payload is serialized with sorted keys and no whitespace so the digest
-    depends only on the data, never on dict ordering or formatting.
-    """
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256((prev_hash + canonical).encode("utf-8")).hexdigest()
 
 
 @dataclass(slots=True)
@@ -167,11 +180,28 @@ class SQLiteAuditSink:
         *,
         hash_chain: bool = True,
         max_detail_chars: int = 2000,
+        hmac_key: SecretStr | str | bytes | None = None,
     ) -> None:
+        """Open (or create) the audit database at ``path``.
+
+        Args:
+            path: SQLite file. Parent directories are created.
+            hash_chain: Chain records together for tamper evidence.
+            max_detail_chars: Truncation guard for caller-supplied details.
+            hmac_key: Key for the HMAC-SHA256 chain. Omitted (the default)
+                resolves ``AUDIT_CHAIN_HMAC_KEY`` from configuration, so the
+                wiring in :mod:`core.observability.audit_setup` needs no
+                changes; pass one explicitly in tests or embedding code.
+
+        Raises:
+            AuditChainKeyError: ``AUDIT_CHAIN_REQUIRE_KEY`` is set and no key
+                could be resolved.
+        """
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._hash_chain = hash_chain
         self._max_detail_chars = max_detail_chars
+        self._hmac_key = self._resolve_key(hmac_key)
         self._conn = sqlite3.connect(
             str(self._path), check_same_thread=False, isolation_level=None
         )
@@ -180,6 +210,52 @@ class SQLiteAuditSink:
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.executescript(_SCHEMA)
         self._lock = RLock()
+
+    def _resolve_key(self, hmac_key: SecretStr | str | bytes | None) -> bytes | None:
+        """Resolve the chain key, enforcing ``AUDIT_CHAIN_REQUIRE_KEY``.
+
+        The requirement must survive a *broken* configuration, not only a
+        well-formed one. ``AuditConfig`` refuses to validate in exactly the
+        state this guard exists for — required, no key — so a blanket
+        ``except Exception`` around the config load would swallow the refusal
+        and open the unkeyed chain the operator forbade. Hence: the validation
+        error is re-raised as :class:`AuditChainKeyError`, and any *other*
+        configuration failure still consults the environment directly before
+        deciding it may run unkeyed.
+
+        Raises:
+            AuditChainKeyError: A keyed chain is required and none is available.
+        """
+        key = coerce_chain_key(hmac_key)
+        require = False
+        if key is None:
+            try:
+                config = get_audit_config()
+                key = coerce_chain_key(config.chain_hmac_key)
+                require = bool(config.chain_require_key)
+            except ValidationError as exc:
+                raise AuditChainKeyError(
+                    "Audit configuration is invalid and AUDIT_CHAIN_HMAC_KEY "
+                    f"could not be resolved; refusing to open the chain: {exc}"
+                ) from exc
+            except Exception as exc:  # configuration must not break the sink
+                logger.debug("Audit chain key configuration unavailable: %s", exc)
+                require = require_chain_key_from_env()
+        if not self._hash_chain:
+            return key
+        if key is None:
+            if require:
+                raise AuditChainKeyError(
+                    "AUDIT_CHAIN_REQUIRE_KEY is set but no AUDIT_CHAIN_HMAC_KEY "
+                    "is configured; refusing to open an unkeyed audit chain."
+                )
+            logger.warning(
+                "Audit hash chain running WITHOUT an HMAC key: set "
+                "AUDIT_CHAIN_HMAC_KEY so the trail is tamper-evident against "
+                "an attacker who can write to %s.",
+                self._path,
+            )
+        return key
 
     # ------------------------------------------------------------------ write
 
@@ -199,7 +275,9 @@ class SQLiteAuditSink:
         with self._lock:
             prev_hash = self._head_hash_locked()
             entry_hash = (
-                compute_entry_hash(prev_hash, payload) if self._hash_chain else ""
+                compute_entry_hash(prev_hash, payload, self._hmac_key)
+                if self._hash_chain
+                else ""
             )
             self._conn.execute(
                 "INSERT INTO audit_log (event_id, timestamp, event_type, user_id, "
@@ -317,13 +395,19 @@ class SQLiteAuditSink:
                     anchor_hash=anchor,
                     head_hash=head,
                 )
-            recomputed = compute_entry_hash(chained.prev_hash, chained.payload)
-            if recomputed != chained.entry_hash:
+            recomputed = compute_entry_hash(
+                chained.prev_hash, chained.payload, self._hmac_key
+            )
+            if not hmac.compare_digest(recomputed, chained.entry_hash):
                 return ChainVerification(
                     ok=False,
                     checked=checked,
                     broken_at=chained.seq,
-                    reason="record content does not match its stored entry_hash",
+                    reason=(
+                        "record content does not match its stored entry_hash "
+                        "(tampering, or the chain was written under a "
+                        "different AUDIT_CHAIN_HMAC_KEY)"
+                    ),
                     anchor_hash=anchor,
                     head_hash=head,
                 )
@@ -386,8 +470,11 @@ class SQLiteAuditSink:
 
 __all__ = [
     "GENESIS_HASH",
+    "AuditChainKeyError",
+    "require_chain_key_from_env",
     "AuditQuery",
     "ChainVerification",
     "SQLiteAuditSink",
+    "coerce_chain_key",
     "compute_entry_hash",
 ]

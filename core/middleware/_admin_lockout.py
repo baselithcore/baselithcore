@@ -13,7 +13,7 @@ The mixin relies on two attributes set by ``SecurityManager.__init__``:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
@@ -29,6 +29,27 @@ if TYPE_CHECKING:
     from core.middleware.rate_limiter import RateLimiter
 
 logger = get_logger(__name__)
+
+# Atomic failure step: INCR the per-IP counter, arm the failure window on the
+# first hit, and stretch the TTL to the full lockout once the threshold is
+# reached — one round trip, no gap between the increment and its expiry.
+# The previous INCR-then-EXPIRE pair had two failure modes: two extra round
+# trips per bad login, and a counter left WITHOUT a TTL whenever the process
+# died (or Redis dropped the connection) between the two calls — that IP then
+# stayed locked out forever, since nothing ever expired the key. The `TTL < 0`
+# branch also heals any such immortal key left behind by the old sequence.
+#   KEYS[1] counter key
+#   ARGV[1] failure-window seconds, ARGV[2] lockout seconds, ARGV[3] threshold
+_RECORD_FAILURE_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+if count >= tonumber(ARGV[3]) then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return count
+"""
 
 
 class AdminLockoutMixin:
@@ -152,12 +173,7 @@ class AdminLockoutMixin:
 
         if redis_client:
             try:
-                count = await redis_client.incr(key)
-                if count == 1:
-                    await redis_client.expire(key, self._LOCKOUT_WINDOW_SECONDS)
-                if count >= self._LOCKOUT_MAX_FAILURES:
-                    # Extend TTL to full lockout duration
-                    await redis_client.expire(key, self._LOCKOUT_DURATION_SECONDS)
+                await self._record_failure_atomic(redis_client, key)
                 return
             except Exception as exc:
                 # Fall through to the in-process counter, but say so: a silently
@@ -192,6 +208,33 @@ class AdminLockoutMixin:
             ]
             for k in stale_keys:
                 self._lockout_fallback.pop(k, None)
+
+    async def _record_failure_atomic(self, redis_client: Any, key: str) -> int:
+        """Run :data:`_RECORD_FAILURE_LUA` for ``key`` and return the new count.
+
+        The script handle is registered lazily on first use (the mixin has no
+        ``__init__``) and cached on the instance; ``register_script`` returns a
+        wrapper that sends ``EVALSHA`` and falls back to ``EVAL`` when the
+        server has not seen the script yet. A client without
+        ``register_script`` (a bare test double) gets a plain ``EVAL``.
+        """
+        args = (
+            self._LOCKOUT_WINDOW_SECONDS,
+            self._LOCKOUT_DURATION_SECONDS,
+            self._LOCKOUT_MAX_FAILURES,
+        )
+        register = getattr(redis_client, "register_script", None)
+        if register is None:
+            return int(await redis_client.eval(_RECORD_FAILURE_LUA, 1, key, *args))
+        script = getattr(self, "_lockout_script", None)
+        if (
+            script is None
+            or getattr(self, "_lockout_script_client", None) is not redis_client
+        ):
+            script = register(_RECORD_FAILURE_LUA)
+            self._lockout_script = script
+            self._lockout_script_client = redis_client
+        return int(await script(keys=[key], args=list(args)))
 
     async def clear_admin_failures(self, identifier: str) -> None:
         """Clear failure counter after a successful admin login."""

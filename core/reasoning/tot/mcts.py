@@ -112,7 +112,7 @@ def mcts_search(
 
             # Update children scores
             max_child_score = 0.0
-            for child, score in zip(children, scores):
+            for child, score in zip(children, scores, strict=True):
                 child.parent = node
                 child.score = score
                 child.value = score
@@ -222,7 +222,7 @@ async def mcts_search_async(
 
             max_child_score = 0.0
             improved = False
-            for child, score in zip(children, scores):
+            for child, score in zip(children, scores, strict=True):
                 child.parent = node
                 child.score = score
                 child.value = score

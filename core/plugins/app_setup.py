@@ -37,6 +37,7 @@ from typing import Any
 from core.observability.logging import get_logger
 
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
+from .config_file import PluginConfigs, plugin_enabled, read_plugin_configs
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .resource_analyzer import ResourceAnalyzer
@@ -151,18 +152,26 @@ def _overrides_setup_app_middleware(plugin_class: type[Plugin]) -> bool:
     return True
 
 
-def apply_plugin_app_middleware(app: Any, plugins_dir: Path | None = None) -> int:
+def apply_plugin_app_middleware(
+    app: Any,
+    plugins_dir: Path | None = None,
+    plugin_configs: PluginConfigs | None = None,
+) -> int:
     """Discover plugins under ``plugins_dir`` and apply their middleware hooks.
 
     Args:
         app: The FastAPI application under construction.
         plugins_dir: Override for the plugin root (defaults to ``<repo>/plugins``).
+        plugin_configs: The plugin enable-list (``configs/plugins.yaml``
+            content). Defaults to reading the file the lifespan reads, so a
+            plugin disabled there is skipped here as well.
 
     Returns:
         Count of plugins whose ``setup_app_middleware`` hook ran successfully.
     """
     if plugins_dir is None:
         plugins_dir = Path(__file__).resolve().parents[2] / "plugins"
+    configs = read_plugin_configs() if plugin_configs is None else plugin_configs
 
     if not plugins_dir.exists():
         logger.debug(
@@ -198,6 +207,16 @@ def apply_plugin_app_middleware(app: Any, plugins_dir: Path | None = None) -> in
             continue
 
         discovery = analyzer.discover_plugin(item)
+        # The same enable-list the lifespan applies: a plugin the config
+        # disables (or omits, when the config names any plugin at all) gets
+        # no routers later, so it must get no app-level middleware or SPA
+        # mount here either — otherwise a release with a declarative plugin
+        # set still serves the console shell of every plugin in the image.
+        if not plugin_enabled(
+            configs, item.name, discovery.name if discovery else item.name
+        ):
+            logger.debug("Skipping app-middleware hook for %s: not enabled", item.name)
+            continue
         expected_hash = discovery.metadata.integrity_sha256 if discovery else None
         if not verify_plugin_integrity(item, expected_hash):
             logger.error(

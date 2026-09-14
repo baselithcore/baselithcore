@@ -182,7 +182,9 @@ class HierarchySearchMixin:
             pairs = [(query, item.content) for item in items]
             raw = await run_inference(reranker.predict, pairs)
             scores = raw.tolist() if hasattr(raw, "tolist") else list(raw)
-            ranked = sorted(zip(items, scores), key=lambda x: x[1], reverse=True)
+            ranked = sorted(
+                zip(items, scores, strict=True), key=lambda x: x[1], reverse=True
+            )
             return [item for item, _ in ranked]
         except Exception as e:
             logger.warning(f"Memory recall rerank failed (keeping fused order): {e}")
@@ -338,7 +340,9 @@ class HierarchySearchMixin:
                 scores = cosine_similarity_many(query_embedding, self._stm_embeddings)
                 scored = [
                     (item, score)
-                    for item, emb, score in zip(self._stm, self._stm_embeddings, scores)
+                    for item, emb, score in zip(
+                        self._stm, self._stm_embeddings, scores, strict=True
+                    )
                     if emb and score > 0.5  # Threshold
                 ]
 
@@ -385,7 +389,7 @@ class HierarchySearchMixin:
                 scores = cosine_similarity_many(query_embedding, embeddings)
                 scored = [
                     (item, score)
-                    for item, emb, score in zip(items, embeddings, scores)
+                    for item, emb, score in zip(items, embeddings, scores, strict=True)
                     if emb and score > 0.5
                 ]
 

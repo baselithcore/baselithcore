@@ -2,6 +2,7 @@
 title: Multi-Tenancy
 description: Data isolation between tenants
 ---
+<!-- markdownlint-disable MD046 -->
 
 **Multi-Tenancy** is an architectural pattern that allows a single instance of the application to serve **multiple customers (tenants)** while keeping their data completely isolated. It is fundamental for **SaaS** applications where different customers share infrastructure but must have separate data.
 
@@ -75,9 +76,9 @@ user. The flow is:
 
 For **background tasks and scripts**, you must set the context explicitly (see Troubleshooting below).
 
-When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_current_tenant_id()`) then key off the current context.
+When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_tenant_or_default()`) then key off the current context.
 
-There is **no** context-manager helper. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, and `get_current_tenant_id()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
+There is **no** general-purpose context-manager helper for an arbitrary tenant. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, `get_current_tenant_id()` and `tenant_is_bound()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
 
 ```python
 from core.context import set_tenant_context, reset_tenant_context, get_current_tenant_id
@@ -95,6 +96,29 @@ try:
 finally:
     reset_tenant_context(token)
 ```
+
+#### "Is a tenant bound at all?" — `tenant_is_bound()`
+
+`core/context.py` also exposes `tenant_is_bound() -> bool`, the public answer to
+"did someone upstream actually say which tenant this work belongs to?".
+
+`get_current_tenant_id()` cannot answer it: it conflates *unbound* with the
+`"default"` fallback unless `strict_tenant_isolation` happens to be on.
+
+```python
+from core.context import get_current_tenant_id, tenant_is_bound
+
+# With STRICT_TENANT_ISOLATION off and nothing bound upstream:
+tenant_is_bound()          # False  — nobody said
+get_current_tenant_id()    # "default"  — indistinguishable from a real tenant
+```
+
+Code that must fail closed **regardless of that unrelated switch** asks
+`tenant_is_bound()` instead of reaching into the module-private contextvar. The
+in-tree example is row-level security binding the DB session
+(`core/db/connection.py`): with `DB_RLS_ENABLED=true` and no tenant bound it
+raises `TenantContextError` rather than silently binding `app.tenant_id` to
+`"default"` and serving another tenant's rows.
 
 !!! warning "Manual data-layer filtering"
     The data layer uses raw SQL (psycopg), not an ORM with automatic query
@@ -277,16 +301,34 @@ Two halves have to be in place, and a third to make them bite.
 **1. The session binding.** `DB_RLS_ENABLED=true` binds the request's tenant to
 the DB session on every pool checkout
 (`SELECT set_config('app.tenant_id', …, false)`). The flag is OFF by default and
-a strict no-op when off — the connection path is byte-identical. Outside a
-request (background task, script) the session binds to `"default"`.
+a strict no-op when off — the connection path is byte-identical.
+
+Outside a request (background task, script) the tenant contextvar may be unset,
+and what that means depends on the flag:
+
+| `DB_RLS_ENABLED` | Unbound caller | Why |
+| --- | --- | --- |
+| off | Binds `"default"`, exactly as before | Nothing downstream reads `app.tenant_id` for access control, so a missing context must not break the caller. |
+| **on** | **Raises `TenantContextError`** | `"default"` would be the worst possible answer: every policy would then match the `default` tenant's rows, so an unbound background job reads and writes another tenant's data *while the database reports that isolation is enforced*. |
+
+The check asks `tenant_is_bound()`, not what `get_current_tenant_id()` resolves
+to, so it fails closed regardless of `strict_tenant_isolation`
+(`core/db/connection.py`). Work that legitimately runs outside a request declares
+itself with [`system_tenant_scope()`](#system-tenant-scope) instead.
 
 **2. The policies.** `migrations/versions/008_row_level_security.py` enables RLS
-and creates a `tenant_isolation` policy on every tenant-scoped table —
-`interactions`, `feedback`, `chat_feedback`, `agent_patterns`, `a2a_tasks`,
-`agent_checkpoints` (the list lives in `core.db.ddl.RLS_PROTECTED_TABLES`). The
-policy is symmetric: a row is visible, **and may be written**, only when its
-`tenant_id` equals the session's. So a cross-tenant `INSERT` or an `UPDATE` that
-moves a row to another tenant is refused, not silently hidden.
+and creates a `tenant_isolation` policy on every tenant-scoped table;
+`009_tool_invocations.py` adds the same policy to the table it creates, and
+`010_system_tenant_rls_exemption.py` widens the predicate across all seven. The
+current list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
+`a2a_tasks`, `agent_checkpoints`, `tool_invocations` — lives in
+`core.db.ddl.RLS_PROTECTED_TABLES`.
+
+The policy is symmetric: for an ordinary tenant a row is visible, **and may be
+written**, only when its `tenant_id` equals the session's. So a cross-tenant
+`INSERT` or an `UPDATE` that moves a row to another tenant is refused, not
+silently hidden. The one exemption is the maintenance identity — see
+[migration 010](#system-tenant-scope) below.
 
 **3. A role that RLS applies to.** This is the step that is easy to miss.
 Postgres exempts two kinds of session from row-level security: a **superuser**,
@@ -320,6 +362,259 @@ this setup: it creates a least-privilege role and asserts that a tenant sees onl
 its own rows, that a query with no `WHERE tenant_id` still isolates, that a
 cross-tenant write is refused, and that an unbound session sees nothing.
 
+#### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
+
+Not everything that touches Postgres belongs to a tenant. Under RLS an unbound
+caller is refused (above), so work that legitimately runs outside a request has to
+*say what it is* rather than be guessed at:
+
+```python
+from core.db.connection import system_tenant_scope
+
+with system_tenant_scope():
+    await run_maintenance()
+```
+
+It binds the tenant context to `SYSTEM_TENANT_ID` (`"system"`,
+`core/db/session_setup.py`) for the whole block and restores the previous token on
+exit, including when the body raises. It is a plain `contextmanager`, so it works
+in sync and async code alike — `contextvars` propagate into awaited coroutines —
+and because it binds the *tenant context* rather than just the DB session,
+everything else that scopes by tenant (caches, memory, stores) sees the same
+explicit identity instead of each falling back on its own.
+
+Who uses it today:
+
+| Caller | Work |
+| --- | --- |
+| `core/bootstrap/lazy_init.py`, `core/db/schema.py`, `core/api/startup_checks.py` | Boot and schema paths |
+| `core/orchestration/checkpoint_postgres.py`, `core/a2a/task_store_postgres.py`, `core/prompts/store_postgres.py` | `initialize()` / DDL on first touch |
+| `core/task_queue/worker.py` | Wraps job execution — but only when RLS is on |
+| `core/cli/handlers.py` | CLI commands that read the database |
+| `core/orchestration/recovery.py` | Crash-recovery and stale-run sweeps |
+| `core/services/tenant/purge.py` | GDPR erasure — cross-tenant by construction |
+
+Note what this is **not** for: it is schema, boot, maintenance and cross-tenant
+work, never a shortcut for reading one tenant's data. A request path that has a
+tenant must bind that tenant.
+
+!!! info "Migration 010 grants the `system` tenant its exemption"
+    `system_tenant_scope()` binds `app.tenant_id = 'system'`, and until migration
+    010 that identity matched **nothing**: migrations 008/009 created
+    `tenant_isolation` with the strict predicate
+    `tenant_id = COALESCE(current_setting('app.tenant_id', true), 'default')`,
+    symmetric in `USING` and `WITH CHECK`. Neither knew about the `system`
+    tenant, which did not exist yet.
+
+    `migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
+    — it does not replace the policy. Same name, same permissive policy, same
+    `COALESCE(..., 'default')` handling of an unset GUC, still no
+    `FORCE ROW LEVEL SECURITY`:
+
+    ```sql
+    CREATE POLICY tenant_isolation ON <table>
+      USING      (tenant_id = <session> OR <session> = 'system')
+      WITH CHECK (tenant_id = <session> OR <session> = 'system');
+    -- <session> = COALESCE(current_setting('app.tenant_id', true), 'default')
+    ```
+
+    It covers all **seven** protected tables (008's six plus `tool_invocations`
+    from 009 — the union is `core.db.ddl.RLS_PROTECTED_TABLES`), and
+    `downgrade()` restores 008/009's predicate byte-identically, so the chain is
+    reversible.
+
+    **Ordinary tenants are unchanged.** The escape compares the *session*, not
+    the row: for a session bound to `acme` the second disjunct is
+    `'acme' = 'system'` — constant false — so the predicate reduces to
+    `tenant_id = 'acme'` exactly as before, in `USING` **and** `WITH CHECK`. One
+    tenant still cannot read or write another's rows.
+
+    Why it is not a hole: `app.tenant_id` is set only by the pooled-checkout hook
+    in `core/db/connection.py`, from the tenant contextvar — never from client
+    input. What keeps a request from *asking* to be `system` is a check, not an
+    accident of wiring; see
+    [Reserved tenant ids](#reserved-tenant-ids) below.
+
+    A deployment wanting a harder boundary still has the two levers above: deny
+    the runtime role the maintenance path, or run maintenance under a separate
+    role.
+
+    Like 008, this is **inert in the default single-role deployment** — Postgres
+    does not apply RLS to a table's owner — so it only matters once you have
+    taken step 3.
+
+!!! warning "This reverses the `WITH CHECK` advice this page used to give"
+    An earlier revision of this page told operators to close the gap by hand and
+    offered an Option A that deliberately kept `WITH CHECK` **strict**, on the
+    reasoning that the maintenance identity should be able to read and delete
+    across tenants but never *write* a row under a tenant it is not.
+
+    **Migration 010 widens `WITH CHECK` too, and that published position was
+    wrong.** The stale-run sweep in `core/orchestration/recovery.py` writes back
+    through an `INSERT … ON CONFLICT DO UPDATE` that re-sends the run's own
+    `tenant_id` (`'acme'`, not `'system'`), so a strict `WITH CHECK` refuses it.
+    The two clauses cover different verbs and both are needed:
+
+    | Clause | Verbs | Why the system tenant needs it |
+    | --- | --- | --- |
+    | `USING` | `SELECT`, and which rows `UPDATE`/`DELETE` can even see | A `DELETE` has no `WITH CHECK` at all, so a hidden row is not *refused* — it simply is not there and the statement reports `0`. That is how `purge_tenant_data()` returned a truthful zero that read as a successful GDPR erasure. |
+    | `WITH CHECK` | `INSERT`, `UPDATE` | The recovery sweep's write-back re-sends a real tenant's id under the `system` session. |
+
+    **If you applied Option A by hand, it is being superseded.** Migration 010
+    issues `DROP POLICY IF EXISTS tenant_isolation` before creating its own, so a
+    hand-applied policy of that name is replaced on upgrade — no error, no
+    warning, and your narrower `WITH CHECK` is gone. That is the intended
+    outcome; nothing is required of you beyond knowing it happened. A hand-rolled
+    policy under a *different* name survives and will now be evaluated alongside
+    010's — permissive policies are OR-ed, so an extra one can only widen access.
+    Drop it.
+
+    If you chose Option B instead (a separate `BYPASSRLS` maintenance role), it
+    still works and 010 does not touch it. It remains blunter than the policy:
+    `BYPASSRLS` exempts that role from RLS everywhere, while 010's escape is
+    scoped to one GUC value the framework alone sets.
+
+    Either way, verify on a staging copy: run a purge against a seeded tenant
+    under the least-privilege role and assert the deleted row counts are
+    non-zero. `tests/unit/test_system_tenant_rls_policy.py` pins the migration's
+    shape (17 cases, including that `downgrade()` restores 008's predicate
+    verbatim and that neither direction drops anything but the policy);
+    `tests/integration/test_rls_tenant_isolation.py` proves the isolation itself
+    against a real Postgres.
+
+#### Reserved tenant ids {#reserved-tenant-ids}
+
+`system` is not just a convention — it is a **reserved identity**, because
+migration 010 gives it cross-tenant read and write. `core/context.py` names the
+set and the predicate:
+
+```python
+from core.context import RESERVED_TENANT_IDS, ReservedTenantError, is_reserved_tenant
+
+RESERVED_TENANT_IDS            # frozenset({"system"})
+is_reserved_tenant("system")   # True
+is_reserved_tenant("acme")     # False
+```
+
+`ReservedTenantError` (a `ValueError` subclass, so existing bad-input handlers
+keep working) is raised where such an id would otherwise be **accepted** —
+minting a token that asserts it, provisioning a tenant record for it.
+
+##### Binding a principal-derived tenant
+
+!!! danger "Code that binds a tenant from a principal MUST use `bind_principal_tenant()`"
+    A tenant that came from a caller's identity — a JWT or OIDC claim, an API-key
+    record, anything a request, connection or token asserted — is bound with
+    `core.context.bind_principal_tenant()`, never the plain setter. It returns a
+    `contextvars.Token` exactly like `set_tenant_context()`, so it is a drop-in,
+    and it raises `ReservedTenantError` if the id is reserved.
+
+    ```python
+    from core.context import (
+        ReservedTenantError,
+        bind_principal_tenant,
+        reset_tenant_context,
+    )
+
+    try:
+        token = bind_principal_tenant(user.tenant_id)   # from a credential
+    except ReservedTenantError:
+        raise HTTPException(status_code=403, detail="Forbidden") from None
+    try:
+        ...
+    finally:
+        reset_tenant_context(token)
+    ```
+
+    Translate the refusal into your own surface's rejection — a 403, a closed
+    socket — and **never fall back to binding it**.
+
+The plain `set_tenant_context()` stays correct, and is not deprecated, for a
+value the **framework itself owns**: the maintenance identity via
+`system_tenant_scope()`, a job's enqueued metadata, an event record, a
+checkpoint's stored tenant. That is why there is no blanket ban on the setter —
+the distinction is where the value came from, not which function is safer.
+
+Every write to the tenant contextvar is one of these eight sites. Only the first
+two derive the value from a principal:
+
+| Binding site | Value comes from | How it binds |
+| --- | --- | --- |
+| `core/middleware/tenant.py` (`TenantMiddleware`) | The authenticated `AuthUser` | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
+| `core/middleware/security.py` (`SecurityManager.enforce_auth`) | The authenticated `AuthUser`, for every `HTTPConnection` — **WebSockets included** | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
+| `core/task_queue/worker.py` | RQ job metadata | `set_tenant_context()` — framework-owned |
+| `core/events/_dispatch.py`, `core/events/durable.py` | The event record | `set_tenant_context()` — framework-owned |
+| `core/orchestration/recovery.py` | The checkpoint row's own `tenant_id` | `set_tenant_context()` — framework-owned |
+| `core/services/tenant/purge.py` | The purge's target tenant, bound to count its rows | `set_tenant_context()` — framework-owned |
+| `core/db/session_setup.py` | `system_tenant_scope()` itself | `set_tenant_context()` — this *is* the system binding |
+
+Both middlewares call the helper rather than doing their own
+`if is_reserved_tenant(...)` first, which matters for more than tidiness: **the
+check-then-bind window is gone**, because the refusal happens *inside* the
+binding call. A per-site check only protects the sites somebody remembered;
+making the binding itself refuse also protects the ones nobody thought of —
+including binding sites in another checkout that shares this `core`.
+
+`enforce_auth` is the one worth naming explicitly: it binds for every
+`HTTPConnection`, so it covers surfaces the pure-ASGI `TenantMiddleware` does not
+reach in the same way — the chat WebSocket among them. Until this landed it was
+the door through which a token claiming `tenant_id="system"` bound the privileged
+identity for the whole connection.
+
+Defence in depth sits one layer earlier, at **mint time**: the JWT issuer
+(`core/auth/_jwt_issue.py`) raises `ReservedTenantError` rather than signing a
+token that asserts a reserved tenant — for **access and refresh tokens alike**, so
+a refresh cannot launder one in. The middleware checks are what protect a
+deployment whose tokens come from somewhere else (a federated IdP, a token minted
+before the check existed).
+
+!!! note "Erasure cannot be silently blocked either"
+    `purge_tenant_data()` no longer trusts a row count of zero. It counts the
+    tenant's rows **as that tenant** before deleting them as `system`, and
+    `assert_purge_visible()` raises `TenantPurgeBlockedError` when rows existed
+    and none were removed — the signature of a policy hiding them. Both outcomes
+    used to be `0` and indistinguishable. The error message names the remedy:
+    apply migration 010, extend a hand-written policy on a plugin table, or grant
+    the maintenance role `BYPASSRLS`.
+
+    A blocked purge is **partial**, so the exception carries what actually
+    happened: `TenantPurgeBlockedError.purged` is the `{table: rows_deleted}` map
+    for the tables completed before the block — the same shape a successful call
+    returns — and `.pending` lists the tables never attempted or deferred by the
+    foreign-key fixpoint loop. An erasure that cleared four tables and stalled on
+    the fifth is a different operational situation from one that cleared nothing,
+    and a caller that can only report "it failed" forces someone to go and look.
+    Re-running the purge after fixing the policy is safe: the deletes are
+    idempotent.
+
+#### CLI commands that deliberately run unbound
+
+`baselith` wraps most commands in `system_tenant_scope()`, but not the ones that
+are long-lived or touch no database (`core/cli/handlers.py`):
+
+| Exemption | Members | Why |
+| --- | --- | --- |
+| `UNSCOPED_COMMANDS` | `init`, `run`, `test`, `lint`, `shell` | `init`/`test`/`lint` open no connection. `run` and `shell` are **long-lived processes**: binding `system` for their lifetime would turn the pool's fail-closed check into a no-op for every unbound query underneath. |
+| `UNSCOPED_SUBCOMMANDS` | `("queue", "worker")` | Same argument as `run` — it blocks for the life of the process, and the worker already binds an identity per *unit of work*. Keyed on the pair because `baselith queue status` is an ordinary short command and stays scoped. |
+
+!!! warning "`baselith shell` and `baselith queue worker` run unbound under RLS"
+    That is the intended design — but it means a query you type into the REPL has
+    no tenant bound, so with `DB_RLS_ENABLED=true` the pool refuses the checkout
+    with `TenantContextError`. Bind one explicitly:
+
+    ```python
+    from core.context import set_tenant_context, reset_tenant_context
+
+    token = set_tenant_context("acme")          # or the tenant you mean
+    try:
+        ...
+    finally:
+        reset_tenant_context(token)
+    ```
+
+    For maintenance work in the REPL, use `system_tenant_scope()` instead — and
+    remember it now carries cross-tenant read **and** write.
+
 #### Who creates the schema
 
 Every Postgres table is owned by a migration. Four stores used to run
@@ -344,13 +639,18 @@ tenant filtering on every vector search is a **Roadmap** item.
 
 `SemanticLLMCache` (`core/cache/semantic_cache.py`) is tenant-partitioned: it
 stores entries under `entries[tenant_id][prompt_hash]`, deriving `tenant_id` from
-`get_current_tenant_id()`. Two tenants issuing the same prompt never share a cache
+`get_tenant_or_default()`. Two tenants issuing the same prompt never share a cache
 entry:
 
 ```python
 # Internally, SemanticLLMCache keys by the current tenant context:
-#   self._entries[get_current_tenant_id()][prompt_hash] = CacheEntry
+#   self._entries[get_tenant_or_default()][prompt_hash] = CacheEntry
 ```
+
+The **exact** LLM response cache (`core/services/llm/_generation.py`) and the
+Redis cache prefix (`core/optimization/caching.py`) partition the same way. All
+three resolve the tenant *leniently* — see
+[Namespacing is not a boundary](#namespacing-is-not-a-boundary).
 
 !!! info "Roadmap: Redis keyspace prefixing & per-tenant flush"
     A Redis-backed cache with automatic per-tenant key prefixing and a
@@ -443,6 +743,31 @@ tenant_id = get_current_tenant_id()
     Leave strict mode on in production; it is the default precisely so that a
     code path that forgot to set the tenant context fails loudly instead of
     silently reading or writing the `"default"` tenant.
+
+### Namespacing is not a boundary
+
+Strict mode is about *data*. A lookup that only builds a key prefix has no data
+to protect, so it must not fail closed — otherwise a cache key prefix becomes a
+hard dependency on request context and takes down the work it was caching for.
+Two helpers, one rule:
+
+| Call | Use for | No tenant bound |
+|---|---|---|
+| `get_current_tenant_id()` | data boundaries: rows, documents, graph nodes, per-tenant scratchpads | raises `TenantContextError` under strict isolation |
+| `get_tenant_or_default()` | namespacing only: cache keys, cost ledger entries, metric labels | returns `"default"` |
+
+In `core/`, the second group is the LLM response cache
+(`core/services/llm/_generation.py`), the semantic cache
+(`core/cache/semantic_cache.py`), the Redis cache prefix
+(`core/optimization/caching.py`) and the cost ledger
+(`core/quotas/cost_enforcement.py`): an entry is keyed by the prompt hash and
+never read across prefixes, so an unbound caller shares the `"default"` bucket.
+
+Apply the same rule in your own code. A failure in this group is easy to miss:
+callers that degrade gracefully (falling back to a template, skipping the
+cache) swallow the exception, and the only trace of it is a failed span in the
+observability view — the feature silently stops using the LLM while the service
+looks healthy.
 
 ---
 
@@ -582,13 +907,25 @@ async def test_tenant_isolation():
 
 ## Troubleshooting
 
-### "TenantContextError" (strict isolation)
+### "TenantContextError" (strict isolation, or RLS)
 
-**Problem:** You receive a `TenantContextError` from `get_current_tenant_id()`.
+**Problem:** You receive a `TenantContextError`.
 
-**Cause:** With `strict_tenant_isolation` enabled, you are running code outside of an HTTP request context (e.g., background task, script) without setting the tenant first.
+**Cause:** Two different switches raise it, and the message tells you which:
 
-**Solution:**
+| Raised from | Switch | Meaning |
+| --- | --- | --- |
+| `get_current_tenant_id()` | `strict_tenant_isolation` | Code is running outside an HTTP request (background task, script) without setting the tenant first. |
+| A **pool checkout** (`core/db/connection.py`) | `DB_RLS_ENABLED=true` | No tenant is bound, so `app.tenant_id` cannot be set. Raised regardless of `strict_tenant_isolation`, and the message names `system_tenant_scope()`. |
+
+For the second, the fix is usually not to invent a tenant: if the work is boot,
+schema, maintenance or cross-tenant, wrap it in
+[`system_tenant_scope()`](#system-tenant-scope). Bind a real tenant only when the
+work genuinely belongs to one.
+
+**Solution (first case):** bind the tenant at the entry point of the task and restore it
+after — `contextvars` do not cross task boundaries on their own, so setting it
+once at startup does not cover a consumer loop started later:
 
 ```python
 from core.context import set_tenant_context, reset_tenant_context
@@ -601,6 +938,15 @@ async def background_task(tenant_id: str):
     finally:
         reset_tenant_context(token)
 ```
+
+The framework already binds at every chokepoint it owns
+(`core/middleware/tenant.py`, `core/task_queue/worker.py`,
+`core/events/durable.py`); a plugin that starts its own producer or consumer
+task owns the same responsibility.
+
+If the raising call is only building a cache key or a metric label, the fix is
+the other way round — use `get_tenant_or_default()`, see
+[Namespacing is not a boundary](#namespacing-is-not-a-boundary).
 
 ### One tenant's data visible to another
 

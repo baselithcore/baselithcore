@@ -259,3 +259,89 @@ class TestSameProviderChain:
         # Attribution stays the provider id, not the widened stage id.
         assert served_by == "ollama"
         reset_fallback_services()
+
+
+class TestRefusalIsFatal:
+    """A refusal is a decision, not an outage.
+
+    With a chain configured, ``LLMRefusalError`` used to be an ordinary stage
+    failure: the chain re-asked the next provider the thing the first one
+    declined, and — when every stage refused — surfaced the whole thing as a
+    generic ``LLMProviderError``. That made the refusal accounting in
+    ``message_runtime``/``structured``/``_generation`` (which books the already
+    billed turn before re-raising) unreachable the moment an operator set
+    ``LLM_FALLBACK_CHAIN``.
+    """
+
+    @staticmethod
+    def _refusal():
+        from core.services.llm.errors import LLMRefusalError
+
+        return LLMRefusalError(category="safety", explanation="no")
+
+    async def test_text_path_does_not_fall_through(self):
+        from core.services.llm.errors import LLMRefusalError
+
+        service = _make_service()
+        with (
+            patch.object(
+                service,
+                "_generate_with_retry",
+                AsyncMock(side_effect=self._refusal()),
+            ),
+            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+        ):
+            with pytest.raises(LLMRefusalError):
+                await run_with_fallback(service, "p", model="llama3.2", json_mode=False)
+        clone.assert_not_called()
+
+    async def test_structured_path_does_not_fall_through(self):
+        from core.services.llm.errors import LLMRefusalError
+        from core.services.llm.fallback_runtime import (
+            maybe_run_structured_with_fallback,
+        )
+
+        service = _make_service()
+        with (
+            patch(
+                "core.services.llm.structured._native_with_retry",
+                AsyncMock(side_effect=self._refusal()),
+            ),
+            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+        ):
+            with pytest.raises(LLMRefusalError):
+                await maybe_run_structured_with_fallback(service, "p", "llama3.2")
+        clone.assert_not_called()
+
+    async def test_messages_path_does_not_fall_through(self):
+        from core.services.llm.errors import LLMRefusalError
+        from core.services.llm.fallback_runtime import (
+            maybe_run_messages_with_fallback,
+        )
+
+        service = _make_service()
+        with (
+            patch(
+                "core.services.llm.message_runtime._messages_with_retry",
+                AsyncMock(side_effect=self._refusal()),
+            ),
+            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+        ):
+            with pytest.raises(LLMRefusalError):
+                await maybe_run_messages_with_fallback(service, [], "llama3.2")
+        clone.assert_not_called()
+
+    async def test_the_refusal_keeps_its_type_and_detail(self):
+        """Not rewrapped as ``All providers failed: …`` — callers branch on the
+        class, and the category/explanation are the whole point."""
+        from core.services.llm.errors import LLMRefusalError
+
+        service = _make_service()
+        with patch.object(
+            service, "_generate_with_retry", AsyncMock(side_effect=self._refusal())
+        ):
+            with pytest.raises(LLMRefusalError) as excinfo:
+                await run_with_fallback(service, "p", model="llama3.2", json_mode=False)
+
+        assert excinfo.value.category == "safety"
+        assert "All providers failed" not in str(excinfo.value)

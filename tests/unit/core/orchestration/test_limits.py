@@ -76,8 +76,10 @@ class TestLoopBudget:
 
 
 class TestTokenBudget:
-    def test_token_cap_defaults_off(self) -> None:
-        b = LoopBudget()
+    def test_token_cap_disabled_when_explicitly_unset(self) -> None:
+        # The default is now the configured cap (see test_loop_defaults.py);
+        # ``None`` remains the opt-out for an unbounded run.
+        b = LoopBudget(limits=LoopLimits(max_tokens=None))
         assert b.limits.max_tokens is None
         b.record_tokens(1_000_000)  # no cap → never raises
         assert b.tokens == 1_000_000
@@ -104,7 +106,7 @@ class TestTokenBudget:
         assert b.tokens == 0
 
     def test_token_pressure(self) -> None:
-        assert LoopBudget().token_pressure() == 0.0  # no cap
+        assert LoopBudget().token_pressure() == 0.0  # nothing spent yet
         b = LoopBudget(limits=LoopLimits(max_tokens=100))
         b.record_tokens(80)
         assert b.token_pressure() == pytest.approx(0.8)
@@ -114,19 +116,29 @@ class TestTokenBudget:
 
 
 class TestChargeLLMCostTokens:
-    def test_tokens_recorded_for_unpriced_model(self) -> None:
-        """Token cap enforces even for models absent from the pricing table."""
+    def test_tokens_recorded_for_unpriced_model(self, monkeypatch) -> None:
+        """Token cap enforces even for models absent from the pricing table.
+
+        Unknown-model dollar charging is governed by
+        ``BASELITH_UNKNOWN_MODEL_COST_POLICY`` (default ``charge`` — see
+        ``tests/unit/core/orchestration/test_budget_context.py``); pinned to
+        'zero' here since this test is about token accounting, not pricing.
+        """
         from core.orchestration.budget_context import (
             activate_budget,
             charge_llm_cost,
             deactivate_budget,
         )
+        from core.quotas import cost_enforcement as ce_mod
+
+        monkeypatch.setenv("BASELITH_UNKNOWN_MODEL_COST_POLICY", "zero")
+        monkeypatch.setattr(ce_mod, "_unknown_model_cost_config", None)
 
         b = LoopBudget(limits=LoopLimits(max_tokens=1000))
         token = activate_budget(b)
         try:
             cost = charge_llm_cost("some-self-hosted-model", 100, 50)
-            assert cost == 0.0  # unpriced → no USD charged
+            assert cost == 0.0  # policy=zero → no USD charged
             assert b.tokens == 150  # ...but tokens still counted
         finally:
             deactivate_budget(token)
@@ -149,8 +161,10 @@ class TestChargeLLMCostTokens:
 
 
 class TestWallClockDeadline:
-    def test_no_deadline_by_default(self) -> None:
-        b = LoopBudget()
+    def test_deadline_disabled_when_explicitly_unset(self) -> None:
+        # The default is now the configured wall-clock cap (see
+        # test_loop_defaults.py); ``None`` remains the opt-out.
+        b = LoopBudget(limits=LoopLimits(max_seconds=None))
         assert b.remaining_seconds() is None
         b.check_deadline()  # must not raise
         b.tick()

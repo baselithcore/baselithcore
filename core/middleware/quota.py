@@ -9,6 +9,9 @@ is rejected with ``429`` before reaching the route.
 Self-authenticating via the bearer token (like ``PluginAccessMiddleware``), so
 it does not depend on where it sits in the stack or on a route dependency
 having run. Unauthenticated requests are not quota-scoped and pass through.
+Verification goes through the shared per-request memo in
+:mod:`core.middleware._auth_memo`, so the tenant middleware and the route's auth
+dependency reuse this one result instead of re-verifying the same token.
 
 Identity and tenant windows are enforced through one batched
 check-then-consume (``check_and_consume_pair``): all four counters are read
@@ -20,11 +23,11 @@ from __future__ import annotations
 
 import json
 
-from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from core.auth import AuthManager, AuthUser, get_auth_manager
+from core.auth import AuthManager, AuthUser
 from core.config.quotas import get_quota_config
+from core.middleware._auth_memo import EXEMPT_PATHS, auth_manager, resolve_user
 from core.observability.logging import get_logger
 from core.quotas.manager import QuotaExceededError, get_quota_manager
 
@@ -36,17 +39,10 @@ class QuotaMiddleware:
 
     # Never quota-metered: liveness/readiness probes, the interactive docs
     # bundle, and metrics scrapes. Without this allowlist a full JWT/API-key
-    # verification ran on every /health poll and Prometheus scrape.
-    _EXEMPT_PATHS = frozenset(
-        {
-            "/health",
-            "/health/ready",
-            "/docs",
-            "/redoc",
-            "/openapi.json",
-            "/metrics",
-        }
-    )
+    # verification ran on every /health poll and Prometheus scrape. Shared with
+    # the other identity-resolving layers; kept as a class attribute because it
+    # is part of this middleware's published surface.
+    _EXEMPT_PATHS = EXEMPT_PATHS
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -54,16 +50,7 @@ class QuotaMiddleware:
     @staticmethod
     def _auth_manager() -> AuthManager | None:
         """The app-configured AuthManager, or the core global as a fallback."""
-        try:
-            from core.di.container import ServiceRegistry
-
-            return ServiceRegistry.get(AuthManager)
-        except Exception:
-            try:
-                return get_auth_manager()
-            except Exception:
-                logger.debug("auth_manager_unavailable_for_quota", exc_info=True)
-                return None
+        return auth_manager()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not get_quota_config().enabled:
@@ -73,35 +60,13 @@ class QuotaMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Mirror SecurityManager._extract_credentials: a caller authenticating
-        # with an ``X-API-Key`` header (no ``Authorization``) is authenticated
-        # by the route dependency, which synthesizes ``ApiKey <key>``. If quota
-        # only looked at ``Authorization`` it would never scope those callers —
-        # an unmetered bypass of QUOTAS_ENABLED. Build the same effective header
-        # here so the synthesized value matches the dependency's (memo hit too).
-        headers = Request(scope).headers
-        header = headers.get("authorization")
-        if not header:
-            api_key = headers.get("x-api-key")
-            if api_key:
-                header = f"ApiKey {api_key.strip()}"
-        manager = self._auth_manager() if header else None
-        user: AuthUser | None = None
-        if header and manager is not None:
-            try:
-                user = await manager.authenticate(header)
-            except Exception as exc:
-                logger.debug("quota auth skipped: %s", exc)
-                user = None
-            else:
-                # Memoize for the route's auth dependency so the same token is
-                # not verified twice per request. The dependency only trusts
-                # the memo when the header AND the manager instance match.
-                scope.setdefault("state", {})["_auth_memo"] = (
-                    header,
-                    id(manager),
-                    user,
-                )
+        # One verification per request, memoised on the scope for the tenant
+        # middleware and the route's auth dependency. Handles the API-key case
+        # too: a caller sending only ``X-API-Key`` is authenticated by the
+        # dependency via a synthesized ``ApiKey <key>`` header, and quota that
+        # read ``Authorization`` alone would never scope them — an unmetered
+        # bypass of QUOTAS_ENABLED.
+        user: AuthUser | None = await resolve_user(scope)
 
         # Only authenticated callers are quota-scoped; anyone else passes through.
         if user is None or not user.is_authenticated:

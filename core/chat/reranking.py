@@ -157,7 +157,7 @@ async def rerank_hits(
             results = await get_many(lookup_keys)
             cached_scores = {
                 key: value
-                for key, value in zip(lookup_keys, results)
+                for key, value in zip(lookup_keys, results, strict=True)
                 if value is not None
             }
         else:
@@ -185,7 +185,9 @@ async def rerank_hits(
                 await run_inference(reranker.predict, uncached_pairs)
             ).tolist()
         cache_writes = []
-        for (idx, hit, cache_key), score in zip(uncached_meta, predicted_scores):
+        for (idx, hit, cache_key), score in zip(
+            uncached_meta, predicted_scores, strict=True
+        ):
             if cache_key and cache is not None:
                 cache_writes.append(cache.set(cache_key, score))
                 telem.increment("rerank_cache.write")

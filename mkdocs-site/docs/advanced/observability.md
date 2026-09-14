@@ -169,7 +169,7 @@ Access UI: `http://localhost:16686`
     internals: request URLs, tenant ids, model names, prompt metadata. Bind it
     to loopback (as above) and reach it through an SSH tunnel, or put an
     authenticating proxy in front. The same applies to the
-    `docker-compose.observability.yml` overlay, where Jaeger, Prometheus and
+    `observability` profile of `compose.yaml`, where Jaeger, Prometheus and
     Grafana are all published on `127.0.0.1` only. Prometheus there also runs
     **without** `--web.enable-lifecycle`: that flag exposes unauthenticated
     `POST /-/reload` and `/-/quit`, a remote shutdown of the monitoring that is

@@ -20,6 +20,7 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from core.observability.logging import get_logger
+from core.utils.runtime_env import is_production_env
 
 logger = get_logger(__name__)
 
@@ -78,6 +79,130 @@ def metadata_url(request: Request, path: str) -> str:
     """Absolute URL of this resource's RFC 9728 metadata document."""
     base = str(request.base_url).rstrip("/")
     return f"{base}{METADATA_PATH}{path}"
+
+
+def resource_identifier(request: Request, path: str, cfg: Any | None = None) -> str:
+    """This endpoint's canonical resource identifier (RFC 8707 / RFC 9728).
+
+    The single source of the value published as ``resource`` in the
+    protected-resource metadata *and* the value an access token must name in
+    its ``aud`` claim — the two were written independently, which is how an
+    audience check ends up validating against something the metadata never
+    advertised.
+
+    ``MCP_RESOURCE_URL`` wins when set. The fallback derives the identifier
+    from ``request.base_url``, which is built from the ``Host`` header: unless
+    the deployment pins the host (``ALLOWED_HOSTS`` / TrustedHost), a caller
+    chooses what this endpoint claims to be, and both the advertised resource
+    and the audience it is compared against move with it.
+
+    Args:
+        request: The request being served.
+        path: The MCP endpoint's mount path.
+        cfg: MCP config; when it carries a non-empty ``mcp_resource_url`` that
+            value is authoritative.
+
+    Returns:
+        The canonical resource identifier, without a trailing slash.
+    """
+    configured = str(getattr(cfg, "mcp_resource_url", "") or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    base = str(request.base_url).rstrip("/")
+    return f"{base}{path}"
+
+
+def _canonical_resource(value: str) -> str:
+    """Normalize a resource URI for comparison.
+
+    Scheme and host are case-insensitive per RFC 3986; a trailing slash is not
+    significant for a resource identifier. Everything else is compared as-is —
+    a differing path is a different resource, not a formatting difference.
+    """
+    text = value.strip()
+    if not text:
+        return ""
+    head, separator, tail = text.partition("://")
+    if separator:
+        authority, slash, rest = tail.partition("/")
+        text = f"{head.lower()}://{authority.lower()}{slash}{rest}"
+    return text.rstrip("/")
+
+
+def token_audiences(user: Any) -> tuple[str, ...]:
+    """The ``aud`` values the caller's token carries, if any.
+
+    JWT and OIDC identities keep the verified claim set on ``metadata``; an
+    API-key identity has none, which is why the caller decides separately
+    whether an empty result means "unbound token" or "not a token at all".
+    """
+    claims = getattr(user, "metadata", None)
+    if not isinstance(claims, dict):
+        return ()
+    audience = claims.get("aud")
+    if isinstance(audience, str):
+        return (audience,)
+    if isinstance(audience, list | tuple):
+        return tuple(str(item) for item in audience)
+    return ()
+
+
+def token_audience_rejected(user: Any, resource: str, *, required: bool) -> bool:
+    """Whether this token must be refused for not being minted for *resource*.
+
+    *required* is the master switch, not just the missing-``aud`` rule: with it
+    off nothing is refused. That is deliberate. ``JWT_AUDIENCE`` is pinned once
+    per deployment (``core.auth.jwt`` passes it to every verification), so the
+    outcome here is binary — either the issued audience is this endpoint's
+    resource identifier or *every* token mismatches and the endpoint is
+    unreachable. An operator who cannot reissue tokens today needs a way to
+    stand the check down; the alternative is an outage with no lever. The
+    setting resolves to the production posture when unset, so the default is
+    still enforced where it matters.
+
+    With the check on: an ``aud`` naming a different resource is a refusal —
+    that token was issued to somebody else and is being replayed here — and so
+    is a token carrying no ``aud`` at all.
+
+    The bare origin is accepted alongside the full endpoint URL: the MCP
+    authorization spec lists both as valid canonical resource URIs for an
+    endpoint served under a path.
+    """
+    if not required:
+        return False
+    audiences = token_audiences(user)
+    if not audiences:
+        return True
+    canonical = _canonical_resource(resource)
+    head, separator, tail = canonical.partition("://")
+    origin = f"{head}://{tail.partition('/')[0]}" if separator else canonical
+    accepted = {canonical, origin}
+    return not any(_canonical_resource(item) in accepted for item in audiences)
+
+
+def audience_required(cfg: Any) -> bool:
+    """Whether the RFC 8707 audience check is enforced at all.
+
+    ``None`` (unset) resolves here rather than at config load, so a process
+    that arms the production posture after settings were built still fails
+    closed. An explicit ``false`` is the documented operator override — see
+    :func:`token_audience_rejected` for why one has to exist.
+    """
+    declared = getattr(cfg, "mcp_require_token_audience", None)
+    if declared is None:
+        return is_production_env()
+    return bool(declared)
+
+
+def is_bearer_credential(request: Request) -> bool:
+    """Whether the caller presented an OAuth bearer token (not an API key).
+
+    Audience binding is a property of OAuth access tokens; an API key has no
+    issuer, no audience and nothing to bind, so subjecting it to the check
+    would refuse every API-key client for a problem it cannot have.
+    """
+    header = request.headers.get("authorization") or ""
+    return header.split(" ", 1)[0].lower() == "bearer"
 
 
 async def authenticate(
@@ -178,6 +303,31 @@ def build_gate(
             logger.warning("mcp_http_insufficient_scope", required=required)
             return None, _jsonrpc_error(INSUFFICIENT_SCOPE, "Insufficient scope", 403)
 
+        # RFC 8707: a token is valid *for a resource*. Without this check a
+        # token an authorization server minted for an unrelated service — or
+        # one lifted from it — reached this endpoint's whole tool catalog.
+        resource = resource_identifier(request, path, cfg)
+        if is_bearer_credential(request) and token_audience_rejected(
+            user, resource, required=audience_required(cfg)
+        ):
+            logger.warning(
+                "mcp_http_token_audience_rejected",
+                resource=resource,
+                audiences=list(token_audiences(user)),
+            )
+            return None, _jsonrpc_error(
+                UNAUTHORIZED,
+                "Token is not valid for this resource",
+                401,
+                headers={
+                    "WWW-Authenticate": (
+                        'Bearer error="invalid_token", error_description='
+                        '"The access token was not issued for this resource", '
+                        f'resource_metadata="{metadata_url(request, path)}"'
+                    )
+                },
+            )
+
         # Bind identity so tenant-scoped tools resolve the tenant.
         from core.context import set_user_context
 
@@ -197,12 +347,17 @@ __all__ = [
     "METADATA_PATH",
     "RATE_LIMITED",
     "UNAUTHORIZED",
+    "audience_required",
     "authenticate",
     "build_gate",
     "enforce_rate_limit",
     "get_rate_limiter",
     "has_required_scope",
+    "is_bearer_credential",
     "metadata_url",
     "origin_rejected",
     "reset_rate_limiter",
+    "resource_identifier",
+    "token_audience_rejected",
+    "token_audiences",
 ]

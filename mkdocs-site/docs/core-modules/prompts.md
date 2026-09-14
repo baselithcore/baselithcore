@@ -152,6 +152,13 @@ Five framework prompts are catalog-served today:
 | `swarm_decomposition` | `core/orchestration/handlers/swarm_agents.py` (`build_decomposition_prompt`) |
 | `loop_goal_hardening` | `core/loops/goal.py` (`harden_goal`, pre-flight goal questionnaire) |
 
+`react_system` and `react_native_system` both close with the same
+untrusted-tool-output handling sentence as
+[`UNTRUSTED_OUTPUT_SYSTEM_RULE`](orchestration.md#untrusted-output-envelope),
+kept byte-comparable with the embedded fallback template in
+`core/reasoning/react.py` / `react_native.py` so the packaged catalog prompt
+and its code fallback never drift out of sync.
+
 !!! note "Literal braces survive"
     Catalog templates use `{{ var }}` placeholders; the renderer matches
     **only** `{{ identifier }}`, so literal JSON examples in a prompt keep
@@ -257,6 +264,21 @@ checkpoint store's approach. Any other durable backend can implement the same
 four-method Protocol (`initialize` / `upsert_version` / `set_label` /
 `fetch_all`); a backend for a store the core does not already speak belongs
 in a plugin.
+
+!!! note "Every call runs inside `system_tenant_scope()`"
+    Prompts are **deployment-global**: neither `prompt_versions` nor
+    `prompt_labels` carries a `tenant_id` column, and neither is covered by a
+    row-level-security policy — there is no tenant this store could be
+    attributed to. Under
+    [`DB_RLS_ENABLED`](../advanced/multi-tenancy.md#system-tenant-scope),
+    though, a pool checkout refuses a caller that bound no tenant at all —
+    and the callers here are out of request by construction: the schema
+    bootstrap, and `PromptSynchronizer.refresh` running on its background
+    timer. So every `PostgresPromptBackend` method now wraps its query in
+    [`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope).
+    Unscoped, `refresh` raised `TenantContextError` into its own fail-open
+    handler on every tick — prompt sync logged a warning and quietly never
+    synced.
 
 ### Enabling it (env)
 

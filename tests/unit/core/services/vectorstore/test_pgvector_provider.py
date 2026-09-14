@@ -38,6 +38,27 @@ def _sqls(cursor):
     return [c.args[0] for c in cursor.execute.call_args_list]
 
 
+def _vector_call(cursor):
+    """The call that ran the vector query.
+
+    ``search()`` first issues ``SET LOCAL hnsw.ef_search = N`` (see
+    VECTORSTORE_HNSW_EF_SEARCH), so the query under test is no longer the
+    cursor's first statement.
+    """
+    for call in cursor.execute.call_args_list:
+        if "<=>" in call.args[0]:
+            return call
+    raise AssertionError("no vector query was executed")
+
+
+def _search_sql(cursor):
+    return _vector_call(cursor).args[0]
+
+
+def _search_params(cursor):
+    return _vector_call(cursor).args[1]
+
+
 @pytest.mark.asyncio
 class TestCreateCollection:
     async def test_ddl_creates_extension_table_index(self):
@@ -105,7 +126,7 @@ class TestSearch:
         )
         with _patched(cursor):
             hits = await PgVectorProvider().search("documents", [0.1, 0.2], limit=5)
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "<=>" in sql and "ORDER BY" in sql and "LIMIT" in sql
         assert isinstance(hits[0], PgVectorPoint)
         assert hits[0].id == "a" and hits[0].score == 0.9
@@ -121,9 +142,9 @@ class TestSearch:
                 score_threshold=0.7,
                 filter={"tenant_id": "t1"},
             )
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "payload @>" in sql
-        params = cursor.execute.call_args_list[0].args[1]
+        params = _search_params(cursor)
         assert 0.7 in params
         assert any("t1" in str(p) for p in params)
 
@@ -231,9 +252,9 @@ class TestTenantIsolation:
         cursor = _cursor()
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], tenant_id="t1")
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "payload @>" in sql
-        params = cursor.execute.call_args_list[0].args[1]
+        params = _search_params(cursor)
         assert any("t1" in str(p) for p in params)
 
     async def test_scroll_applies_tenant_filter(self):
@@ -267,9 +288,9 @@ class TestQdrantStyleFilterTranslation:
         filt = _Filter(must=[_Cond("document_id", _Match(value="d1"))])
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], query_filter=filt)
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "payload->>%s = %s" in sql
-        params = cursor.execute.call_args_list[0].args[1]
+        params = _search_params(cursor)
         assert "document_id" in params and "d1" in params
 
     async def test_search_translates_must_not_match_any(self):
@@ -277,7 +298,7 @@ class TestQdrantStyleFilterTranslation:
         filt = _Filter(must_not=[_Cond("document_id", _Match(any=["d1", "d2"]))])
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], query_filter=filt)
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "NOT (payload->>%s = ANY(%s))" in sql
 
     async def test_scroll_translates_scroll_filter(self):
@@ -301,7 +322,7 @@ class TestQdrantStyleFilterTranslation:
         )
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], query_filter=filt)
-        sql = _sqls(cursor)[0]
+        sql = _search_sql(cursor)
         assert "payload->>%s = %s" in sql
         assert "NOT (payload->>%s = ANY(%s))" in sql
 

@@ -3,12 +3,37 @@
 Extracted from ``interface.py`` to keep that module under the 500-LOC cap. The
 public import path is unchanged: ``from core.plugins.interface import
 PluginMetadata`` still works (``interface`` re-exports this class).
+
+The manifest *schema* lives one module further out, in
+:mod:`core.plugins.manifest_model` (same 500-LOC reason); its public names are
+re-exported here so ``from core.plugins._metadata import PluginManifestModel``
+resolves for callers that think of the schema as part of the metadata surface.
 """
 
 from pathlib import Path
 from typing import Any
 
+from core.plugins.manifest_model import (
+    VENDOR_EXTENSION_PREFIX,
+    ManifestValidationError,
+    PluginManifestModel,
+    is_extension_key,
+    known_manifest_keys,
+    load_manifest_model,
+    validate_manifest_data,
+)
 from core.plugins.permissions import parse_permissions
+
+__all__ = [
+    "VENDOR_EXTENSION_PREFIX",
+    "ManifestValidationError",
+    "PluginManifestModel",
+    "PluginMetadata",
+    "is_extension_key",
+    "known_manifest_keys",
+    "load_manifest_model",
+    "validate_manifest_data",
+]
 
 
 def _normalize_env_declarations(declared: Any) -> list[str]:
@@ -78,6 +103,10 @@ class PluginMetadata:
         subcomponent_of: str = "",
         llm_scopes: list[dict[str, str]] | None = None,
         permissions: Any = None,
+        entry_point: str = "",
+        plugin_id: str = "",
+        repository: str = "",
+        extensions: dict[str, Any] | None = None,
     ):
         """
         Initialize plugin metadata.
@@ -115,6 +144,16 @@ class PluginMetadata:
                 plugin's store resolves its effective scope key via
                 ``core.context.resolve_plugin_tenant(self.metadata.tenancy)``.
                 Unknown values normalize to ``"shared"``.
+            entry_point: Optional ``module:Class`` pointer to the plugin class,
+                relative to the plugin package (e.g. ``plugin:MyPlugin``). When
+                set the loader imports exactly that class instead of scanning
+                the module for a ``Plugin`` subclass.
+            plugin_id: Marketplace identifier (manifest key ``id``). Purely
+                informational for the runtime; defaults to the empty string.
+            repository: Source repository URL (manifest key ``repository``).
+            extensions: Vendor-extension keys (``x-*``) from the manifest,
+                keyed as written. The core never reads them; they are carried
+                so the plugin that owns them can (see :meth:`extension`).
         """
         self.name = name
         self.version = version
@@ -170,6 +209,25 @@ class PluginMetadata:
         # of its parent (and the parent gains a "Has subcomponents" relation).
         self.subcomponent_of = subcomponent_of or ""
 
+        # Optional ``module:Class`` entry point. When present the loader
+        # imports exactly this class instead of guessing from dir(module) —
+        # the old heuristic picked alphabetically and could instantiate the
+        # wrong class in a module that defines more than one.
+        self.entry_point = entry_point or ""
+
+        # Marketplace identity fields. Not consumed by the runtime, but part
+        # of the manifest contract, so they are parsed and carried rather than
+        # silently dropped.
+        self.plugin_id = plugin_id or ""
+        self.repository = repository or ""
+
+        # Vendor extensions: the ``x-`` keys the core does not interpret. They
+        # are part of the signed manifest (V5 hash surface), so a plugin may
+        # trust them exactly as far as it trusts its own signature — and they
+        # are never dropped, which is what a closed key set would otherwise do
+        # to every downstream consumer's data.
+        self.extensions: dict[str, Any] = dict(extensions or {})
+
         # Optional named LLM sub-policies for a plugin with more than one
         # distinct LLM pipeline (e.g. wikigen: "ingestion" vs "chat"). Each entry
         # is ``{"id": <stable-key>, "label": <display>}``; the central LLM-policy
@@ -210,11 +268,30 @@ class PluginMetadata:
             out.append({"id": scope_id, "label": label})
         return out
 
+    def extension(self, name: str, default: Any = None) -> Any:
+        """Read one vendor extension, with or without the ``x-`` prefix.
+
+        Args:
+            name: The extension name, either as written in the manifest
+                (``"x-control"``) or bare (``"control"``).
+            default: Returned when the manifest declares no such key.
+
+        Returns:
+            The declared value, or ``default``.
+        """
+        key = name if is_extension_key(name) else f"{VENDOR_EXTENSION_PREFIX}{name}"
+        return self.extensions.get(key, default)
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize metadata to a dictionary for API or logging export.
+
+        Vendor extensions are re-emitted at the top level under their original
+        ``x-`` keys (they cannot collide with a core key — no core key carries
+        the prefix), so the output stays a valid manifest and round-trips
+        through :meth:`to_json_file` / :meth:`from_file`.
         """
-        return {
+        data: dict[str, Any] = {
             "name": self.name,
             "version": self.version,
             "description": self.description,
@@ -241,58 +318,77 @@ class PluginMetadata:
             "subcomponent_of": self.subcomponent_of,
             "llm_scopes": self.llm_scopes,
             "permissions": self.permissions.summary(),
+            "entry_point": self.entry_point,
+            "id": self.plugin_id,
+            "repository": self.repository,
         }
+        data.update(self.extensions)
+        return data
+
+    @classmethod
+    def from_model(cls, model: PluginManifestModel) -> "PluginMetadata":
+        """Build metadata from an already-validated manifest model.
+
+        Args:
+            model: The validated manifest.
+
+        Returns:
+            PluginMetadata instance.
+        """
+        return cls(
+            name=model.name,
+            version=model.version,
+            description=model.description,
+            author=model.author,
+            dependencies=model.dependencies,
+            required_resources=model.required_resources,
+            optional_resources=model.optional_resources,
+            python_dependencies=model.python_dependencies,
+            plugin_dependencies=model.plugin_dependencies,
+            permissions=model.permissions,
+            min_core_version=model.min_core_version,
+            max_core_version=model.max_core_version,
+            homepage=model.homepage,
+            license=model.license,
+            tags=model.tags,
+            icon=model.icon,
+            screenshots=model.screenshots,
+            category=model.category,
+            environment_variables=model.environment_variables,
+            readiness=model.readiness,
+            system=model.system,
+            tenancy=model.tenancy,
+            integrity_sha256=model.integrity_sha256,
+            signature_ed25519=model.signature_ed25519,
+            subcomponent_of=model.subcomponent_of,
+            llm_scopes=model.llm_scopes,
+            entry_point=model.entry_point or "",
+            plugin_id=model.id,
+            repository=model.repository or model.git_url or "",
+            extensions=model.extensions,
+        )
 
     @classmethod
     def from_file(cls, path: Path) -> "PluginMetadata":
         """
         Load metadata from a manifest file.
 
+        The manifest is validated against :class:`PluginManifestModel` first,
+        so an unknown or misspelled key is a named error instead of a silently
+        ignored line.
+
         Args:
             path: Path to the manifest file (.yaml, .yml, or .json).
 
         Returns:
             PluginMetadata instance.
+
+        Raises:
+            ManifestValidationError: The manifest is unparseable or violates
+                the schema. Callers in the loader and the resource analyzer
+                already treat this as "skip the plugin".
         """
-        if path.suffix in (".yaml", ".yml"):
-            import yaml
-
-            with open(path, encoding="utf-8") as mf:
-                data = yaml.safe_load(mf)
-        else:
-            import json
-
-            with open(path, encoding="utf-8") as mf:
-                data = json.load(mf)
-
-        return cls(
-            name=data.get("name", ""),
-            version=data.get("version", "0.1.0"),
-            description=data.get("description", ""),
-            author=data.get("author", ""),
-            dependencies=data.get("dependencies"),
-            required_resources=data.get("required_resources"),
-            optional_resources=data.get("optional_resources"),
-            python_dependencies=data.get("python_dependencies"),
-            plugin_dependencies=data.get("plugin_dependencies"),
-            permissions=data.get("permissions"),
-            min_core_version=data.get("min_core_version"),
-            max_core_version=data.get("max_core_version"),
-            homepage=data.get("homepage", ""),
-            license=data.get("license", ""),
-            tags=data.get("tags"),
-            icon=data.get("icon", ""),
-            screenshots=data.get("screenshots"),
-            category=data.get("category", "Generic"),
-            environment_variables=data.get("environment_variables"),
-            readiness=data.get("readiness", "stable"),
-            system=bool(data.get("system", False)),
-            tenancy=str(data.get("tenancy", "shared")),
-            integrity_sha256=data.get("integrity_sha256"),
-            signature_ed25519=data.get("signature_ed25519"),
-            subcomponent_of=str(data.get("subcomponent_of", "")),
-            llm_scopes=data.get("llm_scopes"),
-        )
+        return cls.from_model(load_manifest_model(path))
 
     def to_json_file(self, path: Path) -> None:
         """

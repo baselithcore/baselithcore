@@ -14,7 +14,8 @@ from fastapi import HTTPException, Request, status
 
 from core.auth.types import AuthError
 from core.config import SecurityConfig, get_security_config
-from core.context import set_tenant_context as _set_tenant_ctx
+from core.context import ReservedTenantError
+from core.context import bind_principal_tenant as _bind_principal_tenant
 from core.context import set_user_context as _set_user_ctx
 from core.middleware._admin_credentials import (
     VerifiedCredentialCache,
@@ -272,7 +273,17 @@ class SecurityManager(AdminLockoutMixin):
         # correct tenant_id.  The middleware's finally-block reset(token)
         # will correctly restore the context to its pre-request state
         # regardless of this intermediate set.
-        _set_tenant_ctx(user.tenant_id)
+        #
+        # Through ``bind_principal_tenant``: this is the *second* binding site,
+        # and the one that matters for connections TenantMiddleware never sees
+        # — it returns early for any non-HTTP scope, so a WebSocket route
+        # calling ``enforce_auth`` (the chat socket does) was the one path where
+        # a token claiming ``system`` still bound it, for the whole connection.
+        # The helper refuses before the binding, not after.
+        try:
+            _bind_principal_tenant(user.tenant_id)
+        except ReservedTenantError:
+            self._refuse_reserved_tenant(user, client_ip, request.url.path)
         # Bind the user id too (identity-derived), so plugins declaring
         # ``tenancy: personal`` can resolve a per-user tenant via
         # core.context.resolve_plugin_tenant even on a shared deployment.
@@ -287,6 +298,50 @@ class SecurityManager(AdminLockoutMixin):
         )
 
         return role
+
+    @staticmethod
+    def _refuse_reserved_tenant(user: Any, client_ip: str, path: str) -> None:
+        """Reject a verified principal that asserts a reserved tenant.
+
+        403, matching :class:`core.middleware.tenant.TenantMiddleware`: the
+        credential may be perfectly valid; what is refused is the identity it
+        asserts. Audited as a security event rather than logged as a validation
+        nit — a principal carrying a reserved claim means someone *issued* it.
+
+        Raises:
+            HTTPException: Always. The return type is ``None`` only because the
+                call site reads as a guard.
+        """
+        from core.observability.audit import AuditEventType, audit_emit
+
+        SECURITY_EVENTS.labels(reason="reserved_tenant").inc()
+        audit_emit(
+            AuditEventType.AUTH_FAILED,
+            user_id=getattr(user, "user_id", None),
+            tenant_id=getattr(user, "tenant_id", None),
+            resource=f"tenant:{getattr(user, 'tenant_id', None)}",
+            action="reserved_tenant_rejected",
+            success=False,
+            ip_address=client_ip,
+            details={
+                "reason": "principal claimed a framework-reserved tenant id",
+                "path": path,
+            },
+        )
+        logger.warning(
+            "AUDIT | AUTH | reserved_tenant | user=%s tenant=%s ip=%s path=%s",
+            getattr(user, "user_id", None),
+            getattr(user, "tenant_id", None),
+            client_ip,
+            path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This credential asserts a reserved tenant identifier, which "
+                "belongs to the framework's own maintenance context."
+            ),
+        )
 
     def verify_admin_password(self, candidate: str) -> bool:
         """

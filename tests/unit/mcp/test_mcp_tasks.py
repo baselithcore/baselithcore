@@ -120,7 +120,11 @@ class TestTaskLifecycle:
         # A tool that raises is a *tool* error, so the task completes with an
         # isError result rather than failing at the protocol level.
         assert failed["result"]["isError"] is True
-        assert "upstream exploded" in failed["result"]["content"][0]["text"]
+        # Same opaque-error contract as the synchronous path: a correlation
+        # id for the model, the exception text only in the log.
+        message = failed["result"]["content"][0]["text"]
+        assert "upstream exploded" not in message
+        assert "error id" in message.lower()
 
     @pytest.mark.asyncio
     async def test_mid_flight_input_parks_the_task_until_update(self) -> None:

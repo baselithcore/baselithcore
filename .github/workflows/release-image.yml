@@ -36,17 +36,55 @@ permissions:
   contents: read
 
 jobs:
-  build-sign:
-    name: Build, push, sign (cosign) + provenance
+  # ---------------------------------------------------------------------------
+  # Why this is three jobs and not one
+  #
+  # The single job built `linux/amd64,linux/arm64` on one amd64 runner, which
+  # means the arm64 half runs under QEMU emulation: torch, ~100 apt packages,
+  # a Chromium install and two model downloads, all interpreted. That leg
+  # dominated the wall clock and the billed minutes.
+  #
+  # Each platform now builds on a runner of its own architecture — GitHub
+  # offers arm64 hosted runners (`ubuntu-24.04-arm`) — and a final job merges
+  # the two into one multi-arch index. Same manifest for pullers, natively
+  # compiled, and the two legs run in parallel instead of in sequence.
+  #
+  # They are written out rather than expressed as a matrix on purpose: a matrix
+  # cannot hand two per-platform digests to a later job (matrix job outputs
+  # overwrite each other), and the alternative — passing them as artifacts —
+  # would add two more third-party actions to pin.
+  # ---------------------------------------------------------------------------
+  meta:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Resolve image tag
+        id: meta
+        env:
+          REGISTRY: ghcr.io
+          IMAGE_NAME: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          TAG="${INPUT_TAG:-${RELEASE_TAG:-latest}}"
+          # Strip a leading 'v' if present (v0.12.0 -> 0.12.0).
+          TAG="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
+
+  build-amd64:
+    name: Build linux/amd64
+    needs: [meta]
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write        # push to GHCR
-      id-token: write         # keyless cosign (Sigstore OIDC) + SLSA provenance
-      attestations: write     # GitHub artifact attestations
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
+      packages: write        # push the platform image by digest
+      id-token: write         # SLSA provenance
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -58,45 +96,36 @@ jobs:
           # bare workflow_dispatch) keeps the default ref.
           ref: ${{ inputs.tag || github.event.release.tag_name }}
           persist-credentials: false
-
-      - name: Resolve image tag
-        id: meta
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          TAG="${INPUT_TAG:-${RELEASE_TAG:-latest}}"
-          # Strip a leading 'v' if present (v0.12.0 -> 0.12.0).
-          TAG="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "image=${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
-
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3
-
-      - name: Build and push
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
-          # Multi-stage runtime (no build toolchain in the shipped layers).
-          # Dockerfile-slim remains the local/dev single-stage build.
-          file: Dockerfile-full
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
-            ${{ steps.meta.outputs.image }}:latest
+          # The repository's one Dockerfile: multi-stage, so the compiler
+          # toolchain stays in the build stage. Local, dev and production all
+          # build this same file — there is no second variant to drift.
+          file: Dockerfile
+          platforms: linux/amd64
+          # No tags: the platform image is pushed by digest and only the merge
+          # job below names it, so neither leg can leave a half-finished
+          # single-arch image sitting on the release tag.
+          outputs: type=image,name=${{ needs.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          # Layer cache in the registry, per platform. Without it every release
+          # re-downloaded torch and the model weights and reinstalled Chromium
+          # from scratch; the Dockerfile keeps those layers above the source
+          # COPYs, so a release that only changes code now reuses all of them.
+          # Registry rather than type=gha: the cache for this image is several
+          # GB and would be evicted from the 10GB Actions cache continuously.
+          cache-from: type=registry,ref=${{ needs.meta.outputs.image }}:buildcache-amd64
+          cache-to: type=registry,ref=${{ needs.meta.outputs.image }}:buildcache-amd64,mode=max
           # `org.opencontainers.image.source` is what links the GHCR package to
           # this repository: without it the package shows up unattached (absent
           # from the repo's Packages sidebar, inheriting none of its settings).
@@ -104,18 +133,118 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
+            org.opencontainers.image.version=${{ needs.meta.outputs.tag }}
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.title=BaselithCore
             org.opencontainers.image.description=Modular orchestration engine for production-grade agentic AI
-          # SLSA provenance + SBOM attached to the image at push time.
+          # SLSA provenance + SBOM attached to the platform image at push time;
+          # `imagetools create` carries both into the merged index.
           provenance: mode=max
           sbom: true
 
+  build-arm64:
+    name: Build linux/arm64
+    needs: [meta]
+    # Native arm64 hosted runner. The previous single-job build cross-built
+    # this platform under QEMU on an amd64 runner, which is where most of the
+    # wall clock went. If this label is ever unavailable to the repository the
+    # job fails fast here, rather than silently shipping an amd64-only index.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          outputs: type=image,name=${{ needs.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ needs.meta.outputs.image }}:buildcache-arm64
+          cache-to: type=registry,ref=${{ needs.meta.outputs.image }}:buildcache-arm64,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.meta.outputs.tag }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.title=BaselithCore
+            org.opencontainers.image.description=Modular orchestration engine for production-grade agentic AI
+          provenance: mode=max
+          sbom: true
+
+  publish:
+    name: Merge manifest, sign (cosign), scan, attest
+    needs: [meta, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # write the multi-arch index
+      id-token: write         # keyless cosign (Sigstore OIDC)
+      attestations: write     # GitHub artifact attestations
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # Only .trivyignore.yaml is read here; the scan targets the pushed
+          # digest, not the working tree.
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3
+      - name: Merge the two platform images into one index
+        id: merge
+        env:
+          IMAGE: ${{ needs.meta.outputs.image }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          AMD64_DIGEST: ${{ needs.build-amd64.outputs.digest }}
+          ARM64_DIGEST: ${{ needs.build-arm64.outputs.digest }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Annotate the INDEX as well as the platform manifests: GHCR reads
+          # the source link off whichever manifest the tag points at, and that
+          # is the index here.
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=${SOURCE_URL}" \
+            --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "index:org.opencontainers.image.version=${TAG}" \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}@${AMD64_DIGEST}" \
+            "${IMAGE}@${ARM64_DIGEST}"
+          # The index digest is what gets signed and attested — not either
+          # platform digest, which a puller of the tag never resolves to.
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
       - name: Sign image (keyless / Sigstore OIDC)
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.merge.outputs.digest }}
+          IMAGE: ${{ needs.meta.outputs.image }}
           COSIGN_YES: "true"
         run: |
           cosign sign "${IMAGE}@${DIGEST}"
@@ -128,8 +257,8 @@ jobs:
           TRIVY_VERSION: 0.71.0
           # Keep in lockstep with TRIVY_VERSION (and the copy in ci.yml).
           TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
-          IMAGE: ${{ steps.meta.outputs.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ needs.meta.outputs.image }}
+          DIGEST: ${{ steps.merge.outputs.digest }}
         run: |
           set -euo pipefail
           curl -sSfL -o trivy.tar.gz \
@@ -142,6 +271,6 @@ jobs:
       - name: Generate GitHub artifact attestation (provenance)
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1
         with:
-          subject-name: ${{ steps.meta.outputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-name: ${{ needs.meta.outputs.image }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true

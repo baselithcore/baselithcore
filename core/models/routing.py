@@ -50,19 +50,37 @@ class RoutingDecision:
 
 
 _DEFAULT_PRIMARY: Final[Mapping[TaskCategory, str]] = {
-    TaskCategory.PLANNING: "claude-opus-4-8",
-    TaskCategory.REASONING: "claude-opus-4-8",
-    TaskCategory.EXECUTION: "claude-sonnet-4-6",
+    TaskCategory.PLANNING: "claude-opus-5",
+    TaskCategory.REASONING: "claude-opus-5",
+    TaskCategory.EXECUTION: "claude-sonnet-5",
     TaskCategory.CLASSIFICATION: "claude-haiku-4-5",
     TaskCategory.SUMMARIZATION: "claude-haiku-4-5",
     TaskCategory.EMBEDDING: "claude-haiku-4-5",
 }
 
 _COMPLEXITY_UPGRADE: Final[Mapping[TaskCategory, dict[Complexity, str]]] = {
-    TaskCategory.EXECUTION: {Complexity.COMPLEX: "claude-opus-4-8"},
-    TaskCategory.SUMMARIZATION: {Complexity.COMPLEX: "claude-sonnet-4-6"},
-    TaskCategory.CLASSIFICATION: {Complexity.COMPLEX: "claude-sonnet-4-6"},
+    TaskCategory.EXECUTION: {Complexity.COMPLEX: "claude-opus-5"},
+    TaskCategory.SUMMARIZATION: {Complexity.COMPLEX: "claude-sonnet-5"},
+    TaskCategory.CLASSIFICATION: {Complexity.COMPLEX: "claude-sonnet-5"},
 }
+
+
+def cost_per_1k_usd(model_id: str) -> float:
+    """Rough USD cost of 1K tokens for ``model_id`` (500 in / 500 out).
+
+    Used only to *rank* and *bound* candidates for the ``max_cost_per_1k_usd``
+    guard below, not for billing (real calls are priced by
+    :func:`core.models.pricing.estimate_cost` from actual token counts).
+
+    Public because the guard has a second enforcement point: the learned router
+    (:meth:`core.models.routing_stats.LearnedModelRouter._allowed_models`) has
+    to apply the same ceiling to the scoreboard's candidate set, and a
+    cross-module import of a private name is how two copies of a rule drift
+    apart.
+    """
+    from core.models.pricing import get_price
+
+    return get_price(model_id).estimate(500, 500)
 
 
 @dataclass
@@ -76,8 +94,16 @@ class RoutingPolicy:
         default_factory=lambda: {cat: dict(m) for cat, m in _COMPLEXITY_UPGRADE.items()}
     )
 
-    def select(self, category: TaskCategory, complexity: Complexity) -> RoutingDecision:
-        """Return the model id and rationale for the given task signal."""
+    def _candidate_pool(self) -> tuple[str, ...]:
+        """Every distinct model id this policy might ever select."""
+        ids = set(self.primary.values())
+        for tier in self.complexity_upgrade.values():
+            ids.update(tier.values())
+        return tuple(ids)
+
+    def _resolve(
+        self, category: TaskCategory, complexity: Complexity
+    ) -> RoutingDecision:
         upgrade = self.complexity_upgrade.get(category, {}).get(complexity)
         if upgrade is not None:
             return RoutingDecision(
@@ -96,6 +122,57 @@ class RoutingPolicy:
             complexity=complexity,
         )
 
+    def select(
+        self,
+        category: TaskCategory,
+        complexity: Complexity,
+        *,
+        max_cost_per_1k_usd: float | None = None,
+    ) -> RoutingDecision:
+        """Return the model id and rationale for the given task signal.
+
+        Args:
+            category: Task bucket being routed.
+            complexity: Difficulty signal used to break ties within the
+                category.
+            max_cost_per_1k_usd: Optional budget hint. When given and the
+                resolved model's approximate cost per 1K tokens (500 in /
+                500 out, per :func:`cost_per_1k_usd`) exceeds it, the
+                *priciest* candidate in this policy's pool that still fits
+                the budget is substituted instead (``rule="cost_guard"``) —
+                the best quality the budget affords, not just any affordable
+                model. When no candidate fits, the single cheapest candidate
+                is returned as a best effort rather than raising.
+        """
+        decision = self._resolve(category, complexity)
+        if max_cost_per_1k_usd is None:
+            return decision
+        if cost_per_1k_usd(decision.model_id) <= max_cost_per_1k_usd:
+            return decision
+
+        candidates = sorted(self._candidate_pool(), key=cost_per_1k_usd)
+        if not candidates:
+            return decision
+        affordable = [
+            c for c in candidates if cost_per_1k_usd(c) <= max_cost_per_1k_usd
+        ]
+        if affordable:
+            best = max(affordable, key=cost_per_1k_usd)
+            return RoutingDecision(
+                model_id=best,
+                rule="cost_guard",
+                category=category,
+                complexity=complexity,
+            )
+        # Nothing fits the budget: fall back to the cheapest known candidate
+        # rather than raise — a routing hint should never abort a request.
+        return RoutingDecision(
+            model_id=candidates[0],
+            rule="cost_guard",
+            category=category,
+            complexity=complexity,
+        )
+
 
 class ModelRouter:
     """Thin facade over a ``RoutingPolicy``."""
@@ -107,8 +184,12 @@ class ModelRouter:
         self,
         category: TaskCategory,
         complexity: Complexity = Complexity.MEDIUM,
+        *,
+        max_cost_per_1k_usd: float | None = None,
     ) -> RoutingDecision:
-        return self._policy.select(category, complexity)
+        return self._policy.select(
+            category, complexity, max_cost_per_1k_usd=max_cost_per_1k_usd
+        )
 
     @property
     def policy(self) -> RoutingPolicy:

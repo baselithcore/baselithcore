@@ -31,6 +31,7 @@ from core.cli.handlers import (
     cmd_shell,
     cmd_test,
     cmd_verify,
+    run_command,
 )
 
 try:
@@ -340,7 +341,12 @@ def main() -> int:
     # parser-provided handlers (set_defaults(handler=...)) used by plugin CLIs.
     handler = COMMAND_HANDLERS_MAP.get(args.command) or getattr(args, "handler", None)
     if handler and callable(handler):
-        result: Any = handler(args)
+        # Through ``run_command``, never straight at the handler: it is what
+        # declares the ``system`` tenant under DB_RLS_ENABLED, and this is the
+        # only point every command passes — including the ones plugins add to
+        # the map above at import time and the ``set_defaults(handler=...)``
+        # fallback on the same line.
+        result: Any = run_command(args.command, handler, args)
         return int(result) if isinstance(result, int) else 0
 
     # Unknown / unregistered command

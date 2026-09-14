@@ -6,7 +6,10 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/baselithcore/baselithcore
-  # `slim` excludes heavy browser/OCR extras; use `full` if you need them.
+  # There is ONE image. This used to say "`slim` excludes heavy browser/OCR
+  # extras; use `full` if you need them" — no build ever produced either tag,
+  # and the two Dockerfiles behind those names installed the same Playwright,
+  # Chromium and pytesseract. Both are gone; the repository has one Dockerfile.
   tag: ""              # defaults to .Chart.AppVersion when empty
   # Pin by content, not by name. A tag is a mutable pointer: the image the
   # admission controller verified and the image that starts three weeks later
@@ -392,9 +395,59 @@ worker:
       memory: 3Gi
 
 # -------------------------------------------------------------------------
+# Telemetry (OpenTelemetry traces + metrics)
+# -------------------------------------------------------------------------
+# Off by default, and off means *nothing is instrumented*: no TracerProvider,
+# no FastAPI/HTTPX/Redis auto-instrumentation, therefore no HTTP, database or
+# client spans anywhere — including in-process consumers such as the
+# BaselithControl "Traces" tab, which then correctly reports that the SDK is
+# not active and shows an empty list. Turning tracing on is this block; it is
+# not something the app infers from having the SDK installed.
+telemetry:
+  # Installs the providers and the auto-instrumentation at boot.
+  enabled: false
+
+  # OTLP/gRPC collector endpoint (e.g. "http://tempo.monitoring:4317",
+  # "http://otel-collector:4317").
+  #
+  # EMPTY IS A SUPPORTED MODE, and the right one for a cluster with no trace
+  # backend: the providers and every instrumentor are still installed, spans
+  # are still produced and still reach in-process consumers (the Traces tab),
+  # they simply are not shipped anywhere. Pointing the exporter at a collector
+  # that is not deployed is strictly worse than leaving this empty — the gRPC
+  # exporter retries every batch with backoff, burning CPU on the export
+  # thread and filling the log, and you still have no trace backend.
+  #
+  # A collector outside this namespace also needs a NetworkPolicy egress rule
+  # when networkPolicy.egress.enabled is on: presets.sameNamespace does not
+  # cover it, and the export then fails silently at the CNI.
+  otlpEndpoint: ""
+
+  # Head-based sampling ratio, ParentBased(TraceIdRatio). 1.0 traces every
+  # request: fine for a lab or a low-traffic staging, but on a busy deployment
+  # it is the single most expensive knob here — every sampled span costs
+  # attribute allocation, queue space and (with a collector) egress. Lower it
+  # in production; the trace you keep is still a complete one, because the
+  # decision is taken once at the root and inherited by every child.
+  tracesSampleRate: 1.0
+
+  # Push OTel-native metrics over OTLP. Independent of the Prometheus /metrics
+  # scrape, which is always available and is what serviceMonitor uses — so
+  # this is duplicate cost unless a collector actually consumes it. Requires
+  # otlpEndpoint (metrics have no in-process consumer; the chart refuses the
+  # combination rather than starting an export thread that exports nowhere).
+  metricsEnabled: false
+
+  # `deployment.environment` resource attribute on every span/metric. Empty
+  # leaves the app default ("development"), which mislabels a production
+  # deployment in whatever backend receives it.
+  environment: ""
+
+# -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-# Non-secret environment variables -> ConfigMap.
+# Non-secret environment variables -> ConfigMap. Keys set here always win over
+# the blocks above, so an operator can still drive TELEMETRY_* by hand.
 config:
   CORE_LOG_LEVEL: INFO
   CORE_LOG_FORMAT: json
@@ -466,6 +519,36 @@ extraVolumeMounts: []
 # the destination yourself.
 seedFromImage: []
 
+# Declarative plugin set. The other way round from `seedFromImage` above: that
+# one makes configs/plugins.yaml writable so an admin can toggle plugins at
+# runtime; this one makes the plugin set a property of the release. When
+# `config` is non-empty it is rendered into a ConfigMap and mounted read-only
+# over /app/configs/plugins.yaml in the api and worker pods (subPath, so the
+# rest of configs/ stays as shipped). The app reads that path by default, so
+# no PLUGIN_CONFIG_PATH is involved, and the pods roll whenever the content
+# changes. Every console or CLI toggle then fails with "Read-only file
+# system" — deliberately: the set of plugins a release runs is decided by
+# whoever renders the values (a customer spec, a GitOps overlay), not by a
+# click in a pod, and the running state can never drift from the manifest.
+#
+# The map is the plugins.yaml content verbatim: plugin name -> its block. Note
+# the loader's rule (core/api/lifespan.py): when the file has any entries, a
+# plugin absent from it is NOT loaded, so list every plugin the release needs,
+# system plugins included.
+#
+#   plugins:
+#     config:
+#       auth: {enabled: true}
+#       api_routers: {enabled: true}
+#       baselithcontrol: {enabled: true, require_admin: false}
+#       compliance: {enabled: true, require_admin: true}
+#
+# Mutually exclusive with `config.PLUGIN_CONFIG_PATH` and with a
+# `seedFromImage` entry from /app/configs/plugins.yaml; the chart refuses to
+# render the combination.
+plugins:
+  config: {}
+
 # `helm test <release>` — the smoke test that asks the one question a
 # successful install cannot answer: does a request reaching the Service get an
 # answer. It retries rather than sampling once, because a cold start (plugin
@@ -499,6 +582,56 @@ serviceMonitor:
   #  secretName: baselithcore-metrics-auth
   #  usernameKey: username
   #  passwordKey: password
+
+# PrometheusRule for the Prometheus Operator — the alerts that go with the
+# ServiceMonitor above. Off by default: a rule object referencing a Prometheus
+# that is not there is dead YAML, and a chart that ships alerts nobody routed
+# teaches operators to ignore the ones that do fire.
+#
+# `labels` is usually what decides whether the rules are picked up at all:
+# kube-prometheus-stack selects PrometheusRule objects by label (commonly
+# `release: <stack release>`), so an object without it is created, accepted and
+# never evaluated. Check the Prometheus resource's `ruleSelector` before
+# concluding the alerts do not work.
+prometheusRule:
+  enabled: false
+  # Rules can live in the Prometheus namespace instead of the release's, for
+  # setups whose ruleNamespaceSelector is narrow. Empty = the release namespace.
+  namespace: ""
+  labels: {}
+  #  release: kube-prometheus-stack
+  # Group evaluation interval. Empty = Prometheus' global default, which is the
+  # right answer unless you have measured otherwise.
+  interval: ""
+  # Thresholds. Every one of them is a judgement about THIS deployment's
+  # traffic, so they are values and not constants in the template.
+  thresholds:
+    # Ratios, not counts: an absolute error threshold is either useless on a
+    # cell serving ten requests a minute or deaf on one serving ten thousand.
+    # Measured on the RED HTTP counter, which is also the availability SLI in
+    # deploy/prometheus/slo-rules.yml, so the two cannot disagree.
+    httpErrorRatio: 0.05
+    llmErrorRatio: 0.10
+    # Fraction of NON-streaming requests slower than the 1s latency objective.
+    # The streaming routes are excluded in the rule: they are designed to stay
+    # open for minutes, so leaving them in makes the ratio a measure of how
+    # much streaming a deployment does.
+    httpSlowRatio: 0.05
+    # Auth failures, rate-limit rejections and oversized requests share one
+    # counter, so this is a spike detector, not a policy.
+    securityEventsPerSecond: 1
+    volumeUsedRatio: 0.85
+    containerRestarts: 3
+    # Longer than the daily schedule plus one missed run, so a single skipped
+    # backup does not page and two do.
+    backupMaxAgeHours: 26
+  # Alert names to leave out, for the one a given deployment cannot act on —
+  # silencing here rather than in Alertmanager keeps the reason in git.
+  disabledAlerts: []
+  #  - BaselithcoreHttpLatencyHigh
+  # Extra rule objects, appended to the group verbatim. For deployment-specific
+  # alerts that have no business in the chart.
+  extraRules: []
 
 # Pre-deploy Alembic migrations (helm hook Job). When enabled, api pods boot
 # with DB_MIGRATIONS_ON_STARTUP=false — a bad migration fails the Job (and
@@ -578,15 +711,63 @@ networkPolicy:
     rules: []
 
 # Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
-# prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the
-# directory offsite for true DR. Disabled by default.
+# prunes by age; with `offsite` on, every dump is then copied to an object
+# store, which is what makes it a backup rather than a file on the node that
+# just died. Disabled by default.
 backup:
   enabled: false
+  # Identity the backup pod runs as. Kept apart from the app's ServiceAccount
+  # so a cloud role for the bucket (IRSA on EKS, Workload Identity on GKE,
+  # AKS workload identity) is granted to the backup alone, never to the pods
+  # that serve requests. `annotations` carries the binding
+  # (`eks.amazonaws.com/role-arn`, `iam.gke.io/gcp-service-account`, ...).
+  serviceAccount:
+    create: false
+    name: ""                     # defaults to <fullname>-backup when created
+    annotations: {}
+  # Extra labels on the backup pod. Some identity webhooks key on a pod
+  # label rather than on the ServiceAccount alone: AKS workload identity
+  # injects its token only into pods labelled
+  # `azure.workload.identity/use: "true"`.
+  podLabels: {}
+  # Copy each dump to an object store with rclone. Any rclone backend works:
+  # `remote` is the backend definition (every key becomes an
+  # RCLONE_CONFIG_OFFSITE_<KEY> variable, so `type: s3, provider: AWS,
+  # env_auth: true, region: eu-west-1` is an S3 remote authenticated through
+  # the pod's cloud identity; `type: gcs, env_auth: true` a GCS one;
+  # `type: azureblob, env_auth: true, account: <name>` Azure Blob; an S3-
+  # compatible store such as OVH or MinIO adds `provider: Other` and
+  # `endpoint`). `path` is "bucket/prefix" on that remote. Static keys, where
+  # the provider has no pod identity, go in `credentialsSecret`: a Secret
+  # whose keys are the same RCLONE_CONFIG_OFFSITE_* variables
+  # (RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID / _SECRET_ACCESS_KEY for S3).
+  #
+  # The local `retentionDays` still applies to the volume; `offsite.retentionDays`
+  # prunes the remote copy too, and 0 leaves that to the bucket's own lifecycle
+  # rules (the platform Terraform sets those on the backups bucket).
+  offsite:
+    enabled: false
+    image: rclone/rclone:1.75.1
+    remote: {}
+    path: ""
+    retentionDays: 0
+    credentialsSecret: ""
+    extraArgs: []
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
+  backoffLimit: 2
+  # `concurrencyPolicy: Forbid` means a job that hangs blocks every schedule
+  # after it, so the run is bounded. Has to cover waitForDatabaseSeconds plus
+  # the dump of the largest database this is pointed at.
+  activeDeadlineSeconds: 3600
+  # How long to wait for the database to accept connections before the dump.
+  # A CronJob replays its missed schedules when a cluster comes back up, so
+  # the nightly run routinely starts mid-boot, ahead of CoreDNS: without this
+  # pg_dump dies on the first name-resolution failure and the day is lost.
+  waitForDatabaseSeconds: 300
   pg:
     host: postgres
     port: 5432
@@ -595,7 +776,14 @@ backup:
     passwordSecret:
       name: ""                   # defaults to the release secret
       key: DB_PASSWORD
-  # Where dumps land. Replace with a persistentVolumeClaim for durability.
+  # Where dumps land. Replace with a persistentVolumeClaim for durability —
+  # and null the emptyDir when you do. Values merge rather than replace, so a
+  # claim added on top of this default renders a volume with two types and the
+  # API server rejects the CronJob outright:
+  #   backup:
+  #     volume:
+  #       emptyDir: null
+  #       persistentVolumeClaim: {claimName: baselithcore-backups}
   volume:
     emptyDir: {}
     # persistentVolumeClaim:

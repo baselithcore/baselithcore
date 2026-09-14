@@ -4,6 +4,7 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 from core.chat.agent_state import AgentState
+from core.context import TenantContextError, get_current_tenant_id
 from core.observability import telemetry
 from core.observability.logging import get_logger
 
@@ -150,10 +151,40 @@ class RetrievalContextMixin:
         """
         Check the response cache for a matching context and query.
 
+        The key is ``(tenant_id, normalized_query, context_hash)``. The tenant
+        comes from the authenticated request context — the same accessor
+        ``core.chat.precheck`` uses — never from ``ChatRequest.tenant_id``,
+        which is client-supplied and normally unset. Without it, two tenants
+        asking the same question over the same retrieved context collided on
+        one entry and one tenant's generated answer was served to the other:
+        the context hash only separates tenants when their corpora differ,
+        which a shared corpus (or an empty one) does not guarantee.
+
+        When no tenant can be resolved the key is withheld entirely and the
+        layer degrades to a no-op — the same fail-closed choice
+        ``build_precheck_key`` makes. A placeholder tenant would put every
+        out-of-request caller in one shared bucket.
+
         Args:
             state: Current agent state.
         """
         if self.service.response_cache is None:
+            state.next_action = (
+                "plan_backlog" if not state.rag_only else "generate_answer"
+            )
+            return
+
+        try:
+            tenant_id = get_current_tenant_id()
+        except TenantContextError:
+            # STRICT_TENANT_ISOLATION (on by default) raises this when no
+            # tenant is bound — a background job or script driving this
+            # pipeline outside a request. Skipping the cache costs one
+            # generation; sharing a bucket costs cross-tenant disclosure.
+            # Narrow on purpose: any *other* failure in the tenant accessor is
+            # a bug and must surface, not be absorbed as a cache miss.
+            logger.debug("response_cache_tenant_unavailable", exc_info=True)
+            telemetry.increment("response_cache.skipped_no_tenant")
             state.next_action = (
                 "plan_backlog" if not state.rag_only else "generate_answer"
             )
@@ -166,8 +197,15 @@ class RetrievalContextMixin:
             cache_context_repr = f"[RAG_ONLY]\n{cache_context_repr}"
 
         context_hash = hashlib.sha256(cache_context_repr.encode("utf-8")).hexdigest()
-        state.cache_key = (state.normalized_query, context_hash)
-        cached_answer = await self.service.response_cache.get(state.cache_key)  # type: ignore[arg-type]
+        # Three elements: the tenant leads, so one tenant's answer can never be
+        # served to another even when the question and the retrieved context
+        # match exactly. ``AgentState.cache_key`` is ``tuple[str, ...]``.
+        state.cache_key = (
+            tenant_id,
+            state.normalized_query,
+            context_hash,
+        )
+        cached_answer = await self.service.response_cache.get(state.cache_key)
 
         if cached_answer is not None:
             telemetry.increment("response_cache.hit")

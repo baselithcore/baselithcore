@@ -45,7 +45,8 @@ core/swarm/
 
 core/orchestration/handlers/
 ├── swarm_handler.py        # Orchestration with Dynamic Personas
-├── swarm_agents.py         # VirtualAgentSpec + default agent roster
+├── swarm_colony.py         # Per-request / per-tenant Colony ownership
+├── swarm_agents.py         # VirtualAgentSpec, default roster, memory/persona resolution
 └── simulation_handler.py   # Multi-turn Scenario Simulation
 
 core/memory/
@@ -235,6 +236,37 @@ The orchestrator automatically:
 2. **Routes to appropriate handler** (SwarmHandler or SimulationHandler)
 3. **Injects memory context** (semantic + graph) into agent prompts
 4. **Persists outcomes** back to episodic memory
+
+### Colony ownership: one per request, never per process
+
+The orchestrator builds **one `SwarmHandler` for the whole process**. The colony
+it serves is not process-wide: `SwarmHandler.handle()` mints a fresh `Colony` per
+request and binds it for the duration
+(`core/orchestration/handlers/swarm_colony.py`).
+
+A shared colony meant one agent registry, one auction and — the sharp edge —
+**one pheromone field**: a failure signal deposited while serving tenant A
+steered tenant B's bidding a moment later, and a dynamic agent minted for one
+request competed in every later request's auctions.
+
+`self._colony` resolves in this order:
+
+| Order | Source | When it applies |
+|---|---|---|
+| 1 | The colony bound by `request_colony_scope(...)` (a `ContextVar`) | Inside `SwarmHandler.handle()` — concurrent requests and the tasks they spawn each see their own. |
+| 2 | An explicitly pinned colony (`handler._colony = colony`) | Test harnesses and direct injection. It deliberately **loses** to a request scope, so pinning one can never put a shared colony back on the served path. |
+| 3 | A **tenant-keyed** colony | Entry points that open no scope — the multi-round `SimulationHandler` path, a handler subclass with its own entry point. Pheromone and agent state still never crosses a tenant boundary. |
+
+The tenant registry is a bounded LRU (`MAX_TENANT_COLONIES = 64`): colonies are
+cheap to rebuild (the virtual-agent roster is re-registered on creation), and an
+unbounded map keyed by tenant is a memory leak on a multi-tenant deployment. A
+caller with no bound tenant — a script, a background job — gets its own
+`"default"` bucket rather than a shared one, because failing closed there would
+break a legitimate caller.
+
+Pass `colony_factory=` to `SwarmHandler(...)` to control what a per-request
+colony is built from; the default mints a `Colony` carrying the handler's
+virtual-agent roster.
 
 ---
 

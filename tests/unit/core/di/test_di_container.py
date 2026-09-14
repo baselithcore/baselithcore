@@ -8,6 +8,7 @@ from core.di.container import (
     ServiceLifetime,
     ServiceNotFoundError,
     ServiceRegistry,
+    _current_scope,
 )
 
 
@@ -123,3 +124,38 @@ class TestServiceRegistry:
     def test_registry_not_found(self):
         with pytest.raises(ServiceNotFoundError):
             ServiceRegistry.get(IService)
+
+
+class TestScopeContextRestoration:
+    """Leaving a scope must restore the *previous* scope, not clear the slot.
+
+    ``__aexit__`` used to ``set(None)``, so a nested scope's exit detached the
+    still-open outer scope and every later ``resolve`` of a SCOPED service
+    raised ``ScopeNotActiveError`` — or, worse, silently built a second
+    instance in a fresh scope.
+    """
+
+    @pytest.mark.asyncio
+    async def test_async_nested_scope_restores_the_outer_scope(self):
+        container = DependencyContainer()
+        container.register(IService, MockService, ServiceLifetime.SCOPED)
+
+        assert _current_scope.get() is None
+        async with container.create_scope() as outer:
+            assert _current_scope.get() is outer
+            async with container.create_scope() as inner:
+                assert _current_scope.get() is inner
+            assert _current_scope.get() is outer
+            # …and the outer scope is still usable for SCOPED resolution.
+            assert isinstance(container.resolve(IService), MockService)
+        assert _current_scope.get() is None
+
+    def test_sync_nested_scope_restores_the_outer_scope(self):
+        container = DependencyContainer()
+
+        assert _current_scope.get() is None
+        with container.create_scope() as outer:
+            with container.create_scope() as inner:
+                assert _current_scope.get() is inner
+            assert _current_scope.get() is outer
+        assert _current_scope.get() is None

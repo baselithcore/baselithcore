@@ -7,7 +7,7 @@ Tests for task prioritization:
 - PriorityQueue operations
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from core.prioritization import (
     DependencyGraph,
@@ -166,14 +166,35 @@ class TestTaskPrioritizer:
 
         no_deadline = prioritizer.score(Task(id="t1", name="No deadline"))
         soon = prioritizer.score(
-            Task(id="t2", name="Soon", deadline=datetime.now() + timedelta(days=1))
+            Task(id="t2", name="Soon", deadline=datetime.now(UTC) + timedelta(days=1))
         )
         overdue = prioritizer.score(
-            Task(id="t3", name="Overdue", deadline=datetime.now() - timedelta(days=1))
+            Task(
+                id="t3",
+                name="Overdue",
+                deadline=datetime.now(UTC) - timedelta(days=1),
+            )
         )
 
         assert overdue.deadline_component > soon.deadline_component
         assert soon.deadline_component > no_deadline.deadline_component
+
+    def test_naive_deadline_is_read_as_utc(self):
+        """A caller-supplied naive deadline must not raise against an aware now.
+
+        ``Task.deadline`` is a plain field an external caller fills in, so the
+        scorer still has to accept ``datetime(...)`` with no tzinfo; it reads
+        it as UTC instead of comparing naive against aware.
+        """
+        prioritizer = TaskPrioritizer()
+        naive = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+
+        overdue = prioritizer.score(Task(id="t1", name="Overdue", deadline=naive))
+        aware = prioritizer.score(
+            Task(id="t2", name="Overdue", deadline=naive.replace(tzinfo=UTC))
+        )
+
+        assert overdue.deadline_component == aware.deadline_component
 
     def test_dependency_boost(self):
         """Tasks with many dependents get priority boost."""

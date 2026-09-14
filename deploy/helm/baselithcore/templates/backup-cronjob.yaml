@@ -1,4 +1,11 @@
 {{- if .Values.backup.enabled }}
+{{- $offsite := .Values.backup.offsite }}
+{{- if and $offsite.enabled (not $offsite.path) }}
+{{- fail "backup.offsite.enabled requires backup.offsite.path (\"bucket/prefix\" on the remote)" }}
+{{- end }}
+{{- if and $offsite.enabled (not (hasKey $offsite.remote "type")) }}
+{{- fail "backup.offsite.remote needs at least `type` (s3, gcs, azureblob, ...): it is the rclone backend the dumps are copied to" }}
+{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -13,18 +20,42 @@ spec:
   failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
-      backoffLimit: 1
+      backoffLimit: {{ .Values.backup.backoffLimit }}
+      # Under `concurrencyPolicy: Forbid` a job that never finishes is not a
+      # slow backup, it is the end of all backups: every later schedule is
+      # skipped while it hangs. The deadline has to cover the wait below plus
+      # the dump itself (and the upload, when offsite is on).
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
             {{- include "baselithcore.selectorLabels" . | nindent 12 }}
             app.kubernetes.io/component: backup
+            {{- with .Values.backup.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         spec:
           restartPolicy: Never
+          {{- with (include "baselithcore.backupServiceAccountName" .) }}
+          serviceAccountName: {{ . }}
+          {{- end }}
+          # The backup never calls the Kubernetes API. A cloud identity
+          # (IRSA, Workload Identity) rides on its own projected token that
+          # the provider's webhook injects; it does not need this one.
+          automountServiceAccountToken: false
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
-          containers:
-            - name: pg-backup
+          # A CronJob does not only fire on a healthy cluster. When one comes
+          # back after downtime the controller replays the schedules it missed
+          # immediately, so the nightly dump starts during the boot — ahead of
+          # CoreDNS, which resolves `postgres` for it. pg_dump does not retry:
+          # it exits on the first `could not translate host name ... Try again`,
+          # the two attempts `backoffLimit` allows land seconds apart inside the
+          # same gap, and the day has no backup. Waiting for the database to
+          # actually answer costs nothing on a healthy cluster and is the whole
+          # difference on a cold one.
+          initContainers:
+            - name: wait-for-db
               image: {{ .Values.backup.image | quote }}
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
@@ -32,35 +63,81 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  set -euo pipefail
-                  TS=$(date +%Y%m%d_%H%M%S)
-                  OUT="${BACKUP_DIR}/backup_${TS}.sql.gz"
-                  echo "Dumping ${PGDATABASE} -> ${OUT}"
-                  pg_dump | gzip > "${OUT}"
-                  echo "Pruning backups older than ${RETENTION_DAYS} days"
-                  find "${BACKUP_DIR}" -name 'backup_*.sql.gz' -mtime +${RETENTION_DAYS} -delete
-                  echo "Backup complete."
+                  set -eu
+                  DEADLINE=$(( $(date +%s) + WAIT_SECONDS ))
+                  until pg_isready -q; do
+                    if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                      echo "database ${PGHOST}:${PGPORT} still unreachable after ${WAIT_SECONDS}s, giving up" >&2
+                      exit 1
+                    fi
+                    echo "waiting for ${PGHOST}:${PGPORT} ..."
+                    sleep 5
+                  done
+                  echo "database ${PGHOST}:${PGPORT} is accepting connections"
+              env:
+                - name: WAIT_SECONDS
+                  value: {{ .Values.backup.waitForDatabaseSeconds | quote }}
+                {{- include "baselithcore.backupEnv" . | nindent 16 }}
+            {{- if $offsite.enabled }}
+            # With offsite on, the dump is an init container so it has finished
+            # (exit 0, file renamed into place) before the upload starts: two
+            # containers in one pod run concurrently and would need a
+            # handshake, init containers run in order for free.
+            {{- include "baselithcore.backupDumpContainer" . | nindent 12 }}
+            {{- end }}
+          containers:
+            {{- if $offsite.enabled }}
+            - name: offsite-upload
+              image: {{ $offsite.image | quote }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  echo "Uploading ${BACKUP_DIR} -> offsite:${OFFSITE_PATH}"
+                  # Copy, never sync: sync would delete remote dumps the local
+                  # retention already pruned, and the remote keeps its own
+                  # (longer) history. Files already present are skipped.
+                  # shellcheck disable=SC2086 — EXTRA_ARGS is a flag list by design
+                  rclone copy "${BACKUP_DIR}" "offsite:${OFFSITE_PATH}" \
+                    --include 'backup_*.sql.gz' --no-traverse --stats-one-line -v ${EXTRA_ARGS}
+                  if [ "${OFFSITE_RETENTION_DAYS}" -gt 0 ]; then
+                    echo "Pruning offsite dumps older than ${OFFSITE_RETENTION_DAYS} days"
+                    rclone delete "offsite:${OFFSITE_PATH}" \
+                      --min-age "${OFFSITE_RETENTION_DAYS}d" --include 'backup_*.sql.gz'
+                  fi
+                  echo "Offsite copy now holds:"
+                  rclone lsf "offsite:${OFFSITE_PATH}" --include 'backup_*.sql.gz' | tail -n 5
+                  echo "Offsite upload complete."
               env:
                 - name: BACKUP_DIR
                   value: /backups
-                - name: RETENTION_DAYS
-                  value: {{ .Values.backup.retentionDays | quote }}
-                - name: PGHOST
-                  value: {{ .Values.backup.pg.host | quote }}
-                - name: PGPORT
-                  value: {{ .Values.backup.pg.port | quote }}
-                - name: PGDATABASE
-                  value: {{ .Values.backup.pg.database | quote }}
-                - name: PGUSER
-                  value: {{ .Values.backup.pg.user | quote }}
-                - name: PGPASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.backup.pg.passwordSecret.name | default (include "baselithcore.secretName" .) }}
-                      key: {{ .Values.backup.pg.passwordSecret.key }}
+                - name: OFFSITE_PATH
+                  value: {{ $offsite.path | quote }}
+                - name: OFFSITE_RETENTION_DAYS
+                  value: {{ $offsite.retentionDays | quote }}
+                - name: EXTRA_ARGS
+                  value: {{ join " " $offsite.extraArgs | quote }}
+                # No config file: the remote is defined entirely by the
+                # RCLONE_CONFIG_OFFSITE_* variables below, and /dev/null stops
+                # rclone from trying to create one under a read-only $HOME.
+                - name: RCLONE_CONFIG
+                  value: /dev/null
+                {{- include "baselithcore.backupOffsiteRemoteEnv" . | trim | nindent 16 }}
+              {{- with $offsite.credentialsSecret }}
+              envFrom:
+                - secretRef:
+                    name: {{ . | quote }}
+              {{- end }}
               volumeMounts:
                 - name: backups
                   mountPath: /backups
+                  readOnly: true
+            {{- else }}
+            {{- include "baselithcore.backupDumpContainer" . | nindent 12 }}
+            {{- end }}
           volumes:
             - name: backups
               {{- toYaml .Values.backup.volume | nindent 14 }}

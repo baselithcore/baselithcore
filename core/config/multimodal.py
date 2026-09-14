@@ -61,7 +61,7 @@ class VisionConfig(BaseSettings):
         default="gpt-4o", description="OpenAI vision model identifier."
     )
     anthropic_model: str = Field(
-        default="claude-3-5-sonnet-20241022",
+        default="claude-opus-5",
         description="Anthropic vision model identifier.",
     )
     google_model: str = Field(

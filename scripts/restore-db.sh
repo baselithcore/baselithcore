@@ -22,7 +22,7 @@ echo "Starting database restoration from $BACKUP_FILE..."
 
 # Wait for the database container to be ready
 echo "Waiting for postgres to be ready..."
-until docker compose -f docker-compose.prod.yml exec postgres pg_isready -U baselithcore; do
+until docker compose -f compose.prod.yaml exec postgres pg_isready -U baselithcore; do
   sleep 2
 done
 
@@ -30,16 +30,16 @@ done
 if [[ "$BACKUP_FILE" == *.gz ]]; then
   echo "Detected gzipped backup; decompressing in-stream..."
   gunzip -c "$BACKUP_FILE" \
-    | docker compose -f docker-compose.prod.yml exec -T postgres \
+    | docker compose -f compose.prod.yaml exec -T postgres \
         psql -U baselithcore -d baselithcore
 else
   # Plain SQL: copy into the container and apply.
   echo "Copying backup file to container..."
-  docker cp "$BACKUP_FILE" "$(docker compose -f docker-compose.prod.yml ps -q postgres)":/tmp/backup.sql
+  docker cp "$BACKUP_FILE" "$(docker compose -f compose.prod.yaml ps -q postgres)":/tmp/backup.sql
   echo "Restoring database..."
-  docker compose -f docker-compose.prod.yml exec postgres psql -U baselithcore -d baselithcore -f /tmp/backup.sql
+  docker compose -f compose.prod.yaml exec postgres psql -U baselithcore -d baselithcore -f /tmp/backup.sql
   echo "Cleaning up..."
-  docker compose -f docker-compose.prod.yml exec postgres rm /tmp/backup.sql
+  docker compose -f compose.prod.yaml exec postgres rm /tmp/backup.sql
 fi
 
 echo "Database restoration completed successfully."

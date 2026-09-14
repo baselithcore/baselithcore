@@ -327,3 +327,41 @@ class TestGlobalEventBus:
         reset_event_bus()
         bus2 = get_event_bus()
         assert bus1 is not bus2
+
+
+class TestEmitSyncOffLoop:
+    """``emit_sync`` from a worker thread must not spin up a private loop.
+
+    Handlers are written for the application's loop: they touch loop-bound
+    resources (async Redis pools, tasks). Running them on a throwaway
+    ``asyncio.run`` loop that is torn down a millisecond later left those
+    resources bound to a closed loop for the rest of the process.
+    """
+
+    @pytest.mark.asyncio
+    async def test_emit_sync_from_thread_runs_handlers_on_the_bound_loop(self):
+        bus = EventBus()
+        seen: list[asyncio.AbstractEventLoop] = []
+
+        async def handler(data):
+            seen.append(asyncio.get_running_loop())
+
+        bus.subscribe("thread.event", handler)
+        await bus.emit("bind.loop", {})  # the bus learns the app loop here
+        loop = asyncio.get_running_loop()
+
+        invoked = await asyncio.to_thread(bus.emit_sync, "thread.event", {"k": 1})
+
+        assert invoked == 1
+        assert seen == [loop]
+
+    def test_emit_sync_without_any_loop_still_runs_standalone(self):
+        bus = EventBus()
+        received = []
+
+        async def handler(data):
+            received.append(data)
+
+        bus.subscribe("standalone.event", handler)
+        assert bus.emit_sync("standalone.event", {"k": 2}) == 1
+        assert received == [{"k": 2}]

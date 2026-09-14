@@ -144,6 +144,49 @@ class AgentCapabilities:
 
 
 # =============================================================================
+# Security schemes
+# =============================================================================
+
+#: Name under which this agent's HMAC request signing is advertised.
+HMAC_SECURITY_SCHEME = "hmacSignature"
+
+#: JSON-RPC over HTTP is the transport this agent prefers, and the only one
+#: :func:`~core.a2a.router.create_a2a_router` mounts. A2A 0.3.0 makes a peer
+#: guess without this field.
+DEFAULT_PREFERRED_TRANSPORT = "JSONRPC"
+
+
+def default_security_schemes() -> dict[str, Any]:
+    """The security schemes an agent served by this framework accepts.
+
+    A2A 0.3.0 carries OpenAPI 3 ``SecurityScheme`` objects. This agent
+    authenticates peers with an HMAC over the request body, presented in a
+    header, so the closest accurate OpenAPI shape is ``apiKey`` in ``header``
+    — a peer reading the card learns which header to compute and where to put
+    it, which is what the field is for. Replace ``AgentCard.securitySchemes``
+    when a deployment fronts the agent with something else (OAuth, mTLS).
+    """
+    return {
+        HMAC_SECURITY_SCHEME: {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-A2A-Signature",
+            "description": (
+                "HMAC-SHA256 over the raw request body, keyed by the shared "
+                "secret (BASELITH_A2A_SHARED_SECRET) or the per-peer secret "
+                "selected by X-A2A-Peer. Send alongside X-A2A-Timestamp and "
+                "X-A2A-Nonce, which are covered by the signature."
+            ),
+        }
+    }
+
+
+def default_security() -> list[dict[str, list[str]]]:
+    """The security requirement matching :func:`default_security_schemes`."""
+    return [{HMAC_SECURITY_SCHEME: []}]
+
+
+# =============================================================================
 # Agent Card
 # =============================================================================
 
@@ -169,7 +212,14 @@ class AgentCard:
         defaultInputModes: Default supported input types
         defaultOutputModes: Default supported output types
         documentationUrl: Link to agent documentation
-        protocols: Supported protocols (jsonrpc, rest, etc.)
+        preferredTransport: Transport a peer should use first (A2A 0.3.0)
+        securitySchemes: Named OpenAPI security schemes the agent accepts
+        security: Which of those schemes a peer must satisfy
+        protocols: **Deprecated.** A pre-0.3.0, non-spec field. Still accepted
+            on construction and read back by :meth:`from_dict`, but no longer
+            emitted by :meth:`to_dict`: a conformant peer validating the card
+            against the 0.3.0 schema rejects unknown members, and this one
+            duplicated what ``preferredTransport`` now says properly.
         metadata: Additional custom metadata
     """
 
@@ -191,6 +241,13 @@ class AgentCard:
 
     # Documentation
     documentationUrl: str | None = None
+
+    # Transport + authentication (A2A 0.3.0). Without these a peer has to
+    # guess how to reach the agent and how to authenticate to it — which in
+    # practice means trying unsigned and being refused.
+    preferredTransport: str = DEFAULT_PREFERRED_TRANSPORT
+    securitySchemes: dict[str, Any] = field(default_factory=default_security_schemes)
+    security: list[dict[str, list[str]]] = field(default_factory=default_security)
 
     # Legacy fields (backward compatible)
     endpoint: str | None = None
@@ -231,13 +288,25 @@ class AgentCard:
         if self.documentationUrl:
             data["documentationUrl"] = self.documentationUrl
 
-        # Legacy fields (for backward compatibility)
+        # Transport + authentication (A2A 0.3.0).
+        if self.preferredTransport:
+            data["preferredTransport"] = self.preferredTransport
+        if self.securitySchemes:
+            data["securitySchemes"] = self.securitySchemes
+            # A requirement without a scheme to name would be unresolvable, so
+            # the two are emitted together or not at all.
+            if self.security:
+                data["security"] = self.security
+
+        # Legacy fields (for backward compatibility). ``protocols`` is
+        # deliberately NOT emitted: it is not an A2A member, and a peer
+        # validating the card against the 0.3.0 schema rejects what it cannot
+        # place. ``preferredTransport`` above carries the same information in
+        # the shape the spec defines.
         if self.endpoint:
             data["endpoint"] = self.endpoint
         if self.capabilities:
             data["legacyCapabilities"] = [c.to_dict() for c in self.capabilities]
-        if self.protocols:
-            data["protocols"] = self.protocols
 
         # Metadata
         if self.metadata:
@@ -274,8 +343,19 @@ class AgentCard:
             defaultInputModes=data.get("defaultInputModes", ["text/plain"]),
             defaultOutputModes=data.get("defaultOutputModes", ["text/plain"]),
             documentationUrl=data.get("documentationUrl"),
+            preferredTransport=data.get(
+                "preferredTransport", DEFAULT_PREFERRED_TRANSPORT
+            ),
+            # A peer that declares no security scheme has none — substituting
+            # *our* HMAC default would tell the caller to sign requests the
+            # peer will not verify, and would put a scheme we invented into any
+            # card round-tripped back out. Locally constructed cards still get
+            # the defaults, from the dataclass fields.
+            securitySchemes=data.get("securitySchemes") or {},
+            security=data.get("security") or [],
             endpoint=data.get("endpoint"),
             capabilities=legacy_caps,
+            # Read back for a card minted before 0.3.0; never re-emitted.
             protocols=data.get("protocols", ["jsonrpc"]),
             metadata=data.get("metadata", {}),
         )

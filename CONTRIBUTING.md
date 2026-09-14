@@ -40,7 +40,9 @@ This project adopts a respectful and collaborative code of conduct. We expect al
 2. **Create a branch** from `main`: `git checkout -b feature/feature-name`
 3. **Implement** changes following the project standards
 4. **Test** your changes: `python -m pytest`
-5. **Commit** with descriptive messages
+5. **Commit** using [Conventional Commits](#commit-format) — **mandatory**, not a
+   style preference: `semantic-release` derives the version number, the
+   changelog entry and whether a release happens at all from the commit type
 6. **Push** and open a **Pull Request**
 
 ---
@@ -104,16 +106,20 @@ when adding or changing a dependency:
   conflicts on downstream consumers and block their security patches.
 - **`uv.lock`** — the reproducibility lock for development and CI (`uv sync`).
   This, not exact pins, is what guarantees a repeatable dev/test environment.
-- **`requirements.txt`** — the **pinned** install set used by the Docker images
-  (`pip install -r requirements.txt`); keep it pinned so production image builds
-  stay byte-for-byte reproducible.
+- **`requirements.txt`** — the human-readable mirror of the dependency surface
+  the container images install. Keep every spec **identical** to the matching
+  entry in `pyproject.toml`; `scripts/check_requirements_sync.py` (CI job
+  `requirements_sync`) fails the build otherwise. It is **not** what the image
+  installs from: the `Dockerfile` materialises `uv.lock` with
+  `uv export --frozen`, so the image gets the same fully-pinned transitive set
+  CI tested, which a range-based requirements file cannot give it.
 
 ### Local Services (Docker)
 
 To run supporting services:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ---
@@ -148,8 +154,9 @@ pre-commit run --all-files
 ### Testing
 
 - **Pytest** for unit and integration tests
-- Minimum enforced coverage gate: **54%**
-- Current improvement target: **66%+** overall
+- Minimum enforced **branch**-coverage gate: **78%** (`--cov-fail-under` in
+  [`pytest.ini`](pytest.ini)). It is a ratchet — raise it as coverage grows,
+  never lower it to make a branch pass.
 - Strict `mypy` gate on hardened core resilience modules
 - Mock external dependencies (LLM, DB)
 
@@ -184,24 +191,57 @@ Before opening a PR, ensure that:
 - [ ] Focused strict typing gates pass: `python scripts/check_official_plugin_typing.py` and `python scripts/check_core_strict_typing.py`
 - [ ] Pre-commit passes: `pre-commit run --all-files`
 - [ ] Documentation updated (if necessary)
-- [ ] Clear and descriptive commit messages
+- [ ] Commit messages follow [Conventional Commits](#commit-format) (mandatory)
 
 ### Commit Format
 
-Use descriptive commit messages:
+**[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) are
+mandatory.** This is not a house style — it is the input to an automated
+pipeline. `@semantic-release/commit-analyzer` (configured in
+[`.releaserc`](.releaserc)) reads the type of every commit on `main` to decide
+whether to cut a release, whether it is a major/minor/patch, and which section
+of [`CHANGELOG.md`](CHANGELOG.md) the entry lands in. A commit that does not
+parse is silently treated as no-release: the fix ships in the tree and never
+reaches PyPI, the container image or the Helm chart.
 
 ```text
 type(scope): short description
 
-Detailed description of changes (optional).
+Optional body explaining *why*, wrapped at 72 columns.
+
+BREAKING CHANGE: what an operator must do differently.
 ```
 
-**Types**: `feat`, `fix`, `docs`, `test`, `refactor`, `style`, `chore`
+The subject is imperative and lower-case, with no trailing period. The scope is
+optional and names the subsystem (`orchestration`, `memory`, `plugins`,
+`docker`, `chart`, ...).
+
+**Allowed types**, and what each one releases:
+
+| Type       | Release   | Use for                                              |
+| ---------- | --------- | ---------------------------------------------------- |
+| `feat`     | **minor** | New user-visible capability                           |
+| `fix`      | **patch** | Bug fix                                               |
+| `perf`     | **patch** | Performance improvement with no behaviour change      |
+| `refactor` | none      | Internal restructuring, identical behaviour           |
+| `docs`     | none      | Documentation only                                    |
+| `test`     | none      | Tests only                                            |
+| `build`    | none      | Packaging, `pyproject.toml`, Dockerfile, dependencies |
+| `ci`       | none      | Workflows and repository gates                        |
+| `style`    | none      | Formatting only, no code change                       |
+| `chore`    | none      | Anything else that ships nothing                      |
+| `revert`   | **patch** | Reverting a previous commit                           |
+
+A `BREAKING CHANGE:` footer (or a `!` after the type, e.g. `feat(api)!:`) forces
+a **major** release regardless of type. Pre-1.0 that is still a real signal —
+use it only for a change an operator has to act on.
 
 **Examples**:
 
 - `feat(reasoning): add MCTS strategy to TreeOfThoughts`
 - `fix(cache): handle Redis connection timeout`
+- `perf(memory): batch MTM consolidation writes`
+- `build(docker): install from the uv lock export instead of requirements.txt`
 - `docs(readme): update installation instructions`
 
 ---

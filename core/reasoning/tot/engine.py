@@ -310,7 +310,7 @@ class TreeOfThoughts:
                 # independent LLM calls, and the mcts path already fans out
                 # the same way. Serial awaits paid k× the latency per step.
                 scores = await self._evaluate_thoughts(new_nodes, problem)
-                for n, score in zip(new_nodes, scores):
+                for n, score in zip(new_nodes, scores, strict=True):
                     # ``get_best_leaf`` selects children by ``score``: without
                     # this assignment every node stayed at 0.0 and the final
                     # answer was the first-constructed chain, discarding every

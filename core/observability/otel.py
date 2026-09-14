@@ -96,13 +96,101 @@ def _build_resource(service_name: str, config: Any) -> Any:
     return Resource.create(attributes)
 
 
+#: ``OTEL_TRACES_SAMPLER`` values this bootstrap understands. Matches the
+#: OpenTelemetry environment-variable specification; the SDK's own
+#: ``jaeger_remote`` and ``xray`` samplers need extra packages and are treated
+#: as unknown (warn + fall back) rather than pretended to support.
+_ENV_SAMPLER = "OTEL_TRACES_SAMPLER"
+_ENV_SAMPLER_ARG = "OTEL_TRACES_SAMPLER_ARG"
+_KNOWN_SAMPLERS = frozenset(
+    {
+        "always_on",
+        "always_off",
+        "traceidratio",
+        "parentbased_always_on",
+        "parentbased_always_off",
+        "parentbased_traceidratio",
+    }
+)
+
+
+def _sampler_arg_ratio() -> float:
+    """``OTEL_TRACES_SAMPLER_ARG`` as a ratio clamped to [0, 1].
+
+    An absent or unparsable value means 1.0 — the SDK's own default. Sampling
+    *less* than asked because a typo slipped into a chart value is the failure
+    mode that silently empties a trace backend, so it is logged loudly.
+    """
+    raw = (os.getenv(_ENV_SAMPLER_ARG) or "").strip()
+    if not raw:
+        return 1.0
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except ValueError:
+        logger.warning(
+            "[OTEL] %s=%r is not a number; using ratio 1.0", _ENV_SAMPLER_ARG, raw
+        )
+        return 1.0
+
+
+def _sampler_from_env() -> Any | None:
+    """Build the sampler named by ``OTEL_TRACES_SAMPLER``, or ``None``.
+
+    ``None`` means "nothing configured (or nothing we understand)" and the
+    caller falls back to the ``telemetry_traces_sample_rate`` setting.
+    """
+    name = (os.getenv(_ENV_SAMPLER) or "").strip().lower()
+    if not name:
+        return None
+    if name not in _KNOWN_SAMPLERS:
+        logger.warning(
+            "[OTEL] %s=%r is not supported; falling back to "
+            "telemetry_traces_sample_rate",
+            _ENV_SAMPLER,
+            name,
+        )
+        return None
+
+    from opentelemetry.sdk.trace.sampling import (
+        ALWAYS_OFF,
+        ALWAYS_ON,
+        ParentBased,
+        TraceIdRatioBased,
+    )
+
+    if name == "always_on":
+        return ALWAYS_ON
+    if name == "always_off":
+        return ALWAYS_OFF
+    if name == "traceidratio":
+        return TraceIdRatioBased(_sampler_arg_ratio())
+    if name == "parentbased_always_on":
+        return ParentBased(root=ALWAYS_ON)
+    if name == "parentbased_always_off":
+        return ParentBased(root=ALWAYS_OFF)
+    return ParentBased(root=TraceIdRatioBased(_sampler_arg_ratio()))
+
+
 def _build_sampler(sample_rate: float) -> Any:
-    """Return a ParentBased(TraceIdRatio) sampler clamped to [0, 1]."""
+    """Return the trace sampler to install.
+
+    ``OTEL_TRACES_SAMPLER``/``OTEL_TRACES_SAMPLER_ARG`` win when set: the SDK
+    honours them only for a ``TracerProvider`` built without an explicit
+    sampler, and this bootstrap always passes one — so an operator who set the
+    standard variables (and every chart and sidecar that sets them for you) was
+    silently ignored. With neither set, the historical behaviour is unchanged:
+    a ParentBased(TraceIdRatio) sampler at ``sample_rate``, clamped to [0, 1].
+    """
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_ON,
         ParentBased,
         TraceIdRatioBased,
     )
+
+    from_env = _sampler_from_env()
+    if from_env is not None:
+        logger.info("[OTEL] Sampler from %s=%s", _ENV_SAMPLER, os.getenv(_ENV_SAMPLER))
+        return from_env
 
     rate = max(0.0, min(1.0, sample_rate))
     if rate >= 1.0:

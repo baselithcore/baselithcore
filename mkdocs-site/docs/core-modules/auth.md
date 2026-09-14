@@ -224,14 +224,36 @@ When a token is revoked (e.g., during logout):
     deliberate exceptions: a verification still held in the in-process cache
     (≤5 s) keeps working, and the per-user **epoch** read degrades to "no
     epoch" instead of raising (`core/auth/_token_epoch.py`) so token *minting*
-    never blocks on the cache. The API-key denylist is the opposite — Redis
-    read failures fall back to process-local state (`core/auth/api_keys.py`).
+    never blocks on the cache. The API-key denylist (`core/auth/api_keys.py`)
+    is governed by its own setting instead — see
+    [`API_KEY_REVOCATION_FAIL_MODE`](#api-key-revocation-on-a-denylist-outage)
+    below.
 
 !!! note "Already-expired tokens"
     `revoke_token` only blacklists tokens that still have remaining lifetime (`exp > now`). Tokens that are already expired are intentionally **not** added to the blacklist because `verify_token` always runs standard JWT expiration verification (`verify_exp=True`) before consulting the blacklist, so an expired token is rejected before the blacklist check. This avoids storing zero-TTL entries that Redis would immediately evict.
 
 !!! note "In-process verify cache vs. revocation"
     `verify_token` caches a successful verification in-process for a short window (≤5 s, never past the token's `exp`) to skip the signature decode and the Redis blacklist round-trip on repeat requests. `revoke_token` evicts the local entry immediately, so revocation is instant within the same worker; across other workers the blacklist takes effect after at most the cache window. The cache is a **bounded LRU** (8192 entries) — a burst of distinct valid tokens (rotation or token spray) cannot grow it without limit; the oldest entries are evicted at the cap.
+
+### API key revocation on a denylist outage
+
+The API-key path (`core/auth/api_keys.py`) has its own shared **Redis
+denylist**, separate from the JWT blacklist above, and its own policy for what
+to do when that denylist cannot be read: `SecurityConfig.api_key_revocation_fail_mode`
+(env `API_KEY_REVOCATION_FAIL_MODE`, default `closed`).
+
+- **`closed`** (the default) treats the key as revoked on a Redis read
+  failure — the same rejection the validator already returns for an unknown
+  key — so a revocation performed on another worker survives a cache outage.
+- **`open`** trusts process-local state instead, which was this method's only
+  behavior before this setting existed: convenient, but it means anyone able
+  to make Redis unreachable un-revokes every key revoked elsewhere for the
+  duration.
+
+No denylist backend at all (Redis unreachable at `APIKeyValidator`
+construction, so `self._redis is None`) is a different case — single-node,
+process-local revocation by deployment choice — and is unaffected by the fail
+mode; it always behaves as if a key were not denylisted.
 
 ### Refresh-token family revocation
 
@@ -772,6 +794,27 @@ from core.context import get_current_tenant_id
 tenant = get_current_tenant_id()  # Always correct — set by enforce_auth
 ```
 
+### Reserved tenant ids cannot be minted
+
+`core.context.RESERVED_TENANT_IDS` (currently `{"system"}`) names identities the
+framework binds for its own maintenance work — see
+[`system_tenant_scope()`](db.md#row-level-security-session-binding) and
+[Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security).
+Migration `010_system_tenant_rls_exemption` grants the `system` tenant
+visibility of **every** tenant's rows, so a token that asserted it would be a
+total-access credential.
+
+Both `JWTHandler.create_token` and `create_refresh_token` (`core.auth._jwt_issue`)
+check `tenant_id` against this set before embedding it and raise
+`core.context.ReservedTenantError` (a `ValueError` subclass) if it matches —
+refusing the claim at issuance, rather than relying on every verifier to reject
+it later. The request boundary applies the same refusal on the way in:
+`enforce_auth` (`core/middleware/security.py`) and `TenantMiddleware`
+(`core/middleware/tenant.py`) bind a principal's tenant via
+`core.context.bind_principal_tenant`, which raises the same
+`ReservedTenantError` rather than let a token or API key that names `system`
+be bound to the request context.
+
 ---
 
 ## Configuration
@@ -790,6 +833,7 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | `JWT_STRICT_VALIDATION`| auto    | Rejects tokens missing `aud`/`iss`. Enabled automatically when `AUTH_REQUIRED=true` and both resolve |
 | `AUTH_ACCESS_TOKEN_LIFETIME` | `3600` | Access-token lifetime in **seconds** (min 60). Legacy alias `AUTH_SESSION_LIFETIME` is accepted for the same field |
 | `API_KEYS_SCOPED`      | -       | Least-privilege scoped keys: `key=scope\|scope,...` (see [Capability Scopes](#capability-scopes-fine-grained-authorization)) |
+| `API_KEY_REVOCATION_FAIL_MODE` | `closed` | `closed`/`open` — what an unreadable API-key denylist means, see [API key revocation on a denylist outage](#api-key-revocation-on-a-denylist-outage) |
 | `OIDC_ENABLED`         | `false` | Enable federated SSO via an external OIDC provider           |
 | `OIDC_ISSUER`          | `None`  | OIDC issuer URL (validated as `iss`)                         |
 | `OIDC_AUDIENCE`        | `None`  | Expected `aud` for IdP tokens                                |

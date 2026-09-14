@@ -511,11 +511,14 @@ default to a non-breaking posture; enable the stricter ones in production.
 | -------- | ------- | ------ |
 | `BASELITH_SANITIZE_EXTERNAL_CONTENT` | **on** | Strip invisibles/bidi/HTML comments from flagged fetched content (tool output, scraped pages). Set `false` for legacy detection-only mode. |
 | `BASELITH_ORCHESTRATOR_GUARDRAILS` | **on** | Input validation (regex, pre-budget) + output PII/harmful-content filtering on every `Orchestrator.process` call. Set `false` to bypass for trusted internal traffic. |
-| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface — a digest computed before 0.27 (which left shipped `ui/dist/**` assets, native modules and shell scripts uncovered) is refused until the plugin is re-signed. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface (`V5_MANIFEST`) — a digest computed against any superseded surface is refused until the plugin is re-signed. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
-| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
-| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). |
+| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a **usable** trusted key — neither revoked nor expired. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Legacy form: comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). No key identity, no expiry, no revocation — prefer the trust store below. |
+| `BASELITH_PLUGIN_TRUST_STORE` | unset | Path to a JSON trust store carrying key identity, expiry and revocation — see [Plugin trust store](#plugin-trust-store). Merged with the roots above; a store entry for the same key **wins**, so revoking works even while the key is still listed there. |
+| `BASELITH_DISABLE_PLUGIN_ENTRY_POINTS` | off | Consider only the `plugins/` directory and ignore every installed distribution advertising the `baselith.plugins` entry-point group. For a deployment that wants exactly the trees it shipped and nothing a transitive dependency might advertise. |
+| `BASELITH_ENFORCE_PLUGIN_COMPAT` / `BASELITH_ENFORCE_PLUGIN_CONFIG` | **on** | Admission gates, both fail-closed: a plugin whose declared version bounds / `plugin_dependencies` (COMPAT) or whose config against its own JSON Schema (CONFIG) do not check out is skipped. `false`/`0`/`no`/`off` downgrades to warn-only while a manifest is corrected. |
 | `BASELITH_PLUGIN_PERMISSIONS` | `warn` | How strictly a plugin's declared `permissions:` block is applied: `off` (parsed, never consulted), `warn` (a call outside the declared set is logged once and proceeds), `enforce` (refused). Integrity proves *which code* runs; this decides what it may do. Egress, `tools` and `secrets` are enforced at their chokepoints; `filesystem` is documentation only. A plugin that declared **nothing** is never refused, even under `enforce` — see [Packaging › Permissions](../plugins/packaging.md#permissions). |
 | `BASELITH_WORKFLOW_VERSION_PINNING` | **`enforce`** | A durable workflow run is pinned to the definition it started on (declared version + structural fingerprint). `enforce` fails a resume whose definition changed mid-flight rather than replaying recorded outputs into an edited graph; `warn` logs and continues; `off` records the pin but ignores mismatches. Safe as a default because a run with no pin gets one on first sight and cannot mismatch retroactively. |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
@@ -567,10 +570,10 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 - The Nginx gateway runs with a read-only root filesystem and dedicated `tmpfs` mounts for runtime state.
 - Internal services are segmented across dedicated Docker networks.
 - TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
-- The observability overlay ships **no default Grafana credential**: `docker-compose.observability.yml` requires `GRAFANA_ADMIN_PASSWORD` (compose aborts when unset) instead of falling back to `admin`/`admin` — a reachable Grafana on the default credential is an instant takeover of every dashboard and datasource.
+- The observability profile ships **no default Grafana credential**: `compose.yaml` requires `GRAFANA_ADMIN_PASSWORD` (compose aborts when unset) instead of falling back to `admin`/`admin` — a reachable Grafana on the default credential is an instant takeover of every dashboard and datasource.
 - `REDIS_PASSWORD` (optional, strongly recommended) arms `--requirepass` on the FalkorDB/Redis service in both compose files through the image's `REDIS_ARGS` environment variable — never a `command:` override, which would bypass the FalkorDB entrypoint and stop the graph module from loading. The healthcheck picks the password up the same way. When set, point `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL` at `redis://:<password>@…`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues, and rate-limit counters.
 
-The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment. The default single-host `docker-compose.yml` applies the same rule — the Docker-in-Docker daemon needs `privileged: true` (root-equivalent on the compose host), so it lives in the opt-in `docker-compose.sandbox.yml` overlay and joins the stack only via `docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d`. See [Deployment › Opt-in sandbox overlay](deployment.md#opt-in-sandbox-overlay-single-host).
+The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment. The default single-host `compose.yaml` applies the same rule — the Docker-in-Docker daemon needs `privileged: true` (root-equivalent on the compose host), so it lives in the opt-in `compose.sandbox.yaml` overlay and joins the stack only via `docker compose -f compose.yaml -f compose.sandbox.yaml up -d`. See [Deployment › Opt-in sandbox overlay](deployment.md#opt-in-sandbox-overlay-single-host).
 
 ## Supply-Chain Security
 
@@ -642,6 +645,53 @@ dependency is finally fixed and the entry deleted.
 
 <!-- markdownlint-enable MD046 -->
 
+<!-- markdownlint-disable MD046 -->
+<!-- The fenced block below sits inside an mkdocs admonition, so it is indented
+     by four spaces; markdownlint reads that as an indented code block. -->
+
+!!! note "The base image is pinned by digest *and* patched at build time"
+    The `Dockerfile` pins `python:3.12-slim` by digest, so the same Dockerfile
+    at the same commit builds from the same base — including the same Debian
+    package set. That second half is the catch: Debian keeps publishing
+    security updates against a frozen set, and refreshing the digest does not
+    necessarily collect them, because the upstream image is only rebuilt on its
+    own schedule. A pin left alone therefore accumulates distro CVEs until the
+    post-push Trivy gate in `release-image.yml` fails a release.
+
+    So the runtime stage runs `apt-get upgrade` on top of the pinned base. The
+    two answer different questions: the digest decides which base a build
+    starts from, the upgrade decides that the build does not ship known holes in
+    it. The interpreter is unaffected — `python:3.12-slim` compiles Python from
+    source, so apt never touches it.
+
+    It is the **last** step of the stage, and the position is load-bearing.
+    Docker keys a `RUN`'s cache on the command string and the parent layer, not
+    on what the apt archive holds today, so an upgrade near the top of the stage
+    stayed cached for as long as the base digest did — it ran once and never
+    again, and forcing it would have meant rebuilding the 1.89GB dependency copy
+    and the 1.39GB Chromium install below it. Last, it sits downstream of the
+    source `COPY`s, which change on every release because semantic-release
+    rewrites `core/_version.py`; the layer is therefore rebuilt every release
+    for free and is the only one that is. It also sits downstream of the ~110
+    apt packages `playwright install --with-deps` brings in, which an upgrade
+    placed earlier could never reach — on a fresh build that costs nothing,
+    since apt installs those with the archive's security updates already in, but
+    on a release whose Chromium layer comes from a months-old cache those
+    packages are frozen at the day it was built. Re-tagging an unchanged tree
+    reuses the layer, which is the honest limit of the arrangement.
+
+    The trade is that the runtime layer is no longer bit-identical from one day
+    to the next, which is why the release pipeline scans the image it **pushed**
+    rather than trusting the one it built. When bumping the digest, check the
+    candidate first:
+
+    ```bash
+    trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+        python:3.12-slim@sha256:<candidate>
+    ```
+
+<!-- markdownlint-enable MD046 -->
+
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
     (`--skip-files` in `ci.yml`). The developer portal is a **vendored, dev-only
@@ -655,6 +705,73 @@ dependency is finally fixed and the entry deleted.
     shipped product, so its lockfile is an accepted exclusion. Secret and
     misconfig scanning of the portal source is unaffected — only its lockfile is
     skipped.
+
+### Plugin trust store {#plugin-trust-store}
+
+`integrity_sha256` proves the tree matches what was signed; `signature_ed25519`
+proves **who** signed it. The set of publishers a deployment accepts comes from two
+sources (`core/plugins/signing.py`), merged:
+
+| Source | Shape | Limits |
+| ------ | ----- | ------ |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | Comma-separated hex public keys | No identity, no expiry, no revocation |
+| `BASELITH_PLUGIN_TRUST_STORE` | Path to a JSON file | Key id, expiry and revocation per key |
+
+```json title="trust-store.json"
+{
+  "keys": [
+    {
+      "key_id": "release-2026",
+      "public_key_hex": "4f2c…<64 hex characters>",
+      "not_after": "2027-01-01T00:00:00Z"
+    },
+    {
+      "key_id": "leaked-2026",
+      "public_key_hex": "9ab1…<64 hex characters>",
+      "revoked": true
+    }
+  ]
+}
+```
+
+| Key | Required | Meaning |
+| --- | -------- | ------- |
+| `public_key_hex` | ✅ | Raw 32-byte Ed25519 public key, 64 hex characters. A different length is skipped with an ERROR. |
+| `key_id` | ❌ | Operator-facing label, quoted in refusal logs. Defaults to the first 16 hex characters of the key. |
+| `not_after` | ❌ | ISO-8601 instant after which the key stops verifying. Absent or empty means no expiry; a **naive** value is read as UTC. |
+| `revoked` | ❌ | `true` refuses the key immediately, regardless of `not_after`. |
+
+A bare JSON list is accepted in place of the `{"keys": [...]}` wrapper.
+
+Three behaviours are worth being explicit about, because they are what makes the
+store usable in an incident:
+
+- **Revocation beats the legacy env var.** The merge is keyed by public key and a
+  store entry replaces the env-derived one, so revoking a key takes effect even
+  while it is still listed in `BASELITH_PLUGIN_TRUST_ROOTS`.
+- **Everything fails closed.** A missing, unreadable or malformed store logs an
+  ERROR and yields *no* keys — with `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true` that
+  refuses every plugin. A `not_after` that will not parse is treated as **already
+  expired**, never as "no expiry".
+- **Refusals name the key.** When a signature fails, the loader checks it against
+  the revoked and expired entries and, on a match, logs that the signature was
+  produced by trust store key `leaked-2026`, which is revoked. Revocation doing its
+  job reads very differently from tampering.
+
+The public API is `load_trust_store(path=None)` (every well-formed entry, usable or
+not), `load_trusted_keys()` (env roots merged with the store) and `load_trust_roots()`
+(usable hex keys only — unchanged signature, unchanged behaviour when only the env
+var is set). `TrustedKey.rejection_reason()` returns `"revoked"`,
+`"expired on <timestamp>"` or `None`.
+
+!!! danger "A pre-V5 signature does not cover the manifest"
+    Signature enforcement on its own still accepts a signature computed against a
+    superseded hash surface, and nothing before `V5_MANIFEST` covered the manifest —
+    so a plugin's declared `permissions:` (egress, tools, secrets) could be widened
+    without breaking its hash or its publisher signature. Re-sign your plugins at V5
+    (`python scripts/sign_changed_plugins.py --all`), and/or set
+    `BASELITH_REQUIRE_SIGNED_PLUGINS=true`, which refuses every superseded surface.
+    See [Packaging › Hash surface generations](../plugins/packaging.md#hash-surface-generations).
 
 ## Secrets Management
 
@@ -810,7 +927,7 @@ before the cost-control middleware could see them.
 
 ## Admin Account Lockout
 
-After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login.
+After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login. Each failure is recorded by a single atomic Lua script (increment, arm the window, extend to the lockout TTL at the threshold), so a crash mid-update can never leave a counter without an expiry — which used to mean a permanent lockout for that IP.
 
 !!! warning "Behind a reverse proxy: run uvicorn with `--proxy-headers`"
     IP-keyed protections (this lockout, anonymous rate limiting) key on

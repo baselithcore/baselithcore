@@ -150,3 +150,77 @@ class TestTenantRouter:
 
         assert result.id == "t1"
         mock_service.create_tenant.assert_called_with("t1", "T1")
+
+
+class TestReservedTenantIdIsRefused:
+    """``system`` cannot be provisioned.
+
+    Migration ``010_system_tenant_rls_exemption`` grants the ``system`` tenant
+    visibility of every tenant-scoped row so the framework's cross-tenant
+    maintenance work can function. A tenant record with that id would let anyone
+    holding a principal for it read and write the whole database, so the door
+    every provisioning path goes through refuses it. The check lives in the
+    service, not the router, because the router is one caller of several.
+    """
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_the_service_refuses_before_touching_the_database(
+        self, mock_get_conn
+    ):
+        from core.services.tenant import ReservedTenantIdError
+
+        mock_cursor = _mock_cursor(mock_get_conn)
+
+        with pytest.raises(ReservedTenantIdError, match="reserved"):
+            await TenantService().create_tenant("system", "Sneaky")
+
+        mock_cursor.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_it_is_a_value_error_for_existing_handlers(self, mock_get_conn):
+        """Subclassing ``ValueError`` keeps callers that already catch it — the
+        documented failure mode of ``create_tenant`` — working unchanged."""
+        from core.services.tenant import ReservedTenantIdError
+
+        _mock_cursor(mock_get_conn)
+
+        with pytest.raises(ValueError):
+            await TenantService().create_tenant("system", "Sneaky")
+        assert issubclass(ReservedTenantIdError, ValueError)
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_an_ordinary_id_is_unaffected(self, mock_get_conn):
+        mock_cursor = _mock_cursor(mock_get_conn)
+        mock_cursor.fetchone.return_value = ("acme", "Acme", "active", "2026-01-01")
+
+        tenant = await TenantService().create_tenant("acme", "Acme")
+
+        assert tenant.id == "acme"
+        mock_cursor.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("core.routers.tenant.get_tenant_service")
+    async def test_the_admin_route_answers_400_not_500(self, mock_get_service):
+        """Without the mapping it fell into the generic handler and came back as
+        'An internal error occurred', which tells an operator nothing."""
+        from fastapi import HTTPException
+
+        from core.services.tenant import ReservedTenantIdError
+
+        mock_service = AsyncMock()
+        mock_get_service.return_value = mock_service
+        mock_service.get_tenant.return_value = None
+        mock_service.create_tenant.side_effect = ReservedTenantIdError(
+            "'system' is a reserved tenant identifier and cannot be provisioned."
+        )
+
+        with pytest.raises(HTTPException) as excinfo:
+            await create_tenant(
+                CreateTenantRequest(id="system", name="S"), user="admin"
+            )
+
+        assert excinfo.value.status_code == 400
+        assert "reserved" in excinfo.value.detail

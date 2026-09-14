@@ -264,6 +264,17 @@ of the base prompt is never registered.
 
 ---
 
+## Result cache (`core/optimization/caching.py`)
+
+`RedisCache` namespaces every key by tenant: `{prefix}:{tenant_id}:{cache_prefix}:{key}`.
+The tenant id comes from `get_tenant_or_default()` rather than
+`get_current_tenant_id()` — a deliberately lenient lookup, since the id only
+scopes a Redis key and is not an access boundary. Callers running outside a
+request (a background job, a CLI invocation) share the `"default"` prefix
+instead of raising under `strict_tenant_isolation`.
+
+---
+
 ## Configuration
 
 | Variable                      | Default | Description                                                |

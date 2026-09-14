@@ -84,7 +84,10 @@ class SearchMixin:
             scored_items: list[tuple[MemoryItem, float]] = [
                 (item, score)
                 for item, embedding, score in zip(
-                    self._working_memory, self._working_memory_embeddings, scores
+                    self._working_memory,
+                    self._working_memory_embeddings,
+                    scores,
+                    strict=True,
                 )
                 if embedding and score >= self.similarity_threshold
             ]

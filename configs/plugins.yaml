@@ -7,7 +7,7 @@ browser_agent:
 goals:
   enabled: false
 example-plugin:
-  enabled: true
+  enabled: false
 marketplace:
   enabled: true
 my-plugin:

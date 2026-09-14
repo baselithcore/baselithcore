@@ -483,7 +483,7 @@ It is already wired into the framework's untrusted-content boundaries:
 | External MCP tool results | `core/mcp/client_operations.py` (`OperationsMixin.call_tool`, mixed into `MCPClient`) | `mcp_tool:<name>` |
 | Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
 | Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
-| Every tool observation (opt-in) | `core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop and the parallel executor | `<tool name>` |
+| Every tool observation (**on by default**) | `core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop, the typed `Agent` loop and the parallel executor | `<tool name>` |
 
 ### Scanning every tool observation (`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`)
 
@@ -491,12 +491,18 @@ The dedicated boundaries above cover MCP and the web scraper, but the same
 zero-width/bidi/HTML-comment smuggling can ride back in through **any** tool
 that touches the outside world (HTTP bodies, file contents, DB rows).
 `sanitize_tool_output(text, source=...)` is the universal chokepoint for the
-observation path: with `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true` every
-observation the ReAct tool loop or the parallel executor feeds back into
-context is passed through `scan_external_content` (findings logged with the
-tool name as `source`, sanitization per the
-`BASELITH_SANITIZE_EXTERNAL_CONTENT` policy). **Default off** — the
-dedicated boundaries stay authoritative until the operator opts in.
+observation path: every observation a tool loop feeds back into context is
+passed through `scan_external_content` (findings logged with the tool name as
+`source`, sanitization per the `BASELITH_SANITIZE_EXTERNAL_CONTENT` policy).
+
+**The scan is on by default.** `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT` is a kill
+switch, not an opt-in: `0`/`false`/`no`/`off` restores the unscanned path for a
+deployment that must accept byte-exact tool output; any other value — or none —
+leaves it on.
+
+Scanning removes the smuggled bytes. Telling the model that the result is *data*
+rather than an instruction is the other half, and it lives in the
+[untrusted-output envelope](orchestration.md#untrusted-output-envelope).
 
 ---
 

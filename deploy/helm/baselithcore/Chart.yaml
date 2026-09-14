@@ -3,9 +3,15 @@ name: baselithcore
 description: BaselithCore — modular orchestration engine for production-grade agentic AI.
 type: application
 # Chart version (SemVer) — bump on chart changes, independent of appVersion.
-version: 0.5.1
-# Tracks the BaselithCore application release (see core/_version.py).
-appVersion: "0.31.0"
+version: 0.8.0
+# Tracks the BaselithCore application release (core/_version.py) and, because
+# `image.tag` defaults to empty, it IS the image tag a plain `helm install`
+# pulls. It had drifted a release behind (0.31.0 against a 0.32.0 codebase),
+# so the chart silently deployed the previous image — semantic-release only
+# rewrote core/_version.py. `.releaserc` now rewrites this line in the same
+# release commit, and tests/unit/deploy/test_helm_chart.py fails if the two
+# ever disagree again.
+appVersion: "0.33.0"
 # The chart uses fields that older API servers silently drop rather than
 # reject: PodDisruptionBudget.unhealthyPodEvictionPolicy (1.27+) and
 # topologySpreadConstraints.matchLabelKeys (1.27+). Declaring the floor turns

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Any, Final
 
 from core.observability.logging import get_logger
 
@@ -23,9 +23,64 @@ logger = get_logger(__name__)
 DEFAULT_MAX_ITERATIONS: Final[int] = 25
 DEFAULT_BUDGET_USD: Final[float] = 0.50
 DEFAULT_MAX_TOOL_CALLS: Final[int] = 50
-# Token cap defaults to None (disabled) — a token budget is model/context-window
-# specific, so callers opt in with an explicit cap rather than inheriting one.
-DEFAULT_MAX_TOKENS: Final[int | None] = None
+#: Fallback token ceiling for one request when the orchestration settings are
+#: unreadable. A cap that is never set is not a cap: the historical ``None``
+#: default left every loop token-unbounded *and* pinned ``token_pressure()`` at
+#: 0.0, so the context auto-tuning that polls it could never fire.
+DEFAULT_MAX_TOKENS: Final[int] = 400_000
+#: Fallback wall-clock deadline (seconds) for one request.
+DEFAULT_MAX_SECONDS: Final[float] = 600.0
+#: Assumed model context window; denominator of :meth:`LoopBudget.token_pressure`
+#: when a caller explicitly disabled the token cap.
+DEFAULT_CONTEXT_WINDOW_TOKENS: Final[int] = 200_000
+
+
+def _orchestration_settings() -> Any | None:
+    """The orchestration settings, or ``None`` when they cannot be read.
+
+    Settings resolution must never be the reason a budget cannot be built, so
+    every failure degrades to the module-level fallbacks above.
+    """
+    try:
+        from core.config.orchestration import get_orchestration_config
+
+        return get_orchestration_config()
+    except Exception:  # pragma: no cover - defensive: config must not break loops
+        logger.debug("orchestration_settings_unavailable", exc_info=True)
+        return None
+
+
+def _default_max_tokens() -> int | None:
+    """Configured cumulative token cap; ``None`` when explicitly disabled (0)."""
+    config = _orchestration_settings()
+    raw = getattr(config, "loop_max_tokens", DEFAULT_MAX_TOKENS)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TOKENS
+    return value if value > 0 else None
+
+
+def _default_max_seconds() -> float | None:
+    """Configured wall-clock deadline; ``None`` when explicitly disabled (0)."""
+    config = _orchestration_settings()
+    raw = getattr(config, "loop_max_seconds", DEFAULT_MAX_SECONDS)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_SECONDS
+    return value if value > 0 else None
+
+
+def _context_window_tokens() -> int:
+    """Configured context window used by the token-pressure fallback."""
+    config = _orchestration_settings()
+    raw = getattr(config, "context_window_tokens", DEFAULT_CONTEXT_WINDOW_TOKENS)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CONTEXT_WINDOW_TOKENS
+    return max(value, 0)
 
 
 class BudgetExceededError(RuntimeError):
@@ -45,13 +100,16 @@ class LoopLimits:
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
     budget_usd: float = DEFAULT_BUDGET_USD
     # Cumulative token cap for the whole request (input + output across every
-    # LLM call). None disables token enforcement.
-    max_tokens: int | None = DEFAULT_MAX_TOKENS
+    # LLM call). Defaults to ``ORCHESTRATOR_LOOP_MAX_TOKENS``; None disables
+    # token enforcement (and switches token_pressure() to the context-window
+    # fallback below).
+    max_tokens: int | None = field(default_factory=_default_max_tokens)
     # Wall-clock deadline for the whole request, in seconds from budget
-    # creation. None disables it. Checked on every tick; use
-    # ``LoopBudget.remaining_seconds()`` to derive per-call timeouts so a
-    # single slow tool or LLM call can't outlive the request deadline.
-    max_seconds: float | None = None
+    # creation. Defaults to ``ORCHESTRATOR_LOOP_MAX_SECONDS``; None disables
+    # it. Checked on every tick; use ``LoopBudget.remaining_seconds()`` to
+    # derive per-call timeouts so a single slow tool or LLM call can't outlive
+    # the request deadline.
+    max_seconds: float | None = field(default_factory=_default_max_seconds)
 
 
 @dataclass
@@ -175,16 +233,24 @@ class LoopBudget:
         return min(self.context_tokens / self.tokens, 1.0)
 
     def token_pressure(self) -> float:
-        """Fraction of the token cap consumed, in ``[0, 1]``.
+        """Fraction of the available token room consumed, in ``[0, 1]``.
 
-        Returns 0.0 when no token cap is set. Handlers can poll this to trigger
-        context compaction *before* the hard cap aborts the request (e.g.
-        compact when ``token_pressure() > 0.8``).
+        With a token cap set (the default), this is ``tokens / max_tokens``.
+        When a caller explicitly disabled the cap the signal must not silently
+        vanish — a pressure that is structurally 0.0 makes every consumer of it
+        dead code — so it falls back to the assembled context measured against
+        the configured context window (``ORCHESTRATOR_CONTEXT_WINDOW_TOKENS``).
+
+        Handlers poll this to trigger context compaction *before* a hard cap
+        aborts the request (e.g. compact when ``token_pressure() > 0.8``).
         """
         cap = self.limits.max_tokens
-        if not cap:
+        if cap:
+            return min(self.tokens / cap, 1.0)
+        window = _context_window_tokens()
+        if window <= 0 or self.context_tokens <= 0:
             return 0.0
-        return min(self.tokens / cap, 1.0)
+        return min(self.context_tokens / window, 1.0)
 
     def snapshot(self) -> LoopBudgetSnapshot:
         return LoopBudgetSnapshot(

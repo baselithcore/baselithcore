@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { Skeleton } from './components/Skeleton';
 
@@ -42,32 +43,40 @@ function PageFallback() {
 }
 
 export default function App() {
+  // Keyed by pathname so a page that throws gets a fresh boundary the moment
+  // the user navigates away — otherwise the SPA would stay stuck on the
+  // fallback (whose only recovery action is a full page reload) after
+  // routing to an unrelated, healthy page.
+  const location = useLocation();
+
   return (
     <Layout>
       <Suspense fallback={<PageFallback />}>
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/run" element={<RunTask />} />
-          <Route path="/sessions" element={<Sessions />} />
-          <Route path="/channels" element={<Channels />} />
-          <Route path="/skills" element={<Skills />} />
-          <Route path="/crons" element={<Crons />} />
-          <Route path="/nodes" element={<Nodes />} />
-          <Route path="/logs" element={<Logs />} />
-          <Route path="/doctor" element={<Doctor />} />
-          <Route path="/agents" element={<Agents />} />
-          <Route path="/workspaces" element={<Workspaces />} />
-          <Route path="/metrics" element={<Metrics />} />
-          <Route path="/canvas" element={<Canvas />} />
-          <Route path="/models" element={<Models />} />
-          <Route path="/computer-use" element={<ComputerUse />} />
-          <Route path="/desktop" element={<DesktopTask />} />
-          <Route path="/stealth" element={<Stealth />} />
-          <Route path="/audit-log" element={<AuditLog />} />
-          <Route path="/approvals" element={<Approvals />} />
-          <Route path="/replay" element={<Replay />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <ErrorBoundary key={location.pathname}>
+          <Routes>
+            <Route path="/" element={<Overview />} />
+            <Route path="/run" element={<RunTask />} />
+            <Route path="/sessions" element={<Sessions />} />
+            <Route path="/channels" element={<Channels />} />
+            <Route path="/skills" element={<Skills />} />
+            <Route path="/crons" element={<Crons />} />
+            <Route path="/nodes" element={<Nodes />} />
+            <Route path="/logs" element={<Logs />} />
+            <Route path="/doctor" element={<Doctor />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/workspaces" element={<Workspaces />} />
+            <Route path="/metrics" element={<Metrics />} />
+            <Route path="/canvas" element={<Canvas />} />
+            <Route path="/models" element={<Models />} />
+            <Route path="/computer-use" element={<ComputerUse />} />
+            <Route path="/desktop" element={<DesktopTask />} />
+            <Route path="/stealth" element={<Stealth />} />
+            <Route path="/audit-log" element={<AuditLog />} />
+            <Route path="/approvals" element={<Approvals />} />
+            <Route path="/replay" element={<Replay />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </ErrorBoundary>
       </Suspense>
     </Layout>
   );

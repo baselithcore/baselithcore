@@ -8,6 +8,7 @@ import {
   RateLimitError,
   ApiConnectionError,
 } from '../src/index.js';
+import { ChatStreamError } from '../src/client.js';
 
 const BASE = 'https://api.test';
 
@@ -18,6 +19,18 @@ function json(payload: unknown, status = 200, headers: Record<string, string> = 
     status,
     headers: { 'content-type': 'application/json', ...headers },
   });
+}
+
+/** A fake `/chat/stream` response body split across arbitrary chunk boundaries. */
+function sseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+  return new Response(body);
 }
 
 function clientWith(handler: Handler, opts: Record<string, unknown> = {}): BaselithClient {
@@ -123,11 +136,54 @@ describe('chat', () => {
     expect(res.sources).toEqual([{ id: 1 }]);
   });
 
-  it('streams text chunks', async () => {
-    const c = clientWith(() => new Response('Hello world'));
+  it('decodes SSE data frames into text chunks, stopping at event: done', async () => {
+    const c = clientWith(() => sseResponse(['data: Hello\n\ndata:  world\n\n', 'event: done\ndata: [DONE]\n\n']));
     let out = '';
     for await (const chunk of c.chatStream('q')) out += chunk;
     expect(out).toBe('Hello world');
+  });
+
+  it('reassembles an SSE frame split across arbitrary chunk boundaries', async () => {
+    // The blank line terminating the first event, and the "done" keyword
+    // itself, are each split across two network reads.
+    const c = clientWith(() =>
+      sseResponse(['data: hel', 'lo\n', '\nevent: don', 'e\ndata: [DONE]\n\n'])
+    );
+    const out: string[] = [];
+    for await (const chunk of c.chatStream('q')) out.push(chunk);
+    expect(out).toEqual(['hello']);
+  });
+
+  it('tolerates keepalive comments and reassembles multi-line data fields', async () => {
+    const c = clientWith(() =>
+      sseResponse([
+        ': keepalive\n\n',
+        'data: line1\ndata: line2\n\n',
+        ': keepalive\n\n',
+        'event: done\ndata: [DONE]\n\n',
+      ])
+    );
+    const out: string[] = [];
+    for await (const chunk of c.chatStream('q')) out.push(chunk);
+    expect(out).toEqual(['line1\nline2']);
+  });
+
+  it('surfaces event: error as ChatStreamError', async () => {
+    const c = clientWith(() =>
+      sseResponse(['data: partial\n\n', 'event: error\ndata: stream failed\n\n', 'event: done\ndata: [DONE]\n\n'])
+    );
+    const iter = c.chatStream('q')[Symbol.asyncIterator]();
+    await expect(iter.next()).resolves.toEqual({ done: false, value: 'partial' });
+    await expect(iter.next()).rejects.toBeInstanceOf(ChatStreamError);
+  });
+
+  it('merges a CRLF line split exactly at the \\r/\\n boundary (regression)', async () => {
+    // A chunk boundary between "\r" and its "\n" must not fragment one
+    // logical `data:` block into two.
+    const c = clientWith(() => sseResponse(['data: hello\r', '\ndata: world\r\n\r\n']));
+    const out: string[] = [];
+    for await (const chunk of c.chatStream('q')) out.push(chunk);
+    expect(out).toEqual(['hello\nworld']);
   });
 });
 

@@ -264,9 +264,11 @@ agents constructed without gates behave as before.
 
 **Observation hygiene** — every tool observation is deterministically
 truncated (head + tail kept, `BASELITH_TOOL_OUTPUT_MAX_CHARS`, default
-`8000`) before it re-enters the context window, and with
-`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true` (default off) it is additionally
-scanned for indirect-injection smuggling at the same chokepoint — see
+`8000`) before it re-enters the context window, then scanned for
+indirect-injection smuggling at the same chokepoint (on by default;
+`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT` is the kill switch), then wrapped in the
+[untrusted-output envelope](orchestration.md#untrusted-output-envelope) so the
+model reads it as data rather than instruction — see
 [Guardrails › Indirect Injection Scanning](guardrails.md#indirect-injection-scanning).
 
 **Early escalation on consecutive failures** — after

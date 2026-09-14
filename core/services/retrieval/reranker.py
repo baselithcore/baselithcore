@@ -111,7 +111,7 @@ class Reranker:
             scores = await asyncio.to_thread(self.model.predict, pairs)
 
             # Assign new scores
-            for idx, score in zip(valid_indices, scores):
+            for idx, score in zip(valid_indices, scores, strict=True):
                 results[idx].score = float(score)
 
             # Sort by new score descending

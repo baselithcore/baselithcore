@@ -72,12 +72,14 @@ export function useOverlayA11y({
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
       if (!activeElement || !container.contains(activeElement)) {
         event.preventDefault();
-        (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+        // focusable.length === 0 already returned above, so index 0 and the
+        // last index are guaranteed to exist here.
+        (event.shiftKey ? focusable[focusable.length - 1]! : focusable[0]!).focus();
         return;
       }
 
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
 
       if (event.shiftKey && activeElement === first) {
         event.preventDefault();

@@ -132,7 +132,9 @@ results = await registry.search(query="scraper", force=False)
 
 - `fetch(force=False)` returns in-memory data, then the on-disk cache
   (`cache/marketplace_registry.json`) if it is fresher than
-  `registry_cache_ttl` (default 3600s), then the remote URL.
+  `registry_cache_ttl` (default 3600s), then the remote URL. The cache's
+  file `mtime` and the current time are both read as UTC-aware timestamps
+  for that comparison.
 - `file://` registry URLs are supported for testing/air-gapped use.
 - On a failed remote fetch, the registry falls back to an existing (even
   expired) cache before raising `RuntimeError`.

@@ -320,7 +320,9 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
         # Auth-gated like core /metrics (admin basic auth by default there):
         # run/channel/usage telemetry is not for anonymous readers.
         auth.check(request)
-        payload, content_type = render_metrics()
+        # Pass the scraper's Accept through: exemplars only exist in the
+        # OpenMetrics encoding, and this registry carries them.
+        payload, content_type = render_metrics(request.headers.get("accept", ""))
         return Response(content=payload, media_type=content_type)
 
     @router.get("/", include_in_schema=False)

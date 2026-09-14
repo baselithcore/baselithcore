@@ -86,8 +86,18 @@ class QdrantProvider:
 
         try:
             if mode == "embedded":
-                location = path if path else ":memory:"
-                self.client = AsyncQdrantClient(location=location)
+                # `location` is a URL to qdrant_client: anything but
+                # ":memory:" is dialled as a remote host, so an on-disk
+                # embedded store passed there becomes a client for the
+                # server "/app/data/qdrant" ("Name or service not known").
+                # Persistence goes through `path`; only the in-memory mode
+                # uses `location`.
+                if path:
+                    self.client = AsyncQdrantClient(path=path)
+                    location = path
+                else:
+                    location = ":memory:"
+                    self.client = AsyncQdrantClient(location=location)
                 logger.info(
                     f"Initialized Qdrant provider in embedded mode (location={location})"
                 )

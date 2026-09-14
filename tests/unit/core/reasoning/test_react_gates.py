@@ -71,7 +71,7 @@ class TestAutonomyGate:
             autonomy_policy=AutonomyPolicy(level=AutonomyLevel.SUPERVISED),
         )
         result = await agent._execute_tool("t", "")
-        assert result == "done"
+        assert "done" in result
         assert calls == [1]
 
     async def test_human_approval_allows_execution(self) -> None:
@@ -83,7 +83,8 @@ class TestAutonomyGate:
             human_intervention=channel,
         )
         result = await agent._execute_tool("t", "")
-        assert result == "done"
+        # Observations arrive sealed in the untrusted-content envelope.
+        assert "done" in result
         assert calls == [1]
         assert len(channel.requests) == 1
 
@@ -118,7 +119,7 @@ class TestAutonomyGate:
             autonomy_policy=AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS),
         )
         result = await agent._execute_tool("t", "")
-        assert result == "done"
+        assert "done" in result
 
 
 class TestContractGate:
@@ -147,7 +148,7 @@ class TestBudgetGate:
         calls: list = []
         budget = LoopBudget(limits=LoopLimits(max_tool_calls=1))
         agent = ReActAgent(tools=[_tool(calls)], loop_budget=budget)
-        assert await agent._execute_tool("t", "") == "done"
+        assert "done" in await agent._execute_tool("t", "")
         with pytest.raises(BudgetExceededError):
             await agent._execute_tool("t", "")
         assert calls == [1]
@@ -160,7 +161,7 @@ class TestBudgetGate:
         agent = ReActAgent(tools=[_tool(calls)])
         token = activate_budget(budget)
         try:
-            assert await agent._execute_tool("t", "") == "done"
+            assert "done" in await agent._execute_tool("t", "")
             assert budget.tool_calls == 1
             with pytest.raises(BudgetExceededError):
                 await agent._execute_tool("t", "")

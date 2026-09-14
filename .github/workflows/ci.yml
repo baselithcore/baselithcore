@@ -23,6 +23,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # A merge queue re-runs the checks against the PR rebased onto the CURRENT
+  # tip, which is the only place a semantic conflict shows up: two PRs that are
+  # each green in isolation and red together. Without this trigger the queue has
+  # no required checks to wait on and either refuses to enqueue or merges
+  # unverified — so the one event the queue exists for never runs CI.
+  merge_group:
 
 # Least privilege by default; jobs that write (release, publish, SARIF
 # upload) escalate with their own job-level permissions block.
@@ -30,10 +36,14 @@ permissions:
   contents: read
 
 # One run per ref: superseded pushes stop burning runners. Never cancel
-# main - the release job runs there.
+# main - the release job runs there. Never cancel a merge_group run either: its
+# ref (refs/heads/gh-readonly-queue/...) is not main, so the expression below
+# would have cancelled it, and a cancelled queue check reads as failed - which
+# drops the PR out of the queue instead of merging it.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: >-
+    ${{ github.ref != 'refs/heads/main' && github.event_name != 'merge_group' }}
 
 jobs:
   # ============================================================
@@ -53,8 +63,12 @@ jobs:
         with:
           node-version: 'lts/*'
       - name: Run markdownlint
+        # zizmor: ignore[adhoc-packages]
+        # There is no package.json to lock a docs linter against, and adding one
+        # at the repo root to hold a single global CLI would be the larger evil.
+        # The version is pinned instead, which is what the lockfile would buy.
         run: |
-          npm install -g markdownlint-cli2
+          npm install -g markdownlint-cli2@0.23.2
           markdownlint-cli2 --config .markdownlint.yaml .
         continue-on-error: true
 
@@ -78,6 +92,112 @@ jobs:
           ruff check . --exclude templates,examples
           ruff format --check . --exclude templates,examples
 
+  zizmor:
+    # Static analysis for the workflows themselves. Everything else in this
+    # file gates the application; nothing gated the CI definition, which is the
+    # one part of the repository that runs with a token. zizmor catches the
+    # classes that matter here: `${{ }}` expansion of attacker-controllable
+    # values into a `run:` block (template injection), a checkout that leaves
+    # credentials in .git/config for later steps, over-broad `permissions:`,
+    # and unpinned `uses:`.
+    #
+    # Deliberate exceptions are `# zizmor: ignore[rule]` comments at the site,
+    # each with the reason next to it — never a blanket allowlist in a config
+    # file nobody reads.
+    name: Workflow Lint (zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Audit workflow definitions
+        run: |
+          uv pip install --system zizmor==1.30.1
+          # --offline: no GitHub API calls. The online mode resolves referenced
+          # actions through the API, which makes the result depend on rate
+          # limits and on repositories we do not control — a gate that can turn
+          # red without a change in this tree is not a gate. Every audit that
+          # needs only the workflow text still runs.
+          zizmor --offline .github/workflows/
+
+  helm_lint:
+    # The chart is a shipped artifact: `helm install` against it is the
+    # documented deployment path, and its appVersion is the released image tag.
+    # Nothing validated it, so a template that renders invalid YAML — or valid
+    # YAML the API server rejects — was only discovered by an operator applying
+    # it to a real cluster.
+    name: Helm Chart (lint + kubeconform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4
+        with:
+          version: v3.20.0
+      - name: helm lint (default and production values)
+        # Both value sets: the production overlay turns on the ingress, the
+        # NetworkPolicy, the worker Deployment and the ServiceMonitor, none of
+        # which the default render exercises.
+        run: |
+          helm lint deploy/helm/baselithcore
+          helm lint deploy/helm/baselithcore \
+            -f deploy/helm/baselithcore/values-production.yaml
+      - name: Render and validate against the Kubernetes schemas
+        env:
+          KUBECONFORM_VERSION: 0.8.0
+          # From the release's CHECKSUMS file. Same posture as the gitleaks and
+          # Trivy steps: a binary fetched over the network is verified before it
+          # runs, and a tampered or unavailable download fails the job rather
+          # than silently skipping the gate.
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          # -strict rejects unknown fields, which is what catches a typo'd key
+          # that a cluster would accept and then ignore. The CRDs-catalog
+          # schema location resolves the out-of-tree kinds the chart emits
+          # (monitoring.coreos.com ServiceMonitor/PrometheusRule, keda.sh
+          # ScaledObject); -ignore-missing-schemas keeps a catalog gap from
+          # failing the build, while every in-tree Kubernetes kind is still
+          # validated strictly.
+          # --kube-version must match kubeconform's -kubernetes-version: helm
+          # uses it to resolve .Capabilities.KubeVersion and the
+          # apiVersion-availability guards in the templates, so without it helm
+          # renders against ITS built-in default while kubeconform validates
+          # against 1.29 — two different clusters, and a chart that renders a
+          # deprecated apiVersion for the target would slip through.
+          validate() {
+            helm template baselithcore deploy/helm/baselithcore \
+              --kube-version 1.29.0 "$@" \
+              | /tmp/kubeconform \
+                  -strict \
+                  -summary \
+                  -ignore-missing-schemas \
+                  -kubernetes-version 1.29.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                  -
+          }
+          validate
+          validate -f deploy/helm/baselithcore/values-production.yaml
+
   architecture_boundaries:
     name: Architecture Boundaries
     runs-on: ubuntu-latest
@@ -98,11 +218,14 @@ jobs:
         run: python scripts/check_exception_hygiene.py
       - name: Check public API surface drift
         run: python scripts/check_public_api.py
-      - name: Check configuration surface (.env.example + reference page)
+      - name: Check configuration surface (.env.example + configs/.env.base + reference page)
         run: python scripts/check_config_surface.py
       - name: Check eval-corpus ratchet
         run: |
-          pip install pyyaml
+          # Pinned like every other tool this workflow installs (see the policy
+          # note at the top) and in lockstep with the `plugin_integrity` job,
+          # which installs the same parser.
+          pip install pyyaml==6.0.3
           python scripts/check_eval_baseline.py
 
   docs_consistency:
@@ -131,7 +254,14 @@ jobs:
         run: python scripts/check_docs_consistency.py --routes
       - name: Changed core modules have their docs page touched
         if: github.event_name == 'pull_request'
-        run: python scripts/check_docs_sync.py "origin/${{ github.base_ref }}"
+        # BASE_REF goes through the environment, not through `${{ }}` inside the
+        # run block: expression interpolation splices the value into the shell
+        # script BEFORE bash parses it, so a branch name containing shell
+        # metacharacters would execute as code in a job that can read the
+        # checkout. An env var is expanded by bash as data.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/check_docs_sync.py "origin/${BASE_REF}"
 
   openapi_drift:
     # The checked-in sdk/openapi.json (and its mkdocs copy) must match what
@@ -310,6 +440,9 @@ jobs:
       - name: Type Check Official Plugins
         run: |
           uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
+          # The roster derivation reads each manifest.yaml — same parser pin as
+          # the eval-baseline and plugin_integrity jobs.
+          pip install pyyaml==6.0.3
           python scripts/check_official_plugin_typing.py
 
   type_check_core_strict:
@@ -384,6 +517,40 @@ jobs:
       # builds stop being reproducible. Regenerate with `uv lock`.
       - name: Verify uv.lock is in sync with pyproject.toml
         run: uv lock --check
+
+  dependency_review:
+    # Gates the DIFF, which is the one thing the other supply-chain jobs do not
+    # do. pip-audit and Trivy answer "is anything we install vulnerable today",
+    # and both are happy to stay green while a PR introduces a new dependency
+    # that is merely not-yet-known-bad. This one answers "what is this PR
+    # adding, and is it something we would have accepted on purpose" — it
+    # compares the base and head dependency graphs and fails on a newly
+    # introduced vulnerable or badly licensed package, at review time, when
+    # removing it is still cheap.
+    #
+    # Requires the repository's Dependency graph to be enabled (Settings →
+    # Code security). Without it the action errors rather than passing
+    # vacuously, which is the correct failure direction for a security gate.
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # pull_request only: the action diffs a base against a head, and a push or
+    # a merge_group run has no PR to diff.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Review dependency changes introduced by this PR
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48  # v4
+        with:
+          fail-on-severity: high
+          # No PR comment: that needs pull-requests:write, and this job has no
+          # reason to hold a write token. The findings are in the job log and
+          # in the check annotation.
+          comment-summary-in-pr: never
 
   gitleaks:
     name: Secrets Scan (gitleaks)
@@ -593,21 +760,85 @@ jobs:
         run: |
           python -m pip install build==1.5.0 setuptools==83.0.0 wheel==0.47.0
       - name: Build distributions
-        run: python -m build --no-isolation
+        # SOURCE_DATE_EPOCH makes the build reproducible. Without it, setuptools
+        # stamps "now" into every zip/tar member, so the same commit built twice
+        # produces two artifacts with different hashes — which makes the build
+        # provenance attestation on the release unverifiable by anyone who tries
+        # to rebuild it. The commit's own author date is the canonical choice
+        # (it is what `git log -1 --format=%ct` returns and it is stable for a
+        # given commit).
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
+          python -m build --no-isolation
       - name: Validate distribution artifacts
         run: python scripts/check_distribution_artifacts.py
 
   # ============================================================
   # 🧪 TEST
   # ============================================================
+  frontend_test:
+    # `core/static/frontend/js/api.js` is the SSE client the shipped chat UI
+    # runs: it reassembles `/chat/stream` frames across arbitrary chunk
+    # boundaries. Its tests existed and nothing ran them, so the regressions
+    # they pin (a CRLF line split exactly at the \r/\n boundary, `event: error`
+    # leaking into the transcript as ordinary text) were only ever caught by
+    # whoever happened to run `node --test` locally.
+    #
+    # No npm install and no `cache:` key: the module under test has zero
+    # dependencies and the directory has no package.json, so there is no
+    # lockfile to cache against and `cache: 'npm'` would fail looking for one.
+    name: Frontend JS Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '22'
+      - name: Run node --test
+        # Discover rather than naming api.test.mjs: a second test module added
+        # next to it must be picked up without editing CI, which is exactly how
+        # the first one came to be unrun.
+        #
+        # Discovered with `find` and passed as explicit paths, not handed to
+        # `--test` as a glob. A `--test` glob that matches nothing exits 0 with
+        # zero tests — so a renamed or moved file would turn this gate green
+        # while verifying nothing, which is worse than the hole it closes. The
+        # emptiness check below is the whole point of doing it this way.
+        run: |
+          FILES="$(find core/static/frontend/js -name '*.test.mjs' | sort)"
+          if [ -z "$FILES" ]; then
+            echo "::error::no *.test.mjs found under core/static/frontend/js"
+            exit 1
+          fi
+          echo "Running:"
+          echo "$FILES"
+          echo "$FILES" | xargs node --test
+
   python_test:
     name: Python Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
-    # required checks in branch protection.
-    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness]
+    # required checks in branch protection. zizmor, helm_lint, ui_build and
+    # frontend_test join them for the same reason — a gate that nothing depends
+    # on is advisory, and a workflow audit, a chart that will not render, a
+    # stale dashboard bundle or a broken SSE client in the shipped chat UI are
+    # all things that must not reach a release. frontend_test is safe to depend
+    # on because it carries no `if:` and therefore runs on every trigger.
+    #
+    # dependency_review is deliberately NOT here: it only runs on
+    # pull_request, so listing it would make every push to main skip
+    # python_test (a skipped dependency blocks the dependent job).
+    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
     strategy:
       fail-fast: false
       matrix:
@@ -647,6 +878,7 @@ jobs:
           POSTGRES_DB: test_db
           DB_HOST: localhost
           REDIS_URL: redis://localhost:6379/0
+          CACHE_REDIS_URL: redis://localhost:6379/1
         run: |
           # Install the LOCKED set, not a fresh resolution. `-e ".[test]"`
           # re-resolved every dependency to whatever was newest that morning,
@@ -678,7 +910,55 @@ jobs:
   # ============================================================
   # 🏗️ BUILD
   # ============================================================
-
+  ui_build:
+    # `plugins/baselithbot/ui/dist/` is COMMITTED and is the only thing the
+    # wheel ships (ui/src and ui/node_modules are excluded in pyproject.toml).
+    # A committed build output that nothing rebuilds is a build output that
+    # drifts: a change to ui/src/ that was never rebuilt ships the previous
+    # bundle, and the dashboard silently serves stale code for a release.
+    #
+    # This rebuilds it from a clean `npm ci` and fails if the result differs
+    # from what is committed — the same shape as the openapi_drift gate.
+    name: BaselithBot UI Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: plugins/baselithbot/ui/package-lock.json
+      - name: Install, typecheck and build
+        working-directory: plugins/baselithbot/ui
+        # npm ci, not npm install: it installs the locked tree exactly and
+        # fails on a lockfile that disagrees with package.json, rather than
+        # quietly resolving something new and rewriting the lock.
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Committed dist/ matches a clean rebuild
+        # `git status --porcelain`, not `git diff`: dist/ is covered by a
+        # `dist/` line in .gitignore and its bundles are tracked only because
+        # they were force-added. `git diff` sees modifications and deletions of
+        # those tracked files but is blind to ADDED ones — and an added file is
+        # the normal shape of this drift, because the bundle names are
+        # content-hashed, so a source change produces a new filename rather
+        # than a changed one. --porcelain reports tracked and untracked alike.
+        run: |
+          DRIFT="$(git status --porcelain -- plugins/baselithbot/ui/dist)"
+          if [ -n "$DRIFT" ]; then
+            echo "::error::plugins/baselithbot/ui/dist is out of date."
+            echo "Run 'npm ci && npm run build' in plugins/baselithbot/ui and commit dist/."
+            echo "$DRIFT"
+            exit 1
+          fi
 
   # ============================================================
   # 🚀 RELEASE
@@ -702,12 +982,15 @@ jobs:
       new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4  # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
           # persist-credentials stays ON here (the default), unlike every other
           # job: semantic-release pushes the version bump, the changelog and the
-          # tag back to the branch, which needs the token in .git/config.
+          # tag back to the branch, which needs the token in .git/config. That
+          # is what zizmor's `artipacked` audit flags, and the suppression above
+          # is the deliberate answer: this job cannot do its work without the
+          # credential, and it uploads only dist/, never the .git directory.
       - name: Semantic Release
         id: semantic
         uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4  # v4
@@ -735,9 +1018,19 @@ jobs:
 
       - name: Install uv and build package
         if: steps.semantic.outputs.new_release_published == 'true'
+        # SOURCE_DATE_EPOCH: same reasoning as `package_smoke` above, and it
+        # matters more here — these are the artifacts that get a Sigstore
+        # provenance attestation and go to PyPI. An attestation over a build
+        # nobody can reproduce bit-for-bit proves only that OUR runner made it,
+        # not that the source produces it. `git log -1` runs after
+        # semantic-release has committed the version bump, so the epoch is the
+        # release commit's, not the pre-release one's.
         run: |
           pip install uv==0.12.0
           uv pip install --system build==1.5.0
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
           python3 -m build
 
       - name: Generate release SBOM and attach to the GitHub Release
@@ -804,7 +1097,12 @@ jobs:
     # default image.repository already pointed at ghcr.io/baselithcore/
     # baselithcore. Calling it inside this run needs no extra event and no
     # extra token.
-    name: Release Container Image
+    name: Release Container Image  # zizmor: ignore[self-repository]
+    # (zizmor prefers the newer `$/.github/...` self-reference syntax for the
+    # `uses:` below. The `./` form is the documented, universally supported one
+    # and this is a reusable-workflow call that already resolves inside this
+    # repository at this commit — switching spelling buys nothing and risks a
+    # release path that is exercised once per release.)
     needs: [release]
     # DISABLED by default. The image build is the longest and most expensive
     # job in the pipeline (multi-arch, torch + playwright + pre-cached models)

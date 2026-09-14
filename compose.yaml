@@ -1,0 +1,322 @@
+---
+# ============================================================
+# compose.yaml — the single-host stack
+# ============================================================
+# Everything in one place for local work and small self-hosted
+# installs: API, worker, Postgres, FalkorDB and Qdrant.
+#
+#   docker compose up -d
+#
+# This file used to call itself PRODUCTION in its own header
+# while compose.prod.yaml was the actual production stack — two
+# files claiming the same role, which is how someone ends up
+# running the unhardened one on a public address. Production is
+# compose.prod.yaml. This one is the batteries-included stack.
+#
+# Optional service groups are PROFILES, not separate files:
+#
+#   docker compose --profile observability up -d   # Jaeger, Prometheus, Grafana
+#   docker compose --profile local-llm up -d       # Ollama
+#
+# Two overlays stay separate files, because they modify the
+# services above rather than adding to them:
+#
+#   -f compose.yaml -f compose.dev.yaml        # live-reload: source over the image
+#   -f compose.yaml -f compose.sandbox.yaml    # opt-in Docker-in-Docker sandbox
+# ============================================================
+
+services:
+  # === API Server ===
+  api:
+    build:
+      context: .
+    container_name: baselith-core-api
+    env_file: configs/.env.production
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./documents:/app/documents:ro
+      - ./data:/app/data
+    ports:
+      - '8000:8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # --- Container hardening, mirrored from compose.prod.yaml ---
+    # This stack is the one people actually run for local work and small
+    # self-hosted installs, and it had none of it: the process could gain
+    # privileges through a setuid binary, and it kept the full default Linux
+    # capability set (CHOWN, SETUID, NET_RAW, MKNOD ...) that a Python web app
+    # has no use for. Hardening only the file labelled "production" protects
+    # the deployment least likely to be exposed by accident.
+    # `init: true` reaps the zombies a PID-1 uvicorn otherwise leaks.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    restart: unless-stopped
+    healthcheck:
+      # python, not curl: the image ships no shell utilities (see Dockerfile).
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Matches the image HEALTHCHECK: boot imports torch and
+      # sentence-transformers and loads the cached models, which regularly
+      # outlasts a 90s retry budget counted from process start.
+      start_period: 300s
+      start_interval: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # === Background Worker ===
+  worker:
+    build:
+      context: .
+    container_name: baselith-core-worker
+    command: python -m core.task_queue.worker
+    env_file: configs/.env.production
+    volumes:
+      - ./documents:/app/documents:ro
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # Same hardening as `api` above, and for the same reason: the worker runs
+    # the identical image and executes queued jobs, which is the side that
+    # touches plugin code paths with the least supervision.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+
+  # === PostgreSQL ===
+  postgres:
+    # pgvector/pgvector = official postgres + the `vector` extension, so the
+    # optional VECTORSTORE_PROVIDER=pgvector backend works out of the box.
+    image: pgvector/pgvector:pg16
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-baselithcore}
+      POSTGRES_USER: ${DB_USER:-baselithcore}
+      # No default on purpose: a guessable password on a PRODUCTION stack is a
+      # breach waiting to happen. `docker compose` aborts until DB_PASSWORD is
+      # set in the environment or .env.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (no default in production)}
+      TZ: ${APP_TIMEZONE:-Europe/Rome}
+    ports:
+      # Loopback-only: the backing stores are reachable from the compose
+      # network by service name; the host binding exists for operator
+      # tooling and must not expose the store to the network.
+      - '127.0.0.1:5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselithcore} -U ${DB_USER:-baselithcore}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === FalkorDB (Redis + GraphDB) ===
+  # Single instance: Cache, Queue, AND GraphDB
+  redis:
+    # Pinned: a `latest` re-pull silently changes the data plane.
+    image: falkordb/falkordb:v4.20.4
+    container_name: baselith-core-redis
+    # REDIS_PASSWORD is optional but strongly recommended: without it any
+    # container on the network (and any host process via the loopback
+    # publish) has full RW access to cache, queues, and rate-limit counters.
+    # When set, point CACHE_REDIS_URL etc. at redis://:<password>@redis:6379.
+    #
+    # REDIS_ARGS, NOT a `command:` override: the FalkorDB image's run.sh
+    # entrypoint IGNORES the container command (verified live — the previous
+    # `command: redis-server --maxmemory 512mb ...` was silently never
+    # applied) and only appends REDIS_ARGS to its own redis-server launch.
+    environment:
+      - REDIS_ARGS=--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    # Compose resolves a service by its SERVICE name, not its container_name —
+    # so this instance answers to `redis`. configs/.env.production, however,
+    # points CACHE_REDIS_URL / QUEUE_REDIS_URL / GRAPH_DB_URL at `falkordb`
+    # (the image's name), which resolved to nothing. The alias makes both
+    # spellings work rather than forcing every existing .env to be rewritten.
+    # Declared on `default` on purpose: that is the network this service
+    # already joins implicitly, and naming it here would otherwise move the
+    # service off it and cut api/worker/postgres connectivity.
+    networks:
+      default:
+        aliases:
+          - falkordb
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === Qdrant (Vector Store) ===
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: baselith-core-qdrant
+    ports:
+      - '127.0.0.1:6333:6333'
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The qdrant image ships no curl/wget; a bash TCP connect to the REST
+      # port is the standard liveness probe for it.
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" 2>/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === Ollama (Local LLM Runtime) — profile: local-llm ===
+  # Opt-in, for two reasons. It is a 4GB memory reservation that most
+  # deployments do not use (any hosted provider makes it dead weight), and
+  # api/worker used to declare `depends_on: ollama: service_healthy`, so every
+  # `up` waited for a model runtime to report healthy before the API could
+  # start — for a dependency nothing touches until a request arrives.
+  #
+  #   docker compose --profile local-llm up -d
+  #
+  # ⚠️ On macOS, or on Linux with a GPU, running Ollama NATIVELY is strongly
+  # preferable: the container cannot reach Metal, and CUDA passthrough needs
+  # extra setup. Natively, leave this profile off and point the app at
+  # LLM_API_BASE=http://host.docker.internal:11434.
+  ollama:
+    profiles: [local-llm]
+    # Pinned: a `latest` re-pull silently changes the local LLM runtime.
+    image: ollama/ollama:0.33.2
+    container_name: baselith-core-ollama
+    ports:
+      - '127.0.0.1:11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'ls']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G # Higher memory limit for LLM weights
+
+  # === Observability — profile: observability ===
+  # Was docker-compose.observability.yml. A separate file meant Jaeger and
+  # Prometheus were declared twice in this repository (there and in
+  # compose.prod.yaml) with different port exposure, and starting them needed
+  # a second `-f`. A profile is what Compose has for an opt-in service group.
+  #
+  #   docker compose --profile observability up -d
+  #
+  # Endpoints (all loopback-only): Jaeger UI :16686, Prometheus :9090,
+  # Grafana :3000, OTLP gRPC :4317 / HTTP :4318.
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    # Loopback-only: the UI is unauthenticated and every span it holds is
+    # application internals (URLs, tenant ids, prompts). Reach it through an
+    # SSH tunnel, or put an authenticating proxy in front. Containers on the
+    # shared network still send to `jaeger:4317` by service name.
+    ports:
+      - '127.0.0.1:16686:16686'
+      - '127.0.0.1:4317:4317'
+      - '127.0.0.1:4318:4318'
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.5
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # The storage path below was set without a volume, so every restart
+      # started the TSDB empty — the one thing a metrics store must not do.
+      - prometheus_data:/prometheus
+    # Loopback-only: the query API exposes every metric series, and the admin
+    # endpoints are unauthenticated by design in Prometheus.
+    ports:
+      - '127.0.0.1:9090:9090'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # NOT enabled: --web.enable-lifecycle exposes unauthenticated POST
+      # /-/reload and /-/quit to anyone who can reach the port, i.e. a remote
+      # shutdown of the monitoring that is supposed to notice the incident.
+      # Reload with `docker compose kill -s SIGHUP prometheus` instead.
+    restart: unless-stopped
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.4.10
+    container_name: grafana
+    environment:
+      # No default on purpose: admin/admin on a reachable Grafana is an
+      # instant takeover of every dashboard and datasource. Compose aborts
+      # until GRAFANA_ADMIN_PASSWORD is set (same pattern as DB_PASSWORD).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set (no default)}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:
+  prometheus_data:

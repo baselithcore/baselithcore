@@ -53,6 +53,36 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
+{{/* Name of the ConfigMap carrying the declarative plugin set (`plugins.config`). */}}
+{{- define "baselithcore.pluginsConfigName" -}}
+{{- printf "%s-plugins" (include "baselithcore.fullname" .) -}}
+{{- end -}}
+
+{{/*
+Volume + mount for the declarative plugin set. Rendered into both pod specs
+only when `plugins.config` is non-empty, so a chart without it renders
+byte-identically to before the key existed. `subPath` mounts a single file
+over the image's configs/plugins.yaml without hiding the rest of configs/;
+the pods roll on content changes through the checksum/plugins annotation,
+which is also why a subPath (which does not live-update) is fine here.
+*/}}
+{{- define "baselithcore.pluginsConfigVolumeMount" -}}
+{{- if .Values.plugins.config }}
+- name: plugins-config
+  mountPath: /app/configs/plugins.yaml
+  subPath: plugins.yaml
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "baselithcore.pluginsConfigVolume" -}}
+{{- if .Values.plugins.config }}
+- name: plugins-config
+  configMap:
+    name: {{ include "baselithcore.pluginsConfigName" . }}
+{{- end }}
+{{- end -}}
+
 {{/*
 Names of the env sources the pre-deploy migration hook reads.
 
@@ -196,6 +226,39 @@ TRUSTED_HOSTS: {{ include "baselithcore.trustedHosts" . | quote }}
 {{- if and (not (hasKey .Values.config "ALLOW_ORIGINS")) .Values.ingress.enabled }}
 ALLOW_ORIGINS: {{ include "baselithcore.allowOrigins" . | quote }}
 {{- end }}
+{{- include "baselithcore.telemetryConfigData" . }}
+{{- end -}}
+
+{{/*
+Telemetry env for the ConfigMap (api and worker both consume it via envFrom).
+
+Every key is skipped when `.Values.config` already carries it: the two would
+otherwise render as duplicate keys in one ConfigMap `data` map, where the
+winner depends on YAML merge order rather than on anything the operator chose.
+*/}}
+{{- define "baselithcore.telemetryConfigData" -}}
+{{- if .Values.telemetry.enabled }}
+{{- if and .Values.telemetry.metricsEnabled (not .Values.telemetry.otlpEndpoint) }}
+{{- fail "telemetry.metricsEnabled requires telemetry.otlpEndpoint: OTel metrics have no in-process consumer, so without a collector the periodic export thread exports nowhere. Use the Prometheus /metrics scrape (serviceMonitor) instead." }}
+{{- end }}
+{{- if not (hasKey .Values.config "TELEMETRY_ENABLED") }}
+TELEMETRY_ENABLED: "true"
+{{- end }}
+{{- if not (hasKey .Values.config "TELEMETRY_OTEL_ENDPOINT") }}
+{{- /* Always emitted, empty included: the app default is localhost:4317, and
+inheriting it in a pod with no sidecar collector is the retry-forever case. */}}
+TELEMETRY_OTEL_ENDPOINT: {{ .Values.telemetry.otlpEndpoint | quote }}
+{{- end }}
+{{- if not (hasKey .Values.config "TELEMETRY_TRACES_SAMPLE_RATE") }}
+TELEMETRY_TRACES_SAMPLE_RATE: {{ .Values.telemetry.tracesSampleRate | quote }}
+{{- end }}
+{{- if not (hasKey .Values.config "TELEMETRY_METRICS_ENABLED") }}
+TELEMETRY_METRICS_ENABLED: {{ .Values.telemetry.metricsEnabled | quote }}
+{{- end }}
+{{- if and .Values.telemetry.environment (not (hasKey .Values.config "DEPLOYMENT_ENVIRONMENT")) }}
+DEPLOYMENT_ENVIRONMENT: {{ .Values.telemetry.environment | quote }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/* Probe httpGet block, shared by the three probes. */}}
@@ -314,5 +377,98 @@ Args: root (the chart context), component ("api" / "worker").
     matchLabels:
       {{- include "baselithcore.selectorLabels" $root | nindent 6 }}
       app.kubernetes.io/component: {{ $component }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Environment shared by the backup CronJob's wait-for-database init container and
+its dump container. Defined once because the two have to agree: an init
+container that probes a different host than the one pg_dump later contacts is
+worse than no probe at all — it reports the database ready and the dump then
+fails against something else.
+*/}}
+{{- define "baselithcore.backupEnv" -}}
+- name: BACKUP_DIR
+  value: /backups
+- name: RETENTION_DAYS
+  value: {{ .Values.backup.retentionDays | quote }}
+- name: PGHOST
+  value: {{ .Values.backup.pg.host | quote }}
+- name: PGPORT
+  value: {{ .Values.backup.pg.port | quote }}
+- name: PGDATABASE
+  value: {{ .Values.backup.pg.database | quote }}
+- name: PGUSER
+  value: {{ .Values.backup.pg.user | quote }}
+- name: PGPASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.backup.pg.passwordSecret.name | default (include "baselithcore.secretName" .) }}
+      key: {{ .Values.backup.pg.passwordSecret.key }}
+{{- end -}}
+
+{{/*
+ServiceAccount the backup pod runs as. Empty means the namespace default: the
+CronJob then carries no serviceAccountName at all, exactly as before the
+`backup.serviceAccount` block existed.
+*/}}
+{{- define "baselithcore.backupServiceAccountName" -}}
+{{- if .Values.backup.serviceAccount.create -}}
+{{- default (printf "%s-backup" (include "baselithcore.fullname" .)) .Values.backup.serviceAccount.name -}}
+{{- else -}}
+{{- .Values.backup.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The pg_dump container. It is the pod's main container when the dump stays on
+the volume, and an init container (so it has finished before the upload
+starts) when `backup.offsite` is on — same container either way.
+*/}}
+{{- define "baselithcore.backupDumpContainer" -}}
+- name: pg-backup
+  image: {{ .Values.backup.image | quote }}
+  securityContext:
+    {{- toYaml .Values.securityContext | nindent 4 }}
+  command:
+    - /bin/sh
+    - -c
+    - |
+      set -euo pipefail
+      TS=$(date +%Y%m%d_%H%M%S)
+      OUT="${BACKUP_DIR}/backup_${TS}.sql.gz"
+      # Dumped to a temporary name and renamed only once pg_dump
+      # has exited 0. Writing straight to $OUT leaves the file
+      # behind when the dump fails — a 20-byte gzip of nothing,
+      # newer than every real backup, kept for the whole retention
+      # window, and picked first by anyone restoring "the latest".
+      # A failed backup must look like a missing one.
+      TMP="${BACKUP_DIR}/.backup_${TS}.sql.gz.partial"
+      trap 'rm -f "${TMP}"' EXIT
+      echo "Dumping ${PGDATABASE} -> ${OUT}"
+      pg_dump | gzip > "${TMP}"
+      mv "${TMP}" "${OUT}"
+      echo "Pruning backups older than ${RETENTION_DAYS} days"
+      find "${BACKUP_DIR}" -name 'backup_*.sql.gz' -mtime +${RETENTION_DAYS} -delete
+      # Interrupted runs (OOM, node eviction, the deadline above)
+      # never reach the trap, so their partials are swept here.
+      find "${BACKUP_DIR}" -name '.backup_*.sql.gz.partial' -mmin +60 -delete
+      echo "Backup complete."
+  env:
+    {{- include "baselithcore.backupEnv" . | nindent 4 }}
+  volumeMounts:
+    - name: backups
+      mountPath: /backups
+{{- end -}}
+
+{{/*
+The rclone remote named `offsite`, defined through the environment: every key
+of backup.offsite.remote becomes RCLONE_CONFIG_OFFSITE_<KEY>. Booleans and
+numbers are stringified, which is what rclone expects from the environment.
+*/}}
+{{- define "baselithcore.backupOffsiteRemoteEnv" -}}
+{{- range $key, $value := .Values.backup.offsite.remote }}
+- name: RCLONE_CONFIG_OFFSITE_{{ $key | upper }}
+  value: {{ $value | toString | quote }}
 {{- end }}
 {{- end -}}

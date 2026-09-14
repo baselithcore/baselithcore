@@ -6,10 +6,12 @@ Configuration for the web scraper module, including fetcher, crawler, and rate l
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from core.config._collections import csv_list
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,9 @@ class ScraperConfig(BaseSettings):
         default=True,
         description="Block requests to private/internal IPs (SSRF protection)",
     )
-    blocked_extensions: list[str] = Field(
+    # NoDecode + csv_list: a comma-separated (or blank) value must parse
+    # rather than raise a SettingsError out of the whole ScraperConfig.
+    blocked_extensions: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             ".exe",
             ".zip",
@@ -149,6 +153,12 @@ class ScraperConfig(BaseSettings):
         ],
         description="File extensions to skip during crawling",
     )
+
+    @field_validator("blocked_extensions", mode="before")
+    @classmethod
+    def _parse_csv_lists(cls, value: Any) -> Any:
+        """Accept ``.exe,.zip`` and a blank value, as well as a JSON array."""
+        return csv_list(value)
 
     # Playwright-specific settings
     playwright_headless: bool = Field(

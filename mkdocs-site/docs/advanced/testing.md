@@ -68,7 +68,7 @@ addopts =
     --cov=core
     --cov-report=term-missing
     --cov-report=html:htmlcov
-    --cov-fail-under=75
+    --cov-fail-under=78
 timeout = 120
 timeout_method = thread
 markers =
@@ -86,7 +86,7 @@ What that means in practice:
   fixture) runs on the event loop without a marker.
 - **`--strict-markers`** — a marker that is not declared above fails
   collection; add new markers to `pytest.ini` first.
-- **Coverage is always on**, measured over `core/` only, with a **75 %
+- **Coverage is always on**, measured over `core/` only, with a **78 %
   branch** gate (`[tool.coverage.run] branch = true` in `pyproject.toml`).
 - **`timeout = 120`** — a hung test fails itself instead of stalling the job.
 
@@ -374,7 +374,7 @@ is the factory form; `TRANSIENT` and `SCOPED` lifetimes are covered in
 enforces the gate:
 
 ```bash
-# Full suite, gate enforced (75 % branch coverage over core/)
+# Full suite, gate enforced (78 % branch coverage over core/)
 pytest
 
 # Only unit tests
@@ -410,7 +410,7 @@ pytest --cov-report=term-missing
 
 ## Coverage Requirements
 
-There is a single enforced gate: **`--cov-fail-under=75`**, measured as
+There is a single enforced gate: **`--cov-fail-under=78`**, measured as
 **branch** coverage over `core/` (`pytest.ini`). Plugins, scripts and
 templates are reported when you ask for them but never gated.
 
@@ -860,17 +860,36 @@ green.
 ### GitHub Actions
 
 Tests run in the `python_test` job of `.github/workflows/ci.yml` on a Python
-3.12 / 3.13 matrix (3.14 advisory), with Postgres 16 and Redis 7 as service
-containers. Dependencies come from the lock file, not a fresh resolution:
+3.12 / 3.13 matrix (3.14 advisory, `continue-on-error`), with Postgres 16 and
+Redis 7 as service containers. Dependencies come from the lock file, not a fresh
+resolution.
+
+The `needs:` list is load-bearing: a gate that nothing depends on is advisory, so
+every blocking gate is wired into the test → release path structurally rather
+than relying on branch protection. That now includes `zizmor` (workflow audit),
+`helm_lint` (chart lint + kubeconform render) and `ui_build` (the BaselithBot
+dashboard typechecks, builds, and the committed `ui/dist/` matches a clean
+rebuild). `dependency_review` is deliberately **not** in the list: it only runs
+on `pull_request`, and a skipped dependency blocks the dependent job, so listing
+it would make every push to `main` skip `python_test`.
 
 ```yaml title=".github/workflows/ci.yml (python_test, abridged)"
 python_test:
   name: Python Tests (${{ matrix.python-version }})
   runs-on: ubuntu-latest
-  needs: [architecture_boundaries, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
+  needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins,
+          type_check_core_strict, security_scan, package_smoke, evals, red_team,
+          fairness, zizmor, helm_lint, ui_build]
   strategy:
+    fail-fast: false
     matrix:
       python-version: ['3.12', '3.13']
+      experimental: [false]
+      include:
+        # 3.14 runs advisory until every upstream dep publishes wheels
+        - python-version: '3.14'
+          experimental: true
+  continue-on-error: ${{ matrix.experimental }}
   services:
     postgres:
       image: postgres:16-alpine
@@ -900,7 +919,7 @@ python_test:
 ```
 
 The job runs `pytest -n auto` (pytest-xdist) on top of the `pytest.ini`
-defaults, so the 75 % branch gate applies in CI exactly as it does locally.
+defaults, so the 78 % branch gate applies in CI exactly as it does locally.
 
 ---
 

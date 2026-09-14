@@ -417,7 +417,7 @@ class IndexingService:
             limit=self._config.index_max_concurrency,
             return_exceptions=True,
         )
-        for doc_id, outcome in zip(stale_list, results):
+        for doc_id, outcome in zip(stale_list, results, strict=True):
             if isinstance(outcome, BaseException):
                 logger.warning(f"[indexing] Failed to delete {doc_id}: {outcome}")
                 continue

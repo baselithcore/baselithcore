@@ -1,5 +1,7 @@
 {
   "cases": 30,
+  "dataset_sha256": "0631f94ea7bebea7e3f6a9fc4de49dae096eb10f21bfd0337da2d452d4c6f8d4",
+  "dataset_version": 1,
   "red_team": 80,
   "runs": 30
 }

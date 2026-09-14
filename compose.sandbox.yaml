@@ -1,0 +1,68 @@
+---
+# ============================================================
+# ⚠️ OPT-IN — compose.sandbox.yaml
+# ============================================================
+# Docker-in-Docker daemon for sandboxed agent code execution.
+#
+# NOT part of the default stack on purpose: `privileged: true` is
+# root-equivalent on the compose host — a container escape from
+# sandboxed code would compromise every other service, including
+# the postgres volume. Run it only on a host you are prepared to
+# treat as fully exposed to agent-executed code (ideally a
+# dedicated VM), or use a rootless/sysbox runtime instead.
+#
+# Usage:
+#   docker compose -f compose.yaml -f compose.sandbox.yaml up -d
+# ============================================================
+
+services:
+  api:
+    environment:
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - sandbox_certs:/certs/client:ro
+    networks:
+      - baselith-network
+      - default
+
+  worker:
+    environment:
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - sandbox_certs:/certs/client:ro
+    networks:
+      - baselith-network
+      - default
+
+  sandbox-daemon:
+    # Digest-pinned like every other image in this repository: `24-dind` is a
+    # floating major tag, and this is the one container in the stack that runs
+    # `privileged: true`. Index digest, so it stays multi-arch.
+    image: docker:24-dind@sha256:9b17a9f25adf17b88d0a013b4f00160754adf4b07ccbe9986664a49886c2c98e
+    container_name: baselith-sandbox-daemon
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - sandbox_certs:/certs/client
+      - sandbox_data:/var/lib/docker
+    networks:
+      - baselith-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+networks:
+  baselith-network:
+    driver: bridge
+
+volumes:
+  sandbox_certs:
+  sandbox_data:
