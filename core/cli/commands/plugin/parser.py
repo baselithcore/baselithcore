@@ -75,6 +75,21 @@ def register_parser(subparsers, formatter_class):
         help="Install/build the plugin into the Docker core runtime",
     )
 
+    sync_plugin = plugin_subparsers.add_parser(
+        "sync",
+        help="Reconcile local plugins with the Docker core runtime",
+        description=(
+            "Rebuild frontend assets, Python plugin requirements, and the Docker "
+            "API runtime for enabled local plugins."
+        ),
+        formatter_class=formatter_class,
+    )
+    sync_plugin.add_argument(
+        "--docker",
+        action="store_true",
+        help="Sync enabled plugins into the Docker core runtime",
+    )
+
     # ─── Local Management ──────────────────────────────────
     plugin_subparsers.add_parser(
         "list",

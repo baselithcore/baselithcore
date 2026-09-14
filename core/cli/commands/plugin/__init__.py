@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 _LAZY_EXPORTS: dict[str, str] = {
     "add_plugin": "add",
     "install_plugin_into_docker": "add_docker",
+    "sync_plugins_into_docker": "sync_docker",
     "create_plugin": "create",
     "status_local_plugins": "local",
     "info_local_plugin": "local",
@@ -109,6 +110,7 @@ __all__ = [
     "search_plugins",
     "sign_plugin",
     "status_local_plugins",
+    "sync_plugins_into_docker",
     "uninstall_plugin_cmd",
     "update_plugin_cmd",
     "validate_local_plugin",

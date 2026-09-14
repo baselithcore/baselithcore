@@ -7,8 +7,10 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from core.cli.commands.plugin import add, add_docker
+from core.cli.commands.plugin import add, add_docker, sync_docker
+from core.cli.commands.plugin import parser as plugin_parser
 from core.cli.commands.plugin.install_validation import validate_install_manifest
+from core.cli.handlers import cmd_plugin
 
 
 def plugin(tmp_path, name="sample", **extra):
@@ -31,6 +33,21 @@ def test_docker_add_does_not_check_host_packages(tmp_path, monkeypatch):
     monkeypatch.setattr(add_docker, "install_plugin_into_docker", install)
     assert add.add_plugin("plugin-sample", docker=True) == 0
     install.assert_called_once()
+
+
+def test_plugin_sync_docker_command_is_registered(monkeypatch):
+    import argparse
+
+    from core.cli.commands import plugin as plugin_pkg
+
+    root = argparse.ArgumentParser()
+    subparsers = root.add_subparsers(dest="command")
+    plugin_parser.register_parser(subparsers, argparse.RawDescriptionHelpFormatter)
+    args = root.parse_args(["plugin", "sync", "--docker"])
+    sync = Mock(return_value=0)
+    monkeypatch.setattr(plugin_pkg, "sync_plugins_into_docker", sync)
+    assert cmd_plugin(args) == 0
+    sync.assert_called_once_with()
 
 
 def test_existing_dependency_prepares_transitive_dependencies(tmp_path, monkeypatch):
@@ -241,3 +258,54 @@ def test_installation_failure_never_reports_ready(monkeypatch, failure):
     monkeypatch.setattr(add_docker, "print_success", success)
     assert add_docker.install_plugin_into_docker("sample", {}) == 1
     assert "Plugin ready" not in [call.args[0] for call in success.call_args_list]
+
+
+def test_sync_failure_never_reports_ready(monkeypatch):
+    monkeypatch.setattr(sync_docker, "_enabled_plugin_manifests", Mock(return_value={}))
+    monkeypatch.setattr(sync_docker, "_write_plugin_requirements", Mock())
+    monkeypatch.setattr(sync_docker, "_compose", Mock(return_value=1))
+    success = Mock()
+    monkeypatch.setattr(sync_docker, "print_success", success)
+    assert sync_docker.sync_plugins_into_docker() == 1
+    assert "Plugin runtime synced" not in [
+        call.args[0] for call in success.call_args_list
+    ]
+
+
+def test_sync_builds_only_declared_frontends(monkeypatch):
+    manifests = {
+        "legacy": {"name": "legacy", "version": "1.0.0"},
+        "modern": {"name": "modern", "version": "1.0.0", "frontend": {"path": "ui"}},
+    }
+    monkeypatch.setattr(
+        sync_docker, "_enabled_plugin_manifests", Mock(return_value=manifests)
+    )
+    monkeypatch.setattr(sync_docker, "_write_plugin_requirements", Mock())
+    build = Mock(return_value=0)
+    monkeypatch.setattr(sync_docker, "_build_frontends", build)
+    monkeypatch.setattr(sync_docker, "_compose", Mock(return_value=0))
+    monkeypatch.setattr(sync_docker, "_wait_for_http", Mock(return_value=True))
+    monkeypatch.setattr(sync_docker, "_probe_plugin", Mock(return_value=True))
+
+    assert sync_docker.sync_plugins_into_docker() == 0
+    assert [call.args[0] for call in build.call_args_list] == ["modern"]
+
+
+def test_sync_probes_only_http_contract_plugins(monkeypatch):
+    manifests = {
+        "agent": {"name": "agent", "version": "1.0.0"},
+        "router": {"name": "router", "version": "1.0.0", "health_endpoint": "/router/"},
+        "spa": {"name": "spa", "version": "1.0.0", "frontend": {"path": "ui"}},
+    }
+    monkeypatch.setattr(
+        sync_docker, "_enabled_plugin_manifests", Mock(return_value=manifests)
+    )
+    monkeypatch.setattr(sync_docker, "_write_plugin_requirements", Mock())
+    monkeypatch.setattr(sync_docker, "_build_frontends", Mock(return_value=0))
+    monkeypatch.setattr(sync_docker, "_compose", Mock(return_value=0))
+    monkeypatch.setattr(sync_docker, "_wait_for_http", Mock(return_value=True))
+    probe = Mock(return_value=True)
+    monkeypatch.setattr(sync_docker, "_probe_plugin", probe)
+
+    assert sync_docker.sync_plugins_into_docker() == 0
+    assert [call.args[0] for call in probe.call_args_list] == ["router", "spa"]

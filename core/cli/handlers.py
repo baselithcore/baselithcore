@@ -183,6 +183,11 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             install_deps=getattr(args, "install_deps", False),
             docker=getattr(args, "docker", False),
         ),
+        "sync": lambda: (
+            plugin.sync_plugins_into_docker()
+            if getattr(args, "docker", False)
+            else plugin.status_local_plugins(json_output=args.format == "json")
+        ),
         "create": lambda: plugin.create_plugin(
             args.name,
             args.type,

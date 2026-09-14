@@ -250,6 +250,7 @@
       "search_plugins",
       "sign_plugin",
       "status_local_plugins",
+      "sync_plugins_into_docker",
       "uninstall_plugin_cmd",
       "update_plugin_cmd",
       "validate_local_plugin"
@@ -782,9 +783,9 @@
       "ApprovalPrincipal",
       "ApprovalRequiredError",
       "AutonomyLevel",
-      "BUILTIN_INTENTS",
       "AutonomyPolicy",
       "AutonomyUpgradeGate",
+      "BUILTIN_INTENTS",
       "BaseFlowHandler",
       "BaseStreamHandler",
       "Checkpoint",
