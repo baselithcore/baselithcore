@@ -80,7 +80,7 @@ COPY templates/ templates/
 COPY deploy/docker/core-entrypoint.sh /usr/local/bin/baselith-core-entrypoint
 
 # Install the package itself in non-editable mode
-RUN pip install .
+RUN pip install . && pip check
 
 # Create necessary directories if they don't exist (e.g. data, logs)
 RUN mkdir -p data logs documents

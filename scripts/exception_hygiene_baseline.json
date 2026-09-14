@@ -3,9 +3,8 @@
   "files": {
     "core/a2a/security.py": 1,
     "core/api/errors.py": 1,
-    "core/cli/commands/doctor.py": 2,
     "core/cli/commands/info.py": 1,
-    "core/cli/commands/plugin/create.py": 3,
+    "core/cli/commands/plugin/create.py": 1,
     "core/cli/commands/plugin/deps.py": 1,
     "core/cli/commands/plugin/local_manage.py": 2,
     "core/cli/commands/plugin/local_status.py": 6,

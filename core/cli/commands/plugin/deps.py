@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
@@ -77,7 +78,9 @@ def _local_plugin_names() -> list[str]:
     return [
         path.name
         for path in sorted(plugins_dir.iterdir())
-        if path.is_dir() and not path.name.startswith(".") and path.name != "__pycache__"
+        if path.is_dir()
+        and not path.name.startswith(".")
+        and path.name != "__pycache__"
     ]
 
 
@@ -106,9 +109,14 @@ def _check_resource(resource: object) -> bool:
             "on",
         }
     if normalized == "redis":
-        return env_value("CACHE_REDIS_URL") is not None or env_value("REDIS_URL") is not None
+        return (
+            env_value("CACHE_REDIS_URL") is not None
+            or env_value("REDIS_URL") is not None
+        )
     if normalized == "qdrant":
-        return (env_value("VECTORSTORE_PROVIDER", "qdrant") or "qdrant").lower() == "qdrant"
+        return (
+            env_value("VECTORSTORE_PROVIDER", "qdrant") or "qdrant"
+        ).lower() == "qdrant"
     if normalized == "sandbox":
         return env_value("SANDBOX_ENABLED") is not None or os.path.exists(
             env_value("SANDBOX_DOCKER_SOCKET", "/var/run/docker.sock")
@@ -261,6 +269,12 @@ def deps_check(
     return 0 if all_ok else 1
 
 
+class _DependencySummary(TypedDict):
+    plugin: str
+    all_satisfied: bool
+    missing: list[str]
+
+
 def deps_check_all(json_output: bool = False, python_only: bool = False) -> int:
     """Check dependencies for all local plugins."""
     plugin_names = _local_plugin_names()
@@ -271,7 +285,7 @@ def deps_check_all(json_output: bool = False, python_only: bool = False) -> int:
             print_warning("No local plugins found.")
         return 0
 
-    results: list[dict[str, object]] = []
+    results: list[_DependencySummary] = []
     all_ok = True
     for plugin_name in plugin_names:
         plugin_dir = Path("plugins") / plugin_name
@@ -377,7 +391,9 @@ def deps_install(plugin_name: str, yes: bool = False, dry_run: bool = False) -> 
         return 0
 
     if dry_run:
-        console.print(f"[bold]{plugin_name} missing packages:[/bold] {', '.join(missing)}")
+        console.print(
+            f"[bold]{plugin_name} missing packages:[/bold] {', '.join(missing)}"
+        )
         return 0
 
     console.print(f"\n[bold]Missing packages:[/bold] {', '.join(missing)}\n")

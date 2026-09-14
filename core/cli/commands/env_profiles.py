@@ -6,7 +6,6 @@ from secrets import token_urlsafe
 
 from core.cli.commands.doctor_checks import is_placeholder_secret
 
-
 DEV_DEFAULTS = {
     "APP_ENV": "development",
     "CORE_DEBUG": "true",
@@ -40,8 +39,7 @@ DOCKER_CORE_DEFAULTS = {
     "CORE_DATA_DIR": "/app/data",
     "CORE_DOCUMENTS_DIR": "/app/documents",
     "CORE_DETERMINISTIC_MODE": "false",
-    "HOST": "0.0.0.0",
-    "PORT": "8000",
+    # Container bind address and port are fixed by docker-compose.core.yml.
     "BASELITH_HTTP_PORT": "8000",
     "BASELITH_POSTGRES_PORT": "5432",
     "BASELITH_REDIS_PORT": "6379",

@@ -5,23 +5,24 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from core.cli.commands.doctor_checks import CheckResult
 
 
 def load_manifest(plugin_dir: Path) -> dict[str, Any] | None:
     """Load a plugin manifest from JSON or YAML."""
-    for ext in (".json", ".yaml", ".yml"):
+    for ext in (".yaml", ".yml", ".json"):
         manifest_path = plugin_dir / f"manifest{ext}"
         if not manifest_path.exists():
             continue
         try:
             if ext == ".json":
-                return json.loads(manifest_path.read_text(encoding="utf-8"))
-            import yaml
-
-            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            return data or {}
-        except Exception:
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            else:
+                data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError, yaml.YAMLError):
             return None
     return None
 
@@ -54,7 +55,9 @@ def check_plugins() -> CheckResult:
     missing_manifest = [
         p.name
         for p in plugins
-        if not any((p / f"manifest{ext}").exists() for ext in (".yaml", ".yml", ".json"))
+        if not any(
+            (p / f"manifest{ext}").exists() for ext in (".yaml", ".yml", ".json")
+        )
     ]
     missing_entrypoint = [p.name for p in plugins if not (p / "plugin.py").exists()]
     issues = []
@@ -110,7 +113,8 @@ def check_plugin_dependencies() -> CheckResult:
             "Plugin Dependencies",
             False,
             f"{len(missing)} missing plugin dependency declaration(s)",
-            "Run: baselith plugin deps install <plugin>. Missing: " + ", ".join(missing),
+            "Run: baselith plugin deps install <plugin>. Missing: "
+            + ", ".join(missing),
         )
     return CheckResult("Plugin Dependencies", True, "Declared Python deps satisfied")
 

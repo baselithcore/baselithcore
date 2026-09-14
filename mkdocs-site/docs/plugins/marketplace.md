@@ -89,7 +89,7 @@ baselith plugin create weather-agent --type agent
 baselith plugin create --interactive
 ```
 
-The `--type` flag accepts `agent`, `router`, or `graph`. The generated directory contains `manifest.json`, `__init__.py` and `plugin.py`, plus `agent.py` for the `agent` type or `router.py` for the `router` type. No `README.md` is generated — add one before publishing. Edit `plugin.py`, declare metadata and dependencies in the manifest, then proceed with authentication and publish.
+The `--type` flag accepts `agent`, `router`, or `graph`. The generated directory contains `manifest.yaml`, `__init__.py` and `plugin.py`, plus `agent.py` for the `agent` type or `router.py` for the `router` type. No `README.md` is generated — add one before publishing. Edit `plugin.py`, declare metadata and dependencies in the manifest, then proceed with authentication and publish.
 
 ### 1. Authentication
 

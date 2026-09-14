@@ -211,7 +211,29 @@ Config column: ✓ = aligned   WARN = mismatch   — = not in plugins.yaml
 
 ---
 
-### `plugin create` - Create New Plugin
+### `plugin add` - Install into Docker
+
+```bash
+baselith setup docker-core
+baselith plugin add <repository> --docker
+```
+
+`--docker` validates build inputs, prepares dependencies, builds declared frontends
+with a temporary Node container, installs Python requirements in the API image,
+starts Compose and checks HTTP. It does not check for plugin packages in the host
+Python environment. Invalid declared Core bounds, failed builds and failed probes
+return a nonzero exit code. Missing Core bounds remain a legacy warning.
+
+Use `--ref <branch-or-tag>` on the initial clone; existing directories are reused.
+`--force` replaces only a verifiably clean Git checkout. `--install-deps` without
+`--docker` installs Python dependencies in the host environment.
+
+An HTTP 200 is a reachability check, not a complete application test. The current
+installer does not implement transactional rollback or fingerprint-based sync.
+See the [Docker Core runbook](../getting-started/docker-core.md) for configuration,
+local plugin development and retry instructions.
+
+### `plugin create` - Scaffold a Plugin
 
 Generate scaffolding for a new plugin with the correct structure.
 

@@ -58,32 +58,34 @@ def add_plugin(
     print_success("Manifest valid")
     if not _check_core_compatibility(manifest):
         return 1
-    print_success("Core compatible")
+    if manifest and (
+        manifest.get("min_core_version") or manifest.get("max_core_version")
+    ):
+        print_success("Core compatible with declared bounds")
 
     _copy_env_example(plugin_dir)
 
-    if not _install_plugin_dependencies(manifest):
+    if not _install_plugin_dependencies(manifest, docker=docker):
         return 1
 
     enable_code = enable_local_plugin(plugin_name)
     if enable_code != 0:
         return enable_code
 
+    if docker:
+        from .add_docker import install_plugin_into_docker
+
+        return install_plugin_into_docker(plugin_name, manifest or {})
+
     validate_code = validate_local_plugin(plugin_name)
     deps_code = deps_check(plugin_name)
-    if deps_code != 0 and install_deps and not docker:
+    if deps_code != 0 and install_deps:
         deps_code = deps_install(plugin_name, yes=True)
-    elif deps_code != 0 and not docker:
+    elif deps_code != 0:
         print_info(
             "Install missing Python deps with: "
             f"baselith plugin deps install {plugin_name} -y"
         )
-
-    if docker:
-        from .add_docker import install_plugin_into_docker
-
-        docker_code = install_plugin_into_docker(plugin_name, manifest or {})
-        return docker_code
 
     if validate_code != 0 or deps_code != 0:
         print_warning(
@@ -141,6 +143,8 @@ def _copy_env_example(plugin_dir: Path) -> None:
 def _validate_install_shape(plugin_dir: Path, manifest: dict | None) -> bool:
     plugin_file = plugin_dir / "plugin.py"
     if not plugin_file.is_file():
+        plugin_file = plugin_dir / "plugin.disabled"
+    if not plugin_file.is_file():
         print_error(f"Missing plugin.py in {plugin_dir}")
         return False
 
@@ -155,15 +159,9 @@ def _validate_install_shape(plugin_dir: Path, manifest: dict | None) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        bases = {
-            base.id
-            for base in node.bases
-            if isinstance(base, ast.Name)
-        }
+        bases = {base.id for base in node.bases if isinstance(base, ast.Name)}
         bases.update(
-            base.attr
-            for base in node.bases
-            if isinstance(base, ast.Attribute)
+            base.attr for base in node.bases if isinstance(base, ast.Attribute)
         )
         if bases.intersection(valid_bases):
             has_plugin_class = True
@@ -176,23 +174,41 @@ def _validate_install_shape(plugin_dir: Path, manifest: dict | None) -> bool:
         print_error(f"Missing or unreadable manifest in {plugin_dir}")
         return False
     missing = [
-        field
-        for field in ("name", "version", "description")
-        if not manifest.get(field)
+        field for field in ("name", "version", "description") if not manifest.get(field)
     ]
     if missing:
         print_error("Plugin manifest is incomplete", ", ".join(missing))
         return False
+    from .install_validation import validate_install_manifest
+
+    problems = validate_install_manifest(manifest)
+    if problems:
+        print_error("Invalid installation manifest", "; ".join(problems))
+        return False
     return True
 
 
-def _install_plugin_dependencies(manifest: dict | None) -> bool:
+def _install_plugin_dependencies(
+    manifest: dict | None, *, docker: bool = False, _seen: set[str] | None = None
+) -> bool:
     if not manifest:
         return True
     deps = manifest.get("plugin_dependencies", {}) or {}
+    seen = _seen if _seen is not None else {str(manifest.get("name", ""))}
     names = deps.keys() if isinstance(deps, dict) else deps
     for dep_name in names:
         if not isinstance(dep_name, str):
+            continue
+        if _slugify(dep_name) != dep_name:
+            print_error("Invalid plugin dependency name")
+            return False
+        if docker:
+            if dep_name in seen:
+                continue
+            seen.add(dep_name)
+            source = f"https://github.com/baselithcore/plugin-{dep_name}"
+            if _prepare_docker_dependency(source, dep_name, seen) != 0:
+                return False
             continue
         if (Path("plugins") / dep_name).is_dir():
             if enable_local_plugin(dep_name) != 0:
@@ -208,26 +224,44 @@ def _install_plugin_dependencies(manifest: dict | None) -> bool:
     return True
 
 
+def _prepare_docker_dependency(source: str, name: str, seen: set[str]) -> int:
+    plugin_dir = Path("plugins") / name
+    if not plugin_dir.exists() and not _clone(source, plugin_dir, None):
+        return 1
+    manifest = _load_manifest(plugin_dir)
+    if not _validate_install_shape(
+        plugin_dir, manifest
+    ) or not _check_core_compatibility(manifest):
+        return 1
+    _copy_env_example(plugin_dir)
+    if not _install_plugin_dependencies(manifest, docker=True, _seen=seen):
+        return 1
+    return enable_local_plugin(name)
+
+
 def _check_core_compatibility(manifest: dict | None) -> bool:
     if not manifest:
         return False
     min_core = manifest.get("min_core_version")
-    if not min_core:
-        print_warning("Manifest does not declare min_core_version.")
+    max_core = manifest.get("max_core_version")
+    if not min_core and not max_core:
+        print_warning("No Core version bounds declared; compatibility is unverified.")
         return True
-    try:
-        from packaging.version import Version
+    from core._version import __version__
+    from core.plugins.version import check_plugin_compatibility
 
-        from core._version import __version__
-
-        if Version(__version__) < Version(str(min_core)):
-            print_error(
-                "Plugin requires a newer Baselith core.",
-                f"Installed {__version__}, required >= {min_core}",
-            )
-            return False
-    except Exception as exc:
-        print_warning(f"Could not verify core compatibility: {exc}")
+    if any(
+        value is not None and not isinstance(value, str)
+        for value in (min_core, max_core)
+    ):
+        print_error("Core version bounds must be strings")
+        return False
+    problems = check_plugin_compatibility(
+        core_version=__version__, min_core_version=min_core, max_core_version=max_core
+    )
+    if problems:
+        print_error("Plugin Core compatibility check failed", "; ".join(problems))
+        return False
     return True
 
 
@@ -256,14 +290,21 @@ def _remove_existing(plugin_dir: Path) -> bool:
         print_error(f"Cannot replace non-directory path: {plugin_dir}")
         return False
 
+    git = shutil.which("git")
+    if not git:
+        print_error("Git is required to check the existing plugin before replacement")
+        return False
     result = subprocess.run(
-        ["git", "status", "--porcelain"],
+        [git, "status", "--porcelain"],
         cwd=plugin_dir,
         capture_output=True,
         text=True,
         check=False,
     )
-    if result.returncode == 0 and result.stdout.strip():
+    if result.returncode != 0:
+        print_error("Cannot verify plugin working tree; replacement refused")
+        return False
+    if result.stdout.strip():
         print_error(
             f"Refusing to replace dirty plugin '{plugin_dir.name}'.",
             "Commit, stash, or delete it manually first.",

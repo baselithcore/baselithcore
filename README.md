@@ -48,6 +48,9 @@ runs, not reconstructed from logs afterwards.
 
 ## Sixty seconds
 
+For a checkout-based Docker runtime with automatic plugin builds, use the
+[Docker Core installation guide](mkdocs-site/docs/getting-started/docker-core.md).
+
 ```bash
 pip install baselith-core
 ```

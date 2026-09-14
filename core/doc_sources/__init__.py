@@ -5,17 +5,25 @@ import sys
 from core.utils.optional_import import optional_module
 
 _document_sources = optional_module("plugins.document_sources")
+
+
+class _FallbackDocumentSourceError(Exception):
+    """Raised when optional document source configuration is invalid."""
+
+
+DocumentSourceError = _FallbackDocumentSourceError
+
+
+def create_document_sources(
+    *,
+    space_filter: list[str] | None = None,
+) -> list[tuple[str, object]]:
+    """Keep the source factory contract when the optional plugin is absent."""
+    return []
+
+
 if _document_sources is not None:
-    from plugins.document_sources import DocumentSourceError, create_document_sources
-
-    # Register self as the plugin module for runtime compatibility
+    # Preserve the plugin's module identity and complete public surface.
     sys.modules[__name__] = _document_sources
-else:
-
-    class DocumentSourceError(Exception):
-        """Raised when optional document source configuration is invalid."""
-
-    def create_document_sources() -> list[tuple[str, object]]:
-        return []
 
 __all__ = ["DocumentSourceError", "create_document_sources"]

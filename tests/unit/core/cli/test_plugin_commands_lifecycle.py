@@ -94,7 +94,14 @@ class TestPluginCreateInteractive:
         result = create_plugin("my-new-plugin", "agent")
         assert result == 0
         assert (tmp_path / "plugins" / "my-new-plugin" / "plugin.py").exists()
-        assert (tmp_path / "plugins" / "my-new-plugin" / "manifest.json").exists()
+        import yaml
+
+        manifest = yaml.safe_load(
+            (tmp_path / "plugins" / "my-new-plugin" / "manifest.yaml").read_text()
+        )
+        assert manifest["name"] == "my-new-plugin"
+        assert manifest["min_core_version"]
+        assert "python_dependencies" in manifest
 
     def test_create_class_name_splits_on_dash_and_underscore(
         self, tmp_path, monkeypatch

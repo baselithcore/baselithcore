@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.request import Request, urlopen
 
+import httpx
+import yaml
+from dotenv import dotenv_values
 from packaging.requirements import InvalidRequirement, Requirement
 
 from core.cli.ui import print_error, print_info, print_step, print_success
@@ -29,11 +30,16 @@ COMPOSE_SHELL_OVERRIDE_KEYS = {
 
 def install_plugin_into_docker(plugin_name: str, manifest: dict[str, Any]) -> int:
     """Build frontend, rebuild the API image, restart it, and probe health."""
-    _write_plugin_requirements()
-    if _build_frontend(plugin_name, manifest) != 0:
+    try:
+        _write_plugin_requirements()
+    except (OSError, ValueError) as exc:
+        print_error("Cannot prepare plugin requirements", str(exc))
+        return 1
+    if _build_frontends(plugin_name, manifest) != 0:
         return 1
     if _compose(["build", "api"]) != 0:
         return 1
+    print_success("Python dependencies installed in Docker image")
     if _compose(["up", "-d", "api"]) != 0:
         return 1
     if not _wait_for_http("/health", 200):
@@ -41,10 +47,59 @@ def install_plugin_into_docker(plugin_name: str, manifest: dict[str, Any]) -> in
         return 1
     if not _probe_plugin(plugin_name, manifest):
         return 1
-    print_success("Plugin loaded")
+    print_success("Plugin HTTP endpoint reachable")
     print_success("Health check passed")
     print_success("Plugin ready")
     return 0
+
+
+def _build_frontends(plugin_name: str, manifest: dict[str, Any]) -> int:
+    """Build dependency frontends first, once each, rejecting cycles."""
+    from core.plugins.version import check_plugin_dependency
+
+    from .add import _check_core_compatibility
+    from .add import _load_manifest as load_manifest
+    from .install_validation import validate_install_manifest
+
+    built: set[str] = set()
+    visiting: set[str] = set()
+
+    def build(name: str, data: dict[str, Any]) -> int:
+        if validate_install_manifest(data):
+            print_error(f"Invalid installation manifest: {name}")
+            return 1
+        if name in visiting:
+            print_error(f"Cyclic plugin dependency: {name}")
+            return 1
+        if name in built:
+            return 0
+        visiting.add(name)
+        dependencies = data.get("plugin_dependencies") or {}
+        for dependency in dependencies:
+            dep_manifest = load_manifest(Path("plugins") / dependency)
+            if not dep_manifest or not _check_core_compatibility(dep_manifest):
+                print_error(f"Invalid plugin dependency: {dependency}")
+                return 1
+            constraint = (
+                dependencies[dependency] if isinstance(dependencies, dict) else None
+            )
+            if constraint and not check_plugin_dependency(
+                str(dep_manifest.get("version", "")), constraint
+            ):
+                print_error(f"Plugin dependency version mismatch: {dependency}")
+                return 1
+            if build(dependency, dep_manifest) != 0:
+                return 1
+        # Legacy dependencies may ship prebuilt assets outside ui/dist. Only
+        # rebuild their frontend when its build contract is explicitly declared.
+        if name == plugin_name or isinstance(data.get("frontend"), dict):
+            if _build_frontend(name, data) != 0:
+                return 1
+        visiting.remove(name)
+        built.add(name)
+        return 0
+
+    return build(plugin_name, manifest)
 
 
 def _build_frontend(plugin_name: str, manifest: dict[str, Any]) -> int:
@@ -67,17 +122,15 @@ def _build_frontend(plugin_name: str, manifest: dict[str, Any]) -> int:
             check=False,
         )
         if result.returncode != 0:
-            print_error(
-                f"Frontend dependency install failed: {local_dependency}"
-            )
+            print_error(f"Frontend dependency install failed: {local_dependency}")
             return result.returncode
     command = _node_command(workdir, package_manager, build_command)
     result = subprocess.run(command, text=True, check=False)
     if result.returncode != 0:
         print_error(f"Frontend build failed for plugin '{plugin_name}'.")
         return result.returncode
-    if not output.exists():
-        print_error(f"Frontend build output not found: {output}")
+    if not output.is_dir() or not any(p.is_file() for p in output.rglob("*")):
+        print_error(f"Frontend build output missing or empty: {output}")
         return 1
     print_success("Frontend built")
     return 0
@@ -87,6 +140,8 @@ def _frontend_config(
     plugin_name: str, manifest: dict[str, Any]
 ) -> dict[str, str] | None:
     raw = manifest.get("frontend")
+    if raw is False:
+        return None
     if isinstance(raw, dict):
         path = Path(raw.get("path") or raw.get("directory") or "ui")
         if not path.is_absolute():
@@ -109,15 +164,15 @@ def _frontend_config(
             "output": str(output),
         }
 
-    path = _detect_frontend_path(plugin_name)
-    if path is None:
+    detected_path = _detect_frontend_path(plugin_name)
+    if detected_path is None:
         return None
-    package_manager = _detect_package_manager(path)
+    package_manager = _detect_package_manager(detected_path)
     return {
-        "path": str(path),
+        "path": str(detected_path),
         "package_manager": package_manager,
         "build_command": _default_build_command(package_manager),
-        "output": str(path / _detect_output_dir(path)),
+        "output": str(detected_path / _detect_output_dir(detected_path)),
     }
 
 
@@ -234,75 +289,61 @@ def _local_file_dependency_paths(path: Path) -> list[Path]:
 
 def _write_plugin_requirements() -> None:
     requirements: list[str] = []
-    for manifest_path in sorted(Path("plugins").glob("*/manifest.*")):
+    for plugin_dir in sorted(Path("plugins").iterdir()):
+        if not plugin_dir.is_dir() or not _plugin_enabled(plugin_dir.name):
+            continue
+        manifest_path = next(
+            (
+                plugin_dir / f"manifest{ext}"
+                for ext in (".yaml", ".yml", ".json")
+                if (plugin_dir / f"manifest{ext}").is_file()
+            ),
+            None,
+        )
+        if manifest_path is None:
+            raise ValueError(f"Enabled plugin '{plugin_dir.name}' has no manifest")
         manifest = _load_manifest(manifest_path)
         if not manifest:
-            continue
-        if not _plugin_enabled(str(manifest.get("name") or manifest_path.parent.name)):
-            continue
-        for dep in manifest.get("python_dependencies", []) or []:
-            if isinstance(dep, str) and dep not in requirements:
+            raise ValueError(f"Invalid manifest: {manifest_path}")
+        dependencies = manifest.get("python_dependencies", []) or []
+        if not isinstance(dependencies, list):
+            raise ValueError(f"python_dependencies must be a list: {manifest_path}")
+        for dep in dependencies:
+            if not isinstance(dep, str) or "\n" in dep or "\r" in dep:
+                raise ValueError(f"Invalid Python requirement in {manifest_path}")
+            try:
+                Requirement(dep)
+            except InvalidRequirement as exc:
+                raise ValueError(
+                    f"Invalid Python requirement in {manifest_path}"
+                ) from exc
+            if dep not in requirements:
                 requirements.append(dep)
 
     PLUGIN_REQUIREMENTS.parent.mkdir(parents=True, exist_ok=True)
-    PLUGIN_REQUIREMENTS.write_text(
+    content = (
         "# Generated by: baselith plugin add --docker\n"
-        + "\n".join(requirements)
-        + "\n",
-        encoding="utf-8",
+        + "\n".join(sorted(requirements))
+        + "\n"
     )
-    print_success("Python dependencies ready")
-
-
-def _legacy_dependency_hints(plugin_dir: Path) -> list[str]:
-    """Best-effort bridge for legacy plugins missing manifest dependencies."""
-    hints: list[str] = []
-    pattern = re.compile(r"pip install\s+([^\n\r]+)")
-    for path in plugin_dir.rglob("*.py"):
-        if any(part in {"tests", "ui", "node_modules"} for part in path.parts):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        for match in pattern.finditer(text):
-            for package in _legacy_pip_packages(match.group(1)):
-                if package not in hints:
-                    hints.append(package)
-    return hints
-
-
-def _legacy_pip_packages(arguments: str) -> list[str]:
-    packages: list[str] = []
-    for token in arguments.split():
-        token = token.strip("'\"`,);.")
-        if token in {"&&", "|", "||"}:
-            break
-        if token.startswith("-"):
-            continue
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*", token):
-            continue
-        if token in {".", "./", "../"}:
-            continue
-        if "/" in token or "\\" in token:
-            continue
-        try:
-            Requirement(token)
-        except InvalidRequirement:
-            continue
-        packages.append(token)
-    return packages
+    if (
+        not PLUGIN_REQUIREMENTS.exists()
+        or PLUGIN_REQUIREMENTS.read_text(encoding="utf-8") != content
+    ):
+        temporary = PLUGIN_REQUIREMENTS.with_suffix(".tmp")
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(PLUGIN_REQUIREMENTS)
+    print_info("Python requirements prepared; installation runs during Docker build.")
 
 
 def _load_manifest(path: Path) -> dict[str, Any] | None:
     try:
         if path.suffix == ".json":
-            return json.loads(path.read_text(encoding="utf-8"))
-        import yaml
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
-    except Exception:
+    except (OSError, ValueError, yaml.YAMLError):
         return None
 
 
@@ -311,13 +352,13 @@ def _plugin_enabled(plugin_name: str) -> bool:
     if not config.is_file():
         return False
     try:
-        import yaml
-
         data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            raise ValueError("configs/plugins.yaml must contain a mapping")
         entry = data.get(plugin_name)
         return bool(entry.get("enabled")) if isinstance(entry, dict) else bool(entry)
-    except Exception:
-        return False
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError("Cannot read configs/plugins.yaml") from exc
 
 
 def _compose(args: list[str]) -> int:
@@ -349,28 +390,32 @@ def _read_env_file(path: Path) -> dict[str, str]:
     """Read a dotenv-style file for Docker Compose interpolation."""
     if not path.is_file():
         return {}
-    values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        values[key.strip()] = value.strip().strip("'\"")
-    return values
+    return {
+        key: value for key, value in dotenv_values(path).items() if value is not None
+    }
 
 
 def _wait_for_http(path: str, expected: int, timeout: int = 90) -> bool:
-    deadline = time.time() + timeout
-    port = os.environ.get("BASELITH_HTTP_PORT") or "8000"
-    url = f"http://localhost:{port}{path}"
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    port = _compose_environment(DOCKER_ENV_FILE).get("BASELITH_HTTP_PORT") or "8000"
+    if not port.isdecimal() or not 0 < int(port) < 65536:
+        print_error("BASELITH_HTTP_PORT must be between 1 and 65535")
+        return False
+    if not path.startswith("/") or path.startswith("//"):
+        print_error("Health endpoint must be a local HTTP path")
+        return False
+    url = f"http://localhost:{int(port)}{path}"
+    while time.monotonic() < deadline:
         try:
-            request = Request(url, method="GET")
-            with urlopen(request, timeout=5) as response:
-                if response.status == expected:
-                    return True
-        except Exception:
-            time.sleep(2)
+            response = httpx.get(
+                url, timeout=5, follow_redirects=False, trust_env=False
+            )
+            if response.status_code == expected:
+                return True
+        except httpx.HTTPError:
+            pass
+        time.sleep(2)
+    print_error(f"HTTP check timed out: {path} on port {port} (expected {expected})")
     return False
 
 
@@ -379,17 +424,7 @@ def _probe_plugin(plugin_name: str, manifest: dict[str, Any]) -> bool:
     if isinstance(health, str) and health:
         return _wait_for_http(health, 200, timeout=45)
 
-    port = os.environ.get("BASELITH_HTTP_PORT") or "8000"
-    url = f"http://localhost:{port}/{plugin_name}/"
-    try:
-        request = Request(url, method="GET")
-        with urlopen(request, timeout=10) as response:
-            if 200 <= response.status < 400:
-                return True
-    except Exception as exc:
-        print_error(f"Plugin probe failed at /{plugin_name}/", str(exc))
-        return False
-    return False
+    return _wait_for_http(f"/{plugin_name}/", 200, timeout=45)
 
 
 __all__ = ["install_plugin_into_docker"]

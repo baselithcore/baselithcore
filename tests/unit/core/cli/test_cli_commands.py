@@ -73,7 +73,9 @@ class TestRunCommand:
         with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
             from core.cli.commands import run as run_module
 
-            run_module.run_server(host="localhost", port=9000, reload=False)
+            run_module.run_server(
+                host="localhost", port=9000, reload=False, preflight=False
+            )
             mock_uvicorn.run.assert_called_once()
             mock_console.print.assert_called()
 
@@ -91,7 +93,7 @@ class TestRunCommand:
         with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
             from core.cli.commands import run as run_module
 
-            result = run_module.run_server()
+            result = run_module.run_server(preflight=False)
             assert result == 0  # Graceful exit
             mock_console.print.assert_called()
 
@@ -106,11 +108,12 @@ class TestDoctorCommand:
         with patch("socket.socket") as mock_socket:
             instance = MagicMock()
             mock_socket.return_value = instance
+            instance.__enter__.return_value = instance
             instance.connect_ex.return_value = 0
 
             result = check_port("localhost", 6379)
             assert result is True
-            instance.close.assert_called_once()
+            instance.__exit__.assert_called_once()
 
     def test_check_port_closed(self):
         """Test check_port with closed port."""
@@ -119,6 +122,7 @@ class TestDoctorCommand:
         with patch("socket.socket") as mock_socket:
             instance = MagicMock()
             mock_socket.return_value = instance
+            instance.__enter__.return_value = instance
             instance.connect_ex.return_value = 1  # Connection refused
 
             result = check_port("localhost", 9999)
@@ -152,24 +156,13 @@ class TestDoctorCommand:
             assert result.passed is False
             assert "Cannot connect" in result.message
 
-    def test_check_env_file_exists(self, tmp_path):
+    def test_check_env_file_exists(self, tmp_path, monkeypatch):
         """Test check_env_file when .env exists."""
         from core.cli.commands.doctor import check_env_file
 
-        with patch("core.cli.commands.doctor.Path") as mock_path:
-            mock_cwd = MagicMock()
-            mock_path.cwd.return_value = mock_cwd
-
-            mock_configs = MagicMock()
-            mock_env = MagicMock()
-            mock_env.exists.return_value = True
-
-            # Chain: Path.cwd() / "configs" / ".env"
-            mock_cwd.__truediv__.return_value = mock_configs
-            mock_configs.__truediv__.return_value = mock_env
-
-            result = check_env_file()
-            assert result.passed is True
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("APP_ENV=development\n")
+        assert check_env_file().passed is True
 
     def test_check_env_file_missing(self, tmp_path, monkeypatch):
         """Test check_env_file when .env doesn't exist."""
@@ -177,15 +170,9 @@ class TestDoctorCommand:
 
         monkeypatch.chdir(tmp_path)
 
-        with patch("core.cli.commands.doctor.Path") as mock_path:
-            mock_path.cwd.return_value = tmp_path
-            mock_env = MagicMock()
-            mock_env.exists.return_value = False
-            mock_path.return_value.__truediv__.return_value = mock_env
-
-            result = check_env_file()
-            assert result.passed is False
-            assert ".env" in result.message
+        result = check_env_file()
+        assert result.passed is False
+        assert ".env" in result.message
 
     def test_check_plugins_found(self, tmp_path, monkeypatch):
         """Test check_plugins when plugins exist."""
@@ -197,26 +184,12 @@ class TestDoctorCommand:
         plugin1 = plugins_dir / "test-plugin"
         plugin1.mkdir()
         (plugin1 / "plugin.py").write_text("# plugin")
+        (plugin1 / "manifest.yaml").write_text("name: test-plugin\n")
 
         monkeypatch.chdir(tmp_path)
 
-        with patch("core.cli.commands.doctor.Path") as mock_path:
-            mock_path.cwd.return_value = tmp_path
-            mock_plugins = MagicMock()
-            mock_plugins.exists.return_value = True
-
-            # Mock iterdir to return our plugin directory
-            mock_plugin_dir = MagicMock()
-            mock_plugin_dir.is_dir.return_value = True
-            mock_plugin_file = MagicMock()
-            mock_plugin_file.exists.return_value = True
-            mock_plugin_dir.__truediv__.return_value = mock_plugin_file
-
-            mock_plugins.iterdir.return_value = [mock_plugin_dir]
-            mock_path.return_value.__truediv__.return_value = mock_plugins
-
-            result = check_plugins()
-            assert result.passed is True
+        result = check_plugins()
+        assert result.passed is True
 
     @patch("core.config.get_llm_config")
     def test_check_llm_provider_ollama_available(self, mock_llm_config):
@@ -259,35 +232,9 @@ class TestDoctorCommand:
             CheckResult("Plugins", True, "OK"),
         ]
 
-        with patch(
-            "core.cli.commands.doctor.check_env_file", return_value=mock_results[0]
-        ):
-            with patch(
-                "core.cli.commands.doctor.check_llm_provider",
-                return_value=mock_results[1],
-            ):
-                with patch(
-                    "core.cli.commands.doctor.check_redis", return_value=mock_results[2]
-                ):
-                    with patch(
-                        "core.cli.commands.doctor.check_qdrant",
-                        return_value=mock_results[3],
-                    ):
-                        with patch(
-                            "core.cli.commands.doctor.check_graph_db",
-                            return_value=mock_results[4],
-                        ):
-                            with patch(
-                                "core.cli.commands.doctor.check_postgres",
-                                return_value=mock_results[0],  # Use any passing result
-                            ):
-                                with patch(
-                                    "core.cli.commands.doctor.check_plugins",
-                                    return_value=mock_results[5],
-                                ):
-                                    result = run_doctor()
-                                    assert result == 0
-                                mock_console.print.assert_called()
+        with patch("core.cli.commands.doctor.run_checks", return_value=mock_results):
+            assert run_doctor() == 0
+        mock_console.print.assert_called()
 
 
 class TestCLIMain:

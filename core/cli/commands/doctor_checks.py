@@ -47,12 +47,11 @@ def env_value(name: str, default: str | None = None) -> str | None:
 def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
     """Check if a port is open and accepting connections."""
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
         return result == 0
-    except Exception:
+    except OSError:
         return False
 
 
@@ -65,7 +64,7 @@ def parse_url(url: str, default_port: int) -> tuple[str, int]:
         host = parsed.hostname or "localhost"
         port = parsed.port or default_port
         return host, port
-    except Exception:
+    except ValueError:
         return "localhost", default_port
 
 
@@ -113,7 +112,8 @@ def check_python_runtime() -> CheckResult:
 
 def check_docker() -> CheckResult:
     """Check whether Docker CLI is available and Docker daemon is reachable."""
-    if shutil.which("docker") is None:
+    docker = shutil.which("docker")
+    if docker is None:
         return CheckResult(
             "Docker",
             False,
@@ -125,7 +125,7 @@ def check_docker() -> CheckResult:
         import subprocess
 
         result = subprocess.run(
-            ["docker", "info"],
+            [docker, "info"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -239,7 +239,9 @@ def check_qdrant() -> CheckResult:
         if config.provider != "qdrant":
             return CheckResult("Vector Store", True, f"Provider: {config.provider}")
         if check_port(config.host, config.port):
-            return CheckResult("Qdrant", True, f"Connected ({config.host}:{config.port})")
+            return CheckResult(
+                "Qdrant", True, f"Connected ({config.host}:{config.port})"
+            )
         return CheckResult(
             "Qdrant",
             False,

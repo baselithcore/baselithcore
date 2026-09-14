@@ -115,7 +115,39 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin s
 The class in `plugin.py` carries no identity of its own: `name`, `version` and every other
 field are read from the manifest next to it (`core/plugins/_metadata.py`).
 
-### Dependencies
+### Docker Installation Contract
+
+`baselith plugin add <repository> --docker` uses the existing dependency and
+version fields plus optional frontend and health metadata:
+
+```yaml
+entrypoint: __init__.py
+frontend:
+  path: ui
+  package_manager: pnpm
+  build_command: pnpm build
+  output_dir: out
+health_endpoint: /my-plugin/
+```
+
+`path` is relative to the plugin directory; `output_dir` is relative to `path`.
+The package manager must be `npm`, `pnpm` or `yarn`. Commit the corresponding
+lockfile: the builder uses `npm ci` or frozen-lockfile installation. It runs in
+Node 22 on Docker and checks for a nonempty output directory. `frontend: false`
+disables automatic detection. Legacy main plugins can still use UI detection;
+dependencies needing a frontend rebuild must declare this block explicitly.
+
+The declared health path must return 200 without authentication or redirects.
+Otherwise use a dedicated readiness route. An agent-only plugin should not rely
+on the default `/<name>/` probe unless it actually serves that route.
+
+Installation still expects `plugin.py`; `entrypoint` does not enable arbitrary
+Python package layouts. Python dependencies are installed into the API image,
+with a final `pip check`. Version conflicts fail the build. Missing Core bounds
+remain a legacy warning; invalid or incompatible declared bounds fail installation.
+See [Docker Core and Plugins](../getting-started/docker-core.md) for the runbook.
+
+### Dependency Versions
 
 Specify dependencies with version ranges in `manifest.yaml`:
 

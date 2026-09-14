@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.cli.commands.doctor_checks import is_placeholder_secret
-from core.cli.commands.env_profiles import ensure_dev_env
+from core.cli.commands.env_profiles import ensure_dev_env, ensure_docker_core_env
 from core.cli.commands.plugin import add_docker
 
 
@@ -70,3 +70,28 @@ def _env_values(path: Path) -> dict[str, str]:
             if "=" in line and not line.strip().startswith("#")
         )
     }
+
+
+def test_repeated_setup_preserves_credentials_and_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ensure_dev_env()
+    ensure_docker_core_env()
+    local = (tmp_path / ".env").read_text()
+    docker = (tmp_path / "configs" / ".env.docker.core").read_text()
+    assert ensure_dev_env() == []
+    assert ensure_docker_core_env() == []
+    assert (tmp_path / ".env").read_text() == local
+    assert (tmp_path / "configs" / ".env.docker.core").read_text() == docker
+
+
+def test_new_checkouts_get_distinct_secrets_and_projects(tmp_path, monkeypatch):
+    profiles = []
+    for name in ("first", "second"):
+        checkout = tmp_path / name
+        checkout.mkdir()
+        monkeypatch.chdir(checkout)
+        ensure_dev_env()
+        ensure_docker_core_env()
+        profiles.append(_env_values(checkout / "configs" / ".env.docker.core"))
+    for key in ("SECRET_KEY", "DB_PASSWORD", "COMPOSE_PROJECT_NAME"):
+        assert profiles[0][key] != profiles[1][key]

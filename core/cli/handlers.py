@@ -184,7 +184,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     """Execute the 'config' command to inspect and modify settings."""
-    from core.cli.commands.config import ensure_env_profile, show_config, validate_config
+    from core.cli.commands.config import (
+        ensure_env_profile,
+        show_config,
+        validate_config,
+    )
 
     command = getattr(args, "config_command", "show") or "show"
     if command == "show":
