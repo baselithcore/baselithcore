@@ -180,7 +180,9 @@ class SseDecoder {
  * comment lines, stops at `event: done` and throws {@link ChatStreamError} on
  * `event: error`.
  */
-async function* decodeSseStream(rawChunks: AsyncIterable<string> | Iterable<string>): AsyncGenerator<string> {
+async function* decodeSseStream(
+  rawChunks: AsyncIterable<string> | Iterable<string>
+): AsyncGenerator<string> {
   const sse = new SseDecoder();
   for await (const raw of rawChunks) {
     for (const event of sse.feed(raw)) {

@@ -230,11 +230,12 @@ def ensure_env_profile(profile: str = "dev", json_output: bool = False) -> int:
             return 0
         if changed:
             console.print(
-                "[green]Updated Docker env keys:[/green] "
-                + ", ".join(sorted(changed))
+                "[green]Updated Docker env keys:[/green] " + ", ".join(sorted(changed))
             )
         else:
-            console.print("[green]Docker core env already exists and is aligned.[/green]")
+            console.print(
+                "[green]Docker core env already exists and is aligned.[/green]"
+            )
         return 0
 
     if profile != "dev":

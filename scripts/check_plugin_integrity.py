@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -60,11 +62,18 @@ _DEFAULT_PLUGIN_ROOT = ROOT / "plugins"
 def _iter_plugin_dirs(paths: list[Path]) -> list[Path]:
     if paths:
         return [p.resolve() for p in paths if p.is_dir()]
-    return sorted(
-        p
-        for p in _DEFAULT_PLUGIN_ROOT.iterdir()
-        if p.is_dir() and not p.name.startswith(("_", "."))
-    )
+    git = shutil.which("git")
+    if not git:
+        return []
+    raw = subprocess.run(
+        [git, "ls-files", "plugins/*/manifest.y*ml", "plugins/*/manifest.json"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.splitlines()
+    plugin_dirs = {(ROOT / item).parent for item in raw}
+    return sorted(p for p in plugin_dirs if not p.name.startswith(("_", ".")))
 
 
 def _read_manifest_hash(plugin_dir: Path) -> tuple[Path, str | None] | None:

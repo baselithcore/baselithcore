@@ -21,4 +21,5 @@ else:
         response.status_code = 200
         return {"status": "ready", "services": {}, "cached": False}
 
+
 __all__ = ["router"]

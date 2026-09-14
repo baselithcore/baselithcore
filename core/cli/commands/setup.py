@@ -81,19 +81,25 @@ def run_setup(
     table.add_row(".env dev profile", "updated" if env_changes else "already aligned")
     table.add_row(
         "core services",
-        "started" if start_services and services_code == 0 else "needs attention"
+        "started"
+        if start_services and services_code == 0
+        else "needs attention"
         if start_services
         else "skipped",
     )
     table.add_row(
         "service readiness",
-        "ready" if start_services and ready_code == 0 else "needs attention"
+        "ready"
+        if start_services and ready_code == 0
+        else "needs attention"
         if start_services
         else "skipped",
     )
     table.add_row(
         "db migrate",
-        "applied" if migrate and migrate_code == 0 else "needs attention"
+        "applied"
+        if migrate and migrate_code == 0
+        else "needs attention"
         if migrate
         else "skipped",
     )

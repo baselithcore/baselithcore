@@ -166,7 +166,9 @@ def _run_preflight(
     failed_checks = [
         check for check in checks if not check.passed and check.severity == "fail"
     ]
-    service_failures = [check for check in failed_checks if _is_connectivity_check(check)]
+    service_failures = [
+        check for check in failed_checks if _is_connectivity_check(check)
+    ]
     failures = [
         check
         for check in failed_checks
@@ -192,7 +194,9 @@ def _run_preflight(
         border_style="red",
     )
     console.print("[dim]Run `baselith doctor` for the full diagnostic report.[/dim]")
-    console.print("[dim]Use `baselith run --check-plugins` to include plugin readiness.[/dim]")
+    console.print(
+        "[dim]Use `baselith run --check-plugins` to include plugin readiness.[/dim]"
+    )
     console.print("[dim]Use `baselith run --skip-preflight` only for debugging.[/dim]")
     return 1
 

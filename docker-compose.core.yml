@@ -22,7 +22,6 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8000
-    command: baselith-core-entrypoint
     volumes:
       - ./plugins:/app/plugins
       - ./configs:/app/configs
@@ -40,10 +39,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 300s
+      start_interval: 5s
 
   postgres:
     image: pgvector/pgvector:pg16

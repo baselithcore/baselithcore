@@ -171,8 +171,7 @@ def _register_plugin_config(name: str) -> bool:
             f"{PLUGINS_CONFIG_PATH} could not be updated."
         )
         print_info(
-            "Install project dependencies, then run: "
-            f"baselith plugin enable {name}"
+            f"Install project dependencies, then run: baselith plugin enable {name}"
         )
         return False
 

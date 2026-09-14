@@ -13,6 +13,7 @@ after the list was written was simply never gated.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -90,10 +91,22 @@ def official_plugin_dirs() -> tuple[list[str], list[str]]:
     """
     if not PLUGINS_ROOT.is_dir():
         return [], []
+    git = shutil.which("git")
+    if not git:
+        print("warning: git not found; no official plugins discovered", file=sys.stderr)
+        return [], []
     found: list[str] = []
     unsigned: list[str] = []
-    for plugin_dir in sorted(PLUGINS_ROOT.iterdir()):
-        if not plugin_dir.is_dir() or plugin_dir.name.startswith((".", "_")):
+    raw = subprocess.run(
+        [git, "ls-files", "plugins/*/manifest.y*ml", "plugins/*/manifest.json"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.splitlines()
+    plugin_dirs = sorted({(REPO_ROOT / item).parent for item in raw})
+    for plugin_dir in plugin_dirs:
+        if plugin_dir.name.startswith((".", "_")):
             continue
         relative = plugin_dir.relative_to(REPO_ROOT).as_posix()
         if _manifest_declares_integrity(plugin_dir):
