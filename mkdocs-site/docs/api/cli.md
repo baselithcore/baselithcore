@@ -76,6 +76,18 @@ The framework supports global flags that modify the behavior of all commands.
 
 ## General
 
+### `init --template docker-runtime` - Standalone Docker Core
+
+```bash
+baselith init my-core --template docker-runtime
+```
+
+Creates a project that runs the released, version-matched Core image without a
+Core source checkout. The project contains Docker Compose configuration, generated
+credentials, persistent data directories and a plugin workspace. The generated
+Dockerfile is intentionally small: it derives from the Core image and adds the
+Python dependencies declared by installed plugins.
+
 ### `doctor` - System Diagnostics
 
 Verify system health, checking connections to external services and configuration.

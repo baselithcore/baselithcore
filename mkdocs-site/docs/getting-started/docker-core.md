@@ -1,10 +1,31 @@
 # Docker Core and Plugins
 
-This workflow uses a Core checkout, Python 3.12 or newer for the Baselith CLI,
-Git, and a running Docker engine with Compose. Node and frontend package managers
-run inside a temporary Docker builder.
+There are two supported workflows. Core contributors can run from a source
+checkout. Plugin developers and customer installations can instead generate a
+standalone project backed by the released Core image. Both require the Baselith
+CLI, Git, and Docker with Compose. Node and frontend package managers run inside
+a temporary Docker builder.
 
-## Prepare the Core
+## Start without a Core Checkout
+
+Create a small runtime project containing only Compose configuration, persistent
+directories and plugin sources:
+
+```bash
+baselith init my-core --template docker-runtime
+cd my-core
+docker compose --env-file configs/.env.docker.core -f docker-compose.core.yml up -d --build
+curl --fail http://localhost:8000/health
+```
+
+The generated Dockerfile extends the version-matched
+`ghcr.io/baselithcore/baselithcore` image. It does not copy the Core source into
+the project. Adding a plugin updates a generated requirements file and rebuilds
+only this local derived image, so plugin Python packages survive container
+replacement. Plugin files and frontend output remain mounted from `plugins/`
+for immediate development.
+
+## Start from a Core Checkout
 
 From the repository root, inside your Python virtual environment:
 
@@ -104,7 +125,6 @@ default Git branch. Custom dependency repositories and dependency-specific refs
 are not yet supported. In particular, a fix published only on an auth branch is
 not automatically selected when another plugin requires auth.
 
-`sync --docker` with fingerprints and uniform Docker update/remove commands are
-not implemented yet. Repeating `add` invokes builds again; Docker may reuse layers.
-Requirements are declarative but not fully locked, and plugins share one Python
-environment. An image-only distribution without the Core checkout is separate work.
+Fingerprint-based sync and uniform Docker update/remove commands are not implemented
+yet. Repeating `add` invokes builds again; Docker may reuse layers. Requirements
+are declarative but not fully locked, and plugins share one Python environment.

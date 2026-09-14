@@ -11,9 +11,15 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Prompt
 
 from core import __version__ as FRAMEWORK_VERSION
+from core.cli.commands.env_profiles import ensure_docker_core_env
+from core.cli.templates.docker_runtime import DOCKER_RUNTIME_FILES
 from core.cli.ui import console, print_error, print_panel, print_step, print_success
 
 PROJECT_TEMPLATES = {
+    "docker-runtime": {
+        "description": "Standalone Docker runtime using the released Core image",
+        "files": DOCKER_RUNTIME_FILES,
+    },
     "minimal": {
         "description": "Minimal project with core dependencies only",
         "files": {
@@ -167,7 +173,14 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
 
     if not template:
         # Check available templates to offer in prompt
-        choices = ["minimal", "full", "chat-only", "rag-system", "baselith-core"]
+        choices = [
+            "docker-runtime",
+            "minimal",
+            "full",
+            "chat-only",
+            "rag-system",
+            "baselith-core",
+        ]
         template = Prompt.ask(
             "[bold cyan]? Which template would you like to use?[/bold cyan]",
             choices=choices,
@@ -259,6 +272,9 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
                 full_path.write_text(final_content)
                 progress.advance(task)
 
+        if template == "docker-runtime":
+            ensure_docker_core_env(project_path / "configs" / ".env.docker.core")
+
         print_success(f"Created project at [bold]{project_path}[/bold]")
 
         # ``project_path`` may have been redirected under ``plugins/`` when run
@@ -268,7 +284,12 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         except ValueError:
             cd_target = project_path
 
-        next_steps = f"""[bold]cd[/bold] {cd_target}
+        if template == "docker-runtime":
+            next_steps = f"""[bold]cd[/bold] {cd_target}
+[bold]docker compose[/bold] --env-file configs/.env.docker.core -f docker-compose.core.yml up -d --build
+[bold]curl[/bold] --fail http://localhost:8000/health"""
+        else:
+            next_steps = f"""[bold]cd[/bold] {cd_target}
 [bold]pip[/bold] install -e .
 [bold]baselith[/bold] run"""
         print_panel(next_steps, title="Next steps", style="green")
@@ -296,7 +317,14 @@ def register_parser(subparsers, formatter_class):
     )
     init_parser.add_argument(
         "--template",
-        choices=["minimal", "full", "chat-only", "rag-system", "baselith-core"],
+        choices=[
+            "docker-runtime",
+            "minimal",
+            "full",
+            "chat-only",
+            "rag-system",
+            "baselith-core",
+        ],
         help="Select a starter template (minimal, full, rag-system, etc.)",
     )
     return init_parser

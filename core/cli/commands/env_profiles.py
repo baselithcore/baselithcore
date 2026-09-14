@@ -141,6 +141,7 @@ def ensure_dev_env(env_path: Path | None = None) -> list[str]:
 def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
     """Create or normalize the local Docker core env file."""
     path = env_path or Path.cwd() / "configs" / ".env.docker.core"
+    project_root = path.parent.parent if path.parent.name == "configs" else Path.cwd()
     if not path.exists():
         source = Path.cwd() / "configs" / ".env.docker.core.example"
         if source.exists():
@@ -154,7 +155,7 @@ def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
     changed: list[str] = []
 
     if "COMPOSE_PROJECT_NAME" not in values:
-        project_name = _compose_project_name(Path.cwd())
+        project_name = _compose_project_name(project_root)
         lines.append(f"COMPOSE_PROJECT_NAME={project_name}")
         values["COMPOSE_PROJECT_NAME"] = project_name
         changed.append("COMPOSE_PROJECT_NAME")
