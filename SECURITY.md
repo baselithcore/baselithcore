@@ -80,6 +80,14 @@ Operator hardening checklist:
 - [ ] `SECRET_KEY` set to a high-entropy value (≥ 32 chars); never the default.
 - [ ] `AUTH_REQUIRED=true` in any non-local deployment.
 - [ ] TLS terminated in front of the app — the framework does not serve TLS.
+- [ ] `TRUSTED_HOSTS` set to this deployment's hostnames. Empty leaves the
+      `Host` header unvalidated; production refuses to boot that way unless
+      `BASELITH_ALLOW_UNVALIDATED_HOST=true`.
+- [ ] Multi-tenant deployments: `DB_RLS_ENABLED=true` **and** the application
+      connecting as a least-privilege role (`NOSUPERUSER NOBYPASSRLS`, not the
+      table owner). Policies do not apply to a superuser, a `BYPASSRLS` role,
+      or the owner — production refuses to boot on a role that bypasses them.
+      Provision it with `database.runtimeRole` (Helm) or `compose.rls.yaml`.
 - [ ] `MFA_ENABLED=true` and a TOTP step-up enforced for privileged accounts
       (NIS2 Art. 21(2)(j)); see
       [`core-modules/mfa.md`](mkdocs-site/docs/core-modules/mfa.md).

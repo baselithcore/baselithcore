@@ -1057,6 +1057,20 @@ TRUSTED_HOSTS=["api.example.com","admin.example.com"]
     `BASELITH_ALLOW_UNVALIDATED_HOST=true`, an auditable escape hatch that
     downgrades the check to an ERROR log. Outside production it is silent.
 
+!!! danger "Startup check: an RLS policy that applies to nobody is fail-closed"
+    `core.db.rls_posture.enforce_rls_posture` — run from
+    `run_startup_health_checks()` — **refuses to start** the app in production
+    when `DB_RLS_ENABLED=true` and the role the pool authenticates as defeats
+    the policies (`RlsBypassError`). PostgreSQL skips a policy for a
+    `SUPERUSER`, for a `BYPASSRLS` role, and for the **table owner** without
+    `FORCE ROW LEVEL SECURITY` — and the default `DB_USER` is the owner, so the
+    misconfiguration looks identical to a working one from the application
+    side. The escape hatch is `BASELITH_ALLOW_RLS_BYPASS=true`; the remedy is a
+    least-privilege role, provisioned by `database.runtimeRole` (Helm) or
+    `compose.rls.yaml` — see
+    [Multi-Tenancy](multi-tenancy.md#defense-in-depth-row-level-security). With
+    `DB_RLS_ENABLED` off the check is a no-op.
+
 ---
 
 ## Security Headers

@@ -135,6 +135,51 @@ ordinary query error naming it, instead of an opaque permission error on a
 [Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
 for the two-role deployment that makes those policies effective.
 
+### Is row-level security actually enforced?
+
+Enabling `DB_RLS_ENABLED` and running the migrations puts three things in place
+— the pool binds `app.tenant_id`, the tables carry a policy, the policy reads
+the GUC — and **none of them means isolation is enforced**. PostgreSQL skips a
+policy entirely for:
+
+- a **`SUPERUSER`** role — policies never apply to one;
+- a role carrying **`BYPASSRLS`**;
+- the **table owner**, unless the table also has `FORCE ROW LEVEL SECURITY`,
+  which migration 008 deliberately does not set so that migrations and
+  un-tenanted maintenance keep working.
+
+The default `DB_USER` is the role that owns everything Alembic creates, so a
+deployment can have RLS switched on in three places and no isolation at all,
+with nothing in the logs saying so.
+
+`core/db/rls_posture.py` closes that gap. At startup, when `DB_RLS_ENABLED` is
+on, it reads the three vectors back from the catalogs and reports what it finds:
+
+```python
+from core.db.rls_posture import describe_rls_bypass, probe_rls_posture
+
+posture = await probe_rls_posture(conn)
+problem = describe_rls_bypass(posture)   # None when isolation really applies
+```
+
+In **production** a bypass **refuses the boot** — a deployment that believes the
+database is isolating tenants and is wrong has no other moment to find out.
+Outside production, or with `BASELITH_ALLOW_RLS_BYPASS=true` (an auditable
+escape hatch, like `BASELITH_ALLOW_UNVALIDATED_HOST`), it logs at ERROR instead.
+With `DB_RLS_ENABLED` off the check is a no-op: nothing was claimed, so there is
+nothing to contradict.
+
+The remedy it points at is a least-privilege role, provisioned for you by
+`database.runtimeRole` in the Helm chart or by
+`deploy/postgres/initdb/10-runtime-role.sh` under `compose.rls.yaml`:
+
+```sql
+CREATE ROLE baselith_runtime LOGIN PASSWORD '…'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+```
+
+Migrations keep running as the owner; only the serving processes drop to it.
+
 ### Who runs the migrations
 
 `init_db()` runs the Alembic upgrade at boot unless

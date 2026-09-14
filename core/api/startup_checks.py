@@ -235,6 +235,14 @@ async def run_startup_health_checks() -> None:
                 type(exc).__name__,
             )
 
+        # Deliberately outside the try above: a role that silently bypasses
+        # row-level security is a security misconfiguration, not an
+        # infrastructure blip, and must not be swallowed by the handler that
+        # reports an unreachable database.
+        from core.db.rls_posture import enforce_rls_posture
+
+        await enforce_rls_posture()
+
     if CACHE_REDIS_URL:
         try:
             _redis_check = redis.from_url(CACHE_REDIS_URL)

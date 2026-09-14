@@ -452,6 +452,35 @@ follows [Keep a Changelog](https://keepachangelog.com) and
 
 ## [Unreleased]
 
+### Security
+- **Row-level security that applies to nobody now fails the boot.** Turning on
+  `DB_RLS_ENABLED` and running the migrations put a policy on every
+  tenant-scoped table — and PostgreSQL skipped all of them, because the
+  application connects as the role that *owns* those tables (policies never
+  apply to a superuser, a `BYPASSRLS` role, or the owner of a table without
+  `FORCE ROW LEVEL SECURITY`, which the migration deliberately does not set).
+  The console reported isolation was on; the database was returning every
+  tenant's rows. A startup check now reads all three exemptions back from the
+  catalogs and **refuses to start in production** when they defeat the
+  policies, naming each reason and the fix
+  (`BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out). With
+  `DB_RLS_ENABLED` off nothing changes — no claim was made, so there is nothing
+  to contradict.
+- **The least-privilege database role is now provisioned for you**, instead of
+  being a manual step in a document. `database.runtimeRole` in the Helm chart
+  runs it as a pre-upgrade Job right after the migrations, so the grants cover
+  the tables that exist and `ALTER DEFAULT PRIVILEGES` covers every table a
+  later migration adds; `compose.rls.yaml` does the same for the Docker
+  Compose stack. Both keep DDL with the owner, are idempotent (an upgrade
+  repairs a role whose attributes drifted), and never put a password on a
+  command line.
+- **`baselithcontrol` ships with `require_admin: true`.** The bundled
+  `configs/plugins.yaml` shipped it as `false`, which in an
+  auth-disabled deployment promoted the anonymous local operator to admin on
+  the control console. It is inert with `AUTH_REQUIRED=true` (the default),
+  where the admin role is always required — but it is the wrong default to
+  bake into an image.
+
 ### Added
 
 - **Encryption at rest** — versioned AES-256-GCM field encryption

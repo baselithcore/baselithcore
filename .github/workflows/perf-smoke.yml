@@ -16,7 +16,26 @@ name: Perf Smoke
 on:
   schedule:
     - cron: "0 4 * * 1"
-  workflow_dispatch: {}
+  # The weekly run is a smoke: 10 users for 60s says the API is alive under
+  # modest concurrency and nothing more. Before exposing a deployment to the
+  # public internet somebody has to produce *real* load evidence, and a
+  # hand-edited workflow is not a repeatable way to do it — so the run is
+  # parameterised. Dispatch it with the concurrency and duration you actually
+  # want to defend, and the artifact is the evidence.
+  workflow_dispatch:
+    inputs:
+      users:
+        description: "Concurrent users (locust -u)"
+        default: "10"
+        required: false
+      spawn_rate:
+        description: "Users started per second (locust -r)"
+        default: "5"
+        required: false
+      duration:
+        description: "Run length, locust -t syntax (e.g. 60s, 15m, 1h)"
+        default: "60s"
+        required: false
 
 permissions:
   contents: read
@@ -25,7 +44,8 @@ jobs:
   perf_smoke:
     name: Locust Smoke Run
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Sized for the smoke plus headroom; raise it when dispatching a long soak.
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16-alpine
@@ -76,9 +96,17 @@ jobs:
           done
           echo "backend never became healthy"; tail -50 backend.log; exit 1
       - name: Run Locust smoke
+        env:
+          # The schedule has no inputs, so the defaults below are what the
+          # weekly run uses; a dispatch overrides them.
+          USERS: ${{ github.event.inputs.users || '10' }}
+          SPAWN_RATE: ${{ github.event.inputs.spawn_rate || '5' }}
+          DURATION: ${{ github.event.inputs.duration || '60s' }}
         run: |
+          echo "Driving ${USERS} users at ${SPAWN_RATE}/s for ${DURATION}"
           locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
-            --headless -u 10 -r 5 -t 60s --only-summary --csv perf
+            --headless -u "${USERS}" -r "${SPAWN_RATE}" -t "${DURATION}" \
+            --only-summary --csv perf
       - name: Check performance budget
         run: python scripts/check_perf_budget.py --stats perf_stats.csv --report
       - name: Upload results

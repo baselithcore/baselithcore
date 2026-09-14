@@ -29,6 +29,10 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.containerPort }}
+        {{- range .Values.networkPolicy.selfIngressPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
     {{- with .Values.networkPolicy.ingressFrom }}
     # Operator-supplied peer selectors: name the ingress controller (or whatever
     # is actually allowed to reach the API) instead of the whole namespace.

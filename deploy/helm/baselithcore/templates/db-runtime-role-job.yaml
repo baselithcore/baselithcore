@@ -1,0 +1,164 @@
+{{- if .Values.database.runtimeRole.enabled }}
+{{- $role := .Values.database.runtimeRole -}}
+{{- if not $role.name }}
+{{- fail "database.runtimeRole.enabled requires database.runtimeRole.name (the LOGIN role the app authenticates as — it must not be the owner of the tables)" }}
+{{- end }}
+{{- if not $role.adminSecret.name }}
+{{- fail "database.runtimeRole.enabled requires database.runtimeRole.adminSecret.name: creating a role and granting on the schema is owner/superuser work, and the app's own DB_USER cannot do it" }}
+{{- end }}
+# Provisions the least-privilege role the application authenticates as.
+#
+# Row-level security is skipped for a SUPERUSER, for a BYPASSRLS role, and for
+# the *owner* of a table that lacks FORCE ROW LEVEL SECURITY (migration 008
+# deliberately leaves FORCE off). A deployment that keeps using the owning
+# role therefore has RLS switched on in three places and no isolation at all —
+# which `core.db.rls_posture` now refuses to boot past in production.
+#
+# Runs at hook-weight 1, i.e. AFTER the migration Job (weight 0): the GRANTs
+# below cover the tables that exist, and ALTER DEFAULT PRIVILEGES covers every
+# table a later migration adds. Idempotent, so every upgrade also repairs a
+# role whose attributes drifted.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "baselithcore.fullname" . }}-db-runtime-role
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-runtime-role
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ $role.backoffLimit }}
+  activeDeadlineSeconds: {{ $role.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "baselithcore.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: db-runtime-role
+    spec:
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Same reasoning as the migration Job: the release ServiceAccount is an
+      # ordinary resource Helm applies after its hooks, so referencing it here
+      # fails a first install. This Job never calls the Kubernetes API.
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: provision-role
+          image: {{ $role.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              DEADLINE=$(( $(date +%s) + WAIT_SECONDS ))
+              until pg_isready -q; do
+                if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                  echo "database ${PGHOST}:${PGPORT} still unreachable after ${WAIT_SECONDS}s, giving up" >&2
+                  exit 1
+                fi
+                echo "waiting for ${PGHOST}:${PGPORT} ..."
+                sleep 5
+              done
+              # The role password reaches psql through `printenv` inside the
+              # script, never as an argument: a value in argv is readable by
+              # every process on the node via /proc/<pid>/cmdline.
+              psql -v ON_ERROR_STOP=1 -q <<'SQL'
+              \set role_name `printenv RUNTIME_ROLE`
+              \set role_pw `printenv RUNTIME_PASSWORD`
+              \set db_name `printenv PGDATABASE`
+
+              SELECT NOT EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = :'role_name'
+              ) AS need_create \gset
+
+              \if :need_create
+              CREATE ROLE :"role_name" LOGIN PASSWORD :'role_pw'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+              \else
+              -- Idempotent repair: an upgrade re-asserts the attributes in case
+              -- someone granted SUPERUSER or BYPASSRLS to unblock something.
+              ALTER ROLE :"role_name" LOGIN PASSWORD :'role_pw'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+              \endif
+
+              GRANT CONNECT ON DATABASE :"db_name" TO :"role_name";
+              GRANT USAGE ON SCHEMA public TO :"role_name";
+              -- DML only: DDL stays with the owner, which is what keeps the
+              -- runtime role out of the RLS-exempt "table owner" category.
+              GRANT SELECT, INSERT, UPDATE, DELETE
+                ON ALL TABLES IN SCHEMA public TO :"role_name";
+              GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO :"role_name";
+              -- Tables a future migration creates, without re-running this Job.
+              -- Scoped to the role running it (the owner), which is the only
+              -- form that applies to what Alembic creates.
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"role_name";
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT USAGE, SELECT ON SEQUENCES TO :"role_name";
+              SQL
+              echo "runtime role provisioned; the application must now connect as it (DB_USER)"
+          env:
+            - name: WAIT_SECONDS
+              value: {{ $role.waitForDatabaseSeconds | quote }}
+            - name: PGHOST
+              value: {{ $role.host | quote }}
+            - name: PGPORT
+              value: {{ $role.port | quote }}
+            - name: PGDATABASE
+              value: {{ $role.database | quote }}
+            - name: RUNTIME_ROLE
+              value: {{ $role.name | quote }}
+            # The owner/superuser credential, used only by this Job.
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $role.adminSecret.name | quote }}
+                  key: {{ $role.adminSecret.userKey | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $role.adminSecret.name | quote }}
+                  key: {{ $role.adminSecret.passwordKey | quote }}
+            # The password the app will authenticate with. Same secret the app
+            # reads DB_PASSWORD from by default, so the two cannot drift.
+            - name: RUNTIME_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $role.passwordSecret.name | default (include "baselithcore.secretName" .) | quote }}
+                  key: {{ $role.passwordSecret.key | quote }}
+          resources:
+            {{- toYaml $role.resources | nindent 12 }}
+          {{- if .Values.tmpVolumes.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if .Values.tmpVolumes.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
