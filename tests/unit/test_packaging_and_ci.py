@@ -33,6 +33,7 @@ SECURITY = REPO_ROOT / "SECURITY.md"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CI_WORKFLOW = WORKFLOWS / "ci.yml"
+RELEASE_IMAGE_WORKFLOW = WORKFLOWS / "release-image.yml"
 
 # Files that must carry this release's version number after a release, and the
 # regex that finds the version inside each. `.releaserc` has to rewrite every
@@ -234,6 +235,27 @@ def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
 # ---------------------------------------------------------------------------
 # Container image
 # ---------------------------------------------------------------------------
+
+
+def test_manual_image_build_separates_source_ref_from_image_tag() -> None:
+    """Branch names can contain slashes, while Docker tags cannot."""
+    workflow = _workflow(RELEASE_IMAGE_WORKFLOW)
+    inputs = _triggers(workflow)["workflow_dispatch"]["inputs"]
+
+    assert inputs["ref"]["required"] is True
+    assert inputs["tag"]["required"] is True
+    text = RELEASE_IMAGE_WORKFLOW.read_text(encoding="utf-8")
+    assert "inputs.ref || inputs.tag || github.event.release.tag_name" in text
+
+
+def test_manual_image_build_does_not_replace_latest() -> None:
+    """A test image must never become the default production image."""
+    text = RELEASE_IMAGE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "EVENT_NAME: ${{ github.event_name }}" in text
+    assert 'if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then' in text
+    assert 'echo "publish_latest=false"' in text
+    assert 'if [ "${PUBLISH_LATEST}" = "true" ]; then' in text
 
 
 def test_runtime_image_does_not_ship_the_maintenance_scripts() -> None:
