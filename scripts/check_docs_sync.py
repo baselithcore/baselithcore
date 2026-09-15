@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Report `core/` changes whose documentation page was left untouched.
 
-CLAUDE.md: "Code and docs ship together — no merge with stale docs." No linter,
-pre-commit hook or CI job enforces that, so this maps each changed `core/`
-module to the page that documents it and flags the ones nobody edited.
+CLAUDE.md: "Code and docs ship together — no merge with stale docs." This maps
+each changed `core/` module to the page that documents it and flags the ones
+nobody edited.
 
 The mapping is intentionally blunt — it names the page a reviewer would expect
 to move, not every page that could conceivably mention the module. Judgement
@@ -11,10 +11,25 @@ about *whether* the change is substantial stays with the caller.
 
     python scripts/check_docs_sync.py            # working tree
     python scripts/check_docs_sync.py main       # vs a base ref (CI: origin/<base>)
+    python scripts/check_docs_sync.py --commit-msg-file .git/COMMIT_EDITMSG
 
 A change that deliberately ships without a doc update states so in a commit
 message with the marker ``[docs-sync: skip]`` (plus the reason); the gate then
 passes for that range and the marker stays in history for review.
+
+The third form is the `commit-msg` pre-commit hook, and it is the reason this
+runs anywhere other than CI. As a CI-only gate it fired on a pull request,
+which is the wrong moment twice over: the change is already pushed, and the
+person reading the failure is often no longer the person who made it — the
+first failure of this kind pointed at a commit from an earlier session, whose
+author had to reconstruct what the change was for before they could document
+it. At `commit-msg` the diff is still on screen.
+
+It has to be `commit-msg` rather than `pre-commit` for the opt-out to work: the
+marker lives in the message being written, and a plain `pre-commit` hook cannot
+see it (``git log -1`` there is the PREVIOUS commit). A gate whose documented
+escape hatch is unreachable teaches people to reach for ``--no-verify``, which
+disables every other hook too.
 """
 
 from __future__ import annotations
@@ -93,15 +108,34 @@ def expected_pages(module: str) -> tuple[str, ...]:
 SKIP_MARKER = "[docs-sync: skip]"
 
 
-def skip_requested(base_ref: str | None) -> bool:
-    """True when a commit in the range carries the explicit opt-out marker."""
+def skip_requested(base_ref: str | None, commit_msg_file: str | None = None) -> bool:
+    """True when the change carries the explicit opt-out marker.
+
+    At ``commit-msg`` time the marker is in the message being written, which is
+    not in ``git log`` yet, so the file wins when one is given.
+    """
+    if commit_msg_file is not None:
+        try:
+            return SKIP_MARKER in Path(commit_msg_file).read_text(encoding="utf-8")
+        except OSError:
+            # An unreadable message file must not wave the change through.
+            return False
     log_range = f"{base_ref}..HEAD" if base_ref else "-1"
     return any(SKIP_MARKER in line for line in _git("log", "--format=%B", log_range))
 
 
 def main() -> int:
-    base_ref = sys.argv[1] if len(sys.argv) > 1 else None
-    if skip_requested(base_ref):
+    argv = sys.argv[1:]
+    commit_msg_file: str | None = None
+    if argv and argv[0] == "--commit-msg-file":
+        if len(argv) < 2:
+            print("--commit-msg-file needs the path to the commit message file")
+            return 2
+        commit_msg_file = argv[1]
+        argv = argv[2:]
+    base_ref = argv[0] if argv else None
+
+    if skip_requested(base_ref, commit_msg_file):
         print(f"Docs sync: skipped — a commit in range carries {SKIP_MARKER}.")
         return 0
     paths = changed_paths(base_ref)
@@ -151,7 +185,11 @@ def main() -> int:
     print("\n".join(sorted(set(stale))))
     print(
         "\nUpdate each page in this same change, or state explicitly why the "
-        "change is not substantial enough to document."
+        "change is not substantial enough to document.\n"
+        f"To ship without a doc update, put {SKIP_MARKER} in the commit "
+        "message along with the reason — it stays in history for review. Do "
+        "that rather than reaching for --no-verify, which switches off every "
+        "other hook as well."
     )
     return 1
 

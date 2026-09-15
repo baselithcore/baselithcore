@@ -379,6 +379,24 @@ semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
 `grafana/dashboards/agentic-metrics.json`; the token panel there queries the
 `gen_ai_*` metrics, not the legacy `mas_llm_*`/`llm_tokens_total` family.
 
+### Per-plugin span attribution
+
+Every LLM span also carries `baselith.plugin` — the plugin the call was made on
+behalf of, or nothing at all when the call is not running for one. The value
+comes from the request context, which is already bound by the time a generation
+starts: the plugin-context middleware sets it for every request routed to a
+plugin, and the orchestrator sets it around an intent dispatch.
+
+It matters because without it a reader of the traces could see that *something*
+spent tokens without seeing who. That is the difference between a per-plugin
+cost view — or an agent topology — that covers the whole deployment and one
+that covers only the work the orchestrator happens to mediate.
+
+The lookup is best-effort by design: it is wrapped so that a context backend
+failing can never fail a completion. When it cannot resolve a plugin the span
+simply omits the key, and nothing is logged, because a failure here costs the
+caller nothing and would otherwise fire once per completion.
+
 ### OpenInference span enrichment (Phoenix/Arize)
 
 The same LLM spans that carry the `gen_ai.*` attributes can additionally carry
