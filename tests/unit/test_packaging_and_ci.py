@@ -262,10 +262,86 @@ def test_image_installs_the_locked_dependency_set() -> None:
 
 
 def test_image_strips_cuda_from_the_cpu_only_build() -> None:
-    """The CPU torch wheel needs none of it; left in it is gigabytes."""
-    text = DOCKERFILE.read_text(encoding="utf-8")
-    assert "grep -vE '^(nvidia-|triton)'" in text
+    """The CPU torch wheel needs none of it; left in it is gigabytes.
+
+    This asserts what the filter DOES, not how it is spelled. It used to pin
+    the literal ``grep -vE '^(nvidia-|triton)'``, which froze a pattern that
+    did not do the job: torch declares ``cuda-bindings`` on linux, that pulls
+    ``cuda-pathfinder``, and neither matches ``^nvidia-`` or ``^triton``. 27MB
+    of CUDA bindings shipped in every "CPU-only" image while this test was
+    green, because it was checking the spelling of the answer rather than the
+    answer. Running the pattern against real package names cannot go stale the
+    same way.
+    """
+    # Comments stripped throughout: the Dockerfile explains both patterns at
+    # length and quotes them, and a search over the prose finds the
+    # explanation rather than the instruction.
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
     assert "--index-url https://download.pytorch.org/whl/cpu" in text
+
+    filter_match = re.search(r"grep -vE '([^']+)'", text)
+    assert filter_match is not None, (
+        "The export no longer filters the GPU stack out of the locked set."
+    )
+    gpu_filter = re.compile(filter_match.group(1))
+
+    for requirement in (
+        "nvidia-cublas-cu12==12.4.5.8",
+        "nvidia-cudnn-cu12==9.1.0.70",
+        "triton==3.1.0",
+        "cuda-bindings==13.3.1",
+        "cuda-pathfinder==1.6.0",
+    ):
+        assert gpu_filter.search(requirement), (
+            f"{requirement!r} survives the GPU filter and lands in a CPU-only "
+            "image. Every GPU package family torch can pull has to match."
+        )
+
+    for requirement in ("torch==2.13.0", "numpy==2.3.4", "transformers==5.3.0"):
+        assert not gpu_filter.search(requirement), (
+            f"The GPU filter also strips {requirement!r}, which the image needs."
+        )
+
+    # The post-install guard is the second half, and it missed the same family
+    # for the same reason: it reads DIRECTORY names in site-packages, and
+    # cuda-bindings installs one called `cuda`, not `nvidia`.
+    guard_match = re.search(r"grep -qE '([^']+)'", text)
+    assert guard_match is not None, "the CPU-only guard is gone"
+    guard = re.compile(guard_match.group(1))
+    for directory in ("nvidia", "cuda"):
+        assert guard.search(directory), (
+            f"The guard does not match a site-packages directory named "
+            f"{directory!r}, so it would report success with CUDA installed."
+        )
+
+
+def test_image_installs_only_the_browser_it_launches() -> None:
+    """`playwright install chromium` fetches two browsers; one cannot run."""
+    # Comments stripped: the block above this instruction explains the flag at
+    # length and quotes it, which a naive search reads as the instruction.
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    install = re.search(r"playwright install[^\n]*", text)
+    assert install is not None, "the image no longer installs a browser"
+    assert "--only-shell" in install.group(0), (
+        "The image is installing the full Chromium again (641MB). With no "
+        "channel set, launch(headless=True) resolves chromium_headless_shell, "
+        "and the full browser is only what headless=False would start -- which "
+        "cannot work here, because no stage installs Xvfb or an X client. Note "
+        "the direction: --no-shell is the opposite flag and breaks every call "
+        "site with 'Executable doesn't exist'."
+    )
+
+
+def test_project_distribution_is_not_a_second_importable_copy() -> None:
+    """/install-app precedes /app on PYTHONPATH, so a duplicate shadows it."""
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    assert re.search(r"rm -rf /install-app/lib/[^\n]*/core", text), (
+        "pip install . materialises core/ and plugins/ inside /install-app "
+        "alongside the console script, and /install-app comes BEFORE /app on "
+        "PYTHONPATH -- so which copy wins depends on the working directory. "
+        "`baselith plugin enable` writes configs/plugins.yaml, so the CLI run "
+        "from the wrong directory edits a tree the API never reads."
+    )
 
 
 def test_healthcheck_allows_for_a_slow_cold_start() -> None:
