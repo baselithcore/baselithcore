@@ -1351,6 +1351,12 @@ jobs:
       packages: write # push to GHCR
       id-token: write # keyless cosign + SLSA provenance
       attestations: write # actions/attest-build-provenance
+      # A called workflow's jobs cannot grant themselves more than the CALLER
+      # allows, so every scope any job in release-image.yml needs has to appear
+      # here. Its `scan` job uploads the image SARIF to code scanning; without
+      # this line that upload is denied, `scan` fails, and because `publish`
+      # needs it the release would produce no image at all.
+      security-events: write # Trivy SARIF -> code scanning
     with:
       # The git TAG, so the image job checks out the bumped tree rather than
       # the pre-release SHA that started this run. `v` is stripped again on the
