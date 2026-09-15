@@ -160,6 +160,24 @@ net) flushes the batch processors so no spans/metrics are lost on exit.
     calls it — idempotent, and it covers entrypoints that build the app
     differently — and finds the work already done.
 
+### Which plugin spent the tokens
+
+Every LLM span also carries `baselith.plugin`, naming the plugin the call was
+made on behalf of. The value comes from the plugin context, which is bound
+already: the plugin-context middleware sets it for every request routed to a
+plugin, and the orchestrator sets it around an intent dispatch. A call outside
+any plugin — a core route, a background job, a script — omits the key rather
+than guessing.
+
+That one attribute is what lets a reader answer "who spent this" from the span
+stream alone, without the caller threading an identifier through by hand. It
+matters most for the plugins the orchestrator never sees: a plugin that owns its
+routes and calls the model directly registers no intent and emits no agent span,
+so before this its work was attributable to nobody.
+
+Attribution is best-effort and never fails a completion: if the context cannot
+be read, the span simply omits the key.
+
 ### OpenInference enrichment (`openinference.py`)
 
 The LLM service spans carry OTel `gen_ai.*` semantic-convention attributes.

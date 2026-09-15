@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
+from core.observability.agent_spans import PLUGIN_KEY
 from core.observability.logging import get_logger
 from core.quotas.manager import CostBudgetExceededError
 from core.services.llm._accounting import (
@@ -58,6 +59,24 @@ def _resolve_effort(
     return None
 
 
+def _current_plugin() -> str | None:
+    """The plugin the current context executes for, or ``None``.
+
+    Best-effort and import-local: attribution must never be able to fail a
+    generation call, and core.context is cheap but not free to import at module
+    scope from this hot path.
+    """
+    try:
+        from core.context import get_current_plugin
+
+        return get_current_plugin()
+    # Logging here would fire once per completion for a failure that costs the
+    # caller nothing: the span omits the key, and a context backend that is
+    # genuinely broken surfaces wherever the context is actually used.
+    except Exception:  # silent-ok: attribution must never fail a completion
+        return None
+
+
 def _build_span_attributes(
     service: LLMService,
     *,
@@ -77,6 +96,16 @@ def _build_span_attributes(
         "gen_ai.baselith.json_mode": json_mode,
         "gen_ai.baselith.prompt_length": len(prompt),
     }
+    # Which plugin this call is on behalf of. The context is already bound —
+    # the plugin-context middleware sets it for every request routed to a
+    # plugin, and the orchestrator sets it around an intent dispatch — but the
+    # span never carried it, so a reader could see that *something* spent
+    # tokens without seeing who. That gap is the difference between a per-plugin
+    # cost view (or an agent topology) that covers the whole deployment and one
+    # that covers only the work the orchestrator happens to mediate.
+    plugin = _current_plugin()
+    if plugin:
+        attributes[PLUGIN_KEY] = plugin
     if temperature is not None:
         attributes["gen_ai.request.temperature"] = temperature
     if max_tokens is not None:

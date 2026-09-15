@@ -1,0 +1,50 @@
+# Row-level-security overlay for the production compose stack.
+#
+#     docker compose -f compose.prod.yaml -f compose.rls.yaml up -d
+#
+# Why an overlay and not the default: enabling this changes which role the
+# application authenticates as, and the role is created by the postgres image's
+# entrypoint — which runs /docker-entrypoint-initdb.d/* ONLY on a fresh data
+# directory. Folding it into compose.prod.yaml would leave every existing
+# deployment pointing at a role its volume never created.
+#
+# What it buys: PostgreSQL skips a row-level-security policy for a SUPERUSER,
+# for a BYPASSRLS role, and for the *owner* of a table without FORCE ROW LEVEL
+# SECURITY (migration 008 deliberately leaves FORCE off). POSTGRES_USER is both,
+# so the base stack has RLS policies that apply to nobody. This overlay runs the
+# app as a least-privilege role so the policies actually bite —
+# `core.db.rls_posture` refuses to boot in production when they do not.
+#
+# Set in .env (or the environment) before the FIRST `up` of a new volume:
+#
+#     DB_RUNTIME_USER=baselith_runtime
+#     DB_RUNTIME_PASSWORD=<a strong, distinct password>
+#
+# On a volume that already exists, run the same SQL by hand as the owner — see
+# deploy/postgres/initdb/10-runtime-role.sh and docs/architecture/tenant-rls.md.
+
+services:
+  postgres:
+    environment:
+      # Consumed by the init script below; the owner credential is unchanged.
+      - DB_RUNTIME_USER=${DB_RUNTIME_USER:?DB_RUNTIME_USER must be set to use compose.rls.yaml}
+      - DB_RUNTIME_PASSWORD=${DB_RUNTIME_PASSWORD:?DB_RUNTIME_PASSWORD must be set to use compose.rls.yaml}
+    volumes:
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+
+  api:
+    environment:
+      # Migrations keep running as the owner (DB_USER in the base stack); only
+      # the serving processes drop to the least-privilege role.
+      - DB_USER=${DB_RUNTIME_USER}
+      - DB_PASSWORD=${DB_RUNTIME_PASSWORD}
+      - DB_RLS_ENABLED=true
+
+  worker:
+    environment:
+      # The worker shares the pool and the policies. Out-of-request work must
+      # declare its tenant (core.db.connection.system_tenant_scope) or the
+      # checkout refuses — which is the point of RLS being on.
+      - DB_USER=${DB_RUNTIME_USER}
+      - DB_PASSWORD=${DB_RUNTIME_PASSWORD}
+      - DB_RLS_ENABLED=true

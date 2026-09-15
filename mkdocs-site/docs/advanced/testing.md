@@ -990,6 +990,35 @@ Budgets in `scripts/perf_budget.json` are ceilings set by hand. There is no
 nothing. They carry wide headroom because a shared runner is noisy — observed
 `GET /health` p95 is single-digit milliseconds against a 300 ms budget.
 
+### The smoke is not load evidence
+
+10 users for 60 seconds says the API is alive under modest concurrency. It says
+nothing about the concurrency a deployment about to face the public internet
+will actually see, and reading it as if it did is the mistake this section
+exists to prevent.
+
+Produce the real thing before exposing a deployment, and keep the artifact:
+
+```bash
+# Locally, against a running instance — pick numbers you are willing to defend
+BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py \
+  --host http://localhost:8000 --headless -u 250 -r 25 -t 15m \
+  --only-summary --csv perf
+python scripts/check_perf_budget.py --stats perf_stats.csv --report
+```
+
+The same run is a click in CI: **Actions → Perf Smoke → Run workflow** takes
+`users`, `spawn_rate` and `duration`, defaulting to the weekly smoke's values,
+and uploads `perf_*.csv` plus `backend.log` as the artifact. The budget applies
+unchanged — its per-endpoint `p95_ms` and `max_failure_ratio` are the checks
+that matter at any scale, while `min_requests` is only a floor.
+
+Two things to hold on to while reading any result: the profile skips chat
+wherever no LLM is reachable (`BASELITH_PERF_SKIP_CHAT`), so a run with it set
+exercises everything *except* the path with the real latency and the real cost;
+and a GitHub-hosted runner shares a machine, so it establishes a lower bound,
+never a capacity number for your hardware.
+
 ## Chaos / Resilience Testing
 
 Fault-injection tests (`tests/chaos/`, marked `chaos`) verify the framework

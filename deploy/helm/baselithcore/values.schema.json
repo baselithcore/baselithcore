@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "definitions": {
     "quantity": {
-      "type": ["string", "integer"],
+      "type": [
+        "string",
+        "integer"
+      ],
       "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$",
       "description": "Kubernetes quantity. Written unquoted in YAML, `2` is an integer and `2Gi` a string; both are accepted, `2 Gi` and `2gb` are not."
     },
@@ -91,7 +94,7 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 0,
-      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended \u2014 no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place \u2014 so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
     },
     "revisionHistoryLimit": {
       "type": "integer",
@@ -152,7 +155,9 @@
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository"],
+      "required": [
+        "repository"
+      ],
       "properties": {
         "repository": {
           "type": "string",
@@ -167,7 +172,11 @@
           "description": "Empty, or a full sha256 digest. A truncated digest is rejected here rather than by the kubelet after the rollout has started."
         },
         "pullPolicy": {
-          "enum": ["Always", "IfNotPresent", "Never"]
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
         }
       }
     },
@@ -194,7 +203,12 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer",
+            "ExternalName"
+          ]
         },
         "port": {
           "type": "integer",
@@ -221,7 +235,9 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["host"],
+            "required": [
+              "host"
+            ],
             "properties": {
               "host": {
                 "type": "string",
@@ -232,13 +248,20 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["path", "pathType"],
+                  "required": [
+                    "path",
+                    "pathType"
+                  ],
                   "properties": {
                     "path": {
                       "type": "string"
                     },
                     "pathType": {
-                      "enum": ["Exact", "Prefix", "ImplementationSpecific"]
+                      "enum": [
+                        "Exact",
+                        "Prefix",
+                        "ImplementationSpecific"
+                      ]
                     }
                   }
                 }
@@ -267,18 +290,27 @@
           "minimum": 1
         },
         "targetCPUUtilizationPercentage": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "maximum": 100
         },
         "targetMemoryUtilizationPercentage": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "maximum": 100,
           "description": "Null by default on purpose: this pod's memory is dominated by a constant that does not shrink per replica, so a memory target parks the HPA at maxReplicas."
         },
         "behavior": {
-          "type": ["object", "null"]
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     },
@@ -290,13 +322,22 @@
           "type": "boolean"
         },
         "minAvailable": {
-          "type": ["integer", "string"]
+          "type": [
+            "integer",
+            "string"
+          ]
         },
         "maxUnavailable": {
-          "type": ["integer", "string"]
+          "type": [
+            "integer",
+            "string"
+          ]
         },
         "unhealthyPodEvictionPolicy": {
-          "enum": ["IfHealthyBudget", "AlwaysAllow"]
+          "enum": [
+            "IfHealthyBudget",
+            "AlwaysAllow"
+          ]
         }
       }
     },
@@ -339,7 +380,10 @@
           "description": "Adds a second constraint over topology.kubernetes.io/zone. Harmless on a single-zone cluster, where every node reports the same value."
         },
         "whenUnsatisfiable": {
-          "enum": ["DoNotSchedule", "ScheduleAnyway"]
+          "enum": [
+            "DoNotSchedule",
+            "ScheduleAnyway"
+          ]
         }
       }
     },
@@ -381,10 +425,16 @@
               "type": "boolean"
             },
             "maxUnavailable": {
-              "type": ["integer", "string"]
+              "type": [
+                "integer",
+                "string"
+              ]
             },
             "unhealthyPodEvictionPolicy": {
-              "enum": ["IfHealthyBudget", "AlwaysAllow"]
+              "enum": [
+                "IfHealthyBudget",
+                "AlwaysAllow"
+              ]
             }
           }
         },
@@ -427,7 +477,10 @@
                   "pattern": "^[0-9]+$"
                 },
                 "enableTLS": {
-                  "enum": ["true", "false"]
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
                 },
                 "passwordFromEnv": {
                   "type": "string"
@@ -439,7 +492,10 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["name", "listLength"],
+                "required": [
+                  "name",
+                  "listLength"
+                ],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -470,7 +526,10 @@
           "description": "OTLP/gRPC collector endpoint. Empty is a supported mode, not a mistake: instrumentation stays on, no exporter is attached, spans stay in-process for local consumers."
         },
         "tracesSampleRate": {
-          "type": ["number", "string"],
+          "type": [
+            "number",
+            "string"
+          ],
           "minimum": 0,
           "maximum": 1,
           "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
@@ -487,7 +546,11 @@
     "config": {
       "type": "object",
       "additionalProperties": {
-        "type": ["string", "boolean", "number"]
+        "type": [
+          "string",
+          "boolean",
+          "number"
+        ]
       }
     },
     "secrets": {
@@ -513,7 +576,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["from", "to"],
+        "required": [
+          "from",
+          "to"
+        ],
         "properties": {
           "from": {
             "type": "string",
@@ -596,10 +662,18 @@
         },
         "labels": {
           "$ref": "#/definitions/labelMap",
-          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated \u2014 check the Prometheus resource's ruleSelector before concluding the alerts are broken."
         },
         "interval": {
-          "oneOf": [{ "$ref": "#/definitions/duration" }, { "type": "string", "maxLength": 0 }],
+          "oneOf": [
+            {
+              "$ref": "#/definitions/duration"
+            },
+            {
+              "type": "string",
+              "maxLength": 0
+            }
+          ],
           "description": "Group evaluation interval. Empty means Prometheus' global default, which is the right answer unless you have measured otherwise."
         },
         "thresholds": {
@@ -645,12 +719,16 @@
         },
         "disabledAlerts": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Alert names to leave out. Silencing here rather than in Alertmanager keeps the reason in git."
         },
         "extraRules": {
           "type": "array",
-          "items": { "type": "object" },
+          "items": {
+            "type": "object"
+          },
           "description": "Extra rule objects appended to the group verbatim, for deployment-specific alerts that have no business in the chart."
         }
       }
@@ -675,12 +753,94 @@
         }
       }
     },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtimeRole": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "database": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "adminSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "userKey": {
+                  "type": "string"
+                },
+                "passwordKey": {
+                  "type": "string"
+                }
+              }
+            },
+            "passwordSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "waitForDatabaseSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        }
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "selfIngressPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
         },
         "ingressFrom": {
           "type": "array"
@@ -827,7 +987,12 @@
             "remote": {
               "type": "object",
               "additionalProperties": {
-                "type": ["string", "boolean", "integer", "number"]
+                "type": [
+                  "string",
+                  "boolean",
+                  "integer",
+                  "number"
+                ]
               }
             },
             "path": {

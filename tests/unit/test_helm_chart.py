@@ -331,3 +331,146 @@ def _containers(doc: dict) -> list[dict]:
         for key in ("initContainers", "containers")
         for container in pod_spec.get(key) or []
     ]
+
+
+class TestRuntimeRoleJob:
+    """The role the app authenticates as decides whether RLS exists at all.
+
+    PostgreSQL skips a policy for a SUPERUSER, for a BYPASSRLS role, and for
+    the table owner when the table has no FORCE ROW LEVEL SECURITY — which
+    migration 008 deliberately does not set. `DB_USER` out of the box is the
+    owner, so `DB_RLS_ENABLED=true` can be on with nothing isolated. This Job
+    provisions the least-privilege role that makes the policies apply, and
+    `core.db.rls_posture` refuses to boot in production without one.
+    """
+
+    @staticmethod
+    def _job(*args: str) -> dict:
+        rendered = TestChartRenders._render(
+            "--set",
+            "database.runtimeRole.enabled=true",
+            "--set",
+            "database.runtimeRole.adminSecret.name=postgres-superuser",
+            *args,
+        )
+        jobs = [
+            doc
+            for doc in yaml.safe_load_all(rendered)
+            if doc
+            and doc["kind"] == "Job"
+            and doc["metadata"]["labels"].get("app.kubernetes.io/component")
+            == "db-runtime-role"
+        ]
+        assert len(jobs) == 1, [doc["metadata"]["name"] for doc in jobs]
+        return jobs[0]
+
+    def test_absent_by_default(self) -> None:
+        """An existing deployment must not have its DB role rewritten by an
+        upgrade it did not ask for."""
+        components = {
+            doc["metadata"]["labels"].get("app.kubernetes.io/component")
+            for doc in yaml.safe_load_all(TestChartRenders._render())
+            if doc and doc["kind"] == "Job"
+        }
+        assert "db-runtime-role" not in components
+
+    def test_runs_after_the_migrations(self) -> None:
+        """GRANT covers the tables that exist: the Job has to follow Alembic
+        (hook-weight 0), not race it."""
+        annotations = self._job()["metadata"]["annotations"]
+        assert annotations["helm.sh/hook"] == "pre-install,pre-upgrade"
+        assert int(annotations["helm.sh/hook-weight"]) > 0
+
+    def test_grants_dml_only_and_strips_every_rls_exemption(self) -> None:
+        script = self._job()["spec"]["template"]["spec"]["containers"][0]["command"][-1]
+        for attribute in ("NOSUPERUSER", "NOBYPASSRLS", "NOCREATEDB", "NOCREATEROLE"):
+            assert attribute in script
+        assert "SELECT, INSERT, UPDATE, DELETE" in script
+        # DDL stays with the owner: a runtime role that owns a table is exempt
+        # from that table's policy, which is the bug this Job exists to avoid.
+        assert "CREATE ON SCHEMA" not in script
+        # Future tables, without re-running the Job by hand after a migration.
+        assert "ALTER DEFAULT PRIVILEGES" in script
+
+    def test_the_password_never_reaches_a_command_line(self) -> None:
+        """Anything in argv is world-readable through /proc/<pid>/cmdline."""
+        container = self._job()["spec"]["template"]["spec"]["containers"][0]
+        script = container["command"][-1]
+        assert "printenv RUNTIME_PASSWORD" in script
+        env = {item["name"]: item for item in container["env"]}
+        # Both credentials arrive by secretKeyRef, never as a literal value.
+        for name in ("RUNTIME_PASSWORD", "PGPASSWORD", "PGUSER"):
+            assert "valueFrom" in env[name], name
+            assert "value" not in env[name], name
+
+    def test_the_runtime_password_defaults_to_the_app_credential(self) -> None:
+        """Provisioning and connecting must not be able to disagree."""
+        container = self._job()["spec"]["template"]["spec"]["containers"][0]
+        env = {item["name"]: item for item in container["env"]}
+        ref = env["RUNTIME_PASSWORD"]["valueFrom"]["secretKeyRef"]
+        assert ref["key"] == "DB_PASSWORD"
+        assert ref["name"] == "release-baselithcore-secrets"
+
+    def test_refuses_to_render_without_an_admin_credential(self) -> None:
+        """CREATE ROLE is owner work: the app's own role cannot bootstrap
+        itself, and a Job that discovers that in the cluster has already
+        failed the install."""
+        import shutil
+        import subprocess
+
+        helm = shutil.which("helm")
+        if helm is None:  # pragma: no cover — depends on the host toolchain
+            pytest.skip("helm binary not available")
+        result = subprocess.run(
+            [
+                helm,
+                "template",
+                "release",
+                str(CHART_DIR),
+                "--set",
+                "database.runtimeRole.enabled=true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode != 0
+        assert "adminSecret.name" in result.stderr
+
+
+class TestSelfIngressPorts:
+    """A plugin's single-instance side process is reachable only if the policy
+    says so.
+
+    dbview elects one owner of its Node child for the whole cluster and has
+    every other replica forward to it. With `networkPolicy.enabled` and nothing
+    but `containerPort` allowed between the release's own pods, those forwards
+    are dropped and the console 404s from whichever replica lost the election —
+    the exact failure the cross-pod rendezvous exists to fix.
+    """
+
+    @staticmethod
+    def _self_rule(*args: str) -> dict:
+        rendered = TestChartRenders._render(
+            "--set", "networkPolicy.enabled=true", *args
+        )
+        policies = [
+            doc
+            for doc in yaml.safe_load_all(rendered)
+            if doc and doc["kind"] == "NetworkPolicy"
+        ]
+        assert len(policies) == 1
+        # The first ingress rule is the release talking to itself.
+        return policies[0]["spec"]["ingress"][0]
+
+    def test_only_the_api_port_by_default(self) -> None:
+        ports = {entry["port"] for entry in self._self_rule()["ports"]}
+        assert ports == {8000}
+
+    def test_extra_ports_are_opened_between_the_releases_own_pods(self) -> None:
+        rule = self._self_rule("--set", "networkPolicy.selfIngressPorts[0]=43117")
+        ports = {entry["port"] for entry in rule["ports"]}
+        assert ports == {8000, 43117}
+        # Peers only: the operator-supplied and namespace-default rules must not
+        # inherit it, or the port is reachable from anything in the namespace.
+        assert rule["from"][0]["podSelector"]["matchLabels"]

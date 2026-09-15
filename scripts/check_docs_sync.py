@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Report `core/` changes whose documentation page was left untouched.
 
-CLAUDE.md: "Code and docs ship together — no merge with stale docs." No linter,
-pre-commit hook or CI job enforces that, so this maps each changed `core/`
-module to the page that documents it and flags the ones nobody edited.
+CLAUDE.md: "Code and docs ship together — no merge with stale docs." This maps
+each changed `core/` module to the page that documents it and flags the ones
+nobody edited.
 
 The mapping is intentionally blunt — it names the page a reviewer would expect
 to move, not every page that could conceivably mention the module. Judgement
@@ -11,14 +11,32 @@ about *whether* the change is substantial stays with the caller.
 
     python scripts/check_docs_sync.py            # working tree
     python scripts/check_docs_sync.py main       # vs a base ref (CI: origin/<base>)
+    python scripts/check_docs_sync.py --commit-msg-file .git/COMMIT_EDITMSG
 
 A change that deliberately ships without a doc update states so in a commit
 message with the marker ``[docs-sync: skip]`` (plus the reason); the gate then
-passes for that range and the marker stays in history for review.
+passes for that range and the marker stays in history for review. The marker
+must START a line, and the run names the commit it came from — see the note on
+``_SKIP_LINE`` for what a looser match cost.
+
+The third form is the `commit-msg` pre-commit hook, and it is the reason this
+runs anywhere other than CI. As a CI-only gate it fired on a pull request,
+which is the wrong moment twice over: the change is already pushed, and the
+person reading the failure is often no longer the person who made it — the
+first failure of this kind pointed at a commit from an earlier session, whose
+author had to reconstruct what the change was for before they could document
+it. At `commit-msg` the diff is still on screen.
+
+It has to be `commit-msg` rather than `pre-commit` for the opt-out to work: the
+marker lives in the message being written, and a plain `pre-commit` hook cannot
+see it (``git log -1`` there is the PREVIOUS commit). A gate whose documented
+escape hatch is unreachable teaches people to reach for ``--no-verify``, which
+disables every other hook too.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -92,17 +110,77 @@ def expected_pages(module: str) -> tuple[str, ...]:
 
 SKIP_MARKER = "[docs-sync: skip]"
 
+# The marker counts only at the START of a line, with no indentation. It used
+# to be a plain substring search over the whole range, which meant any commit
+# that so much as MENTIONED the marker switched the gate off for every commit
+# in the range — and silently, so the run looked like a pass. The commit that
+# introduced this hook tripped exactly that: a wrapped bullet explaining the
+# opt-out began a line with it, and the gate reported "skipped" for the branch.
+# Prose that discusses the marker is almost always indented or mid-sentence;
+# an actual request is a deliberate line of its own.
+_SKIP_LINE = re.compile(rf"^{re.escape(SKIP_MARKER)}", re.MULTILINE)
 
-def skip_requested(base_ref: str | None) -> bool:
-    """True when a commit in the range carries the explicit opt-out marker."""
+# Separates one commit's record from the next in the `git log` output below.
+# ASCII RS rather than NUL: the separator is interpolated into a `--format`
+# argument, and an argv string cannot contain a NUL byte — passing one raises
+# ValueError before git is even executed.
+_LOG_SEP = "\x1e--docs-sync--\x1e"
+
+
+def skip_requested(
+    base_ref: str | None, commit_msg_file: str | None = None
+) -> str | None:
+    """The commit requesting the opt-out, or ``None``.
+
+    Returns a human-readable source rather than a bool so the caller can say
+    WHICH commit waved the change through. A skip that cannot be attributed is
+    how the substring bug above went unnoticed.
+
+    At ``commit-msg`` time the marker is in the message being written, which is
+    not in ``git log`` yet, so the file wins when one is given.
+    """
+    if commit_msg_file is not None:
+        try:
+            text = Path(commit_msg_file).read_text(encoding="utf-8")
+        except OSError:
+            # An unreadable message file must not wave the change through.
+            return None
+        return "this commit message" if _SKIP_LINE.search(text) else None
+
     log_range = f"{base_ref}..HEAD" if base_ref else "-1"
-    return any(SKIP_MARKER in line for line in _git("log", "--format=%B", log_range))
+    raw = subprocess.run(
+        ["git", "log", f"--format=%H %s%n%B{_LOG_SEP}", log_range],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    for entry in raw.split(_LOG_SEP):
+        entry = entry.strip("\n")
+        if not entry:
+            continue
+        header, _, body = entry.partition("\n")
+        if _SKIP_LINE.search(body):
+            return header.strip()
+    return None
 
 
 def main() -> int:
-    base_ref = sys.argv[1] if len(sys.argv) > 1 else None
-    if skip_requested(base_ref):
-        print(f"Docs sync: skipped — a commit in range carries {SKIP_MARKER}.")
+    argv = sys.argv[1:]
+    commit_msg_file: str | None = None
+    if argv and argv[0] == "--commit-msg-file":
+        if len(argv) < 2:
+            print("--commit-msg-file needs the path to the commit message file")
+            return 2
+        commit_msg_file = argv[1]
+        argv = argv[2:]
+    base_ref = argv[0] if argv else None
+
+    skip_source = skip_requested(base_ref, commit_msg_file)
+    if skip_source is not None:
+        # Name the commit. A skip is a deliberate, reviewable decision, and an
+        # unattributed one reads the same as a clean pass.
+        print(f"Docs sync: skipped — {SKIP_MARKER} requested by: {skip_source}")
         return 0
     paths = changed_paths(base_ref)
 
@@ -151,7 +229,11 @@ def main() -> int:
     print("\n".join(sorted(set(stale))))
     print(
         "\nUpdate each page in this same change, or state explicitly why the "
-        "change is not substantial enough to document."
+        "change is not substantial enough to document.\n"
+        f"To ship without a doc update, put {SKIP_MARKER} in the commit "
+        "message along with the reason — it stays in history for review. Do "
+        "that rather than reaching for --no-verify, which switches off every "
+        "other hook as well."
     )
     return 1
 

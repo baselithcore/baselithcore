@@ -961,6 +961,219 @@ jobs:
           fi
 
   # ============================================================
+  # 🐳 CONTAINER IMAGE
+  # ============================================================
+  image_build:
+    # The container image had no check anywhere in CI: it was built for the
+    # first time during a release, which made the release the place where a
+    # broken Dockerfile, a lockfile the image cannot install, or a base image
+    # that has collected CVEs was discovered. That is the worst possible moment
+    # — the version is already tagged and the changelog already written.
+    #
+    # This job builds the same Dockerfile the release builds, on PRs, and runs
+    # the same CVE gate against the result before anything is pushed anywhere.
+    name: Container Image Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [python_lint]
+    permissions:
+      contents: read
+      packages: write   # only used on main, to WRITE the shared buildcache
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # Full history: the change detection below needs a merge-base with
+          # the target branch, which a shallow clone does not have.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Seconds, no Docker daemon work, so it runs on every PR regardless of
+      # what changed: BuildKit's own Dockerfile linter (deprecated syntax,
+      # undefined build args, casing, unpinned copies).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Lint Dockerfile
+        run: docker buildx build --check --target runtime .
+
+      # A full image build is ~30 minutes cold, so it is scoped to the inputs
+      # that can actually change what the image CONTAINS: the Dockerfile, the
+      # ignore file, and the dependency surface (pyproject.toml drives the
+      # extras, uv.lock pins the resolved set). A change under core/ or
+      # plugins/ only invalidates the thin source layers at the very top of the
+      # image, which the release build reproduces from cache in seconds — not
+      # worth half an hour on every PR.
+      #
+      # `[image-build]` anywhere in the commit message forces a run, for the
+      # case where the reasoning above is wrong.
+      - name: Decide whether to build
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            RANGE="$(git merge-base "origin/${BASE_REF}" HEAD)...HEAD"
+          else
+            RANGE="HEAD~1...HEAD"
+          fi
+          CHANGED="$(git diff --name-only "${RANGE}" 2>/dev/null || echo Dockerfile)"
+          # Read with git into a shell variable, NOT through an Actions
+          # expression: a commit message is attacker-controlled text, and
+          # interpolating github.event.head_commit.message into a run block is
+          # the classic Actions script injection. Compared with grep -F, so it
+          # is never evaluated as a pattern either.
+          MSG="$(git log -1 --format=%B)"
+
+          BUILD=false
+          if printf '%s\n' "${CHANGED}" | grep -qE '^(Dockerfile|\.dockerignore|pyproject\.toml|uv\.lock)$'; then
+            BUILD=true
+          elif printf '%s\n' "${MSG}" | grep -qF '[image-build]'; then
+            BUILD=true
+            echo "Forced by [image-build] in the commit message."
+          fi
+          echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
+          echo "Image inputs changed: ${BUILD}"
+
+      - name: Log in to GHCR
+        if: steps.decide.outputs.build == 'true'
+        # Read access to the layer cache below. A pull request from a FORK gets
+        # a read-only GITHUB_TOKEN, which is enough for that and not enough for
+        # the cache write, which is why the write is gated to main pushes.
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image (amd64, no push)
+        if: steps.decide.outputs.build == 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: false
+          # Loaded into the local daemon so the scan below needs no registry
+          # round trip — nothing this job builds ever leaves the runner.
+          load: true
+          tags: baselithcore:ci
+          # Shares the release build's cache ref on purpose, in both
+          # directions: a PR READS the layers the last main build produced (so
+          # a Dockerfile-only change does not re-download torch and Chromium),
+          # and a main push WRITES them back. That write is what keeps the
+          # cache warm between releases — previously it was refreshed only when
+          # a release ran, so the first build after a quiet month started cold.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-amd64
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=registry,ref=ghcr.io/{0}:buildcache-amd64,mode=max', github.repository) || '' }}
+
+      # The same gate the release runs, at the same severity and against the
+      # same accepted-risk register. A base image that has collected fixable
+      # HIGH/CRITICAL findings now turns a PR red — which is a thing somebody
+      # can fix by bumping the base digest — instead of a release.
+      - name: Scan built image (Trivy)
+        if: steps.decide.outputs.build == 'true'
+        env:
+          TRIVY_VERSION: 0.71.0
+          # Keep in lockstep with TRIVY_VERSION (and the copies in
+          # trivy_scan above and in release-image.yml).
+          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          /tmp/trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --ignorefile .trivyignore.yaml baselithcore:ci
+
+      # Cheap assertions about things that have silently broken before, and
+      # that no unit test can see because they are properties of the IMAGE.
+      - name: Smoke-test the image
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+
+          # The console script the Helm worker Deployment runs
+          # (`["baselith", "queue", "worker"]`). A released image once shipped
+          # without it and that pod could only CrashLoop.
+          docker run --rm --entrypoint baselith baselithcore:ci --version
+
+          # There must be exactly ONE importable copy of the source. The
+          # project distribution is installed into /install-app for its entry
+          # points, and pip also materialises core/ and plugins/ there; with
+          # /install-app ahead of /app on PYTHONPATH, which copy won depended
+          # on the working directory. The Dockerfile deletes them, so `core`
+          # must resolve under /app from ANY cwd.
+          for wd in / /app /tmp; do
+            RESOLVED="$(docker run --rm --workdir "$wd" --entrypoint python \
+              baselithcore:ci -c 'import core; print(core.__file__)')"
+            echo "cwd=${wd} -> ${RESOLVED}"
+            case "${RESOLVED}" in
+              /app/core/*) ;;
+              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/core"; exit 1 ;;
+            esac
+          done
+
+          # CPU-only means CPU-only. The Dockerfile filters CUDA wheels out of
+          # the exported lock, and this is the assertion that the filter still
+          # matches what torch pulls: cuda-bindings/cuda-pathfinder slipped
+          # past a pattern that only looked for `nvidia`.
+          docker run --rm --entrypoint sh baselithcore:ci -c '
+            if ls /install/lib/python3.12/site-packages | grep -qE "^(nvidia|cuda)"; then
+              echo "CUDA packages present in a CPU-only image:" >&2
+              ls /install/lib/python3.12/site-packages | grep -E "^(nvidia|cuda)" >&2
+              exit 1
+            fi'
+
+          # Every capability the image installs must be able to RUN in it. The
+          # spaCy stack is ~160MB and delivers nothing without its model: the
+          # image shipped for a long time with core/nlp falling back to a blank
+          # sentencizer, which no test could see.
+          docker run --rm --entrypoint python baselithcore:ci -c '
+          import spacy
+          nlp = spacy.load("en_core_web_sm")
+          assert "ner" in nlp.pipe_names, nlp.pipe_names
+          print("spaCy pipeline:", nlp.pipe_names)'
+
+          # The browser the image installs must be the one the code launches.
+          # The Dockerfile passes `--only-shell` to drop the 641MB full
+          # Chromium, and which of the two binaries `headless=True` resolves to
+          # is a Playwright implementation detail that has flipped between
+          # versions: trying the opposite flag produced "Executable doesn't
+          # exist at .../chromium_headless_shell-*/chrome-linux/headless_shell"
+          # from every call site. A lockfile bump can flip it back, and nothing
+          # but this catches that — the unit tests all mock Playwright.
+          docker run --rm --entrypoint python baselithcore:ci -c '
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              page.set_content("<h1>ok</h1>")
+              assert page.inner_text("h1") == "ok"
+              browser.close()
+          print("playwright: headless launch ok")'
+
+      - name: Report image size
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          SIZE="$(docker image inspect baselithcore:ci --format '{{.Size}}')"
+          {
+            echo "### Container image"
+            echo
+            echo "Uncompressed size: **$(numfmt --to=iec --suffix=B "${SIZE}")**"
+            echo
+            echo '| Layer | Size |'
+            echo '| --- | ---: |'
+            docker history baselithcore:ci --no-trunc --format '{{.Size}}\t{{.CreatedBy}}' \
+              | awk -F'\t' '$1 != "0B" {gsub(/\|/, "\\|", $2); print "| `" substr($2, 1, 90) "` | " $1 " |"}' \
+              | head -20
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
   # 🚀 RELEASE
   # ============================================================
   release:
@@ -1104,20 +1317,30 @@ jobs:
     # repository at this commit — switching spelling buys nothing and risks a
     # release path that is exercised once per release.)
     needs: [release]
-    # DISABLED by default. The image build is the longest and most expensive
-    # job in the pipeline (multi-arch, torch + playwright + pre-cached models)
-    # and its post-push Trivy gate fails the whole release on base-image CVEs
-    # that have nothing to do with the change being released. It is therefore
-    # opt-in: the job is skipped unless the repository variable
-    # RELEASE_IMAGE_ENABLED is set to the string "true"
-    # (Settings -> Secrets and variables -> Actions -> Variables). An unset
-    # variable evaluates to the empty string, so the default is off.
+    # ON by default, with a kill switch. It was the other way round — opt-in on
+    # a RELEASE_IMAGE_ENABLED variable — because the build is the longest job
+    # in the pipeline and its Trivy gate failed whole releases on base-image
+    # CVEs unrelated to the change being shipped. Nobody ever set the variable,
+    # so the Helm chart kept pointing `image.repository` at a GHCR package that
+    # no release had ever published. An opt-in that stays off is not a safety
+    # feature, it is a broken deployment path.
     #
-    # Nothing else is removed: release-image.yml keeps its `workflow_dispatch`
-    # trigger, so an image can still be cut by hand for any tag at any time.
+    # Both reasons are gone:
+    #   * The Dockerfile applies Debian security updates as its last layer, so
+    #     a pinned base no longer drifts into CVEs between digest bumps.
+    #   * The CVE gate runs in release-image.yml's `scan` job, BEFORE any tag
+    #     is created, so a finding stops the image from being published rather
+    #     than reddening a release that already shipped one.
+    #   * `image_build` above builds and scans the same Dockerfile on every PR
+    #     that touches its inputs, so a base-image problem surfaces on a branch
+    #     where it can be fixed.
+    #
+    # RELEASE_IMAGE_DISABLED (Settings -> Secrets and variables -> Actions ->
+    # Variables) set to "true" turns it off again without a commit. Unset
+    # evaluates to the empty string, so the default is on.
     if: >-
       needs.release.outputs.new_release_published == 'true'
-      && vars.RELEASE_IMAGE_ENABLED == 'true'
+      && vars.RELEASE_IMAGE_DISABLED != 'true'
     uses: ./.github/workflows/release-image.yml
     # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
     # the image job needs are declared here. GITHUB_TOKEN itself is passed
@@ -1128,6 +1351,12 @@ jobs:
       packages: write # push to GHCR
       id-token: write # keyless cosign + SLSA provenance
       attestations: write # actions/attest-build-provenance
+      # A called workflow's jobs cannot grant themselves more than the CALLER
+      # allows, so every scope any job in release-image.yml needs has to appear
+      # here. Its `scan` job uploads the image SARIF to code scanning; without
+      # this line that upload is denied, `scan` fails, and because `publish`
+      # needs it the release would produce no image at all.
+      security-events: write # Trivy SARIF -> code scanning
     with:
       # The git TAG, so the image job checks out the bumped tree rather than
       # the pre-release SHA that started this run. `v` is stripped again on the

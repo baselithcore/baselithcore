@@ -95,15 +95,35 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # human-readable mirror of the spec surface (and as the subject of the
 # `requirements_sync` gate), it is just no longer what the image installs.
 #
-# The extras are the capability groups the image bakes in; they are the same
-# set Section 2 of requirements.txt enumerates. `mineru` is deliberately absent
-# (it conflicts with `huggingface`, see [tool.uv] conflicts in pyproject.toml).
+# The extras are the capability groups the image bakes in. `mineru` is
+# deliberately absent (it conflicts with `huggingface`, see [tool.uv] conflicts
+# in pyproject.toml), and two more were removed once the built image was
+# actually inspected, because they could not work inside it:
 #
-# The `grep -v` drops the CUDA runtime and triton. They are dependencies of the
-# PyPI torch wheel, which is what uv.lock resolved; this image installs the CPU
-# build from download.pytorch.org instead (see the next step), and that wheel
-# needs none of them. Left in, they add several GB of GPU libraries that nothing
-# in the image ever loads.
+#   * `ocr` (pytesseract, pdf2image). Both are thin wrappers around SYSTEM
+#     binaries — `tesseract` and poppler's `pdftoppm` — and no stage here
+#     installs either. Verified on the built image: `pytesseract
+#     .get_tesseract_version()` raises TesseractNotFoundError and `command -v
+#     pdftoppm` finds nothing. plugins/document_sources/ocr_backends.py catches
+#     that and degrades, so nothing crashed; the packages were simply ~10MB of
+#     a capability the image can never deliver. An operator who needs OCR
+#     derives an image that apt-installs tesseract-ocr + poppler-utils and adds
+#     the extra back.
+#   * `computer_use` (pyautogui, mss). Both need an X11 display. In this
+#     headless server image `import pyautogui` raises KeyError: 'DISPLAY' and
+#     mss raises "Cannot connect to display". The import guards in
+#     plugins/baselithbot/computer_use/ already treat them as optional.
+#
+# The `grep -v` drops the CUDA runtime, triton and the CUDA Python bindings.
+# They are dependencies of the PyPI torch wheel, which is what uv.lock
+# resolved; this image installs the CPU build from download.pytorch.org
+# instead (see the next step), and that wheel needs none of them. Left in, they
+# add several GB of GPU libraries that nothing in the image ever loads.
+#
+# `cuda-` belongs in that pattern and was missing: torch 2.13.0 declares
+# `cuda-bindings` on linux, which pulls `cuda-pathfinder`, and neither matches
+# `^nvidia-` or `^triton`. 27MB of CUDA bindings shipped in every "CPU-only"
+# image while the guard below reported success — see the note there.
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -111,10 +131,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     pip install uv==0.12.0 \
     && uv export --frozen --no-dev --no-emit-project --no-hashes --no-annotate \
         --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
-        --extra web --extra browser --extra documents --extra ocr \
-        --extra computer_use \
+        --extra web --extra browser --extra documents \
         --format requirements-txt -o /tmp/requirements.lock.txt \
-    && grep -vE '^(nvidia-|triton)' /tmp/requirements.lock.txt \
+    && grep -vE '^(nvidia-|triton|cuda-)' /tmp/requirements.lock.txt \
         > /tmp/requirements.image.txt \
     && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages"
 
@@ -154,6 +173,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # The final `if` is the guard for the CUDA strip in the export step above: if an
 # nvidia-* package ever makes it into the prefix, the "CPU-only" image has
 # quietly grown by gigabytes, and the build fails instead of pushing it.
+#
+# It matches `cuda` as well as `nvidia`, and that is not cosmetic: the check
+# reads DIRECTORY names in site-packages, and cuda-bindings/cuda-pathfinder
+# install a directory called `cuda`. Matching only `^nvidia` meant the guard
+# printed nothing while 27MB of CUDA bindings sat in the image — a green light
+# that was measuring the wrong thing. The offending names are echoed on
+# failure so the next person does not have to go looking for them.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
@@ -164,10 +190,41 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         --index-url https://download.pytorch.org/whl/cpu \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install -r /tmp/requirements.image.txt \
-    && if ls /install/lib/python3.12/site-packages | grep -q '^nvidia'; then \
+    && if ls /install/lib/python3.12/site-packages | grep -qE '^(nvidia|cuda)'; then \
          echo "ERROR: CUDA packages installed into a CPU-only image" >&2; \
+         ls /install/lib/python3.12/site-packages | grep -E '^(nvidia|cuda)' >&2; \
          exit 1; \
        fi
+
+# --- The spaCy pipeline ---
+# spaCy and its compiled stack (thinc, blis, its slice of numpy) are ~160MB of
+# this image, and without a MODEL they buy nothing: core/config/processing.py
+# ships `enable_spacy_documents: bool = Field(default=True)` with
+# `spacy_model="en_core_web_sm"`, and core/nlp/spacy_utils.py catches the
+# resulting OSError and falls back to `spacy.blank()` — a sentencizer, no NER,
+# no tagger, no lemmatiser. Verified on the built image before this step
+# existed: `spacy.load("en_core_web_sm")` raised E050.
+#
+# So the choice was to drop the `nlp` extra or to add the 15MB that makes the
+# 160MB work. Since core enables the feature by DEFAULT, dropping it would ship
+# an official image whose core NLP path is permanently degraded; baking the
+# model is the coherent half of the trade.
+#
+# Pinned rather than resolved: `python -m spacy download` fetches
+# compatibility.json at build time and picks a version, which is exactly the
+# "two builds of the same commit are two different images" problem the uv.lock
+# export above exists to avoid. The load check on the next line is the guard
+# for the pin — spaCy models are compatible within a minor, so if the `spacy`
+# range in pyproject.toml ever resolves past 3.8 this fails the build loudly
+# instead of shipping a model the runtime cannot open.
+ARG SPACY_MODEL="en_core_web_sm"
+ARG SPACY_MODEL_VERSION="3.8.0"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    PYTHONPATH=/install/lib/python3.12/site-packages \
+    pip install --prefix /install \
+      "https://github.com/explosion/spacy-models/releases/download/${SPACY_MODEL}-${SPACY_MODEL_VERSION}/${SPACY_MODEL}-${SPACY_MODEL_VERSION}-py3-none-any.whl" \
+    && PYTHONPATH=/install/lib/python3.12/site-packages BAKED_SPACY_MODEL="${SPACY_MODEL}" \
+       python -c "import os, spacy; nlp = spacy.load(os.environ['BAKED_SPACY_MODEL']); assert 'ner' in nlp.pipe_names, nlp.pipe_names; print('[docker] spaCy pipeline:', nlp.pipe_names)"
 
 # --- Pre-cache the embedder + reranker ---
 # Baked in rather than downloaded on first use: a pod that fetches several
@@ -202,8 +259,25 @@ PY
 # above cache-stable: this layer is a few tens of MB and is the only one a
 # source change invalidates.
 #
-# The app still RUNS from /app (the CLI detects the checkout and re-executes
-# against it), so this tree exists for its entry points, not to be imported.
+# The app still RUNS from /app, so this tree exists for its entry points, not
+# to be imported — and the `rm -rf` below is what makes that true rather than
+# merely intended. `pip install .` also materialises core/ and plugins/ inside
+# the prefix, and PYTHONPATH lists /install-app BEFORE /app, so which copy won
+# depended on the working directory. Measured on the built image:
+#
+#   cwd=/      import core -> /install-app/lib/python3.12/site-packages/core
+#   cwd=/app   import core -> /app/core
+#
+# uvicorn runs from WORKDIR /app, so the API was always reading the right tree;
+# the `baselith` console script invoked from anywhere else was not. That split
+# matters because the CLI WRITES — `baselith plugin enable` rewrites
+# configs/plugins.yaml — so a command run from the wrong directory would have
+# edited a tree the API never reads. Deleting the packages leaves /app as the
+# only importable copy for every entry point, and takes 24.6MB of duplicate
+# source (17MB core, 7MB plugins) out of the image as a side effect.
+#
+# The dist-info stays: it is what `importlib.metadata` resolves the installed
+# version from, and it carries the console script's entry point.
 FROM deps AS app
 
 COPY pyproject.toml README.md ./
@@ -211,7 +285,10 @@ COPY core/ core/
 COPY plugins/ plugins/
 RUN --mount=type=cache,target=/root/.cache/pip \
     PYTHONPATH=/install/lib/python3.12/site-packages \
-    pip install --no-deps --prefix /install-app .
+    pip install --no-deps --prefix /install-app . \
+    && rm -rf /install-app/lib/python3.12/site-packages/core \
+              /install-app/lib/python3.12/site-packages/plugins \
+    && test -x /install-app/bin/baselith
 
 # ============================================================
 # Stage 3: runtime (default target)
@@ -274,11 +351,41 @@ COPY --from=deps --chown=appuser:appuser /build/models /app/models
 # (and the same docker-clean removal) apply here as in the deps stage; the
 # trailing `rm -rf /var/lib/apt/lists/*` is gone because a cache mount is not
 # part of the layer in the first place.
+#
+# `--only-shell` is worth 641MB, and the direction of that flag is the one
+# thing here you should not take on trust — it was measured, and the obvious
+# guess was backwards.
+#
+# `playwright install chromium` downloads TWO browsers: the full Chromium
+# (641MB) and `chromium_headless_shell` (340MB). The natural assumption is that
+# `launch(headless=True)` runs the full browser in headless mode and the shell
+# is an opt-in for `channel="chromium-headless-shell"`. It is the other way
+# round in this version: with no channel set, `headless=True` resolves to
+# `/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell`.
+# Installing with `--no-shell` therefore broke every call site in the repo with
+# "Executable doesn't exist" — verified by running it.
+#
+# So the unreachable binary is the FULL Chromium, and not only because nothing
+# asks for it by name: it is what `headless=False` would launch, and headless
+# is false nowhere that matters (plugins/browser_agent/tools.py hardcodes True,
+# plugins/document_sources/web.py hardcodes True, core/config/scraper.py's
+# `playwright_headless` defaults to it). More to the point it CANNOT work here
+# — a headed browser needs a display, and no stage installs Xvfb or an X
+# client, nor do the compose files or deploy/ provide one. Verified on the
+# image that still had both binaries:
+#
+#   headless=True  -> page renders
+#   headless=False -> BrowserType.launch: Target page, context or browser has
+#                     been closed
+#
+# An operator who genuinely wants headed browsing needs a derived image that
+# adds Xvfb anyway, and that image can drop this flag. Shipping the binary here
+# only made the failure 641MB more expensive.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && mkdir -p /ms-playwright \
-    && python -m playwright install --with-deps chromium \
+    && python -m playwright install --with-deps --only-shell chromium \
     && chown -R appuser:appuser /ms-playwright
 
 # --- Console script (`baselith`) ---

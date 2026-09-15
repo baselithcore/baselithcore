@@ -1,4 +1,10 @@
 ---
+# `pre-commit install` wires only the `pre-commit` hook type by default, so a
+# commit-msg hook added below would sit in this file doing nothing in every
+# checkout that ran the plain install — which is the documented one in
+# CLAUDE.md. Naming both here makes `pre-commit install` wire both.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   # -----------------------------------------
   # 🐍 Ruff (lint + fix + formatter)
@@ -124,6 +130,23 @@ repos:
         language: system
         pass_filenames: false
         files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|migrations/|\.env\.example|compose|docker-compose|Dockerfile)
+      # The sibling of the gate above, and the one that was CI-only: it asks
+      # whether a changed core/ module's PAGE moved, not whether the prose is
+      # still true. Left to the pull request it reported on a change that was
+      # already pushed, and often by someone who no longer remembered it.
+      #
+      # `commit-msg`, not `pre-commit`, because the documented opt-out is a
+      # [docs-sync: skip] marker IN the commit message — a pre-commit hook
+      # cannot read the message being written, so the escape hatch would be
+      # unreachable and people would learn to pass --no-verify instead, which
+      # switches off every hook in this file. pre-commit hands the message path
+      # to the entry below as its filename argument.
+      - id: docs-sync
+        name: docs-sync
+        entry: python scripts/check_docs_sync.py --commit-msg-file
+        language: system
+        stages: [commit-msg]
+        always_run: true
       # The two typing gates run in a pre-commit-managed venv (`language:
       # python`) instead of `language: system`. Two reasons:
       #   1. `system` resolves `python` from whatever PATH launched git — a GUI
@@ -144,6 +167,12 @@ repos:
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4
           - pydantic-settings==2.14.2
+          # The script reads every plugin manifest to derive its roster from
+          # `integrity_sha256`. Without PyYAML it cannot parse them, treats
+          # every official plugin as unsigned and fails the hook on a clean
+          # tree — so the gate was unrunnable locally while passing in CI,
+          # where the job installs pyyaml separately. Same pin as there.
+          - pyyaml==6.0.3
       - id: core-strict-typing
         name: core-strict-typing
         entry: python scripts/check_core_strict_typing.py

@@ -647,9 +647,70 @@ migrations:
     limits:
       memory: 512Mi
 
+# -------------------------------------------------------------------------
+# Database roles.
+# -------------------------------------------------------------------------
+database:
+  # Provision the least-privilege LOGIN role the application authenticates as,
+  # in a pre-install/pre-upgrade Job that runs right after the migrations.
+  #
+  # Why it is not cosmetic: PostgreSQL skips a row-level-security policy for a
+  # SUPERUSER, for a role with BYPASSRLS, and for the table *owner* when the
+  # table lacks FORCE ROW LEVEL SECURITY — which migration 008 deliberately
+  # does not set. Connecting the app as the owning role (what `DB_USER` is out
+  # of the box, and what the bundled Postgres creates) therefore leaves
+  # DB_RLS_ENABLED=true with no isolation whatsoever. `core.db.rls_posture`
+  # refuses to boot in production when that is the case; this Job is the
+  # remedy it points at.
+  #
+  # Turning it on means two credentials: `adminSecret` (the owner/superuser,
+  # used only by the Job) and the app's own DB_PASSWORD, which the Job sets as
+  # this role's password so the two cannot drift. Point the app at the role by
+  # setting `config.DB_USER` (or `DB_USER` in `secrets.data`) to the same name.
+  runtimeRole:
+    enabled: false
+    name: baselith_runtime
+    host: postgres
+    port: 5432
+    database: baselithcore
+    # psql/pg_isready only — no application code runs here.
+    image: postgres:16-alpine
+    # Owner (or superuser) credential. CREATE ROLE and GRANT are owner work:
+    # the app's own least-privilege role cannot bootstrap itself.
+    adminSecret:
+      name: ""
+      userKey: POSTGRES_USER
+      passwordKey: POSTGRES_PASSWORD
+    # Where the Job reads the password to give the runtime role. Defaults to
+    # the release secret's DB_PASSWORD — the same value the app authenticates
+    # with, so provisioning and connecting cannot disagree.
+    passwordSecret:
+      name: ""
+      key: DB_PASSWORD
+    # Same reasoning as the backup CronJob: a cluster coming back up runs its
+    # hooks before CoreDNS is ready, and psql does not retry a failed name
+    # resolution.
+    waitForDatabaseSeconds: 300
+    backoffLimit: 1
+    activeDeadlineSeconds: 600
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
 # NetworkPolicy: default-deny ingress except from the same namespace + ingress.
 networkPolicy:
   enabled: false
+  # Extra ports this release's own pods may reach on each other, on top of
+  # containerPort. A plugin that runs a single-instance side process and has
+  # every replica forward to it needs one: dbview elects one owner of its Node
+  # child cluster-wide, and the other replicas dial it on 43117
+  # (DBVIEW_INTERNAL_PORT). Without the port here those replicas answer 404 for
+  # the console while the leader's replica serves it.
+  #   selfIngressPorts: [43117]
+  selfIngressPorts: []
   # Ingress peers allowed to reach the API port. Empty means "any pod in this
   # namespace" — which admits a compromised neighbour, and, more often, locks
   # out the two callers that actually matter, because both usually live
