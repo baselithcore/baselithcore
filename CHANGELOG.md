@@ -5,6 +5,16 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+## [0.33.1](https://github.com/baselithcore/baselithcore/compare/v0.33.0...v0.33.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **ci:** grant the image workflow the scope its SARIF upload needs ([0c21b19](https://github.com/baselithcore/baselithcore/commit/0c21b1942a6693d06757ca92e77218ce9f883e6a))
+* **docker,ci:** drop 880MB the image cannot run, gate CVEs before the tag exists ([f63c2d5](https://github.com/baselithcore/baselithcore/commit/f63c2d5fb0ef7038715a7c6a1dcc83d15c07e8d4))
+* **docs-sync:** stop prose about the opt-out from switching the gate off ([83c23a6](https://github.com/baselithcore/baselithcore/commit/83c23a6aa926329eead9d7b80ac17f9cfd7f58ce))
+* **security,observability:** make RLS actually apply, attribute LLM spans to their plugin ([42aa14a](https://github.com/baselithcore/baselithcore/commit/42aa14a464b425f98c64889d46dee1637878b6ea))
+
 # [0.33.0](https://github.com/baselithcore/baselithcore/compare/v0.32.0...v0.33.0) (2026-09-14)
 
 
