@@ -107,11 +107,16 @@ senza checkout del Core:
 - 40 test mirati al runtime/plugin passati;
 - 29 test di packaging e CI passati;
 - Ruff passato sui file Python modificati.
+- immagine multi-arch pubblicata come
+  `ghcr.io/baselithcore/baselithcore:docker-runtime-test`;
+- build amd64 e arm64, firma Cosign, scansione Trivy e attestazione passate.
 
 ## Limiti dichiarati
 
 - Il template usa il tag della stessa versione della CLI. Il flusso pubblico è
   disponibile dopo pubblicazione coordinata di pacchetto Python e immagine GHCR.
+- Il package GHCR di prova è stato creato privato: prima del pull anonimo la sua
+  visibilità deve essere impostata su Public nelle impostazioni del package.
 - I requirements plugin sono dichiarativi ma non tutti fissati a una versione
   esatta; plugin incompatibili possono entrare in conflitto nell'ambiente comune.
 - `plugin sync --docker` invoca ancora la build; Docker riusa i layer invariati,
