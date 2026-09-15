@@ -586,7 +586,8 @@ the repository's **Security → Code scanning** tab.
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token); report pass for every severity, then a blocking `--severity ERROR --error` pass |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
-| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations. Opt-in: the job runs only with the repository variable `RELEASE_IMAGE_ENABLED=true`, or on demand via `workflow_dispatch` — a release alone does not build an image |
+| Container image CVEs | **Trivy** (`image_build` in `ci.yml`, `scan` in `release-image.yml`) | The image is built and scanned on every PR that touches its inputs (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`), and again at release **before any tag is created**. Fixable HIGH/CRITICAL blocks; the full MEDIUM-and-up report goes to the Security tab under the `container-image` category |
+| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations, published on every release. `RELEASE_IMAGE_DISABLED=true` is the kill switch; `workflow_dispatch` cuts one on demand for any tag |
 
 CodeQL runs in **report mode** — it publishes findings without failing the
 build. Semgrep and Trivy each run **twice**: a report-only pass that feeds the
@@ -596,6 +597,29 @@ Security tab (Semgrep without `--error`; Trivy `--scanners vuln,secret,misconfig
 --exit-code 1` for anything not accepted in `.trivyignore.yaml`. A new
 HIGH/CRITICAL dependency CVE is therefore a red build, the same posture as
 `pip-audit`; IaC and secret findings stay visible without gating.
+
+<!-- markdownlint-disable MD046 -->
+<!-- The admonition below has more than one paragraph, so its continuation is
+     indented by four spaces; markdownlint reads that as an indented code
+     block. -->
+
+!!! note "The image CVE gate runs before the tag exists, not after"
+    It used to be the last step of the job that publishes the image, which made
+    it a report rather than a gate: by the time it failed, `imagetools create`
+    had already pointed the release tag and `latest` at the vulnerable index,
+    so every `docker pull` and `helm install` resolved it while the release sat
+    red. Nobody could fix that without cutting another release — which is how
+    the whole image pipeline ended up switched off for several versions.
+
+    The scan is now its own job between the per-architecture builds and the
+    manifest merge. A finding means the merge never runs, so no tag is ever
+    created; what the build legs pushed is a pair of untagged digests that no
+    consumer resolves. Only `linux/amd64` is scanned: both platforms start from
+    the same pinned base digest and install the same `uv export --frozen` set,
+    and Trivy matches findings by package name and version rather than by
+    compiled artifact.
+
+<!-- markdownlint-enable MD046 -->
 
 `.trivyignore.yaml` is the single accepted-risk register for both scanners.
 Trivy reads it directly; `pip-audit` takes advisory ids on the command line, so
@@ -656,7 +680,7 @@ dependency is finally fixed and the entry deleted.
     security updates against a frozen set, and refreshing the digest does not
     necessarily collect them, because the upstream image is only rebuilt on its
     own schedule. A pin left alone therefore accumulates distro CVEs until the
-    post-push Trivy gate in `release-image.yml` fails a release.
+    Trivy gate in `release-image.yml` refuses to publish a release.
 
     So the runtime stage runs `apt-get upgrade` on top of the pinned base. The
     two answer different questions: the digest decides which base a build

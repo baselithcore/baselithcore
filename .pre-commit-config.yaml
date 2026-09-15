@@ -144,6 +144,12 @@ repos:
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4
           - pydantic-settings==2.14.2
+          # The script reads every plugin manifest to derive its roster from
+          # `integrity_sha256`. Without PyYAML it cannot parse them, treats
+          # every official plugin as unsigned and fails the hook on a clean
+          # tree — so the gate was unrunnable locally while passing in CI,
+          # where the job installs pyyaml separately. Same pin as there.
+          - pyyaml==6.0.3
       - id: core-strict-typing
         name: core-strict-typing
         entry: python scripts/check_core_strict_typing.py

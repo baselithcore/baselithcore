@@ -11,11 +11,20 @@ name: Release Container Image
 # entry point: ci.yml invokes it inside the same run as the release, so no
 # second event is needed.
 #
-# That call is currently OPT-IN and off by default — ci.yml gates the
-# `release_image` job on the repository variable RELEASE_IMAGE_ENABLED, because
-# the build is long and its post-push CVE gate fails releases for reasons
-# unrelated to the change being shipped. `workflow_dispatch` below is the
-# supported way to cut an image by hand in the meantime; pass the git tag.
+# That call was OPT-IN and off by default for a while, gated on a
+# RELEASE_IMAGE_ENABLED repository variable nobody ever set, because the build
+# is long and its CVE gate failed releases for base-image findings unrelated to
+# the change being shipped. Both halves of that have been addressed since:
+#
+#   * The Dockerfile now applies Debian security updates as its LAST layer, so
+#     a frozen base digest no longer accumulates distro CVEs between pins.
+#   * The CVE gate moved OUT of `publish` into its own `scan` job that runs
+#     before any tag exists, so a finding stops the release instead of
+#     reporting on an image that is already public.
+#
+# It is therefore on by default now, with RELEASE_IMAGE_DISABLED in ci.yml as
+# the kill switch. `workflow_dispatch` remains the way to cut an image by hand
+# for any tag; pass the git tag.
 on:
   workflow_call:
     inputs:
@@ -35,9 +44,18 @@ on:
 permissions:
   contents: read
 
+# One image build per tag. Two runs for the same tag can only race each other
+# to `imagetools create` and to `latest`, and the loser would leave the moving
+# tags pointing at whichever index finished second. Never cancel in progress: a
+# half-built release that has pushed platform digests but not the index is
+# worse than a duplicate run.
+concurrency:
+  group: release-image-${{ inputs.tag || github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # ---------------------------------------------------------------------------
-  # Why this is three jobs and not one
+  # Why the two builds are separate jobs
   #
   # The single job built `linux/amd64,linux/arm64` on one amd64 runner, which
   # means the arm64 half runs under QEMU emulation: torch, ~100 apt packages,
@@ -57,8 +75,10 @@ jobs:
   meta:
     name: Resolve tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
+      tags: ${{ steps.meta.outputs.tags }}
       image: ${{ steps.meta.outputs.image }}
     steps:
       - name: Resolve image tag
@@ -69,16 +89,47 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
+          set -euo pipefail
           TAG="${INPUT_TAG:-${RELEASE_TAG:-latest}}"
           # Strip a leading 'v' if present (v0.12.0 -> 0.12.0).
           TAG="${TAG#v}"
+
+          # The MOVING tags, which the exact version alone does not give an
+          # operator. `0.33` and `0` let a deployment track patch or minor
+          # updates without a chart edit per release, which is the convention
+          # every widely-pulled image on GHCR and Docker Hub follows; without
+          # them the only choices here were "pin a full version by hand
+          # forever" or "use :latest and take majors unannounced".
+          #
+          # Two deliberate exclusions:
+          #   * A prerelease (any tag containing '-', e.g. 1.0.0-rc.1) gets its
+          #     exact tag and nothing else. Moving `latest` or `1` onto a
+          #     release candidate is how a pre-GA build reaches production.
+          #   * A tag that is not semver at all — the `workflow_dispatch`
+          #     fallback of "latest", or a hand-typed name — is pushed as
+          #     itself. Deriving `${TAG%%.*}` from a non-numeric name would
+          #     invent tags nobody asked for.
+          TAGS="${TAG}"
+          case "${TAG}" in
+            *-*) ;;
+            [0-9]*.[0-9]*.[0-9]*)
+              TAGS="${TAG} ${TAG%.*} ${TAG%%.*} latest"
+              ;;
+          esac
+
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
           echo "image=${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
+          echo "Image tags to publish: ${TAGS}"
 
   build-amd64:
     name: Build linux/amd64
     needs: [meta]
     runs-on: ubuntu-latest
+    # A hung build otherwise runs to GitHub's 6-hour default and bills every
+    # minute of it. A cold build (torch, ~110 apt packages, Chromium, three
+    # model downloads) measures well under an hour; a warm one is minutes.
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write        # push the platform image by digest
@@ -150,6 +201,7 @@ jobs:
     # wall clock went. If this label is ever unavailable to the repository the
     # job fails fast here, rather than silently shipping an amd64-only index.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -189,10 +241,93 @@ jobs:
           provenance: mode=max
           sbom: true
 
-  publish:
-    name: Merge manifest, sign (cosign), scan, attest
-    needs: [meta, build-amd64, build-arm64]
+  # ---------------------------------------------------------------------------
+  # The CVE gate, and the reason it is its own job placed HERE
+  #
+  # It used to run at the END of `publish`, after `imagetools create` had
+  # already pointed the release tag (and `latest`) at the index. A HIGH finding
+  # therefore turned the release red while the vulnerable image sat on the tag
+  # that every `helm install` and `docker pull` resolves — the gate reported,
+  # it did not gate. Worse, that is the exact failure that got the whole image
+  # pipeline switched off: a red release nobody could fix without cutting
+  # another one.
+  #
+  # As a separate job between the builds and the merge, a finding means the tag
+  # is never created. What the build legs pushed is a pair of UNTAGGED digests,
+  # which no consumer resolves and GHCR lists as untagged versions.
+  #
+  # Only amd64 is scanned, and that is not a shortcut: both legs start from the
+  # same pinned base digest and install the same `uv export --frozen` set, and
+  # Trivy matches findings by package name and version, not by compiled
+  # artifact. Scanning the second platform would pull another ~2GB to rediscover
+  # the same package list.
+  # ---------------------------------------------------------------------------
+  scan:
+    name: CVE gate (Trivy, before any tag exists)
+    needs: [meta, build-amd64]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read           # pull the untagged digest to scan it
+      security-events: write   # upload the SARIF report
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # Only .trivyignore.yaml is read here; the scan targets the pushed
+          # digest, not the working tree.
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Trivy
+        env:
+          TRIVY_VERSION: 0.71.0
+          # Keep in lockstep with TRIVY_VERSION (and the copies in ci.yml).
+          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
+        run: |
+          set -euo pipefail
+          curl -sSfL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+      - name: Fail on fixable HIGH/CRITICAL
+        env:
+          IMAGE: ${{ needs.meta.outputs.image }}
+          DIGEST: ${{ needs.build-amd64.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ./trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
+      - name: Report every finding to code scanning
+        # Report mode, and it runs only when the gate above passed: the layers
+        # are already in Trivy's local cache, so this second pass costs seconds
+        # and no second pull. It widens the severity range because the gate
+        # deliberately does not — an unfixable MEDIUM is not worth blocking a
+        # release over, but it is worth someone seeing.
+        env:
+          IMAGE: ${{ needs.meta.outputs.image }}
+          DIGEST: ${{ needs.build-amd64.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ./trivy image --scanners vuln --severity MEDIUM,HIGH,CRITICAL \
+            --format sarif --output trivy-image.sarif \
+            --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4
+        with:
+          sarif_file: trivy-image.sarif
+          category: container-image
+
+  publish:
+    name: Merge manifest, sign (cosign), attest
+    needs: [meta, build-amd64, build-arm64, scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write        # write the multi-arch index
@@ -201,8 +336,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          # Only .trivyignore.yaml is read here; the scan targets the pushed
-          # digest, not the working tree.
           ref: ${{ inputs.tag || github.event.release.tag_name }}
           persist-credentials: false
       - name: Set up Docker Buildx
@@ -220,11 +353,21 @@ jobs:
         env:
           IMAGE: ${{ needs.meta.outputs.image }}
           TAG: ${{ needs.meta.outputs.tag }}
+          TAGS: ${{ needs.meta.outputs.tags }}
           AMD64_DIGEST: ${{ needs.build-amd64.outputs.digest }}
           ARM64_DIGEST: ${{ needs.build-arm64.outputs.digest }}
           SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
+          # The tag set comes from the `meta` job (exact version, minor, major,
+          # latest — see the reasoning there). Built into an argv array rather
+          # than interpolated into the command line: TAGS is a space-separated
+          # list, and word-splitting it inside the `docker` invocation is the
+          # kind of thing that works until a tag has something odd in it.
+          TAG_ARGS=()
+          for t in ${TAGS}; do
+            TAG_ARGS+=(-t "${IMAGE}:${t}")
+          done
           # Annotate the INDEX as well as the platform manifests: GHCR reads
           # the source link off whichever manifest the tag points at, and that
           # is the index here.
@@ -232,8 +375,7 @@ jobs:
             --annotation "index:org.opencontainers.image.source=${SOURCE_URL}" \
             --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
             --annotation "index:org.opencontainers.image.version=${TAG}" \
-            -t "${IMAGE}:${TAG}" \
-            -t "${IMAGE}:latest" \
+            "${TAG_ARGS[@]}" \
             "${IMAGE}@${AMD64_DIGEST}" \
             "${IMAGE}@${ARM64_DIGEST}"
           # The index digest is what gets signed and attested — not either
@@ -249,24 +391,11 @@ jobs:
         run: |
           cosign sign "${IMAGE}@${DIGEST}"
 
-      # Post-push gate: a HIGH/CRITICAL finding fails the release loudly.
-      # (Scanning pre-push would forgo the multi-arch manifest; the signed
-      # digest is immutable either way, and a red release is the signal.)
-      - name: Scan released image (Trivy)
-        env:
-          TRIVY_VERSION: 0.71.0
-          # Keep in lockstep with TRIVY_VERSION (and the copy in ci.yml).
-          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
-          IMAGE: ${{ needs.meta.outputs.image }}
-          DIGEST: ${{ steps.merge.outputs.digest }}
-        run: |
-          set -euo pipefail
-          curl -sSfL -o trivy.tar.gz \
-            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
-          tar -xzf trivy.tar.gz trivy
-          ./trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
-            --exit-code 1 --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
+      # The CVE scan that used to sit here now runs in the `scan` job, before
+      # this job is allowed to start — see the block above it. Re-scanning the
+      # merged index would pull ~2GB to rediscover the package list `scan`
+      # already cleared, and it could no longer change the outcome: the tags
+      # exist by this point.
 
       - name: Generate GitHub artifact attestation (provenance)
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1
