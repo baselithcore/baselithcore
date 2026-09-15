@@ -88,6 +88,17 @@ credentials, persistent data directories and a plugin workspace. The generated
 Dockerfile is intentionally small: it derives from the Core image and adds the
 Python dependencies declared by installed plugins.
 
+### `up` - Start the Complete Docker Runtime
+
+```bash
+baselith up [--image <image>] [--timeout <seconds>]
+```
+
+Prepares the current directory as a standalone runtime when necessary, generates
+credentials, downloads the Core and backing-service images, starts Compose and
+waits for `/health`. `--image` selects an explicit Core image; otherwise the tag
+matching the installed Baselith CLI version is used.
+
 ### `doctor` - System Diagnostics
 
 Verify system health, checking connections to external services and configuration.

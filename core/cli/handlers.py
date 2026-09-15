@@ -50,7 +50,7 @@ CommandHandler = Callable[[argparse.Namespace], int]
 #: scoped. The list is an explicit exemption rather than an allowlist so that
 #: forgetting to classify a new command fails closed.
 UNSCOPED_COMMANDS: frozenset[str] = frozenset(
-    {"init", "run", "setup", "test", "lint", "shell"}
+    {"init", "run", "setup", "test", "lint", "shell", "up"}
 )
 
 #: ``(command, subcommand)`` pairs exempt inside an otherwise-scoped command.

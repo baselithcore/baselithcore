@@ -9,7 +9,7 @@ runtime e lo stesso installer plugin:
 
 1. sviluppo del Core da checkout, con `baselith setup docker-core`;
 2. utilizzo e sviluppo plugin senza checkout del Core, con
-   `baselith init <nome> --template docker-runtime`.
+   `baselith up`.
 
 Il secondo flusso genera un progetto piccolo che usa l'immagine Core pubblicata.
 Contiene soltanto Compose, configurazione, dati persistenti e plugin. Il codice
@@ -49,11 +49,13 @@ Node, npm, pnpm e le dipendenze Python dei plugin non sono richiesti sull'host.
 
 ```bash
 pip install baselith-core
-baselith init my-core --template docker-runtime
-cd my-core
-docker compose --env-file configs/.env.docker.core -f docker-compose.core.yml up -d --build
-curl --fail http://localhost:8000/health
+mkdir my-core && cd my-core
+baselith up
 ```
+
+`baselith up` crea il runtime nella directory corrente, genera credenziali,
+scarica Core, PostgreSQL/pgvector, FalkorDB e Qdrant, avvia Compose e attende
+il health check. Per una versione specifica usa `--image <riferimento>`.
 
 Plugin remoto:
 
@@ -103,6 +105,9 @@ senza checkout del Core:
 - `GET /health` restituisce 200;
 - plugin `runtimetest` creato e sincronizzato;
 - `GET /runtimetest/health` restituisce 200;
+- `baselith up --image ...:docker-runtime-test` verificato da directory vuota;
+- secondo `baselith up` verificato senza rigenerare segreti o container;
+- tutti i layer della seconda esecuzione sono stati riutilizzati dalla cache;
 - il layer derivato senza nuove dipendenze è stato costruito in circa 0,1 s;
 - 40 test mirati al runtime/plugin passati;
 - 29 test di packaging e CI passati;

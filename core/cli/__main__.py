@@ -67,12 +67,20 @@ COMMANDS_MAP = {
     "SCAFFOLDING": ["init", "setup", "plugin"],
     "DEVELOPMENT": ["run", "shell", "docs"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
-    "INFRASTRUCTURE": ["db", "cache", "queue"],
+    "INFRASTRUCTURE": ["up", "db", "cache", "queue"],
     "QUALITY & TESTS": ["test", "lint"],
 }
 
 # Flat list of all commands for imports
 COMMANDS = [cmd for group in COMMANDS_MAP.values() for cmd in group]
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    """Start the standalone Docker runtime without eager Docker imports."""
+    from core.cli.commands.up import run_up
+
+    return run_up(image=args.image, timeout=args.timeout)
+
 
 # Mapping of commands to handlers. Using lambdas to allow patching in tests.
 COMMAND_HANDLERS_MAP: dict[str, Any] = {
@@ -86,6 +94,7 @@ COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "db": lambda *args, **kwargs: cmd_db(*args, **kwargs),
     "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),
     "queue": lambda *args, **kwargs: cmd_queue(*args, **kwargs),
+    "up": lambda *args, **kwargs: cmd_up(*args, **kwargs),
     "docs": lambda *args, **kwargs: cmd_docs(*args, **kwargs),
     "doctor": lambda *args, **kwargs: cmd_doctor(*args, **kwargs),
     "test": lambda *args, **kwargs: cmd_test(*args, **kwargs),

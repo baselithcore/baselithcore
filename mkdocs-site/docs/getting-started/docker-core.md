@@ -8,6 +8,25 @@ a temporary Docker builder.
 
 ## Start without a Core Checkout
 
+The shortest path prepares the current directory, downloads every required
+image, starts the stack and waits for Core health:
+
+```bash
+mkdir my-core && cd my-core
+baselith up
+```
+
+For a prerelease or pinned image:
+
+```bash
+baselith up --image ghcr.io/baselithcore/baselithcore:docker-runtime-test
+```
+
+`up` downloads the Core base image plus PostgreSQL/pgvector, FalkorDB and
+Qdrant. Each service remains in its own container. Existing Baselith runtime
+configuration is preserved, and unrelated Dockerfile or Compose files are not
+overwritten.
+
 Create a small runtime project containing only Compose configuration, persistent
 directories and plugin sources:
 
