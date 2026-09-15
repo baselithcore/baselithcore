@@ -117,13 +117,47 @@ class Plugin(ABC):
         mode = resolve_plugin_tenancy_mode(self.metadata.name, declared)
         return resolve_plugin_tenant(mode)
 
+    async def init_schema(self, config: dict[str, Any] | None = None) -> None:
+        """Create or upgrade this plugin's own database schema.
+
+        Called at **deploy time** by ``baselith plugin schema-init``, as the
+        role that owns the tables — never from :meth:`initialize`, which runs
+        in the serving process.
+
+        The distinction is the whole point. A deployment that isolates tenants
+        at the database connects its application as a least-privilege role:
+        ``NOSUPERUSER NOBYPASSRLS``, owning nothing, holding no DDL. That is
+        what makes a row-level-security policy apply to it at all — PostgreSQL
+        exempts a superuser, a ``BYPASSRLS`` role and a table's *owner* from
+        that table's own policy. A plugin that builds its schema from the
+        serving process therefore cannot run in such a deployment: it fails on
+        ``permission denied for schema public``, or, once granted that, on
+        ``must be owner of table …`` — ownership is not a privilege that can be
+        granted around. Worse, if it did own its tables, their policies would
+        not apply to the very role the app runs as.
+
+        So schema work moves here and the serving process keeps none. See
+        :mod:`core.db.ddl`, whose ``runtime_ddl_allowed()`` already refuses
+        boot-time DDL in production, and the multi-tenancy guide.
+
+        Args:
+            config: The plugin's block from the enable-list. Passed explicitly
+                because this runs on a plugin that was loaded *cold* — never
+                initialised — so ``self._config`` is not populated.
+
+        Default: a no-op. A plugin with no schema of its own, or one whose
+        tables come from an Alembic migration, implements nothing.
+        """
+        return None
+
     async def initialize(self, config: dict[str, Any]) -> None:
         """
         Prepare the plugin for operation.
 
         This is the standard entry point called by the PluginLoader.
-        Perform DB migrations, client initializations, or heavy resource
-        loading here.
+        Client initializations and heavy resource loading go here. **Schema
+        creation does not** — it belongs in :meth:`init_schema`, which runs at
+        deploy time as the table owner; see there for why.
 
         Args:
             config: User-provided configuration from the system settings.

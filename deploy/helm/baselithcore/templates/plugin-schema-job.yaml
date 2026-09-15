@@ -1,4 +1,16 @@
-{{- if .Values.migrations.enabled }}
+{{- if .Values.database.pluginSchemaInit.enabled }}
+# Builds every enabled plugin's schema, at deploy time, as the table owner.
+#
+# A plugin that creates its tables from the serving process cannot run in a
+# deployment that isolates tenants at the database: that application connects
+# as a least-privilege role which owns nothing and holds no DDL — the only way
+# a row-level-security policy applies to it — so the plugin fails on
+# `permission denied for schema public`, or, once granted that, on
+# `must be owner of table …`, which no grant fixes.
+#
+# Hook-weight 2: after Alembic (0) and after the runtime role exists (1), and
+# before Helm applies the Deployment. A non-zero exit stops the release rather
+# than starting an application against a half-built schema.
 # Pre-deploy Alembic migration Job. Runs `alembic upgrade head` BEFORE the
 # rollout: a bad migration fails this Job (and the helm upgrade) instead of
 # crash-looping the whole ReplicaSet, and pods no longer contend on the
@@ -7,22 +19,22 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "baselithcore.fullname" . }}-migrate
+  name: {{ include "baselithcore.fullname" . }}-plugin-schema
   labels:
     {{- include "baselithcore.labels" . | nindent 4 }}
-    app.kubernetes.io/component: migrations
+    app.kubernetes.io/component: plugin-schema
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-weight": "2"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: {{ .Values.migrations.backoffLimit }}
-  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  backoffLimit: {{ .Values.database.pluginSchemaInit.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.database.pluginSchemaInit.activeDeadlineSeconds }}
   template:
     metadata:
       labels:
         {{- include "baselithcore.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: migrations
+        app.kubernetes.io/component: plugin-schema
     spec:
       {{- with .Values.pullSecrets }}
       imagePullSecrets:
@@ -37,12 +49,12 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: migrate
+        - name: plugin-schema
           image: {{ include "baselithcore.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          command: ["alembic", "upgrade", "head"]
+          command: ["baselith", "plugin", "schema-init"]
           # Hook-scoped copies (migrations-env.yaml), created at hook-weight -5.
           # The release's own ConfigMap/Secret do not exist yet on a first
           # install, and an envFrom that cannot resolve leaves the pod stuck
@@ -83,7 +95,7 @@ spec:
                   key: {{ .Values.database.runtimeRole.adminSecret.passwordKey | quote }}
           {{- end }}
           resources:
-            {{- toYaml .Values.migrations.resources | nindent 12 }}
+            {{- toYaml .Values.database.pluginSchemaInit.resources | nindent 12 }}
           {{- if .Values.tmpVolumes.enabled }}
           volumeMounts:
             - name: tmp
