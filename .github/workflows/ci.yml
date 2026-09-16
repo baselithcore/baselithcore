@@ -839,17 +839,20 @@ jobs:
     # pull_request, so listing it would make every push to main skip
     # python_test (a skipped dependency blocks the dependent job).
     needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    # 3.14 is NOT here. requires-python is >=3.12 with no upper cap, so it is
+    # worth testing — but until every upstream dep publishes wheels it can only
+    # run advisory, and an advisory leg is `continue-on-error`, which means it
+    # cannot fail the build no matter what it finds. Running it on every push
+    # and every PR spent ~2.7 minutes a run producing information nothing is
+    # gated on, and the same commits flow through both develop and main, so it
+    # was ~11 minutes per change set. It now runs once a night in nightly.yml
+    # (`forward_compat`), which is where this repo already keeps its
+    # forward-looking non-blocking signal. Move it back into this matrix — WITH
+    # the advisory flags dropped — the day it is ready to block.
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.12', '3.13']
-        experimental: [false]
-        include:
-          # requires-python is >=3.12 with no upper cap: 3.14 runs advisory
-          # until every upstream dep publishes wheels, then moves to blocking.
-          - python-version: '3.14'
-            experimental: true
-    continue-on-error: ${{ matrix.experimental }}
     services:
       postgres:
         image: postgres:16-alpine
