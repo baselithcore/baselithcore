@@ -135,6 +135,7 @@ nav = [
   { "Advanced Topics" = [
       "advanced/index.md",
       { "Best Practices"     = "advanced/best-practices.md" },
+      { "Quality Gates"      = "advanced/quality-gates.md" },
       { "Multi-Tenancy"      = "advanced/multi-tenancy.md" },
       { "Observability"      = "advanced/observability.md" },
       { "Security"           = "advanced/security.md" },
