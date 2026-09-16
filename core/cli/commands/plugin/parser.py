@@ -113,6 +113,24 @@ def register_parser(subparsers, formatter_class):
     )
     validate_local.add_argument("name", help="Name of the local plugin")
 
+    schema_init = plugin_subparsers.add_parser(
+        "schema-init",
+        help="Create every enabled plugin's database schema (deploy step)",
+        description=(
+            "Run each enabled plugin's init_schema() as the table owner, "
+            "before the application starts. The serving process then needs no "
+            "DDL, which is what lets it connect as a least-privilege role and "
+            "have row-level security actually apply to it."
+        ),
+        formatter_class=formatter_class,
+    )
+    schema_init.add_argument(
+        "--plugin",
+        dest="schema_plugin",
+        default=None,
+        help="Restrict the run to one plugin, by registry name",
+    )
+
     sign_plugin = plugin_subparsers.add_parser(
         "sign",
         help="Compute the executable-surface SHA-256 and write it into manifest.integrity_sha256",

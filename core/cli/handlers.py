@@ -216,6 +216,10 @@ def cmd_plugin(args: argparse.Namespace) -> int:
         "sign": lambda: plugin.sign_plugin(
             args.path, check_only=getattr(args, "check", False)
         ),
+        "schema-init": lambda: plugin.schema_init(
+            getattr(args, "schema_plugin", None),
+            json_output=args.format == "json",
+        ),
     }
 
     # Handle nested subcommands: deps, config, marketplace

@@ -526,6 +526,36 @@ class MyAgent(LifecycleMixin, AgentProtocol):
 
 ---
 
+## 6b. Create Your Database Schema (Optional)
+
+If your plugin owns tables, create them in `init_schema()` — never in
+`initialize()`:
+
+```python title="plugins/my-plugin/plugin.py"
+class MyPlugin(Plugin):
+    async def init_schema(self, config: dict | None = None) -> None:
+        """Create this plugin's tables. Runs at deploy time, as their owner."""
+        async with get_connection() as conn, conn.cursor() as cursor:
+            await cursor.execute(
+                "CREATE TABLE IF NOT EXISTS myplugin_notes ("
+                "  id BIGSERIAL PRIMARY KEY,"
+                "  tenant_id TEXT NOT NULL,"
+                "  body TEXT NOT NULL)"
+            )
+```
+
+Run it with `baselith plugin schema-init` (every enabled plugin) or
+`baselith plugin schema-init --plugin my-plugin`. Leave the method out entirely
+when your tables come from an Alembic migration — the default is a no-op.
+
+Doing this at boot instead breaks any deployment that connects as a
+least-privilege role for row-level security: it cannot `CREATE`, and if it
+could, it would *own* the tables and PostgreSQL would exempt it from their
+policies. See
+[Schema is deploy work](../core-modules/plugins.md#schema-is-deploy-work-not-boot-work).
+
+---
+
 ## 7. Test the Plugin
 
 ### Verify Plugin Loading

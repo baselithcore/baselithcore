@@ -468,7 +468,7 @@ Two further changes to the same effect:
 - **The Chromium install moved above the source `COPY`s.** It is the largest
   single step (1.39GB) and depends on nothing but the installed dependencies;
   sitting below them, a one-line code change invalidated it and the build
-  reinstalled the browser and its ~100 apt packages from scratch.
+  reinstalled the browser and its apt packages from scratch.
 
 `git`, `ssdeep` and `libfuzzy-dev` are no longer installed at all: no
 requirement is a VCS URL, and nothing in the repository references the fuzzy

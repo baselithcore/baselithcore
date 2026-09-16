@@ -97,6 +97,38 @@ class MyPlugin(Plugin):
 See [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared)
 for the full model.
 
+### Schema is deploy work, not boot work
+
+A plugin that owns tables creates them in `init_schema()`, not in
+`initialize()`. The default is a no-op, so a plugin whose tables come from an
+Alembic migration implements nothing:
+
+```python
+class MyPlugin(Plugin):
+    async def init_schema(self, config: dict | None = None) -> None:
+        """Create or upgrade this plugin's own tables. Runs as their owner."""
+        await cursor.execute("CREATE TABLE IF NOT EXISTS notes (...)")
+```
+
+`baselith plugin schema-init` runs it on every enabled plugin at deploy time,
+loading them **cold** — instantiated, never initialised — so no runtime client
+is opened; its exit code is the number of failures, so a deploy stops rather
+than starting an application against a half-built schema.
+
+The split exists because the serving process must not hold DDL. A deployment
+that isolates tenants at the database connects as a least-privilege role
+(`NOSUPERUSER NOBYPASSRLS`, owning nothing), and PostgreSQL exempts a
+superuser, a `BYPASSRLS` role and a table's *owner* from that table's own
+policy. A plugin building its schema at boot fails there with
+`permission denied for schema public` — or, once granted that, with
+`must be owner of table …`, which no grant fixes — and one that *did* own its
+tables would be exempt from the policies meant to isolate it.
+
+In Kubernetes the chart runs the command for you: set
+`database.pluginSchemaInit.enabled` and the Job lands after the migrations and
+after the runtime role exists, before the Deployment. See
+[`plugin schema-init`](../api/cli.md#plugin-schema-init-build-plugin-schemas-at-deploy-time).
+
 ---
 
 ## Capability Mixins
