@@ -481,6 +481,18 @@ neither gates readiness. Results are cached (~30s).
 { "status": "ready", "services": { "database": true, "redis": true, "vectorstore": true }, "cached": false }
 ```
 
+!!! warning "Some misconfigurations never reach this probe"
+    A readiness probe reports on a running app. Three security postures are
+    checked *before* the app starts serving and **refuse the boot in
+    production** instead of answering 503 — an empty `TRUSTED_HOSTS`, an
+    unbound JWT trust perimeter, and a database role that silently bypasses
+    row-level security while `DB_RLS_ENABLED=true`
+    (`core.api.startup_checks` → [`core.db.rls_posture`](../core-modules/db.md#is-row-level-security-actually-enforced)).
+    Each names its own auditable opt-out in the failure message. A pod
+    crash-looping with one of those errors is not an outage to route around;
+    it is the framework refusing to serve behind a perimeter that is not
+    there.
+
 ---
 
 ### `GET /status` - System Status

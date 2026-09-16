@@ -247,6 +247,7 @@
       "plugin_tree",
       "publish_plugin_cmd",
       "register_parser",
+      "schema_init",
       "search_plugins",
       "sign_plugin",
       "status_local_plugins",

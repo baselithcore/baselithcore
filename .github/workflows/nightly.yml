@@ -43,6 +43,65 @@ jobs:
           mypy --version
           mypy core/ || true  # advisory: pre-existing debt tracked separately
 
+  forward_compat:
+    # Python 3.14 against the LOCKED dependency set. Two canaries, one file,
+    # deliberately not merged: `fresh_resolve_tests` below varies the
+    # dependencies and holds the interpreter at 3.12, this one varies the
+    # interpreter and holds the dependencies at uv.lock. Run together they say
+    # which of the two moved when something breaks.
+    #
+    # It lived in ci.yml's test matrix as an `experimental` leg until the cost
+    # was measured: `continue-on-error` meant it could never fail a build, so
+    # every push and every PR paid for a signal nobody was gated on. Nightly
+    # gives the same answer a day later, which is the right latency for
+    # "upstream has not published 3.14 wheels yet".
+    #
+    # A failure here is information, not an incident: it means the ecosystem is
+    # not ready, or that something in core/ genuinely breaks on 3.14. Read it,
+    # do not silence it.
+    name: Forward-compat (Python 3.14, locked deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.14'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Run Tests
+        env:
+          POSTGRES_DB: test_db
+          DB_HOST: localhost
+          REDIS_URL: redis://localhost:6379/0
+          CACHE_REDIS_URL: redis://localhost:6379/1
+        # Same install as ci.yml's python_test: the locked set with hashes,
+        # then the project without deps. Keep the two in step, or this stops
+        # testing the interpreter and starts testing a different dependency
+        # set as well.
+        run: |
+          uv export --frozen --extra test --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-test.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-test.txt
+          uv pip install --system --no-deps -e .
+          pytest -n auto -q
+
   fresh_resolve_tests:
     name: Tests against freshly-resolved deps
     runs-on: ubuntu-latest

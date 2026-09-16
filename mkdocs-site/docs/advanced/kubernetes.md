@@ -82,6 +82,13 @@ cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
     `.Chart.AppVersion` (`0.31.0`). Override both with `--set` when you
     mirror the image into a private registry.
 
+    Each release publishes four tags for the same index: the exact version
+    (`0.33.0`), the minor (`0.33`), the major (`0`) and `latest`. The moving
+    ones let a deployment track patches or minors without a chart edit per
+    release; a prerelease (`1.0.0-rc.1`) gets its exact tag only and never
+    moves `latest`. For production, prefer `image.digest` over any of them —
+    see below.
+
 !!! warning "First publish: check the package is public"
     A GHCR package created by a workflow is not guaranteed to be world-readable,
     and the chart pulls anonymously — `pullSecrets` is empty by default. After
@@ -105,22 +112,18 @@ cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
 
 ## Supply chain: signed images & provenance
 
-!!! warning "Image publication is opt-in — a release does not build one"
-    The image job is **disabled by default**: `ci.yml` runs it only when the
-    repository variable `RELEASE_IMAGE_ENABLED` is set to `true`. So a new
-    version on PyPI does **not** imply a matching tag on GHCR, and the tag the
-    chart defaults to may not exist for the version you are deploying. Check
-    before you rely on it, and pin `image.tag` to a tag you have verified:
+!!! info "Every release publishes an image"
+    The image job runs on every release. It was opt-in for a while, behind a
+    `RELEASE_IMAGE_ENABLED` variable that was never set — so the versions
+    released in that period have no matching tag on GHCR. For those, cut one on
+    demand by running the **Release Container Image** workflow from the Actions
+    tab (`workflow_dispatch`) with the git tag, e.g. `v0.31.0`.
 
-    ```bash
-    docker manifest inspect ghcr.io/baselithcore/baselithcore:<version>
-    ```
+    `RELEASE_IMAGE_DISABLED=true` is the kill switch if you need to stop
+    publishing without editing a workflow.
 
-    To cut one on demand, run the **Release Container Image** workflow from the
-    Actions tab (`workflow_dispatch`) with the git tag, e.g. `v0.31.0`.
-
-When it does run, release images (`linux/amd64` + `linux/arm64`, built from
-the repository's single `Dockerfile`) are pushed to GHCR, **signed with cosign** (keyless,
+Release images (`linux/amd64` + `linux/arm64`, built from the repository's
+single `Dockerfile`) are pushed to GHCR, **signed with cosign** (keyless,
 Sigstore OIDC), scanned with Trivy, and carry two kinds of attestation
 (`.github/workflows/release-image.yml`):
 

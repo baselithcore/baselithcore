@@ -1,6 +1,24 @@
 name: BaselithCore CI
 
 # ------------------------------------------------------------------
+# Where the gates are defined
+# ------------------------------------------------------------------
+# Every gate that is fast and hermetic — no network, no database, no built
+# artifact, no importable app — is defined in .pre-commit-config.yaml and runs
+# here through the single `quality_gates` job. ruff, mypy, bandit,
+# markdownlint, prettier and the scripts/check_*.py gates are NOT invoked by
+# this file: it would be a second copy of their arguments, free to drift from
+# the one developers run, which is exactly how this workflow used to disagree
+# with a green `git commit`. Add a gate by adding a hook.
+#
+# What stays here is what a hook genuinely cannot do, and each such job says
+# why in its own comment: the full git history (gitleaks), the network
+# (pip-audit, dependency-review, trivy), a resolved dependency graph (uv lock),
+# an importable app (docs_consistency --routes, openapi_drift), a built wheel
+# (package_smoke), a container image, or the test suite itself. The complete
+# list is mirrored in mkdocs-site/docs/advanced/quality-gates.md.
+#
+# ------------------------------------------------------------------
 # Tool version pinning policy
 # ------------------------------------------------------------------
 # Every developer tool installed by this workflow is pinned to an exact
@@ -10,10 +28,9 @@ name: BaselithCore CI
 # ruff 0.16.0, which began formatting Python code blocks embedded in
 # Markdown and failed `ruff format --check` on 93 untouched docs.
 #
-# Keep these pins in sync with the local toolchain:
-#   - ruff  -> .pre-commit-config.yaml (ruff-pre-commit rev) and the
-#              `dev` extra in pyproject.toml
-#   - mypy  -> .pre-commit-config.yaml (mirrors-mypy rev)
+# The pins that are duplicated on purpose — gitleaks here and in the hook
+# config, ruff/mypy in the hook config and in pyproject's `dev` extra — are
+# compared by scripts/check_tool_pins.py, which is itself one of the hooks.
 # Bump versions deliberately, in their own PR, so the diff that adapts to
 # a new tool release is reviewable on its own.
 # ------------------------------------------------------------------
@@ -49,33 +66,40 @@ jobs:
   # ============================================================
   # 📝 LINTING
   # ============================================================
-  markdownlint:
-    name: Lint Markdown
+  quality_gates:
+    # ------------------------------------------------------------------
+    # Every fast, hermetic gate — run from .pre-commit-config.yaml, which is
+    # their only definition.
+    # ------------------------------------------------------------------
+    # This job replaces seven that each re-implemented a hook: `Lint Markdown`,
+    # `Lint Python (Ruff)`, `Architecture Boundaries`, the three `Type Check`
+    # jobs and `Plugin Integrity`, plus the bandit step of the security job.
+    # Each of them installed its own copy of a tool and spelled out its own
+    # argv next to a hook that ran the same tool differently, with a comment
+    # asking a human to keep the two in step. That is not a mechanism, and the
+    # drift it allowed is the reason a developer could watch `git commit` go
+    # green and the pipeline go red on an unchanged tree:
+    #
+    #   * mypy ran PER FILE in the hook and per PACKAGE here, so a signature
+    #     change staged without its callers type-checked locally and could not
+    #     type-check here;
+    #   * bandit scanned the staged files in the hook and `core plugins sdk
+    #     scripts` in full here;
+    #   * ruff's exclusions were written twice, in two syntaxes;
+    #   * `Lint Markdown` carried `continue-on-error: true`, so the pipeline was
+    #     also, in one place, laxer than the laptop.
+    #
+    # There is now one list of gates, one set of arguments, one dependency set.
+    # `pre-commit run --all-files` is what runs here, what `git push` runs
+    # through the `full-tree` hook, and a superset of what `git commit` runs.
+    # Adding a gate means adding a hook; nothing needs to be added here.
+    #
+    # A hook that rewrites a file (ruff --fix, prettier --write) fails under
+    # pre-commit, and --show-diff-on-failure prints what it would have written,
+    # so a formatting miss reads as a diff instead of "exit code 1".
+    name: Quality Gates (pre-commit)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: always()
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: 'lts/*'
-      - name: Run markdownlint
-        # zizmor: ignore[adhoc-packages]
-        # There is no package.json to lock a docs linter against, and adding one
-        # at the repo root to hold a single global CLI would be the larger evil.
-        # The version is pinned instead, which is what the lockfile would buy.
-        run: |
-          npm install -g markdownlint-cli2@0.23.2
-          markdownlint-cli2 --config .markdownlint.yaml .
-        continue-on-error: true
-
-  python_lint:
-    name: Lint Python (Ruff)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -83,14 +107,37 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
+          # Pinned to the same interpreter as `default_language_version` in
+          # .pre-commit-config.yaml. mypy's verdict depends on the version it
+          # runs under, so this is part of the gate, not a build detail.
           python-version: '3.12'
-      - name: Install uv
-        run: pip install uv==0.12.0
-      - name: Lint with Ruff
-        run: |
-          uv pip install --system ruff==0.15.5
-          ruff check . --exclude templates,examples
-          ruff format --check . --exclude templates,examples
+      - name: Install pre-commit
+        # Pinned like every other tool this workflow installs (see the policy
+        # note at the top). scripts/check_tool_pins.py — itself one of the
+        # hooks below — fails the build if this version drops under the floor
+        # the config or the `dev` extra declares.
+        run: pip install pre-commit==4.6.1
+      - name: Cache hook environments
+        # Without this every run rebuilds a mypy venv, a node install for
+        # prettier/markdownlint and the ruff wheel. The config file's hash is
+        # the whole key: any change to a rev, an arg or an
+        # additional_dependencies list must invalidate the cache, and nothing
+        # else can change what the environments contain.
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run every hook over the whole tree
+        env:
+          # The gitleaks hook scans the STAGED diff (`gitleaks git --pre-commit
+          # --staged`). Nothing is staged in a CI checkout, so here it would
+          # bootstrap a Go toolchain to scan zero bytes and report success — a
+          # green light for a check that did not run. The `gitleaks` job below
+          # scans the full history instead, which is strictly stronger and is
+          # the only form of the check that means anything off a developer's
+          # machine.
+          SKIP: gitleaks
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
 
   zizmor:
     # Static analysis for the workflows themselves. Everything else in this
@@ -197,36 +244,6 @@ jobs:
           }
           validate
           validate -f deploy/helm/baselithcore/values-production.yaml
-
-  architecture_boundaries:
-    name: Architecture Boundaries
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      - name: Check Sacred Core boundaries
-        run: python scripts/check_architecture_boundaries.py
-      - name: Check 500-line file size cap
-        run: python scripts/check_file_size.py
-      - name: Check silent-exception ratchet
-        run: python scripts/check_exception_hygiene.py
-      - name: Check public API surface drift
-        run: python scripts/check_public_api.py
-      - name: Check configuration surface (.env.example + configs/.env.base + reference page)
-        run: python scripts/check_config_surface.py
-      - name: Check eval-corpus ratchet
-        run: |
-          # Pinned like every other tool this workflow installs (see the policy
-          # note at the top) and in lockstep with the `plugin_integrity` job,
-          # which installs the same parser.
-          pip install pyyaml==6.0.3
-          python scripts/check_eval_baseline.py
 
   docs_consistency:
     name: Docs ↔ Code Consistency
@@ -404,103 +421,9 @@ jobs:
           name: fairness-report
           path: fairness-report.json
 
-  type_check:
-    name: Type Check (MyPy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      - name: Install uv
-        run: pip install uv==0.12.0
-      - name: Type Check
-        run: |
-          uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
-          mypy core --ignore-missing-imports --incremental --fast-module-lookup
-
-  type_check_plugins:
-    name: Type Check Official Plugins
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      - name: Install uv
-        run: pip install uv==0.12.0
-      - name: Type Check Official Plugins
-        run: |
-          uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
-          # The roster derivation reads each manifest.yaml — same parser pin as
-          # the eval-baseline and plugin_integrity jobs.
-          pip install pyyaml==6.0.3
-          python scripts/check_official_plugin_typing.py
-
-  type_check_core_strict:
-    name: Type Check Core Strict (ratchet)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      - name: Install uv
-        run: pip install uv==0.12.0
-      - name: Type Check Core Strict
-        run: |
-          uv pip install --system mypy==2.3.0 redis==5.3.1 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
-          python scripts/check_core_strict_typing.py
-
-  plugin_integrity:
-    name: Plugin Integrity
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      - name: Install runtime deps for hashing
-        run: pip install pyyaml==6.0.3
-      - name: Verify manifest integrity_sha256 matches source tree
-        run: python scripts/check_plugin_integrity.py
-
   # ============================================================
   # 🔒 SECURITY
   # ============================================================
-  requirements_sync:
-    name: requirements.txt ↔ pyproject.toml sync
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: '3.12'
-      # requirements.txt is the Docker-install mirror of pyproject specs; its
-      # header demands they stay identical. This makes that promise a gate.
-      - name: Check spec equivalence
-        run: python scripts/check_requirements_sync.py
-
   uv_lock_check:
     name: Lockfile Check (uv)
     runs-on: ubuntu-latest
@@ -576,10 +499,15 @@ jobs:
           ./gitleaks git --no-banner --redact --exit-code 1
 
   security_scan:
-    name: Security Scan (Bandit)
+    # Bandit used to run here too, over `core plugins sdk scripts`, while the
+    # hook scanned only the staged files. It is now the `bandit` hook — same
+    # argv, one definition — and runs in `quality_gates`. What is left here is
+    # the part a hook cannot do: resolving dependencies and querying an
+    # advisory database over the network.
+    name: Dependency Audit (pip-audit)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [python_lint]
+    needs: [quality_gates]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -590,13 +518,6 @@ jobs:
           python-version: '3.12'
       - name: Install uv
         run: pip install uv==0.12.0
-      - name: Security Scan
-        run: |
-          uv pip install --system bandit==1.9.4
-          # Full first-party surface: plugins hold the subprocess/browser/
-          # inbound-webhook code, sdk and scripts ship to users/CI — none of
-          # them may go unscanned.
-          bandit -r core plugins sdk scripts -ll --exclude tests --skip B101
       - name: Dependency Vulnerability Scan
         run: |
           uv pip install --system -e . pip-audit==2.10.1
@@ -628,7 +549,7 @@ jobs:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [python_lint]
+    needs: [quality_gates]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -660,7 +581,7 @@ jobs:
     name: Trivy Scan
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [python_lint]
+    needs: [quality_gates]
     permissions:
       contents: read
       security-events: write
@@ -747,7 +668,7 @@ jobs:
     name: Package Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [architecture_boundaries, python_lint]
+    needs: [quality_gates]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -838,18 +759,21 @@ jobs:
     # dependency_review is deliberately NOT here: it only runs on
     # pull_request, so listing it would make every push to main skip
     # python_test (a skipped dependency blocks the dependent job).
-    needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins, type_check_core_strict, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    needs: [quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    # 3.14 is NOT here. requires-python is >=3.12 with no upper cap, so it is
+    # worth testing — but until every upstream dep publishes wheels it can only
+    # run advisory, and an advisory leg is `continue-on-error`, which means it
+    # cannot fail the build no matter what it finds. Running it on every push
+    # and every PR spent ~2.7 minutes a run producing information nothing is
+    # gated on, and the same commits flow through both develop and main, so it
+    # was ~11 minutes per change set. It now runs once a night in nightly.yml
+    # (`forward_compat`), which is where this repo already keeps its
+    # forward-looking non-blocking signal. Move it back into this matrix — WITH
+    # the advisory flags dropped — the day it is ready to block.
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.12', '3.13']
-        experimental: [false]
-        include:
-          # requires-python is >=3.12 with no upper cap: 3.14 runs advisory
-          # until every upstream dep publishes wheels, then moves to blocking.
-          - python-version: '3.14'
-            experimental: true
-    continue-on-error: ${{ matrix.experimental }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -959,6 +883,219 @@ jobs:
             echo "$DRIFT"
             exit 1
           fi
+
+  # ============================================================
+  # 🐳 CONTAINER IMAGE
+  # ============================================================
+  image_build:
+    # The container image had no check anywhere in CI: it was built for the
+    # first time during a release, which made the release the place where a
+    # broken Dockerfile, a lockfile the image cannot install, or a base image
+    # that has collected CVEs was discovered. That is the worst possible moment
+    # — the version is already tagged and the changelog already written.
+    #
+    # This job builds the same Dockerfile the release builds, on PRs, and runs
+    # the same CVE gate against the result before anything is pushed anywhere.
+    name: Container Image Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [quality_gates]
+    permissions:
+      contents: read
+      packages: write   # only used on main, to WRITE the shared buildcache
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # Full history: the change detection below needs a merge-base with
+          # the target branch, which a shallow clone does not have.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Seconds, no Docker daemon work, so it runs on every PR regardless of
+      # what changed: BuildKit's own Dockerfile linter (deprecated syntax,
+      # undefined build args, casing, unpinned copies).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Lint Dockerfile
+        run: docker buildx build --check --target runtime .
+
+      # A full image build is ~30 minutes cold, so it is scoped to the inputs
+      # that can actually change what the image CONTAINS: the Dockerfile, the
+      # ignore file, and the dependency surface (pyproject.toml drives the
+      # extras, uv.lock pins the resolved set). A change under core/ or
+      # plugins/ only invalidates the thin source layers at the very top of the
+      # image, which the release build reproduces from cache in seconds — not
+      # worth half an hour on every PR.
+      #
+      # `[image-build]` anywhere in the commit message forces a run, for the
+      # case where the reasoning above is wrong.
+      - name: Decide whether to build
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            RANGE="$(git merge-base "origin/${BASE_REF}" HEAD)...HEAD"
+          else
+            RANGE="HEAD~1...HEAD"
+          fi
+          CHANGED="$(git diff --name-only "${RANGE}" 2>/dev/null || echo Dockerfile)"
+          # Read with git into a shell variable, NOT through an Actions
+          # expression: a commit message is attacker-controlled text, and
+          # interpolating github.event.head_commit.message into a run block is
+          # the classic Actions script injection. Compared with grep -F, so it
+          # is never evaluated as a pattern either.
+          MSG="$(git log -1 --format=%B)"
+
+          BUILD=false
+          if printf '%s\n' "${CHANGED}" | grep -qE '^(Dockerfile|\.dockerignore|pyproject\.toml|uv\.lock)$'; then
+            BUILD=true
+          elif printf '%s\n' "${MSG}" | grep -qF '[image-build]'; then
+            BUILD=true
+            echo "Forced by [image-build] in the commit message."
+          fi
+          echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
+          echo "Image inputs changed: ${BUILD}"
+
+      - name: Log in to GHCR
+        if: steps.decide.outputs.build == 'true'
+        # Read access to the layer cache below. A pull request from a FORK gets
+        # a read-only GITHUB_TOKEN, which is enough for that and not enough for
+        # the cache write, which is why the write is gated to main pushes.
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image (amd64, no push)
+        if: steps.decide.outputs.build == 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: false
+          # Loaded into the local daemon so the scan below needs no registry
+          # round trip — nothing this job builds ever leaves the runner.
+          load: true
+          tags: baselithcore:ci
+          # Shares the release build's cache ref on purpose, in both
+          # directions: a PR READS the layers the last main build produced (so
+          # a Dockerfile-only change does not re-download torch and Chromium),
+          # and a main push WRITES them back. That write is what keeps the
+          # cache warm between releases — previously it was refreshed only when
+          # a release ran, so the first build after a quiet month started cold.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-amd64
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=registry,ref=ghcr.io/{0}:buildcache-amd64,mode=max', github.repository) || '' }}
+
+      # The same gate the release runs, at the same severity and against the
+      # same accepted-risk register. A base image that has collected fixable
+      # HIGH/CRITICAL findings now turns a PR red — which is a thing somebody
+      # can fix by bumping the base digest — instead of a release.
+      - name: Scan built image (Trivy)
+        if: steps.decide.outputs.build == 'true'
+        env:
+          TRIVY_VERSION: 0.71.0
+          # Keep in lockstep with TRIVY_VERSION (and the copies in
+          # trivy_scan above and in release-image.yml).
+          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          /tmp/trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --ignorefile .trivyignore.yaml baselithcore:ci
+
+      # Cheap assertions about things that have silently broken before, and
+      # that no unit test can see because they are properties of the IMAGE.
+      - name: Smoke-test the image
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+
+          # The console script the Helm worker Deployment runs
+          # (`["baselith", "queue", "worker"]`). A released image once shipped
+          # without it and that pod could only CrashLoop.
+          docker run --rm --entrypoint baselith baselithcore:ci --version
+
+          # There must be exactly ONE importable copy of the source. The
+          # project distribution is installed into /install-app for its entry
+          # points, and pip also materialises core/ and plugins/ there; with
+          # /install-app ahead of /app on PYTHONPATH, which copy won depended
+          # on the working directory. The Dockerfile deletes them, so `core`
+          # must resolve under /app from ANY cwd.
+          for wd in / /app /tmp; do
+            RESOLVED="$(docker run --rm --workdir "$wd" --entrypoint python \
+              baselithcore:ci -c 'import core; print(core.__file__)')"
+            echo "cwd=${wd} -> ${RESOLVED}"
+            case "${RESOLVED}" in
+              /app/core/*) ;;
+              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/core"; exit 1 ;;
+            esac
+          done
+
+          # CPU-only means CPU-only. The Dockerfile filters CUDA wheels out of
+          # the exported lock, and this is the assertion that the filter still
+          # matches what torch pulls: cuda-bindings/cuda-pathfinder slipped
+          # past a pattern that only looked for `nvidia`.
+          docker run --rm --entrypoint sh baselithcore:ci -c '
+            if ls /install/lib/python3.12/site-packages | grep -qE "^(nvidia|cuda)"; then
+              echo "CUDA packages present in a CPU-only image:" >&2
+              ls /install/lib/python3.12/site-packages | grep -E "^(nvidia|cuda)" >&2
+              exit 1
+            fi'
+
+          # Every capability the image installs must be able to RUN in it. The
+          # spaCy stack is ~160MB and delivers nothing without its model: the
+          # image shipped for a long time with core/nlp falling back to a blank
+          # sentencizer, which no test could see.
+          docker run --rm --entrypoint python baselithcore:ci -c '
+          import spacy
+          nlp = spacy.load("en_core_web_sm")
+          assert "ner" in nlp.pipe_names, nlp.pipe_names
+          print("spaCy pipeline:", nlp.pipe_names)'
+
+          # The browser the image installs must be the one the code launches.
+          # The Dockerfile passes `--only-shell` to drop the 641MB full
+          # Chromium, and which of the two binaries `headless=True` resolves to
+          # is a Playwright implementation detail that has flipped between
+          # versions: trying the opposite flag produced "Executable doesn't
+          # exist at .../chromium_headless_shell-*/chrome-linux/headless_shell"
+          # from every call site. A lockfile bump can flip it back, and nothing
+          # but this catches that — the unit tests all mock Playwright.
+          docker run --rm --entrypoint python baselithcore:ci -c '
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              page.set_content("<h1>ok</h1>")
+              assert page.inner_text("h1") == "ok"
+              browser.close()
+          print("playwright: headless launch ok")'
+
+      - name: Report image size
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          SIZE="$(docker image inspect baselithcore:ci --format '{{.Size}}')"
+          {
+            echo "### Container image"
+            echo
+            echo "Uncompressed size: **$(numfmt --to=iec --suffix=B "${SIZE}")**"
+            echo
+            echo '| Layer | Size |'
+            echo '| --- | ---: |'
+            docker history baselithcore:ci --no-trunc --format '{{.Size}}\t{{.CreatedBy}}' \
+              | awk -F'\t' '$1 != "0B" {gsub(/\|/, "\\|", $2); print "| `" substr($2, 1, 90) "` | " $1 " |"}' \
+              | head -20
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================================
   # 🚀 RELEASE
@@ -1104,20 +1241,30 @@ jobs:
     # repository at this commit — switching spelling buys nothing and risks a
     # release path that is exercised once per release.)
     needs: [release]
-    # DISABLED by default. The image build is the longest and most expensive
-    # job in the pipeline (multi-arch, torch + playwright + pre-cached models)
-    # and its post-push Trivy gate fails the whole release on base-image CVEs
-    # that have nothing to do with the change being released. It is therefore
-    # opt-in: the job is skipped unless the repository variable
-    # RELEASE_IMAGE_ENABLED is set to the string "true"
-    # (Settings -> Secrets and variables -> Actions -> Variables). An unset
-    # variable evaluates to the empty string, so the default is off.
+    # ON by default, with a kill switch. It was the other way round — opt-in on
+    # a RELEASE_IMAGE_ENABLED variable — because the build is the longest job
+    # in the pipeline and its Trivy gate failed whole releases on base-image
+    # CVEs unrelated to the change being shipped. Nobody ever set the variable,
+    # so the Helm chart kept pointing `image.repository` at a GHCR package that
+    # no release had ever published. An opt-in that stays off is not a safety
+    # feature, it is a broken deployment path.
     #
-    # Nothing else is removed: release-image.yml keeps its `workflow_dispatch`
-    # trigger, so an image can still be cut by hand for any tag at any time.
+    # Both reasons are gone:
+    #   * The Dockerfile applies Debian security updates as its last layer, so
+    #     a pinned base no longer drifts into CVEs between digest bumps.
+    #   * The CVE gate runs in release-image.yml's `scan` job, BEFORE any tag
+    #     is created, so a finding stops the image from being published rather
+    #     than reddening a release that already shipped one.
+    #   * `image_build` above builds and scans the same Dockerfile on every PR
+    #     that touches its inputs, so a base-image problem surfaces on a branch
+    #     where it can be fixed.
+    #
+    # RELEASE_IMAGE_DISABLED (Settings -> Secrets and variables -> Actions ->
+    # Variables) set to "true" turns it off again without a commit. Unset
+    # evaluates to the empty string, so the default is on.
     if: >-
       needs.release.outputs.new_release_published == 'true'
-      && vars.RELEASE_IMAGE_ENABLED == 'true'
+      && vars.RELEASE_IMAGE_DISABLED != 'true'
     uses: ./.github/workflows/release-image.yml
     # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
     # the image job needs are declared here. GITHUB_TOKEN itself is passed
@@ -1128,6 +1275,12 @@ jobs:
       packages: write # push to GHCR
       id-token: write # keyless cosign + SLSA provenance
       attestations: write # actions/attest-build-provenance
+      # A called workflow's jobs cannot grant themselves more than the CALLER
+      # allows, so every scope any job in release-image.yml needs has to appear
+      # here. Its `scan` job uploads the image SARIF to code scanning; without
+      # this line that upload is denied, `scan` fails, and because `publish`
+      # needs it the release would produce no image at all.
+      security-events: write # Trivy SARIF -> code scanning
     with:
       # The git TAG, so the image job checks out the bumped tree rather than
       # the pre-release SHA that started this run. `v` is stripped again on the

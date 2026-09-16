@@ -305,6 +305,40 @@ baselith --format json plugin validate <name>
 
 ---
 
+### `plugin schema-init` - Build Plugin Schemas at Deploy Time
+
+Run every enabled plugin's `init_schema()` **as the role that owns the tables**,
+before the application starts.
+
+The serving process must not hold DDL. A deployment that isolates tenants at the
+database connects as a least-privilege role — `NOSUPERUSER NOBYPASSRLS`, owning
+nothing — because PostgreSQL exempts a superuser, a `BYPASSRLS` role and a
+table's *owner* from that table's own row-level-security policy. A plugin that
+builds its schema from the serving process cannot run there: it fails with
+`permission denied for schema public`, or, once granted that, with
+`must be owner of table …` — and ownership is not a privilege that can be
+granted. Worse, a plugin that *did* own its tables would be exempt from their
+policies.
+
+```bash
+baselith plugin schema-init                # every enabled plugin
+baselith plugin schema-init --plugin my-plugin   # just one
+baselith plugin schema-init --format json  # machine-readable summary
+```
+
+Plugins are loaded **cold** — instantiated, never initialised — so no runtime
+client is opened. A plugin with no schema of its own implements nothing and is
+reported as such. The exit code is the number of plugins that failed, so a
+deploy job stops instead of starting an application against a half-built
+schema.
+
+In Kubernetes the chart runs this for you: set
+`database.pluginSchemaInit.enabled` and the Job lands after the migrations and
+after the runtime role exists. See
+[Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security).
+
+---
+
 ### `plugin sign` - Sign Plugin Integrity
 
 Compute the SHA-256 hash of everything a plugin ships and runs and write it into

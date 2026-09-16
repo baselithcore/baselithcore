@@ -91,7 +91,7 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 0,
-      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended \u2014 no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place \u2014 so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
     },
     "revisionHistoryLimit": {
       "type": "integer",
@@ -596,10 +596,18 @@
         },
         "labels": {
           "$ref": "#/definitions/labelMap",
-          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated \u2014 check the Prometheus resource's ruleSelector before concluding the alerts are broken."
         },
         "interval": {
-          "oneOf": [{ "$ref": "#/definitions/duration" }, { "type": "string", "maxLength": 0 }],
+          "oneOf": [
+            {
+              "$ref": "#/definitions/duration"
+            },
+            {
+              "type": "string",
+              "maxLength": 0
+            }
+          ],
           "description": "Group evaluation interval. Empty means Prometheus' global default, which is the right answer unless you have measured otherwise."
         },
         "thresholds": {
@@ -645,12 +653,16 @@
         },
         "disabledAlerts": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Alert names to leave out. Silencing here rather than in Alertmanager keeps the reason in git."
         },
         "extraRules": {
           "type": "array",
-          "items": { "type": "object" },
+          "items": {
+            "type": "object"
+          },
           "description": "Extra rule objects appended to the group verbatim, for deployment-specific alerts that have no business in the chart."
         }
       }
@@ -675,12 +687,120 @@
         }
       }
     },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pluginSchemaInit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        },
+        "runtimeRole": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "adminUser": {
+              "type": "string"
+            },
+            "grantSchemaCreate": {
+              "type": "boolean"
+            },
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "database": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "adminSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "userKey": {
+                  "type": "string"
+                },
+                "passwordKey": {
+                  "type": "string"
+                }
+              }
+            },
+            "passwordSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "waitForDatabaseSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        }
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "selfIngressPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
         },
         "ingressFrom": {
           "type": "array"

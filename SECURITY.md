@@ -13,8 +13,8 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.33.x  | :white_check_mark: |
-| < 0.33  | :x:                |
+| 0.35.x  | :white_check_mark: |
+| < 0.35  | :x:                |
 
 The exact version is recorded in [`core/_version.py`](core/_version.py). The
 table above is rewritten by semantic-release on every release (see the
@@ -80,6 +80,14 @@ Operator hardening checklist:
 - [ ] `SECRET_KEY` set to a high-entropy value (≥ 32 chars); never the default.
 - [ ] `AUTH_REQUIRED=true` in any non-local deployment.
 - [ ] TLS terminated in front of the app — the framework does not serve TLS.
+- [ ] `TRUSTED_HOSTS` set to this deployment's hostnames. Empty leaves the
+      `Host` header unvalidated; production refuses to boot that way unless
+      `BASELITH_ALLOW_UNVALIDATED_HOST=true`.
+- [ ] Multi-tenant deployments: `DB_RLS_ENABLED=true` **and** the application
+      connecting as a least-privilege role (`NOSUPERUSER NOBYPASSRLS`, not the
+      table owner). Policies do not apply to a superuser, a `BYPASSRLS` role,
+      or the owner — production refuses to boot on a role that bypasses them.
+      Provision it with `database.runtimeRole` (Helm) or `compose.rls.yaml`.
 - [ ] `MFA_ENABLED=true` and a TOTP step-up enforced for privileged accounts
       (NIS2 Art. 21(2)(j)); see
       [`core-modules/mfa.md`](mkdocs-site/docs/core-modules/mfa.md).

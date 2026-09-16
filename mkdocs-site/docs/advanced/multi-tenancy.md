@@ -331,11 +331,12 @@ silently hidden. The one exemption is the maintenance identity — see
 [migration 010](#system-tenant-scope) below.
 
 **3. A role that RLS applies to.** This is the step that is easy to miss.
-Postgres exempts two kinds of session from row-level security: a **superuser**,
-and the **table owner** (unless the table is set to `FORCE ROW LEVEL SECURITY`).
-The default single-role deployment is both — `POSTGRES_USER` in the compose
-stack is a superuser that owns every table — so the policies are inert until the
-deployment separates the roles:
+Postgres exempts three kinds of session from row-level security: a
+**superuser**, a role carrying **`BYPASSRLS`**, and the **table owner** (unless
+the table is set to `FORCE ROW LEVEL SECURITY`). The default single-role
+deployment is all three — `POSTGRES_USER` in the compose stack is a superuser
+that owns every table — so the policies are inert until the deployment separates
+the roles:
 
 ```sql
 -- run once, as the owner
@@ -361,6 +362,73 @@ something a migration should impose.
 this setup: it creates a least-privilege role and asserts that a tenant sees only
 its own rows, that a query with no `WHERE tenant_id` still isolates, that a
 cross-tenant write is refused, and that an unbound session sees nothing.
+
+##### The deployment cannot get step 3 silently wrong any more
+
+Steps 1 and 2 fail loudly when they are missing. Step 3 used to fail *silently*:
+every policy in place, `DB_RLS_ENABLED=true` in the config, and a role every one
+of those policies skips. Nothing in the logs, nothing in a health check, and a
+console that reports isolation is on.
+
+`core/db/rls_posture.py` reads the three exemptions back from the catalogs at
+startup whenever `DB_RLS_ENABLED` is on — the role's `rolsuper` and
+`rolbypassrls`, and whether it owns a protected table that lacks
+`FORCE ROW LEVEL SECURITY` — plus whether the policies are enabled at all. In
+**production** a bypass **refuses the boot**, naming every reason at once and
+the remediation; elsewhere it logs at ERROR.
+`BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out for a deployment that
+knows why (a single-tenant install that wants the GUC and nothing else).
+
+##### Provisioning the role
+
+Two supported paths, both idempotent and both keeping DDL with the owner:
+
+=== "Kubernetes (Helm)"
+
+    ```yaml
+    database:
+      runtimeRole:
+        enabled: true
+        name: baselith_runtime
+        adminSecret:
+          name: postgres-superuser   # owner credential, used only by the Job
+    config:
+      DB_USER: baselith_runtime
+      DB_RLS_ENABLED: "true"
+    ```
+
+    A `pre-install,pre-upgrade` Job runs **after** the migration Job, so the
+    `GRANT`s cover the tables that exist and `ALTER DEFAULT PRIVILEGES` covers
+    every table a later migration adds. Re-running it repairs a role whose
+    attributes drifted. The role's password comes from the same
+    `DB_PASSWORD` the app authenticates with, so provisioning and connecting
+    cannot disagree, and neither credential ever reaches a command line.
+
+    **Plugins build their schema at deploy time too.** Set
+    `database.pluginSchemaInit.enabled` alongside: a Job runs
+    `baselith plugin schema-init` as the owner, after the migrations and after
+    the role exists, and only then does Helm apply the Deployment. Without it
+    a plugin that creates its tables from the serving process fails with
+    `permission denied for schema public` — or, once granted that, with
+    `must be owner of table …`, which no grant fixes, because ownership is not
+    a privilege. And a plugin that *did* own its tables would be exempt from
+    their policies, which is the failure this whole arrangement exists to
+    prevent.
+
+=== "Docker Compose"
+
+    ```bash
+    # in .env, before the FIRST `up` of a new volume
+    DB_RUNTIME_USER=baselith_runtime
+    DB_RUNTIME_PASSWORD=<a strong, distinct password>
+
+    docker compose -f compose.prod.yaml -f compose.rls.yaml up -d
+    ```
+
+    `deploy/postgres/initdb/10-runtime-role.sh` runs from the postgres image's
+    entrypoint, which executes `/docker-entrypoint-initdb.d/*` **only on a
+    fresh data directory** — an existing volume never sees it, so provision the
+    role by hand there with the SQL above.
 
 #### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
 

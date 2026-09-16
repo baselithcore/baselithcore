@@ -5,6 +5,29 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.34.0](https://github.com/baselithcore/baselithcore/compare/v0.33.1...v0.34.0) (2026-09-16)
+
+
+### Bug Fixes
+
+* **ci:** keep the auto-fix hooks out of vite's committed bundles ([3e8cf76](https://github.com/baselithcore/baselithcore/commit/3e8cf76e449b6429f1655825d69d87f9702637a0))
+* **security:** declare pip's vendored msgpack and its phantom setuptools ([c4787f1](https://github.com/baselithcore/baselithcore/commit/c4787f10694285f5a38d39969bb2865a5c74375c))
+
+
+### Features
+
+* **plugins:** schema is deploy work, so the app never needs DDL ([b45de76](https://github.com/baselithcore/baselithcore/commit/b45de76e77555a0caae573587688ea04dad7f64d))
+
+## [0.33.1](https://github.com/baselithcore/baselithcore/compare/v0.33.0...v0.33.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **ci:** grant the image workflow the scope its SARIF upload needs ([0c21b19](https://github.com/baselithcore/baselithcore/commit/0c21b1942a6693d06757ca92e77218ce9f883e6a))
+* **docker,ci:** drop 880MB the image cannot run, gate CVEs before the tag exists ([f63c2d5](https://github.com/baselithcore/baselithcore/commit/f63c2d5fb0ef7038715a7c6a1dcc83d15c07e8d4))
+* **docs-sync:** stop prose about the opt-out from switching the gate off ([83c23a6](https://github.com/baselithcore/baselithcore/commit/83c23a6aa926329eead9d7b80ac17f9cfd7f58ce))
+* **security,observability:** make RLS actually apply, attribute LLM spans to their plugin ([42aa14a](https://github.com/baselithcore/baselithcore/commit/42aa14a464b425f98c64889d46dee1637878b6ea))
+
 # [0.33.0](https://github.com/baselithcore/baselithcore/compare/v0.32.0...v0.33.0) (2026-09-14)
 
 
@@ -451,6 +474,35 @@ follows [Keep a Changelog](https://keepachangelog.com) and
 * implement feature flags module, automate CHANGELOG generation, and add release image signing workflow. ([625bc2f](https://github.com/baselithcore/baselithcore/commit/625bc2f3134a6049447ba8572cdb902e7c8d7e03))
 
 ## [Unreleased]
+
+### Security
+- **Row-level security that applies to nobody now fails the boot.** Turning on
+  `DB_RLS_ENABLED` and running the migrations put a policy on every
+  tenant-scoped table — and PostgreSQL skipped all of them, because the
+  application connects as the role that *owns* those tables (policies never
+  apply to a superuser, a `BYPASSRLS` role, or the owner of a table without
+  `FORCE ROW LEVEL SECURITY`, which the migration deliberately does not set).
+  The console reported isolation was on; the database was returning every
+  tenant's rows. A startup check now reads all three exemptions back from the
+  catalogs and **refuses to start in production** when they defeat the
+  policies, naming each reason and the fix
+  (`BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out). With
+  `DB_RLS_ENABLED` off nothing changes — no claim was made, so there is nothing
+  to contradict.
+- **The least-privilege database role is now provisioned for you**, instead of
+  being a manual step in a document. `database.runtimeRole` in the Helm chart
+  runs it as a pre-upgrade Job right after the migrations, so the grants cover
+  the tables that exist and `ALTER DEFAULT PRIVILEGES` covers every table a
+  later migration adds; `compose.rls.yaml` does the same for the Docker
+  Compose stack. Both keep DDL with the owner, are idempotent (an upgrade
+  repairs a role whose attributes drifted), and never put a password on a
+  command line.
+- **`baselithcontrol` ships with `require_admin: true`.** The bundled
+  `configs/plugins.yaml` shipped it as `false`, which in an
+  auth-disabled deployment promoted the anonymous local operator to admin on
+  the control console. It is inert with `AUTH_REQUIRED=true` (the default),
+  where the admin role is always required — but it is the wrong default to
+  bake into an image.
 
 ### Added
 

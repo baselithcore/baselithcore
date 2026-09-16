@@ -586,7 +586,8 @@ the repository's **Security → Code scanning** tab.
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token); report pass for every severity, then a blocking `--severity ERROR --error` pass |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
-| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations. Opt-in: the job runs only with the repository variable `RELEASE_IMAGE_ENABLED=true`, or on demand via `workflow_dispatch` — a release alone does not build an image |
+| Container image CVEs | **Trivy** (`image_build` in `ci.yml`, `scan` in `release-image.yml`) | The image is built and scanned on every PR that touches its inputs (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`), and again at release **before any tag is created**. Fixable HIGH/CRITICAL blocks; every **fixable** MEDIUM-and-up finding goes to the Security tab under the `container-image` category. Findings with no fixed version are not reported: they cannot be acted on from this repository, and the image's last layer applies Debian's security updates, so a fix is picked up by the next build the day it ships |
+| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations, published on every release. `RELEASE_IMAGE_DISABLED=true` is the kill switch; `workflow_dispatch` cuts one on demand for any tag |
 
 CodeQL runs in **report mode** — it publishes findings without failing the
 build. Semgrep and Trivy each run **twice**: a report-only pass that feeds the
@@ -596,6 +597,29 @@ Security tab (Semgrep without `--error`; Trivy `--scanners vuln,secret,misconfig
 --exit-code 1` for anything not accepted in `.trivyignore.yaml`. A new
 HIGH/CRITICAL dependency CVE is therefore a red build, the same posture as
 `pip-audit`; IaC and secret findings stay visible without gating.
+
+<!-- markdownlint-disable MD046 -->
+<!-- The admonition below has more than one paragraph, so its continuation is
+     indented by four spaces; markdownlint reads that as an indented code
+     block. -->
+
+!!! note "The image CVE gate runs before the tag exists, not after"
+    It used to be the last step of the job that publishes the image, which made
+    it a report rather than a gate: by the time it failed, `imagetools create`
+    had already pointed the release tag and `latest` at the vulnerable index,
+    so every `docker pull` and `helm install` resolved it while the release sat
+    red. Nobody could fix that without cutting another release — which is how
+    the whole image pipeline ended up switched off for several versions.
+
+    The scan is now its own job between the per-architecture builds and the
+    manifest merge. A finding means the merge never runs, so no tag is ever
+    created; what the build legs pushed is a pair of untagged digests that no
+    consumer resolves. Only `linux/amd64` is scanned: both platforms start from
+    the same pinned base digest and install the same `uv export --frozen` set,
+    and Trivy matches findings by package name and version rather than by
+    compiled artifact.
+
+<!-- markdownlint-enable MD046 -->
 
 `.trivyignore.yaml` is the single accepted-risk register for both scanners.
 Trivy reads it directly; `pip-audit` takes advisory ids on the command line, so
@@ -656,7 +680,7 @@ dependency is finally fixed and the entry deleted.
     security updates against a frozen set, and refreshing the digest does not
     necessarily collect them, because the upstream image is only rebuilt on its
     own schedule. A pin left alone therefore accumulates distro CVEs until the
-    post-push Trivy gate in `release-image.yml` fails a release.
+    Trivy gate in `release-image.yml` refuses to publish a release.
 
     So the runtime stage runs `apt-get upgrade` on top of the pinned base. The
     two answer different questions: the digest decides which base a build
@@ -672,13 +696,52 @@ dependency is finally fixed and the entry deleted.
     and the 1.39GB Chromium install below it. Last, it sits downstream of the
     source `COPY`s, which change on every release because semantic-release
     rewrites `core/_version.py`; the layer is therefore rebuilt every release
-    for free and is the only one that is. It also sits downstream of the ~110
-    apt packages `playwright install --with-deps` brings in, which an upgrade
-    placed earlier could never reach — on a fresh build that costs nothing,
-    since apt installs those with the archive's security updates already in, but
-    on a release whose Chromium layer comes from a months-old cache those
-    packages are frozen at the day it was built. Re-tagging an unchanged tree
-    reuses the layer, which is the honest limit of the arrangement.
+    for free and is the only one that is. It also sits downstream of the ~60
+    apt packages the Chromium step installs, which an upgrade placed earlier
+    could never reach — on a fresh build that costs nothing, since apt installs
+    those with the archive's security updates already in, but on a release
+    whose Chromium layer comes from a months-old cache those packages are
+    frozen at the day it was built. Re-tagging an unchanged tree reuses the
+    layer, which is the honest limit of the arrangement.
+
+    The same layer upgrades **pip**. `python:3.12-slim` ships pip 25.0.1 in
+    `/usr/local`, and that copy is the runtime pip (`baselith plugin deps
+    install` runs `sys.executable -m pip`), so it cannot be removed; 25.0.1
+    carries five advisories fixed by 26.2.0. The deps stage upgrades its own
+    pip, but its `/usr/local` never reaches the runtime image. The Dockerfile
+    sets a floor (`pip>=26.2.0`), not a pin, so it floats with the apt upgrade.
+
+    That upgrade makes the image scan **louder**, and the reason is worth
+    knowing before someone reads it as a regression. pip 26 ships a CycloneDX
+    SBOM of its own vendored tree at `pip/_vendor/bom.cdx.json`; Trivy reads it
+    and reports all 19 vendored components as installed packages. pip 25.0.1
+    has no such file, so the same tree scanned clean. Measured on the bare base
+    image: no Python findings before the upgrade, two after — a real one
+    (`msgpack`, vendored and inside its advisory's range at 1.1.0 under pip
+    25.0.1 too, simply invisible) and a phantom (`setuptools`, listed in the
+    SBOM as a build requirement but with no code on disk). Both are declared in
+    `.trivyignore.yaml` with the measurements; the upgrade added visibility,
+    not exposure.
+
+!!! note "The browser's apt packages are listed, not delegated"
+    The runtime stage used to run `playwright install --with-deps`. That flag
+    installs Playwright's generic `chromium` package set plus its `tools` set,
+    sized for the full browser and for headed runs — on Debian 13 that meant
+    `libcups2t64` (and avahi behind it), `xvfb`, `xserver-common` and X11
+    bitmap fonts, ~110 packages in all. The cups/avahi/xorg group alone carried
+    37 Debian CVEs with no fixed version, in code nothing in the container can
+    reach: the only binary installed is the headless shell, `ldd` on it names
+    no libcups, and there is no X server to serve.
+
+    The Dockerfile now lists Playwright's own `chromium` list for `debian13`
+    minus `libcups2t64`, and its `tools` list minus `xvfb` and
+    `xfonts-scalable`. `libasound2t64` stays — `headless_shell` links
+    `libasound.so.2` directly and Playwright's launch preflight refuses to
+    start without it. Two guards keep the list honest: that preflight names
+    any missing package at launch, and `image_build` in `ci.yml` launches the
+    browser inside the built image on every PR that touches the Dockerfile.
+    The unit test `test_image_lists_the_browser_apt_packages_itself` pins the
+    shape.
 
     The trade is that the runtime layer is no longer bit-identical from one day
     to the next, which is why the release pipeline scans the image it **pushed**
@@ -1056,6 +1119,20 @@ TRUSTED_HOSTS=["api.example.com","admin.example.com"]
     already rewrites `Host`, an internal-only service — opts out with
     `BASELITH_ALLOW_UNVALIDATED_HOST=true`, an auditable escape hatch that
     downgrades the check to an ERROR log. Outside production it is silent.
+
+!!! danger "Startup check: an RLS policy that applies to nobody is fail-closed"
+    `core.db.rls_posture.enforce_rls_posture` — run from
+    `run_startup_health_checks()` — **refuses to start** the app in production
+    when `DB_RLS_ENABLED=true` and the role the pool authenticates as defeats
+    the policies (`RlsBypassError`). PostgreSQL skips a policy for a
+    `SUPERUSER`, for a `BYPASSRLS` role, and for the **table owner** without
+    `FORCE ROW LEVEL SECURITY` — and the default `DB_USER` is the owner, so the
+    misconfiguration looks identical to a working one from the application
+    side. The escape hatch is `BASELITH_ALLOW_RLS_BYPASS=true`; the remedy is a
+    least-privilege role, provisioned by `database.runtimeRole` (Helm) or
+    `compose.rls.yaml` — see
+    [Multi-Tenancy](multi-tenancy.md#defense-in-depth-row-level-security). With
+    `DB_RLS_ENABLED` off the check is a no-op.
 
 ---
 

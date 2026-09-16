@@ -455,6 +455,9 @@ plugin may persist state under its own directory.
 |---|---|---|
 | Released image | 9.04GB | **4.85GB** |
 
+A later pass took it further, to **4.02GB** — see
+[What could not run inside the image](#what-could-not-run-inside-the-image).
+
 Two further changes to the same effect:
 
 - **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
@@ -465,12 +468,37 @@ Two further changes to the same effect:
 - **The Chromium install moved above the source `COPY`s.** It is the largest
   single step (1.39GB) and depends on nothing but the installed dependencies;
   sitting below them, a one-line code change invalidated it and the build
-  reinstalled the browser and its ~100 apt packages from scratch.
+  reinstalled the browser and its apt packages from scratch.
 
 `git`, `ssdeep` and `libfuzzy-dev` are no longer installed at all: no
 requirement is a VCS URL, and nothing in the repository references the fuzzy
 hashing library — the released image never carried it at runtime, so nothing
 could have been linking it.
+
+#### What could not run inside the image
+
+A later pass built the image and then *ran* things in it, rather than reading
+the Dockerfile. Five payloads turned out to be unreachable from any code path
+the container can execute. Measured on `linux/arm64`: **4.94GB → 4.02GB**.
+
+| Removed | Size | Why it could never work |
+|---|---:|---|
+| `chromium` (the full browser) | 641MB | `playwright install chromium` fetches two binaries, and with no channel set `launch(headless=True)` resolves the *headless shell*, not this one. The full browser is what `headless=False` would start — and no stage installs Xvfb or an X client, so a headed launch fails with `Target page, context or browser has been closed`. Verified both ways. The install now passes `--only-shell` |
+| `cuda-bindings`, `cuda-pathfinder` | 27MB | CUDA Python bindings in a CPU-only image. They are linux dependencies of the PyPI `torch` wheel, and the filter that strips the GPU stack matched `^nvidia-` and `^triton` only. The post-install guard missed them too — it checked `site-packages` for a directory starting with `nvidia`, and these install one called `cuda`, so it reported success on every build |
+| the second copy of `core/` and `plugins/` | 25MB | `pip install .` materialises them inside `/install-app` alongside the console script, and `/install-app` precedes `/app` on `PYTHONPATH`. Which copy won depended on the working directory — `/app/core` from `WORKDIR`, `/install-app/…/core` from anywhere else. Since `baselith plugin enable` *writes* `configs/plugins.yaml`, the CLI run from the wrong directory edited a tree the API never read. Only the entry point and its `dist-info` are kept |
+| `pytesseract`, `pdf2image` | ~10MB | Wrappers around the `tesseract` and `pdftoppm` binaries, neither of which the image installs. `pytesseract.get_tesseract_version()` raised `TesseractNotFoundError` in the released image; the plugin caught it and degraded, so the capability was never delivered and never complained |
+| `pyautogui`, `mss` | ~5MB | Both need an X11 display: `KeyError: 'DISPLAY'` and `Cannot connect to display` in a headless container |
+
+One thing was *added* in the same pass, for the opposite reason. spaCy and its
+compiled stack are ~160MB and `enable_spacy_documents` defaults to **on**, but
+no model was baked — so `spacy.load("en_core_web_sm")` raised `E050` and
+`core/nlp/` silently fell back to a blank sentencizer with no NER. The 15MB
+model is now installed at a pinned version, and the build fails if the
+installed spaCy cannot load it.
+
+An operator who needs OCR or a headed browser derives an image that installs
+the missing system packages and adds the extra back; that is a smaller and more
+honest surface than shipping the Python half to everyone.
 
 #### Release pipeline
 
@@ -483,9 +511,28 @@ all interpreted. It also keeps a per-platform layer cache in the registry
 (`:buildcache-amd64` / `:buildcache-arm64`), so a release that only changes code
 reuses the dependency, model and browser layers instead of rebuilding them.
 
-Signing, the Trivy gate and the provenance attestation all run against the
-**index** digest, which is what a puller of the tag resolves — not against
-either platform digest.
+Signing and the provenance attestation run against the **index** digest, which
+is what a puller of the tag resolves — not against either platform digest.
+
+Three things the pipeline gained once it was turned back on by default:
+
+- **The CVE gate moved ahead of the tag.** It ran as the closing step of the
+  publish job, after `imagetools create` had already pointed the release tag and
+  `latest` at the index — a report, not a gate. It is now a job of its own
+  between the builds and the merge, so a fixable HIGH/CRITICAL means no tag is
+  ever created. See [Security](security.md#supply-chain-security).
+- **Moving tags.** Each release publishes `X.Y.Z`, `X.Y`, `X` and `latest` for
+  the same index; a prerelease gets its exact tag only.
+- **The image is built on pull requests.** `image_build` in `ci.yml` builds and
+  scans the same `Dockerfile` whenever a PR touches what the image contains
+  (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`), and smoke-tests
+  the result: the `baselith` console script answers, `core` resolves under
+  `/app` from every working directory, no CUDA package is present, the spaCy
+  pipeline loads with NER, and Playwright launches headless. Each of those
+  assertions exists because the corresponding property had silently broken. A
+  main-branch run also refreshes the shared `:buildcache-amd64`, which used to
+  be written only by releases — so the first build after a quiet month started
+  cold.
 
 ### Postgres image and the vector store
 

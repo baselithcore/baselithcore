@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         uninstall_plugin_cmd,
         update_plugin_cmd,
     )
+    from .schema_init import schema_init
     from .sign import sign_plugin
     from .tree import plugin_tree
 
@@ -78,6 +79,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "config_reset": "config",
     "plugin_logs": "logs",
     "plugin_tree": "tree",
+    "schema_init": "schema_init",
     "sign_plugin": "sign",
 }
 
@@ -108,6 +110,7 @@ __all__ = [
     "publish_plugin_cmd",
     "register_parser",
     "search_plugins",
+    "schema_init",
     "sign_plugin",
     "status_local_plugins",
     "sync_plugins_into_docker",
