@@ -104,9 +104,7 @@ def test_shell_core_image_overrides_persisted_value(tmp_path, monkeypatch):
         "BASELITH_CORE_IMAGE=ghcr.io/baselithcore/baselithcore:persisted\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv(
-        "BASELITH_CORE_IMAGE", "ghcr.io/baselithcore/baselithcore:shell"
-    )
+    monkeypatch.setenv("BASELITH_CORE_IMAGE", "ghcr.io/baselithcore/baselithcore:shell")
 
     env = add_docker._compose_environment(env_file)
 
@@ -120,9 +118,7 @@ def test_set_docker_core_image_persists_selected_runtime_image(tmp_path):
     assert "BASELITH_CORE_IMAGE=ghcr.io/baselithcore/baselithcore:test" in (
         env_file.read_text(encoding="utf-8")
     )
-    assert not set_docker_core_image(
-        "ghcr.io/baselithcore/baselithcore:test", env_file
-    )
+    assert not set_docker_core_image("ghcr.io/baselithcore/baselithcore:test", env_file)
 
 
 def _env_values(path: Path) -> dict[str, str]:
@@ -159,3 +155,31 @@ def test_new_checkouts_get_distinct_secrets_and_projects(tmp_path, monkeypatch):
         profiles.append(_env_values(checkout / "configs" / ".env.docker.core"))
     for key in ("SECRET_KEY", "DB_PASSWORD", "COMPOSE_PROJECT_NAME"):
         assert profiles[0][key] != profiles[1][key]
+
+
+def test_generated_env_files_are_owner_only(tmp_path, monkeypatch):
+    """Generated credentials must not be readable by other accounts.
+
+    The env file carries a live DB_PASSWORD and the SECRET_KEY, in clear text,
+    because compose and pydantic-settings read it themselves. The mode is the
+    only control left, so it is asserted rather than assumed.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("SECRET_KEY=changeme\n", encoding="utf-8")
+
+    ensure_dev_env()
+    ensure_docker_core_env()
+
+    for path in (tmp_path / ".env", tmp_path / "configs" / ".env.docker.core"):
+        assert path.stat().st_mode & 0o777 == 0o600, path
+
+
+def test_existing_world_readable_env_file_is_tightened(tmp_path, monkeypatch):
+    """A file left 0644 by an earlier version is fixed on the next write."""
+    monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("SECRET_KEY=changeme\n", encoding="utf-8")
+    env_file.chmod(0o644)
+
+    assert ensure_dev_env(env_file)
+    assert env_file.stat().st_mode & 0o777 == 0o600

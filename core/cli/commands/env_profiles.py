@@ -1,10 +1,47 @@
-"""Environment profile helpers for local setup flows."""
+"""Environment profile helpers for local setup flows.
 
+**Why these files hold plaintext secrets.** ``ensure_dev_env`` and
+``ensure_docker_core_env`` generate a ``DB_PASSWORD`` and a ``SECRET_KEY`` when
+the file still carries a placeholder, and write them as ordinary ``KEY=value``
+lines. That shape is dictated by the consumer: Docker Compose's ``env_file``
+and pydantic-settings both read the file themselves, before any code of ours
+runs, so there is nowhere to decrypt. An encrypted value would need its key
+stored beside the ciphertext, which protects nothing.
+
+The control that does apply is the filesystem: :func:`_write_env_file` is the
+single writer here, and it creates the file ``0600`` and re-applies that mode
+on every write, so the generated credentials are unreadable to other accounts
+on the machine even when the repository checkout is group- or world-readable.
+"""
+
+import os
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_urlsafe
 
 from core.cli.commands.doctor_checks import is_placeholder_secret
+
+#: Owner read/write only. An env file holds a live database password and the
+#: application signing key; the default 0644 of a fresh file hands both to
+#: every account on the host.
+_ENV_FILE_MODE = 0o600
+
+
+def _write_env_file(path: Path, text: str) -> None:
+    """Write *text* to *path* as an owner-only file.
+
+    Args:
+        path: The env file to write. Created when absent.
+        text: The full file content, replacing whatever was there.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _ENV_FILE_MODE)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    # os.open only applies the mode when it CREATES the file, so a file that
+    # already existed keeps whatever mode it was given — including the 0644 an
+    # earlier version of this module left behind.
+    os.chmod(path, _ENV_FILE_MODE)
+
 
 DEV_DEFAULTS = {
     "APP_ENV": "development",
@@ -103,9 +140,9 @@ def ensure_dev_env(env_path: Path | None = None) -> list[str]:
         if not source.exists():
             source = Path.cwd() / "configs" / ".env.base"
         if source.exists():
-            path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            _write_env_file(path, source.read_text(encoding="utf-8"))
         else:
-            path.write_text("", encoding="utf-8")
+            _write_env_file(path, "")
 
     lines = path.read_text(encoding="utf-8").splitlines()
     values = _parse_env(lines)
@@ -134,7 +171,7 @@ def ensure_dev_env(env_path: Path | None = None) -> list[str]:
         changed.append("SECRET_KEY")
 
     if changed:
-        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        _write_env_file(path, "\n".join(lines).rstrip() + "\n")
     return changed
 
 
@@ -142,12 +179,12 @@ def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
     """Create or normalize the local Docker core env file."""
     path = env_path or Path.cwd() / "configs" / ".env.docker.core"
     if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         source = Path.cwd() / "configs" / ".env.docker.core.example"
         if source.exists():
-            path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            _write_env_file(path, source.read_text(encoding="utf-8"))
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("", encoding="utf-8")
+            _write_env_file(path, "")
 
     lines = path.read_text(encoding="utf-8").splitlines()
     values = _parse_env(lines)
@@ -182,7 +219,7 @@ def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
         changed.append("SECRET_KEY")
 
     if changed:
-        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        _write_env_file(path, "\n".join(lines).rstrip() + "\n")
     return changed
 
 
@@ -199,7 +236,7 @@ def set_docker_core_image(image: str, env_path: Path | None = None) -> bool:
     lines, replaced = _set_env_value(lines, "BASELITH_CORE_IMAGE", image)
     if not replaced:
         lines.append(f"BASELITH_CORE_IMAGE={image}")
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    _write_env_file(path, "\n".join(lines).rstrip() + "\n")
     return True
 
 

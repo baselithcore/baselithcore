@@ -166,6 +166,16 @@ Persisting the image is important for plugin workflows: later calls to
 `baselith plugin add <repo-or-path> --docker` reuse the same base image instead
 of falling back to the package version default.
 
+!!! note "Generated env files are owner-only"
+    `baselith up` and `baselith setup` generate a `DB_PASSWORD` and a
+    `SECRET_KEY` whenever the file still holds a placeholder, and write them as
+    plain `KEY=value` lines — Docker Compose's `env_file` and pydantic-settings
+    read the file before any of our code runs, so there is nothing that could
+    decrypt them. Both writers therefore create `.env` and
+    `configs/.env.docker.core` with mode `0600` and re-apply that mode on every
+    write, including to a file an older version left `0644`. Keep it that way
+    when you edit the file by hand, and never commit it.
+
 **Options**:
 
 | Flag        | Description                                               |

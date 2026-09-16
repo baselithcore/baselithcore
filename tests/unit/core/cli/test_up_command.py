@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from core.cli.commands import up
 
 
