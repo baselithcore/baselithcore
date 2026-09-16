@@ -415,6 +415,21 @@ therefore bought the plugin *more* authority than its author asked for.
 Three keys that were previously read and silently dropped are now carried on
 `PluginMetadata`: `entry_point`, `id` (as `.plugin_id`) and `repository`.
 
+`PluginMetadata` also carries the two keys the Docker installer reads,
+`frontend` and `health_endpoint` (`core/plugins/_metadata.py`), so
+`to_dict()` — what `/plugins` and the marketplace see — reports the same
+installation contract the manifest declared instead of dropping it at parse
+time. `frontend` is the build block (`path`, `package_manager`,
+`build_command`, `output_dir`) or `false` to disable frontend detection;
+`health_endpoint` is the unauthenticated path probed after installation. Both
+are declarative metadata: the runtime carries them, the CLI acts on them. See
+[Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
+
+`PluginManifestModel` accepts `entrypoint` as a legacy spelling of
+`entry_point`; `from_model()` prefers the canonical key and falls back to the
+legacy one, so an old manifest keeps resolving its class while the schema stays
+`extra="forbid"` for everything else.
+
 #### Vendor extensions: the `x-` namespace
 
 A fail-closed schema has exactly as many legal keys as the core understands, so

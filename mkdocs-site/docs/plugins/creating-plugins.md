@@ -143,6 +143,9 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `plugin_dependencies`   | No       | Map of plugin name to version constraint (e.g. `my_plugin: '>=2.0.0'`). Declares that this plugin needs another one, and **orders initialization** — see below |
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 | `entry_point`           | No       | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`), resolved inside the plugin's own package. Required when `plugin.py` exposes more than one concrete `Plugin` subclass — ambiguity is a hard error, not a guess. |
+| `entrypoint`            | No       | Legacy spelling of `entry_point`, accepted for manifests written before the canonical key existed. `entry_point` wins when both are present; new plugins declare `entry_point` only. |
+| `frontend`              | No       | Frontend build contract used by `baselith plugin add <repository> --docker`: a mapping with `path`, `package_manager` (`npm`, `pnpm` or `yarn`), `build_command` and `output_dir`, or `false` to disable frontend detection. See [Packaging › Docker installation contract](packaging.md#docker-installation-contract). |
+| `health_endpoint`       | No       | Local HTTP path probed after a Docker installation. It must answer 200 with no authentication and no redirect; without it the installer probes the default `/<name>/`. |
 
 !!! danger "Unknown manifest keys are refused"
     The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is

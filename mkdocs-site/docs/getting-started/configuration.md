@@ -832,23 +832,6 @@ Declared in `core.utils.tokens`.
 | --- | --- | --- | --- |
 | `BASELITH_EXACT_TOKEN_COUNTING` | `bool` | `False` | Use anthropic.Anthropic().messages.count_tokens (via estimate_tokens_async) for claude* models instead of the tiktoken/heuristic estimate. Off by default: ANTHROPIC_API_KEY alone is not enough to enable it, since a key is present in most production deployments already and this call is a blocking network request. The sync estimate_tokens() never makes this call regardless of this setting. |
 
-## Transactional-email (SMTP) settings for the auth plugin
-
-Declared in `plugins.auth._config_email`.
-
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `AUTH_APP_BASE_URL` | `str` | `http://localhost:8000` | Public base URL of the app, used to build email links |
-| `AUTH_EMAIL_FROM_NAME` | `str` | `Baselith` |  |
-| `AUTH_SECURITY_NOTICES_ENABLED` | `bool` | `True` | Email the account owner when an authenticator changes (password changed, MFA enabled/disabled, passkey added/removed, API key created). Best-effort: a delivery failure never blocks the change. |
-| `AUTH_SMTP_FROM` | `str` | `no-reply@baselith.local` | From address for transactional emails |
-| `AUTH_SMTP_HOST` | `Optional[str]` | *empty* | SMTP server host. When unset, emails are logged (dev mode). |
-| `AUTH_SMTP_PASSWORD` :material-key: | `Optional[SecretStr]` | *empty* |  |
-| `AUTH_SMTP_PORT` | `int` | `587` |  |
-| `AUTH_SMTP_SSL` | `bool` | `False` | Use implicit TLS (SMTPS, port 465) instead of STARTTLS. |
-| `AUTH_SMTP_USERNAME` | `Optional[str]` | *empty* |  |
-| `AUTH_SMTP_USE_TLS` | `bool` | `True` | STARTTLS (upgrade a plaintext connection) — the port-587 convention. |
-
 ## OpenAI Realtime WebSocket adapter for the core duplex voice protocol
 
 Declared in `plugins.baselithbot.voice.openai_realtime`.
@@ -861,101 +844,6 @@ Declared in `plugins.baselithbot.voice.openai_realtime`.
 | `BASELITHBOT_VOICE_REALTIME_SILENCE_DURATION_MS` | `int` | `500` | Server-VAD silence window marking end of user speech. |
 | `BASELITHBOT_VOICE_REALTIME_VOICE` | `str` | `alloy` | Assistant voice preset. |
 
-## Typed configuration for the BaselithControl plugin
-
-Declared in `plugins.baselithcontrol.config`.
-
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `BASELITHCONTROL_ALERTS_DLQ_THRESHOLD` | `int` | `10` | Dead-letter backlog size that raises an alert (0 = never). |
-| `BASELITHCONTROL_ALERTS_ENABLED` | `bool` | `True` | Evaluate alert rules on a cadence and announce transitions to the dashboard banner (and any registered webhook). Off means the console stays pull-only. |
-| `BASELITHCONTROL_ALERTS_INTERVAL_SECONDS` | `float` | `30.0` | How often the alert rules are evaluated. |
-| `BASELITHCONTROL_ALERTS_PLUGIN_DOWN_SECONDS` | `float` | `60.0` | How long a plugin must stay unhealthy before it alerts. Every reload makes a plugin briefly unhealthy; alerting on that is how operators learn to ignore alerts. |
-| `BASELITHCONTROL_ALERTS_WEBHOOK_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC signing secret for the alert webhook endpoint. |
-| `BASELITHCONTROL_ALERTS_WEBHOOK_URL` :material-key: | `SecretStr \| None` | *empty* | Deliver alert transitions to this URL through the core webhook service (URL/SSRF validation, HMAC signing and retries come from there). A Slack-style URL is itself a credential, hence SecretStr. |
-| `BASELITHCONTROL_APPROVAL_TIMEOUT_SECONDS` | `int` | `60` | How long to wait for a human approval before failing closed. |
-| `BASELITHCONTROL_AUDIT_MAX_EVENTS` | `int` | `500` | Ring-buffer capacity for the in-memory audit trail. |
-| `BASELITHCONTROL_AUDIT_RETENTION_DAYS` | `int` | `90` | Days of durable audit history retained (pruned lazily). |
-| `BASELITHCONTROL_BACKSTAGE_PORTAL_URL` | `str \| None` | *empty* | Deep-link to a running Backstage developer portal. When set (and `http(s)`), the System Console → Backstage panel shows an 'Open portal' button that opens it in a new tab. This is the portal app's own URL — distinct from `BASELITH_BASE_URL` (the framework base the exporter embeds in catalog annotations). Purely a navigation convenience; the export itself works without it. |
-| `BASELITHCONTROL_CARBON_ENABLED` | `bool` | `True` | Estimate energy (Wh) and CO2e (g) for measured LLM usage alongside cost. Estimates only — bucketed per-model energy × PUE × grid carbon intensity, with the assumptions published in the API. |
-| `BASELITHCONTROL_CARBON_GRID_INTENSITY_GCO2E_KWH` | `float` | `475.0` | Grid carbon intensity in gCO2e/kWh used for the estimate. Default is the IEA world average; set your provider/region figure (e.g. ~50 for a nordic region, ~700 for coal-heavy grids). |
-| `BASELITHCONTROL_CARBON_PUE` | `float` | `1.2` | Datacenter power-usage-effectiveness multiplier. |
-| `BASELITHCONTROL_CONFIG_SYNC` | `bool` | `True` | Converge each worker's live plugin registry to plugins.yaml when the file changes, so a toggle handled by one uvicorn worker also takes effect on every other worker instead of only until restart. |
-| `BASELITHCONTROL_CONFIG_SYNC_GRACE_SECONDS` | `float` | `20.0` | Window after a plugins.yaml write during which a config-enabled plugin still absent from a worker's registry is projected as 'discovered' (convergence in flight) rather than 'failed'. |
-| `BASELITHCONTROL_COST_FLUSH_SECONDS` | `float` | `15.0` | How often the in-memory cost buffer is flushed to Postgres. |
-| `BASELITHCONTROL_CROSS_WORKER_EVENTS` | `bool` | `True` | Mirror lifecycle events across uvicorn workers over Redis pub/sub so the SSE stream and the retained timeline see actions applied on any worker. Degrades silently to per-worker events when Redis is unreachable (it is an optional resource). |
-| `BASELITHCONTROL_DEPLOYMENT_KIND` | `str \| None` | *empty* | Declare the deployment topology instead of detecting it (kubernetes, docker, docker_compose, podman, containerd, cri-o, ecs, nomad, serverless, paas, systemd, lxc, bare). Set it when the runtime hides its markers (a rootless container with no cgroup evidence, a chroot, a VM image baked by another tool) — a declared value always wins over detection. |
-| `BASELITHCONTROL_ENABLED` | `bool` | `True` | Whether the plugin is active. |
-| `BASELITHCONTROL_GATE_LEVEL` | `GateLevel` | `GateLevel.OPEN` | Extra approval gate for destructive actions. 'open' = RBAC only. |
-| `BASELITHCONTROL_LIFECYCLE_CAPACITY` | `int` | `200` | Ring-buffer capacity for the retained lifecycle timeline. |
-| `BASELITHCONTROL_LOGS_ENABLED` | `bool` | `True` | Whether the root log handler captures records for the viewer. |
-| `BASELITHCONTROL_LOGS_SHARED` | `bool` | `True` | Mirror captured logs to a shared Redis list so the viewer shows every worker's records (complete under WEB_CONCURRENCY>1) and the live tail streams cross-worker. Degrades silently to the per-worker ring when Redis is unreachable. |
-| `BASELITHCONTROL_LOG_BUFFER_CAPACITY` | `int` | `2000` | Ring-buffer capacity for the retained application-log tail. |
-| `BASELITHCONTROL_NEWS_ALLOW_INTERNAL` | `bool` | `False` | Skip the SSRF private/loopback checks for news feeds (dev only — lets you point the ticker at a local fixture feed). |
-| `BASELITHCONTROL_NEWS_CACHE_TTL_SECONDS` | `float` | `600.0` | How long a fetched news snapshot is cached before refresh. |
-| `BASELITHCONTROL_NEWS_ENABLED` | `bool` | `True` | Whether the scrolling news ticker fetches and renders feeds. |
-| `BASELITHCONTROL_NEWS_FEEDS` | `list[dict[str, Any]] \| None` | *empty* | Override feed list: a list of {url, source, category, lang} dicts. When unset, a curated default set (AI/tech/cyber) is used. Every URL is SSRF-validated at fetch time regardless of source. |
-| `BASELITHCONTROL_NEWS_FETCH_TIMEOUT_SECONDS` | `float` | `6.0` | Per-feed HTTP timeout when refreshing the news snapshot. |
-| `BASELITHCONTROL_NEWS_MAX_ITEMS` | `int` | `40` | Maximum merged headlines kept in the ticker snapshot. |
-| `BASELITHCONTROL_NEWS_STRICT_TOPICS` | `bool` | `True` | Apply the editorial relevance gate to non-curated feeds: headlines that match no topic lane (AI, society, regulation, repos, tech, cyber) are dropped and survivors are re-tagged to their real lane. Turn off to render every fetched headline verbatim. |
-| `BASELITHCONTROL_PERSIST_AUDIT` | `bool` | `True` | Persist governed-action audit records to Postgres so the trail is durable and complete across workers/restarts. Degrades to the in-memory ring (per-worker, resets on restart) when no database is reachable. |
-| `BASELITHCONTROL_PERSIST_COSTS` | `bool` | `True` | Persist measured per-plugin LLM spend to Postgres so it survives restarts and sums correctly across workers. Degrades to an in-memory ledger (resets on restart) when no database is reachable. |
-| `BASELITHCONTROL_REQUIRE_ADMIN` | `bool` | `True` | Gate lifecycle actions behind the auth `admin` role. Set false to allow any authenticated user (trusted single-operator deployments). |
-| `BASELITHCONTROL_REQUIRE_MFA_FOR_DESTRUCTIVE` | `bool` | `False` | Strict mode: refuse destructive operations outright for accounts with no MFA enrolled (forces enrollment before dangerous actions). |
-| `BASELITHCONTROL_SSE_HEARTBEAT_SECONDS` | `float` | `20.0` | Idle keepalive interval for the SSE stream. |
-| `BASELITHCONTROL_SSE_MAX_CONNECTIONS` | `int` | `200` | Per-worker ceiling on open SSE connections (event stream + log tail combined). Excess connections are rejected with 429. |
-| `BASELITHCONTROL_SSE_MAX_PER_USER` | `int` | `8` | Per-user ceiling on concurrent SSE connections (per worker). |
-| `BASELITHCONTROL_STATUS_SHARED` | `bool` | `True` | Share each plugin's 'last healthy' observation across uvicorn workers through Redis, so the Last-healthy figure does not jump depending on which worker served the poll. Degrades silently to the per-worker view without Redis. |
-| `BASELITHCONTROL_STEP_UP_MFA` | `bool` | `True` | Require a fresh TOTP proof (X-MFA-Code header) for destructive operations (db reset, cache clear, plugin disable) from admins who have MFA enrolled. Admins without MFA pass unless require_mfa_for_destructive is also on. |
-| `BASELITHCONTROL_TRACES_CAPACITY` | `int` | `500` | Number of recent traces retained per worker (oldest evicted). |
-| `BASELITHCONTROL_TRACES_ENABLED` | `bool` | `True` | Retain completed spans locally so the dashboard can render a live trace waterfall. Observes the core span seam — the OTLP export to a collector (when configured) is unaffected. |
-| `BASELITHCONTROL_TRACES_IGNORE_SELF` | `bool` | `True` | Drop spans produced by the dashboard's own API polling, its SPA assets and infrastructure probes (/health, /metrics). Without this the control plane observes itself and evicts real application traces from the retention ring within seconds. |
-| `BASELITHCONTROL_TRACES_MAX_SPANS_PER_TRACE` | `int` | `200` | Per-trace span ceiling; beyond it the trace is marked truncated so a runaway loop cannot pin unbounded memory. |
-| `BASELITHCONTROL_TRACES_RETENTION_MINUTES` | `float` | `30.0` | How long a retained trace stays readable before pruning. |
-| `BASELITHCONTROL_TRACES_SHARED` | `bool` | `True` | Mirror retained spans to a shared Redis list so the waterfall is complete across workers. Spans never leave the process that produced them, so without this a trace served by worker A is invisible on worker B under WEB_CONCURRENCY>1. Only already-redacted, already-truncated spans are mirrored. Degrades silently to the per-worker store when Redis is unreachable. |
-| `BASELITHCONTROL_VOLUME_CAPACITY` | `int` | `720` | Ring-buffer capacity for the request-volume time-series. |
-| `BASELITHCONTROL_VOLUME_INTERVAL_SECONDS` | `float` | `5.0` | Sampling cadence for the retained request-volume series. |
-
-## plugins.docheck.vendor.src.docheck.core.config
-
-Declared in `plugins.docheck.vendor.src.docheck.core.config`.
-
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `DOCHECK_APP_NAME` | `str` | `docheck-engine` |  |
-| `DOCHECK_AUDIT_SIGNING_KEY_PATH` | `Path` | `Path('./storage/audit_ed25519.key')` | Audit |
-| `DOCHECK_BIND_TCP` | `str \| None` | *empty* |  |
-| `DOCHECK_BUILTIN_DISABLED_RULES` | `str` | *empty* | DocCheck_Builtin policy controls (deterministic baseline rules). Comma-separated rule ids to disable, e.g. "FORMAT-DATE-ISO,ID-CF-CHECKSUM". |
-| `DOCHECK_BUILTIN_SEVERITY_OVERRIDES` | `str` | *empty* | Severity overrides, format "RULE_ID=FAIL,RULE_ID2=WARN". |
-| `DOCHECK_CHROMA_PERSIST_DIR` | `Path` | `Path('./storage/chroma')` | Vector DB |
-| `DOCHECK_DB_BACKEND` | `str` | `sqlite` |  |
-| `DOCHECK_DB_ENCRYPTION_ENABLED` | `bool` | `False` |  |
-| `DOCHECK_DB_KEY_KEYRING_SERVICE` | `str` | `docheck` |  |
-| `DOCHECK_DB_KEY_KEYRING_USER` | `str` | `master` |  |
-| `DOCHECK_DB_PATH` | `Path` | `Path('./storage/docheck.db')` |  |
-| `DOCHECK_DEBUG` | `bool` | `False` |  |
-| `DOCHECK_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding |
-| `DOCHECK_LLM_API_KEY` :material-key: | `SecretStr` | `SecretStr('ollama')` |  |
-| `DOCHECK_LLM_BASE_URL` | `str` | `http://127.0.0.1:11434/v1` |  |
-| `DOCHECK_LLM_FALLBACK_MODEL` | `str` | `qwen2.5:3b` |  |
-| `DOCHECK_LLM_PRIMARY_MODEL` | `str` | `llama3.1:8b` |  |
-| `DOCHECK_LLM_PROVIDER` | `str` | `ollama` | LLM Provider: ollama (default, local), vllm, openai-compatible |
-| `DOCHECK_LLM_REQUEST_TIMEOUT_S` | `float` | `120.0` |  |
-| `DOCHECK_LLM_TEMPERATURE` | `float` | `0.1` |  |
-| `DOCHECK_LLM_TOP_P` | `float` | `0.9` |  |
-| `DOCHECK_MULTITENANT_ENABLED` | `bool` | `False` | Multi-tenant (post-MVP — disabled by default) |
-| `DOCHECK_OCR_ENGINE` | `str` | `paddleocr` | OCR |
-| `DOCHECK_OIDC_AUDIENCE` | `str` | `docheck` |  |
-| `DOCHECK_OIDC_ISSUER` | `str` | *empty* | OIDC (activated when issuer set) |
-| `DOCHECK_OIDC_JWKS_URI` | `str` | *empty* |  |
-| `DOCHECK_POSTGRES_DSN` :material-key: | `SecretStr` | `SecretStr('')` |  |
-| `DOCHECK_QDRANT_URL` | `str` | *empty* |  |
-| `DOCHECK_RETENTION_DEFAULT_DAYS` | `int` | `365` | Retention |
-| `DOCHECK_SOCKET_PATH` | `Path` | `Path('./storage/docheck.sock')` |  |
-| `DOCHECK_STORAGE_ROOT` | `Path` | `Path('./storage')` |  |
-| `DOCHECK_VECTOR_BACKEND` | `str` | `chroma` |  |
-| `DOCHECK_VERSION` | `str` | `0.1.0` |  |
-
 ## Auditing your environment
 
 ```bash
@@ -963,4 +851,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-629 settings documented.
+538 settings documented.
