@@ -31,6 +31,7 @@ from core.cli.handlers import (
     cmd_setup,
     cmd_shell,
     cmd_test,
+    cmd_up,
     cmd_verify,
     run_command,
 )
@@ -65,7 +66,7 @@ except ImportError:
 
 COMMANDS_MAP = {
     "SCAFFOLDING": ["init", "setup", "plugin"],
-    "DEVELOPMENT": ["run", "shell", "docs"],
+    "DEVELOPMENT": ["run", "up", "shell", "docs"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
     "INFRASTRUCTURE": ["db", "cache", "queue"],
     "QUALITY & TESTS": ["test", "lint"],
@@ -82,6 +83,7 @@ COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "config": lambda *args, **kwargs: cmd_config(*args, **kwargs),
     "verify": lambda *args, **kwargs: cmd_verify(*args, **kwargs),
     "run": lambda *args, **kwargs: cmd_run(*args, **kwargs),
+    "up": lambda *args, **kwargs: cmd_up(*args, **kwargs),
     "shell": lambda *args, **kwargs: cmd_shell(*args, **kwargs),
     "db": lambda *args, **kwargs: cmd_db(*args, **kwargs),
     "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),

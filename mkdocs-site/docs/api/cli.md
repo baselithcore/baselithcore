@@ -33,6 +33,7 @@ baselith --format json <command>  # Global output formatting
 │                                 plugin          Manage framework plugins                               │
 │                                                                                                        │
 │   DEVELOPMENT                   run             Start the development server                           │
+│                                 up              Start the complete Docker runtime                      │
 │                                 shell           Start interactive shell                                │
 │                                 docs            Generate documentation                                 │
 │                                                                                                        │
@@ -54,6 +55,7 @@ baselith --format json <command>  # Global output formatting
   Bootstrap a new project         baselith init my-app
   Check system health             baselith doctor
   Start dev server                baselith run
+  Start Docker runtime            baselith up
   Run the test suite              baselith test
 ```
 
@@ -142,6 +144,34 @@ Completed in 0.07s
 - After configuration changes
 - For troubleshooting connectivity issues
 - In CI/CD pipelines with `--json` for automated health gates
+
+---
+
+### `up` - Docker Runtime
+
+Prepare a standalone Docker runtime project and start BaselithCore with
+PostgreSQL, FalkorDB/Redis, and Qdrant.
+
+```bash
+baselith up
+baselith up --image ghcr.io/baselithcore/baselithcore:<tag>
+```
+
+The command creates the missing runtime files, prepares
+`configs/.env.docker.core`, persists the selected `BASELITH_CORE_IMAGE`, pulls
+the backing service images, builds the API image, starts the stack, and waits
+for `/health`.
+
+Persisting the image is important for plugin workflows: later calls to
+`baselith plugin add <repo-or-path> --docker` reuse the same base image instead
+of falling back to the package version default.
+
+**Options**:
+
+| Flag        | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `--image`   | Core image used as the API base image                     |
+| `--timeout` | Seconds to wait for the Core health check (default: 300) |
 
 ---
 

@@ -186,6 +186,23 @@ def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
     return changed
 
 
+def set_docker_core_image(image: str, env_path: Path | None = None) -> bool:
+    """Persist the API base image used by the standalone Docker runtime."""
+    path = env_path or Path.cwd() / "configs" / ".env.docker.core"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    values = _parse_env(lines)
+
+    if values.get("BASELITH_CORE_IMAGE") == image:
+        return False
+
+    lines, replaced = _set_env_value(lines, "BASELITH_CORE_IMAGE", image)
+    if not replaced:
+        lines.append(f"BASELITH_CORE_IMAGE={image}")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return True
+
+
 def _local_secret_key() -> str | None:
     local_env = Path.cwd() / ".env"
     if not local_env.is_file():
@@ -231,4 +248,4 @@ def _set_env_value(lines: list[str], key: str, value: str) -> tuple[list[str], b
     return updated, replaced
 
 
-__all__ = ["ensure_dev_env", "ensure_docker_core_env"]
+__all__ = ["ensure_dev_env", "ensure_docker_core_env", "set_docker_core_image"]

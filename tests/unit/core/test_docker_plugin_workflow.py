@@ -2,7 +2,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.cli.commands.doctor_checks import is_placeholder_secret
-from core.cli.commands.env_profiles import ensure_dev_env, ensure_docker_core_env
+from core.cli.commands.env_profiles import (
+    ensure_dev_env,
+    ensure_docker_core_env,
+    set_docker_core_image,
+)
 from core.cli.commands.plugin import add_docker
 
 
@@ -59,6 +63,66 @@ def test_compose_uses_docker_env_values_for_interpolation(tmp_path, monkeypatch)
         "configs/.env.docker.core",
     ]
     assert captured["check"] is False
+
+
+def test_compose_uses_persisted_core_image_for_plugin_build(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / "configs" / ".env.docker.core"
+    env_file.parent.mkdir()
+    env_file.write_text(
+        "BASELITH_CORE_IMAGE=ghcr.io/baselithcore/baselithcore:docker-runtime-test\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("BASELITH_CORE_IMAGE", raising=False)
+
+    captured = {}
+
+    def fake_run(command, env, check):
+        captured["command"] = command
+        captured["env"] = env
+        captured["check"] = check
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    with patch.object(add_docker.subprocess, "run", side_effect=fake_run):
+        assert add_docker._compose(["build", "api"]) == 0
+
+    assert (
+        captured["env"]["BASELITH_CORE_IMAGE"]
+        == "ghcr.io/baselithcore/baselithcore:docker-runtime-test"
+    )
+
+
+def test_shell_core_image_overrides_persisted_value(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / "configs" / ".env.docker.core"
+    env_file.parent.mkdir()
+    env_file.write_text(
+        "BASELITH_CORE_IMAGE=ghcr.io/baselithcore/baselithcore:persisted\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "BASELITH_CORE_IMAGE", "ghcr.io/baselithcore/baselithcore:shell"
+    )
+
+    env = add_docker._compose_environment(env_file)
+
+    assert env["BASELITH_CORE_IMAGE"] == "ghcr.io/baselithcore/baselithcore:shell"
+
+
+def test_set_docker_core_image_persists_selected_runtime_image(tmp_path):
+    env_file = tmp_path / "configs" / ".env.docker.core"
+
+    assert set_docker_core_image("ghcr.io/baselithcore/baselithcore:test", env_file)
+    assert "BASELITH_CORE_IMAGE=ghcr.io/baselithcore/baselithcore:test" in (
+        env_file.read_text(encoding="utf-8")
+    )
+    assert not set_docker_core_image(
+        "ghcr.io/baselithcore/baselithcore:test", env_file
+    )
 
 
 def _env_values(path: Path) -> dict[str, str]:

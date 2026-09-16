@@ -50,7 +50,7 @@ CommandHandler = Callable[[argparse.Namespace], int]
 #: scoped. The list is an explicit exemption rather than an allowlist so that
 #: forgetting to classify a new command fails closed.
 UNSCOPED_COMMANDS: frozenset[str] = frozenset(
-    {"init", "run", "setup", "test", "lint", "shell"}
+    {"init", "run", "up", "setup", "test", "lint", "shell"}
 )
 
 #: ``(command, subcommand)`` pairs exempt inside an otherwise-scoped command.
@@ -394,6 +394,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         include_plugins=getattr(args, "check_plugins", False),
         require_services=getattr(args, "require_services", False),
     )
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    """Execute the 'up' command to start the Docker runtime."""
+    from core.cli.commands.up import run_up
+
+    return run_up(image=getattr(args, "image", None), timeout=args.timeout)
 
 
 def cmd_shell(args: argparse.Namespace) -> int:

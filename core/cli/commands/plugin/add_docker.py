@@ -20,6 +20,7 @@ PLUGIN_REQUIREMENTS = Path("configs") / "plugin-requirements.txt"
 COMPOSE_FILE = "docker-compose.core.yml"
 DOCKER_ENV_FILE = Path("configs") / ".env.docker.core"
 COMPOSE_SHELL_OVERRIDE_KEYS = {
+    "BASELITH_CORE_IMAGE",
     "BASELITH_HTTP_PORT",
     "BASELITH_POSTGRES_PORT",
     "BASELITH_REDIS_PORT",
