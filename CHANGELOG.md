@@ -5,6 +5,30 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.35.0](https://github.com/baselithcore/baselithcore/compare/v0.34.0...v0.35.0) (2026-09-16)
+
+
+### Bug Fixes
+
+* **ci:** restore the three gates the branch left red ([d10af43](https://github.com/baselithcore/baselithcore/commit/d10af4316c87b5cfa6d6fe2a2c48a3879f93625f))
+* **cli:** unwedge the gates and make generated env files owner-only ([8cfd0b2](https://github.com/baselithcore/baselithcore/commit/8cfd0b276aa4cfb0fbaf60b1548ee88da9b43cbf))
+* **docker:** align core integration runtime ([1178d15](https://github.com/baselithcore/baselithcore/commit/1178d15c8dac46142b65c4a46f45de658c2d1cf6))
+* **docker:** stabilize clean plugin installs ([03877e1](https://github.com/baselithcore/baselithcore/commit/03877e1c4b643a89de33f265f87740ce95c61fd7))
+* **plugin:** align router scaffold health path ([24a9b06](https://github.com/baselithcore/baselithcore/commit/24a9b064b2ea1eed744c5106c8302ca43a986960))
+* **plugin:** honor docker http port during health checks ([3288286](https://github.com/baselithcore/baselithcore/commit/32882865805d10c7d5f01a6ffdeccf10750bb570))
+* **run:** make service preflight fail open by default ([80bec40](https://github.com/baselithcore/baselithcore/commit/80bec40ae15916e560f621056d6ccdf2dfd466fa))
+* **scripts:** rename the installation runner out of the gate namespace ([35717a1](https://github.com/baselithcore/baselithcore/commit/35717a11388e2a1e03683bff6dd31b583fca30c4))
+* **security:** declare the second phantom-setuptools advisory ([211b3c3](https://github.com/baselithcore/baselithcore/commit/211b3c341bdf76fd156d733329e58692432f1b3a))
+* **setup:** propagate secret key to docker core env ([9eab364](https://github.com/baselithcore/baselithcore/commit/9eab364e648f4ba7ff3dd2a5a378fb4a2dc439e9))
+
+
+### Features
+
+* **docker:** add standalone runtime startup ([3aff6d7](https://github.com/baselithcore/baselithcore/commit/3aff6d77f91ba1c05cf459189086e882b2c3c4ce))
+* **plugin:** add docker sync command ([dafdee1](https://github.com/baselithcore/baselithcore/commit/dafdee176d8a107bf20b7c86cbd8239389283acf))
+* **plugin:** consolidate docker install workflow ([82956f1](https://github.com/baselithcore/baselithcore/commit/82956f1377adc9e3b92eaae01f0c37128bf65c0e))
+* **plugin:** standardize docker plugin workflow ([9bc32cf](https://github.com/baselithcore/baselithcore/commit/9bc32cf8009f126abd503a4c8d7fd2c50f531b2c))
+
 # [0.34.0](https://github.com/baselithcore/baselithcore/compare/v0.33.1...v0.34.0) (2026-09-16)
 
 
