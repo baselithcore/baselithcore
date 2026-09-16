@@ -2,12 +2,9 @@
 Plugin creation logic.
 """
 
-import json
 import re
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from core.cli.ui import console, print_error, print_info, print_step, print_success
 
@@ -25,7 +22,10 @@ def _prompt(label: str, default: str = "") -> str:
 
 
 def create_plugin(
-    name: str, plugin_type: str = "agent", interactive: bool = False
+    name: str,
+    plugin_type: str = "agent",
+    interactive: bool = False,
+    register: bool = True,
 ) -> int:
     """
     Create a new plugin from template.
@@ -34,6 +34,7 @@ def create_plugin(
         name: Plugin name (lowercase with hyphens)
         plugin_type: Type of plugin (agent, router, graph)
         interactive: Whether to run interactive wizard mode
+        register: Whether to enable the plugin in configs/plugins.yaml
 
     Returns:
         Exit code (0 for success)
@@ -41,7 +42,7 @@ def create_plugin(
     if interactive:
         return _create_interactive()
 
-    return _create_from_template(name, plugin_type)
+    return _create_from_template(name, plugin_type, register=register)
 
 
 def _create_interactive() -> int:
@@ -74,58 +75,45 @@ def _create_interactive() -> int:
     register_config = _prompt("Register in plugins.yaml? (y/n)", "y")
 
     # Create the plugin
-    result = _create_from_template(name, type_choice)
+    result = _create_from_template(name, type_choice, register=False)
     if result != 0:
         return result
 
     # Override manifest with interactive data
     plugin_path = Path("plugins") / name
-    manifest_path = plugin_path / "manifest.json"
+    manifest_path = plugin_path / "manifest.yaml"
     if manifest_path.exists():
         try:
+            import yaml
+
             with open(manifest_path, encoding="utf-8") as f:
-                manifest = json.load(f)
+                manifest = yaml.safe_load(f) or {}
             manifest["description"] = description
             manifest["author"] = author
             manifest["tags"] = tags
             if env_vars:
                 manifest["environment_variables"] = env_vars
             with open(manifest_path, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, indent=4)
-        except Exception:
-            pass
-
-    # Register in plugins.yaml
-    if register_config.lower() == "y":
-        config: dict[str, Any] = {}
-        if PLUGINS_CONFIG_PATH.exists():
-            try:
-                with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
-            except Exception:
-                pass
-
-        config[name] = {"enabled": True}
-        try:
-            PLUGINS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(PLUGINS_CONFIG_PATH, "w", encoding="utf-8") as f:
                 yaml.dump(
-                    config,
+                    manifest,
                     f,
                     default_flow_style=False,
                     allow_unicode=True,
                     sort_keys=False,
                 )
-            print_info(f"Registered '{name}' in {PLUGINS_CONFIG_PATH}")
         except Exception:
             pass
+
+    # Register in plugins.yaml
+    if register_config.lower() == "y":
+        _register_plugin_config(name)
 
     console.print()
     print_success("Plugin created successfully with your custom metadata!")
     return 0
 
 
-def _create_from_template(name: str, plugin_type: str) -> int:
+def _create_from_template(name: str, plugin_type: str, register: bool = True) -> int:
     """Create a plugin from a built-in template."""
     plugins_dir = Path("plugins")
     if not plugins_dir.exists():
@@ -163,8 +151,58 @@ def _create_from_template(name: str, plugin_type: str) -> int:
         for file_name in template.keys():
             console.print(f"  [cyan]- {plugin_path / file_name}[/cyan]")
 
+        if register:
+            _register_plugin_config(name)
+
         return 0
 
     except Exception as e:
         print_error(f"Error creating plugin: {e}")
         return 1
+
+
+def _register_plugin_config(name: str) -> bool:
+    """Enable a new local plugin in configs/plugins.yaml."""
+    try:
+        import yaml
+    except ImportError:
+        print_error(
+            "Plugin files were created, but PyYAML is missing so "
+            f"{PLUGINS_CONFIG_PATH} could not be updated."
+        )
+        print_info(
+            f"Install project dependencies, then run: baselith plugin enable {name}"
+        )
+        return False
+
+    config: dict[str, Any] = {}
+    if PLUGINS_CONFIG_PATH.exists():
+        try:
+            with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as exc:
+            print_error(f"Failed to read {PLUGINS_CONFIG_PATH}: {exc}")
+            return False
+
+    existing = config.get(name)
+    if isinstance(existing, dict):
+        existing["enabled"] = True
+    else:
+        config[name] = {"enabled": True}
+
+    try:
+        PLUGINS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(PLUGINS_CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(
+                config,
+                f,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
+    except Exception as exc:
+        print_error(f"Failed to write {PLUGINS_CONFIG_PATH}: {exc}")
+        return False
+
+    print_info(f"Registered '{name}' in {PLUGINS_CONFIG_PATH}")
+    return True

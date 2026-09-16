@@ -199,9 +199,43 @@ Two things called "entry point" meet here; they are unrelated.
   Declare it whenever `plugin.py` exposes more than one concrete `Plugin` subclass —
   ambiguity is a hard error (`PluginClassError`), not an alphabetical coin flip, and the
   message tells the author to add this key.
+- **`entrypoint:`** is accepted only as a legacy spelling for existing plugin
+  manifests. New plugins should declare `entry_point:`.
 - **The `baselith.plugins` distribution entry-point group** lets an *installed* package
   publish a plugin without dropping a directory into `plugins/` — see
   [Shipping a plugin as a distribution](#distribution-entry-points).
+
+### Docker Installation Contract
+
+`baselith plugin add <repository> --docker` uses the existing dependency and
+version fields plus optional frontend and health metadata:
+
+```yaml
+entry_point: plugin:MyPlugin
+frontend:
+  path: ui
+  package_manager: pnpm
+  build_command: pnpm build
+  output_dir: out
+health_endpoint: /my-plugin/
+```
+
+`path` is relative to the plugin directory; `output_dir` is relative to `path`.
+The package manager must be `npm`, `pnpm` or `yarn`. Commit the corresponding
+lockfile: the builder uses `npm ci` or frozen-lockfile installation. It runs in
+Node 22 on Docker and checks for a nonempty output directory. `frontend: false`
+disables automatic detection. Legacy main plugins can still use UI detection;
+dependencies needing a frontend rebuild must declare this block explicitly.
+
+The declared health path must return 200 without authentication or redirects.
+Otherwise use a dedicated readiness route. An agent-only plugin should not rely
+on the default `/<name>/` probe unless it actually serves that route.
+
+Installation still expects `plugin.py`; `entry_point` does not enable arbitrary
+Python package layouts. Python dependencies are installed into the API image,
+with a final `pip check`. Version conflicts fail the build. Missing Core bounds
+remain a legacy warning; invalid or incompatible declared bounds fail installation.
+See [Docker Core and Plugins](../getting-started/docker-core.md) for the runbook.
 
 ### Dependencies
 

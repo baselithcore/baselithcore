@@ -41,6 +41,10 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         print_error(f"No 'plugin.py' or 'plugin.disabled' found in '{plugin_name}'.")
         return 1
 
+    from core.plugins.env import load_plugin_dotenv
+
+    load_plugin_dotenv(plugin_dir)
+
     console.print(f"\n[bold cyan]Validating plugin '{plugin_name}'...[/bold cyan]\n")
 
     checks: list[dict] = []

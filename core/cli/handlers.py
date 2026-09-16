@@ -49,7 +49,9 @@ CommandHandler = Callable[[argparse.Namespace], int]
 #: Everything else, *including commands a plugin registers at runtime*, is
 #: scoped. The list is an explicit exemption rather than an allowlist so that
 #: forgetting to classify a new command fails closed.
-UNSCOPED_COMMANDS: frozenset[str] = frozenset({"init", "run", "test", "lint", "shell"})
+UNSCOPED_COMMANDS: frozenset[str] = frozenset(
+    {"init", "run", "up", "setup", "test", "lint", "shell"}
+)
 
 #: ``(command, subcommand)`` pairs exempt inside an otherwise-scoped command.
 #:
@@ -166,147 +168,48 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_plugin(args: argparse.Namespace) -> int:
     """Execute the 'plugin' command to manage Baselith-Core plugins."""
-    from core.cli.commands import plugin
-    from core.cli.ui import print_error
+    from core.cli.handlers_plugin import dispatch_plugin
 
-    command = getattr(args, "plugin_command", "list") or "list"
+    return dispatch_plugin(args)
 
-    # Main plugin command dispatch
-    PLUGIN_COMMANDS = {
-        "create": lambda: plugin.create_plugin(
-            args.name,
-            args.type,
-            interactive=getattr(args, "interactive", False),
-        ),
-        "list": lambda: plugin.status_local_plugins(
-            getattr(args, "name", None), json_output=args.format == "json"
-        ),
-        "status": lambda: plugin.status_local_plugins(
-            getattr(args, "name", None), json_output=args.format == "json"
-        ),
-        "info": lambda: plugin.info_local_plugin(
-            args.name, json_output=args.format == "json"
-        ),
-        "delete": lambda: plugin.delete_local_plugin(
-            args.name, getattr(args, "force", False)
-        ),
-        "disable": lambda: plugin.disable_local_plugin(
-            args.name,
-            all_plugins=getattr(args, "all_plugins", False),
-        ),
-        "enable": lambda: plugin.enable_local_plugin(
-            args.name,
-            all_plugins=getattr(args, "all_plugins", False),
-        ),
-        "export-manifest": lambda: plugin.export_manifest_cmd(args.name),
-        "validate": lambda: plugin.validate_local_plugin(
-            args.name,
-            json_output=args.format == "json",
-        ),
-        "logs": lambda: plugin.plugin_logs(
-            args.name,
-            lines=getattr(args, "lines", 50),
-            level=getattr(args, "level", None),
-            json_output=args.format == "json",
-        ),
-        "tree": lambda: plugin.plugin_tree(
-            getattr(args, "name", None),
-            json_output=args.format == "json",
-        ),
-        "sign": lambda: plugin.sign_plugin(
-            args.path, check_only=getattr(args, "check", False)
-        ),
-        "schema-init": lambda: plugin.schema_init(
-            getattr(args, "schema_plugin", None),
-            json_output=args.format == "json",
-        ),
-    }
 
-    # Handle nested subcommands: deps, config, marketplace
-    if command == "deps":
-        DEPS_COMMANDS = {
-            "check": lambda: plugin.deps_check(
-                args.name, json_output=args.format == "json"
-            ),
-            "install": lambda: plugin.deps_install(
-                args.name, yes=getattr(args, "yes", False)
-            ),
-        }
-        d_command = getattr(args, "deps_command", None)
-        handler = DEPS_COMMANDS.get(d_command) if d_command else None
-        if handler:
-            return handler()
-        print_error("Usage: baselith plugin deps {check|install} <name>")
-        return 1
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Execute the setup orchestration command."""
+    from core.cli.commands.setup import run_setup
 
-    elif command == "config":
-        CONFIG_COMMANDS = {
-            "show": lambda: plugin.config_show(
-                getattr(args, "name", None),
-                json_output=args.format == "json",
-            ),
-            "set": lambda: plugin.config_set(args.name, args.key, args.value),
-            "get": lambda: plugin.config_get(
-                args.name,
-                args.key,
-                json_output=args.format == "json",
-            ),
-            "reset": lambda: plugin.config_reset(args.name),
-        }
-        c_command = getattr(args, "config_command", "show") or "show"
-        handler = CONFIG_COMMANDS.get(c_command)
-        if handler:
-            return handler()
-        print_error("Usage: baselith plugin config {show|set|get|reset}")
-        return 1
-
-    elif command == "marketplace":
-        MARKETPLACE_COMMANDS = {
-            "list": lambda: plugin.search_plugins(
-                None,
-                category=getattr(args, "category", "all"),
-                force_refresh=getattr(args, "refresh", False),
-            ),
-            "search": lambda: plugin.search_plugins(
-                getattr(args, "query", ""),
-                category=getattr(args, "category", "all"),
-            ),
-            "info": lambda: plugin.info_plugin(args.plugin_id),
-            "install": lambda: plugin.install_plugin_cmd(
-                args.plugin_id,
-                getattr(args, "version", None),
-                getattr(args, "force", False),
-            ),
-            "uninstall": lambda: plugin.uninstall_plugin_cmd(args.plugin_id),
-            "update": lambda: plugin.update_plugin_cmd(args.plugin_id),
-            "publish": lambda: plugin.publish_plugin_cmd(
-                args.path, getattr(args, "key", None)
-            ),
-            "login": lambda: plugin.login_cmd(getattr(args, "github_token", None)),
-            "logout": lambda: plugin.logout_cmd(),
-            "identity": lambda: plugin.identity_cmd(),
-        }
-        m_command = getattr(args, "marketplace_command", "search") or "search"
-        handler = MARKETPLACE_COMMANDS.get(m_command)
-        if handler:
-            return handler()
-        return 1
-
-    # Main command execution
-    handler = PLUGIN_COMMANDS.get(command)
-    if handler:
-        return handler()
-
-    return 1
+    return run_setup(
+        profile=getattr(args, "profile", "dev"),
+        install_deps=getattr(args, "install_deps", False),
+        include_plugins=getattr(args, "with_plugins", False),
+        start_services=getattr(args, "start_services", False),
+        migrate=getattr(args, "migrate", False),
+        wait_timeout=getattr(args, "wait_timeout", 60),
+        json_output=getattr(args, "json", False) or args.format == "json",
+    )
 
 
 def cmd_config(args: argparse.Namespace) -> int:
     """Execute the 'config' command to inspect and modify settings."""
-    from core.cli.commands.config import check_env, show_config, validate_config
+    from core.cli.commands.config import (
+        check_env,
+        ensure_env_profile,
+        show_config,
+        validate_config,
+    )
 
     command = getattr(args, "config_command", "show") or "show"
-    dispatch = {"show": show_config, "validate": validate_config, "env": check_env}
-    return dispatch.get(command, show_config)()
+    if command == "show":
+        return show_config()
+    if command == "validate":
+        return validate_config()
+    if command == "env":
+        return ensure_env_profile(
+            getattr(args, "profile", "dev"),
+            json_output=getattr(args, "json", False) or args.format == "json",
+        )
+    if command == "check-env":
+        return check_env()
+    return 1
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -326,7 +229,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         reload=args.reload and not getattr(args, "no_reload", False),
         workers=args.workers,
         log_level=args.log_level,
+        preflight=not getattr(args, "skip_preflight", False),
+        include_plugins=getattr(args, "check_plugins", False),
+        require_services=getattr(args, "require_services", False),
     )
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    """Execute the 'up' command to start the Docker runtime."""
+    from core.cli.commands.up import run_up
+
+    return run_up(image=getattr(args, "image", None), timeout=args.timeout)
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
@@ -342,7 +255,7 @@ def cmd_db(args: argparse.Namespace) -> int:
 
     return run_db(
         getattr(args, "db_command", "status") or "status",
-        json_output=args.format == "json",
+        json_output=getattr(args, "json", False) or args.format == "json",
     )
 
 
@@ -374,7 +287,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """Execute the 'doctor' command for comprehensive system diagnostics."""
     from core.cli.commands.doctor import run_doctor
 
-    return run_doctor(json_output=getattr(args, "json", False))
+    return run_doctor(
+        json_output=getattr(args, "json", False),
+        fix=getattr(args, "fix", False),
+        include_plugins=not getattr(args, "core_only", False),
+    )
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -412,6 +329,7 @@ def cmd_info(args: argparse.Namespace) -> int:
 # must read the ``__main__`` map, not this one.
 COMMAND_HANDLERS_MAP = {
     "init": cmd_init,
+    "setup": cmd_setup,
     "plugin": cmd_plugin,
     "config": cmd_config,
     "verify": cmd_verify,

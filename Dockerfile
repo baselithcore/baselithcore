@@ -286,6 +286,8 @@ COPY plugins/ plugins/
 RUN --mount=type=cache,target=/root/.cache/pip \
     PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --no-deps --prefix /install-app . \
+    && PYTHONPATH=/install/lib/python3.12/site-packages:/install-app/lib/python3.12/site-packages \
+       pip check \
     && rm -rf /install-app/lib/python3.12/site-packages/core \
               /install-app/lib/python3.12/site-packages/plugins \
     && test -x /install-app/bin/baselith
@@ -337,6 +339,12 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 # root-owned costs nothing, keeps them out of the duplication above, and means
 # a compromised process cannot rewrite its own site-packages.
 COPY --from=deps /install /install
+COPY configs/plugin-requirements.txt configs/plugin-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if grep -Eq '^[[:space:]]*[^#[:space:]]' configs/plugin-requirements.txt; then \
+        PYTHONPATH=/install/lib/python3.12/site-packages \
+        pip install --prefix /install -r configs/plugin-requirements.txt; \
+    fi
 # The model cache IS written at runtime (HF_HOME=/app/models), so it is owned.
 COPY --from=deps --chown=appuser:appuser /build/models /app/models
 

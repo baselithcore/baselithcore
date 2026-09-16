@@ -1,17 +1,74 @@
 ---
+# ==================================================================
+# One definition, three entry points
+# ==================================================================
+# This file is the SINGLE SOURCE OF TRUTH for every gate that is fast and
+# hermetic — no network, no database, no built wheel, no importable app. The
+# three places a developer meets those gates are nested supersets of one
+# another, never independent variants:
+#
+#   git commit  ->  `pre-commit` stage, STAGED FILES ONLY. Fast feedback.
+#   git push    ->  `pre-push` stage, which re-runs that same set over the
+#                   WHOLE TREE (the `full-tree` hook at the end of this file).
+#   CI          ->  the `quality_gates` job runs
+#                   `pre-commit run --all-files` — this file and nothing else.
+#
+# It did not use to work that way: .github/workflows/ci.yml spelled out its own
+# `ruff check`, `mypy core`, `bandit -r ...` invocations next to hooks that ran
+# the same tools with different scope and different arguments. Comments asked
+# the two to be kept "in lockstep", which is not a mechanism. The rules below
+# are what keeps them one thing; breaking any of them re-opens the gap.
+#
+#   1. A hook whose verdict depends on WHICH files it is handed must declare
+#      `pass_filenames: false` and run its whole-tree command. mypy handed a
+#      single file cannot see the caller in another module that the signature
+#      change just broke, so a per-file mypy hook is green on precisely the
+#      commits CI rejects. Same for bandit, whose findings are per-tree.
+#   2. A hook must bring its own toolchain — `language: python` with
+#      `additional_dependencies`, not `language: system` — whenever the tool is
+#      not in the standard library. The CI runner has a bare interpreter, so a
+#      `system` hook that needs PyYAML passes on a laptop and dies in the
+#      pipeline. `language: system` is reserved for scripts/ gates that import
+#      nothing beyond the stdlib (plus the repo itself, which is on the path).
+#   3. A hook that REWRITES files (ruff --fix, prettier --write,
+#      markdownlint --fix) is allowed: pre-commit fails any hook that modified
+#      the tree, so in CI a rewrite is a red build with the diff attached —
+#      the same semantics as `ruff format --check`, without a second argv to
+#      keep in sync.
+#   4. Gates that genuinely cannot live here — they need the full git history,
+#      the app importable, the network, a built artifact or a GPU-free hour —
+#      stay as their own CI jobs. They are enumerated, exhaustively, in
+#      mkdocs-site/docs/advanced/quality-gates.md. That list IS the answer to
+#      "what can CI still fail that my push cannot".
+#
 # `pre-commit install` wires only the `pre-commit` hook type by default, so a
-# commit-msg hook added below would sit in this file doing nothing in every
-# checkout that ran the plain install — which is the documented one in
-# CLAUDE.md. Naming both here makes `pre-commit install` wire both.
-default_install_hook_types: [pre-commit, commit-msg]
+# commit-msg or pre-push hook added below would sit in this file doing nothing
+# in every checkout that ran the plain install — which is the documented one in
+# CLAUDE.md. Naming all three here makes `pre-commit install` wire all three.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+# Every gate runs on 3.12 in CI. Left unpinned, each hook environment is built
+# with whatever interpreter happened to launch pre-commit, and mypy's answers
+# depend on the version it runs under — `sys.version_info` branches in the
+# checked code, version-conditional stdlib stubs. A contributor on 3.13 would
+# get a different verdict from the pipeline's and have no way to see why.
+default_language_version:
+  python: python3.12
+
+# `stages: [pre-commit]` / `[pre-push]` are the post-3.0 stage names. An older
+# pre-commit reads them as unknown stages and wires the pre-push stage to
+# nothing — silently, which is the failure mode this whole file exists to kill.
+minimum_pre_commit_version: '3.2.0'
 
 repos:
   # -----------------------------------------
   # 🐍 Ruff (lint + fix + formatter)
   # -----------------------------------------
-  # Keep this rev in lockstep with the ruff pin in .github/workflows/ci.yml
-  # and the `dev` extra in pyproject.toml — a mismatch means pre-commit and CI
-  # disagree about what "formatted" means.
+  # This rev is the only ruff version in the repository that matters: CI runs
+  # this hook rather than its own `ruff check`, so the exclusions below are
+  # CI's exclusions too. The `dev` extra in pyproject.toml pins the same
+  # version for people who invoke `ruff` by hand, and scripts/check_tool_pins.py
+  # fails the build if the two ever part ways.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.5
     hooks:
@@ -35,15 +92,28 @@ repos:
   # -----------------------------------------
   # 🔒 Bandit (security linting)
   # -----------------------------------------
-  # Keep this rev in lockstep with the bandit pin in .github/workflows/ci.yml:
-  # a mismatch means the local hook and CI disagree about what is a finding,
-  # so a clean commit can still redden the pipeline.
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.4
+  # Whole-tree, running the exact argv the CI job used to spell out for itself.
+  #
+  # It was the upstream per-file hook before, handed only the staged files and
+  # narrowed further by an `exclude:` regex, while CI scanned four trees in
+  # full — `bandit -r core plugins sdk scripts`. A finding in an sdk/ or
+  # scripts/ module that the commit did not touch was therefore invisible until
+  # the pipeline, which is exactly the "green locally, red in CI" the rules at
+  # the top of this file forbid. `pass_filenames: false` is what makes the two
+  # the same run; `files:` only decides WHETHER it runs, never on what.
+  #
+  # `language: python` rather than `system`: the CI runner has no bandit on
+  # PATH, and pinning it here is what keeps the version single-sourced.
+  - repo: local
     hooks:
       - id: bandit
-        args: ['-r', '-ll', '--skip', 'B101']
-        exclude: ^(templates|examples|tests|backstage-portal)/
+        name: bandit
+        entry: bandit -r core plugins sdk scripts -ll --exclude tests --skip B101
+        language: python
+        pass_filenames: false
+        files: \.py$
+        additional_dependencies:
+          - bandit==1.9.4
 
   # -----------------------------------------
   # 🛠️ Built-in hooks
@@ -175,14 +245,18 @@ repos:
         language: system
         stages: [commit-msg]
         always_run: true
-      # The two typing gates run in a pre-commit-managed venv (`language:
-      # python`) instead of `language: system`. Two reasons:
+      # The three typing gates (these two plus `mypy-core` at the end of this
+      # file) run in a pre-commit-managed venv — `language: python`, never
+      # `system`. Two reasons:
       #   1. `system` resolves `python` from whatever PATH launched git — a GUI
       #      client or a non-activated shell picks an interpreter without mypy
       #      and the hook dies with "No module named mypy".
-      #   2. The pinned deps below mirror the `uv pip install` line in the
-      #      Type Check jobs of .github/workflows/ci.yml, so the hook checks
-      #      against exactly the CI dependency set. Keep the two in lockstep.
+      #   2. This list IS the typing dependency set, for laptops and for CI
+      #      alike: the pipeline no longer installs mypy itself, it runs these
+      #      hooks. What mypy sees on a developer's machine and what it sees in
+      #      the `quality_gates` job cannot diverge, because there is one list.
+      #      A stub added here reaches both; a stub added to only one reached
+      #      neither reliably, which is how the two used to disagree.
       - id: official-plugin-typing
         name: official-plugin-typing
         entry: python scripts/check_official_plugin_typing.py
@@ -193,6 +267,7 @@ repos:
           - redis==5.3.1
           - types-requests==2.33.0.20260712
           - types-setuptools==83.0.0.20260724
+          - PyYAML==6.0.3
           - pydantic==2.13.4
           - pydantic-settings==2.14.2
           # The script reads every plugin manifest to derive its roster from
@@ -220,17 +295,93 @@ repos:
       - id: sign-changed-plugins
         name: sign-changed-plugins
         entry: python scripts/sign_changed_plugins.py
-        language: system
+        # PyYAML is not stdlib; see the note on plugin-integrity below.
+        language: python
         pass_filenames: false
         files: ^plugins/
+        # `pre-commit` only, deliberately. It derives its work from the STAGED
+        # diff, so under `--all-files` (pre-push, CI) it has nothing to do —
+        # and if it ever did rewrite a manifest there, it would hand the
+        # verification hook below a freshly-coherent tree and turn a real
+        # integrity drift green. Signing is an authoring step; verifying is the
+        # gate.
         stages: [pre-commit]
+        additional_dependencies: &yaml_dep
+          - pyyaml==6.0.3
       - id: plugin-integrity
         name: plugin-integrity
         entry: python scripts/check_plugin_integrity.py
-        language: system
+        language: python
         pass_filenames: false
         # Same reasoning as above, plus the manifests that carry the digest.
         files: ^plugins/
+        # PyYAML is not stdlib and the CI runner has a bare interpreter, so a
+        # `language: system` spelling of this hook passes on any laptop with a
+        # populated environment and dies in the pipeline. Same pin as the
+        # other manifest readers.
+        additional_dependencies: *yaml_dep
+
+      # ---- gates that used to exist ONLY in CI ---------------------------
+      # Both of these were blocking CI steps with no local counterpart, so the
+      # first time anyone learned they had broken one was on a pushed branch.
+      # They are pure Python over files already in the tree — there was never a
+      # reason for them to be pipeline-only.
+      #
+      # The eval corpora are a ratchet: a suite that shrinks, or a case edited
+      # in place, weakens every downstream quality gate without failing a test.
+      - id: eval-baseline
+        name: eval-baseline
+        entry: python scripts/check_eval_baseline.py
+        language: python
+        pass_filenames: false
+        files: ^evals/
+        additional_dependencies: *yaml_dep
+      # requirements.txt is the Docker-install mirror of the pyproject specs;
+      # its own header demands they stay identical.
+      - id: requirements-sync
+        name: requirements-sync
+        entry: python scripts/check_requirements_sync.py
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|requirements\.txt)$
+      # The pins that remain duplicated on purpose — ruff and mypy are also
+      # named in pyproject's `dev` extra so `pip install -e ".[dev]"` gives a
+      # matching toolchain, and gitleaks is also named in ci.yml because the
+      # full-history scan cannot run from a hook. Prose asking for "lockstep"
+      # is not a mechanism; this is.
+      - id: tool-pins
+        name: tool-pins
+        entry: python scripts/check_tool_pins.py
+        language: system
+        pass_filenames: false
+        files: ^(\.pre-commit-config\.yaml|pyproject\.toml|\.github/workflows/ci\.yml)$
+
+      # ---- pre-push: the whole tree, exactly what CI will see -------------
+      # `git commit` hands the per-file hooks only what is staged. That is the
+      # point of a commit hook, and also the reason a commit can be green while
+      # the tree is not: a ruff finding in a sibling module, a markdown file
+      # someone else left unformatted, a plugin digest stale since a rebase.
+      # CI has no notion of "staged" — it checks everything, always. This hook
+      # closes that gap at the last local moment before the work leaves the
+      # machine, so `git push` and the pipeline judge the same tree through the
+      # same hooks.
+      #
+      # It costs a few minutes on a cold cache and seconds after that, because
+      # the per-file hooks are the cheap ones and the expensive whole-tree
+      # gates already ran at commit time. `git push --no-verify` skips it, at
+      # the price this hook exists to avoid.
+      #
+      # `--hook-stage pre-commit` on the inner run is not decoration: without
+      # it the inner run would select the pre-push stage and recurse into this
+      # very hook.
+      - id: full-tree
+        name: full-tree (the set CI runs)
+        entry: pre-commit run --all-files --hook-stage pre-commit --show-diff-on-failure
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+        verbose: true
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
@@ -284,28 +435,32 @@ repos:
         args: ['--write']
 
   # -----------------------------------------
-  # 🔍 MyPy (type checking)
+  # 🔍 MyPy (type checking) — the WHOLE package, never a file list
   # -----------------------------------------
-  # Keep this rev and the stub/runtime pins in lockstep with the mypy pin in
-  # .github/workflows/ci.yml and the `dev` extra in pyproject.toml — the hook
-  # sat on mypy 1.11 while CI gated on 2.3, so the local run and CI disagreed
-  # about what type-checks.
+  # This was `pre-commit/mirrors-mypy`, which is a per-file hook: pre-commit
+  # handed it the staged files and it type-checked those. That is the single
+  # largest source of a commit passing every hook and the pipeline failing on
+  # the same tree, and it is not a tuning problem — it is what mypy means.
+  # Change a signature in core/a.py, stage only core/a.py: mypy sees a
+  # self-consistent file and exits 0, while `mypy core` reports the call in
+  # core/b.py that no longer type-checks. Reproduced on this repository before
+  # the change; both invocations, same commit, opposite verdicts.
   #
-  # ``redis`` is pinned here as the RUNTIME package, not a ``types-redis`` stub:
+  # So the hook now runs CI's command verbatim, with `pass_filenames: false`.
+  # `files:` decides only whether a commit touching core/ is worth the ~60s,
+  # and `--all-files` (pre-push and CI) runs it unconditionally.
+  #
+  # ``redis`` is pinned as the RUNTIME package, not a ``types-redis`` stub:
   # redis-py 5 ships py.typed, and the stub (last published for 4.6) predates
   # ``aclose()``, so it rejected the very method redis-py 5 wants callers to use
   # while ``close()`` is deprecated. Keep this pin inside pyproject's
   # ``redis[hiredis]>=5.0.7,<6.0`` range.
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
+  - repo: local
     hooks:
-      - id: mypy
-        args: ['--ignore-missing-imports', '--no-error-summary']
-        files: ^core/
-        exclude: ^(templates|examples|tests|frontend|plugins|scripts|backstage-portal)/
-        additional_dependencies:
-          - redis==5.3.1
-          - types-requests==2.33.0.20260712
-          - types-setuptools==83.0.0.20260724
-          - pydantic==2.13.4
-          - pydantic-settings==2.14.2
+      - id: mypy-core
+        name: mypy-core
+        entry: mypy core --ignore-missing-imports --incremental --fast-module-lookup
+        language: python
+        pass_filenames: false
+        files: ^core/.*\.pyi?$
+        additional_dependencies: *typing_gate_deps

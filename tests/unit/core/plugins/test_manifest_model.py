@@ -6,6 +6,8 @@ both halves of the fix: unknown keys are rejected with a useful message, and no
 manifest actually shipped in this repo is rejected by the new strictness.
 """
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,27 @@ PLUGINS_DIR = REPO_ROOT / "plugins"
 
 
 def _shipped_manifests() -> list[Path]:
+    git = shutil.which("git")
+    try:
+        if not git:
+            raise OSError("git not found")
+        tracked = subprocess.run(
+            [
+                git,
+                "ls-files",
+                "plugins/*/manifest.y*ml",
+                "plugins/*/manifest.json",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        tracked = []
+    if tracked:
+        return [REPO_ROOT / item for item in sorted(tracked)]
+
     found: list[Path] = []
     for plugin_dir in sorted(PLUGINS_DIR.iterdir()):
         if not plugin_dir.is_dir() or plugin_dir.name.startswith((".", "_")):
@@ -125,6 +148,9 @@ class TestAcceptedShapes:
         keys = known_manifest_keys()
         for expected in (
             "entry_point",
+            "entrypoint",
+            "frontend",
+            "health_endpoint",
             "integrity_sha256",
             "signature_ed25519",
             "permissions",

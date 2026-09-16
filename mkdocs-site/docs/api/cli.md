@@ -33,6 +33,7 @@ baselith --format json <command>  # Global output formatting
 │                                 plugin          Manage framework plugins                               │
 │                                                                                                        │
 │   DEVELOPMENT                   run             Start the development server                           │
+│                                 up              Start the complete Docker runtime                      │
 │                                 shell           Start interactive shell                                │
 │                                 docs            Generate documentation                                 │
 │                                                                                                        │
@@ -54,6 +55,7 @@ baselith --format json <command>  # Global output formatting
   Bootstrap a new project         baselith init my-app
   Check system health             baselith doctor
   Start dev server                baselith run
+  Start Docker runtime            baselith up
   Run the test suite              baselith test
 ```
 
@@ -142,6 +144,44 @@ Completed in 0.07s
 - After configuration changes
 - For troubleshooting connectivity issues
 - In CI/CD pipelines with `--json` for automated health gates
+
+---
+
+### `up` - Docker Runtime
+
+Prepare a standalone Docker runtime project and start BaselithCore with
+PostgreSQL, FalkorDB/Redis, and Qdrant.
+
+```bash
+baselith up
+baselith up --image ghcr.io/baselithcore/baselithcore:<tag>
+```
+
+The command creates the missing runtime files, prepares
+`configs/.env.docker.core`, persists the selected `BASELITH_CORE_IMAGE`, pulls
+the backing service images, builds the API image, starts the stack, and waits
+for `/health`.
+
+Persisting the image is important for plugin workflows: later calls to
+`baselith plugin add <repo-or-path> --docker` reuse the same base image instead
+of falling back to the package version default.
+
+!!! note "Generated env files are owner-only"
+    `baselith up` and `baselith setup` generate a `DB_PASSWORD` and a
+    `SECRET_KEY` whenever the file still holds a placeholder, and write them as
+    plain `KEY=value` lines — Docker Compose's `env_file` and pydantic-settings
+    read the file before any of our code runs, so there is nothing that could
+    decrypt them. Both writers therefore create `.env` and
+    `configs/.env.docker.core` with mode `0600` and re-apply that mode on every
+    write, including to a file an older version left `0644`. Keep it that way
+    when you edit the file by hand, and never commit it.
+
+**Options**:
+
+| Flag        | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `--image`   | Core image used as the API base image                     |
+| `--timeout` | Seconds to wait for the Core health check (default: 300) |
 
 ---
 
@@ -238,7 +278,29 @@ Config column: ✓ = aligned   WARN = mismatch   — = not in plugins.yaml
 
 ---
 
-### `plugin create` - Create New Plugin
+### `plugin add` - Install into Docker
+
+```bash
+baselith setup docker-core
+baselith plugin add <repository> --docker
+```
+
+`--docker` validates build inputs, prepares dependencies, builds declared frontends
+with a temporary Node container, installs Python requirements in the API image,
+starts Compose and checks HTTP. It does not check for plugin packages in the host
+Python environment. Invalid declared Core bounds, failed builds and failed probes
+return a nonzero exit code. Missing Core bounds remain a legacy warning.
+
+Use `--ref <branch-or-tag>` on the initial clone; existing directories are reused.
+`--force` replaces only a verifiably clean Git checkout. `--install-deps` without
+`--docker` installs Python dependencies in the host environment.
+
+An HTTP 200 is a reachability check, not a complete application test. The current
+installer does not implement transactional rollback or fingerprint-based sync.
+See the [Docker Core runbook](../getting-started/docker-core.md) for configuration,
+local plugin development and retry instructions.
+
+### `plugin create` - Scaffold a Plugin
 
 Generate scaffolding for a new plugin with the correct structure.
 

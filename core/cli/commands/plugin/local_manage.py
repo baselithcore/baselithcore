@@ -143,8 +143,10 @@ def enable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
 
     if not disabled_plugin.exists() and not disabled_init.exists():
         if (plugin_dir / "plugin.py").exists() or (plugin_dir / "__init__.py").exists():
+            _sync_config_enabled(plugin_name, True)
             console.print(
-                f"[yellow]Plugin '{plugin_name}' is already enabled.[/yellow]"
+                f"[yellow]Plugin '{plugin_name}' is already enabled; "
+                "config aligned.[/yellow]"
             )
             return 0
         else:

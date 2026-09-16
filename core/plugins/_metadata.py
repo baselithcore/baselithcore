@@ -104,6 +104,8 @@ class PluginMetadata:
         llm_scopes: list[dict[str, str]] | None = None,
         permissions: Any = None,
         entry_point: str = "",
+        frontend: Any = None,
+        health_endpoint: str | None = None,
         plugin_id: str = "",
         repository: str = "",
         extensions: dict[str, Any] | None = None,
@@ -148,6 +150,9 @@ class PluginMetadata:
                 relative to the plugin package (e.g. ``plugin:MyPlugin``). When
                 set the loader imports exactly that class instead of scanning
                 the module for a ``Plugin`` subclass.
+            frontend: Optional Docker installation frontend build contract.
+            health_endpoint: Optional local HTTP path checked after Docker
+                installation.
             plugin_id: Marketplace identifier (manifest key ``id``). Purely
                 informational for the runtime; defaults to the empty string.
             repository: Source repository URL (manifest key ``repository``).
@@ -214,6 +219,8 @@ class PluginMetadata:
         # the old heuristic picked alphabetically and could instantiate the
         # wrong class in a module that defines more than one.
         self.entry_point = entry_point or ""
+        self.frontend = frontend
+        self.health_endpoint = health_endpoint
 
         # Marketplace identity fields. Not consumed by the runtime, but part
         # of the manifest contract, so they are parsed and carried rather than
@@ -319,6 +326,8 @@ class PluginMetadata:
             "llm_scopes": self.llm_scopes,
             "permissions": self.permissions.summary(),
             "entry_point": self.entry_point,
+            "frontend": self.frontend,
+            "health_endpoint": self.health_endpoint,
             "id": self.plugin_id,
             "repository": self.repository,
         }
@@ -362,7 +371,9 @@ class PluginMetadata:
             signature_ed25519=model.signature_ed25519,
             subcomponent_of=model.subcomponent_of,
             llm_scopes=model.llm_scopes,
-            entry_point=model.entry_point or "",
+            entry_point=model.entry_point or model.entrypoint or "",
+            frontend=model.frontend,
+            health_endpoint=model.health_endpoint,
             plugin_id=model.id,
             repository=model.repository or model.git_url or "",
             extensions=model.extensions,

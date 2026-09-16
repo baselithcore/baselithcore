@@ -1,0 +1,98 @@
+---
+# ============================================================
+# Baselith-Core — Core-only Docker stack
+# ============================================================
+# Usage:
+#   cp configs/.env.docker.core.example configs/.env.docker.core
+#   edit configs/.env.docker.core
+#   BASELITH_DOCKER_ENV_FILE=configs/.env.docker.core \
+#     docker compose --env-file configs/.env.docker.core -f docker-compose.core.yml up --build
+#
+# This stack deliberately excludes worker, sandbox, observability, and Ollama.
+# It is the fast path for "core secco" plus local plugin development.
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ${BASELITH_DOCKER_ENV_FILE:-configs/.env.docker.core.example}
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+    volumes:
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      - ./documents:/app/documents
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - '${BASELITH_HTTP_PORT:-8000}:8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+      start_interval: 5s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-baselithcore}
+      POSTGRES_USER: ${DB_USER:-baselithcore}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in configs/.env.docker.core}
+      TZ: ${APP_TIMEZONE:-Europe/Rome}
+    ports:
+      - '127.0.0.1:${BASELITH_POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_core_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: falkordb/falkordb:v4.20.4
+    environment:
+      REDIS_ARGS: --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - '127.0.0.1:${BASELITH_REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_core_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - '127.0.0.1:${BASELITH_QDRANT_PORT:-6333}:6333'
+    volumes:
+      - qdrant_core_data:/qdrant/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" 2>/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_core_data:
+  redis_core_data:
+  qdrant_core_data:

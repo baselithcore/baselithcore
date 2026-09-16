@@ -2,10 +2,11 @@
 
 import sys
 
-import plugins.api_routers.tenant as _tenant
-from plugins.api_routers.tenant import router
+from core.utils.optional_import import optional_router
 
-# Register self as the plugin module for runtime compatibility
-sys.modules[__name__] = _tenant
+_tenant, router = optional_router("plugins.api_routers.tenant")
+if _tenant is not None:
+    # Register self as the plugin module for runtime compatibility
+    sys.modules[__name__] = _tenant
 
 __all__ = ["router"]

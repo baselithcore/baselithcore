@@ -3,6 +3,9 @@ Database and VectorStore utility commands.
 """
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
@@ -160,10 +163,81 @@ def cmd_reset(json_output: bool = False) -> int:
     return 0
 
 
+def cmd_migrate(json_output: bool = False) -> int:
+    """Apply Alembic migrations to the configured PostgreSQL database."""
+    from core.cli.commands.doctor import check_postgres
+
+    alembic_ini = Path.cwd() / "alembic.ini"
+    if not alembic_ini.exists():
+        message = "alembic.ini not found"
+        if json_output:
+            print(json.dumps({"status": "error", "message": message}))
+        else:
+            print_error("Cannot run migrations", message)
+        return 1
+
+    postgres = check_postgres()
+    if not postgres.passed:
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "message": postgres.message,
+                        "details": postgres.details,
+                    }
+                )
+            )
+        else:
+            print_error("PostgreSQL is not ready", postgres.message)
+            if postgres.details:
+                console.print(f"[dim]{postgres.details}[/dim]")
+        return 1
+
+    cmd = [sys.executable, "-m", "alembic", "upgrade", "head"]
+    if not json_output:
+        print_header("🧱 Database Migrations", "Alembic upgrade head")
+
+    result = subprocess.run(
+        cmd,
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "status": "ok" if result.returncode == 0 else "error",
+                    "command": cmd,
+                    "returncode": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+            )
+        )
+        return result.returncode
+
+    if result.stdout:
+        console.print(result.stdout.rstrip())
+    if result.stderr:
+        console.print(result.stderr.rstrip(), style="red")
+
+    if result.returncode == 0:
+        print_success("Database migrations applied.")
+    else:
+        print_error("Database migrations failed", f"Exit code {result.returncode}")
+    return result.returncode
+
+
 def run_db(command: str, json_output: bool = False) -> int:
     """Main entrypoint for db commands."""
     if command == "status":
         return cmd_status(json_output=json_output)
+    elif command == "migrate":
+        return cmd_migrate(json_output=json_output)
     elif command == "reset":
         return cmd_reset(json_output=json_output)
     else:
@@ -186,20 +260,38 @@ def register_parser(subparsers, formatter_class):
         description="Manage persistence layers, including SQL databases and VectorStores used for RAG and memory.",
         formatter_class=formatter_class,
     )
+    db_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit machine-readable JSON output",
+    )
     db_subparsers = db_parser.add_subparsers(
         dest="db_command", title="Database Operations"
     )
-    db_subparsers.add_parser(
+    status_parser = db_subparsers.add_parser(
         "status",
         help="Check connectivity and migration status for all databases",
         formatter_class=formatter_class,
     )
-    db_subparsers.add_parser(
+    reset_parser = db_subparsers.add_parser(
         "reset",
         help="Wipe all data and reset schemas (DEVELOPMENT ONLY)",
         formatter_class=formatter_class,
     )
+    migrate_parser = db_subparsers.add_parser(
+        "migrate",
+        help="Apply PostgreSQL schema migrations with Alembic",
+        formatter_class=formatter_class,
+    )
+    for subcommand in (status_parser, reset_parser, migrate_parser):
+        subcommand.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Emit machine-readable JSON output",
+        )
     return db_parser
 
 
-__all__ = ["register_parser", "run_db"]
+__all__ = ["cmd_migrate", "register_parser", "run_db"]

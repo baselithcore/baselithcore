@@ -222,6 +222,7 @@
       "verify"
     ],
     "core.cli.commands.plugin": [
+      "add_plugin",
       "config_get",
       "config_reset",
       "config_set",
@@ -229,7 +230,9 @@
       "create_plugin",
       "delete_local_plugin",
       "deps_check",
+      "deps_check_all",
       "deps_install",
+      "deps_install_all",
       "disable_local_plugin",
       "enable_local_plugin",
       "export_manifest_cmd",
@@ -237,6 +240,7 @@
       "info_local_plugin",
       "info_plugin",
       "install_plugin_cmd",
+      "install_plugin_into_docker",
       "login_cmd",
       "logout_cmd",
       "plugin_logs",
@@ -247,6 +251,7 @@
       "search_plugins",
       "sign_plugin",
       "status_local_plugins",
+      "sync_plugins_into_docker",
       "uninstall_plugin_cmd",
       "update_plugin_cmd",
       "validate_local_plugin"

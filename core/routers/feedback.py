@@ -2,10 +2,11 @@
 
 import sys
 
-import plugins.api_routers.feedback as _feedback
-from plugins.api_routers.feedback import router
+from core.utils.optional_import import optional_router
 
-# Register self as the plugin module for runtime compatibility
-sys.modules[__name__] = _feedback
+_feedback, router = optional_router("plugins.api_routers.feedback")
+if _feedback is not None:
+    # Register self as the plugin module for runtime compatibility
+    sys.modules[__name__] = _feedback
 
 __all__ = ["router"]

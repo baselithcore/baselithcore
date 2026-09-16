@@ -2,6 +2,8 @@
 Config command - Show and validate configuration.
 """
 
+import json
+
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
@@ -208,6 +210,60 @@ def validate_config() -> int:
     return 0
 
 
+def ensure_env_profile(profile: str = "dev", json_output: bool = False) -> int:
+    """Ensure a local environment profile is present in ``.env``."""
+    if profile == "docker-core":
+        from core.cli.commands.env_profiles import ensure_docker_core_env
+
+        changed = ensure_docker_core_env()
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "profile": "docker-core",
+                        "env_file": "configs/.env.docker.core",
+                        "changed_keys": sorted(changed),
+                    }
+                )
+            )
+            return 0
+        if changed:
+            console.print(
+                "[green]Updated Docker env keys:[/green] " + ", ".join(sorted(changed))
+            )
+        else:
+            console.print(
+                "[green]Docker core env already exists and is aligned.[/green]"
+            )
+        return 0
+
+    if profile != "dev":
+        console.print(f"[red]Unknown env profile: {profile}[/red]")
+        return 1
+
+    from core.cli.commands.env_profiles import ensure_dev_env
+
+    changed = ensure_dev_env()
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "profile": "dev",
+                    "env_file": ".env",
+                    "changed_keys": sorted(changed),
+                }
+            )
+        )
+        return 0
+    if changed:
+        console.print("[green]Updated .env keys:[/green] " + ", ".join(sorted(changed)))
+    else:
+        console.print("[green].env already matches the dev profile defaults.[/green]")
+    return 0
+
+
 def check_env() -> int:
     """Report environment variables that look like misspelled settings.
 
@@ -264,12 +320,36 @@ def register_parser(subparsers, formatter_class):
         help="Check .env integrity and required fields",
         formatter_class=formatter_class,
     )
-    config_subparsers.add_parser(
+    env_parser = config_subparsers.add_parser(
         "env",
+        help="Create or normalize a local .env profile",
+        formatter_class=formatter_class,
+    )
+    env_parser.add_argument(
+        "profile",
+        nargs="?",
+        default="dev",
+        choices=["dev", "docker-core"],
+        help="Environment profile to ensure",
+    )
+    env_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit machine-readable JSON output",
+    )
+    config_subparsers.add_parser(
+        "check-env",
         help="Report environment variables that resemble misspelled settings",
         formatter_class=formatter_class,
     )
     return config_parser
 
 
-__all__ = ["check_env", "register_parser", "show_config", "validate_config"]
+__all__ = [
+    "check_env",
+    "ensure_env_profile",
+    "register_parser",
+    "show_config",
+    "validate_config",
+]

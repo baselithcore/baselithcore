@@ -17,9 +17,11 @@ from .parser import register_parser
 if TYPE_CHECKING:
     # Static-analysis-only imports: give type checkers/IDEs the real symbols
     # while keeping runtime resolution lazy via ``__getattr__`` below.
+    from .add import add_plugin
+    from .add_docker import install_plugin_into_docker
     from .config import config_get, config_reset, config_set, config_show
     from .create import create_plugin
-    from .deps import deps_check, deps_install
+    from .deps import deps_check, deps_check_all, deps_install, deps_install_all
     from .local import (
         delete_local_plugin,
         disable_local_plugin,
@@ -47,6 +49,9 @@ if TYPE_CHECKING:
 
 # Public name -> submodule that defines it. Resolved on first access.
 _LAZY_EXPORTS: dict[str, str] = {
+    "add_plugin": "add",
+    "install_plugin_into_docker": "add_docker",
+    "sync_plugins_into_docker": "sync_docker",
     "create_plugin": "create",
     "status_local_plugins": "local",
     "info_local_plugin": "local",
@@ -65,7 +70,9 @@ _LAZY_EXPORTS: dict[str, str] = {
     "logout_cmd": "marketplace",
     "identity_cmd": "marketplace",
     "deps_check": "deps",
+    "deps_check_all": "deps",
     "deps_install": "deps",
+    "deps_install_all": "deps",
     "config_show": "config",
     "config_set": "config",
     "config_get": "config",
@@ -81,14 +88,18 @@ __all__ = [
     "config_reset",
     "config_set",
     "config_show",
+    "add_plugin",
     "create_plugin",
     "delete_local_plugin",
     "deps_check",
+    "deps_check_all",
     "deps_install",
+    "deps_install_all",
     "disable_local_plugin",
     "enable_local_plugin",
     "export_manifest_cmd",
     "identity_cmd",
+    "install_plugin_into_docker",
     "info_local_plugin",
     "info_plugin",
     "install_plugin_cmd",
@@ -102,6 +113,7 @@ __all__ = [
     "schema_init",
     "sign_plugin",
     "status_local_plugins",
+    "sync_plugins_into_docker",
     "uninstall_plugin_cmd",
     "update_plugin_cmd",
     "validate_local_plugin",

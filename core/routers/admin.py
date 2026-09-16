@@ -2,10 +2,14 @@
 
 import sys
 
-import plugins.api_routers.admin as _admin
-from plugins.api_routers.admin import router, verify_credentials
+from core.utils.optional_import import optional_router, unavailable_admin_credentials
 
-# Register self as the plugin module for runtime compatibility
-sys.modules[__name__] = _admin
+_admin, router = optional_router("plugins.api_routers.admin")
+if _admin is not None:
+    verify_credentials = _admin.verify_credentials
+    # Register self as the plugin module for runtime compatibility
+    sys.modules[__name__] = _admin
+else:
+    verify_credentials = unavailable_admin_credentials
 
 __all__ = ["router", "verify_credentials"]

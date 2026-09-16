@@ -45,7 +45,7 @@ This creates the following structure:
 
 ```text
 plugins/weather_agent/
-├── manifest.json       # Metadata manifest
+├── manifest.yaml       # Metadata manifest
 ├── __init__.py         # Exports the plugin class
 ├── plugin.py           # Plugin class (capabilities)
 └── agent.py            # Agent logic
@@ -57,26 +57,24 @@ The generator derives class names by splitting the plugin name on `-` and `_`, s
 
 ## 2. Metadata Manifest
 
-The CLI scaffold writes a `manifest.json`. The framework also accepts `manifest.yaml` / `manifest.yml` (checked first); YAML is convenient when you maintain the manifest by hand or package the plugin for distribution.
+The CLI scaffold writes `manifest.yaml`. The framework also accepts `.yml` and `.json` for existing plugins.
 
-```json title="plugins/weather_agent/manifest.json"
-{
-    "name": "weather_agent",
-    "version": "0.3.0",
-    "description": "Answers weather questions with the configured LLM",
-    "author": "Baselith User",
-    "tags": ["agent", "weather"],
-    "category": "AI",
-    "icon": "bot",
-    "readiness": "alpha",
-    "environment_variables": []
-}
+```yaml title="plugins/weather_agent/manifest.yaml"
+name: weather_agent
+version: 0.3.0
+description: Answers weather questions with the configured LLM
+author: Baselith User
+tags: [agent, weather]
+category: AI
+icon: bot
+readiness: alpha
+environment_variables: []
 ```
 
-The scaffold fills in `version`, `category`, `icon`, `readiness` and an empty `environment_variables` list; edit `description` and `tags` to taste. `Plugin.metadata` reads this file from the plugin directory automatically, so nothing in code repeats it.
+The scaffold also includes installation metadata such as `min_core_version`, `entry_point` and dependency declarations. Preserve these fields and complete them for your plugin. `Plugin.metadata` reads this file from the plugin directory automatically, so nothing in code repeats it. See the [Docker workflow](docker-core.md) for installation and build requirements.
 
 !!! tip "YAML vs JSON"
-    If you later convert the manifest to `manifest.yaml`, the loader and registry will continue to work without code changes.
+    YAML is preferred when multiple manifest formats exist. Keep one authoritative manifest per plugin.
 
 ---
 

@@ -5,17 +5,27 @@ Constants and templates for plugin commands.
 # Plugin creation templates
 PLUGIN_TEMPLATE = {
     "agent": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom agent plugin for {name}",
-    "author": "Baselith User",
-    "tags": ["agent", "{name}"],
-    "category": "AI",
-    "icon": "bot",
-    "readiness": "alpha",
-    "environment_variables": []
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom agent plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: AI
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entry_point: plugin:{class_name}Plugin
+plugin_dependencies: {{}}
+required_resources: []
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: null
+environment_variables: []
+tags:
+- agent
+- {name}
+""",
         "__init__.py": '''"""
 {name} Plugin.
 """
@@ -35,7 +45,7 @@ class {class_name}Plugin(AgentPlugin):
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize the plugin."""
-        self._config = config
+        await super().initialize(config)
         # Setup resources if needed
 
     def create_agent(self, service: Any, **kwargs) -> {class_name}Agent:
@@ -89,14 +99,27 @@ __all__ = ["{class_name}Agent"]
 ''',
     },
     "router": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom router plugin for {name}",
-    "category": "Utilities",
-    "icon": "link",
-    "readiness": "alpha"
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom router plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: Utilities
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entry_point: plugin:{class_name}Plugin
+plugin_dependencies: {{}}
+required_resources: []
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: /{name}/health
+environment_variables: []
+tags:
+- router
+- {name}
+""",
         "__init__.py": '''"""
 {name} Plugin.
 """
@@ -117,7 +140,10 @@ class {class_name}Plugin(RouterPlugin):
     """Plugin providing the {class_name} API endpoints."""
 
     async def initialize(self, config: Dict[str, Any]) -> None:
-        pass
+        await super().initialize(config)
+
+    def get_router_prefix(self) -> str:
+        return ""
 
     def create_router(self) -> APIRouter:
         return router
@@ -141,14 +167,28 @@ async def health():
 ''',
     },
     "graph": {
-        "manifest.json": """{{
-    "name": "{name}",
-    "version": "0.3.0",
-    "description": "A custom graph schema plugin for {name}",
-    "category": "Knowledge",
-    "icon": "database",
-    "readiness": "alpha"
-}}""",
+        "manifest.yaml": """name: {name}
+version: 0.1.0
+description: A custom graph schema plugin for {name}
+author: Baselith User
+license: LicenseRef-Proprietary
+category: Knowledge
+readiness: alpha
+tenancy: shared
+min_core_version: 0.31.0
+entry_point: plugin:{class_name}Plugin
+plugin_dependencies: {{}}
+required_resources:
+- graph
+optional_resources: []
+python_dependencies: []
+frontend: null
+health_endpoint: null
+environment_variables: []
+tags:
+- graph
+- {name}
+""",
         "__init__.py": '''"""
 {name} Graph Plugin.
 """
@@ -166,7 +206,7 @@ class {class_name}Plugin(GraphPlugin):
     """Plugin extending the Graph Schema."""
 
     async def initialize(self, config: Dict[str, Any]) -> None:
-        pass
+        await super().initialize(config)
 
     def register_entity_types(self) -> List[Dict[str, Any]]:
         """Register custom entity types."""

@@ -35,6 +35,13 @@ defaults `0.0.0.0` / `8000`)
     management, Backstage, and frontend-manifest surfaces are the routers that
     actually live under `/api/...` (see below).
 
+The clean Docker Core profile can start without the legacy `api_routers` plugin.
+Its fallback exposes `/health` and `/health/ready`; those minimal responses do
+not certify every optional service or plugin. Missing legacy application routes
+remain unavailable. The fallback admin credential dependency returns 404 when
+the admin router plugin is absent; it does not grant access. See the
+[Docker Core runbook](../getting-started/docker-core.md) for installation checks.
+
 ---
 
 ## API Versioning

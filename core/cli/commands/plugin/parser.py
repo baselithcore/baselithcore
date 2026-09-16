@@ -37,6 +37,58 @@ def register_parser(subparsers, formatter_class):
         action="store_true",
         help="Run interactive creation wizard",
     )
+    create_plugin.add_argument(
+        "--no-register",
+        action="store_true",
+        help="Create plugin files without enabling it in configs/plugins.yaml",
+    )
+
+    add_plugin = plugin_subparsers.add_parser(
+        "add",
+        help="Clone and enable a Baselith plugin from Git",
+        description=(
+            "Clone a Git plugin into plugins/, validate it, enable it, "
+            "and check dependencies."
+        ),
+        formatter_class=formatter_class,
+    )
+    add_plugin.add_argument("source", help="Git URL or local Git source to clone")
+    add_plugin.add_argument(
+        "--name",
+        default=None,
+        help="Plugin folder name under plugins/ (default: derived from repo name)",
+    )
+    add_plugin.add_argument("--ref", default=None, help="Branch, tag, or ref to clone")
+    add_plugin.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing clean plugin directory",
+    )
+    add_plugin.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install missing Python dependencies into the current Python environment",
+    )
+    add_plugin.add_argument(
+        "--docker",
+        action="store_true",
+        help="Install/build the plugin into the Docker core runtime",
+    )
+
+    sync_plugin = plugin_subparsers.add_parser(
+        "sync",
+        help="Reconcile local plugins with the Docker core runtime",
+        description=(
+            "Rebuild frontend assets, Python plugin requirements, and the Docker "
+            "API runtime for enabled local plugins."
+        ),
+        formatter_class=formatter_class,
+    )
+    sync_plugin.add_argument(
+        "--docker",
+        action="store_true",
+        help="Sync enabled plugins into the Docker core runtime",
+    )
 
     # ─── Local Management ──────────────────────────────────
     plugin_subparsers.add_parser(
@@ -159,19 +211,41 @@ def register_parser(subparsers, formatter_class):
         help="Verify all declared dependencies for a plugin",
         formatter_class=formatter_class,
     )
-    deps_check.add_argument("name", help="Plugin name to check")
+    deps_check.add_argument("name", nargs="?", default="", help="Plugin name to check")
+    deps_check.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_plugins",
+        help="Check dependencies for all local plugins",
+    )
+    deps_check.add_argument(
+        "--python-only",
+        action="store_true",
+        help="Only check Python package dependencies",
+    )
 
     deps_install = deps_subparsers.add_parser(
         "install",
         help="Install missing Python dependencies for a plugin",
         formatter_class=formatter_class,
     )
-    deps_install.add_argument("name", help="Plugin name")
+    deps_install.add_argument("name", nargs="?", default="", help="Plugin name")
+    deps_install.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_plugins",
+        help="Install missing Python dependencies for all local plugins",
+    )
     deps_install.add_argument(
         "-y",
         "--yes",
         action="store_true",
         help="Skip confirmation prompt",
+    )
+    deps_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show missing Python packages without installing them",
     )
 
     # ─── Configuration ─────────────────────────────────────

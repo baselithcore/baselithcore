@@ -138,6 +138,9 @@ class PluginManifestModel(BaseModel):
     #: ``module:Class`` pointing at the plugin class, relative to the plugin
     #: package. Absent ⇒ the loader falls back to scanning the module.
     entry_point: str | None = None
+    #: Legacy spelling accepted for plugins created before ``entry_point`` was
+    #: the canonical manifest key.
+    entrypoint: str | None = None
 
     # --- Dependencies -------------------------------------------------------
     dependencies: list[str] | None = None
@@ -165,6 +168,8 @@ class PluginManifestModel(BaseModel):
 
     # --- Runtime posture ----------------------------------------------------
     environment_variables: list[Any] | None = None
+    frontend: Any = None
+    health_endpoint: str | None = None
     system: bool = False
     tenancy: str = "shared"
     llm_scopes: list[Any] | None = None

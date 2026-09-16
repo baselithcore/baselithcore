@@ -192,6 +192,25 @@ vulnerabilities:
       both get re-checked together rather than decaying into a permanent mute.
       Re-evaluate at expiry by confirming pip still ships no setuptools code.
     expired_at: 2026-10-29
+  - id: CVE-2026-59890
+    statement: >-
+      The SECOND advisory against the same phantom setuptools 70.3.0, and the
+      reason this shape of entry will keep recurring: a MANIFEST.in exclusion
+      bypass in sdist via an NFC/NFD Unicode normalization collision on macOS
+      APFS/HFS+ (GHSA-h35f-9h28-mq5c), fixed in 83.0.0. Everything said for
+      CVE-2025-47273 above applies unchanged — the version comes from pip's
+      vendored SBOM, pip/_vendor/setuptools does not exist, and the only real
+      setuptools in the image is the one the Dockerfile installs into /install
+      at >=83.0.0, which is exactly at this advisory's fixed version. The
+      advisory is also about building an sdist on macOS, which this Linux image
+      does not do.
+      Kept per-CVE rather than muting the package, deliberately: a
+      setuptools-wide mute would also hide findings against that real 83.0.0
+      copy, which is the one that could actually hurt. If a third phantom CVE
+      shows up, revisit the SHAPE of the exception rather than adding a fourth
+      — the honest fix would be Trivy learning that a vendored SBOM entry with
+      no code on disk is not an installed package.
+    expired_at: 2026-10-29
 
 # ==================================================================
 # Secret-scanner exceptions
