@@ -140,7 +140,7 @@ dei tempi su un computer senza cache, ne' una prova remota end-to-end.
 Nel virtualenv di sviluppo con le dipendenze di test installate:
 
 ```bash
-python scripts/check_installation_workflow.py
+python scripts/run_installation_workflow.py
 ```
 
 Il comando verifica confini architetturali, dimensione file, eccezioni silenziose,

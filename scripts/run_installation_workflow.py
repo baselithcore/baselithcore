@@ -2,6 +2,13 @@
 
 Run with the development Python environment. This is a focused regression gate,
 not a replacement for the full CI suite or the final clean Docker test.
+
+Named ``run_`` rather than ``check_`` on purpose: it defines no gate of its own,
+it *invokes* four that pre-commit already owns plus a pytest selection. Every
+``scripts/check_*.py`` is required to be wired to a hook
+(``tests/unit/test_quality_gates_wiring.py``) so that a developer never first
+meets a gate on a pushed branch — a runner that shells out to pytest is exactly
+what must not become a commit hook.
 """
 
 import subprocess
