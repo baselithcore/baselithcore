@@ -20,6 +20,15 @@ Conda is optional; a Python virtual environment also works.
 To start the Core without adding a plugin:
 
 ```bash
+baselith up
+```
+
+`up` creates the missing runtime files, persists the selected
+`BASELITH_CORE_IMAGE`, pulls the service images, builds the API image, starts
+the stack and waits for `/health`. The Compose command it wraps stays available
+for the cases where you need the flags yourself:
+
+```bash
 BASELITH_DOCKER_ENV_FILE=configs/.env.docker.core docker compose --env-file configs/.env.docker.core -f docker-compose.core.yml up -d --build
 curl --fail http://localhost:8000/health
 ```
@@ -27,6 +36,31 @@ curl --fail http://localhost:8000/health
 The stack contains the API, PostgreSQL, FalkorDB and Qdrant. Migrations run in the
 API entrypoint. Ollama, workers, sandbox and observability services are not started
 by this profile. First-build time depends on downloads, architecture and cache.
+
+## Env Keys of the Docker Profile
+
+`baselith setup docker-core` (and `baselith config env docker-core`) writes
+`configs/.env.docker.core`. Besides the application settings, the profile owns
+the keys that shape the runtime itself — none of them belongs in the root
+`.env`, which configures a host-side process instead:
+
+| Key                        | Default                                   | Effect                                                     |
+| -------------------------- | ----------------------------------------- | ---------------------------------------------------------- |
+| `BASELITH_CORE_IMAGE`      | `ghcr.io/baselithcore/baselithcore:<ver>` | Base image of the API service                              |
+| `BASELITH_DOCKER_ENV_FILE` | `configs/.env.docker.core`                | Env file Compose reads; also the file `up` persists keys to |
+| `BASELITH_HTTP_PORT`       | `8000`                                    | Host port published for the API                            |
+| `BASELITH_POSTGRES_PORT`   | `5432`                                    | Host port published for PostgreSQL, bound to `127.0.0.1`   |
+| `BASELITH_REDIS_PORT`      | `6379`                                    | Host port published for Redis/FalkorDB, bound to `127.0.0.1` |
+| `BASELITH_QDRANT_PORT`     | `6333`                                    | Host port published for Qdrant, bound to `127.0.0.1`       |
+| `BASELITH_RUN_MIGRATIONS`  | `true`                                    | Whether the API entrypoint applies migrations at startup   |
+
+Only the API port is published on every interface; the three backing stores are
+bound to the loopback address. Change the `BASELITH_*_PORT` values to run a
+second stack side by side, and set `BASELITH_RUN_MIGRATIONS=false` when you
+prefer to run `baselith db migrate` yourself at deploy time.
+
+The file holds a generated `DB_PASSWORD` and `SECRET_KEY` and is written `0600`.
+Keep that mode when you edit it by hand, and never commit it.
 
 ## Add a Plugin
 
@@ -104,7 +138,11 @@ default Git branch. Custom dependency repositories and dependency-specific refs
 are not yet supported. In particular, a fix published only on an auth branch is
 not automatically selected when another plugin requires auth.
 
-`sync --docker` with fingerprints and uniform Docker update/remove commands are
-not implemented yet. Repeating `add` invokes builds again; Docker may reuse layers.
+`baselith plugin sync --docker` reconciles every enabled plugin with the Docker
+runtime — requirements, declared frontends, image rebuild, health and per-plugin
+probes. It has no fingerprinting, so it rebuilds unconditionally and relies on
+Docker layer reuse; uniform Docker update/remove commands are not implemented
+yet. Repeating `add` invokes builds again the same way.
+
 Requirements are declarative but not fully locked, and plugins share one Python
 environment. An image-only distribution without the Core checkout is separate work.
