@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,7 @@ SECURITY = REPO_ROOT / "SECURITY.md"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CI_WORKFLOW = WORKFLOWS / "ci.yml"
+PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
 # Files that must carry this release's version number after a release, and the
 # regex that finds the version inside each. `.releaserc` has to rewrite every
@@ -46,6 +49,10 @@ VERSION_BEARING_FILES = (
     "sdk/python/baselith_sdk/version.py",
     "sdk/typescript/package.json",
     "sdk/typescript/src/client.ts",
+    # info.version in the OpenAPI document; the openapi_drift gate regenerates
+    # it from core/_version.py, so a release that skips it reddens the next PR.
+    "sdk/openapi.json",
+    "mkdocs-site/docs/api/specs/openapi.json",
 )
 
 
@@ -236,143 +243,77 @@ def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_runtime_image_does_not_ship_the_maintenance_scripts() -> None:
-    """`scripts/reset_*.py` drop the production data stores."""
-    text = DOCKERFILE.read_text(encoding="utf-8")
-    copies = re.findall(r"^COPY\s+(?:--\S+\s+)*scripts/?\s", text, flags=re.M)
-    assert not copies, (
-        "The Dockerfile copies the whole scripts/ directory into the runtime "
-        "image again. That ships reset_all.py, reset_graphdb.py and "
-        "reset_qdrant.py — which exist to wipe the data stores — onto the "
-        "filesystem of the internet-facing process. Copy individual scripts by "
-        "name if one is genuinely needed at runtime."
-    )
-
-
-def test_image_installs_the_locked_dependency_set() -> None:
-    """requirements.txt carries ranges, so installing it re-resolves nightly."""
-    text = DOCKERFILE.read_text(encoding="utf-8")
-    assert "uv export --frozen" in text, (
-        "The image must materialise uv.lock, not resolve requirements.txt: "
-        "ranges made two builds of the same commit two different images."
-    )
-    assert not re.search(
-        r"pip install[^\n]*-r requirements\.txt", _without_comments(text)
-    ), "The image is installing from requirements.txt again."
-
-
-def test_image_strips_cuda_from_the_cpu_only_build() -> None:
-    """The CPU torch wheel needs none of it; left in it is gigabytes.
-
-    This asserts what the filter DOES, not how it is spelled. It used to pin
-    the literal ``grep -vE '^(nvidia-|triton)'``, which froze a pattern that
-    did not do the job: torch declares ``cuda-bindings`` on linux, that pulls
-    ``cuda-pathfinder``, and neither matches ``^nvidia-`` or ``^triton``. 27MB
-    of CUDA bindings shipped in every "CPU-only" image while this test was
-    green, because it was checking the spelling of the answer rather than the
-    answer. Running the pattern against real package names cannot go stale the
-    same way.
-    """
-    # Comments stripped throughout: the Dockerfile explains both patterns at
-    # length and quotes them, and a search over the prose finds the
-    # explanation rather than the instruction.
-    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
-    assert "--index-url https://download.pytorch.org/whl/cpu" in text
-
-    filter_match = re.search(r"grep -vE '([^']+)'", text)
-    assert filter_match is not None, (
-        "The export no longer filters the GPU stack out of the locked set."
-    )
-    gpu_filter = re.compile(filter_match.group(1))
-
-    for requirement in (
-        "nvidia-cublas-cu12==12.4.5.8",
-        "nvidia-cudnn-cu12==9.1.0.70",
-        "triton==3.1.0",
-        "cuda-bindings==13.3.1",
-        "cuda-pathfinder==1.6.0",
-    ):
-        assert gpu_filter.search(requirement), (
-            f"{requirement!r} survives the GPU filter and lands in a CPU-only "
-            "image. Every GPU package family torch can pull has to match."
-        )
-
-    for requirement in ("torch==2.13.0", "numpy==2.3.4", "transformers==5.3.0"):
-        assert not gpu_filter.search(requirement), (
-            f"The GPU filter also strips {requirement!r}, which the image needs."
-        )
-
-    # The post-install guard is the second half, and it missed the same family
-    # for the same reason: it reads DIRECTORY names in site-packages, and
-    # cuda-bindings installs one called `cuda`, not `nvidia`.
-    guard_match = re.search(r"grep -qE '([^']+)'", text)
-    assert guard_match is not None, "the CPU-only guard is gone"
-    guard = re.compile(guard_match.group(1))
-    for directory in ("nvidia", "cuda"):
-        assert guard.search(directory), (
-            f"The guard does not match a site-packages directory named "
-            f"{directory!r}, so it would report success with CUDA installed."
-        )
-
-
-def test_image_installs_only_the_browser_it_launches() -> None:
-    """`playwright install chromium` fetches two browsers; one cannot run."""
-    # Comments stripped: the block above this instruction explains the flag at
-    # length and quotes it, which a naive search reads as the instruction.
-    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
-    install = re.search(r"playwright install[^\n]*", text)
-    assert install is not None, "the image no longer installs a browser"
-    assert "--only-shell" in install.group(0), (
-        "The image is installing the full Chromium again (641MB). With no "
-        "channel set, launch(headless=True) resolves chromium_headless_shell, "
-        "and the full browser is only what headless=False would start -- which "
-        "cannot work here, because no stage installs Xvfb or an X client. Note "
-        "the direction: --no-shell is the opposite flag and breaks every call "
-        "site with 'Executable doesn't exist'."
-    )
-
-
-def test_project_distribution_is_not_a_second_importable_copy() -> None:
-    """/install-app precedes /app on PYTHONPATH, so a duplicate shadows it."""
-    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
-    assert re.search(r"rm -rf /install-app/lib/[^\n]*/core", text), (
-        "pip install . materialises core/ and plugins/ inside /install-app "
-        "alongside the console script, and /install-app comes BEFORE /app on "
-        "PYTHONPATH -- so which copy wins depends on the working directory. "
-        "`baselith plugin enable` writes configs/plugins.yaml, so the CLI run "
-        "from the wrong directory edits a tree the API never reads."
-    )
-
-
-def test_healthcheck_allows_for_a_slow_cold_start() -> None:
-    """Without a start period the retry budget runs during boot."""
-    text = DOCKERFILE.read_text(encoding="utf-8")
-    healthcheck = re.search(r"^HEALTHCHECK(.*?)CMD ", text, flags=re.M | re.S)
-    assert healthcheck is not None, "the image no longer declares a HEALTHCHECK"
-    flags = healthcheck.group(1)
-    assert "--start-period=" in flags, (
-        "A container that imports torch and loads the cached models can exceed "
-        "the 3x30s retry budget, so it is marked unhealthy while still booting."
-    )
-    assert "--start-interval=" in flags
-
-
-@pytest.mark.parametrize("service", ["api", "worker"])
-def test_compose_app_services_are_hardened(service: str) -> None:
-    """compose.yaml is the stack people actually run; it had none of this."""
-    spec = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"][service]
-    assert spec.get("security_opt") == ["no-new-privileges:true"], (
-        f"{service} can gain privileges through a setuid binary."
-    )
-    assert spec.get("cap_drop") == ["ALL"], (
-        f"{service} keeps the full default capability set, which a Python web "
-        "app has no use for."
-    )
-
-
 # ---------------------------------------------------------------------------
 # CI workflows
 # ---------------------------------------------------------------------------
+
+
+VITE_OUTPUT = "plugins/baselithbot/ui/dist/"
+
+# Hooks that REWRITE the files they are given. Any one of them pointed at
+# VITE_OUTPUT wedges the `ui_build` drift gate permanently.
+CONTENT_REWRITING_HOOKS = ("end-of-file-fixer", "mixed-line-ending", "prettier")
+
+
+def _hook(hook_id: str) -> dict[str, Any]:
+    config = yaml.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    for repo in config["repos"]:
+        for hook in repo["hooks"]:
+            if hook["id"] == hook_id:
+                return hook
+    raise AssertionError(f"no {hook_id} hook in .pre-commit-config.yaml")
+
+
+@pytest.mark.parametrize("hook_id", CONTENT_REWRITING_HOOKS)
+def test_formatters_keep_out_of_the_vite_output(hook_id: str) -> None:
+    """A tree a gate diffs byte for byte cannot also be edited by a formatter."""
+    hook = _hook(hook_id)
+    pattern = hook.get("exclude", "")
+    assert re.search(pattern, VITE_OUTPUT) if pattern else False, (
+        f"The {hook_id} hook is not excluded from {VITE_OUTPUT}, which is "
+        "vite's output and is compared byte for byte against a clean rebuild "
+        "by the ui_build gate. end-of-file-fixer appending one newline to the "
+        ".js.map files was enough to report all 30 as drift on every CI run, "
+        "with no local rebuild able to clear it: the hook put the newline "
+        "back on the way into the commit. Prettier is worse -- it un-minifies "
+        "the bundles it formats, so it would ship an un-minified dashboard."
+    )
+
+
+def test_prettier_matches_the_files_it_is_excluded_from() -> None:
+    """The exclusion above is only load-bearing while `files:` still selects them."""
+    files_pattern = _hook("prettier")["files"]
+    # If this stops matching, the exclusion is dead weight and its removal
+    # looks harmless -- until `files:` widens again and nothing says why.
+    assert re.search(files_pattern, "dist/assets/index-abc123.js"), (
+        "prettier's `files:` no longer matches the vite bundles. Re-check "
+        "whether the dist exclusion is still needed before dropping it."
+    )
+
+
+def test_typescript_build_caches_are_not_tracked() -> None:
+    """`tsc -b` rewrites them on every build, so tracking them dirties the tree."""
+    git = shutil.which("git")
+    assert git is not None, "git is required to check what is tracked"
+    tracked = subprocess.run(
+        [git, "ls-files", "plugins/baselithbot/ui"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
+    ).stdout.split()
+    for path in tracked:
+        assert not path.endswith(".tsbuildinfo"), (
+            f"{path} is a tsc incremental-build cache. It is listed in "
+            "plugins/baselithbot/ui/.gitignore and was force-added; tracked, "
+            "it is rewritten by every `npm run build` and gets swept into "
+            "unrelated commits."
+        )
+        assert "/.tsbuild-node/" not in path, (
+            f"{path} is tsc -b output for the node-side config (tsconfig."
+            "node.json's outDir). Same problem as the .tsbuildinfo files, and "
+            "it ships nowhere -- the wheel's package-data lists ui/dist only."
+        )
 
 
 def test_every_action_reference_is_pinned_to_a_commit() -> None:

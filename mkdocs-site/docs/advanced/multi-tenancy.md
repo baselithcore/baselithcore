@@ -404,6 +404,17 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     `DB_PASSWORD` the app authenticates with, so provisioning and connecting
     cannot disagree, and neither credential ever reaches a command line.
 
+    **Plugins build their schema at deploy time too.** Set
+    `database.pluginSchemaInit.enabled` alongside: a Job runs
+    `baselith plugin schema-init` as the owner, after the migrations and after
+    the role exists, and only then does Helm apply the Deployment. Without it
+    a plugin that creates its tables from the serving process fails with
+    `permission denied for schema public` — or, once granted that, with
+    `must be owner of table …`, which no grant fixes, because ownership is not
+    a privilege. And a plugin that *did* own its tables would be exempt from
+    their policies, which is the failure this whole arrangement exists to
+    prevent.
+
 === "Docker Compose"
 
     ```bash

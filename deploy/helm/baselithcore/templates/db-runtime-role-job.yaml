@@ -93,6 +93,13 @@ spec:
 
               GRANT CONNECT ON DATABASE :"db_name" TO :"role_name";
               GRANT USAGE ON SCHEMA public TO :"role_name";
+              {{- if $role.grantSchemaCreate }}
+              -- Opt-in (database.runtimeRole.grantSchemaCreate): plugins that
+              -- build their own schema at first use need it. A table created
+              -- this way is owned by the runtime role and therefore exempt
+              -- from its own policy — never use it for tenant-scoped data.
+              GRANT CREATE ON SCHEMA public TO :"role_name";
+              {{- end }}
               -- DML only: DDL stays with the owner, which is what keeps the
               -- runtime role out of the RLS-exempt "table owner" category.
               GRANT SELECT, INSERT, UPDATE, DELETE
@@ -119,11 +126,16 @@ spec:
             - name: RUNTIME_ROLE
               value: {{ $role.name | quote }}
             # The owner/superuser credential, used only by this Job.
+            {{- if $role.adminUser }}
+            - name: PGUSER
+              value: {{ $role.adminUser | quote }}
+            {{- else }}
             - name: PGUSER
               valueFrom:
                 secretKeyRef:
                   name: {{ $role.adminSecret.name | quote }}
                   key: {{ $role.adminSecret.userKey | quote }}
+            {{- end }}
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

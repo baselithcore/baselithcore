@@ -586,7 +586,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token); report pass for every severity, then a blocking `--severity ERROR --error` pass |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
-| Container image CVEs | **Trivy** (`image_build` in `ci.yml`, `scan` in `release-image.yml`) | The image is built and scanned on every PR that touches its inputs (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`), and again at release **before any tag is created**. Fixable HIGH/CRITICAL blocks; the full MEDIUM-and-up report goes to the Security tab under the `container-image` category |
+| Container image CVEs | **Trivy** (`image_build` in `ci.yml`, `scan` in `release-image.yml`) | The image is built and scanned on every PR that touches its inputs (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`), and again at release **before any tag is created**. Fixable HIGH/CRITICAL blocks; every **fixable** MEDIUM-and-up finding goes to the Security tab under the `container-image` category. Findings with no fixed version are not reported: they cannot be acted on from this repository, and the image's last layer applies Debian's security updates, so a fix is picked up by the next build the day it ships |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations, published on every release. `RELEASE_IMAGE_DISABLED=true` is the kill switch; `workflow_dispatch` cuts one on demand for any tag |
 
 CodeQL runs in **report mode** — it publishes findings without failing the
@@ -696,13 +696,52 @@ dependency is finally fixed and the entry deleted.
     and the 1.39GB Chromium install below it. Last, it sits downstream of the
     source `COPY`s, which change on every release because semantic-release
     rewrites `core/_version.py`; the layer is therefore rebuilt every release
-    for free and is the only one that is. It also sits downstream of the ~110
-    apt packages `playwright install --with-deps` brings in, which an upgrade
-    placed earlier could never reach — on a fresh build that costs nothing,
-    since apt installs those with the archive's security updates already in, but
-    on a release whose Chromium layer comes from a months-old cache those
-    packages are frozen at the day it was built. Re-tagging an unchanged tree
-    reuses the layer, which is the honest limit of the arrangement.
+    for free and is the only one that is. It also sits downstream of the ~60
+    apt packages the Chromium step installs, which an upgrade placed earlier
+    could never reach — on a fresh build that costs nothing, since apt installs
+    those with the archive's security updates already in, but on a release
+    whose Chromium layer comes from a months-old cache those packages are
+    frozen at the day it was built. Re-tagging an unchanged tree reuses the
+    layer, which is the honest limit of the arrangement.
+
+    The same layer upgrades **pip**. `python:3.12-slim` ships pip 25.0.1 in
+    `/usr/local`, and that copy is the runtime pip (`baselith plugin deps
+    install` runs `sys.executable -m pip`), so it cannot be removed; 25.0.1
+    carries five advisories fixed by 26.2.0. The deps stage upgrades its own
+    pip, but its `/usr/local` never reaches the runtime image. The Dockerfile
+    sets a floor (`pip>=26.2.0`), not a pin, so it floats with the apt upgrade.
+
+    That upgrade makes the image scan **louder**, and the reason is worth
+    knowing before someone reads it as a regression. pip 26 ships a CycloneDX
+    SBOM of its own vendored tree at `pip/_vendor/bom.cdx.json`; Trivy reads it
+    and reports all 19 vendored components as installed packages. pip 25.0.1
+    has no such file, so the same tree scanned clean. Measured on the bare base
+    image: no Python findings before the upgrade, two after — a real one
+    (`msgpack`, vendored and inside its advisory's range at 1.1.0 under pip
+    25.0.1 too, simply invisible) and a phantom (`setuptools`, listed in the
+    SBOM as a build requirement but with no code on disk). Both are declared in
+    `.trivyignore.yaml` with the measurements; the upgrade added visibility,
+    not exposure.
+
+!!! note "The browser's apt packages are listed, not delegated"
+    The runtime stage used to run `playwright install --with-deps`. That flag
+    installs Playwright's generic `chromium` package set plus its `tools` set,
+    sized for the full browser and for headed runs — on Debian 13 that meant
+    `libcups2t64` (and avahi behind it), `xvfb`, `xserver-common` and X11
+    bitmap fonts, ~110 packages in all. The cups/avahi/xorg group alone carried
+    37 Debian CVEs with no fixed version, in code nothing in the container can
+    reach: the only binary installed is the headless shell, `ldd` on it names
+    no libcups, and there is no X server to serve.
+
+    The Dockerfile now lists Playwright's own `chromium` list for `debian13`
+    minus `libcups2t64`, and its `tools` list minus `xvfb` and
+    `xfonts-scalable`. `libasound2t64` stays — `headless_shell` links
+    `libasound.so.2` directly and Playwright's launch preflight refuses to
+    start without it. Two guards keep the list honest: that preflight names
+    any missing package at launch, and `image_build` in `ci.yml` launches the
+    browser inside the built image on every PR that touches the Dockerfile.
+    The unit test `test_image_lists_the_browser_apt_packages_itself` pins the
+    shape.
 
     The trade is that the runtime layer is no longer bit-identical from one day
     to the next, which is why the release pipeline scans the image it **pushed**

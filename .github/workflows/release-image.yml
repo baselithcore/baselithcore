@@ -303,18 +303,30 @@ jobs:
           set -euo pipefail
           ./trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
             --exit-code 1 --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
-      - name: Report every finding to code scanning
+      - name: Report every fixable finding to code scanning
         # Report mode, and it runs only when the gate above passed: the layers
         # are already in Trivy's local cache, so this second pass costs seconds
         # and no second pull. It widens the severity range because the gate
-        # deliberately does not — an unfixable MEDIUM is not worth blocking a
+        # deliberately does not — a fixable MEDIUM is not worth blocking a
         # release over, but it is worth someone seeing.
+        #
+        # `--ignore-unfixed` here too. This pass once reported unfixed
+        # findings as well, on the theory that they were worth seeing; what
+        # it produced was ~150 open alerts against glibc, util-linux, perl and
+        # the like — Debian packages with no fixed version, in the base image,
+        # that nothing in this repository can act on — and the Security tab
+        # stopped being a place anyone looked. A finding without a fix is not
+        # actionable from here, and it is not lost either: the Dockerfile
+        # applies Debian's security updates as its last layer, so the day a
+        # fix ships, the next build carries it and this scan (or the gate
+        # above, if it is HIGH/CRITICAL) reports whatever is still open.
         env:
           IMAGE: ${{ needs.meta.outputs.image }}
           DIGEST: ${{ needs.build-amd64.outputs.digest }}
         run: |
           set -euo pipefail
           ./trivy image --scanners vuln --severity MEDIUM,HIGH,CRITICAL \
+            --ignore-unfixed \
             --format sarif --output trivy-image.sarif \
             --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
       - name: Upload SARIF

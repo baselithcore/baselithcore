@@ -137,7 +137,9 @@ describe('chat', () => {
   });
 
   it('decodes SSE data frames into text chunks, stopping at event: done', async () => {
-    const c = clientWith(() => sseResponse(['data: Hello\n\ndata:  world\n\n', 'event: done\ndata: [DONE]\n\n']));
+    const c = clientWith(() =>
+      sseResponse(['data: Hello\n\ndata:  world\n\n', 'event: done\ndata: [DONE]\n\n'])
+    );
     let out = '';
     for await (const chunk of c.chatStream('q')) out += chunk;
     expect(out).toBe('Hello world');
@@ -170,7 +172,11 @@ describe('chat', () => {
 
   it('surfaces event: error as ChatStreamError', async () => {
     const c = clientWith(() =>
-      sseResponse(['data: partial\n\n', 'event: error\ndata: stream failed\n\n', 'event: done\ndata: [DONE]\n\n'])
+      sseResponse([
+        'data: partial\n\n',
+        'event: error\ndata: stream failed\n\n',
+        'event: done\ndata: [DONE]\n\n',
+      ])
     );
     const iter = c.chatStream('q')[Symbol.asyncIterator]();
     await expect(iter.next()).resolves.toEqual({ done: false, value: 'partial' });

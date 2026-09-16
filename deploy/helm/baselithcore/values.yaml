@@ -651,6 +651,26 @@ migrations:
 # Database roles.
 # -------------------------------------------------------------------------
 database:
+  # Build every enabled plugin's schema at deploy time, as the table owner, in
+  # a Job that runs after the migrations.
+  #
+  # Needed by any deployment that runs the application as a least-privilege
+  # role: a plugin creating its tables from the serving process fails there
+  # with `permission denied for schema public`, or `must be owner of table …`
+  # once granted that — and ownership is not a privilege that can be granted.
+  # Harmless otherwise: a plugin with no schema of its own does nothing, and
+  # the DDL each plugin runs is idempotent.
+  pluginSchemaInit:
+    enabled: false
+    backoffLimit: 1
+    activeDeadlineSeconds: 900
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+
   # Provision the least-privilege LOGIN role the application authenticates as,
   # in a pre-install/pre-upgrade Job that runs right after the migrations.
   #
@@ -677,6 +697,27 @@ database:
     image: postgres:16-alpine
     # Owner (or superuser) credential. CREATE ROLE and GRANT are owner work:
     # the app's own least-privilege role cannot bootstrap itself.
+    #
+    # The *name* of that role is not a secret and is almost never stored as one
+    # — the bundled Postgres takes it as a plain value and keeps only the
+    # password in a Secret. So name it here; `adminSecret.userKey` stays as the
+    # alternative for a deployment that does keep it alongside the password.
+    adminUser: ""
+    # Let the runtime role create tables in `public`.
+    #
+    # Off by default, because DDL is what the role exists not to have. Turn it
+    # on only for a deployment whose plugins build their own schema at first
+    # use (against `core.db.ddl`'s "Alembic owns every table"): without it they
+    # fail activation with `permission denied for schema public`. The supported
+    # answer is `database.pluginSchemaInit`, which runs that DDL as the owner
+    # at deploy time instead.
+    #
+    # What it costs, exactly: a table the runtime role creates is *owned* by
+    # it, and PostgreSQL exempts an owner from its own table's policy. So this
+    # is safe for a plugin's own un-tenanted tables and NEVER an answer for a
+    # tenant-scoped one — those must come from a migration, created by the
+    # owner, or their RLS is off for the very role the app runs as.
+    grantSchemaCreate: false
     adminSecret:
       name: ""
       userKey: POSTGRES_USER

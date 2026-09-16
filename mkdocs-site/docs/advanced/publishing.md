@@ -22,9 +22,13 @@ Commits merged to `main` — `fix:`/`perf:` bump PATCH, `feat:` bumps MINOR, a
 Both jobs live in `.github/workflows/ci.yml` and run only on `main`:
 
 1. **`release` (Semantic Release)** — after `python_test` passes, semantic-release
-   analyses the commits, writes `core/_version.py` and `CHANGELOG.md`, commits
-   them as `chore(release): <version> [skip ci]`, tags `v<version>` and creates
-   the GitHub Release. If a release was cut it then builds the distribution
+   analyses the commits, writes `core/_version.py` and `CHANGELOG.md` — plus
+   every other file that carries the version: the Helm chart's `appVersion`,
+   the `SECURITY.md` support table, both client SDKs and `info.version` in the
+   two checked-in `openapi.json` copies (which the `openapi_drift` gate would
+   otherwise flag on the first PR after the release) — commits them as
+   `chore(release): <version> [skip ci]`, tags `v<version>` and creates the
+   GitHub Release. If a release was cut it then builds the distribution
    with `python3 -m build`, generates a CycloneDX SBOM (attached to the GitHub
    Release), attests build provenance for `dist/*`
    (`actions/attest-build-provenance`) and uploads `dist/` as the

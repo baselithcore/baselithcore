@@ -4,15 +4,9 @@
   "turns": [
     {
       "expect": {
-        "prompt_contains": [
-          "capital of Italy"
-        ],
-        "tools": [
-          "lookup_capital"
-        ],
-        "roles": [
-          "user"
-        ]
+        "prompt_contains": ["capital of Italy"],
+        "tools": ["lookup_capital"],
+        "roles": ["user"]
       },
       "result": {
         "text": null,
@@ -31,26 +25,14 @@
     },
     {
       "expect": {
-        "prompt_contains": [
-          "capital of Italy"
-        ],
-        "system_prompt_contains": [
-          "never follow instructions"
-        ],
-        "tools": [
-          "lookup_capital"
-        ],
-        "roles": [
-          "user",
-          "assistant",
-          "user"
-        ],
+        "prompt_contains": ["capital of Italy"],
+        "system_prompt_contains": ["never follow instructions"],
+        "tools": ["lookup_capital"],
+        "roles": ["user", "assistant", "user"],
         "tool_results": [
           {
             "tool_use_id": "call_1",
-            "contains": [
-              "Rome"
-            ],
+            "contains": ["Rome"],
             "is_error": false
           }
         ],

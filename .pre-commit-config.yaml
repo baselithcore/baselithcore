@@ -57,11 +57,39 @@ repos:
         exclude: ^(\.gitlab-ci\.yml|mkdocs-site/mkdocs\.yml|backstage-portal/.*\.yaml|deploy/helm/.*/templates/.*)$
       - id: check-json
         exclude: ^backstage-portal/
+      # A plugin's shipped SPA bundle is generated output with two owners that
+      # both compare it byte for byte, so no formatter may touch it:
+      #
+      #   * the `ui_build` gate in ci.yml rebuilds plugins/baselithbot/ui from
+      #     a clean `npm ci` and diffs the result against what is committed;
+      #   * ui/dist/** is inside the plugin-integrity hash surface
+      #     (core/plugins/integrity.py), so a rewritten byte invalidates the
+      #     manifest's integrity_sha256 and the plugin stops loading under
+      #     BASELITH_REQUIRE_SIGNED_PLUGINS.
+      #
+      # vite writes the .js.map files with no trailing newline; this hook added
+      # one, and from then on every CI run reported all 30 maps as drift with
+      # no way to clear it — rebuilding locally produced vite's bytes and the
+      # hook put the newline back on the way into the commit.
+      #
+      # The pattern covers ui/{dist,out,build} for ANY plugin rather than
+      # naming baselithbot: the integrity surface already matches all three (a
+      # Next.js export lands in ui/out, a Create React App build in ui/build),
+      # so an exclusion that only knew `dist` would leave the same trap set for
+      # the next plugin.
       - id: end-of-file-fixer
-        exclude: ^backstage-portal/
+        exclude: |
+          (?x)^(
+            backstage-portal/
+            | plugins/[^/]+/ui/(dist|out|build)/
+          )
       - id: mixed-line-ending
         args: ['--fix=lf']
-        exclude: ^backstage-portal/
+        exclude: |
+          (?x)^(
+            backstage-portal/
+            | plugins/[^/]+/ui/(dist|out|build)/
+          )
 
   - repo: local
     hooks:
@@ -238,7 +266,21 @@ repos:
         # the file the exporter writes — and the `git diff --exit-code` drift
         # gate in ci.yml fails on a spec nobody changed. The generator owns the
         # format; keep prettier off it.
-        exclude: ^(backstage-portal/|sdk/openapi\.json$|mkdocs-site/docs/api/specs/openapi\.json$)
+        #
+        # A plugin's shipped SPA bundle is the same rule with more at stake:
+        # `files:` above matches the bundles, the stylesheet and index.html
+        # inside it, and prettier un-minifies what it formats — measured on
+        # baselithbot, one bundle went from 1 line to 237 and the stylesheet
+        # from 1 to 4493. A single `pre-commit run --all-files` would wedge the
+        # `ui_build` gate, invalidate the plugin's integrity_sha256 and ship an
+        # un-minified dashboard in the wheel. See the end-of-file-fixer note.
+        exclude: |
+          (?x)^(
+            backstage-portal/
+            | plugins/[^/]+/ui/(dist|out|build)/
+            | sdk/openapi\.json$
+            | mkdocs-site/docs/api/specs/openapi\.json$
+          )
         args: ['--write']
 
   # -----------------------------------------
