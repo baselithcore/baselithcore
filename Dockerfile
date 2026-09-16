@@ -341,16 +341,34 @@ COPY --from=deps /install /install
 COPY --from=deps --chown=appuser:appuser /build/models /app/models
 
 # --- Playwright's Chromium ---
-# Above the source COPYs on purpose: this installs Chromium plus ~100 apt
+# Above the source COPYs on purpose: this installs Chromium plus its apt
 # packages (a 1.39GB layer, the largest single step) and depends on nothing but
 # /install. Below them, a one-line code change invalidated it and the build
 # reinstalled the whole browser. Ownership is set inside the same RUN that
 # creates the files, so it adds no second copy.
 #
-# `playwright install --with-deps` shells out to apt, so the same cache mounts
-# (and the same docker-clean removal) apply here as in the deps stage; the
-# trailing `rm -rf /var/lib/apt/lists/*` is gone because a cache mount is not
-# part of the layer in the first place.
+# The apt packages are listed here instead of delegated to `playwright install
+# --with-deps`. That flag installs Playwright's generic `chromium` set plus its
+# `tools` set — sized for the full browser and for headed runs — and on Debian
+# 13 that meant libcups2t64 (with avahi behind it), xvfb, xserver-common and
+# X11 bitmap fonts: ~110 packages, of which the cups/avahi/xorg group alone
+# carried 37 Debian CVEs with no fix available, in code nothing in this
+# container can reach. The only binary installed is the headless shell (see
+# `--only-shell` below); `ldd` on it names no libcups, and no X server can be
+# used here (see below). So the list is Playwright's own `chromium` list for
+# debian13 minus libcups2t64, and its `tools` list minus xvfb and
+# xfonts-scalable. libasound2t64 stays: headless_shell links libasound.so.2
+# directly and Playwright's launch preflight refuses to start without it
+# (measured). Fonts are kept as Playwright ships them — Liberation for the
+# metric-compatible Latin families, Noto Color Emoji, and the CJK/Thai
+# fallbacks — because a screenshot of a page in those scripts is otherwise
+# tofu. The apt cache mounts (and the docker-clean removal) are the same as in
+# the deps stage; there is no trailing `rm -rf /var/lib/apt/lists/*` because a
+# cache mount is not part of the layer in the first place.
+#
+# Two guards keep this list honest: Playwright's preflight at launch fails
+# with the missing package by name, and `image_build` in ci.yml launches the
+# browser in the built image on every PR that touches this file.
 #
 # `--only-shell` is worth 641MB, and the direction of that flag is the one
 # thing here you should not take on trust — it was measured, and the obvious
@@ -384,8 +402,17 @@ COPY --from=deps --chown=appuser:appuser /build/models /app/models
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+        libcairo2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 \
+        libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 \
+        libxfixes3 libxkbcommon0 libxrandr2 \
+        libfontconfig1 libfreetype6 fonts-liberation fonts-noto-color-emoji \
+        fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei \
+        fonts-tlwg-loma-otf fonts-freefont-ttf \
     && mkdir -p /ms-playwright \
-    && python -m playwright install --with-deps --only-shell chromium \
+    && python -m playwright install --only-shell chromium \
     && chown -R appuser:appuser /ms-playwright
 
 # --- Console script (`baselith`) ---
@@ -452,7 +479,7 @@ RUN mkdir -p data logs documents qdrant_data \
 #
 # Two reasons it runs here rather than near the top of the stage:
 #
-#   * `playwright install --with-deps` above pulls in ~110 apt packages, and an
+#   * The Chromium step above installs ~60 apt packages, and an
 #     upgrade placed before it can never reach them. On a FRESH build that
 #     costs nothing — apt installs them from the archive with its security
 #     updates already in, and either position upgrades the same 12 base
@@ -472,11 +499,25 @@ RUN mkdir -p data logs documents qdrant_data \
 #
 # The interpreter is unaffected: python:3.12-slim compiles CPython from source
 # into /usr/local, so apt owns no part of it.
+#
+# pip rides in the same layer, for the same reason. The base image ships pip
+# 25.0.1 in /usr/local and that copy is the one runtime pip there is —
+# `baselith plugin deps install` (core/marketplace/installer.py) runs
+# `sys.executable -m pip` — so it cannot simply be removed. 25.0.1 carries five
+# advisories fixed by 26.2.0 (CVE-2025-8869, CVE-2026-3219, CVE-2026-6357,
+# CVE-2026-8643, CVE-2026-13346: symlink, archive and entry-point handling
+# during wheel installation, and an index-driven arbitrary file write). The
+# deps stage upgrades its own pip, but that stage's /usr/local never reaches
+# this image. A floor rather than a pin, so it floats with the apt upgrade
+# above: the floor records the last fixed version, the float collects the
+# next one.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,target=/root/.cache/pip \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
-    && apt-get upgrade -y --no-install-recommends
+    && apt-get upgrade -y --no-install-recommends \
+    && pip install --upgrade "pip>=26.2.0"
 
 USER appuser
 

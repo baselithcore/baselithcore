@@ -97,15 +97,23 @@ vulnerabilities:
   # ----------------------------------------------------------------
   - id: CVE-2026-69112
     paths:
+      # The lockfile (filesystem scan) and the installed distribution inside
+      # the container image (image scan in release-image.yml / image_build),
+      # which reports the same CVE against the dist-info path. Without the
+      # second glob the accepted risk resurfaced as a code-scanning alert.
       - uv.lock
+      - "**/site-packages/accelerate-*.dist-info/METADATA"
     statement: >-
       Path traversal in accelerate's load_checkpoint_in_model /
       load_checkpoint_and_dispatch: unsanitised `weight_map` entries in a
       sharded-checkpoint index let a crafted model repository read arbitrary
       files, or block indefinitely on a named pipe. The structural block is
       harder than the caps above — there is nothing to upgrade to. The
-      advisory covers "through 1.14.0" and 1.14.0 (2026-06-11) is the newest
-      release on PyPI; upstream has only a fix commit, no release carrying it.
+      advisory (GHSA-4j2p-28q2-5m79) names no patched version: the two
+      upstream fix PRs (#4070, #4138) were closed unmerged, and 1.15.0
+      (2026-09-09) shipped without them. It only falls outside the advisory's
+      "<= 1.14.0" range, so bumping to it would silence the scanner without
+      fixing anything — the lock stays at 1.14.0 and the risk stays declared.
       Reachability: nothing in core/, plugins/, sdk/ or scripts/ imports
       accelerate. It is reached only indirectly, by transformers'
       from_pretrained(..., device_map=...) in the local HuggingFace provider,
@@ -119,8 +127,8 @@ vulnerabilities:
       trust boundary the codebase already draws around model loading with
       LLM_HUGGINGFACE_TRUST_REMOTE_CODE (default false), which grants a
       strictly stronger capability (RCE) than this arbitrary-file-read.
-      Shorter expiry than the entries above on purpose: the fix is already
-      committed upstream, so a release should land well inside the window.
+      Re-argue at expiry: check the advisory for a first patched version and
+      re-lock to it the day one exists.
     expired_at: 2026-10-09
 
 # ==================================================================
