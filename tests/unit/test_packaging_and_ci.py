@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,7 @@ SECURITY = REPO_ROOT / "SECURITY.md"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CI_WORKFLOW = WORKFLOWS / "ci.yml"
+PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
 # Files that must carry this release's version number after a release, and the
 # regex that finds the version inside each. `.releaserc` has to rewrite every
@@ -243,6 +246,74 @@ def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
 # ---------------------------------------------------------------------------
 # CI workflows
 # ---------------------------------------------------------------------------
+
+
+VITE_OUTPUT = "plugins/baselithbot/ui/dist/"
+
+# Hooks that REWRITE the files they are given. Any one of them pointed at
+# VITE_OUTPUT wedges the `ui_build` drift gate permanently.
+CONTENT_REWRITING_HOOKS = ("end-of-file-fixer", "mixed-line-ending", "prettier")
+
+
+def _hook(hook_id: str) -> dict[str, Any]:
+    config = yaml.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    for repo in config["repos"]:
+        for hook in repo["hooks"]:
+            if hook["id"] == hook_id:
+                return hook
+    raise AssertionError(f"no {hook_id} hook in .pre-commit-config.yaml")
+
+
+@pytest.mark.parametrize("hook_id", CONTENT_REWRITING_HOOKS)
+def test_formatters_keep_out_of_the_vite_output(hook_id: str) -> None:
+    """A tree a gate diffs byte for byte cannot also be edited by a formatter."""
+    hook = _hook(hook_id)
+    pattern = hook.get("exclude", "")
+    assert re.search(pattern, VITE_OUTPUT) if pattern else False, (
+        f"The {hook_id} hook is not excluded from {VITE_OUTPUT}, which is "
+        "vite's output and is compared byte for byte against a clean rebuild "
+        "by the ui_build gate. end-of-file-fixer appending one newline to the "
+        ".js.map files was enough to report all 30 as drift on every CI run, "
+        "with no local rebuild able to clear it: the hook put the newline "
+        "back on the way into the commit. Prettier is worse -- it un-minifies "
+        "the bundles it formats, so it would ship an un-minified dashboard."
+    )
+
+
+def test_prettier_matches_the_files_it_is_excluded_from() -> None:
+    """The exclusion above is only load-bearing while `files:` still selects them."""
+    files_pattern = _hook("prettier")["files"]
+    # If this stops matching, the exclusion is dead weight and its removal
+    # looks harmless -- until `files:` widens again and nothing says why.
+    assert re.search(files_pattern, "dist/assets/index-abc123.js"), (
+        "prettier's `files:` no longer matches the vite bundles. Re-check "
+        "whether the dist exclusion is still needed before dropping it."
+    )
+
+
+def test_typescript_build_caches_are_not_tracked() -> None:
+    """`tsc -b` rewrites them on every build, so tracking them dirties the tree."""
+    git = shutil.which("git")
+    assert git is not None, "git is required to check what is tracked"
+    tracked = subprocess.run(
+        [git, "ls-files", "plugins/baselithbot/ui"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
+    ).stdout.split()
+    for path in tracked:
+        assert not path.endswith(".tsbuildinfo"), (
+            f"{path} is a tsc incremental-build cache. It is listed in "
+            "plugins/baselithbot/ui/.gitignore and was force-added; tracked, "
+            "it is rewritten by every `npm run build` and gets swept into "
+            "unrelated commits."
+        )
+        assert "/.tsbuild-node/" not in path, (
+            f"{path} is tsc -b output for the node-side config (tsconfig."
+            "node.json's outDir). Same problem as the .tsbuildinfo files, and "
+            "it ships nowhere -- the wheel's package-data lists ui/dist only."
+        )
 
 
 def test_every_action_reference_is_pinned_to_a_commit() -> None:
