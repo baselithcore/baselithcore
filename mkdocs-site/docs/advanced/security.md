@@ -711,6 +711,18 @@ dependency is finally fixed and the entry deleted.
     pip, but its `/usr/local` never reaches the runtime image. The Dockerfile
     sets a floor (`pip>=26.2.0`), not a pin, so it floats with the apt upgrade.
 
+    That upgrade makes the image scan **louder**, and the reason is worth
+    knowing before someone reads it as a regression. pip 26 ships a CycloneDX
+    SBOM of its own vendored tree at `pip/_vendor/bom.cdx.json`; Trivy reads it
+    and reports all 19 vendored components as installed packages. pip 25.0.1
+    has no such file, so the same tree scanned clean. Measured on the bare base
+    image: no Python findings before the upgrade, two after — a real one
+    (`msgpack`, vendored and inside its advisory's range at 1.1.0 under pip
+    25.0.1 too, simply invisible) and a phantom (`setuptools`, listed in the
+    SBOM as a build requirement but with no code on disk). Both are declared in
+    `.trivyignore.yaml` with the measurements; the upgrade added visibility,
+    not exposure.
+
 !!! note "The browser's apt packages are listed, not delegated"
     The runtime stage used to run `playwright install --with-deps`. That flag
     installs Playwright's generic `chromium` package set plus its `tools` set,

@@ -131,6 +131,68 @@ vulnerabilities:
       re-lock to it the day one exists.
     expired_at: 2026-10-09
 
+  # ----------------------------------------------------------------
+  # pip's own vendored tree — visible only since pip 26 ships an SBOM
+  # ----------------------------------------------------------------
+  # Both entries below come from ONE file: `pip/_vendor/bom.cdx.json`, the
+  # CycloneDX SBOM that pip started shipping with 26.0. Trivy reads it and
+  # reports all 19 vendored components as installed packages. pip 25.0.1 (what
+  # `python:3.12-slim` ships) has no such file, so the same tree scanned clean
+  # — measured both ways on the bare base image: 0 python-pkg findings before
+  # the upgrade, these 2 after. The upgrade did not add either weakness; it
+  # made pip's supply chain legible to the scanner, which is the point of an
+  # SBOM. pip 25.0.1 vendored msgpack 1.1.0, equally inside the advisory's
+  # "<= 1.2.0" range and equally unreported.
+  #
+  # Why pip is in the image at all, and cannot simply be dropped: the runtime
+  # pip is what `baselith plugin deps install` runs, via `sys.executable -m
+  # pip` (core/marketplace/installer.py). The Dockerfile upgrades it to
+  # >=26.2.0 because 25.0.1 carries five advisories on exactly that code path
+  # (CVE-2025-8869, CVE-2026-3219, CVE-2026-6357, CVE-2026-8643,
+  # CVE-2026-13346 — symlink and archive handling during wheel installation,
+  # and an index-driven arbitrary file write). Staying on 25.0.1 to avoid the
+  # two entries below would trade five reachable install-path weaknesses for
+  # one unreachable DoS and one package that is not installed.
+  #
+  # Neither entry carries `paths`. Trivy reports SBOM-derived components under
+  # the aggregate "Python" target with PkgPath unset, so a path filter matches
+  # nothing and silently stops suppressing. Do not "tighten" these by adding
+  # one.
+  - id: GHSA-6v7p-g79w-8964
+    statement: >-
+      msgpack 1.1.2, vendored in pip/_vendor/msgpack. Reusing an Unpacker after
+      it has raised keeps reading past the buffer and can crash the process —
+      a DoS when the same Unpacker is fed untrusted input repeatedly. Fixed in
+      1.2.1. Unreachable fix: no released pip carries it. pip 26.2.1 is the
+      newest release and vendors 1.1.2; pip's main branch has already bumped
+      vendor.txt to msgpack==1.2.1, so the next release closes this without
+      any change here. Blast radius: the single consumer is
+      pip/_vendor/cachecontrol/serialize.py, which deserialises pip's OWN HTTP
+      cache. Nothing in core/, plugins/, sdk/ or scripts/ imports msgpack, and
+      the image installs no other copy. Reaching the vulnerable path means
+      writing crafted msgpack into pip's cache directory first, which is
+      already write access as the running user; production runs as appuser on
+      a read-only root filesystem (readOnlyRootFilesystem), so the cache is not
+      even persistent. Re-evaluate at expiry: if a pip release has shipped
+      msgpack 1.2.1, drop this entry and raise the Dockerfile's pip floor.
+    expired_at: 2026-10-29
+  - id: CVE-2025-47273
+    statement: >-
+      Path traversal in setuptools' PackageIndex, reported against 70.3.0 and
+      fixed in 78.1.1. There is nothing to upgrade, because setuptools 70.3.0
+      is NOT INSTALLED: it appears only as a component of pip's vendored SBOM.
+      pip lists it in _vendor/vendor.txt and bom.cdx.json as a build-time
+      requirement, but ships no code for it — verified on the image,
+      pip/_vendor/setuptools does not exist, and the base image has no
+      setuptools module at all. The only real setuptools in this image is the
+      one the Dockerfile installs into /install (>=83.0.0, well above the
+      78.1.1 fix), which Trivy reports separately from its own dist-info and
+      which is clean. So this is a scanner artifact of pip's SBOM, not an
+      accepted risk — but it is kept on the same expiry as the entry above so
+      both get re-checked together rather than decaying into a permanent mute.
+      Re-evaluate at expiry by confirming pip still ships no setuptools code.
+    expired_at: 2026-10-29
+
 # ==================================================================
 # Secret-scanner exceptions
 # ==================================================================
