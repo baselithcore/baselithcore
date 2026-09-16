@@ -5,6 +5,19 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.34.0](https://github.com/baselithcore/baselithcore/compare/v0.33.1...v0.34.0) (2026-09-16)
+
+
+### Bug Fixes
+
+* **ci:** keep the auto-fix hooks out of vite's committed bundles ([3e8cf76](https://github.com/baselithcore/baselithcore/commit/3e8cf76e449b6429f1655825d69d87f9702637a0))
+* **security:** declare pip's vendored msgpack and its phantom setuptools ([c4787f1](https://github.com/baselithcore/baselithcore/commit/c4787f10694285f5a38d39969bb2865a5c74375c))
+
+
+### Features
+
+* **plugins:** schema is deploy work, so the app never needs DDL ([b45de76](https://github.com/baselithcore/baselithcore/commit/b45de76e77555a0caae573587688ea04dad7f64d))
+
 ## [0.33.1](https://github.com/baselithcore/baselithcore/compare/v0.33.0...v0.33.1) (2026-09-15)
 
 
