@@ -15,6 +15,14 @@ on:
 permissions:
   contents: read
 
+# One run per ref, like ci.yml and codeql.yml. This workflow had no
+# concurrency block at all, so a branch pushed three times in a minute kept
+# all three Semgrep runs alive and only the last one's result was ever read.
+# main is never cancelled: its result is the one the Security tab keeps.
+concurrency:
+  group: semgrep-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   semgrep:
     name: Scan
