@@ -788,6 +788,15 @@ Uvicorn and starts anyway when a backing service is unreachable — the prefligh
 reports, it does not gate. `--require-services` turns that report into a gate;
 `--skip-preflight` removes it entirely.
 
+The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
+its `catalog/` and `compliance/` subdirectories) and prints what it created.
+A directory that is merely absent is a `mkdir`, not a reason to refuse to boot:
+left fatal under a supervisor that restarts the process, it is an endless crash
+loop whose only remedy is `baselith doctor --fix`. A directory that cannot be
+created — a read-only mount, wrong ownership — still fails the check and stops
+startup. `baselith doctor` itself never creates anything; the diagnostic only
+reports, and `--fix` is what repairs on demand.
+
 ### `test` - Run Tests
 
 Execute the pytest suite with coverage reporting in a structured output. Displays execution timing on completion.

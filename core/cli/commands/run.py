@@ -161,7 +161,18 @@ def _run_preflight(
 ) -> int:
     """Run startup diagnostics before Uvicorn starts."""
     from core.cli.commands.doctor import run_checks
+    from core.cli.commands.doctor_checks import ensure_data_dirs
 
+    # Repair what the diagnostic would only tell us to repair by hand: a data
+    # directory that does not exist yet is a mkdir, not a reason to refuse to
+    # boot. Left fatal it is an endless restart loop under systemd. Anything
+    # that cannot be created still fails the check below.
+    created = ensure_data_dirs()
+    if created:
+        console.print(
+            f"[dim]Created {len(created)} missing data director(y/ies): "
+            f"{', '.join(str(path) for path in created)}[/dim]"
+        )
     checks = run_checks(include_plugins=include_plugins)
     failed_checks = [
         check for check in checks if not check.passed and check.severity == "fail"
