@@ -1101,7 +1101,12 @@ app lifespan at startup) starts `RedisRunEventsBridge`
 - **Listen** — one pattern subscription per process re-injects every received
   event into the local stream, **including on the publishing replica**: one
   Redis round trip of latency buys symmetry with no dedup machinery, and any
-  replica can serve any run's SSE feed.
+  replica can serve any run's SSE feed. It reads via
+  `core.realtime.subscriptions.iter_messages`, not the raw
+  `pubsub.listen()`, so an idle gap can't trip the shared pool's
+  `socket_timeout` and force a reconnect; each reconnect attempt also closes
+  its old subscription (`close_pubsub`) so it returns its connection to the
+  bounded pool instead of leaking it.
 - **Fail-open at both ends** — a broadcaster error falls back to local
   fan-out; a failed Redis publish re-injects the event locally so this
   replica's subscribers still see it; the listener reconnects with a 2 s

@@ -38,21 +38,37 @@ def _clean_stream():
 
 
 class _FakePubSub:
-    """Minimal redis pubsub double: pattern-subscribe + listen from a queue."""
+    """Minimal redis pubsub double: pattern-subscribe + poll from a queue.
+
+    ``get_message(timeout=…)`` returns ``None`` on an idle window, exactly as
+    redis-py does; ``listen()`` is the shape that cannot be used here, because
+    it reads with no deadline of its own and so inherits the shared pool's
+    ``socket_timeout`` (see ``core.realtime.subscriptions``).
+    """
 
     def __init__(self, queue: asyncio.Queue) -> None:
         self._queue = queue
         self.patterns: list[str] = []
+        self.closed = False
 
     async def psubscribe(self, *patterns: str) -> None:
         self.patterns.extend(patterns)
 
-    async def listen(self):
-        while True:
-            yield await self._queue.get()
+    async def get_message(self, *, ignore_subscribe_messages=False, timeout=0.0):
+        try:
+            return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+        except TimeoutError:
+            return None
 
-    async def aclose(self) -> None:  # pragma: no cover - teardown path
-        return None
+    async def listen(self):
+        raise AssertionError(
+            "listen() cannot outlive the pool's socket_timeout — "
+            "poll with core.realtime.subscriptions.iter_messages"
+        )
+        yield {}  # pragma: no cover - unreachable, keeps this a generator
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class _FakeRedis:

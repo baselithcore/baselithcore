@@ -26,6 +26,7 @@ from typing import Any
 
 from core.api.events import AgentEvent
 from core.observability.logging import get_logger
+from core.realtime.subscriptions import close_pubsub, iter_messages
 
 logger = get_logger(__name__)
 
@@ -143,10 +144,16 @@ class RedisRunEventsBridge:
             subscriber = self._subscriber
             if subscriber is None:  # stopped
                 return
+            pubsub: Any = None
             try:
                 pubsub = subscriber.pubsub()
                 await pubsub.psubscribe(f"{RUN_EVENTS_CHANNEL_PREFIX}*")
-                async for message in pubsub.listen():
+                # iter_messages, not pubsub.listen(): the latter inherits the
+                # pool's socket_timeout and dies on the first idle gap — see
+                # core.realtime.subscriptions.
+                async for message in iter_messages(
+                    pubsub, ignore_subscribe_messages=False
+                ):
                     if message.get("type") != "pmessage":
                         continue
                     channel = str(message.get("channel", ""))
@@ -163,12 +170,18 @@ class RedisRunEventsBridge:
                         continue
                     get_run_event_stream().publish(run_id, event)
             except asyncio.CancelledError:
+                await close_pubsub(pubsub)
                 raise
             except Exception as exc:
                 logger.warning(
                     "run_events_bridge_listener_reconnect",
                     extra={"error": str(exc)},
                 )
+                # Each attempt closes its own subscription: this loop runs for
+                # the life of the process, so one connection abandoned per
+                # reconnect drains the bounded pool until every Redis caller in
+                # the worker fails — see core.realtime.subscriptions.
+                await close_pubsub(pubsub)
                 await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
 
 
