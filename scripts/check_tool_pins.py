@@ -7,7 +7,7 @@ to compare. A few pins are duplicated on purpose, and those are what this gate
 watches:
 
 ``ruff`` / ``mypy``
-    Also named in pyproject's ``dev`` extra, so ``pip install -e ".[dev]"``
+    Also named in pyproject's ``dev`` dependency group, so ``uv sync``
     gives a toolchain that agrees with the hooks when a developer runs ``ruff
     check`` or ``mypy`` by hand.
 
@@ -19,7 +19,7 @@ watches:
 
 ``pre-commit``
     Pinned in the workflow that runs the hooks, and floor-specified in the
-    ``dev`` extra. The pin has to satisfy both that floor and the
+    ``dev`` group. The pin has to satisfy both that floor and the
     ``minimum_pre_commit_version`` the config declares, or CI runs the hooks
     with a pre-commit that reads the stage names differently from the one on
     the developer's machine.
@@ -73,16 +73,24 @@ def _precommit_minimum(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _dev_requirements(data: dict[str, object]) -> list[str]:
+    """Plain requirement strings in the ``dev`` dependency group (PEP 735).
+
+    The group is where the toolchain lives; it used to be an extra under
+    ``[project.optional-dependencies]``, which published the CI pins in the
+    wheel's metadata. ``{include-group = ...}`` entries are dicts, not strings,
+    and are skipped — nothing in an included group is pinned.
+    """
+    groups = data.get("dependency-groups", {})
+    assert isinstance(groups, dict)
+    return [spec for spec in groups.get("dev", []) if isinstance(spec, str)]
+
+
 def _dev_extra_pins(data: dict[str, object]) -> dict[str, str]:
-    """Exactly-pinned (``==``) packages in the ``dev`` optional-dependency."""
-    optional = data.get("project", {})
-    assert isinstance(optional, dict)
-    extras = optional.get("optional-dependencies", {})
-    assert isinstance(extras, dict)
-    dev = extras.get("dev", [])
+    """Exactly-pinned (``==``) packages in the ``dev`` dependency group."""
     pins: dict[str, str] = {}
-    for spec in dev:
-        match = re.fullmatch(r"([A-Za-z0-9._-]+)==([^\s;]+)", str(spec).strip())
+    for spec in _dev_requirements(data):
+        match = re.fullmatch(r"([A-Za-z0-9._-]+)==([^\s;]+)", spec.strip())
         if match:
             pins[match.group(1).lower()] = match.group(2)
     return pins
@@ -90,13 +98,9 @@ def _dev_extra_pins(data: dict[str, object]) -> dict[str, str]:
 
 def _dev_extra_floor(data: dict[str, object], package: str) -> str | None:
     """The ``>=`` floor a ``dev`` requirement declares, if it declares one."""
-    optional = data.get("project", {})
-    assert isinstance(optional, dict)
-    extras = optional.get("optional-dependencies", {})
-    assert isinstance(extras, dict)
-    for spec in extras.get("dev", []):
+    for spec in _dev_requirements(data):
         match = re.fullmatch(
-            rf"{re.escape(package)}>=([^\s,;]+)", str(spec).strip(), re.IGNORECASE
+            rf"{re.escape(package)}>=([^\s,;]+)", spec.strip(), re.IGNORECASE
         )
         if match:
             return match.group(1)
@@ -149,7 +153,7 @@ def main() -> int:
 
     problems: list[str] = []
 
-    # ruff — hook rev vs the `dev` extra a developer installs.
+    # ruff — hook rev vs the `dev` group a developer installs.
     _check_single(
         problems,
         "ruff",
@@ -157,7 +161,7 @@ def main() -> int:
             ".pre-commit-config.yaml (ruff-pre-commit rev)",
             _precommit_rev(precommit, "https://github.com/astral-sh/ruff-pre-commit"),
         ),
-        ("pyproject.toml (dev extra)", dev_pins.get("ruff")),
+        ("pyproject.toml (dev group)", dev_pins.get("ruff")),
     )
 
     # mypy — pinned in the typing hooks' additional_dependencies. More than one
@@ -176,7 +180,7 @@ def main() -> int:
             ".pre-commit-config.yaml (typing hooks)",
             next(iter(mypy_hook_pins)) if len(mypy_hook_pins) == 1 else None,
         ),
-        ("pyproject.toml (dev extra)", dev_pins.get("mypy")),
+        ("pyproject.toml (dev group)", dev_pins.get("mypy")),
     )
 
     # gitleaks — the hook scans the staged change, the CI job the full history.
@@ -194,7 +198,7 @@ def main() -> int:
         )
 
     # pre-commit itself — CI installs it to run the hooks, so its version has to
-    # clear both the floor in the dev extra and the config's declared minimum.
+    # clear both the floor in the dev group and the config's declared minimum.
     ci_precommit = _ci_pip_pin(ci, "pre-commit")
     if len(ci_precommit) != 1:
         problems.append(
@@ -204,7 +208,7 @@ def main() -> int:
     else:
         pinned = next(iter(ci_precommit))
         for where, floor in (
-            ("pyproject.toml dev extra", _dev_extra_floor(pyproject, "pre-commit")),
+            ("pyproject.toml dev group", _dev_extra_floor(pyproject, "pre-commit")),
             (".pre-commit-config.yaml", _precommit_minimum(precommit)),
         ):
             if floor and _version_tuple(pinned) < _version_tuple(floor):

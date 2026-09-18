@@ -392,6 +392,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-instrumentation-redis" },
     { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
     { name = "orjson" },
     { name = "packaging" },
     { name = "prometheus-client" },
@@ -422,24 +423,6 @@ computer-use = [
     { name = "mss" },
     { name = "pillow" },
     { name = "pyautogui" },
-]
-dev = [
-    { name = "beautifulsoup4" },
-    { name = "hypothesis" },
-    { name = "ipython" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pypdf" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-randomly" },
-    { name = "pytest-timeout" },
-    { name = "qdrant-client" },
-    { name = "ruff" },
-    { name = "schemathesis" },
-    { name = "soupsieve" },
-    { name = "types-pyyaml" },
 ]
 documents = [
     { name = "openpyxl" },
@@ -489,6 +472,38 @@ rag = [
 sandbox = [
     { name = "docker" },
 ]
+tokenizer = [
+    { name = "tiktoken" },
+]
+vertex = [
+    { name = "anthropic", extra = ["vertex"] },
+]
+web = [
+    { name = "beautifulsoup4" },
+    { name = "playwright" },
+    { name = "soupsieve" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "beautifulsoup4" },
+    { name = "hypothesis" },
+    { name = "ipython" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pypdf" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-randomly" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "qdrant-client" },
+    { name = "ruff" },
+    { name = "schemathesis" },
+    { name = "soupsieve" },
+    { name = "types-pyyaml" },
+]
 test = [
     { name = "beautifulsoup4" },
     { name = "hypothesis" },
@@ -503,17 +518,6 @@ test = [
     { name = "schemathesis" },
     { name = "soupsieve" },
 ]
-tokenizer = [
-    { name = "tiktoken" },
-]
-vertex = [
-    { name = "anthropic", extra = ["vertex"] },
-]
-web = [
-    { name = "beautifulsoup4" },
-    { name = "playwright" },
-    { name = "soupsieve" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -525,8 +529,6 @@ requires-dist = [
     { name = "anthropic", extras = ["vertex"], marker = "extra == 'vertex'", specifier = ">=0.18.0,<1.0" },
     { name = "argcomplete", specifier = ">=3.2.0" },
     { name = "argon2-cffi", specifier = ">=23.1.0" },
-    { name = "beautifulsoup4", marker = "extra == 'dev'", specifier = ">=4.14.2" },
-    { name = "beautifulsoup4", marker = "extra == 'test'", specifier = ">=4.14.2" },
     { name = "beautifulsoup4", marker = "extra == 'web'", specifier = ">=4.14.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "deepeval", marker = "extra == 'evaluation'", specifier = ">=2.0.0" },
@@ -537,15 +539,11 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1.16.0,<2.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.20.0" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
-    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.100" },
-    { name = "ipython", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "locust", marker = "extra == 'load'", specifier = ">=2.20.0" },
     { name = "markdown-it-py", specifier = ">=3.0.0,<4.0" },
     { name = "mineru", extras = ["pipeline"], marker = "extra == 'mineru'", specifier = ">=3.4.4,<4" },
     { name = "mss", marker = "extra == 'computer-use'", specifier = ">=9.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = "==2.3.0" },
     { name = "networkx", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "ollama", specifier = ">=0.6.0,<1.0" },
@@ -557,6 +555,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.42b0" },
     { name = "opentelemetry-instrumentation-redis", specifier = ">=0.42b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.21.0" },
+    { name = "opentelemetry-semantic-conventions", specifier = ">=0.42b0" },
     { name = "orjson", specifier = ">=3.11.7,<4.0" },
     { name = "packaging", specifier = ">=23.2" },
     { name = "pdf2image", marker = "extra == 'ocr'", specifier = ">=1.17.0" },
@@ -564,7 +563,6 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'ocr'", specifier = "==12.3.0" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.62.0" },
     { name = "playwright", marker = "extra == 'web'", specifier = ">=1.62.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5.0" },
     { name = "presidio-analyzer", marker = "extra == 'pii'", specifier = ">=2.2.0" },
     { name = "presidio-anonymizer", marker = "extra == 'pii'", specifier = ">=2.2.0" },
     { name = "prometheus-client", specifier = ">=0.20.0,<1.0" },
@@ -572,40 +570,20 @@ requires-dist = [
     { name = "pyautogui", marker = "extra == 'computer-use'", specifier = ">=0.9.54" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1,<3.0" },
-    { name = "pypdf", marker = "extra == 'dev'", specifier = ">=6.16.1" },
     { name = "pypdf", marker = "extra == 'documents'", specifier = ">=6.16.1" },
-    { name = "pypdf", marker = "extra == 'test'", specifier = ">=6.16.1" },
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.13" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.4.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
-    { name = "pytest-randomly", marker = "extra == 'dev'", specifier = ">=4.1.0" },
-    { name = "pytest-randomly", marker = "extra == 'test'", specifier = ">=4.1.0" },
-    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.4.0" },
-    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.4.0" },
-    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.8.0" },
     { name = "python-docx", marker = "extra == 'documents'", specifier = ">=1.2.0,<2" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.30" },
     { name = "python-pptx", marker = "extra == 'documents'", specifier = ">=1.0.2,<2" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "qdrant-client", marker = "extra == 'dev'", specifier = ">=1.15.1,<2.0" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.15.1,<2.0" },
-    { name = "qdrant-client", marker = "extra == 'test'", specifier = ">=1.15.1,<2.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.0.7,<6.0" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "rich-argparse", specifier = ">=1.4.0" },
     { name = "rq", specifier = ">=1.15.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.5" },
-    { name = "schemathesis", marker = "extra == 'dev'", specifier = ">=4.25" },
-    { name = "schemathesis", marker = "extra == 'test'", specifier = ">=4.25" },
     { name = "sentence-transformers", marker = "extra == 'rag'", specifier = "==5.6.0" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.0.0" },
-    { name = "soupsieve", marker = "extra == 'dev'", specifier = ">=2.8.4" },
-    { name = "soupsieve", marker = "extra == 'test'", specifier = ">=2.8.4" },
     { name = "soupsieve", marker = "extra == 'web'", specifier = ">=2.8.4" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.8.15,<4" },
     { name = "sse-starlette", specifier = ">=2.1.0" },
@@ -613,11 +591,45 @@ requires-dist = [
     { name = "supermemory", marker = "extra == 'memory'", specifier = ">=0.1.0" },
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.7.0" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=5.3.0" },
-    { name = "types-pyyaml", marker = "extra == 'dev'" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1.0" },
     { name = "xlrd", marker = "extra == 'documents'", specifier = ">=2.0.2" },
 ]
-provides-extras = ["browser", "documents", "ocr", "mineru", "web", "qdrant", "rag", "nlp", "gemini", "tokenizer", "evaluation", "sandbox", "huggingface", "test", "load", "dev", "memory", "pii", "bedrock", "vertex", "computer-use"]
+provides-extras = ["browser", "documents", "ocr", "mineru", "web", "qdrant", "rag", "nlp", "gemini", "tokenizer", "evaluation", "sandbox", "huggingface", "load", "memory", "pii", "bedrock", "vertex", "computer-use"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "beautifulsoup4", specifier = ">=4.14.2" },
+    { name = "hypothesis", specifier = ">=6.100" },
+    { name = "ipython", specifier = ">=8.0.0" },
+    { name = "mypy", specifier = "==2.3.0" },
+    { name = "pre-commit", specifier = ">=3.5.0" },
+    { name = "pypdf", specifier = ">=6.16.1" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-randomly", specifier = ">=4.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "qdrant-client", specifier = ">=1.15.1,<2.0" },
+    { name = "ruff", specifier = "==0.15.5" },
+    { name = "schemathesis", specifier = ">=4.25" },
+    { name = "soupsieve", specifier = ">=2.8.4" },
+    { name = "types-pyyaml" },
+]
+test = [
+    { name = "beautifulsoup4", specifier = ">=4.14.2" },
+    { name = "hypothesis", specifier = ">=6.100" },
+    { name = "pypdf", specifier = ">=6.16.1" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-randomly", specifier = ">=4.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "qdrant-client", specifier = ">=1.15.1,<2.0" },
+    { name = "schemathesis", specifier = ">=4.25" },
+    { name = "soupsieve", specifier = ">=2.8.4" },
+]
 
 [[package]]
 name = "beautifulsoup4"

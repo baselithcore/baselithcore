@@ -114,10 +114,12 @@ Declared in `core.config.app`.
 | `SENTRY_TRACES_SAMPLE_RATE` | `float` | `0.1` | Sentry trace/profile sample rates. Defaults are conservative for production; raise to 1.0 only in pre-prod or for short investigations. |
 | `SERVICE_VERSION` | `str` | *computed* | Service version reported as the `service.version` resource attribute. Defaults to the installed package version. |
 | `STRICT_TENANT_ISOLATION` | `bool` | `True` | If True, enforces strict logical isolation between different tenants. |
-| `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics to stdout (debugging the pipeline locally). |
+| `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics/logs to stdout (debugging the pipeline locally). |
 | `TELEMETRY_ENABLED` | `bool` | `False` |  |
+| `TELEMETRY_LOGS_ENABLED` | `bool` | `False` | Ship log records to the collector over OTLP, in addition to (never instead of) the stdout logging that `kubectl logs` shows. The structlog chain already stamps trace_id/span_id on every entry; exporting the records hands the backend that correlation as structured fields rather than something to re-parse out of a scraped file. |
 | `TELEMETRY_METRICS_ENABLED` | `bool` | `False` | Push OTel-native metrics (e.g. HTTP server/client histograms from auto-instrumentation) to the collector via OTLP. Independent of the Prometheus `/metrics` scrape endpoint, which is always available. |
-| `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces and metrics (OTLP/gRPC). |
+| `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces, metrics and logs. The default is the OTLP/gRPC port; switch to :4318 when selecting `http/protobuf` below (the per-signal `/v1/...` path is appended for you). |
+| `TELEMETRY_OTEL_PROTOCOL`<br>also accepts `OTEL_EXPORTER_OTLP_PROTOCOL` | `str` | `grpc` | OTLP wire protocol: `grpc` (default) or `http/protobuf`. HTTP is what a collector's `otlphttp` receiver speaks, what most vendor ingest endpoints expose, and the only option behind an L7 proxy that will not forward HTTP/2 trailers. `OTEL_EXPORTER_OTLP_PROTOCOL` is the specification's own name for this knob, so it is accepted as an alias — a sidecar or chart that already sets it is honoured without a Baselith-specific variable. |
 | `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | `1.0` | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Lower in high-traffic production to cap cost. |
 
 ## Audit-trail configuration
@@ -851,4 +853,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-538 settings documented.
+540 settings documented.

@@ -31,7 +31,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: pip install -e ".[test]"
+        run: pip install --group test -e .
       - name: Run judge evals
         env:
           # Unset secrets leave these empty; the script then skips green.

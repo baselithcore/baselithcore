@@ -68,9 +68,23 @@ class AppConfig(BaseSettings):
 
     # === Observability & Telemetry ===
     telemetry_enabled: bool = Field(default=False, alias="TELEMETRY_ENABLED")
-    # OpenTelemetry collector endpoint for traces and metrics (OTLP/gRPC).
+    # OpenTelemetry collector endpoint for traces, metrics and logs. The default
+    # is the OTLP/gRPC port; switch to :4318 when selecting `http/protobuf`
+    # below (the per-signal `/v1/...` path is appended for you).
     telemetry_otel_endpoint: str = Field(
         default="http://localhost:4317", alias="TELEMETRY_OTEL_ENDPOINT"
+    )
+    # OTLP wire protocol: `grpc` (default) or `http/protobuf`. HTTP is what a
+    # collector's `otlphttp` receiver speaks, what most vendor ingest endpoints
+    # expose, and the only option behind an L7 proxy that will not forward
+    # HTTP/2 trailers. `OTEL_EXPORTER_OTLP_PROTOCOL` is the specification's own
+    # name for this knob, so it is accepted as an alias — a sidecar or chart
+    # that already sets it is honoured without a Baselith-specific variable.
+    telemetry_otel_protocol: str = Field(
+        default="grpc",
+        validation_alias=AliasChoices(
+            "TELEMETRY_OTEL_PROTOCOL", "OTEL_EXPORTER_OTLP_PROTOCOL"
+        ),
     )
     # Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all
     # traces, 0.0 = none. Lower in high-traffic production to cap cost.
@@ -83,7 +97,13 @@ class AppConfig(BaseSettings):
     telemetry_metrics_enabled: bool = Field(
         default=False, alias="TELEMETRY_METRICS_ENABLED"
     )
-    # Also export spans/metrics to stdout (debugging the pipeline locally).
+    # Ship log records to the collector over OTLP, in addition to (never
+    # instead of) the stdout logging that `kubectl logs` shows. The structlog
+    # chain already stamps trace_id/span_id on every entry; exporting the
+    # records hands the backend that correlation as structured fields rather
+    # than something to re-parse out of a scraped file.
+    telemetry_logs_enabled: bool = Field(default=False, alias="TELEMETRY_LOGS_ENABLED")
+    # Also export spans/metrics/logs to stdout (debugging the pipeline locally).
     telemetry_console_export: bool = Field(
         default=False, alias="TELEMETRY_CONSOLE_EXPORT"
     )

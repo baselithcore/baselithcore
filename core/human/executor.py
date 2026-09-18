@@ -24,13 +24,12 @@ import asyncio
 import atexit
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Final, TypeVar
+from typing import Final
 
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-_T = TypeVar("_T")
 
 #: Fallback pool width when the config layer is unavailable.
 DEFAULT_HITL_CALLBACK_THREADS: Final[int] = 8
@@ -71,7 +70,7 @@ def get_hitl_executor() -> ThreadPoolExecutor:
     return _hitl_executor
 
 
-async def run_hitl_callback(fn: Callable[[], _T]) -> _T:
+async def run_hitl_callback[T](fn: Callable[[], T]) -> T:
     """Run a blocking HITL callback on the dedicated pool.
 
     Drop-in replacement for ``asyncio.to_thread`` at human-callback call

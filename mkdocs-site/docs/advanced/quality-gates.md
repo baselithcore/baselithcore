@@ -17,7 +17,7 @@ there is nothing for the two to disagree about.
 ## Setup
 
 ```bash
-pip install -e ".[dev]"
+uv sync                     # or: pip install -e . --group dev   (pip >= 25.1)
 pre-commit install          # wires pre-commit, commit-msg AND pre-push
 ```
 
@@ -109,13 +109,13 @@ Tool versions live in `.pre-commit-config.yaml`. Three are duplicated on
 purpose, and [`scripts/check_tool_pins.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/check_tool_pins.py)
 — itself a hook — fails the build when they part ways:
 
-- **ruff** and **mypy** are also in pyproject's `dev` extra, so `pip install -e
-  ".[dev]"` gives a toolchain that agrees with the hooks when you invoke them
+- **ruff** and **mypy** are also in pyproject's `dev` dependency group, so
+  `uv sync` gives a toolchain that agrees with the hooks when you invoke them
   by hand.
 - **gitleaks** is also in `ci.yml`, because a full-history scan cannot run from
   a hook.
 - **pre-commit** itself is pinned in `ci.yml` and must clear both the `dev`
-  extra's floor and the config's `minimum_pre_commit_version`.
+  group's floor and the config's `minimum_pre_commit_version`.
 
 The gates run on **Python 3.12**, pinned by `default_language_version` in the
 hook config and by the `quality_gates` job. mypy's verdict depends on the

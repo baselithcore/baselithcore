@@ -124,11 +124,15 @@ When you open the Jaeger UI (`http://localhost:16686`), you will see:
 ### Configuration
 
 ```env
-# Enable OpenTelemetry traces/metrics export
+# Enable OpenTelemetry traces/metrics/logs export
 TELEMETRY_ENABLED=true
 
-# OpenTelemetry Collector / OTLP endpoint (traces and metrics)
+# OpenTelemetry Collector / OTLP endpoint (all three signals)
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+
+# OTLP wire protocol: grpc (default, :4317) or http/protobuf (:4318).
+# OTEL_EXPORTER_OTLP_PROTOCOL is accepted as an alias.
+TELEMETRY_OTEL_PROTOCOL=grpc
 
 # Head sampling ratio — ParentBased(TraceIdRatio), 0.0–1.0 (lower in prod)
 TELEMETRY_TRACES_SAMPLE_RATE=1.0
@@ -136,7 +140,10 @@ TELEMETRY_TRACES_SAMPLE_RATE=1.0
 # Push OTel-native metrics over OTLP (independent of Prometheus /metrics)
 TELEMETRY_METRICS_ENABLED=false
 
-# Also export spans/metrics to stdout (pipeline debugging)
+# Ship log records over OTLP as well as to stdout
+TELEMETRY_LOGS_ENABLED=false
+
+# Also export spans/metrics/logs to stdout (pipeline debugging)
 TELEMETRY_CONSOLE_EXPORT=false
 
 # Resource attributes attached to every span/metric
@@ -147,11 +154,33 @@ SERVICE_VERSION=                    # service.version (defaults to package versi
 !!! info "Provider setup"
     Provider configuration is centralized in `core/observability/otel.py`:
     a rich `Resource` (`service.name/version/namespace/instance.id`,
-    `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP/gRPC
-    span + metric export, FastAPI/HTTPX/Redis/psycopg auto-instrumentation, and
-    W3C TraceContext+Baggage propagation — installed idempotently on startup
-    and flushed on shutdown. The homegrown `Tracer` spans bridge into this
-    provider, so custom spans reach the collector too.
+    `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP
+    span + metric + log export, FastAPI/HTTPX/Redis/psycopg
+    auto-instrumentation, and W3C TraceContext+Baggage propagation — installed
+    idempotently on startup and flushed on shutdown. The homegrown `Tracer`
+    spans bridge into this provider, so custom spans reach the collector too.
+    All three signals share one `Resource`, so a backend can join a log line to
+    the span it was written inside.
+
+!!! tip "Pointing at an HTTP collector"
+    `TELEMETRY_OTEL_PROTOCOL=http/protobuf` switches every signal to OTLP/HTTP,
+    whose default port is **4318**, not 4317. Set the endpoint to the collector
+    root (`http://collector:4318`) and leave the path off: the per-signal
+    `/v1/traces`, `/v1/metrics` and `/v1/logs` suffix is appended for you.
+    This matters because the SDK appends it only for endpoints it reads from
+    the environment — an explicit endpoint is used verbatim, so a collector
+    root handed straight to the HTTP exporter would 404 on every batch with
+    nothing raised anywhere.
+
+!!! tip "Logs as the third signal"
+    `TELEMETRY_LOGS_ENABLED=true` installs a `LoggerProvider` and attaches its
+    handler to the root logger, **in addition to** stdout logging — never
+    instead of it. The structlog chain already stamps `trace_id`/`span_id` on
+    every entry (see below); exporting the records hands the backend those
+    fields structured, rather than leaving them to be re-parsed out of a
+    scraped file. Records emitted by the export path itself (the OTel SDK,
+    gRPC, urllib3) are dropped from the OTLP sink only, because exporting them
+    turns one failed batch into an unbounded feedback loop.
 
 **Start Jaeger (Development):**
 
@@ -642,11 +671,13 @@ LOG_LEVEL_FILE=INFO     # DEBUG|INFO|WARNING|ERROR|CRITICAL (file handler)
 LOG_JSON=true           # true = structured JSON; false = Rich console output
 LOG_MASKING_ENABLED=true
 
-# Tracing / Telemetry (OpenTelemetry → OTLP)
+# Tracing / Telemetry (OpenTelemetry → OTLP: traces, metrics, logs)
 TELEMETRY_ENABLED=true
 TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
 TELEMETRY_TRACES_SAMPLE_RATE=1.0   # 0.0–1.0 head sampling
 TELEMETRY_METRICS_ENABLED=false    # OTLP metric push (Prometheus /metrics always on)
+TELEMETRY_LOGS_ENABLED=false       # OTLP log push (stdout logging always on)
+TELEMETRY_OTEL_PROTOCOL=grpc       # or http/protobuf (endpoint port becomes 4318)
 TELEMETRY_CONSOLE_EXPORT=false
 DEPLOYMENT_ENVIRONMENT=production
 SERVICE_VERSION=

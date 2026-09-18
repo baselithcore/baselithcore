@@ -19,6 +19,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 
 from core.observability import otel
 from core.observability.logging import add_otel_context
+from core.observability.otel_exporters import PROTOCOL_GRPC
 from core.observability.tracing import SpanStatus, Tracer
 
 
@@ -185,6 +186,7 @@ class TestOptionalExport:
         provider = otel._setup_tracing(
             resource=None,
             endpoint=None,
+            protocol=PROTOCOL_GRPC,
             sampler=otel._build_sampler(1.0),
             console_export=False,
         )
@@ -198,6 +200,7 @@ class TestOptionalExport:
         provider = otel._setup_tracing(
             resource=None,
             endpoint="http://collector:4317",
+            protocol=PROTOCOL_GRPC,
             sampler=otel._build_sampler(1.0),
             console_export=False,
         )
@@ -205,7 +208,7 @@ class TestOptionalExport:
         provider.shutdown()
 
     def test_meter_provider_skipped_with_no_destination(self):
-        assert otel._setup_metrics(None, None, False) is None
+        assert otel._setup_metrics(None, None, PROTOCOL_GRPC, False) is None
 
 
 class TestExistingAppIsInstrumented:

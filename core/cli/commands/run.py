@@ -114,7 +114,21 @@ def run_server(
     console.print()
 
     try:
-        # Configure uvicorn
+        # Configure uvicorn.
+        #
+        # The three settings below are not development conveniences: they are
+        # the parity this command owed `backend.py` and the container CMD in
+        # the Dockerfile, which both already set them. Without them `baselith
+        # run` behind any proxy — the compose gateway, a local ingress, a
+        # tunnel — reports the proxy as `request.client.host` for every caller,
+        # which collapses the per-IP rate limiter, the failed-auth throttle and
+        # the admin lockout into ONE shared bucket, and a Ctrl-C with open SSE
+        # streams cuts the lifespan teardown short.
+        #
+        # Trust stays limited to FORWARDED_ALLOW_IPS (uvicorn's own default is
+        # 127.0.0.1): widen it to the proxy's address, never to "*", or the
+        # header becomes caller-controlled and the limiter is bypassed by
+        # spoofing it.
         config: dict[str, Any] = {
             "app": "backend:app",
             "host": host,
@@ -122,6 +136,11 @@ def run_server(
             "reload": reload,
             "log_level": log_level,
             "access_log": True,
+            "proxy_headers": True,
+            "forwarded_allow_ips": os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+            "timeout_graceful_shutdown": int(
+                os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "30")
+            ),
         }
 
         # Only set workers if not in reload mode

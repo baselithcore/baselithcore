@@ -22,18 +22,14 @@ import contextvars
 import os
 from collections.abc import Awaitable, Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from typing import ParamSpec, TypeVar
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 
-async def bounded_gather(
-    awaitables: Iterable[Awaitable[_T]],
+async def bounded_gather[T](
+    awaitables: Iterable[Awaitable[T]],
     *,
     limit: int,
     return_exceptions: bool = False,
-) -> list[_T | BaseException]:
+) -> list[T | BaseException]:
     """Like ``asyncio.gather`` but with at most ``limit`` coroutines in flight.
 
     Results are returned in submission order. With ``return_exceptions=True`` a
@@ -47,7 +43,7 @@ async def bounded_gather(
     """
     semaphore = asyncio.Semaphore(max(1, limit))
 
-    async def _run(item: Awaitable[_T]) -> _T:
+    async def _run(item: Awaitable[T]) -> T:
         async with semaphore:
             return await item
 
@@ -100,9 +96,9 @@ def get_inference_executor() -> ThreadPoolExecutor:
     return _inference_executor
 
 
-async def run_inference(
-    fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
-) -> _T:
+async def run_inference[**P, T](
+    fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+) -> T:
     """Run a blocking inference call on the dedicated pool.
 
     Drop-in replacement for ``asyncio.to_thread`` / ``run_in_executor(None, …)``
@@ -136,8 +132,8 @@ async def run_inference(
 
     loop = asyncio.get_running_loop()
     context = contextvars.copy_context()
-    bound: Callable[[], _T] = partial(fn, *args, **kwargs)
-    call: Callable[[], _T] = partial(context.run, bound)
+    bound: Callable[[], T] = partial(fn, *args, **kwargs)
+    call: Callable[[], T] = partial(context.run, bound)
     return await loop.run_in_executor(get_inference_executor(), call)
 
 

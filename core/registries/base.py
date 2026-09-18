@@ -27,14 +27,11 @@ from __future__ import annotations
 import builtins
 import threading
 from collections.abc import Callable, Iterator
-from typing import Generic, TypeVar
 
 from core.exceptions import DuplicateRegistrationError, ItemNotFoundError
 
-T = TypeVar("T")
 
-
-class BaseRegistry(Generic[T]):
+class BaseRegistry[T]:
     """A thread-safe, name-keyed registry of items of type ``T``.
 
     Keys are resolved per item, in order: an explicit ``name`` passed to

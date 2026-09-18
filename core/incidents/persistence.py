@@ -6,8 +6,7 @@ for the process lifetime, so NIS2/DORA incident records are lost on restart.
 This module adds opt-in, file-based SQLite stores that persist each incident as
 a JSON blob keyed by its id, so a cold start rehydrates the full record set.
 
-SQLite (stdlib :mod:`sqlite3`) is chosen deliberately — the same rationale as
-:mod:`plugins.baselithmed.persistence`:
+SQLite (stdlib :mod:`sqlite3`) is chosen deliberately:
 
     * it is in the Python standard library — zero new dependencies, no infra;
     * incident writes are low-volume (a handful per incident lifecycle), well

@@ -319,6 +319,8 @@ STRICT_TENANT_ISOLATION=true
 # Telemetry
 TELEMETRY_ENABLED=false
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+TELEMETRY_OTEL_PROTOCOL=grpc        # or http/protobuf (endpoint port becomes 4318)
+TELEMETRY_LOGS_ENABLED=false        # OTLP log-record export, alongside stdout
 SENTRY_DSN=
 
 # Cost control

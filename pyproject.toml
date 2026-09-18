@@ -78,6 +78,14 @@ dependencies = [
   "opentelemetry-instrumentation-httpx>=0.42b0",
   "opentelemetry-instrumentation-redis>=0.42b0",
   "opentelemetry-sdk>=1.21.0",
+  # Declared rather than left transitive. core/observability/otel.py spells the
+  # resource attribute keys out as plain strings precisely so the *bootstrap*
+  # does not depend on a semconv release, but every instrumentation package
+  # above imports this one for its span attributes, and it is the package whose
+  # 0.x versioning changes attribute names between releases. Left undeclared,
+  # the version that shapes the emitted telemetry was whatever the resolver
+  # happened to pick — a dashboard breaking on an unrelated dependency bump.
+  "opentelemetry-semantic-conventions>=0.42b0",
   "orjson>=3.11.7,<4.0",
   # Direct import in core/plugins/version.py: PEP 440 parsing is what orders
   # plugin prereleases correctly (a string compare put `beta.10` before
@@ -206,6 +214,53 @@ huggingface = [
   "transformers>=5.3.0",
   "accelerate>=0.25.0",
 ]
+# Load testing harness (tests/load/locustfile.py). Not needed for the unit
+# suite — install to drive a running instance: `pip install -e ".[load]"`.
+load = [
+  "locust>=2.20.0",
+]
+memory = [
+  "supermemory>=0.1.0",
+]
+pii = [
+  # NER-based PII redaction engine (BASELITH_PII_ENGINE=presidio); the
+  # regex redaction in core.guardrails needs no extra.
+  "presidio-analyzer>=2.2.0",
+  "presidio-anonymizer>=2.2.0",
+]
+# Anthropic cloud serving backends (LLM_ANTHROPIC_BACKEND=bedrock|vertex):
+# the SDK imports the cloud auth stacks lazily, so they must be installed.
+bedrock = [
+  "anthropic[bedrock]>=0.18.0,<1.0",
+]
+vertex = [
+  "anthropic[vertex]>=0.18.0,<1.0",
+]
+computer_use = [
+  "mss>=9.0.0",
+  # 12.3.0: see the `ocr` extra above for the CVE list fixed in this release
+  "Pillow==12.3.0",
+  "pyautogui>=0.9.54",
+]
+
+# ------------------------------------------------------------------
+# Development dependency groups (PEP 735)
+# ------------------------------------------------------------------
+# NOT extras. `test` and `dev` used to live in [project.optional-dependencies],
+# which meant they were published in the wheel's metadata: `pip install
+# baselith-core[dev]` worked for every consumer, and this project's exact
+# `ruff==`/`mypy==` CI pins were advertised as installable requirements of the
+# library. They are development inputs, so they belong in a table that is
+# resolved from the repository and never travels with the distribution.
+#
+# Install them with `uv sync --group dev` (or `pip install -e . --group dev`,
+# pip >= 25.1). `[tool.uv] default-groups` below makes a bare `uv sync` install
+# `dev`, which is what a contributor wants by default.
+#
+# Runtime capability groups — browser, documents, rag, qdrant and the rest —
+# stay in [project.optional-dependencies] above: those ARE part of the public
+# contract and a consumer must be able to ask for them by extra.
+[dependency-groups]
 test = [
   "qdrant-client>=1.15.1,<2.0",
   "beautifulsoup4>=4.14.2",
@@ -232,62 +287,32 @@ test = [
   # like everything else the test job runs against.
   "pytest-xdist>=3.8.0",
 ]
-# Load testing harness (tests/load/locustfile.py). Not needed for the unit
-# suite — install to drive a running instance: `pip install -e ".[load]"`.
-load = [
-  "locust>=2.20.0",
-]
 dev = [
-  "qdrant-client>=1.15.1,<2.0",
-  "beautifulsoup4>=4.14.2",
-  # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
-  # the CSS selector parser, both fixed in 2.8.4
-  "soupsieve>=2.8.4",
-  # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
-  # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
-  "pytest>=7.4.0",
-  "pytest-cov>=4.1.0",
-  "pytest-asyncio>=0.21.0",
-  "pytest-timeout>=2.4.0",
-  "pytest-randomly>=4.1.0",
-  "hypothesis>=6.100",
-  "schemathesis>=4.25",
+  # Everything the test group installs, plus the toolchain.
+  { include-group = "test" },
   # Exact pins: these two are CI gates. A floating spec lets a new upstream
   # release fail a branch that nobody touched (ruff 0.16.0 did exactly that by
   # formatting Python blocks inside Markdown). Keep in lockstep with the pins
-  # in .github/workflows/ci.yml and .pre-commit-config.yaml.
+  # in .github/workflows/ci.yml and .pre-commit-config.yaml —
+  # scripts/check_tool_pins.py fails the build when they part ways.
   "ruff==0.15.5",
   "mypy==2.3.0",
   "ipython>=8.0.0",
   "pre-commit>=3.5.0",
   "types-PyYAML",
 ]
-memory = [
-  "supermemory>=0.1.0",
-]
-pii = [
-  # NER-based PII redaction engine (BASELITH_PII_ENGINE=presidio); the
-  # regex redaction in core.guardrails needs no extra.
-  "presidio-analyzer>=2.2.0",
-  "presidio-anonymizer>=2.2.0",
-]
-# Anthropic cloud serving backends (LLM_ANTHROPIC_BACKEND=bedrock|vertex):
-# the SDK imports the cloud auth stacks lazily, so they must be installed.
-bedrock = [
-  "anthropic[bedrock]>=0.18.0,<1.0",
-]
-vertex = [
-  "anthropic[vertex]>=0.18.0,<1.0",
-]
-computer_use = [
-  "mss>=9.0.0",
-  # 12.3.0: see the `ocr` extra above for the CVE list fixed in this release
-  "Pillow==12.3.0",
-  "pyautogui>=0.9.54",
-]
 
 [tool.uv]
+# Floor on uv itself. Every workflow and the Dockerfile install `uv==0.12.0`,
+# and PEP 735 dependency groups (`--group`, `default-groups`) need >= 0.5.15 —
+# an older uv silently resolves without them, producing an environment missing
+# every test dependency and a green-looking install. The floor turns that into
+# an error naming the version.
+required-version = ">=0.12.0"
+# `uv sync` with no arguments installs this group. A contributor's first
+# command is a working development environment, not a runtime-only one; CI
+# asks for what it wants explicitly (`--no-default-groups --group test`).
+default-groups = ["dev"]
 constraint-dependencies = [
   # PYSEC-2026-3628: duplicate Host headers forwarded on HTTP/2 -> HTTP/1.1
   # downgrade (request smuggling, CWE-444). Transitive via httpx[http2].

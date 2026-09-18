@@ -64,23 +64,31 @@ below.
 git clone <repository-url>
 cd baselith-core
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# or: venv\Scripts\activate  # Windows
+# Recommended: uv creates the virtualenv, reads .python-version (3.12) and
+# installs the LOCKED set from uv.lock — the same one CI tests against.
+# `dev` is the default group, so this includes the test suite and the toolchain.
+uv sync
 
-# Install framework + development tooling
-pip install -e ".[dev]"
+# Equivalent with pip (>= 25.1, for the --group flag)
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -e . --group dev
 
-# Install optional capability groups as needed
-# pip install -e ".[rag]"
-# pip install -e ".[browser,web]"
+# Optional capability groups are EXTRAS, not dependency groups: they are part
+# of the published contract, so they are installed by extra either way.
+# uv sync --extra rag --extra browser --extra web
 # pip install -e ".[documents,ocr,nlp]"
-# pip install -e ".[huggingface]"
 
 # Install pre-commit hooks
 pre-commit install
 ```
+
+> **Extras vs dependency groups.** `[project.optional-dependencies]` holds the
+> runtime capability groups (`rag`, `browser`, `documents`, `qdrant`, ...) —
+> those ship in the wheel's metadata and any consumer can ask for them.
+> `[dependency-groups]` (PEP 735) holds `test` and `dev` — development inputs
+> that are resolved from this repository and never travel with the
+> distribution, which is why this project's exact `ruff==`/`mypy==` CI pins are
+> no longer advertised as installable requirements of the library.
 
 ### Setup Verification
 
@@ -106,6 +114,9 @@ when adding or changing a dependency:
   conflicts on downstream consumers and block their security patches.
 - **`uv.lock`** — the reproducibility lock for development and CI (`uv sync`).
   This, not exact pins, is what guarantees a repeatable dev/test environment.
+  It covers the extras **and** the PEP 735 dependency groups; CI installs from
+  it with `uv export --frozen --no-default-groups --group test`, never by
+  re-resolving. `uv lock --check` is its own CI job.
 - **`requirements.txt`** — the human-readable mirror of the dependency surface
   the container images install. Keep every spec **identical** to the matching
   entry in `pyproject.toml`; `scripts/check_requirements_sync.py` (CI job

@@ -8,11 +8,10 @@ file-based SQLite store that persists each record as a JSON blob keyed by its
 id (providers/functions by ``id``, arrangements by ``reference_number``), so a
 cold start rehydrates the full register.
 
-SQLite (stdlib :mod:`sqlite3`) is chosen deliberately — the same rationale as
-:mod:`plugins.baselithmed.persistence`: it is in the standard library (zero new
-dependencies, no infra), register writes are low-volume, and the same
-``RegisterStore`` protocol can later be implemented against Postgres without
-touching service code. ``check_same_thread=False`` plus an internal
+SQLite (stdlib :mod:`sqlite3`) is chosen deliberately: it is in the standard
+library (zero new dependencies, no infra), register writes are low-volume, and
+the same ``RegisterStore`` protocol can later be implemented against Postgres
+without touching service code. ``check_same_thread=False`` plus an internal
 :class:`~threading.RLock` makes the single connection safe to share across the
 event loop and worker threads; ``PRAGMA journal_mode=WAL`` keeps reads
 non-blocking. Selected only when ``THIRDPARTY_REGISTER_DB_PATH`` is set; unset

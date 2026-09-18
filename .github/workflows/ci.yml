@@ -225,7 +225,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Audit workflow definitions
         run: |
           uv pip install --system zizmor==1.30.1
@@ -319,10 +323,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install locked dependencies
         run: |
-          uv export --frozen --extra test --no-emit-project \
+          uv export --frozen --no-default-groups --group test --no-emit-project \
             --format requirements-txt -o /tmp/requirements-test.txt
           uv pip install --system --no-config --require-hashes \
             -r /tmp/requirements-test.txt
@@ -356,7 +364,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install package
         run: uv pip install --system -e .
       - name: Regenerate and diff OpenAPI schema
@@ -385,7 +397,10 @@ jobs:
         run: python scripts/check_sdk_contract.py --list && python scripts/check_sdk_contract.py
       - name: Test Python SDK
         run: |
-          pip install -e sdk/python pytest==8.3.4
+          # The SDK declares its own PEP 735 `test` group; installing it beats
+          # naming a pytest version here that nothing keeps in step with the
+          # SDK's own floor.
+          pip install -e sdk/python --group sdk/python/pyproject.toml:test
           python -m pytest sdk/python/tests -q
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
@@ -416,7 +431,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install package
         run: uv pip install --system -e .
       - name: Run deterministic eval gate
@@ -440,7 +459,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install package
         run: uv pip install --system -e .
       - name: Run red-team gate
@@ -469,7 +492,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install package
         run: uv pip install --system -e .
       - name: Run bias examination gate
@@ -496,6 +523,8 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
         with:
           version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       # A stale uv.lock means pyproject.toml changed without re-locking:
       # builds stop being reproducible. Regenerate with `uv lock`.
       - name: Verify uv.lock is in sync with pyproject.toml
@@ -577,7 +606,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Dependency Vulnerability Scan
         run: |
           uv pip install --system -e . pip-audit==2.10.1
@@ -596,7 +629,7 @@ jobs:
           # transformers, pypdf or playwright, so a CVE in an extra used to
           # surface only through Trivy. --no-deps: the export is fully pinned,
           # so nothing is resolved or installed.
-          uv export --frozen --all-extras --no-extra mineru --no-dev \
+          uv export --frozen --all-extras --no-extra mineru --no-default-groups \
             --no-emit-project --no-hashes --format requirements-txt \
             -o /tmp/lock-audit.txt
           pip-audit --no-deps -r /tmp/lock-audit.txt \
@@ -856,7 +889,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
-        run: pip install uv==0.12.0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Run Tests
         env:
           POSTGRES_DB: test_db
@@ -864,8 +901,9 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           CACHE_REDIS_URL: redis://localhost:6379/1
         run: |
-          # Install the LOCKED set, not a fresh resolution. `-e ".[test]"`
-          # re-resolved every dependency to whatever was newest that morning,
+          # Install the LOCKED set, not a fresh resolution. Installing the
+          # group directly re-resolved every dependency to whatever was newest
+          # that morning,
           # so uv.lock described a combination CI never exercised — and a lock
           # nothing installs from is a lock nothing validates. Exporting it
           # with hashes also makes the test environment reproducible and
@@ -875,7 +913,7 @@ jobs:
           # [tool.uv] constraint-dependencies from pyproject.toml, which are
           # unpinned ranges and therefore rejected in --require-hashes mode.
           # Their effect is already baked into the pinned export.
-          uv export --frozen --extra test --no-emit-project \
+          uv export --frozen --no-default-groups --group test --no-emit-project \
             --format requirements-txt -o /tmp/requirements-test.txt
           uv pip install --system --no-config --require-hashes \
             -r /tmp/requirements-test.txt
@@ -902,7 +940,8 @@ jobs:
     # bundle, and the dashboard silently serves stale code for a release.
     #
     # This rebuilds it from a clean `npm ci` and fails if the result differs
-    # from what is committed — the same shape as the openapi_drift gate.
+    # from what is committed — the same shape as the openapi_drift gate — and
+    # lints and tests the sources on the way through.
     name: BaselithBot UI Build
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
@@ -915,17 +954,31 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '22'
+          # From the dashboard's own .nvmrc rather than a literal here, so a
+          # contributor's `nvm use`, the package.json `engines.node` floor and
+          # the version CI builds the committed dist/ with are one fact. A
+          # bundle built on a different major is a bundle this gate's rebuild
+          # comparison can fail for reasons nobody changed.
+          node-version-file: plugins/baselithbot/ui/.nvmrc
           cache: 'npm'
           cache-dependency-path: plugins/baselithbot/ui/package-lock.json
-      - name: Install, typecheck and build
+      - name: Install, lint, typecheck, test and build
         working-directory: plugins/baselithbot/ui
         # npm ci, not npm install: it installs the locked tree exactly and
         # fails on a lockfile that disagrees with package.json, rather than
         # quietly resolving something new and rewriting the lock.
+        #
+        # lint and test run HERE and nowhere else. The dashboard ships an
+        # ESLint 9 flat config and a vitest suite, and until this step neither
+        # was executed by any workflow: `npm test` elsewhere in this file
+        # belongs to the `sdk` job (sdk/typescript), and `frontend_test` covers
+        # a different tree entirely (core/static/frontend/js, via node --test).
+        # A test suite no pipeline runs is a test suite that rots silently.
         run: |
           npm ci
+          npm run lint
           npm run typecheck
+          npm test
           npm run build
       - name: Committed dist/ matches a clean rebuild
         # `git status --porcelain`, not `git diff`: dist/ is covered by a

@@ -21,7 +21,7 @@ import inspect
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from core.observability.logging import get_logger
 
@@ -60,7 +60,7 @@ class AllProvidersFailedError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class Provider(Generic[T]):
+class Provider[T]:
     """One provider stage in the fallback chain.
 
     ``timeout_seconds`` bounds this stage only, overriding the chain-level
@@ -84,7 +84,7 @@ class ProviderAttempt:
 
 
 @dataclass(frozen=True)
-class FallbackOutcome(Generic[T]):
+class FallbackOutcome[T]:
     """Successful chain outcome plus the trail of attempts that produced it."""
 
     result: T
@@ -92,7 +92,7 @@ class FallbackOutcome(Generic[T]):
     attempts: list[ProviderAttempt] = field(default_factory=list)
 
 
-async def _invoke(call: ProviderCall[T], *args: object, **kwargs: object) -> T:
+async def _invoke[T](call: ProviderCall[T], *args: object, **kwargs: object) -> T:
     """Invoke a sync or async ``call`` and await if needed."""
     result = call(*args, **kwargs)
     if inspect.isawaitable(result):
@@ -100,7 +100,7 @@ async def _invoke(call: ProviderCall[T], *args: object, **kwargs: object) -> T:
     return result
 
 
-class FallbackChain(Generic[T]):
+class FallbackChain[T]:
     """Ordered list of providers tried in sequence on failure."""
 
     def __init__(

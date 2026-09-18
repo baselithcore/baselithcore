@@ -129,7 +129,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
     pip install uv==0.12.0 \
-    && uv export --frozen --no-dev --no-emit-project --no-hashes --no-annotate \
+    && uv export --frozen --no-default-groups --no-emit-project --no-hashes --no-annotate \
         --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
         --extra web --extra browser --extra documents \
         --format requirements-txt -o /tmp/requirements.lock.txt \

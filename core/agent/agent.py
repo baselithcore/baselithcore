@@ -43,7 +43,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -76,7 +76,6 @@ from core.services.llm.tool_calling import (
 
 logger = get_logger(__name__)
 
-OutputT = TypeVar("OutputT")
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -90,7 +89,7 @@ class AgentOutputValidationError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class AgentResult(Generic[OutputT]):
+class AgentResult[OutputT]:
     """Outcome of one :meth:`Agent.run` call.
 
     Attributes:
@@ -113,7 +112,7 @@ class AgentResult(Generic[OutputT]):
     messages: list[Message] = field(default_factory=list)
 
 
-class Agent(Generic[OutputT]):
+class Agent[OutputT]:
     """A typed agent: model + system prompt + tools + validated output.
 
     Args:
