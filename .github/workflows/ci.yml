@@ -68,18 +68,24 @@ concurrency:
 # Every job below carries the same `runs-on:` expression rather than a literal
 # label, and the three things it encodes are the reason:
 #
-#   1. DEFAULT: the organisation's self-hosted runners, matched by
-#      [self-hosted, baselith-01-org]. The runner is registered on the
-#      `baselithcore` ORG, not on this repository, which adds two conditions
-#      that a repo-level runner does not have: its runner group must grant
-#      access to this repository, and — because this repository is PUBLIC —
-#      that group must additionally have "Allow public repositories" turned on.
-#      Neither is visible from a workflow, and a job that matches no runner
-#      does not fail: it queues. See the kill switch in (3) for the way out.
+#   1. DEFAULT: the organisation's self-hosted runner, matched by
+#      [self-hosted, baselith-01-org]. It is registered on the `baselithcore`
+#      ORG, not on this repository, which adds two conditions a repo-level
+#      runner does not have: its runner group must reach this repository, and —
+#      this repository being PUBLIC — that group must also allow public
+#      repositories, which is off by default.
 #
-#      A runner executes one job at a time, so this pipeline's ~22 jobs
-#      serialize across however many runners in the group carry the label. That
-#      is the accepted trade: the wall-clock cost of a run went up, the hosted
+#      Verified 2026-09-18: `baselith-runner-01` (id 84, Linux, X64) carries
+#      the label and sits in the `Default` group — visibility `all`,
+#      allows_public_repositories true, restricted_to_workflows false. Neither
+#      condition is observable from a workflow, and a job that matches no
+#      runner does not fail: it QUEUES. So the symptom of either being revoked
+#      is a pipeline that never starts, not a red build — which is what the
+#      kill switch in (3) exists for.
+#
+#      A runner executes one job at a time and there is exactly one carrying
+#      this label, so this pipeline's ~22 jobs serialize on it. That is the
+#      accepted trade: the wall-clock cost of a run went up, the hosted
 #      capacity it consumes went to zero.
 #
 #   2. FORK PULL REQUESTS FALL BACK TO ubuntu-latest, unconditionally. This
@@ -101,15 +107,19 @@ concurrency:
 #        gh variable set CI_RUNNER_LABELS --body '["ubuntu-latest"]'
 #        gh variable delete CI_RUNNER_LABELS
 #
-# The runner must provide Docker (the `python_test` job declares `services:`
-# for postgres and redis, and `image_build` drives buildx) and enough disk for
-# the image builds. Everything else — Python, Node, uv — is installed per run
-# by the pinned setup actions exactly as it is on a hosted runner.
+# Two things the runner must supply itself, because nothing in this file
+# installs them and both ship with the hosted images: DOCKER — `python_test`
+# declares postgres and redis `services:`, and `image_build` drives buildx plus
+# eight `docker run` assertions — and the GH CLI, which the `release` job calls
+# as `gh release upload` to attach the SBOM to the tag. Everything else is
+# installed per run exactly as on a hosted runner: helm by setup-helm, Node by
+# setup-node, Python and uv by setup-python, and gitleaks, trivy and
+# kubeconform by checksummed download. Nothing anywhere calls sudo or apt-get.
 #
 # NOT covered here: the called workflow `release-image.yml` and the other
 # workflows in this directory keep their hosted runners. release-image builds
-# linux/arm64 on `ubuntu-24.04-arm`; nothing in the org runner group is known
-# to serve arm64, and a release is the wrong place to find out.
+# linux/arm64 on `ubuntu-24.04-arm`; the org runner is X64 and this workflow
+# sets up no QEMU, so it cannot serve that build.
 # ------------------------------------------------------------------
 
 jobs:
