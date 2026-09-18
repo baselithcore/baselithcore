@@ -12,25 +12,22 @@
 
 [![CI](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/baselith-core.svg?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
-[![Version 0.33.0](https://img.shields.io/badge/version-0.33.0-0b5394.svg?style=flat-square)](CHANGELOG.md)
-[![Tests: 8709 passing](https://img.shields.io/badge/tests-8709%20passing-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
-[![Coverage 82%](https://img.shields.io/badge/coverage-82%25-brightgreen.svg?style=flat-square)](https://docs.baselithcore.xyz/advanced/testing/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
 [![Your plugins: any licence](https://img.shields.io/badge/your%20plugins-any%20licence-brightgreen.svg?style=flat-square)](LICENSE.exception)
 [![Docs](https://img.shields.io/badge/docs-baselithcore.xyz-0b5394.svg?style=flat-square)](https://docs.baselithcore.xyz)
 
-BaselithCore is a Python orchestration engine for agentic AI. Execution state
-is checkpointed as a run proceeds, so an interrupted process resumes from its
-last completed step instead of replaying side effects. Every request carries a
-budget that caps iterations, tool calls, tokens and USD spend, and every step
-emits OpenTelemetry spans and Prometheus metrics with real cost attached. The
-audit trail a regulated deployment has to produce is written while the system
-runs, not reconstructed from logs afterwards.
+BaselithCore is a Python orchestration engine for agentic AI. Execution state is
+checkpointed as a run proceeds, so an interrupted process resumes from its last
+completed step instead of replaying side effects. Every request carries a budget
+that caps iterations, tool calls, tokens and USD spend, and every step emits
+OpenTelemetry spans and Prometheus metrics with real cost attached — the audit
+trail a regulated deployment has to produce is written while the system runs,
+not reconstructed from logs afterwards.
 
 <div align="center">
 
-[**Quick start**](#quick-start) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Contributing**](CONTRIBUTING.md)
+[**Quick start**](#quick-start) · [**Plugins**](#plugins) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Changelog**](CHANGELOG.md) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
 
@@ -43,13 +40,12 @@ runs, not reconstructed from logs afterwards.
 ## Why BaselithCore
 
 - **Agents that survive production.** Durable execution with checkpoint/resume, replayable tool steps, state history and fork/rewind — a `SIGKILL` mid-run recovers without repeating a single side effect.
-- **Everything included, nothing rented.** Evaluation suites, LLM-as-judge, red-teaming, OpenTelemetry tracing, Prometheus metrics with real USD cost, Helm/Terraform deployment — built in and self-hosted, with no companion SaaS to subscribe to.
-- **Brakes, not just horsepower.** Autonomy gating, durable human-in-the-loop approvals, per-request cost budgets, prompt-injection guardrails, sandboxed code execution — every seam fail-closed by default, plus opt-in EU AI Act / GDPR / NIS2 / DORA primitives with evidence trails.
+- **Everything included, nothing rented.** Evaluation suites, LLM-as-judge, red-teaming, OpenTelemetry tracing, Prometheus metrics with real USD cost, Helm and Terraform deployment — built in, self-hosted, no companion SaaS to subscribe to.
+- **Brakes, not just horsepower.** Autonomy gating, durable human-in-the-loop approvals, per-request cost budgets, prompt-injection guardrails and sandboxed code execution, every seam fail-closed by default — plus opt-in EU AI Act, GDPR, NIS2 and DORA primitives with evidence trails.
 
-## Sixty seconds
+## Quick start
 
-For a checkout-based Docker runtime with automatic plugin builds, use the
-[Docker Core installation guide](mkdocs-site/docs/getting-started/docker-core.md).
+Two ways in. As a library, in one command:
 
 ```bash
 pip install baselith-core
@@ -72,6 +68,52 @@ Typed, budgeted and observable from the first line — the
 [quickstart](https://docs.baselithcore.xyz/getting-started/quickstart/) adds
 tools, structured output and a checkpoint store.
 
+Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, with migrations
+applied at startup. From a checkout of this repository, with Docker running:
+
+```bash
+pip install -e .                # installs the `baselith` CLI
+baselith setup docker-core      # writes .env and configs/.env.docker.core
+baselith up                     # pulls images, builds the API, waits for /health
+baselith doctor                 # environment and configuration diagnostics
+```
+
+Optional capabilities (RAG, browser automation, OCR, extra model providers,
+vector backends, …) install as extras — the [installation
+guide](https://docs.baselithcore.xyz/getting-started/installation/) lists them,
+and the [Docker Core guide](mkdocs-site/docs/getting-started/docker-core.md)
+covers the checkout-based runtime in full.
+
+## Plugins
+
+Everything domain-specific is a plugin, and the CLI does the plumbing. Scaffold
+one, check it, run it — without leaving the terminal:
+
+```bash
+baselith plugin create my_plugin --type agent               # manifest.yaml, plugin.py, agent.py
+baselith plugin validate my_plugin                          # syntax, manifest, schema, deps, env vars
+baselith plugin add my_plugin --name my_plugin --docker     # build, rebuild the API image, probe HTTP
+```
+
+`--type` picks the shape: `agent`, `router` or `graph`. Running someone else's
+plugin is the same `add` command with a Git URL, and the marketplace is one
+command away:
+
+```bash
+baselith plugin add https://github.com/your-org/plugin-example --docker
+baselith plugin marketplace search browser
+baselith plugin marketplace install <plugin-id>
+```
+
+`baselith plugin list`, `status` and `logs` cover day-to-day work; `sign` writes
+the integrity hash a hardened deployment verifies before it imports anything.
+
+The [first-plugin tutorial](https://docs.baselithcore.xyz/getting-started/first-plugin/)
+walks one end to end · [creating
+plugins](https://docs.baselithcore.xyz/plugins/creating-plugins/) ·
+[packaging](https://docs.baselithcore.xyz/plugins/packaging/) ·
+[marketplace](https://docs.baselithcore.xyz/plugins/marketplace/)
+
 ## Architecture at a glance
 
 ```mermaid
@@ -93,6 +135,7 @@ graph TD
         S["Storage Layer<br/>(Postgres · Qdrant/pgvector · Redis)"]
         R["Plugin Registry"]
         RES["Resilience · Observability · Guardrails"]
+        GOV["Governance<br/>(autonomy gating · human-in-the-loop · budgets · compliance evidence)"]
     end
 
     A --> COG
@@ -112,6 +155,7 @@ graph TD
 
     A --> I["Interop<br/>(MCP · A2A streaming · AP2 mandates · realtime duplex)"]
     A -.->|wrapped by| RES
+    A -.->|gated by| GOV
 ```
 
 Two rules hold the shape: `core/` stays domain-agnostic, and everything
@@ -139,19 +183,6 @@ docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 
 </details>
 
-## <span id="quick-start"></span> Quick start
-
-```bash
-pip install baselith-core       # core engine
-docker compose up -d            # Redis, PostgreSQL, Qdrant (optional)
-baselith doctor                 # validate environment and configuration
-```
-
-Optional capabilities (RAG, browser automation, OCR, extra model providers,
-vector backends, …) install as extras — the [installation
-guide](https://docs.baselithcore.xyz/getting-started/installation/) has the
-full list.
-
 ## Contributing
 
 Contributions are welcome, and the on-ramps are deliberately marked:
@@ -161,26 +192,20 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 - [**Discussions**](https://github.com/baselithcore/baselithcore/discussions) — questions, ideas, and what you built
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
-PR has to pass, and the review turnaround you can expect.
-
-Version 0.35.0 ships **8,709 tests** at **82% branch coverage**, gated in CI at
-a 78% floor alongside strict typing, architecture-boundary and docs-consistency
-checks.
+PR has to pass, and the review turnaround you can expect. Every pull request
+runs **8,791 tests** behind a **78% branch-coverage floor**, strict typing,
+architecture-boundary and docs-consistency gates. Report vulnerabilities through
+[SECURITY.md](SECURITY.md); release history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
-BaselithCore is licensed under the **GNU Affero General Public License v3.0 only
-(AGPL-3.0-only)** — see [LICENSE](LICENSE).
-
-[LICENSE.exception](LICENSE.exception) grants an additional permission under
-AGPL section 7: a plugin that uses the framework as a library — rather than
-modifying it — may be licensed under any terms you choose, including closed
-ones, and section 13 never reaches it. The permission is offered to everyone on
-identical terms. Two conditions come with it: your plugin must carry the notice
-described in section 3(c), and patching files under `core/` makes it a modified
-framework rather than a plugin, in which case AGPL-3.0-only applies in full. See
-[plugin packaging](https://docs.baselithcore.xyz/plugins/packaging/) for what
-the notice has to say.
+**AGPL-3.0-only** — see [LICENSE](LICENSE).
+[LICENSE.exception](LICENSE.exception) adds a permission under AGPL section 7:
+a plugin that uses the framework as a library — rather than patching files under
+`core/` — may be licensed under any terms you choose, including closed ones, and
+section 13 never reaches it. Offered to everyone on identical terms; your plugin
+carries the notice described in section 3(c), and [plugin
+packaging](https://docs.baselithcore.xyz/plugins/packaging/) says what it must say.
 
 ---
 Copyright © 2026 BaselithCore Team.
