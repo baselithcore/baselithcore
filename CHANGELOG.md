@@ -5,6 +5,15 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+## [0.35.1](https://github.com/baselithcore/baselithcore/compare/v0.35.0...v0.35.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **cli:** a missing data directory must not hold the server down ([758fb91](https://github.com/baselithcore/baselithcore/commit/758fb916a25f45eedfc72c25770c6b804ca5d0bb))
+* **plugins:** read the frontend and entry_point contracts the way manifests actually write them ([1693b6f](https://github.com/baselithcore/baselithcore/commit/1693b6f6452abc57c6e701fea7125c0b804aebc7))
+* **realtime:** stop Redis pubsub from dying after idle silence and leaking pool connections ([fa01b89](https://github.com/baselithcore/baselithcore/commit/fa01b89e72e6d42f3db18d878870cbe5db226c8e))
+
 # [0.35.0](https://github.com/baselithcore/baselithcore/compare/v0.34.0...v0.35.0) (2026-09-16)
 
 
