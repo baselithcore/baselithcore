@@ -12,6 +12,12 @@ so a burst of inference cannot starve the unrelated short tasks that also live
 on the default executor — SSRF DNS resolution, audit-log appends, tokenization.
 It carries the caller's ``contextvars`` across the thread hop (tenant, trace,
 budget) the way ``asyncio.to_thread`` does; a bare ``run_in_executor`` does not.
+
+``drain_async_iterator`` goes the other way: it lets a **synchronous** caller
+consume an async stream. Returning an async generator from a function annotated
+``Iterator[str]`` type-checks against ``Any`` and then fails at the call site
+with ``'async_generator' object is not iterable`` — a runtime error a long way
+from its cause. This is the bridge that makes the sync surface honest.
 """
 
 from __future__ import annotations
@@ -20,8 +26,16 @@ import asyncio
 import atexit
 import contextvars
 import os
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Iterable,
+    Iterator,
+)
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 
 async def bounded_gather[T](
@@ -145,8 +159,57 @@ def shutdown_inference_executor(*, wait: bool = False) -> None:
         executor.shutdown(wait=wait, cancel_futures=not wait)
 
 
+async def _anext[T](iterator: AsyncIterator[T]) -> T:
+    """``__anext__`` as a real coroutine.
+
+    ``AsyncIterator.__anext__`` is typed ``Awaitable[T]``, and
+    ``asyncio.Runner.run`` takes a ``Coroutine``. Awaiting it inside this
+    wrapper is what turns one into the other.
+    """
+    return await iterator.__anext__()
+
+
+def drain_async_iterator[T](
+    open_stream: Callable[[], Coroutine[Any, Any, AsyncIterator[T]]],
+) -> Iterator[T]:
+    """Consume an async stream from synchronous code, item by item.
+
+    ``open_stream`` is a **callable** returning the awaitable that produces the
+    stream, not the awaitable itself: it is invoked once the loop exists, so a
+    coroutine is never created in one context and awaited in another.
+
+    Built on :class:`asyncio.Runner` (3.11+) rather than a hand-rolled
+    ``new_event_loop`` / ``set_event_loop`` / ``close`` dance. The Runner owns
+    the loop for the whole drain — every ``__anext__`` must run on the SAME
+    loop, which is why ``asyncio.run`` per item cannot work — and on exit it
+    runs ``shutdown_asyncgens``, so a stream abandoned part-way still gets its
+    ``finally`` blocks and releases whatever it held.
+
+    The caller must not already be inside a running loop; check before calling
+    and route such callers to the async API instead. Driving a loop from within
+    a running one raises, and doing it on a request thread would block the
+    event loop for the whole stream even if it did not.
+
+    Args:
+        open_stream: Zero-argument callable returning an awaitable that
+            resolves to the async iterator to drain.
+
+    Yields:
+        Each item the stream produces, in order.
+    """
+    with asyncio.Runner() as runner:
+        iterator: AsyncIterator[T] = runner.run(open_stream()).__aiter__()
+        while True:
+            try:
+                item = runner.run(_anext(iterator))
+            except StopAsyncIteration:
+                return
+            yield item
+
+
 __all__ = [
     "bounded_gather",
+    "drain_async_iterator",
     "get_inference_executor",
     "run_inference",
     "shutdown_inference_executor",

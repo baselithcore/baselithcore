@@ -81,6 +81,19 @@ take a single `ChatRequest`:
 | `handle_chat_stream(req)` | `Iterator[str]` | Synchronous token stream |
 | `handle_chat_stream_async(req)` | `AsyncIterator[str]` | Async token stream |
 
+!!! warning "The two synchronous methods drive their own event loop"
+    `handle_chat` and `handle_chat_stream` exist for scripts, notebooks and
+    CLI tools — callers with no event loop of their own. Both raise
+    `RuntimeError` when called from a thread that already runs one, naming the
+    async method to use instead. From FastAPI, a worker, or anything else
+    already inside a loop, always use the `_async` variants: the synchronous
+    ones would block that loop for the whole request, and cannot run at all.
+
+`handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
+through `core.utils.concurrency.drain_async_iterator`, so the guardrails, the
+metrics, the streaming-disabled fallback and the error stream have one
+implementation rather than two that can drift.
+
 ### With Plugin Registry
 
 ```python

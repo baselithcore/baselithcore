@@ -21,6 +21,7 @@ from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
 from core.services.chat.exceptions import ChatServiceError
 from core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
+from core.utils.concurrency import drain_async_iterator
 
 if TYPE_CHECKING:
     from sentence_transformers import (  # type: ignore[import-untyped]
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     )
 
     from core.nlp import CachedEmbedder
+    from core.orchestration.protocols import OrchestratorProtocol
 
     # The service only needs `.encode(...)`: both the raw model and the
     # framework's caching wrapper satisfy that contract.
@@ -188,9 +190,15 @@ class ChatService:
         return self._history_manager
 
     @property
-    def agent(self) -> Any:
+    def agent(self) -> OrchestratorProtocol:
         """
         Access the main Orchestrator 'agent'.
+
+        Typed as the protocol rather than ``Any``: the only two members this
+        service touches are ``process`` and ``process_stream``, which is
+        exactly what ``OrchestratorProtocol`` declares. It was ``Any``, and
+        that is what let `handle_chat_stream` return an async generator from a
+        method annotated ``Iterator[str]`` without mypy noticing.
 
         This agent is responsible for breaking down the query into tasks
         and coordinating sub-agents. Requires `plugin_registry`.
@@ -308,38 +316,46 @@ class ChatService:
         """
         Process a conversational request as a synchronous stream.
 
+        WARNING: Blocking call, like :meth:`handle_chat`. Use
+        :meth:`handle_chat_stream_async` from any async context.
+
+        This used to `return self.agent.process_stream(...)` directly. That is
+        an ASYNC generator, so the returned object satisfied the annotation
+        only because the orchestrator is typed ``Any``; iterating it with a
+        plain ``for`` raised ``'async_generator' object is not iterable`` at the
+        call site, a long way from the cause. Every test passed because they all
+        inject a mock whose ``process_stream`` is a sync generator — the one
+        shape production never has.
+
+        It now drives the async path on a private event loop, the same bridge
+        :meth:`handle_chat` uses for the non-streaming case, and delegates to
+        :meth:`handle_chat_stream_async` so the guardrails, metrics, the
+        streaming-disabled fallback and the error stream have exactly one
+        implementation.
+
         Args:
             req: Chat request payload.
 
         Returns:
-            Iterator[str]: Generator yielding response tokens or segments.
+            Iterator[str]: Iterator yielding response tokens or segments.
+
+        Raises:
+            RuntimeError: If called from a thread that already runs an event
+                loop. Driving a loop from inside a running one is impossible,
+                and blocking a request thread for a whole stream would be wrong
+                even if it were not.
         """
-        start = time.perf_counter()
         try:
-            self._record_metric("chat_requests_total", route="stream")
-
-            if not self.config.streaming_enabled:
-                response = self.handle_chat(req)
-                return iter([response.answer])
-
-            context = {
-                "conversation_id": req.conversation_id,
-                "rag_only": req.rag_only,
-                "kb_label": req.kb_label,
-            }
-
-            # Delegate to the orchestrator's native streaming capability.
-            return self.agent.process_stream(req.query, context)
-
-        except Exception:
-            self._record_metric("chat_request_errors_total", route="stream")
-            self._record_metric(
-                "chat_request_latency",
-                route="stream",
-                value=time.perf_counter() - start,
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is not None and running.is_running():
+            raise RuntimeError(
+                "Attempted synchronous chat streaming from an async context. "
+                "Call `handle_chat_stream_async` instead."
             )
-            logger.exception("Chat streaming pipeline failed")
-            return iter(["❌ Critical internal error during generation."])
+
+        return drain_async_iterator(lambda: self.handle_chat_stream_async(req))
 
     async def handle_chat_async(self, req: ChatRequest) -> ChatResponse:
         """

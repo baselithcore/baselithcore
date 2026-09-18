@@ -111,6 +111,7 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core.routers",
     "core.scraper",
     "core.security",
+    "core.services.chat",
     "core.services.evaluation",
     "core.services.graph",
     "core.services.llm",

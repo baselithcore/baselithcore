@@ -191,14 +191,34 @@ async def test_handle_chat_async_error(chat_service):
             await chat_service.handle_chat_async(req)
 
 
+async def _async_tokens(*tokens: str):
+    """An async generator, which is what Orchestrator.process_stream returns.
+
+    The sync-stream tests used to inject `iter([...])` here. That made them
+    pass against an implementation that handed the async generator straight
+    back to a synchronous caller — the one shape production never produces, so
+    the bug it hid could not be caught.
+    """
+    for token in tokens:
+        yield token
+
+
 def test_handle_chat_stream(chat_service):
     req = ChatRequest(query="stream")
     mock_agent = MagicMock()
-    mock_agent.process_stream.return_value = iter(["token1", "token2"])
+    mock_agent.process_stream.return_value = _async_tokens("token1", "token2")
 
     with patch.object(ChatService, "agent", new=mock_agent):
         stream = chat_service.handle_chat_stream(req)
         assert list(stream) == ["token1", "token2"]
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_stream_refuses_an_async_context(chat_service):
+    """The sync stream drives its own loop, so it cannot run inside one."""
+    req = ChatRequest(query="stream")
+    with pytest.raises(RuntimeError, match="handle_chat_stream_async"):
+        chat_service.handle_chat_stream(req)
 
 
 def test_record_metric_import_error(chat_service):
@@ -217,9 +237,15 @@ def test_record_metric_import_error(chat_service):
 
 
 def test_handle_chat_stream_disabled(chat_service):
+    """With streaming off the answer arrives as a single chunk.
+
+    Patches `handle_chat_async`, not `handle_chat`: the sync stream now
+    delegates to `handle_chat_stream_async` so that the guardrails, the
+    metrics and this fallback have one implementation rather than two.
+    """
     chat_service.config.streaming_enabled = False
     req = ChatRequest(query="sync")
-    with patch.object(chat_service, "handle_chat") as mock_handle:
+    with patch.object(chat_service, "handle_chat_async") as mock_handle:
         mock_handle.return_value = MagicMock(answer="sync answer")
         stream = chat_service.handle_chat_stream(req)
         assert list(stream) == ["sync answer"]
