@@ -119,6 +119,33 @@ def check_plugin_dependencies() -> CheckResult:
     return CheckResult("Plugin Dependencies", True, "Declared Python deps satisfied")
 
 
+def frontend_build_output(plugin_dir: Path, frontend: dict[str, Any]) -> Path:
+    """Resolve the build output a frontend contract declares.
+
+    Mirrors the resolution ``baselith plugin add --docker`` performs, so the
+    doctor check looks where the builder actually writes: ``path`` is relative
+    to the plugin directory (default ``ui``) and ``output_dir`` is relative to
+    ``path`` (default ``dist``). The legacy ``dist``/``dist_path`` spellings
+    stay supported and remain relative to the plugin directory.
+
+    Args:
+        plugin_dir: Directory the manifest was loaded from.
+        frontend: The manifest's ``frontend`` mapping.
+
+    Returns:
+        The directory the frontend build is expected to produce.
+    """
+    legacy = frontend.get("dist") or frontend.get("dist_path")
+    if legacy:
+        return plugin_dir / str(legacy)
+    path = Path(str(frontend.get("path") or frontend.get("directory") or "ui"))
+    output = Path(str(frontend.get("output_dir") or frontend.get("output") or "dist"))
+    if output.is_absolute():
+        return output
+    base = path if path.is_absolute() else plugin_dir / path
+    return base / output
+
+
 def check_plugin_frontends() -> CheckResult:
     """Check whether plugins that declare frontend builds have a built dist."""
     missing: list[str] = []
@@ -129,11 +156,14 @@ def check_plugin_frontends() -> CheckResult:
         frontend = manifest.get("frontend")
         if not isinstance(frontend, dict):
             continue
-        dist = frontend.get("dist") or frontend.get("dist_path") or "frontend/dist"
-        dist_path = plugin_dir / str(dist)
+        dist_path = frontend_build_output(plugin_dir, frontend)
         if not dist_path.exists():
             command = frontend.get("build_command") or "npm run build"
-            missing.append(f"{plugin_dir.name}:{dist} (build: {command})")
+            try:
+                label: Path | str = dist_path.relative_to(plugin_dir)
+            except ValueError:
+                label = dist_path
+            missing.append(f"{plugin_dir.name}:{label} (build: {command})")
     if missing:
         return CheckResult(
             "Plugin Frontends",
@@ -147,6 +177,7 @@ def check_plugin_frontends() -> CheckResult:
 
 __all__ = [
     "check_plugin_dependencies",
+    "frontend_build_output",
     "check_plugin_frontends",
     "check_plugins",
 ]

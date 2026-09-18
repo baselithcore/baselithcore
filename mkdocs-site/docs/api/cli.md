@@ -112,6 +112,14 @@ runtime configuration (telemetry, migrations mode) and plugin readiness
 (plugins, plugin dependencies, plugin frontends). The last three are the ones
 `--core-only` skips.
 
+*Plugin Frontends* reads each manifest's `frontend` block and checks that the
+declared build output is on disk, resolving it the way the Docker installer
+does: `path` against the plugin directory (default `ui`), then `output_dir`
+against `path` (default `dist`); the older `dist`/`dist_path` spellings stay
+relative to the plugin directory. A plugin that declares no `frontend` block is
+not checked, so a UI plugin only gets the unbuilt-SPA warning once it declares
+its build contract.
+
 **Example Output** (a host with Qdrant and PostgreSQL down, dependency list
 elided):
 
