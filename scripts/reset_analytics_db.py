@@ -42,7 +42,7 @@ async def get_table_counts(cur, tables):
         await cur.execute("SELECT to_regclass(%s)", (table,))
         result = await cur.fetchone()
         if result and result[0]:
-            await cur.execute(f"SELECT COUNT(*) FROM {table}")  # nosec
+            await cur.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608  # nosec
             row = await cur.fetchone()
             counts[table] = row[0] if row else 0
         else:

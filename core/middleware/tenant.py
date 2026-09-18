@@ -23,11 +23,11 @@ from core.context import (
 from core.middleware._auth_memo import resolve_user
 
 try:
-    import structlog  # type: ignore
-    from structlog.contextvars import bind_contextvars  # type: ignore
+    import structlog
+    from structlog.contextvars import bind_contextvars
 except ImportError:
-    structlog = None  # type: ignore
-    bind_contextvars = None  # type: ignore
+    structlog = None  # type: ignore[assignment]
+    bind_contextvars = None  # type: ignore[assignment]
 
 
 class TenantMiddleware:

@@ -188,11 +188,11 @@ class FallbackChain[T]:
             if remaining is not None:
                 timeout = remaining if timeout is None else min(timeout, remaining)
             try:
-                if timeout is not None:
-                    result = await asyncio.wait_for(
-                        _invoke(provider.call, *args, **kwargs), timeout=timeout
-                    )
-                else:
+                # `asyncio.timeout(None)` is a no-op deadline, so one statement
+                # covers both the bounded and the unbounded stage. The awaited
+                # value is a fresh coroutine, never an existing task, so the
+                # context manager cancels exactly what `wait_for` did.
+                async with asyncio.timeout(timeout):
                     result = await _invoke(provider.call, *args, **kwargs)
             except Exception as exc:
                 if isinstance(exc, self._fatal_exceptions):

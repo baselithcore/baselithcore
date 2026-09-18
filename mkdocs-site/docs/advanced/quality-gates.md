@@ -114,6 +114,9 @@ purpose, and [`scripts/check_tool_pins.py`](https://github.com/baselithcore/base
   by hand.
 - **gitleaks** is also in `ci.yml`, because a full-history scan cannot run from
   a hook.
+- **zensical** is in `docs.yml`, the only workflow that builds the site, and in
+  pyproject's `docs` dependency group so `uv lock` resolves it and the site can
+  be built without reading a workflow to learn the version.
 - **pre-commit** itself is pinned in `ci.yml` and must clear both the `dev`
   group's floor and the config's `minimum_pre_commit_version`.
 

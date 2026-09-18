@@ -22,10 +22,10 @@ try:
     from fastapi.responses import ORJSONResponse, StreamingResponse
 except ImportError:
     # FastAPI is optional
-    APIRouter = None  # type: ignore
-    Request = None  # type: ignore
-    ORJSONResponse = None  # type: ignore
-    StreamingResponse = None  # type: ignore
+    APIRouter = None  # type: ignore[assignment, misc]
+    Request = None  # type: ignore[assignment, misc]
+    ORJSONResponse = None  # type: ignore[assignment, misc]
+    StreamingResponse = None  # type: ignore[assignment, misc]
 
 from .agent_card import AgentCard
 from .guards import (

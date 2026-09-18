@@ -73,4 +73,4 @@ class Bulkhead:
                     with self._lock:
                         self._current -= 1
 
-        return wrapper  # type: ignore
+        return wrapper  # type: ignore[return-value]

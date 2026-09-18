@@ -45,6 +45,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PRECOMMIT = ROOT / ".pre-commit-config.yaml"
 PYPROJECT = ROOT / "pyproject.toml"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+DOCS_CI = ROOT / ".github" / "workflows" / "docs.yml"
 
 
 # --------------------------------------------------------------------------
@@ -105,6 +106,20 @@ def _dev_extra_floor(data: dict[str, object], package: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _group_pins(data: dict[str, object], group: str) -> dict[str, str]:
+    """Exactly-pinned (``==``) packages in one PEP 735 dependency group."""
+    groups = data.get("dependency-groups", {})
+    assert isinstance(groups, dict)
+    pins: dict[str, str] = {}
+    for spec in groups.get(group, []):
+        if not isinstance(spec, str):
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9._-]+)==([^\s;]+)", spec.strip())
+        if match:
+            pins[match.group(1).lower()] = match.group(2)
+    return pins
 
 
 def _ci_env(text: str, name: str) -> str | None:
@@ -217,6 +232,23 @@ def main() -> int:
                     f"declared in {where}"
                 )
 
+    # zensical — the docs site generator. Pinned in docs.yml, which is the only
+    # thing that builds the site, and declared in the `docs` dependency group so
+    # `uv lock` resolves it and someone can build the site without reading a
+    # workflow to learn the version.
+    docs_ci = DOCS_CI.read_text(encoding="utf-8") if DOCS_CI.exists() else ""
+    docs_ci_pins = set(re.findall(r"zensical==([^\s\"']+)", docs_ci))
+    if docs_ci_pins:
+        _check_single(
+            problems,
+            "zensical",
+            (".github/workflows/docs.yml", next(iter(sorted(docs_ci_pins)))),
+            (
+                "pyproject.toml (docs group)",
+                _group_pins(pyproject, "docs").get("zensical"),
+            ),
+        )
+
     if problems:
         print("Tool pins disagree across the files that declare them:\n")
         for problem in problems:
@@ -229,6 +261,8 @@ def main() -> int:
         return 1
 
     checked = ["ruff", "mypy", "pre-commit"]
+    if docs_ci_pins:
+        checked.append("zensical")
     if gitleaks_hook or gitleaks_ci:
         checked.insert(2, "gitleaks")
     print(f"Tool pins agree: {', '.join(checked)}.")

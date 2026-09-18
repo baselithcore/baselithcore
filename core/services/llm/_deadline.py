@@ -74,7 +74,11 @@ async def stream_within_deadline[T](stream: AsyncIterator[T]) -> AsyncIterator[T
         if remaining is not None and remaining <= 0:
             raise BudgetExceededError("max_seconds", budget.snapshot())
         try:
-            item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+            # The `yield` below is deliberately OUTSIDE this block: a yield
+            # suspended inside an active `asyncio.timeout` lets the deadline
+            # fire while another task holds the event loop.
+            async with asyncio.timeout(remaining):
+                item = await iterator.__anext__()
         except StopAsyncIteration:
             return
         except TimeoutError:

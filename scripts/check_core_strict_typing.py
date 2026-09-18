@@ -63,6 +63,7 @@ STRICT_FLAGS: tuple[str, ...] = (
 #: :data:`STRICT_FLAGS`. Sorted, dotted names. Grow only.
 STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core._version",
+    "core.a2a",
     "core.adversarial",
     "core.agent",
     "core.agents",
@@ -110,8 +111,14 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core.routers",
     "core.scraper",
     "core.security",
+    "core.services.evaluation",
+    "core.services.graph",
     "core.services.llm",
+    "core.services.retrieval",
+    "core.services.tenant",
     "core.services.vectorstore",
+    "core.services.vision",
+    "core.services.voice",
     "core.skill_evolution",
     "core.storage",
     "core.swarm",

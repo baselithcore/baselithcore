@@ -21,7 +21,7 @@ from core.security.ssrf import SsrfPolicy, assert_url_safe_async
 try:
     import httpx
 except ImportError:
-    httpx = None  # type: ignore
+    httpx = None  # type: ignore[assignment]
 
 from .agent_card import AgentCard
 from .protocol import (

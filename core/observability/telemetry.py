@@ -24,7 +24,7 @@ from typing import Any
 
 # Optional Prometheus integration (soft dependency).
 try:  # pragma: no cover
-    from prometheus_client import Counter as PrometheusCounter  # type: ignore
+    from prometheus_client import Counter as PrometheusCounter
 
     _PrometheusCounterType: type[Any] | None = PrometheusCounter
 except Exception:  # pragma: no cover

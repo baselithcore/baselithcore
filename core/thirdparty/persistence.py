@@ -75,7 +75,7 @@ class SQLiteRegisterStore:
         blob = json.dumps(payload, sort_keys=True)
         with self._lock:
             self._conn.execute(
-                f"INSERT INTO {table} (id, data) VALUES (?, ?) "  # nosec B608
+                f"INSERT INTO {table} (id, data) VALUES (?, ?) "  # noqa: S608  # nosec B608
                 "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                 (key, blob),
             )
@@ -85,7 +85,7 @@ class SQLiteRegisterStore:
     ) -> T | None:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {table} WHERE id = ?",  # nosec B608
+                f"SELECT data FROM {table} WHERE id = ?",  # noqa: S608  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
@@ -96,7 +96,7 @@ class SQLiteRegisterStore:
     ) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {table} ORDER BY id ASC"  # nosec B608
+                f"SELECT data FROM {table} ORDER BY id ASC"  # noqa: S608  # nosec B608
             )
             rows = cur.fetchall()
         return [factory(json.loads(r[0])) for r in rows]

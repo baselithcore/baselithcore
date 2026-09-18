@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 try:
     import redis.asyncio as redis
 except ImportError:
-    redis = None  # type: ignore
+    redis = None  # type: ignore[assignment]
 
 logger = get_logger(__name__)
 

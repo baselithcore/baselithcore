@@ -75,13 +75,13 @@ async def reset_analytics():
                     result = await cur.fetchone()
                     if result and result[0]:
                         # Get count before truncate
-                        await cur.execute(f"SELECT count(*) FROM {table}")  # nosec
+                        await cur.execute(f"SELECT count(*) FROM {table}")  # noqa: S608  # nosec
                         count_before = (await cur.fetchone())[0]
 
                         await cur.execute(f"TRUNCATE TABLE {table} CASCADE")
 
                         # Verify truncate worked
-                        await cur.execute(f"SELECT count(*) FROM {table}")  # nosec
+                        await cur.execute(f"SELECT count(*) FROM {table}")  # noqa: S608  # nosec
                         count_after = (await cur.fetchone())[0]
 
                         if count_after == 0:

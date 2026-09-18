@@ -49,7 +49,7 @@ def run_shell() -> int:
         c = Config()
         c.TerminalInteractiveShell.banner1 = ""
         c.TerminalInteractiveShell.banner2 = ""
-        IPython.start_ipython(argv=[], config=c, user_ns=context)  # type: ignore
+        IPython.start_ipython(argv=[], config=c, user_ns=context)
     except ImportError:
         import code
 

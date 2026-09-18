@@ -85,10 +85,12 @@ pre-commit install
 > **Extras vs dependency groups.** `[project.optional-dependencies]` holds the
 > runtime capability groups (`rag`, `browser`, `documents`, `qdrant`, ...) —
 > those ship in the wheel's metadata and any consumer can ask for them.
-> `[dependency-groups]` (PEP 735) holds `test` and `dev` — development inputs
-> that are resolved from this repository and never travel with the
+> `[dependency-groups]` (PEP 735) holds `test`, `dev` and `docs` — development
+> inputs that are resolved from this repository and never travel with the
 > distribution, which is why this project's exact `ruff==`/`mypy==` CI pins are
-> no longer advertised as installable requirements of the library.
+> no longer advertised as installable requirements of the library. Build the
+> documentation site with `uv sync --no-default-groups --group docs`, then
+> `zensical build --clean` from `mkdocs-site/`.
 
 ### Setup Verification
 

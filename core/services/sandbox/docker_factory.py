@@ -19,7 +19,7 @@ try:
 except ImportError:
     docker = None  # type: ignore
     DockerException = Exception
-    DockerClient: TypeAlias = Any  # type: ignore
+    DockerClient: TypeAlias = Any  # type: ignore[misc, no-redef]
 
 logger = get_logger(__name__)
 

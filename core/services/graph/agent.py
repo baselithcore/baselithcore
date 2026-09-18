@@ -110,7 +110,8 @@ class GraphService:
         """
         # Attempt to delegate to doc_ops if functionality there
         if hasattr(self._doc_ops, "register_rag_usage"):
-            return self._doc_ops.register_rag_usage(session_id, doc_sources)
+            self._doc_ops.register_rag_usage(session_id, doc_sources)
+            return
 
         if not self.client.is_enabled():
             return

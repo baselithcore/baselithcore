@@ -315,7 +315,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             COUNT(CASE WHEN label = 'negative' THEN 1 END) as negative_count
         FROM feedback f
         {where_clause}
-        """  # nosec B608
+        """  # noqa: S608  # nosec B608
         async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             row = await cur.fetchone() or {}

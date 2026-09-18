@@ -10,7 +10,7 @@ from core.observability.logging import get_logger
 try:
     import openai
 except ImportError:
-    openai = None  # type: ignore
+    openai = None  # type: ignore[assignment]
 
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast

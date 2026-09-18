@@ -119,7 +119,7 @@ async def _rows_visible_to_tenant(table: str, tenant_id: str) -> int:
             # Same quoting rule as the DELETE below: the identifier comes from
             # information_schema, the value is parameterised.
             await cur.execute(
-                f'SELECT count(*) FROM "{table}" WHERE tenant_id = %s',  # nosec B608
+                f'SELECT count(*) FROM "{table}" WHERE tenant_id = %s',  # noqa: S608  # nosec B608
                 (tenant_id,),
             )
             row = await cur.fetchone()
@@ -223,7 +223,7 @@ async def purge_tenant_data(tenant_id: str) -> dict[str, int]:
                         # table comes from information_schema (trusted), quoted
                         # as an identifier; the value is parameterised.
                         await cur.execute(
-                            f'DELETE FROM "{table}" WHERE tenant_id = %s',  # nosec B608
+                            f'DELETE FROM "{table}" WHERE tenant_id = %s',  # noqa: S608  # nosec B608
                             (tenant_id,),
                         )
                         removed = cur.rowcount

@@ -261,6 +261,15 @@ computer_use = [
 # stay in [project.optional-dependencies] above: those ARE part of the public
 # contract and a consumer must be able to ask for them by extra.
 [dependency-groups]
+# The documentation site's build tool. It was pinned in
+# .github/workflows/docs.yml and nowhere else, so the generator that produces
+# docs.baselithcore.xyz was the one piece of the toolchain no dependency file
+# declared: `uv lock` never saw it, `uv sync` never installed it, and building
+# the site locally meant reading a workflow to find out what to install.
+# scripts/check_tool_pins.py compares this against the workflow.
+docs = [
+  "zensical==0.0.51",
+]
 test = [
   "qdrant-client>=1.15.1,<2.0",
   "beautifulsoup4>=4.14.2",
@@ -433,8 +442,6 @@ ignore = [
     "S110",     # try/except/pass — 46 best-effort blocks, each needs its own audit
     "S112",     # try/except/continue — same audit
     "S311",     # random for jitter/sampling; annotate the sites, then re-enable
-    "S608",     # f-string SQL — each site needs proof the interpolated part is an
-                # identifier and not caller data before this can gate
     "UP035",    # deprecated typing imports (residual)
     "UP040",    # TypeAlias → PEP 695 `type` statement
     "UP042",    # Enum(str) → StrEnum — changes base class semantics, migrate carefully
@@ -467,6 +474,11 @@ ignore = [
     # A test that proves 0.0.0.0 is rejected has to name it, and forcing an
     # ImportError is what `exec` is for here.
     "S104", "S102",
+    # The RLS-isolation and ledger integration tests interpolate table names on
+    # purpose: proving a tenant cannot read another's rows means issuing the
+    # query the policy must refuse. A test is not attack surface, and the rule
+    # still gates core/, plugins/ and scripts/.
+    "S608",
 ]
 "sdk/python/tests/**" = ["S105", "S106", "S107"]
 "plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped

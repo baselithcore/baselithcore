@@ -116,7 +116,7 @@ class TaskTracker:
         import json
 
         # Mypy thinks hgetall might return Awaitable, but we are using sync Redis here
-        data: dict[Any, Any] = self._conn.hgetall(self._key(task_id))  # type: ignore
+        data: dict[Any, Any] = self._conn.hgetall(self._key(task_id))  # type: ignore[assignment]
         if not data:
             return None
 
