@@ -108,6 +108,43 @@ global broadcasts alongside its own channels. Redis channel names carry the
 `events:` prefix (`events:global`, `events:session-123`); pass the bare name
 to both `publish()` and `subscribe()`.
 
+### Reading a subscription: `core.realtime.subscriptions`
+
+Anything that consumes a raw `PubSub` — this module included — goes through
+two helpers, because the shared pool makes the obvious loop wrong in two ways
+that both fail silently.
+
+```python
+from core.realtime import close_pubsub, iter_messages
+
+pubsub = client.pubsub()
+await pubsub.subscribe("events:global")
+try:
+    async for message in iter_messages(pubsub):
+        handle(message)
+finally:
+    await close_pubsub(pubsub)
+```
+
+- **Never `pubsub.listen()`.** The pool sets `socket_timeout` so a server that
+  accepts a connection and then stops answering cannot hang a caller forever,
+  and redis-py applies that deadline to every read carrying none of its own —
+  `read_timeout = timeout if timeout is not None else self.socket_timeout`. The
+  blocking read behind `listen()` carries none, so an idle subscriber raises
+  `TimeoutError: Timeout reading from <host>` after a few seconds of silence
+  and redis-py drops the socket. A reconnect loop around it then looks healthy
+  while it re-subscribes forever, losing every event published in the gaps.
+  `iter_messages` polls with `get_message(timeout=…)` instead: its own deadline
+  expiring returns `None`, and the subscription lives on.
+- **Always `close_pubsub()`.** A `PubSub` checks one connection out of the
+  bounded pool for the whole subscription and only `PubSub.aclose()` releases
+  it — `unsubscribe()` just sends the command, and `Redis.aclose()` releases
+  the *client's* own connection, which a pubsub user never has. An abandoned
+  subscription stays in the pool's in-use set forever, even after its socket
+  dies, until every Redis caller in the worker raises
+  `ConnectionError("Too many connections")` and the blame lands on whoever
+  asked next.
+
 ---
 
 ## Event Architecture

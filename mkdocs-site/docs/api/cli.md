@@ -25,38 +25,35 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.31.0  •  https://baselithcore.xyz
+  Multi-Agent, Plugin-First Framework  •  v0.35.0  •  https://baselithcore.xyz
 
-╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
-│                                                                                                        │
-│   SCAFFOLDING                   init            Bootstrap a new project                                │
-│                                 plugin          Manage framework plugins                               │
-│                                                                                                        │
-│   DEVELOPMENT                   run             Start the development server                           │
-│                                 up              Start the complete Docker runtime                      │
-│                                 shell           Start interactive shell                                │
-│                                 docs            Generate documentation                                 │
-│                                                                                                        │
-│   SYSTEM & HEALTH               doctor          Run system diagnostics                                 │
-│                                 verify          Verify environment configuration                       │
-│                                 info            View system dashboard                                  │
-│                                 config          Manage configuration                                   │
-│                                                                                                        │
-│   INFRASTRUCTURE                db              Manage database systems                                │
-│                                 cache           Manage Redis cache                                     │
-│                                 queue           Manage task queues                                     │
-│                                                                                                        │
-│   QUALITY & TESTS               test            Run test suite                                         │
-│                                 lint            Run code linters                                       │
-│                                                                                                        │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────── Command Menu ────────────────────────────────────────╮
+│   SCAFFOLDING               init            Bootstrap a new project                          │
+│                             setup           Prepare a BaselithCore environment               │
+│                             plugin          Manage framework plugins                         │
+│   DEVELOPMENT               run             Start the development server                     │
+│                             up              Download and start the complete Docker runtime   │
+│                             shell           Start interactive shell                          │
+│                             docs            Generate documentation                           │
+│   SYSTEM & HEALTH           doctor          Run system diagnostics                           │
+│                             verify          Verify environment configuration                 │
+│                             info            View system dashboard                            │
+│                             config          Manage configuration                             │
+│   INFRASTRUCTURE            db              Manage database systems                          │
+│                             cache           Manage Redis cache                               │
+│                             queue           Manage task queues                               │
+│   QUALITY & TESTS           test            Run test suite                                   │
+│                             lint            Run code linters                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Usage: baselith <command>
+Use baselith <command> --help for detailed info on any command.
 
 ──────────────────────────── Quick Start ─────────────────────────────
-  Bootstrap a new project         baselith init my-app
-  Check system health             baselith doctor
-  Start dev server                baselith run
-  Start Docker runtime            baselith up
-  Run the test suite              baselith test
+  Bootstrap a new project           baselith init my-app
+  Check system health               baselith doctor
+  Start dev server                  baselith run
+  Run the test suite                baselith test
 ```
 
 ---
@@ -88,9 +85,17 @@ baselith doctor
 
 **Options**:
 
-| Flag            | Description                                           |
-| --------------- | ----------------------------------------------------- |
-| `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+| Flag            | Description                                                          |
+| --------------- | -------------------------------------------------------------------- |
+| `--json`        | Emit machine-readable JSON output for CI/CD pipelines                |
+| `--format json` | Same output, through the global formatting flag                      |
+| `--fix`         | Apply the safe local repairs: create `.env` and the data directories |
+| `--core-only`   | Skip the three plugin checks and validate only the core runtime      |
+
+`--fix` is deliberately narrow: it creates `.env` from `.env.example` (falling
+back to `configs/.env.base`) and creates the missing data directories. It never
+starts a service, never installs a dependency and never recovers a credential
+from a running container.
 
 A failed check carries the command that fixes it in its Details column. Those
 hints name the backing store they need — for the bundled stack that is
@@ -101,32 +106,65 @@ configuration from the environment as readily as from a `.env` file, because a
 container deployment injects a ConfigMap and Secret through `envFrom` and has
 deliberately no file on disk.
 
-**Example Output**:
+**Checks**: project runtime (Python, Docker, core dependencies, `.env`, data
+directories), infrastructure (LLM provider, Redis, Qdrant, PostgreSQL, GraphDB),
+runtime configuration (telemetry, migrations mode) and plugin readiness
+(plugins, plugin dependencies, plugin frontends). The last three are the ones
+`--core-only` skips.
+
+*Plugin Frontends* reads each manifest's `frontend` block and checks that the
+declared build output is on disk, resolving it the way the Docker installer
+does: `path` against the plugin directory (default `ui`), then `output_dir`
+against `path` (default `dist`); the older `dist`/`dist_path` spellings stay
+relative to the plugin directory. A plugin that declares no `frontend` block is
+not checked, so a UI plugin only gets the unbuilt-SPA warning once it declares
+its build contract.
+
+**Example Output** (a host with Qdrant and PostgreSQL down, dependency list
+elided):
 
 ```text
 ╭─────────────────────────╮
-│ Baselith-Core Doctor    │
+│ 🩺 Baselith-Core Doctor │
 │   System Diagnostics    │
 ╰─────────────────────────╯
 
-┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
-┃  Status  ┃ Component     ┃ Message                      ┃ Details/Resolution ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
-│ ✅ PASS  │ Environment   │ Found config at .env         │                    │
-│ ✅ PASS  │ LLM Provider  │ Ollama connected             │                    │
-│ ✅ PASS  │ Redis (Cache) │ Connected (localhost:6379)   │                    │
-│ ✅ PASS  │ Qdrant        │ Connected (localhost:6333)   │                    │
-│ ✅ PASS  │ GraphDB       │ Connected (localhost:6379)   │                    │
-│ ✅ PASS  │ Plugins       │ 5 plugin(s) found            │                    │
-└──────────┴───────────────┴──────────────────────────────┴────────────────────┘
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  Status  ┃ Component           ┃ Message                        ┃ Details/Resolution             ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ ✅ PASS  │ Python              │ Python 3.12.13                 │ /opt/homebrew/…/bin/python     │
+│ ❌ FAIL  │ Environment         │ .env file not found            │ Run: cp .env.example .env, or  │
+│          │                     │                                │ use: baselith doctor --fix     │
+│ ❌ FAIL  │ Data Directories    │ 2 data director(y/ies) missing │ Run: baselith doctor --fix     │
+│ ✅ PASS  │ Docker              │ Docker daemon reachable        │                                │
+│ ✅ PASS  │ Core Dependencies   │ Common local extras installed  │                                │
+│ ✅ PASS  │ LLM Provider        │ Ollama connected               │                                │
+│          │                     │ (localhost:11434)              │                                │
+│ ✅ PASS  │ Redis (Cache)       │ Connected (localhost:6379)     │                                │
+│ ❌ FAIL  │ Qdrant              │ Cannot connect                 │ Run: docker compose up -d      │
+│          │                     │ (localhost:6333)               │ qdrant                         │
+│ ❌ FAIL  │ PostgreSQL          │ Cannot connect (postgres:5432) │ Run: docker compose up -d      │
+│          │                     │                                │ postgres                       │
+│ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
+│ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ For predictable startup,       │
+│          │                     │                                │ prefer false and run: baselith │
+│          │                     │                                │ db migrate                     │
+│ ✅ PASS  │ Plugins             │ 10 plugin(s) found             │                                │
+│ ❌ FAIL  │ Plugin Dependencies │ 15 missing plugin dependency   │ Run: baselith plugin deps      │
+│          │                     │ declaration(s)                 │ install <plugin>. Missing: …   │
+│ ✅ PASS  │ Plugin Frontends    │ Declared frontend builds       │                                │
+│          │                     │ present                        │                                │
+└──────────┴─────────────────────┴────────────────────────────────┴────────────────────────────────┘
 
-Results: 6 passed
-✅ System ready! Run: baselith run
+Results: 10 passed, 5 failed
 
-Completed in 0.07s
+⚠️  Some critical checks failed. Fix them before running the server.
+
+⏱  Completed in 508ms
 ```
 
-**JSON Output** (`baselith --format json doctor`):
+**JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 
 ```json
 {
@@ -144,6 +182,51 @@ Completed in 0.07s
 - After configuration changes
 - For troubleshooting connectivity issues
 - In CI/CD pipelines with `--json` for automated health gates
+
+---
+
+### `setup` - Environment Bootstrap
+
+Prepare a local environment from a profile, without starting the server.
+
+```bash
+baselith setup                 # dev profile (default)
+baselith setup docker-core     # Docker runtime profile
+```
+
+`setup dev` writes the developer defaults into the root `.env` (copying
+`.env.example` when the file is absent), then runs the flags you asked for —
+services, migrations — followed by `doctor --fix`, and prints a step table with
+one row per stage. It exits `1` when any row needs attention, so it doubles as
+the check you run after changing a local service.
+
+`setup docker-core` is the narrower one: it prepares `.env` and
+`configs/.env.docker.core`, the env file the Docker Compose runtime reads, and
+stops there.
+
+Both preserve a credential that is already valid and generate a `DB_PASSWORD`
+and a `SECRET_KEY` only where a placeholder is still in place. Neither downloads
+the core image nor builds it — `baselith up` does that — and neither starts a
+backing service unless `setup dev` is given `--start-services`.
+
+**Options** (dev profile only; `docker-core` ignores them):
+
+| Flag              | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| `--install-deps`  | Install missing plugin dependencies instead of a dry run     |
+| `--with-plugins`  | Include the local plugin checks in the flow                  |
+| `--start-services`| Start PostgreSQL, Redis and Qdrant with Docker Compose       |
+| `--migrate`       | Apply database migrations once the services answer           |
+| `--wait-timeout`  | Seconds to wait for the services to become ready (default 60)|
+| `--json`          | Machine-readable output (`docker-core` profile only)         |
+
+!!! warning "`--json` and the dev profile"
+    `baselith setup --json` on the dev profile exits `1` with
+    `JSON output is not supported for setup orchestration yet.` The flag is
+    implemented for `setup docker-core`.
+
+See the [Docker Core runbook](../getting-started/docker-core.md) for the
+`docker-core` profile end to end.
 
 ---
 
@@ -200,20 +283,11 @@ baselith --format json info   # Machine-readable JSON for CI
 | --------------- | ----------------------------------------------------- |
 | `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
 
-A failed check carries the command that fixes it in its Details column. Those
-hints name the backing store they need — for the bundled stack that is
-`docker compose up -d postgres redis qdrant` from `compose.yaml`, the Compose v2
-command (`docker-compose`, the v1 Python wrapper, is deprecated and the hints no
-longer suggest it). The environment check is the one exception: it accepts
-configuration from the environment as readily as from a `.env` file, because a
-container deployment injects a ConfigMap and Secret through `envFrom` and has
-deliberately no file on disk.
-
 **Example Output**:
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.31.0     ││   Name       app      │
+│   Version   0.35.0     ││   Name       app      │
 │   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -237,15 +311,6 @@ baselith --format json verify   # Machine-readable JSON for CI
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
 | `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
-
-A failed check carries the command that fixes it in its Details column. Those
-hints name the backing store they need — for the bundled stack that is
-`docker compose up -d postgres redis qdrant` from `compose.yaml`, the Compose v2
-command (`docker-compose`, the v1 Python wrapper, is deprecated and the hints no
-longer suggest it). The environment check is the one exception: it accepts
-configuration from the environment as readily as from a `.env` file, because a
-container deployment injects a ConfigMap and Secret through `envFrom` and has
-deliberately no file on disk.
 
 ---
 
@@ -299,6 +364,27 @@ An HTTP 200 is a reachability check, not a complete application test. The curren
 installer does not implement transactional rollback or fingerprint-based sync.
 See the [Docker Core runbook](../getting-started/docker-core.md) for configuration,
 local plugin development and retry instructions.
+
+### `plugin sync` - Reconcile the Docker Runtime
+
+Rebuild the Docker core runtime from whatever is enabled under `plugins/` right
+now, instead of reinstalling one plugin at a time.
+
+```bash
+baselith plugin sync --docker
+```
+
+For every enabled plugin the command validates the installation manifest and
+the declared core bounds, writes the combined Python requirements, builds the
+declared frontends, rebuilds and restarts the `api` service, waits for
+`/health`, then probes each plugin that declares `health_endpoint` or a
+`frontend` contract. A plugin whose manifest is missing or invalid stops the
+sync with a nonzero exit code rather than being skipped.
+
+`--docker` is what selects the Docker runtime; without it the command only
+prints the local plugin status, exactly like `plugin status`. The sync has no
+fingerprinting — it rebuilds every time and relies on Docker layer reuse for the
+cost.
 
 ### `plugin create` - Scaffold a Plugin
 
@@ -701,6 +787,23 @@ baselith run --host 0.0.0.0 --port 8000 --reload --workers 1 --log-level info
 | `--no-reload` | Disable hot-reloading (production-like behavior)          |
 | `--workers`   | Number of parallel worker processes (ignored with reload) |
 | `--log-level` | Set the verbosity of system logs (info, debug, etc.)      |
+| `--skip-preflight`   | Start Uvicorn without running the doctor checks first |
+| `--check-plugins`    | Include plugin readiness in the startup preflight     |
+| `--require-services` | Block startup when preflight cannot reach a backing service |
+
+By default `run` executes the core doctor checks before handing over to
+Uvicorn and starts anyway when a backing service is unreachable — the preflight
+reports, it does not gate. `--require-services` turns that report into a gate;
+`--skip-preflight` removes it entirely.
+
+The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
+its `catalog/` and `compliance/` subdirectories) and prints what it created.
+A directory that is merely absent is a `mkdir`, not a reason to refuse to boot:
+left fatal under a supervisor that restarts the process, it is an endless crash
+loop whose only remedy is `baselith doctor --fix`. A directory that cannot be
+created — a read-only mount, wrong ownership — still fails the check and stops
+startup. `baselith doctor` itself never creates anything; the diagnostic only
+reports, and `--fix` is what repairs on demand.
 
 ### `test` - Run Tests
 
@@ -778,6 +881,21 @@ baselith db reset
 !!! danger "Warning"
     This operation is irreversible. You will lose all embeddings and cached configurations.
 
+### `db migrate` - Apply Migrations
+
+Run `alembic upgrade head` against the configured PostgreSQL database.
+
+```bash
+baselith db migrate
+baselith db migrate --json
+```
+
+The command checks that `alembic.ini` is present and that PostgreSQL answers
+before it starts, so an unreachable database fails with the connection error
+rather than a migration traceback. It is the explicit counterpart of
+`DB_MIGRATIONS_ON_STARTUP`: set that to `false` and run this at deploy time for
+a startup that cannot race two processes onto the same schema.
+
 ---
 
 ## Config
@@ -817,6 +935,32 @@ Validates that all current configuration settings are valid and that services ar
 
 ```bash
 baselith config validate
+```
+
+### `config env` - Create or Normalize an Env Profile
+
+Write the profile defaults into the local env file, leaving every value you
+have already set in place.
+
+```bash
+baselith config env                 # dev profile -> .env
+baselith config env docker-core     # docker-core profile -> configs/.env.docker.core
+baselith config env --json
+```
+
+This is the step `baselith setup` runs first, exposed on its own for the case
+where the env file has drifted and nothing else needs doing. It reports the
+keys it added or changed; a file that already matches the profile is left
+untouched. Generated files are written `0600` — see the note under the
+[`up`](#up---docker-runtime) command.
+
+### `config check-env` - Detect Misspelled Variables
+
+Report environment variables that look like a misspelled setting — a name close
+to a real one, which pydantic-settings would silently ignore.
+
+```bash
+baselith config check-env
 ```
 
 ---

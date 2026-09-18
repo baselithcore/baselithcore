@@ -40,6 +40,7 @@ nav = [
       { "Admin Console"        = "getting-started/console.md" },
       { "Configuration"        = "getting-started/configuration.md" },
       { "First Plugin"         = "getting-started/first-plugin.md" },
+      { "Docker Core"          = "getting-started/docker-core.md" },
       { "Framework Principles" = "getting-started/framework-principles.md" },
   ]},
 

@@ -11,7 +11,10 @@ This module closes both halves:
 * ``entry_point: module:Class`` is honoured, resolved relative to the plugin's
   own package;
 * without one, the heuristic still applies, but ambiguity is now an error
-  rather than an alphabetical coin flip.
+  rather than an alphabetical coin flip;
+* ``entrypoint: __init__.py`` — the marketplace spelling, naming the entry
+  *file* — is not a class pointer, so it falls back to the heuristic instead
+  of failing the whole plugin with "module has no '__init__.py'".
 
 Kept out of ``loader.py`` to respect the 500-line module cap.
 """
@@ -19,9 +22,12 @@ Kept out of ``loader.py`` to respect the 500-line module cap.
 from __future__ import annotations
 
 import importlib
+import logging
 from types import ModuleType
 
 from .interface import Plugin
+
+logger = logging.getLogger(__name__)
 
 
 class PluginClassError(RuntimeError):
@@ -74,6 +80,25 @@ def find_plugin_classes(module: ModuleType, package_prefix: str) -> list[type[Pl
     return found
 
 
+def _names_an_entry_file(declared: str) -> bool:
+    """Whether ``declared`` points at the entry *file* instead of a class.
+
+    Marketplace manifests spell ``entrypoint`` as the module the plugin lives
+    in — ``__init__.py``, ``plugin.py``, sometimes ``src/plugin.py``. That says
+    nothing about which class to instantiate, and the loader already finds the
+    file on its own, so such a value must not be read as a class name.
+
+    Args:
+        declared: The manifest's ``entry_point``, stripped.
+
+    Returns:
+        ``True`` when the value is a file path rather than a class pointer.
+    """
+    if ":" in declared:
+        return False
+    return declared.endswith(".py") or "/" in declared or "\\" in declared
+
+
 def _load_entry_point_module(
     module: ModuleType,
     package_prefix: str,
@@ -101,7 +126,8 @@ def resolve_plugin_class(
         module: The executed plugin module.
         package_prefix: The plugin's package FQN (``plugins.<dirname>``).
         entry_point: The manifest's ``entry_point``, as ``module:Class``,
-            ``:Class`` or a bare ``Class``. Empty falls back to the heuristic.
+            ``:Class`` or a bare ``Class``. Empty — or a file name such as
+            ``__init__.py`` — falls back to the heuristic.
 
     Returns:
         The plugin class to instantiate.
@@ -112,6 +138,13 @@ def resolve_plugin_class(
             exposes zero or more than one candidate.
     """
     declared = (entry_point or "").strip()
+    if declared and _names_an_entry_file(declared):
+        logger.debug(
+            "entry_point %r names the plugin's entry file, not a class; "
+            "resolving the class by inspecting the module instead",
+            declared,
+        )
+        declared = ""
     if declared:
         module_part, _, class_name = declared.rpartition(":")
         class_name = class_name.strip()

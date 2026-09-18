@@ -220,7 +220,12 @@ frontend:
 health_endpoint: /my-plugin/
 ```
 
-`path` is relative to the plugin directory; `output_dir` is relative to `path`.
+`path` is relative to the plugin directory (default `ui`); `output_dir` is
+relative to `path` (default `dist`). `baselith doctor` resolves the pair the
+same way in its *Plugin Frontends* check and warns when the declared output is
+not on disk, so a plugin that ships a UI should always declare the block — the
+warning is what catches an unbuilt SPA before it serves a 404.
+
 The package manager must be `npm`, `pnpm` or `yarn`. Commit the corresponding
 lockfile: the builder uses `npm ci` or frozen-lockfile installation. It runs in
 Node 22 on Docker and checks for a nonempty output directory. `frontend: false`

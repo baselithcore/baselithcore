@@ -19,8 +19,14 @@ from core.realtime.duplex import (
 )
 from core.realtime.events import EventType, RealtimeEvent
 from core.realtime.pubsub import PubSubManager
+from core.realtime.subscriptions import (
+    DEFAULT_IDLE_TIMEOUT,
+    close_pubsub,
+    iter_messages,
+)
 
 __all__ = [
+    "DEFAULT_IDLE_TIMEOUT",
     "AudioDelta",
     "DuplexEvent",
     "DuplexVoiceSession",
@@ -33,4 +39,6 @@ __all__ = [
     "SpeechStarted",
     "SpeechStopped",
     "TranscriptDelta",
+    "close_pubsub",
+    "iter_messages",
 ]
