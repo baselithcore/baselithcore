@@ -205,10 +205,37 @@ def check_env_file() -> CheckResult:
     )
 
 
+def data_dir_paths() -> list[Path]:
+    """Return the local data directories the server requires, root first."""
+    data_dir = resolve_local_path(env_value("CORE_DATA_DIR"), "./data")
+    return [data_dir, data_dir / "catalog", data_dir / "compliance"]
+
+
+def ensure_data_dirs() -> list[Path]:
+    """Create every missing required data directory; return the ones created.
+
+    Startup calls this so a directory the CLI would happily create with
+    ``doctor --fix`` cannot hold the server down: under ``Restart=always`` a
+    fatal preflight over a missing ``catalog/`` is an endless crash loop.
+    A directory that cannot be created is left to :func:`check_data_dirs`,
+    which reports it as the failure it is.
+    """
+    created: list[Path] = []
+    for path in data_dir_paths():
+        if path.exists():
+            continue
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        created.append(path)
+    return created
+
+
 def check_data_dirs(create: bool = False) -> CheckResult:
     """Check local data directories are present and writable."""
-    data_dir = resolve_local_path(env_value("CORE_DATA_DIR"), "./data")
-    required = [data_dir, data_dir / "catalog", data_dir / "compliance"]
+    required = data_dir_paths()
+    data_dir = required[0]
     if create:
         for path in required:
             path.mkdir(parents=True, exist_ok=True)
@@ -405,8 +432,7 @@ def apply_fixes() -> list[str]:
         if source.exists():
             shutil.copyfile(source, root_env)
             fixed.append(f"Created {root_env} from {source}")
-    data_dir = resolve_local_path(env_value("CORE_DATA_DIR"), "./data")
-    data_paths = [data_dir, data_dir / "catalog", data_dir / "compliance"]
+    data_paths = data_dir_paths()
     before = [path.exists() for path in data_paths]
     result = check_data_dirs(create=True)
     if result.passed and not all(before):

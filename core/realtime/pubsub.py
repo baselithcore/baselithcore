@@ -14,6 +14,7 @@ from redis.asyncio import Redis as AsyncRedis
 from core.cache.redis_cache import create_redis_client
 from core.observability.logging import get_logger
 from core.realtime.events import RealtimeEvent
+from core.realtime.subscriptions import iter_messages
 
 logger = get_logger(__name__)
 
@@ -95,7 +96,12 @@ class PubSubManager:
                 await pubsub.subscribe(*full_channels)
                 logger.info(f"[pubsub] Subscribed to {full_channels}")
 
-                async for message in pubsub.listen():
+                # iter_messages, not pubsub.listen(): the latter inherits the
+                # pool's socket_timeout and drops the subscription after a few
+                # idle seconds — see core.realtime.subscriptions.
+                async for message in iter_messages(
+                    pubsub, ignore_subscribe_messages=False
+                ):
                     if message["type"] == "message":
                         try:
                             # Parse JSON to validate/structure if needed,

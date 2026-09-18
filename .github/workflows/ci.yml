@@ -62,6 +62,66 @@ concurrency:
   cancel-in-progress: >-
     ${{ github.ref != 'refs/heads/main' && github.event_name != 'merge_group' }}
 
+# ------------------------------------------------------------------
+# Where the jobs run
+# ------------------------------------------------------------------
+# Every job below carries the same `runs-on:` expression rather than a literal
+# label, and the three things it encodes are the reason:
+#
+#   1. DEFAULT: the organisation's self-hosted runner, matched by
+#      [self-hosted, baselith-01-org]. It is registered on the `baselithcore`
+#      ORG, not on this repository, which adds two conditions a repo-level
+#      runner does not have: its runner group must reach this repository, and —
+#      this repository being PUBLIC — that group must also allow public
+#      repositories, which is off by default.
+#
+#      Verified 2026-09-18: `baselith-runner-01` (id 84, Linux, X64) carries
+#      the label and sits in the `Default` group — visibility `all`,
+#      allows_public_repositories true, restricted_to_workflows false. Neither
+#      condition is observable from a workflow, and a job that matches no
+#      runner does not fail: it QUEUES. So the symptom of either being revoked
+#      is a pipeline that never starts, not a red build — which is what the
+#      kill switch in (3) exists for.
+#
+#      A runner executes one job at a time and there is exactly one carrying
+#      this label, so this pipeline's ~22 jobs serialize on it. That is the
+#      accepted trade: the wall-clock cost of a run went up, the hosted
+#      capacity it consumes went to zero.
+#
+#   2. FORK PULL REQUESTS FALL BACK TO ubuntu-latest, unconditionally. This
+#      repository is public, so a pull request from a fork carries code that
+#      nobody has reviewed yet — and a self-hosted runner is a persistent
+#      machine with a filesystem, a network position and whatever the previous
+#      job left behind. GitHub's own guidance is to never expose one to a
+#      public repository's fork PRs. `github.event.pull_request.head.repo.fork`
+#      is null on push and merge_group (no pull_request payload), which is
+#      falsy, so those events take the self-hosted branch as intended.
+#
+#   3. KILL SWITCH: set the repository variable CI_RUNNER_LABELS to a JSON
+#      array — `["ubuntu-latest"]` — and every job moves back to hosted
+#      runners with no commit and no workflow edit. That matters because the
+#      failure mode of a self-hosted runner is not a red build: it is jobs that
+#      queue forever with nothing to pick them up. Restore the default by
+#      deleting the variable:
+#
+#        gh variable set CI_RUNNER_LABELS --body '["ubuntu-latest"]'
+#        gh variable delete CI_RUNNER_LABELS
+#
+# Two things the runner must supply itself, because nothing in this file
+# installs them and both ship with the hosted images: DOCKER — `python_test`
+# declares postgres and redis `services:`, and `image_build` drives buildx plus
+# eight `docker run` assertions — and the GH CLI, which the `release` job calls
+# as `gh release upload` to attach the SBOM to the tag. Everything else is
+# installed per run exactly as on a hosted runner: helm by setup-helm, Node by
+# setup-node, Python and uv by setup-python, and gitleaks, trivy and
+# kubeconform by checksummed download. Nothing anywhere calls sudo or apt-get.
+#
+# NOT covered here: the called workflow `release-image.yml` and the other
+# workflows in this directory keep their hosted runners. release-image builds
+# linux/arm64 on `ubuntu-24.04-arm`; the org runner is X64 and this workflow
+# sets up no QEMU, so it cannot serve that build.
+# ------------------------------------------------------------------
+
 jobs:
   # ============================================================
   # 📝 LINTING
@@ -98,7 +158,7 @@ jobs:
     # pre-commit, and --show-diff-on-failure prints what it would have written,
     # so a formatting miss reads as a diff instead of "exit code 1".
     name: Quality Gates (pre-commit)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -152,7 +212,7 @@ jobs:
     # each with the reason next to it — never a blanket allowlist in a config
     # file nobody reads.
     name: Workflow Lint (zizmor)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -183,7 +243,7 @@ jobs:
     # YAML the API server rejects — was only discovered by an operator applying
     # it to a real cluster.
     name: Helm Chart (lint + kubeconform)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -247,7 +307,7 @@ jobs:
 
   docs_consistency:
     name: Docs ↔ Code Consistency
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -285,7 +345,7 @@ jobs:
     # create_app() actually serves — schema drift fails the build instead of
     # silently shipping a stale contract.
     name: OpenAPI Drift Gate
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -309,7 +369,7 @@ jobs:
     # Client SDKs are part of the shipped surface: build + test them so a
     # server-side change that breaks the published clients fails here.
     name: Client SDKs (Python + TypeScript)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -345,7 +405,7 @@ jobs:
     # network — a change that breaks an agent-flow contract (tools used,
     # output keywords, call/latency/cost budgets) fails this job.
     name: Eval Regression Gate
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -369,7 +429,7 @@ jobs:
     # blocked last quarter and passes today is a regression — this is the
     # only job that notices. An empty corpus fails the gate.
     name: Red-Team Gate
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -398,7 +458,7 @@ jobs:
     # call, no API key, no network. An empty dataset directory fails the job —
     # an examination that examines nothing is the failure mode this prevents.
     name: Bias Examination Gate
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -426,7 +486,7 @@ jobs:
   # ============================================================
   uv_lock_check:
     name: Lockfile Check (uv)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -455,7 +515,7 @@ jobs:
     # Code security). Without it the action errors rather than passing
     # vacuously, which is the correct failure direction for a security gate.
     name: Dependency Review
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     # pull_request only: the action diffs a base against a head, and a push or
     # a merge_group run has no PR to diff.
@@ -477,7 +537,7 @@ jobs:
 
   gitleaks:
     name: Secrets Scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -505,7 +565,7 @@ jobs:
     # the part a hook cannot do: resolving dependencies and querying an
     # advisory database over the network.
     name: Dependency Audit (pip-audit)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [quality_gates]
     steps:
@@ -547,7 +607,7 @@ jobs:
   # ------------------------------------------------------------
   sbom:
     name: SBOM (CycloneDX)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [quality_gates]
     steps:
@@ -579,7 +639,7 @@ jobs:
   # ------------------------------------------------------------
   trivy_scan:
     name: Trivy Scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [quality_gates]
     permissions:
@@ -666,7 +726,7 @@ jobs:
 
   package_smoke:
     name: Package Smoke Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [quality_gates]
     steps:
@@ -711,7 +771,7 @@ jobs:
     # dependencies and the directory has no package.json, so there is no
     # lockfile to cache against and `cache: 'npm'` would fail looking for one.
     name: Frontend JS Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -745,7 +805,7 @@ jobs:
 
   python_test:
     name: Python Tests (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 30
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
@@ -844,7 +904,7 @@ jobs:
     # This rebuilds it from a clean `npm ci` and fails if the result differs
     # from what is committed — the same shape as the openapi_drift gate.
     name: BaselithBot UI Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -897,7 +957,7 @@ jobs:
     # This job builds the same Dockerfile the release builds, on PRs, and runs
     # the same CVE gate against the result before anything is pushed anywhere.
     name: Container Image Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 90
     needs: [quality_gates]
     permissions:
@@ -1102,7 +1162,7 @@ jobs:
   # ============================================================
   release:
     name: Semantic Release
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [python_test]
     if: github.ref == 'refs/heads/main'
@@ -1201,7 +1261,7 @@ jobs:
   # ============================================================
   publish_pypi:
     name: Publish to PyPI
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [release]
     if: needs.release.outputs.new_release_published == 'true'

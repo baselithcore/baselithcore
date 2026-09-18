@@ -422,7 +422,10 @@ installation contract the manifest declared instead of dropping it at parse
 time. `frontend` is the build block (`path`, `package_manager`,
 `build_command`, `output_dir`) or `false` to disable frontend detection;
 `health_endpoint` is the unauthenticated path probed after installation. Both
-are declarative metadata: the runtime carries them, the CLI acts on them. See
+are declarative metadata: the runtime carries them, the CLI acts on them —
+`baselith doctor` reads the same `frontend` block to check that the declared
+build output exists, resolving `path` against the plugin directory and
+`output_dir` against `path` exactly as the installer does. See
 [Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
 
 `PluginManifestModel` accepts `entrypoint` as a legacy spelling of

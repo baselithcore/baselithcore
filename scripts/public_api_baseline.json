@@ -1017,6 +1017,7 @@
     ],
     "core.realtime": [
       "AudioDelta",
+      "DEFAULT_IDLE_TIMEOUT",
       "DuplexEvent",
       "DuplexVoiceSession",
       "EventType",
@@ -1027,7 +1028,9 @@
       "SessionError",
       "SpeechStarted",
       "SpeechStopped",
-      "TranscriptDelta"
+      "TranscriptDelta",
+      "close_pubsub",
+      "iter_messages"
     ],
     "core.reasoning": [
       "AgentPattern",

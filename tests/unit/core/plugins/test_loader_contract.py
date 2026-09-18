@@ -194,6 +194,73 @@ class TestEntryPointResolution:
         assert plugin is not None
         assert type(plugin).__name__ == "SoloPlugin"
 
+    @pytest.mark.asyncio
+    async def test_file_style_entry_point_falls_back_to_the_heuristic(
+        self, registry, tmp_path
+    ):
+        """``entrypoint: __init__.py`` names the entry *file*, not a class.
+
+        Marketplace manifests spell it that way. Reading it as ``module:Class``
+        made every such plugin fail to load with "has no '__init__.py'".
+        """
+        _write_plugin(
+            tmp_path,
+            "file_style",
+            body=ONE_CLASS,
+            manifest_extra="entrypoint: __init__.py\n",
+        )
+        loader = PluginLoader(tmp_path, registry)
+        plugin = await loader.load_plugin(tmp_path / "file_style", initialize=False)
+        assert plugin is not None
+        assert type(plugin).__name__ == "SoloPlugin"
+
+    @pytest.mark.asyncio
+    async def test_file_path_entry_point_falls_back_to_the_heuristic(
+        self, registry, tmp_path
+    ):
+        _write_plugin(
+            tmp_path,
+            "file_path",
+            body=ONE_CLASS,
+            manifest_extra="entrypoint: src/plugin.py\n",
+        )
+        loader = PluginLoader(tmp_path, registry)
+        plugin = await loader.load_plugin(tmp_path / "file_path", initialize=False)
+        assert plugin is not None
+        assert type(plugin).__name__ == "SoloPlugin"
+
+    @pytest.mark.asyncio
+    async def test_file_style_entry_point_does_not_resolve_ambiguity(
+        self, registry, tmp_path
+    ):
+        """Tolerating a file name is not licence to guess between two classes."""
+        _write_plugin(
+            tmp_path,
+            "file_style_ambiguous",
+            body=TWO_CLASSES,
+            manifest_extra="entrypoint: __init__.py\n",
+        )
+        loader = PluginLoader(tmp_path, registry)
+        plugin = await loader.load_plugin(
+            tmp_path / "file_style_ambiguous", initialize=False
+        )
+        assert plugin is None
+
+    @pytest.mark.asyncio
+    async def test_module_qualified_non_identifier_class_still_fails(
+        self, registry, tmp_path
+    ):
+        """``module:not-a-class`` is malformed, not a file name — still refused."""
+        _write_plugin(
+            tmp_path,
+            "malformed",
+            body=ONE_CLASS,
+            manifest_extra="entry_point: plugin:not-a-class\n",
+        )
+        loader = PluginLoader(tmp_path, registry)
+        plugin = await loader.load_plugin(tmp_path / "malformed", initialize=False)
+        assert plugin is None
+
 
 class TestModuleTeardown:
     @pytest.mark.asyncio
