@@ -21,6 +21,48 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from core.config import SecurityConfig, get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
 
+#: Per-path-prefix body-size caps, longest prefix wins. A streaming upload
+#: route legitimately accepts bodies the JSON default must keep refusing
+#: (a 50 MiB PDF vs the 10 MiB memory-exhaustion guard), and the cap it needs
+#: is a property of that route, not of the deployment — so the route's owner
+#: declares it here at import/mount time instead of forcing operators to raise
+#: the global limit for every endpoint at once. Resolved per request, so
+#: registration order against app construction does not matter.
+_SIZE_OVERRIDES: dict[str, int] = {}
+
+
+def register_request_size_override(path_prefix: str, max_bytes: int) -> None:
+    """Allow bodies up to ``max_bytes`` under ``path_prefix``.
+
+    Args:
+        path_prefix: Absolute request path prefix, e.g. ``"/plugin/api/upload"``.
+        max_bytes: Cap for requests under that prefix. ``0`` disables the
+            check there; negative values are rejected.
+
+    Raises:
+        ValueError: If ``path_prefix`` is not absolute or ``max_bytes`` < 0.
+    """
+    if not path_prefix.startswith("/"):
+        raise ValueError(f"path_prefix must be absolute, got {path_prefix!r}")
+    if max_bytes < 0:
+        raise ValueError(f"max_bytes must be >= 0, got {max_bytes}")
+    _SIZE_OVERRIDES[path_prefix] = max_bytes
+
+
+def clear_request_size_overrides() -> None:
+    """Drop every registered override (tests, plugin reload)."""
+    _SIZE_OVERRIDES.clear()
+
+
+def _override_for(path: str) -> int | None:
+    """Longest registered prefix matching ``path``, or ``None``."""
+    best: int | None = None
+    best_len = -1
+    for prefix, limit in _SIZE_OVERRIDES.items():
+        if path.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = limit, len(prefix)
+    return best
+
 
 class _BodyTooLarge(Exception):
     """Raised out of the receive channel once the streamed body crosses the cap.
@@ -48,6 +90,8 @@ class RequestSizeLimitMiddleware:
 
     Configured via ``SecurityConfig.max_request_size_bytes``; set to 0 to
     disable. WebSocket and lifespan scopes are passed through unchanged.
+    A streaming-upload route that needs a different cap registers it with
+    :func:`register_request_size_override` instead of raising the global one.
     """
 
     def __init__(self, app: ASGIApp, max_bytes: int | None = None) -> None:
@@ -57,13 +101,21 @@ class RequestSizeLimitMiddleware:
         self.max_bytes = max_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if self.max_bytes <= 0 or scope["type"] != "http":
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # A route that declared a larger (or unlimited) body wins over the
+        # deployment default; everything else keeps the configured cap.
+        override = _override_for(scope.get("path") or "")
+        max_bytes = self.max_bytes if override is None else override
+        if max_bytes <= 0:
             await self.app(scope, receive, send)
             return
 
         # Fast path: trust Content-Length when present.
         content_length = self._content_length(scope.get("headers") or [])
-        if content_length is not None and content_length > self.max_bytes:
+        if content_length is not None and content_length > max_bytes:
             SECURITY_EVENTS.labels(reason="request_too_large").inc()
             await self._reject(send)
             return
@@ -83,7 +135,7 @@ class RequestSizeLimitMiddleware:
             if message.get("type") == "http.request":
                 body = message.get("body", b"") or b""
                 received += len(body)
-                if received > self.max_bytes:
+                if received > max_bytes:
                     too_large = True
                     SECURITY_EVENTS.labels(reason="request_too_large").inc()
                     raise _BodyTooLarge
@@ -307,4 +359,9 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
-__all__ = ["RequestSizeLimitMiddleware", "SecurityHeadersMiddleware"]
+__all__ = [
+    "RequestSizeLimitMiddleware",
+    "SecurityHeadersMiddleware",
+    "clear_request_size_overrides",
+    "register_request_size_override",
+]

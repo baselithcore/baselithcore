@@ -216,6 +216,31 @@ it alive.
   `http.request` body to meter; its cross-origin guard is
   [`CSRFOriginMiddleware`](#csrforiginmiddleware)).
 
+### Per-route caps
+
+A streaming-upload route legitimately accepts bodies the JSON default must
+keep refusing — a 50 MiB document intake against a 10 MiB memory-exhaustion
+guard. That cap is a property of the route, not of the deployment, so raising
+`MAX_REQUEST_SIZE_BYTES` (which would lift the guard for *every* endpoint) is
+the wrong lever. The route's owner registers its own instead:
+
+```python
+from core.middleware.security import register_request_size_override
+
+# A plugin declares this when it mounts, for its own path prefix.
+register_request_size_override("/myplugin/api/uploads/", 51 * 1024 * 1024)
+```
+
+- Longest matching prefix wins; everything else keeps the configured default.
+- `0` disables the check under that prefix; a relative prefix or a negative
+  size raises `ValueError`.
+- Overrides are resolved **per request**, so registering after the app has
+  been built still takes effect (plugins mount later than the middleware
+  stack). `clear_request_size_overrides()` drops them again — for tests, or a
+  plugin reload.
+- The route still enforces its own limit while streaming to disk: the
+  override widens the host guard, it does not replace the route's.
+
 ---
 
 ## SecurityHeadersMiddleware

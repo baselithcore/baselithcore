@@ -37,6 +37,12 @@ from core.middleware.security_headers import (
 from core.middleware.security_headers import (
     SecurityHeadersMiddleware as SecurityHeadersMiddleware,
 )
+from core.middleware.security_headers import (
+    clear_request_size_overrides as clear_request_size_overrides,
+)
+from core.middleware.security_headers import (
+    register_request_size_override as register_request_size_override,
+)
 from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 from core.security.digest import credential_digest
