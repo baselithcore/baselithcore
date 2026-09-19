@@ -222,6 +222,17 @@ class CredentialsManager:
             # or array. Returning it would satisfy `json.load` and then break
             # every caller on `data["api_key"] = ...` with a TypeError this
             # function's own contract says cannot happen.
+            #
+            # The rule below flags any logger call whose *literal* message
+            # carries a credential keyword, on the assumption that a secret is
+            # about to be interpolated into it. The only argument here is
+            # ``self.credentials_file`` — a path (``~/.baselith/credentials.json``
+            # by default), never the file's contents — and this branch is
+            # reached precisely when those contents could not be parsed. The
+            # sibling calls on the same file escape the rule only because they
+            # are f-strings, which the rule's literal-message pattern does not
+            # bind; that is an accident of syntax, not a real difference.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             logger.warning(
                 "Credentials file %s does not contain a JSON object; ignoring it.",
                 self.credentials_file,
