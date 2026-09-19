@@ -46,6 +46,12 @@ class AppConfig(BaseSettings):
     host: str = Field(default="0.0.0.0", alias="HOST")  # nosec B104  # noqa: S104
     # Port to listen on.
     port: int = Field(default=8000, alias="PORT")
+    # Site-relative path ``GET /`` redirects to. The framework serves nothing
+    # at the root: a deployment's homepage is one of the plugin SPAs it
+    # installed (``/<plugin>/``), which core cannot guess, so ``/`` answers 404
+    # until this names the landing. Empty (the default) keeps that 404 — no
+    # deployment gains a redirect it did not ask for.
+    root_redirect: str = Field(default="", alias="BASELITH_ROOT_REDIRECT")
 
     # === Multi-Tenancy ===
     # If True, enforces strict logical isolation between different tenants.
@@ -321,6 +327,44 @@ class AppConfig(BaseSettings):
     def _parse_csv_lists(cls, value: Any) -> Any:
         """Accept ``a,b`` and a blank value, as well as a JSON array."""
         return csv_list(value)
+
+    @field_validator("root_redirect", mode="before")
+    @classmethod
+    def _validate_root_redirect(cls, value: Any) -> Any:
+        """Confine the landing to this site, and refuse a self-redirect.
+
+        The value lands verbatim in a ``Location`` header on an unauthenticated
+        route, so anything but a site-relative path turns the root into an open
+        redirect — a phishing primitive that borrows the deployment's own
+        hostname. Rejected: absolute URLs (``https://evil.example``), the
+        protocol-relative form (``//evil.example``, a host — not a path), a
+        backslash (browsers normalise ``/\\evil.example`` to ``//evil.example``),
+        embedded CR/LF (header splitting) and ``/`` itself (a redirect loop).
+
+        Raising here fails the boot with the offending value named, rather than
+        serving a root that quietly points off-site.
+        """
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return value
+        target = value.strip()
+        if not target:
+            return ""
+        problem: str | None = None
+        if not target.startswith("/"):
+            problem = "must start with '/' (site-relative path)"
+        elif target.startswith("//") or target.startswith("/\\"):
+            problem = "names a host, not a path (open redirect)"
+        elif "\\" in target:
+            problem = "must not contain a backslash (browsers read it as '/')"
+        elif any(char < " " or char == "\x7f" for char in target):
+            problem = "must not contain control characters"
+        elif target == "/":
+            problem = "would redirect '/' to itself"
+        if problem is not None:
+            raise ValueError(f"BASELITH_ROOT_REDIRECT {problem}: {target!r}")
+        return target
 
 
 # Internal singleton for app configuration.

@@ -68,6 +68,7 @@ Declared in `core.config.app`.
 | `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` |  |
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` |  |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
+| `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
 | `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
 | `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
@@ -853,4 +854,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-540 settings documented.
+541 settings documented.

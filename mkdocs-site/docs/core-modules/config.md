@@ -313,6 +313,10 @@ print(config.timezone)                  # ZoneInfo (derived from APP_TIMEZONE)
 HOST=0.0.0.0
 PORT=8000
 
+# Landing: path GET / redirects to (307). Empty = the root keeps answering 404,
+# because no route is registered there.
+BASELITH_ROOT_REDIRECT=
+
 # Multi-Tenancy (Default: true) — lives on AppConfig
 STRICT_TENANT_ISOLATION=true
 

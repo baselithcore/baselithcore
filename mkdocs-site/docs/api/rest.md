@@ -42,6 +42,15 @@ remain unavailable. The fallback admin credential dependency returns 404 when
 the admin router plugin is absent; it does not grant access. See the
 [Docker Core runbook](../getting-started/docker-core.md) for installation checks.
 
+!!! info "The site root `/`"
+    No route is registered at `/`, so the bare hostname answers `404`: the
+    homepage of an installation is one of the plugin SPAs it loaded, which the
+    framework cannot guess. Setting `BASELITH_ROOT_REDIRECT` to a
+    site-relative path (e.g. `/<plugin>/`) makes `GET /` and `HEAD /` answer a
+    `307` to it; anything that is not such a path — an absolute URL, a
+    protocol-relative `//host`, a backslash, an embedded newline, or `/`
+    itself — fails the boot instead of becoming an open redirect.
+
 ---
 
 ## API Versioning
