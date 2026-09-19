@@ -8,6 +8,7 @@ before arriving at a final conclusion.
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -46,7 +47,7 @@ Let's break this down:
 
 Provide your reasoning in clear numbered steps, then give a final answer."""
 
-    def __init__(self, llm_service=None):
+    def __init__(self, llm_service: Any = None) -> None:
         """
         Initialize the Chain of Thought orchestrator.
 
@@ -56,7 +57,7 @@ Provide your reasoning in clear numbered steps, then give a final answer."""
         self._llm_service = llm_service
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:

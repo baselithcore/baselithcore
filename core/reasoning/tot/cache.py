@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from threading import Lock
 
@@ -170,7 +171,7 @@ class ThoughtCache:
         self,
         thought: str,
         problem: str,
-        evaluator,
+        evaluator: Callable[[str], float],
     ) -> float:
         """
         Get cached score or evaluate and cache.
@@ -196,7 +197,7 @@ class ThoughtCache:
         self,
         thought: str,
         problem: str,
-        evaluator,
+        evaluator: Callable[[str], Awaitable[float]],
     ) -> float:
         """
         Async version of get_or_evaluate.

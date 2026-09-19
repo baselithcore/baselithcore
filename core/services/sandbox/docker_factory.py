@@ -19,7 +19,7 @@ try:
 except ImportError:
     docker = None  # type: ignore
     DockerException = Exception
-    DockerClient: TypeAlias = Any  # type: ignore
+    DockerClient: TypeAlias = Any  # type: ignore[misc, no-redef]
 
 logger = get_logger(__name__)
 
@@ -142,7 +142,7 @@ class DockerFactory:
                 # We need to set the build context to the directory containing the Dockerfile
                 build_context = str(SANDBOX_DOCKERFILE.parent)
 
-                def _build():
+                def _build() -> Any:
                     """Internal image build operation."""
                     image, logs = self.client.images.build(
                         path=build_context,

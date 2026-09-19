@@ -116,7 +116,7 @@ class PostgresPatternStore:
         # VALUES travel in `params` as psycopg placeholders, so no caller
         # input reaches the statement text.
         query = (
-            "SELECT * FROM agent_patterns WHERE "  # nosec B608
+            "SELECT * FROM agent_patterns WHERE "  # noqa: S608  # nosec B608
             + " AND ".join(clauses)
             + " ORDER BY occurrences DESC, updated_at DESC LIMIT %s"
         )

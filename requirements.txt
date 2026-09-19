@@ -50,6 +50,7 @@ opentelemetry-instrumentation-fastapi>=0.42b0
 opentelemetry-instrumentation-httpx>=0.42b0
 opentelemetry-instrumentation-redis>=0.42b0
 opentelemetry-sdk>=1.21.0
+opentelemetry-semantic-conventions>=0.42b0
 orjson>=3.11.7,<4.0
 prometheus-client>=0.20.0,<1.0
 psycopg[binary,pool]>=3.2.1,<4.0

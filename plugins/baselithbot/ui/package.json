@@ -1,6 +1,9 @@
 {
   "name": "baselithbot-ui",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "version": "1.0.0",
   "type": "module",
   "description": "React + Vite dashboard for the BaselithCore Baselithbot plugin (vanilla CSS).",

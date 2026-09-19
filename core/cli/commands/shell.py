@@ -2,6 +2,7 @@
 Shell command - Interactive REPL.
 """
 
+import argparse
 from typing import Any
 
 from core.cli.ui import console, print_header
@@ -49,7 +50,7 @@ def run_shell() -> int:
         c = Config()
         c.TerminalInteractiveShell.banner1 = ""
         c.TerminalInteractiveShell.banner2 = ""
-        IPython.start_ipython(argv=[], config=c, user_ns=context)  # type: ignore
+        IPython.start_ipython(argv=[], config=c, user_ns=context)
     except ImportError:
         import code
 
@@ -61,7 +62,10 @@ def run_shell() -> int:
     return 0
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> None:
     """Register 'shell' command parser."""
     subparsers.add_parser(
         "shell",

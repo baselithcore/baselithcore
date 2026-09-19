@@ -321,13 +321,12 @@ class HumanIntervention:
                 # A timed-out *sync* callback's thread cannot be cancelled —
                 # it runs to completion in the background and its result is
                 # discarded; the caller is released on time regardless.
-                coro = self._invoke_callback(request)
-                if request.timeout_seconds is not None:
-                    response = await asyncio.wait_for(
-                        coro, timeout=request.timeout_seconds
-                    )
-                else:
-                    response = await coro
+                # `asyncio.timeout(None)` is a no-op deadline, so the bounded
+                # and unbounded cases are one statement. The `except
+                # asyncio.CancelledError` clause below still sees an OUTER
+                # cancellation: the context manager converts only its own.
+                async with asyncio.timeout(request.timeout_seconds):
+                    response = await self._invoke_callback(request)
 
                 # COMPLETED means "a human answered", not "they said yes":
                 # the decision itself is the retained ``response``. (REJECTED

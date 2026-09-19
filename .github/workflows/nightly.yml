@@ -39,7 +39,7 @@ jobs:
       - name: Latest mypy
         run: |
           pip install uv
-          uv pip install --system -e ".[dev]" mypy --upgrade
+          uv pip install --system --group dev -e . mypy --upgrade
           mypy --version
           mypy core/ || true  # advisory: pre-existing debt tracked separately
 
@@ -95,7 +95,7 @@ jobs:
         # testing the interpreter and starts testing a different dependency
         # set as well.
         run: |
-          uv export --frozen --extra test --no-emit-project \
+          uv export --frozen --no-default-groups --group test --no-emit-project \
             --format requirements-txt -o /tmp/requirements-test.txt
           uv pip install --system --no-config --require-hashes \
             -r /tmp/requirements-test.txt
@@ -129,7 +129,7 @@ jobs:
       - name: Install with fresh resolution (no lockfile)
         run: |
           pip install uv
-          uv pip install --system -e ".[test]" pytest-xdist
+          uv pip install --system --group test -e . pytest-xdist
       - name: Run tests
         env:
           POSTGRES_DB: test_db

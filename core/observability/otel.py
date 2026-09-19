@@ -1,11 +1,12 @@
 """
-Centralized OpenTelemetry SDK bootstrap (traces + metrics).
+Centralized OpenTelemetry SDK bootstrap (traces + metrics + logs).
 
 This module is the **single source of truth** for OpenTelemetry provider
 configuration. It builds a rich OTel ``Resource``, installs sampled
-``TracerProvider``/``MeterProvider`` instances wired to an OTLP collector,
-turns on auto-instrumentation for FastAPI/HTTPX/Redis/psycopg, and sets the
-W3C propagators. The homegrown ``Tracer`` in
+``TracerProvider``/``MeterProvider``/``LoggerProvider`` instances wired to an
+OTLP collector, turns on auto-instrumentation for FastAPI/HTTPX/Redis/psycopg,
+and sets the W3C propagators. All three signals share one ``Resource``, so a
+backend can join a log line to the span it was written inside. The homegrown ``Tracer`` in
 :mod:`core.observability.tracing` bridges into the ``TracerProvider``
 configured here, so custom spans reach the collector alongside
 auto-instrumentation spans.
@@ -24,9 +25,13 @@ Design rules:
   leave the process. Attaching an exporter pointed at an endpoint nothing is
   listening on is the worst of both worlds: no trace backend *and* a retrying
   gRPC exporter burning CPU and filling the log on every batch.
+- **Protocol is a setting, not a constant.** The wire protocol comes from
+  ``TELEMETRY_OTEL_PROTOCOL`` / ``OTEL_EXPORTER_OTLP_PROTOCOL`` and exporter
+  construction lives in :mod:`core.observability.otel_exporters`, which also
+  shapes the per-signal endpoint HTTP needs and gRPC does not.
 - **No reverse dependency.** This module imports only ``config``, ``logging``
-  and its own ``otel_instrumentation`` sibling; ``tracing.py`` imports *from*
-  here (lazily), never the reverse.
+  and its own ``otel_*`` siblings; ``tracing.py`` imports *from* here (lazily),
+  never the reverse.
 
 The Prometheus ``/metrics`` scrape endpoint (``core.observability.metrics``)
 is independent of the OTLP metric push configured here; both can run together.
@@ -42,10 +47,16 @@ from typing import Any
 
 from core.config import get_app_config
 from core.observability.logging import get_logger
+from core.observability.otel_exporters import (
+    build_metric_exporter,
+    build_span_exporter,
+    normalize_protocol,
+)
 from core.observability.otel_instrumentation import (
     instrument_libraries,
     setup_propagators,
 )
+from core.observability.otel_logs import setup_log_export, shutdown_log_export
 
 logger = get_logger(__name__)
 
@@ -201,6 +212,7 @@ def _build_sampler(sample_rate: float) -> Any:
 def _setup_tracing(
     resource: Any,
     endpoint: str | None,
+    protocol: str,
     sampler: Any,
     console_export: bool,
 ) -> Any:
@@ -216,13 +228,10 @@ def _setup_tracing(
     provider = TracerProvider(resource=resource, sampler=sampler)
 
     if endpoint is not None:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-            OTLPSpanExporter,
-        )
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
+            BatchSpanProcessor(build_span_exporter(endpoint, protocol))
         )
 
     if console_export:
@@ -249,7 +258,7 @@ def _setup_tracing(
 
 
 def _setup_metrics(
-    resource: Any, endpoint: str | None, console_export: bool
+    resource: Any, endpoint: str | None, protocol: str, console_export: bool
 ) -> Any | None:
     """Install a MeterProvider with OTLP periodic metric export.
 
@@ -266,12 +275,8 @@ def _setup_metrics(
     readers: list[Any] = []
 
     if endpoint is not None:
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-            OTLPMetricExporter,
-        )
-
         readers.append(
-            PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
+            PeriodicExportingMetricReader(build_metric_exporter(endpoint, protocol))
         )
 
     if console_export:
@@ -310,8 +315,8 @@ def setup_telemetry(
 
     Args:
         service_name: Logical service name for the OTel ``Resource``.
-        otlp_endpoint: OTLP/gRPC collector endpoint. Falls back to
-            ``telemetry_otel_endpoint`` from config. Empty (or blank) means no
+        otlp_endpoint: OTLP collector endpoint, in the shape the configured
+            protocol expects. Falls back to ``telemetry_otel_endpoint``. Empty (or blank) means no
             collector: providers and instrumentation are installed, spans stay
             in-process and reach the local sinks, nothing is exported.
         enable_fastapi: Auto-instrument FastAPI.
@@ -340,16 +345,27 @@ def setup_telemetry(
         endpoint = _normalize_endpoint(otlp_endpoint or config.telemetry_otel_endpoint)
         console_export = getattr(config, "telemetry_console_export", False)
         sample_rate = getattr(config, "telemetry_traces_sample_rate", 1.0)
+        protocol = normalize_protocol(getattr(config, "telemetry_otel_protocol", None))
 
         try:
             resource = _build_resource(service_name, config)
             sampler = _build_sampler(sample_rate)
             _tracer_provider = _setup_tracing(
-                resource, endpoint, sampler, console_export
+                resource, endpoint, protocol, sampler, console_export
             )
 
             if getattr(config, "telemetry_metrics_enabled", False):
-                _meter_provider = _setup_metrics(resource, endpoint, console_export)
+                _meter_provider = _setup_metrics(
+                    resource, endpoint, protocol, console_export
+                )
+
+            if getattr(config, "telemetry_logs_enabled", False):
+                setup_log_export(
+                    resource,
+                    endpoint,
+                    protocol,
+                    console_export=console_export,
+                )
 
             setup_propagators()
             instrument_libraries(enable_fastapi, enable_redis, enable_httpx, app)
@@ -358,10 +374,11 @@ def setup_telemetry(
             atexit.register(shutdown_telemetry)
             logger.info(
                 "[OTEL] Telemetry initialized "
-                "(service=%s, env=%s, sample_rate=%.2f, export=%s)",
+                "(service=%s, env=%s, sample_rate=%.2f, protocol=%s, export=%s)",
                 service_name,
                 getattr(config, "deployment_environment", "development"),
                 sample_rate,
+                protocol,
                 endpoint if endpoint is not None else "in-process only",
             )
             return True
@@ -380,6 +397,11 @@ def shutdown_telemetry() -> None:
     with _lock:
         if not _initialized:
             return
+
+        # Logs first: the handler is attached to the root logger, so detaching
+        # it before the other providers tear down keeps their own shutdown
+        # chatter out of a processor that is already flushing.
+        shutdown_log_export()
 
         if _tracer_provider is not None:
             try:

@@ -624,9 +624,19 @@ as a `ContextVar`. `ExecutionMixin.process` binds it at request start, so code
 far from the handler — notably `LLMService` — can charge against it without
 threading the budget through every call. After each generation `LLMService`
 charges the call's **real USD cost** (via `core/models/pricing`), which makes
-`LoopLimits.budget_usd` an **enforced** cap rather than advisory. Models absent
-from the pricing table are not charged, so self-hosted models never abort a
-request on an unknown price.
+`LoopLimits.budget_usd` an **enforced** cap rather than advisory. The charge
+follows the model that actually **served** the turn, which is not always the one
+the caller asked for: with `LLM_FALLBACK_CHAIN` configured, another provider's
+model may answer, and billing that at the primary's rate moves the budget on
+spend the deployment never made.
+
+A **self-hosted** model never aborts a request on an unknown price: its id is
+namespaced by provider (`ollama/llama3.2`) and priced at zero. That is a
+recent guarantee, not an old one — a bare local tag has no pricing row, so it
+used to be priced through `BASELITH_UNKNOWN_MODEL_COST_POLICY`, whose default
+bills `UNKNOWN_PRICE` at 100 $/M. A single local turn could therefore blow a
+`budget_usd` cap on money nobody spent. A model absent from the table that is
+**not** local is still charged, which is the visibility that policy exists for.
 
 ### Durable checkpointing & resume
 

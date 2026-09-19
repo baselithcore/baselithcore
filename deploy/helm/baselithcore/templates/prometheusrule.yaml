@@ -178,6 +178,28 @@ spec:
               with a fallback chain behind it is not an incident; every model
               failing is.
         {{- end }}
+        {{- if not (has "BaselithcoreLlmServedByFallback" $off) }}
+        - alert: BaselithcoreLlmServedByFallback
+          expr: |-
+            (
+              (sum(rate(mas_llm_fallback_served_total{namespace="{{ $ns }}"}[15m])) or vector(0))
+              / clamp_min(sum(rate(mas_llm_requests_total{namespace="{{ $ns }}"}[15m])), 1)
+            ) > {{ $t.llmFallbackRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            component: llm
+          annotations:
+            summary: "LLM traffic is being served by a fallback provider in {{ $ns }}"
+            description: >-
+              These requests SUCCEEDED, which is why nothing else fires on
+              them. The `primary` and `served_by` labels say what stopped
+              answering and what took over; a `served_by="ollama"` means
+              inference moved onto the host itself, spending GPU that appears
+              in no invoice. Check the primary's credentials first — an
+              expired key is the usual cause, and a chain cannot fall through
+              on one by design.
+        {{- end }}
         {{- if not (has "BaselithcoreSecurityEventSpike" $off) }}
         - alert: BaselithcoreSecurityEventSpike
           expr: |-

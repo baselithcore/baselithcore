@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PluginCategory(str, Enum):
@@ -100,8 +100,10 @@ class MarketplacePlugin(BaseModel):
             return coerced
         return v
 
-    class Config:
-        populate_by_name = True
+    # Pydantic v2 spelling. The v1 `class Config:` inner class still worked
+    # through the compatibility shim, but emitted a PydanticDeprecatedSince20
+    # warning on every import of this module and is slated for removal in v3.
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PluginReview(BaseModel):

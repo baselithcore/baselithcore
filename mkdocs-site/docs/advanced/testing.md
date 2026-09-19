@@ -43,10 +43,13 @@ tests drive the ASGI app in-process (see [HTTP tests](#http-tests)).
 ### Dependencies
 
 ```bash
-pip install -e ".[test]"
+uv sync --no-default-groups --group test
+# or, with pip >= 25.1:  pip install -e . --group test
 ```
 
-CI installs the **locked** set instead (`uv export --frozen --extra test`), so
+`test` is a PEP 735 dependency group, not an extra: it is resolved from this
+repository and never ships in the wheel's metadata. CI installs the **locked**
+set instead (`uv export --frozen --no-default-groups --group test`), so
 a green local run and a green CI run exercise the same dependency versions —
 see [CI/CD Integration](#cicd-integration).
 

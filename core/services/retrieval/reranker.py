@@ -56,7 +56,7 @@ class Reranker:
             logger.warning("sentence-transformers not installed. Reranker disabled.")
 
     @property
-    def model(self):
+    def model(self) -> "CrossEncoder | None":
         """
         Access the Cross-Encoder model, loading it into memory on first use.
 
@@ -89,18 +89,21 @@ class Reranker:
         Returns:
             Reranked list of SearchResult objects (top_k).
         """
-        if not self._enabled or not self.model or not results:
+        # Bind the property ONCE: each access can lazily construct the model,
+        # and mypy cannot narrow a property across two reads anyway.
+        model = self.model
+        if not self._enabled or model is None or not results:
             return results[:top_k]
 
         try:
             # Prepare pairs for CrossEncoder: [[query, doc_text], ...]
-            pairs = []
-            valid_indices = []
+            pairs: list[tuple[str, str]] = []
+            valid_indices: list[int] = []
 
             for i, res in enumerate(results):
                 content = res.document.content
                 if content:
-                    pairs.append([query, content])
+                    pairs.append((query, content))
                     valid_indices.append(i)
 
             if not pairs:
@@ -108,7 +111,13 @@ class Reranker:
 
             # Predict scores (offloaded so blocking torch inference does not
             # stall the event loop).
-            scores = await asyncio.to_thread(self.model.predict, pairs)
+            # Wrapped in a lambda rather than passed as `to_thread(model.predict,
+            # pairs)`: CrossEncoder.predict is an overloaded function, and an
+            # overload set cannot be matched against to_thread's single
+            # Callable parameter. The closure gives it one concrete signature.
+            # `pairs` is a list of TUPLES for the same reason — that is what
+            # predict's signature declares, even though it accepts lists too.
+            scores = await asyncio.to_thread(lambda: model.predict(pairs))
 
             # Assign new scores
             for idx, score in zip(valid_indices, scores, strict=True):

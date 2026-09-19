@@ -2,6 +2,7 @@
 Documentation utility commands.
 """
 
+import argparse
 import json
 from pathlib import Path
 
@@ -75,7 +76,10 @@ def run_docs(command: str) -> int:
         return 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'docs' command parser."""
     docs_parser = subparsers.add_parser(
         "docs",

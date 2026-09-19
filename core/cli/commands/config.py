@@ -2,6 +2,7 @@
 Config command - Show and validate configuration.
 """
 
+import argparse
 import json
 
 from rich.layout import Layout
@@ -299,7 +300,10 @@ def check_env() -> int:
     return 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'config' command parser."""
     config_parser = subparsers.add_parser(
         "config",

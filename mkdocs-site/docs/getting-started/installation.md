@@ -104,8 +104,8 @@ cd baselithcore
 # Base installation
 pip install -e .
 
-# With development dependencies
-pip install -e ".[dev]"
+# With development dependencies (PEP 735 group, not an extra)
+uv sync                          # or: pip install -e . --group dev  (pip >= 25.1)
 
 # With selected optional capabilities
 pip install -e ".[rag,browser,web]"

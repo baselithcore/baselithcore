@@ -175,10 +175,10 @@ def record_genai_metrics(
                 duration_seconds
             )
         if input_tokens > 0 or output_tokens > 0 or cache_read_tokens > 0:
-            from core.models.pricing import DEFAULT_PRICING, estimate_cost
+            from core.models.pricing import estimate_cost, is_priced
             from core.observability.metrics import GEN_AI_COST_USD
 
-            if model in DEFAULT_PRICING:
+            if is_priced(model):
                 cost = estimate_cost(
                     model,
                     max(input_tokens, 0),

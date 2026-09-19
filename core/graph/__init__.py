@@ -9,6 +9,7 @@ Modules:
 - linking: Domain-agnostic linking helpers (nodes, external issues)
 - code_graph: Code graph specialized operations
 - query_builder: Query construction and parameter encoding utilities
+- protocols: Structural types for the values the graph client decodes
 
 For backward compatibility, the main public API is re-exported here.
 """

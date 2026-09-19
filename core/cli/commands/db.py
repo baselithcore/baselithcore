@@ -2,6 +2,7 @@
 Database and VectorStore utility commands.
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -252,7 +253,10 @@ def run_db(command: str, json_output: bool = False) -> int:
         return 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'db' command parser."""
     db_parser = subparsers.add_parser(
         "db",

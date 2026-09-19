@@ -45,9 +45,12 @@ def _load_manifest(plugin_dir: Path) -> dict | None:
         if manifest_path.exists():
             try:
                 with open(manifest_path, encoding="utf-8") as f:
+                    manifest: dict | None
                     if ext in (".yaml", ".yml"):
-                        return yaml.safe_load(f) or {}
-                    return json.load(f)
+                        manifest = yaml.safe_load(f) or {}
+                    else:
+                        manifest = json.load(f)
+                    return manifest
             except Exception:
                 return None
     return None

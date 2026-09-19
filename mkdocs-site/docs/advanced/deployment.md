@@ -585,8 +585,12 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-server-header \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-30}" \
-    --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
+    --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}" \
+    ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency "$UVICORN_LIMIT_CONCURRENCY"}
 ```
+
+`python backend.py` and `baselith run` pass the same settings from the same
+variables, so the three entry points behave alike behind one proxy.
 
 - **`--proxy-headers --forwarded-allow-ips`** — trust `X-Forwarded-For` only from
   your load balancer / reverse proxy. **Set `FORWARDED_ALLOW_IPS` to the LB
@@ -613,6 +617,14 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
   (nginx, ALB and Envoy all default to 60s), so the proxy would reuse sockets
   the app had already closed and surface sporadic `502`s. Keep the app side
   longer than the proxy side; set `UVICORN_KEEP_ALIVE` to match yours.
+- **`--limit-concurrency`** (`UVICORN_LIMIT_CONCURRENCY`, unset by default) —
+  load shedding. Above that many concurrent connections/tasks uvicorn answers
+  `503` immediately instead of queueing work until the client or the proxy
+  times out: an explicit "over capacity" signal the proxy can retry against
+  another replica and the HPA can scale on, where unbounded queueing shows up
+  as latency collapse across every request. Size it from a load test against
+  a single replica; the `${VAR:+...}` form passes the flag only when the
+  variable is set, so leaving it unset keeps uvicorn's default (no limit).
 
 !!! tip "Worker processes (`WEB_CONCURRENCY`)"
     Size `WEB_CONCURRENCY` to roughly the number of CPU cores available to the
@@ -859,6 +871,22 @@ map $http_upgrade $connection_upgrade {
     '' "";
 }
 
+# Edge/app log correlation. The app keeps a caller-supplied X-Request-ID only
+# when it is a bounded ASCII token ([A-Za-z0-9._-]{1,128}) and mints a UUID
+# otherwise, so an id forwarded unchecked would appear in the edge log and
+# nowhere else. Same rule here: keep a well-formed id, replace anything else
+# with nginx's own $request_id, send it upstream and log it — one id on the
+# edge line and on every app log line for that request.
+map $http_x_request_id $req_id {
+    default $request_id;
+    "~^[A-Za-z0-9._-]{1,128}$" $http_x_request_id;
+}
+
+log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                '$status $body_bytes_sent "$http_referer" '
+                '"$http_user_agent" "$http_x_forwarded_for" "$req_id"';
+access_log /var/log/nginx/access.log main;
+
 server {
     listen 80;
     server_name baselith.ai;
@@ -899,6 +927,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $req_id;
 
         # Timeout for LLM (long responses)
         proxy_read_timeout 120s;
@@ -922,6 +951,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $req_id;
         proxy_buffering off;
         proxy_cache off;
         # NOT `add_header X-Accel-Buffering no` here: one add_header inside a
@@ -935,9 +965,10 @@ server {
 ```
 
 The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
-`compose.prod.yaml`) applies the same three rules — empty `Connection`
+`compose.prod.yaml`) applies the same four rules — empty `Connection`
 for non-upgrade requests so `keepalive 32` is actually used, the extended
-streaming location, and no `add_header` inside a location — and is checked
+streaming location, no `add_header` inside a location, and the validated
+`X-Request-ID` that is forwarded and logged — and is checked
 with `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
 
 ### SSL Certificate Setup (Let's Encrypt)
@@ -952,6 +983,23 @@ sudo certbot --nginx -d baselith.ai
 # Auto-renewal is configured automatically
 sudo certbot renew --dry-run
 ```
+
+### Landing page
+
+The framework registers no route at `/`: the homepage of an installation is one
+of the plugin SPAs it loaded, which the core cannot guess, so the bare hostname
+answers `404` — which reads as an outage to whoever opens the link for the first
+time. Name the landing and the root redirects to it instead:
+
+```env
+BASELITH_ROOT_REDIRECT=/<plugin>/
+```
+
+The redirect is a `307`, deliberately temporary: a `301` is cached by browsers
+indefinitely and would outlive the setting being changed or removed. Only a
+site-relative path is accepted — an absolute URL, a protocol-relative `//host`,
+a backslash or an embedded newline fails the boot rather than turning the root
+into an open redirect. Left empty (the default), the `404` stands.
 
 ---
 

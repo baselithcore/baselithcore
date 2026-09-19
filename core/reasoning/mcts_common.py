@@ -7,6 +7,7 @@ multi-strategy backpropagation (moving average vs cumulative).
 """
 
 import math
+from typing import Any
 
 
 def uct_score(
@@ -41,7 +42,7 @@ def uct_score(
 
 
 def backpropagate_moving_avg(
-    node,
+    node: Any,
     value: float,
     *,
     parent_attr: str = "parent",
@@ -72,7 +73,7 @@ def backpropagate_moving_avg(
 
 
 def backpropagate_cumulative(
-    node,
+    node: Any,
     reward: float,
     *,
     parent_attr: str = "parent",

@@ -202,7 +202,11 @@ async def read_capped_body(request: Request) -> bytes | None:
     """
     max_bytes = a2a_max_body_bytes()
     if max_bytes <= 0:
-        return await request.body()
+        # Bound to a local first: `Request` resolves to `Any` wherever starlette
+        # is not installed (the strict-typing hook's own environment), and
+        # returning that directly trips `no-any-return`.
+        whole: bytes = await request.body()
+        return whole
 
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > max_bytes:

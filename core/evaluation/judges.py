@@ -3,8 +3,10 @@ Standard Evaluator Implementations (LLM Judges).
 """
 
 import asyncio
+from collections.abc import Sequence
 
 from .base import BaseLLMEvaluator
+from .protocols import EvaluationResult, Evaluator
 
 
 class RelevanceEvaluator(BaseLLMEvaluator):
@@ -117,20 +119,20 @@ class CompositeEvaluator(BaseLLMEvaluator):
     This doesn't use an LLM directly but orchestrates others.
     """
 
-    def __init__(self, evaluators=None):
+    def __init__(self, evaluators: Sequence[Evaluator] | None = None) -> None:
         super().__init__()
-        self.evaluators = evaluators or [
+        self.evaluators: Sequence[Evaluator] = evaluators or [
             RelevanceEvaluator(),
             CoherenceEvaluator(),
         ]
 
-    async def evaluate(self, response: str, query: str, context: dict | None = None):
+    async def evaluate(
+        self, response: str, query: str, context: dict | None = None
+    ) -> EvaluationResult:
         """Run all evaluators and average the score."""
-        from .protocols import EvaluationResult
-
         total_score = 0.0
-        aspects = {}
-        feedbacks = []
+        aspects: dict[str, float] = {}
+        feedbacks: list[str] = []
         should_refine = False
 
         # Sub-judges are independent LLM calls; run them concurrently.

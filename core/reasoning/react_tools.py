@@ -391,9 +391,9 @@ class ToolExecutionMixin:
             else:
                 coro = asyncio.to_thread(tool.fn, *args, **kwargs)
             timeout = self._effective_tool_timeout()
-            if timeout is not None:
-                return await asyncio.wait_for(coro, timeout=timeout)
-            return await coro
+            # `asyncio.timeout(None)` is a no-op deadline: one path, not two.
+            async with asyncio.timeout(timeout):
+                return await coro
 
         async def _finish(observation: str, ok: bool) -> str:
             await dispatch_post_hook(

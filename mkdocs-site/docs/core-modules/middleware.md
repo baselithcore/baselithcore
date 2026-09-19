@@ -55,6 +55,7 @@ core/middleware/
 ├── cost_control.py        # CostControlMiddleware, CostController, cost_controller
 ├── optimization.py        # StaticCacheMiddleware, SmartGzipMiddleware
 ├── idempotency.py         # IdempotencyMiddleware (pure ASGI, Idempotency-Key replay)
+├── _idempotency_store.py  # Redis replay-or-lock Lua step + unverified `exp` reader (shared by the above)
 ├── csrf.py                # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
 ├── plugin_activation.py   # PluginActivationMiddleware (pure ASGI)
 ├── plugin_context.py      # PluginContextMiddleware (pure ASGI)
@@ -113,7 +114,7 @@ adds, in order:
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
-| `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
+| `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins; preflight answers cacheable for `max_age=7200`, the ceiling Chromium honours, instead of Starlette's 600s — see below) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
@@ -163,6 +164,14 @@ replaced by a fresh UUID4. The value is echoed on the response, bound into
 every log line for the request and copied into the RFC 9457 `request_id`
 member, so an unvalidated header would be a log-/header-injection primitive
 and an unbounded per-request allocation.
+
+The bundled nginx gateway (`deploy/nginx/nginx.conf`) applies the **same
+rule at the edge**: a caller id matching that pattern is kept, anything else
+is replaced by nginx's own `$request_id` (32 hex characters), and the result
+is both sent upstream as `X-Request-ID` and written to the access log. The
+edge line and every application log line for a request therefore carry one
+id; before, a request the app had to re-id (or one that arrived without an
+id) had an edge log entry nothing in the app log could be matched to.
 
 ---
 
@@ -376,6 +385,18 @@ Redis store round-trip: persisting before that last emit guarantees that a
 client which saw the complete response gets a replay on its next retry.
 SSE, oversized and non-cacheable (`5xx`/retryable-`4xx`) responses are never
 accumulated at all.
+
+**One round trip before the route runs.** "Is there a stored response?" and
+"claim the in-flight lock" are a single atomic Lua step
+(`core/middleware/_idempotency_store.py`, registered once per process like
+the rate limiter's script): the script returns the stored payload, or takes
+the lock with `SET NX EX`, or reports the lock held. They used to be a `GET`
+followed by a `SET NX` — two Redis latencies on the hot path of every keyed
+mutating request — plus a third `GET` whenever the lock was held, to cover
+the gap between the two in which a concurrent duplicate could have finished.
+Inside one script there is no gap, so the `409` needs no re-check either. A
+client without `register_script` (a minimal stand-in) keeps the sequential
+path, re-check included.
 
 **Who a stored response belongs to.** Replay happens *before* route
 authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:

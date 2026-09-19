@@ -8,6 +8,7 @@ complex problems that require non-linear exploration.
 
 import asyncio
 import re
+from typing import Any
 
 from core.observability.logging import get_logger
 from core.reasoning.prompts import (
@@ -38,7 +39,7 @@ class TreeOfThoughts:
     coalesced into one upstream call by the service's single-flight layer).
     """
 
-    def __init__(self, llm_service=None):
+    def __init__(self, llm_service: Any = None) -> None:
         """
         Initialize the Tree of Thoughts engine.
 
@@ -49,7 +50,7 @@ class TreeOfThoughts:
         self.tools: list = []
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -259,11 +260,11 @@ class TreeOfThoughts:
         problem: str,
         k: int = 3,
         max_steps: int = 5,
-        tools: list | None = None,
+        tools: list[Any] | None = None,
         strategy: str = "mcts",
         initial_state: str | None = None,
-        **kwargs,
-    ) -> dict:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """
         Solve a problem using Tree of Thoughts with optional tools.
 

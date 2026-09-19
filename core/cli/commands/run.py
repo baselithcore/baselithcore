@@ -5,13 +5,18 @@ Provides the CLI entry point for launching the Baselith-Core development server
 behind a Uvicorn instance with auto-reload capabilities.
 """
 
+import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.panel import Panel
 from rich.table import Table
 
 from core.cli.ui import console, print_error
+
+if TYPE_CHECKING:
+    from core.cli.commands.doctor_checks import CheckResult
 
 
 def run_server(
@@ -114,7 +119,21 @@ def run_server(
     console.print()
 
     try:
-        # Configure uvicorn
+        # Configure uvicorn.
+        #
+        # The three settings below are not development conveniences: they are
+        # the parity this command owed `backend.py` and the container CMD in
+        # the Dockerfile, which both already set them. Without them `baselith
+        # run` behind any proxy — the compose gateway, a local ingress, a
+        # tunnel — reports the proxy as `request.client.host` for every caller,
+        # which collapses the per-IP rate limiter, the failed-auth throttle and
+        # the admin lockout into ONE shared bucket, and a Ctrl-C with open SSE
+        # streams cuts the lifespan teardown short.
+        #
+        # Trust stays limited to FORWARDED_ALLOW_IPS (uvicorn's own default is
+        # 127.0.0.1): widen it to the proxy's address, never to "*", or the
+        # header becomes caller-controlled and the limiter is bypassed by
+        # spoofing it.
         config: dict[str, Any] = {
             "app": "backend:app",
             "host": host,
@@ -122,7 +141,22 @@ def run_server(
             "reload": reload,
             "log_level": log_level,
             "access_log": True,
+            "proxy_headers": True,
+            "forwarded_allow_ips": os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+            "timeout_graceful_shutdown": int(
+                os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "30")
+            ),
+            # Parity with the container CMD and backend.py for the two
+            # remaining runtime knobs: a keep-alive longer than the proxy's
+            # upstream idle timeout (uvicorn's 5s default is shorter than
+            # nginx/ALB/Envoy's 60s, which surfaces as sporadic 502s), and
+            # optional load-shedding (503 above N concurrent connections
+            # instead of queueing; unset = uvicorn's default, no limit).
+            "timeout_keep_alive": int(os.getenv("UVICORN_KEEP_ALIVE", "75")),
         }
+        limit_concurrency = os.getenv("UVICORN_LIMIT_CONCURRENCY", "").strip()
+        if limit_concurrency:
+            config["limit_concurrency"] = int(limit_concurrency)
 
         # Only set workers if not in reload mode
         if not reload and workers > 1:
@@ -212,7 +246,7 @@ def _run_preflight(
     return 1
 
 
-def _is_connectivity_check(check) -> bool:
+def _is_connectivity_check(check: "CheckResult") -> bool:
     if check.name in CONNECTIVITY_CHECKS:
         return True
     if check.name != "LLM Provider":
@@ -222,7 +256,7 @@ def _is_connectivity_check(check) -> bool:
 
 
 def _print_preflight_panel(
-    failures,
+    failures: "Sequence[CheckResult]",
     title: str,
     border_style: str,
 ) -> None:
@@ -244,7 +278,10 @@ def _print_preflight_panel(
     )
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'run' command parser."""
     run_parser = subparsers.add_parser(
         "run",

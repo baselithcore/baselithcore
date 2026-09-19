@@ -16,7 +16,7 @@ from core.services.llm.tool_calling import LLMToolSpec, ToolChoice
 try:
     import anthropic
 except ImportError:  # pragma: no cover - optional dependency
-    anthropic = None  # type: ignore
+    anthropic = None  # type: ignore[assignment]
 
 # Prompt caching: the system prompt is the stable prefix (instructions +
 # tool/RAG/memory context), re-sent on every call. Marking it with an ephemeral

@@ -117,6 +117,48 @@ UNKNOWN_PRICE: Final[ModelPrice] = ModelPrice(
     output_usd_per_million=100.0,
 )
 
+#: Zero rate for a model served by a local provider.
+LOCAL_PRICE: Final[ModelPrice] = ModelPrice(0.0, 0.0)
+
+#: Providers whose tokens carry no marginal dollar cost. Self-hosted inference
+#: is capacity-bound (GPU seconds, VRAM, a queue), not price-bound, so billing
+#: it through the unknown-model policy charges ``UNKNOWN_PRICE`` — a
+#: deliberately punitive 100 $/M that exists to make a *missing vendor row*
+#: visible. Applied to a local model it invents spend that never happened, and
+#: a per-run or per-tenant budget aborts on it. Local models are priced at zero
+#: instead, and their real cost is watched as tokens, not dollars.
+LOCAL_PROVIDERS: Final[frozenset[str]] = frozenset({"ollama"})
+
+
+def is_local_model_id(model_id: str) -> bool:
+    """Whether *model_id* names a model served by a local provider.
+
+    Local ids are namespaced (``ollama/llama3.2``) because a bare tag carries
+    no vendor: ``llama3.2`` costs nothing served locally and bills behind a
+    hosted gateway. Use :func:`qualified_model_id` to build one.
+    """
+    return any(model_id.startswith(f"{provider}/") for provider in LOCAL_PROVIDERS)
+
+
+def qualified_model_id(provider: str | None, model: str) -> str:
+    """The pricing-table key for *model* as served by *provider*.
+
+    Local providers get their model namespaced; hosted providers keep the bare
+    id their pricing rows are keyed by. Idempotent, so a caller may apply it to
+    an id that is already qualified.
+
+    Args:
+        provider: The provider that actually served the call, or ``None``.
+        model: The model id the provider was asked for.
+
+    Returns:
+        ``"<provider>/<model>"`` for a local provider, else ``model``.
+    """
+    if not provider or provider not in LOCAL_PROVIDERS:
+        return model
+    prefix = f"{provider}/"
+    return model if model.startswith(prefix) else f"{prefix}{model}"
+
 
 # Snapshot date of DEFAULT_PRICING. Refresh quarterly, updating both together —
 # consumers (e.g. dashboards) display this instead of hand-syncing a copy.
@@ -146,17 +188,40 @@ DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
     # Google
     "gemini-2.5-pro": ModelPrice(3.50, 10.50),
     "gemini-2.5-flash": ModelPrice(0.075, 0.30),
-    # Local (Ollama, etc.) — zero marginal cost; capacity-bound, not price-bound
-    "ollama/llama-3-70b": ModelPrice(0.0, 0.0),
-    "ollama/mistral-large": ModelPrice(0.0, 0.0),
+    # Local models need no rows: every ``<local-provider>/<model>`` id is
+    # priced at zero by ``get_price`` (see LOCAL_PROVIDERS). Listing a few tags
+    # here used to imply the opposite — that an unlisted local tag was
+    # *unpriced*, which is how a self-hosted model came to be billed at
+    # UNKNOWN_PRICE.
 }
 
 
 def get_price(
     model_id: str, *, table: Mapping[str, ModelPrice] = DEFAULT_PRICING
 ) -> ModelPrice:
-    """Return the ``ModelPrice`` for ``model_id`` or ``UNKNOWN_PRICE``."""
-    return table.get(model_id, UNKNOWN_PRICE)
+    """Return the ``ModelPrice`` for ``model_id``.
+
+    Resolution order: an explicit table row, then :data:`LOCAL_PRICE` for a
+    locally-served model, then :data:`UNKNOWN_PRICE`.
+    """
+    price = table.get(model_id)
+    if price is not None:
+        return price
+    if is_local_model_id(model_id):
+        return LOCAL_PRICE
+    return UNKNOWN_PRICE
+
+
+def is_priced(
+    model_id: str, *, table: Mapping[str, ModelPrice] = DEFAULT_PRICING
+) -> bool:
+    """Whether a cost lookup for *model_id* is backed by a real rate.
+
+    True for a table row and for any locally-served model (whose rate is a
+    known zero). The unknown-model policy therefore applies only to what is
+    left: a hosted model with no row, which is the case worth warning about.
+    """
+    return model_id in table or is_local_model_id(model_id)
 
 
 def estimate_cost(

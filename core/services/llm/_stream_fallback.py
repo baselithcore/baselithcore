@@ -30,12 +30,14 @@ from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 from core.services.llm._deadline import stream_within_deadline
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.fallback_runtime import (
+from core.services.llm._fallback_support import (
     _breaker_open,
     _clone_service,
+    fatal_exception_types,
     parse_fallback_chain,
+    record_fallback_served,
 )
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -45,20 +47,9 @@ logger = get_logger(__name__)
 #: One provider chunk: the text delta and the cumulative token count.
 Chunk = tuple[str, int]
 
-
-def _fatal_exception_types() -> tuple[type[BaseException], ...]:
-    """Exceptions that must abort the chain instead of trying the next stage."""
-    from core.middleware.cost_control import (
-        BudgetExceededError as MiddlewareBudgetExceededError,
-    )
-    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
-    from core.services.llm.exceptions import BudgetExceededError
-
-    return (
-        BudgetExceededError,
-        MiddlewareBudgetExceededError,
-        LoopBudgetExceededError,
-    )
+#: Never an empty string: every httpx timeout class stringifies to ``""``,
+#: which is exactly what a hung local model server produces.
+_describe = describe_exception
 
 
 def _candidates(
@@ -133,16 +124,20 @@ async def open_stream(
 
     Raises:
         LLMProviderError: When every candidate failed to produce a first
-            chunk (the error carries the last failure).
+            chunk. The message carries **every** stage's failure, primary
+            first: reporting only the last one named the local fallback as the
+            cause of an outage that started at the hosted primary, which sent
+            operators to debug the wrong host.
         BudgetExceededError: Propagated unchanged from any stage — budget
             and deadline overruns never fall through.
     """
-    fatal = _fatal_exception_types()
+    fatal = fatal_exception_types()
     primary = service.config.provider
-    last_error: Exception | None = None
+    failures: list[str] = []
 
     for provider, use_model, existing in _candidates(service, model):
         if _breaker_open(provider):
+            failures.append(f"{provider}:{use_model} (circuit_open)")
             logger.warning("llm_stream_provider_skipped", extra={"provider": provider})
             continue
         serving = existing or _clone_service(service, provider, use_model)
@@ -162,22 +157,26 @@ async def open_stream(
             await _aclose(stream)
             raise
         except Exception as exc:  # any failure to open tries the next stage
-            last_error = exc
+            failures.append(f"{provider}:{use_model} ({_describe(exc)})")
             await _aclose(stream)
             logger.warning(
                 "llm_stream_provider_failed",
-                extra={"provider": provider, "error": str(exc)},
+                extra={"provider": provider, "error": _describe(exc)},
             )
             continue
 
         if provider != primary:
-            logger.warning(
-                "llm_stream_fallback_served",
-                extra={"provider": provider, "primary": primary},
+            record_fallback_served(
+                primary=primary,
+                served_by=provider,
+                served_model=use_model,
+                path="stream",
             )
         return _prepend(first, stream), serving, provider, use_model
 
-    raise LLMProviderError(f"All stream providers failed: {last_error}")
+    raise LLMProviderError(
+        f"All stream providers failed: {', '.join(failures) or '<empty>'}"
+    )
 
 
 __all__ = ["Chunk", "open_stream"]

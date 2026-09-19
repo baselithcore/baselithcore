@@ -1,0 +1,83 @@
+# Git attributes — line endings, diff behaviour, and what counts as generated.
+#
+# The line-ending half is not cosmetic here. Several trees are compared BYTE
+# FOR BYTE by a CI gate or hashed into a manifest: a Windows checkout that
+# converted LF to CRLF would fail those gates for a reason no diff explains,
+# and `plugins/*/ui/dist/**` would additionally break its integrity_sha256 and
+# stop the plugin loading under BASELITH_REQUIRE_SIGNED_PLUGINS.
+
+# Normalize text in the repository, check out with LF everywhere.
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary: never normalized, never diffed as text
+# ---------------------------------------------------------------------------
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.whl binary
+*.so binary
+*.dylib binary
+*.db binary
+*.sqlite3 binary
+
+# ---------------------------------------------------------------------------
+# Generated / vendored: collapsed in diffs and excluded from language stats
+# ---------------------------------------------------------------------------
+# `linguist-generated` alone: it collapses the file in a GitHub diff (still
+# expandable) and drops it from the language stats. NOT `-diff` — that marks
+# the file binary for git ITSELF, so `git diff uv.lock` stops printing anything
+# locally and a reviewer cannot see what a relock actually changed.
+uv.lock linguist-generated=true
+package-lock.json linguist-generated=true
+sdk/typescript/package-lock.json linguist-generated=true
+plugins/baselithbot/ui/package-lock.json linguist-generated=true
+# `-diff` IS right here: these are minified, content-hashed bundles where a
+# textual diff is noise, and the gate that guards them compares bytes, not
+# hunks.
+plugins/*/ui/dist/** linguist-generated=true -diff
+sdk/openapi.json linguist-generated=true
+mkdocs-site/docs/api/specs/openapi.json linguist-generated=true
+CHANGELOG.md linguist-generated=true
+mkdocs-site/docs/getting-started/configuration.md linguist-generated=true
+
+# Not the project's own code: excluded from language statistics so the
+# repository reads as the Python framework it is.
+templates/** linguist-vendored=true
+examples/** linguist-documentation=true
+mkdocs-site/** linguist-documentation=true
+
+# ---------------------------------------------------------------------------
+# Diff drivers: better hunk headers when reviewing
+# ---------------------------------------------------------------------------
+*.py diff=python
+*.md diff=markdown
+*.html diff=html
+*.css diff=css
+
+# Shell scripts and hooks must stay LF whatever the platform: a CRLF shebang
+# line is a "bad interpreter" error at runtime, not at checkout.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Keep working-tree-only paths out of exported archives (`git archive`, and the
+# GitHub source tarballs attached to a release).
+.github/ export-ignore
+.devcontainer/ export-ignore
+tests/ export-ignore
+benchmarks/ export-ignore
+.editorconfig export-ignore
+.gitattributes export-ignore
+.pre-commit-config.yaml export-ignore

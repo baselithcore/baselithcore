@@ -36,7 +36,10 @@ class HandshakeMixin:
     # Supplied by MCPClient.
     _protocol_version: str | None
     _client_info: dict[str, Any]
-    _server_info: Any
+    # Declared as it is on MCPClient, not as `Any`: the mixin re-declaring it
+    # loosely was what made `return self._server_info` an untyped return from a
+    # method promising MCPServerInfo.
+    _server_info: MCPServerInfo | None
     _connected: bool
     _send_request: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
     _send_notification: Callable[[str, dict[str, Any]], Awaitable[None]]

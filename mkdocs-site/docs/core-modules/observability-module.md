@@ -12,6 +12,8 @@ core/observability/
 ├── span_sink.py  # In-process fan-out of completed spans (dashboards, tests)
 ├── span_bridge.py    # OTel SDK SpanProcessor feeding the span sinks
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
+├── otel_exporters.py        # OTLP protocol selection (gRPC / HTTP) + endpoint shaping
+├── otel_logs.py             # LoggerProvider — log records exported over OTLP
 ├── otel_instrumentation.py  # what gets instrumented, and the propagators
 ├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
 ├── agent_spans.py    # Agent-attributed spans (OTel GenAI: invoke_agent / execute_tool)
@@ -124,7 +126,7 @@ separate under load.
   `service.namespace`, `service.instance.id` (`host:pid`) and
   `deployment.environment`.
 - A **`TracerProvider`** with a `ParentBased(TraceIdRatioBased)` sampler driven
-  by `TELEMETRY_TRACES_SAMPLE_RATE`, exporting via **OTLP/gRPC**
+  by `TELEMETRY_TRACES_SAMPLE_RATE`, exporting via **OTLP**
   (`BatchSpanProcessor`) — but only when `TELEMETRY_OTEL_ENDPOINT` is set. Left
   empty, the provider and the instrumentation are still installed and spans
   still reach in-process consumers through the sink bridge; they simply do not
@@ -134,6 +136,9 @@ separate under load.
 - An optional **`MeterProvider`** (`TELEMETRY_METRICS_ENABLED=true`) pushing
   OTel-native metrics over OTLP — independent of the Prometheus `/metrics`
   scrape, which is always available.
+- An optional **`LoggerProvider`** (`TELEMETRY_LOGS_ENABLED=true`, see
+  "Log export over OTLP" below) shipping log records as the third signal, on
+  the same `Resource` as traces and metrics.
 - **Auto-instrumentation** for FastAPI, HTTPX, Redis and (opportunistically)
   psycopg — the *what* and *how* of it living in `otel_instrumentation.py`, so
   `otel.py` keeps to provider configuration. The FastAPI instrumentor skips `/health`, `/health/ready` and
@@ -159,6 +164,53 @@ net) flushes the batch processors so no spans/metrics are lost on exit.
     wrap the whole stack, measuring true end-to-end latency. The lifespan still
     calls it — idempotent, and it covers entrypoints that build the app
     differently — and finds the work already done.
+
+### OTLP protocol: gRPC or HTTP (`otel_exporters.py`)
+
+`TELEMETRY_OTEL_PROTOCOL` selects the wire protocol for **all three signals**;
+the OpenTelemetry specification's own `OTEL_EXPORTER_OTLP_PROTOCOL` is accepted
+as an alias, so a sidecar or chart that already sets it is honoured without a
+Baselith-specific variable.
+
+| Value | Default port | When |
+| --- | --- | --- |
+| `grpc` (default) | 4317 | A collector's `otlp` receiver on the same network. |
+| `http/protobuf` | 4318 | A collector's `otlphttp` receiver, a vendor ingest endpoint, or anything behind an L7 proxy that will not forward HTTP/2 trailers. |
+
+The two protocols do not take the same URL. gRPC takes the collector root;
+HTTP takes a **per-signal path** (`/v1/traces`, `/v1/metrics`, `/v1/logs`) and
+the SDK appends it only for endpoints read from the environment — an explicit
+endpoint is used verbatim. `otel_exporters.signal_endpoint()` therefore appends
+the path when it is missing, so `TELEMETRY_OTEL_ENDPOINT=http://collector:4318`
+works for every signal. An endpoint that already spells a path out is left
+alone. An unsupported protocol name warns and falls back to gRPC rather than
+failing the boot; `http/json` is a valid value in the specification but the
+Python SDK ships no exporter for it, so it counts as unsupported.
+
+### Log export over OTLP (`otel_logs.py`)
+
+`TELEMETRY_LOGS_ENABLED=true` installs a `LoggerProvider` and attaches its
+handler to the root logger, so log records leave the process over OTLP as the
+third signal — **in addition to**, never instead of, the stdout logging that
+`kubectl logs` shows and that is the only thing left when the collector is
+down.
+
+The correlation data was already being produced: the `add_otel_context`
+processor stamps `trace_id`/`span_id` on every entry. What changes is that the
+backend receives those as structured fields it already understands, instead of
+having to re-parse them out of a scraped file through a second storage path.
+
+Two loops the bridge is careful about:
+
+- **Self-logging.** The exporter's transport (gRPC, urllib3) and the OTel SDK
+  log through the same root logger; unfiltered, one failed export logs a
+  warning, which becomes a record, which is queued for export, which fails.
+  Records from those loggers are dropped **from the OTLP sink only** — they
+  still reach stdout, where a human can see them.
+- **Shutdown re-entrancy.** The handler is detached from the root logger before
+  the provider flushes, so nothing queues into a processor that is mid-flush.
+  `shutdown_telemetry()` does this first, ahead of the tracer and meter
+  providers.
 
 ### Which plugin spent the tokens
 
@@ -364,6 +416,7 @@ metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
 | `mas_llm_requests_total`          | Counter   | LLM calls issued                 |
 | `mas_llm_tokens_total`            | Counter   | LLM tokens consumed              |
 | `mas_llm_latency_seconds`         | Histogram | LLM call latency                 |
+| `mas_llm_fallback_served_total`   | Counter   | Calls answered by a fallback stage |
 | `mas_retrieval_latency_seconds`   | Histogram | Vector retrieval latency         |
 | `mas_rerank_latency_seconds`      | Histogram | Reranker latency                 |
 | `mas_indexed_documents_current`   | Gauge     | Documents currently indexed      |
@@ -460,11 +513,13 @@ LOG_JSON=true                   # Emit JSON (production) or human-readable (dev)
 LOG_MASKING_ENABLED=true        # Redact PII/credentials from log messages
 
 # OpenTelemetry
-TELEMETRY_ENABLED=false         # Master switch for OTel traces/metrics
-TELEMETRY_OTEL_ENDPOINT=http://localhost:4317   # OTLP/gRPC collector
+TELEMETRY_ENABLED=false         # Master switch for OTel traces/metrics/logs
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317   # OTLP collector (:4318 for HTTP)
+TELEMETRY_OTEL_PROTOCOL=grpc                     # grpc | http/protobuf
 TELEMETRY_TRACES_SAMPLE_RATE=1.0                 # ParentBased(TraceIdRatio), 0.0–1.0
 TELEMETRY_METRICS_ENABLED=false                  # Push OTel-native metrics via OTLP
-TELEMETRY_CONSOLE_EXPORT=false                   # Also export spans/metrics to stdout
+TELEMETRY_LOGS_ENABLED=false                     # Push log records via OTLP
+TELEMETRY_CONSOLE_EXPORT=false                   # Also export spans/metrics/logs to stdout
 DEPLOYMENT_ENVIRONMENT=development               # deployment.environment resource attr
 SERVICE_VERSION=                                 # service.version (defaults to package version)
 

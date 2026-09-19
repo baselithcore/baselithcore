@@ -25,7 +25,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.35.0  •  https://baselithcore.xyz
+  Multi-Agent, Plugin-First Framework  •  v0.36.0  •  https://baselithcore.xyz
 
 ╭──────────────────────────────────────── Command Menu ────────────────────────────────────────╮
 │   SCAFFOLDING               init            Bootstrap a new project                          │
@@ -70,6 +70,28 @@ The framework supports global flags that modify the behavior of all commands.
 
 !!! tip "JSON for CI/CD"
     When using `--format json`, all logical output is emitted as a single JSON object to `stdout`. This is the professional standard for automation and pipeline integration. `--format` is the only output-shaping global flag — there is no global `--verbose` flag.
+
+### Log verbosity
+
+A command's output is a user interface — tables, panels, prompts — so the CLI
+configures logging for itself and keeps the console at `WARNING`. Library log
+records stay out of the way of what you asked for.
+
+Two environment variables override that, and are read from the environment or
+`.env`:
+
+| Variable            | Effect                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `LOG_LEVEL_CONSOLE` | Set the console level explicitly — `DEBUG` to see the framework's own records, `ERROR` to see almost nothing. Naming `INFO` gets you `INFO`; leaving it unset gets you `WARNING`, not the `INFO` a server defaults to. |
+| `LOG_JSON`          | `true` renders those records as JSON instead of the readable console format. Unset means readable, whatever a server-side configuration would do. |
+
+```bash
+baselith plugin validate my_plugin                      # just the report
+LOG_LEVEL_CONSOLE=DEBUG baselith plugin validate my_plugin   # and the plumbing
+```
+
+This is separate from `--format`: `--format json` shapes the command's *result*,
+`LOG_JSON` shapes the *log records* around it.
 
 ---
 
@@ -140,6 +162,10 @@ elided):
 │ ✅ PASS  │ Core Dependencies   │ Common local extras installed  │                                │
 │ ✅ PASS  │ LLM Provider        │ Ollama connected               │                                │
 │          │                     │ (localhost:11434)              │                                │
+│ ✅ PASS  │ LLM Fallback        │ Chain: ollama:llama3.2         │ A primary failure runs         │
+│          │                     │                                │ inference locally on this host │
+│ ❌ FAIL  │ LLM Local Models    │ model 'llava:7b' is not        │ Run: ollama pull llava:7b      │
+│          │                     │ installed at localhost:11434   │                                │
 │ ✅ PASS  │ Redis (Cache)       │ Connected (localhost:6379)     │                                │
 │ ❌ FAIL  │ Qdrant              │ Cannot connect                 │ Run: docker compose up -d      │
 │          │                     │ (localhost:6333)               │ qdrant                         │
@@ -157,12 +183,19 @@ elided):
 │          │                     │ present                        │                                │
 └──────────┴─────────────────────┴────────────────────────────────┴────────────────────────────────┘
 
-Results: 10 passed, 5 failed
+Results: 11 passed, 6 failed
 
 ⚠️  Some critical checks failed. Fix them before running the server.
 
 ⏱  Completed in 508ms
 ```
+
+`LLM Fallback` and `LLM Local Models` answer the question the provider row
+does not: where a failure sends inference, and whether what it would land on
+actually exists. Both read configuration and probe **local** endpoints only —
+a diagnostic must not spend money or depend on a vendor being reachable. The
+same checks run once at startup (`LLM_PREFLIGHT`, see
+[LLM service](../core-modules/services.md)).
 
 **JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 
@@ -287,7 +320,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.35.0     ││   Name       app      │
+│   Version   0.36.0     ││   Name       app      │
 │   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -624,6 +657,27 @@ baselith --format json plugin info <name>
 
 ---
 
+### Marketplace commands and exit codes
+
+Every `plugin marketplace` subcommand returns a real exit code, so a script or
+a CI step can branch on it:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command did what was asked. An install that finds the plugin **already installed** counts, so re-running a provisioning script does not fail. A search that matches nothing counts too: the query ran, and "none" is an answer. |
+| `1` | The command did not. The plugin is unknown to the marketplace, the install or publish was rejected, the credentials were missing or no longer verify, or the category was invalid. |
+
+`marketplace identity` follows the same rule: it exits `1` when nothing is
+stored or the stored token no longer verifies, so `baselith plugin marketplace
+identity` can be used as an "am I logged in?" check.
+
+!!! warning "This changed"
+    These commands used to print their outcome and return nothing, which the
+    CLI coerced to `0`. A failed install, an unknown plugin, a rejected
+    publish and a failed login all reported **success**. A pipeline that
+    treated a green exit as "the plugin is installed", or as "the release went
+    out", was not being told the truth.
+
 ### `plugin marketplace list` - List Marketplace Plugins
 
 List all plugins available in the Baselith Marketplace, optionally filtered by
@@ -795,6 +849,17 @@ By default `run` executes the core doctor checks before handing over to
 Uvicorn and starts anyway when a backing service is unreachable — the preflight
 reports, it does not gate. `--require-services` turns that report into a gate;
 `--skip-preflight` removes it entirely.
+
+Uvicorn is started with the same proxy and shutdown settings as `backend.py`
+and the container's own command, so the three entry points behave alike:
+
+| Setting | Value | Why it is not optional |
+| --- | --- | --- |
+| `proxy_headers` | on | Without it every caller behind a proxy reports the proxy's address, which collapses the per-IP rate limiter, the failed-auth throttle and the admin lockout into one shared bucket. |
+| `forwarded_allow_ips` | `$FORWARDED_ALLOW_IPS`, default `127.0.0.1` | The trusted source for those headers. Widen it to your proxy's address; never to `*`, which makes the header caller-controlled and the limiter bypassable by spoofing it. |
+| `timeout_graceful_shutdown` | `$GRACEFUL_SHUTDOWN_TIMEOUT`, default 30s | Bounds the drain so a Ctrl-C or `SIGTERM` with open streams still runs lifespan cleanup before the supervisor kills the process. |
+| `timeout_keep_alive` | `$UVICORN_KEEP_ALIVE`, default 75s | uvicorn's own 5s is shorter than the upstream idle timeout of every common proxy (nginx, ALB, Envoy: 60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep the app side longer than the proxy side. |
+| `limit_concurrency` | `$UVICORN_LIMIT_CONCURRENCY`, unset by default | Load shedding: above this many concurrent connections uvicorn answers `503` at once instead of queueing until something times out. Only passed when the variable is set, so the default stays uvicorn's (no limit). |
 
 The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
 its `catalog/` and `compliance/` subdirectories) and prints what it created.

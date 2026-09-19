@@ -5,6 +5,7 @@ RQ tasks for async document processing pipeline.
 """
 
 import asyncio
+from collections.abc import Coroutine
 from typing import Any
 
 from rq import get_current_job
@@ -15,7 +16,7 @@ from core.task_queue.status import get_task_tracker, update_job_progress
 logger = get_logger(__name__)
 
 
-def _run_async(coro):
+def _run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     """Helper to run async code in RQ job."""
     return asyncio.run(coro)
 
@@ -53,7 +54,7 @@ def ingest_document_task(
         update_job_progress(30, "Processing document")
 
         # Run async indexing
-        async def _ingest():
+        async def _ingest() -> Any:
             return await indexing_service.ingest_file(
                 file_path=file_path,
                 collection=collection,
@@ -188,7 +189,7 @@ def reindex_collection_task(
 
         indexing_service = get_indexing_service()
 
-        async def _reindex():
+        async def _reindex() -> Any:
             return await indexing_service.reindex_collection(
                 collection_name=collection,
                 force=force,

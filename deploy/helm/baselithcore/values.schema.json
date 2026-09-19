@@ -625,6 +625,12 @@
               "exclusiveMinimum": 0,
               "maximum": 1
             },
+            "llmFallbackRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Fraction of LLM calls answered by a fallback stage rather than the configured primary. These requests SUCCEED, so no error-based alert covers them: a chain quietly carrying production traffic — often onto a local model on the host itself — is the failure mode. Keep it low."
+            },
             "httpSlowRatio": {
               "type": "number",
               "exclusiveMinimum": 0,

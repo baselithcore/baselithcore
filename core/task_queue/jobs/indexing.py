@@ -28,7 +28,7 @@ async def _run_indexing_logic(incremental: bool, job_id: str) -> int:
     pubsub = PubSubManager(get_storage_config().cache_redis_url)
 
     # helper for async publish inside async job
-    async def _publish(event: RealtimeEvent):
+    async def _publish(event: RealtimeEvent) -> None:
         await pubsub.publish("global", event)
 
     try:

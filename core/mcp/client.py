@@ -236,7 +236,7 @@ class MCPClient(HandshakeMixin, OperationsMixin):
         self, method: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
-        cached = self.cache.get(method, params)
+        cached: dict[str, Any] | None = self.cache.get(method, params)
         if cached is not None:
             logger.debug("mcp_cache_hit", method=method)
             return cached
@@ -272,7 +272,8 @@ class MCPClient(HandshakeMixin, OperationsMixin):
                 raise RuntimeError(
                     f"MCP error {error.get('code')}: {error.get('message')}"
                 )
-            return response.get("result", {})
+            result: dict[str, Any] = response.get("result", {})
+            return result
 
         if self._writer is None or self._reader is None:
             raise RuntimeError("Not connected")
@@ -298,9 +299,9 @@ class MCPClient(HandshakeMixin, OperationsMixin):
             error = response["error"]
             raise RuntimeError(f"MCP error {error.get('code')}: {error.get('message')}")
 
-        result = response.get("result", {})
-        self.cache.store(method, params, result)
-        return result
+        cacheable: dict[str, Any] = response.get("result", {})
+        self.cache.store(method, params, cacheable)
+        return cacheable
 
     def _on_notification(self, message: dict[str, Any]) -> None:
         """React to a server notification seen while awaiting a reply.

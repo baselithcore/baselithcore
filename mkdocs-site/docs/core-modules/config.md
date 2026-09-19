@@ -313,12 +313,18 @@ print(config.timezone)                  # ZoneInfo (derived from APP_TIMEZONE)
 HOST=0.0.0.0
 PORT=8000
 
+# Landing: path GET / redirects to (307). Empty = the root keeps answering 404,
+# because no route is registered there.
+BASELITH_ROOT_REDIRECT=
+
 # Multi-Tenancy (Default: true) — lives on AppConfig
 STRICT_TENANT_ISOLATION=true
 
 # Telemetry
 TELEMETRY_ENABLED=false
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+TELEMETRY_OTEL_PROTOCOL=grpc        # or http/protobuf (endpoint port becomes 4318)
+TELEMETRY_LOGS_ENABLED=false        # OTLP log-record export, alongside stdout
 SENTRY_DSN=
 
 # Cost control
@@ -352,6 +358,7 @@ print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
 print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
 print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
+print(llm.preflight)           # "auto"       (LLM_PREFLIGHT — startup posture check)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
 vs = get_vectorstore_config()

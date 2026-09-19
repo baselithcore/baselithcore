@@ -339,7 +339,7 @@ class SQLiteAuditSink:
         spec = spec or AuditQuery()
         where, params = spec.where()
         sql = (
-            f"SELECT {_COLUMNS} FROM audit_log{where} "  # nosec B608 - fixed columns
+            f"SELECT {_COLUMNS} FROM audit_log{where} "  # noqa: S608  # nosec B608 - fixed columns
             "ORDER BY seq DESC LIMIT ? OFFSET ?"
         )
         with self._lock:
@@ -373,7 +373,7 @@ class SQLiteAuditSink:
             )
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"  # nosec B608 - fixed columns
+                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"  # noqa: S608  # nosec B608 - fixed columns
             )
             rows = cur.fetchall()
 
