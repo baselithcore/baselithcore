@@ -379,3 +379,86 @@ def test_anonymous_optin_is_scoped_per_source_address():
     assert r3.json() == {"n": 1}
     assert r3.headers.get("idempotency-replayed") == "true"
     assert state["count"] == 2
+
+
+class ScriptedFakeRedis(FakeRedis):
+    """FakeRedis that also offers ``register_script`` — the production path.
+
+    The stand-in above has no ``register_script``, so every test through it
+    exercises the sequential fallback. This one emulates the Lua step and
+    counts the round trips taken before the app runs, which is the number
+    the script exists to shrink.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.round_trips = 0
+
+    def register_script(self, lua):
+        assert "GET" in lua and "NX" in lua
+
+        async def run(keys, args):
+            self.round_trips += 1
+            stored = self.store.get(keys[0])
+            if stored is not None:
+                return [1, stored]
+            if await self.set(keys[1], "1", nx=True, ex=args[0]):
+                return [2]
+            return [3]
+
+        return run
+
+
+def test_scripted_path_replays_in_one_round_trip():
+    fake = ScriptedFakeRedis()
+    client, state = _build(fake)
+    r1 = client.post("/count", headers=_keyed("k1"))
+    assert r1.json() == {"n": 1}
+    # Replay-check + lock claim was ONE call, not GET then SET NX.
+    assert fake.round_trips == 1
+    r2 = client.post("/count", headers=_keyed("k1"))
+    assert r2.json() == {"n": 1}
+    assert r2.headers.get("idempotency-replayed") == "true"
+    assert fake.round_trips == 2
+    assert state["count"] == 1
+
+
+def test_scripted_path_returns_409_while_in_flight():
+    fake = ScriptedFakeRedis()
+    client, state = _build(fake)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/count",
+        "headers": [(b"authorization", _CRED["Authorization"].encode())],
+    }
+    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+        mw = IdempotencyMiddleware(FastAPI())
+    storage_key = mw._storage_key(scope, "dup")
+    assert storage_key is not None
+    fake.store[storage_key + ":lock"] = "1"
+    r = client.post("/count", headers=_keyed("dup"))
+    assert r.status_code == 409
+    assert state["count"] == 0
+    # No second look-up: with GET and SET NX atomic there is no gap to cover.
+    assert fake.round_trips == 1
+
+
+def test_scripted_path_fails_open_on_undecodable_entry():
+    fake = ScriptedFakeRedis()
+    client, state = _build(fake)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/count",
+        "headers": [(b"authorization", _CRED["Authorization"].encode())],
+    }
+    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+        mw = IdempotencyMiddleware(FastAPI())
+    storage_key = mw._storage_key(scope, "bad")
+    assert storage_key is not None
+    fake.store[storage_key] = "not json"
+    r = client.post("/count", headers=_keyed("bad"))
+    # Executed normally rather than 409 on a lock the script never took.
+    assert r.status_code == 200
+    assert state["count"] == 1

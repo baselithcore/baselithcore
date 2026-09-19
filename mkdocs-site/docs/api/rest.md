@@ -60,6 +60,30 @@ plugin-management, Backstage, and discovery routes are not versioned.
 
 ---
 
+## Browser clients (CORS)
+
+Only the origins listed in `ALLOW_ORIGINS` may call the API from a browser;
+the default is empty, which blocks every cross-origin request — the right
+posture for an API with no browser front end. Credentials are allowed for a
+concrete origin list and disabled under the `*` wildcard, which is the
+standard rule (a wildcard and credentials cannot be combined).
+
+Three response headers are **exposed** to the calling script, since a browser
+cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
+report), `Idempotency-Replayed` and `Retry-After`.
+
+A preflight answer stays cacheable in the browser for **7200 seconds**. The
+framework default is Starlette's 600s, at which a dashboard making
+credentialed JSON calls re-asks `OPTIONS` for every distinct URL every ten
+minutes — a full round trip that gates the real request. 7200s is the ceiling
+Chromium honours (Firefox allows up to 86400). The price is latency on a
+policy change: a browser tab that is already open picks up an edited
+`ALLOW_ORIGINS`, method or header list within two hours rather than ten
+minutes, so widen the lists before you need them and treat narrowing as a
+change that reaches clients slowly.
+
+---
+
 ## Error Envelope
 
 Every error — framework exceptions, `HTTPException`, request-validation

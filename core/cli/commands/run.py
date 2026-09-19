@@ -146,7 +146,17 @@ def run_server(
             "timeout_graceful_shutdown": int(
                 os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "30")
             ),
+            # Parity with the container CMD and backend.py for the two
+            # remaining runtime knobs: a keep-alive longer than the proxy's
+            # upstream idle timeout (uvicorn's 5s default is shorter than
+            # nginx/ALB/Envoy's 60s, which surfaces as sporadic 502s), and
+            # optional load-shedding (503 above N concurrent connections
+            # instead of queueing; unset = uvicorn's default, no limit).
+            "timeout_keep_alive": int(os.getenv("UVICORN_KEEP_ALIVE", "75")),
         }
+        limit_concurrency = os.getenv("UVICORN_LIMIT_CONCURRENCY", "").strip()
+        if limit_concurrency:
+            config["limit_concurrency"] = int(limit_concurrency)
 
         # Only set workers if not in reload mode
         if not reload and workers > 1:

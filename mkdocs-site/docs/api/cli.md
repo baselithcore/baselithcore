@@ -825,6 +825,8 @@ and the container's own command, so the three entry points behave alike:
 | `proxy_headers` | on | Without it every caller behind a proxy reports the proxy's address, which collapses the per-IP rate limiter, the failed-auth throttle and the admin lockout into one shared bucket. |
 | `forwarded_allow_ips` | `$FORWARDED_ALLOW_IPS`, default `127.0.0.1` | The trusted source for those headers. Widen it to your proxy's address; never to `*`, which makes the header caller-controlled and the limiter bypassable by spoofing it. |
 | `timeout_graceful_shutdown` | `$GRACEFUL_SHUTDOWN_TIMEOUT`, default 30s | Bounds the drain so a Ctrl-C or `SIGTERM` with open streams still runs lifespan cleanup before the supervisor kills the process. |
+| `timeout_keep_alive` | `$UVICORN_KEEP_ALIVE`, default 75s | uvicorn's own 5s is shorter than the upstream idle timeout of every common proxy (nginx, ALB, Envoy: 60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep the app side longer than the proxy side. |
+| `limit_concurrency` | `$UVICORN_LIMIT_CONCURRENCY`, unset by default | Load shedding: above this many concurrent connections uvicorn answers `503` at once instead of queueing until something times out. Only passed when the variable is set, so the default stays uvicorn's (no limit). |
 
 The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
 its `catalog/` and `compliance/` subdirectories) and prints what it created.

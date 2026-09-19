@@ -574,4 +574,11 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # the upstream keepalive pool of every common reverse proxy (nginx 60s, ALB 60s,
 # Envoy 60s), so the proxy reuses sockets uvicorn already closed and surfaces
 # sporadic 502s. Keep the app side *longer* than the proxy side.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]
+# --limit-concurrency (UVICORN_LIMIT_CONCURRENCY, unset by default): load
+# shedding. Above that many concurrent connections/tasks uvicorn answers 503
+# immediately instead of queueing work until the client or the proxy times
+# out — a fast, explicit "over capacity" the HPA and the proxy can act on,
+# where unbounded queueing shows up as latency collapse across every request.
+# The `${VAR:+...}` form adds the flag only when the variable is set, so an
+# unset value passes nothing rather than an empty argument.
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75} ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency $UVICORN_LIMIT_CONCURRENCY}"]

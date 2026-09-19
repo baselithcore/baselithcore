@@ -33,7 +33,7 @@
     "core/middleware/_admin_lockout.py": 1,
     "core/middleware/_plugin_route.py": 1,
     "core/middleware/_security_env.py": 1,
-    "core/middleware/idempotency.py": 6,
+    "core/middleware/idempotency.py": 4,
     "core/middleware/plugin_context.py": 2,
     "core/middleware/rate_limiter.py": 1,
     "core/observability/audit_chain.py": 1,
