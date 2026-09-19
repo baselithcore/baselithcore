@@ -199,6 +199,11 @@ class TestAccounting:
         from core.orchestration.limits import LoopBudget, LoopLimits
 
         service = _service()
+        # A PAID provider on purpose: a turn served locally is priced at zero
+        # by design (self-hosted inference is capacity-bound, not price-bound),
+        # so a dollar assertion needs a provider that actually bills. The stub
+        # provider below answers either way.
+        service.config.provider = "anthropic"
         service.provider = Mock(supports_native_tools=True, supports_messages=True)
         service.provider.generate_messages = AsyncMock(
             return_value=LLMResult(text="ok", tokens_used=100)

@@ -240,11 +240,41 @@ fall through an ordered chain of `provider:model` stages when the primary
 provider fails or its circuit breaker is open — e.g.
 `LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
 fallback, the default). Each stage is a cached `LLMService` clone with the
-provider's dedicated credentials (`core.services.llm.fallback_runtime`); a
-clone never recurses into its own chain. Budget and deadline errors are
-**fatal** — they never fall through, since the request is out of money or
-time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
-are attributed to the provider that actually served the call.
+provider's dedicated credentials (`core.services.llm.fallback_runtime`, whose
+shared machinery lives in `_fallback_support`); a clone never recurses into its
+own chain. The span records `gen_ai.baselith.serving_provider` and
+`gen_ai.response.model`, and GenAI metrics are attributed to the provider that
+actually served the call.
+
+**What never falls through.** Budget and deadline errors, because the request
+is out of money or time. A refusal, because the model ran and was billed. And
+a **client error** (`LLMClientError`: expired or wrong key, unknown model,
+malformed payload) — the chain covers outages, not configuration. Without that
+last rule a deployment whose hosted key lapsed served every request from its
+local stage instead, successfully and indefinitely, with a warning as the only
+symptom. A 5xx, a timeout, a connection error and a rate limit still fail over,
+which is what a chain is for.
+
+**A fallback that serves is an alertable event.** The request returns 200
+either way, so a log line is not enough: each fallback answer increments
+`mas_llm_fallback_served_total{primary,served_by,path}` (paths: `text`,
+`structured`, `messages`, `stream`) and logs `llm_fallback_served` with the
+trail of stage failures behind it. Alert on the counter — inference moving to
+another provider, often a local one on whichever host happens to run it, is an
+operational event and not an implementation detail.
+
+**Cost follows the answer, not the request.** Every ledger — the middleware
+controller, the per-run `LoopBudget`, the tenant's cumulative spend and the
+GenAI cost metric — books the model that actually served, provider-namespaced
+when that provider is local (`core.models.pricing.qualified_model_id`). Two
+bugs closed at once: a fallback answer used to be priced at the *primary's*
+rate, and a self-hosted model, having no pricing row, was priced through the
+unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — spend that never
+happened, large enough to abort a budgeted run. Any `ollama/<model>` id now
+prices at zero without needing a table row, while tokens are still metered, so
+a run cannot escape its token cap by moving to a local model. A local endpoint
+that fronts a paid model can still be priced by adding an explicit row for its
+qualified id.
 
 Stages are identified by `provider:model`, not by provider alone, so a chain
 may name the primary's own provider with a different model — big model first,
@@ -253,6 +283,30 @@ configuration illegal: it collided with the primary and raised `duplicate
 provider names in chain` on *every* call, turning a fallback into a total
 outage. The circuit breaker stays keyed by **provider** (a rate limit is a
 property of the provider, not of one model).
+
+**Startup posture check (`LLM_PREFLIGHT`).** `core.services.llm.preflight`
+runs once from the startup health checks and answers the question the runtime
+cannot: *will this deployment serve from what it thinks it will?* It reports
+
+- an **unset `LLM_PROVIDER`**, which inherits the package default (`ollama`)
+  and serves every request from a local model on that host — successfully, and
+  with no other symptom;
+- a **primary without credentials**, which otherwise fails on the first
+  request, after the rollout is live;
+- **chain stages without credentials**, or a chain that cannot be parsed (it is
+  parsed per request, so a typo used to surface only under load);
+- **local endpoints and models**: every Ollama target the deployment may reach
+  — primary, chain stage and the separately-configured vision provider — is
+  probed with `GET /api/tags`, and a model that is not installed is named. It
+  is never pulled: several gigabytes is an operator's decision, not a boot
+  step.
+
+`auto` (the default) raises in a production environment and warns elsewhere;
+`warn`, `strict` and `off` force the behaviour. It **never calls a hosted
+provider**: a startup that depends on a vendor answering is one a vendor
+incident can stop, and a credential check that costs money is one nobody
+leaves enabled. The same checks back `baselith doctor` (`LLM Fallback` and
+`LLM Local Models`).
 
 **Bound the stages (`LLM_FALLBACK_STAGE_TIMEOUT`).** Unset — the default —
 each stage may spend the full `LLM_REQUEST_TIMEOUT`, so a chain ending at a

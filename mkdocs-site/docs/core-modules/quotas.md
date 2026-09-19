@@ -190,6 +190,17 @@ the pricing table is priced:
 | `zero` | Treats the call as free — a self-hosted model with no meaningful USD cost. |
 | `reject` | Raises `UnknownModelCostRejected` instead of billing anything. |
 
+A **locally-served** model never reaches this policy. Its id is namespaced by
+provider (`ollama/llama3.2`, via `core.models.pricing.qualified_model_id`) and
+priced at zero, because self-hosted inference is capacity-bound rather than
+price-bound. Before that, a bare local tag had no pricing row and was therefore
+treated as unknown: under the default `charge` policy a 4k-token turn on a
+self-hosted 7B "cost" `UNKNOWN_PRICE`'s 100 $/M — spend that never happened,
+and enough to abort a run with a `budget_usd` cap. Tokens are still metered, so
+a run cannot escape its token cap by moving to a local model, and a local
+endpoint fronting a paid model can be priced with an explicit row for its
+qualified id.
+
 The `reject` wording is now literally true, because the policy is applied at a
 genuine **pre-call gate**: passing `model=` to `enforce_tenant_cost_budget()`
 runs the check before the provider is called, so an unpriceable call is refused

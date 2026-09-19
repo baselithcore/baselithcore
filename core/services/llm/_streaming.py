@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
+from core.models.pricing import qualified_model_id
 from core.observability.logging import get_logger
 from core.services.llm._accounting import (
     charge_usage_to_budget,
@@ -115,15 +116,21 @@ async def stream_response(
                     span.set_attribute("gen_ai.baselith.served_by", serving_provider)
                     span.set_attribute("gen_ai.response.model", serving_model)
                     model = serving_model
+                # Every ledger books the model that answered, namespaced by
+                # provider when that provider is local: a bare local tag has no
+                # pricing row, so it used to meter at UNKNOWN_PRICE.
+                billing_model = qualified_model_id(serving_provider, model)
                 async for chunk, tokens in chunks:
                     # Track incremental tokens. A provider's terminal usage
                     # event can correct the running estimate *downward*, which
                     # must never be reported as negative usage.
                     new_tokens = tokens - accumulated_tokens
                     if new_tokens > 0:
-                        report_tokens_to_middleware(new_tokens, model=model)
+                        report_tokens_to_middleware(new_tokens, model=billing_model)
                         if service.cost_tracker:
-                            service.cost_tracker.track_tokens(new_tokens, model=model)
+                            service.cost_tracker.track_tokens(
+                                new_tokens, model=billing_model
+                            )
                     # The latest figure wins even when it corrects the
                     # running estimate downward: pricing and the span should
                     # carry what the provider billed, not the high-water mark.
@@ -149,7 +156,7 @@ async def stream_response(
             from core.observability.openinference import openinference_llm_attributes
 
             for key, value in openinference_llm_attributes(
-                model=model,
+                model=billing_model,
                 provider=serving_provider,
                 # OpenInference has no cache tiers: its prompt count means
                 # "tokens in the prompt", so it gets the whole prompt side.
@@ -164,16 +171,16 @@ async def stream_response(
             # once at stream end so a mid-stream abort is never triggered
             # by the charge itself. Every bucket is forwarded: a cache read
             # bills at ~0.1x input, not at the full input rate.
-            charge_usage_to_budget(model, billed)
+            charge_usage_to_budget(billing_model, billed)
 
             # Book the stream's cost on the tenant's cumulative ledger
             # (enforced pre-call on the next generation; never raises).
             # Priced independently of the LoopBudget charge, which returns 0
             # outside an orchestrated request — background jobs meter too.
-            await record_usage_cost(model, billed)
+            await record_usage_cost(billing_model, billed)
             record_genai_metrics(
                 gen_ai_system(serving_provider),
-                model,
+                billing_model,
                 input_tokens=billed.input_tokens,
                 output_tokens=billed.output_tokens,
                 cache_read_tokens=billed.cache_read_tokens,

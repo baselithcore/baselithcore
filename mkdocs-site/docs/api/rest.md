@@ -524,7 +524,12 @@ neither gates readiness. Results are cached (~30s).
     Each names its own auditable opt-out in the failure message. A pod
     crash-looping with one of those errors is not an outage to route around;
     it is the framework refusing to serve behind a perimeter that is not
-    there.
+    there. A fourth check refuses the boot for a different reason:
+    `LLM_PREFLIGHT` (`core.services.llm.preflight`, `auto` = strict in
+    production) validates that the deployment will serve from the provider it
+    thinks it will — a configuration that never set `LLM_PROVIDER` inherits
+    the package default and answers every request from a local model on that
+    pod, successfully, which is exactly why nothing downstream reports it.
 
 ---
 

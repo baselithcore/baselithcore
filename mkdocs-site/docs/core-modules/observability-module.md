@@ -416,6 +416,7 @@ metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
 | `mas_llm_requests_total`          | Counter   | LLM calls issued                 |
 | `mas_llm_tokens_total`            | Counter   | LLM tokens consumed              |
 | `mas_llm_latency_seconds`         | Histogram | LLM call latency                 |
+| `mas_llm_fallback_served_total`   | Counter   | Calls answered by a fallback stage |
 | `mas_retrieval_latency_seconds`   | Histogram | Vector retrieval latency         |
 | `mas_rerank_latency_seconds`      | Histogram | Reranker latency                 |
 | `mas_indexed_documents_current`   | Gauge     | Documents currently indexed      |

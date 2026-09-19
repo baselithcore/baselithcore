@@ -65,7 +65,7 @@ class TestFallbackWiring:
             service = LLMService(config=config, enable_cache=False)
         with patch(
             "core.services.llm.fallback_runtime.run_with_fallback",
-            AsyncMock(return_value=("saved", 5, "openai")),
+            AsyncMock(return_value=("saved", 5, "openai", "gpt-4o-mini")),
         ) as rwf:
             result = await service.generate_response("hello")
         assert result == "saved"

@@ -358,6 +358,7 @@ print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
 print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
 print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
+print(llm.preflight)           # "auto"       (LLM_PREFLIGHT — startup posture check)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
 vs = get_vectorstore_config()

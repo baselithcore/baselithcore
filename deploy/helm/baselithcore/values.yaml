@@ -612,6 +612,13 @@ prometheusRule:
     # deploy/prometheus/slo-rules.yml, so the two cannot disagree.
     httpErrorRatio: 0.05
     llmErrorRatio: 0.10
+    # Fraction of LLM calls answered by a fallback stage rather than the
+    # configured primary. Deliberately low: unlike an error ratio this one
+    # measures SUCCESSFUL requests, so nothing else will ever page on it. A
+    # chain that quietly carries production traffic is the failure mode —
+    # especially when its tail is a local model, where the symptom is a busy
+    # GPU and an invoice that never arrives, not an error.
+    llmFallbackRatio: 0.01
     # Fraction of NON-streaming requests slower than the 1s latency objective.
     # The streaming routes are excluded in the rule: they are designed to stay
     # open for minutes, so leaving them in makes the ratio a measure of how

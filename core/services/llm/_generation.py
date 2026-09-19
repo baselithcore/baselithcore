@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
+from core.models.pricing import qualified_model_id
 from core.observability.agent_spans import PLUGIN_KEY
 from core.observability.logging import get_logger
 from core.quotas.manager import CostBudgetExceededError
@@ -302,7 +303,12 @@ async def generate_response(
             extra_kwargs["usage_sink"] = provider_usage
             started = time.perf_counter()
             try:
-                content, tokens_used, serving_provider = await maybe_run_with_fallback(
+                (
+                    content,
+                    tokens_used,
+                    serving_provider,
+                    serving_model,
+                ) = await maybe_run_with_fallback(
                     service,
                     prompt=prompt,
                     model=resolved_model,
@@ -318,7 +324,7 @@ async def generate_response(
                 await _account_refusal(
                     service,
                     span,
-                    model=resolved_model,
+                    model=qualified_model_id(service.config.provider, resolved_model),
                     usage=provider_usage[-1] if provider_usage else Usage(),
                     input_tokens=input_tokens,
                     started=started,
@@ -329,6 +335,13 @@ async def generate_response(
             # estimate was already booked pre-call, so only the remainder may
             # be added. Pricing and telemetry use the metered split instead.
             output_tokens = max(tokens_used - input_tokens, 0)
+            # Every ledger books the model that ACTUALLY answered, namespaced
+            # by provider when that provider is local. Booking a fallback turn
+            # under the primary's id prices self-hosted inference at a hosted
+            # rate, and a bare local tag ("llama3.2") has no pricing row at all,
+            # so it used to bill at UNKNOWN_PRICE's punitive 100 $/M — spend
+            # that never happened, large enough to abort the next run.
+            billing_model = qualified_model_id(serving_provider, serving_model)
             metered = provider_usage[-1] if provider_usage else None
             billed = billed_usage(
                 metered,
@@ -343,13 +356,16 @@ async def generate_response(
             set_usage_span_attributes(span, billed)
             span.set_attribute("gen_ai.baselith.response_length", len(content))
             span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
+            # semconv: the model that answered, which is the primary's only
+            # when no fallback stage ran.
+            span.set_attribute("gen_ai.response.model", serving_model)
 
             # Opt-in OpenInference enrichment (Phoenix/Arize-style backends)
             # on the same span; content capture is a second opt-in.
             from core.observability.openinference import openinference_llm_attributes
 
             for key, value in openinference_llm_attributes(
-                model=resolved_model,
+                model=serving_model,
                 provider=serving_provider,
                 # OpenInference has no cache tiers: its prompt count means
                 # "tokens in the prompt", so it gets the whole prompt side
@@ -360,12 +376,12 @@ async def generate_response(
                 completion=content,
             ).items():
                 span.set_attribute(key, value)
-            report_tokens_to_middleware(output_tokens, model=resolved_model)
+            report_tokens_to_middleware(output_tokens, model=billing_model)
             if service.cost_tracker:
-                service.cost_tracker.track_tokens(output_tokens, model=resolved_model)
+                service.cost_tracker.track_tokens(output_tokens, model=billing_model)
             record_genai_metrics(
                 gen_ai_system(serving_provider),
-                resolved_model,
+                billing_model,
                 input_tokens=billed.input_tokens,
                 output_tokens=billed.output_tokens,
                 cache_read_tokens=billed.cache_read_tokens,
@@ -378,13 +394,13 @@ async def generate_response(
             # LoopBudgetExceededError when the request blows its USD cap.
             # Every bucket is forwarded: a cache read bills at ~0.1x input,
             # so pricing it as fresh input aborted well-cached runs early.
-            charge_usage_to_budget(resolved_model, billed)
+            charge_usage_to_budget(billing_model, billed)
 
             # Book the cost on the tenant's cumulative ledger (enforced by
             # the pre-call gate above on the NEXT call; never raises).
             # Priced independently of the LoopBudget charge, which returns 0
             # outside an orchestrated request — background jobs meter too.
-            await record_usage_cost(resolved_model, billed)
+            await record_usage_cost(billing_model, billed)
 
             # Cache response (exact match)
             if service.cache is not None:

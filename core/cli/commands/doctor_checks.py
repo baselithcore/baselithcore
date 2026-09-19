@@ -357,8 +357,17 @@ def check_llm_provider() -> CheckResult:
         config = get_llm_config()
         provider = config.provider
         if provider == "ollama":
-            ollama_url = config.api_base or "http://localhost:11434"
-            host, port = parse_url(ollama_url, 11434)
+            # ``api_base_for``, not the raw field: the endpoint may come from
+            # LLM_OLLAMA_API_BASE or OLLAMA_HOST, and probing the wrong host
+            # reports a healthy server as down (or the reverse).
+            from core.services.llm.runtime import api_base_for
+
+            resolved = api_base_for(config, "ollama")
+            # A diagnostic runs against whatever configuration exists, test
+            # doubles included: anything that is not a usable URL falls back to
+            # the endpoint an unconfigured Ollama client would reach anyway.
+            ollama_url = resolved if isinstance(resolved, str) and resolved else None
+            host, port = parse_url(ollama_url or "http://localhost:11434", 11434)
             if check_port(host, port):
                 return CheckResult(
                     "LLM Provider", True, f"Ollama connected ({host}:{port})"
@@ -379,6 +388,18 @@ def check_llm_provider() -> CheckResult:
                 False,
                 f"{provider.upper()} API key missing",
                 "Set LLM_API_KEY in .env",
+            )
+        # anthropic/gemini used to pass unconditionally: the check reported a
+        # healthy provider for a deployment that had no key for it and would
+        # fail on its first request.
+        from core.services.llm.runtime import provider_configured
+
+        if not provider_configured(config, provider):
+            return CheckResult(
+                "LLM Provider",
+                False,
+                f"{provider.upper()} has no usable credentials",
+                f"Set the API key for {provider}.",
             )
         return CheckResult("LLM Provider", True, f"Provider: {provider}")
     except Exception as e:

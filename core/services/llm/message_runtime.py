@@ -25,6 +25,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
 from core.resilience import retry
@@ -269,6 +270,10 @@ async def generate_messages(
             extra["allow_refusal"] = True
 
         started = time.perf_counter()
+        # Overwritten below by whichever stage answers; pre-seeded so the
+        # refusal handler can attribute the turn without a NameError.
+        serving_provider = service.config.provider
+        serving_model = resolved_model
         try:
             # Through the fallback chain, never straight at the provider: with
             # LLM_FALLBACK_CHAIN configured, a provider failure falls through
@@ -280,7 +285,11 @@ async def generate_messages(
                 maybe_run_messages_with_fallback,
             )
 
-            raw_result, serving_provider = await maybe_run_messages_with_fallback(
+            (
+                raw_result,
+                serving_provider,
+                serving_model,
+            ) = await maybe_run_messages_with_fallback(
                 service,
                 messages,
                 resolved_model,
@@ -292,18 +301,21 @@ async def generate_messages(
             )
             result = cast("LLMResult", raw_result)
             span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
+            span.set_attribute("gen_ai.response.model", serving_model)
         except LLMRefusalError:
             # A refusal is generated, billed output: book the turn before the
             # error propagates, or the spend leaves no trace in any ledger.
+            billing_model = qualified_model_id(serving_provider, serving_model)
             billed = account_turn(
                 service,
                 span,
-                model=resolved_model,
+                model=billing_model,
                 result=LLMResult(stop_reason=STOP_REFUSAL, usage=Usage()),
                 input_tokens=input_tokens,
                 started=started,
+                provider=serving_provider,
             )
-            await record_usage_cost(resolved_model, billed)
+            await record_usage_cost(billing_model, billed)
             raise
         except (LoopBudgetExceededError, RateLimitError):
             span.set_attribute("gen_ai.baselith.error", "budget_or_rate_limit")
@@ -315,13 +327,16 @@ async def generate_messages(
             logger.error(f"Message generation failed: {e}")
             raise LLMProviderError(f"Message generation failed: {e}") from e
 
+        # The model that answered, provider-namespaced when local.
+        billing_model = qualified_model_id(serving_provider, serving_model)
         billed = account_turn(
             service,
             span,
-            model=resolved_model,
+            model=billing_model,
             result=result,
             input_tokens=input_tokens,
             started=started,
+            provider=serving_provider,
         )
         # Book the cost on the tenant's cumulative ledger, exactly as the text,
         # streaming and structured paths do. ``account_turn`` deliberately
@@ -335,7 +350,7 @@ async def generate_messages(
         # Only the native branch books here: the degraded branch returns
         # through ``generate_structured``, which books it already, so booking
         # again would double-charge the tenant.
-        await record_usage_cost(resolved_model, billed)
+        await record_usage_cost(billing_model, billed)
         # Stop-reason policy last: the call is accounted for either way.
         return apply_stop_reason(
             result, model=resolved_model, allow_refusal=allow_refusal

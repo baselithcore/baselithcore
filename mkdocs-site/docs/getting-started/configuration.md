@@ -660,6 +660,7 @@ Declared in `core.config.services`.
 | `LLM_MAX_TOKENS` | `int \| None` | *empty* | Maximum tokens to generate |
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
 | `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
+| `LLM_PREFLIGHT` | `Literal['auto', 'off', 'warn', 'strict']` | `auto` | Startup LLM posture check: 'auto' (default) fails startup in a production environment and warns elsewhere, 'warn' always logs, 'strict' always fails, 'off' skips. Never calls a hosted provider. |
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
@@ -854,4 +855,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-541 settings documented.
+542 settings documented.

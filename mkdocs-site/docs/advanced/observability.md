@@ -257,6 +257,7 @@ prefix** (e.g. `mas_chat_requests_total`, `mas_llm_latency_seconds`,
 from core.observability.metrics import (
     CHAT_REQUESTS_TOTAL,       # mas_chat_requests_total
     LLM_LATENCY_SECONDS,       # mas_llm_latency_seconds
+    LLM_FALLBACK_SERVED_TOTAL, # mas_llm_fallback_served_total
 )
 ```
 

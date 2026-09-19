@@ -140,6 +140,10 @@ elided):
 │ ✅ PASS  │ Core Dependencies   │ Common local extras installed  │                                │
 │ ✅ PASS  │ LLM Provider        │ Ollama connected               │                                │
 │          │                     │ (localhost:11434)              │                                │
+│ ✅ PASS  │ LLM Fallback        │ Chain: ollama:llama3.2         │ A primary failure runs         │
+│          │                     │                                │ inference locally on this host │
+│ ❌ FAIL  │ LLM Local Models    │ model 'llava:7b' is not        │ Run: ollama pull llava:7b      │
+│          │                     │ installed at localhost:11434   │                                │
 │ ✅ PASS  │ Redis (Cache)       │ Connected (localhost:6379)     │                                │
 │ ❌ FAIL  │ Qdrant              │ Cannot connect                 │ Run: docker compose up -d      │
 │          │                     │ (localhost:6333)               │ qdrant                         │
@@ -157,12 +161,19 @@ elided):
 │          │                     │ present                        │                                │
 └──────────┴─────────────────────┴────────────────────────────────┴────────────────────────────────┘
 
-Results: 10 passed, 5 failed
+Results: 11 passed, 6 failed
 
 ⚠️  Some critical checks failed. Fix them before running the server.
 
 ⏱  Completed in 508ms
 ```
+
+`LLM Fallback` and `LLM Local Models` answer the question the provider row
+does not: where a failure sends inference, and whether what it would land on
+actually exists. Both read configuration and probe **local** endpoints only —
+a diagnostic must not spend money or depend on a vendor being reachable. The
+same checks run once at startup (`LLM_PREFLIGHT`, see
+[LLM service](../core-modules/services.md)).
 
 **JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 

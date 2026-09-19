@@ -9,6 +9,10 @@ from rich.table import Table
 from core.cli.commands import doctor_checks as checks
 from core.cli.commands import doctor_plugin_checks as plugin_checks
 from core.cli.commands.doctor_checks import CheckResult, apply_fixes
+from core.cli.commands.doctor_llm import (
+    check_llm_fallback_chain,
+    check_llm_local_endpoints,
+)
 from core.cli.ui import Timer, console, print_header, print_timing
 
 _ENV_CONFIG_MARKERS = checks._ENV_CONFIG_MARKERS
@@ -74,6 +78,9 @@ def run_checks(include_plugins: bool = True) -> list[CheckResult]:
         check_docker(),
         check_core_dependencies(),
         check_llm_provider(),
+        # Where inference actually ends up when the primary is not the answer.
+        check_llm_fallback_chain(),
+        check_llm_local_endpoints(),
         check_redis(),
         check_qdrant(),
         check_postgres(),
