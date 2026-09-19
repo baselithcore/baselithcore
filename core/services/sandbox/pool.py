@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -143,7 +144,7 @@ class SandboxPool:
             await factory.ensure_image()
 
             # Create container (but don't start it yet)
-            def _create_impl():
+            def _create_impl() -> Any:
                 """Internal container creation operation."""
                 return factory.client.containers.create(
                     factory.base_image,
@@ -290,7 +291,9 @@ class SandboxPool:
         )
 
     @asynccontextmanager
-    async def acquire(self, timeout: float | None = None):
+    async def acquire(
+        self, timeout: float | None = None
+    ) -> AsyncIterator[PooledContainer]:
         """
         Acquire a container from the pool.
 
@@ -388,7 +391,7 @@ class SandboxPool:
             # Execute code in container
             loop = asyncio.get_running_loop()
 
-            def _exec():
+            def _exec() -> Any:
                 """Internal exec execution operation."""
                 return pooled.container.exec_run(
                     cmd=["python", "-c", code],

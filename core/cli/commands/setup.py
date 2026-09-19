@@ -1,5 +1,6 @@
 """Local setup orchestration commands."""
 
+import argparse
 import json
 import subprocess
 import time
@@ -242,7 +243,10 @@ def _wait_for_core_services(timeout_seconds: int = 60) -> int:
     return 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'setup' command parser."""
     setup_parser = subparsers.add_parser(
         "setup",

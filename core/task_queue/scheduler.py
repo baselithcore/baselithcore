@@ -207,7 +207,8 @@ class TaskScheduler:
         )
 
         logger.info(f"Enqueued task {func.__name__} -> job {job.id}")
-        return job.id
+        # RQ ships no py.typed, so `job.id` is `Any`.
+        return str(job.id)
 
     def enqueue_at(
         self,
@@ -274,7 +275,8 @@ class TaskScheduler:
         )
 
         logger.info(f"Scheduled task {func.__name__} for {scheduled_time}")
-        return job.id
+        # RQ ships no py.typed, so `job.id` is `Any`.
+        return str(job.id)
 
     def enqueue_in(
         self,

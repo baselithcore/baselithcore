@@ -161,7 +161,8 @@ class OperationsMixin:
         self._ensure_connected()
 
         response = await self._send_request("resources/list", {})
-        return response.get("resources", [])
+        resources: list[dict[str, Any]] = response.get("resources", [])
+        return resources
 
     async def read_resource(self, uri: str) -> Any:
         """Read a resource from the server."""

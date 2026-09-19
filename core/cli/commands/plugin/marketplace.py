@@ -30,12 +30,12 @@ def _check_marketplace() -> bool:
 
 def search_plugins(
     query: str | None = None, category: str = "all", force_refresh: bool = False
-):
+) -> None:
     """
     Search for plugins in the Baselith Marketplace.
     """
 
-    async def _run():
+    async def _run() -> None:
         registry = PluginRegistry()
 
         try:
@@ -80,12 +80,12 @@ def search_plugins(
     asyncio.run(_run())
 
 
-def info_plugin(plugin_id: str):
+def info_plugin(plugin_id: str) -> None:
     """
     Show detailed information about a marketplace plugin.
     """
 
-    async def _run():
+    async def _run() -> None:
         registry = PluginRegistry()
         plugin = await registry.get_plugin(plugin_id)
 
@@ -108,12 +108,14 @@ def info_plugin(plugin_id: str):
     asyncio.run(_run())
 
 
-def install_plugin_cmd(plugin_id: str, version: str | None = None, force: bool = False):
+def install_plugin_cmd(
+    plugin_id: str, version: str | None = None, force: bool = False
+) -> None:
     """
     Install a plugin from the marketplace.
     """
 
-    async def _run():
+    async def _run() -> None:
         registry = PluginRegistry()
         installer = PluginInstaller()
 
@@ -145,12 +147,12 @@ def install_plugin_cmd(plugin_id: str, version: str | None = None, force: bool =
     asyncio.run(_run())
 
 
-def uninstall_plugin_cmd(plugin_id: str):
+def uninstall_plugin_cmd(plugin_id: str) -> None:
     """
     Uninstall a plugin.
     """
 
-    async def _run():
+    async def _run() -> None:
         installer = PluginInstaller()
 
         if await installer.uninstall(plugin_id):
@@ -165,12 +167,12 @@ def uninstall_plugin_cmd(plugin_id: str):
     asyncio.run(_run())
 
 
-def update_plugin_cmd(plugin_id: str):
+def update_plugin_cmd(plugin_id: str) -> None:
     """
     Update an existing plugin from the marketplace.
     """
 
-    async def _run():
+    async def _run() -> None:
         # Simply uninstall and reinstall for now
         installer = PluginInstaller()
         registry = PluginRegistry()
@@ -196,7 +198,7 @@ def update_plugin_cmd(plugin_id: str):
     asyncio.run(_run())
 
 
-def login_cmd(github_token: str | None = None):
+def login_cmd(github_token: str | None = None) -> None:
     """
     Authenticate with the marketplace.
 
@@ -206,7 +208,7 @@ def login_cmd(github_token: str | None = None):
       * interactive: paste an existing marketplace JWT or API key.
     """
 
-    async def _run():
+    async def _run() -> None:
         # Automated login: exchange a GitHub token for a marketplace session.
         # The GitHub token is used once for the exchange and never stored.
         if github_token:
@@ -263,12 +265,12 @@ def login_cmd(github_token: str | None = None):
     asyncio.run(_run())
 
 
-def logout_cmd():
+def logout_cmd() -> None:
     """
     Remove cached marketplace credentials.
     """
 
-    async def _run():
+    async def _run() -> None:
         manager = CredentialsManager()
         await manager.delete_credentials()
         console.print(
@@ -278,12 +280,12 @@ def logout_cmd():
     asyncio.run(_run())
 
 
-def identity_cmd():
+def identity_cmd() -> None:
     """
     Show the currently logged-in marketplace identity.
     """
 
-    async def _run():
+    async def _run() -> None:
         auth_service = AuthService()
         manager = CredentialsManager()
 
@@ -326,12 +328,12 @@ def identity_cmd():
     asyncio.run(_run())
 
 
-def publish_plugin_cmd(path: str, key: str | None = None):
+def publish_plugin_cmd(path: str, key: str | None = None) -> None:
     """
     Publish a plugin to the marketplace.
     """
 
-    async def _run():
+    async def _run() -> None:
         manager = CredentialsManager()
         # Resolution order: --key, MARKETPLACE_API_KEY, stored credentials.
         admin_key = (

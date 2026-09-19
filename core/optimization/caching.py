@@ -8,7 +8,7 @@ latency and LLM costs.
 import asyncio
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from core.cache.protocols import TTLCacheProtocol
 from core.config.storage import get_storage_config
@@ -27,6 +27,18 @@ logger = get_logger(__name__)
 
 # Alias for backward compatibility - RedisCache implements this
 CacheABC = TTLCacheProtocol
+
+
+class SupportsEncode(Protocol):
+    """Minimal embedder surface :class:`SemanticCacheVectorBacked` needs.
+
+    The vector shape stays untyped: sentence-transformers returns a numpy
+    array, other embedders a plain list — hence the ``tolist`` probe below.
+    """
+
+    def encode(self, text: str, /) -> Any:
+        """Embed *text* and return its vector."""
+        ...
 
 
 class RedisCache:
@@ -233,19 +245,22 @@ class SemanticCache:
         self.cache = RedisCache(prefix="semantic")
         self.ttl = ttl
 
-    def _hash_prompt(self, prompt: str, **kwargs) -> str:
+    def _hash_prompt(self, prompt: str, **kwargs: Any) -> str:
         """Create a deterministic hash from prompt and parameters."""
         # Sort kwargs to ensure deterministic hash
         params_str = json.dumps(kwargs, sort_keys=True)
         content = f"{prompt}|{params_str}"
         return hashlib.sha256(content.encode()).hexdigest()
 
-    async def get_response(self, prompt: str, **kwargs) -> str | None:
+    async def get_response(self, prompt: str, **kwargs: Any) -> str | None:
         """Retrieve cached response if available."""
         key = self._hash_prompt(prompt, **kwargs)
-        return await self.cache.get(key)
+        # RedisCache.get() deserializes whatever JSON is on the wire: name
+        # that boundary instead of leaking Any through the declared return.
+        cached: str | None = await self.cache.get(key)
+        return cached
 
-    async def cache_response(self, prompt: str, response: str, **kwargs) -> None:
+    async def cache_response(self, prompt: str, response: str, **kwargs: Any) -> None:
         """Store response in cache."""
         key = self._hash_prompt(prompt, **kwargs)
         await self.cache.set(key, response, ttl=self.ttl)
@@ -280,7 +295,7 @@ class SemanticCacheVectorBacked(SemanticCache):
     def __init__(
         self,
         ttl: int = 3600,
-        embedder=None,
+        embedder: SupportsEncode | None = None,
         similarity_threshold: float = 0.85,
         collection_name: str | None = None,
     ):
@@ -304,7 +319,7 @@ class SemanticCacheVectorBacked(SemanticCache):
         self._vector_service: VectorStoreService | None = None
 
     @property
-    def vector_service(self):
+    def vector_service(self) -> "VectorStoreService | None":
         """Lazy load vector store service."""
         if self._vector_service is None:
             try:
@@ -317,7 +332,7 @@ class SemanticCacheVectorBacked(SemanticCache):
                 logger.warning("VectorStoreService not available for semantic cache")
         return self._vector_service
 
-    async def _ensure_collection(self):
+    async def _ensure_collection(self) -> None:
         """Ensure the vector collection exists."""
         if self.vector_service:
             try:
@@ -328,7 +343,7 @@ class SemanticCacheVectorBacked(SemanticCache):
             except Exception:
                 pass  # nosec B110 - Collection may already exist
 
-    async def get_response(self, prompt: str, **kwargs) -> str | None:
+    async def get_response(self, prompt: str, **kwargs: Any) -> str | None:
         """
         Override to use semantic search when available.
 
@@ -337,7 +352,7 @@ class SemanticCacheVectorBacked(SemanticCache):
         """
         return await self.get_response_semantic(prompt, **kwargs)
 
-    async def cache_response(self, prompt: str, response: str, **kwargs) -> None:
+    async def cache_response(self, prompt: str, response: str, **kwargs: Any) -> None:
         """
         Override to cache with embedding when available.
 
@@ -346,7 +361,7 @@ class SemanticCacheVectorBacked(SemanticCache):
         """
         await self.cache_response_with_embedding(prompt, response, **kwargs)
 
-    async def get_response_semantic(self, prompt: str, **kwargs) -> str | None:
+    async def get_response_semantic(self, prompt: str, **kwargs: Any) -> str | None:
         """
         Search for semantically similar cached prompts.
 
@@ -384,10 +399,13 @@ class SemanticCacheVectorBacked(SemanticCache):
             if results and len(results) > 0:
                 top_result = results[0]
                 if top_result.score >= self.similarity_threshold:
-                    # Get the response from Redis cache using stored hash
-                    prompt_hash = top_result.document.metadata.get("prompt_hash")
+                    # Fetch the response by the stored hash; both the
+                    # payload dict and the cache are untyped, so bind each.
+                    prompt_hash: str | None = top_result.document.metadata.get(
+                        "prompt_hash"
+                    )
                     if prompt_hash:
-                        cached_response = await self.cache.get(prompt_hash)
+                        cached_response: str | None = await self.cache.get(prompt_hash)
                         if cached_response:
                             logger.debug(
                                 f"Semantic cache hit with score {top_result.score:.3f}"
@@ -402,7 +420,7 @@ class SemanticCacheVectorBacked(SemanticCache):
             return await super().get_response(prompt, **kwargs)
 
     async def cache_response_with_embedding(
-        self, prompt: str, response: str, **kwargs
+        self, prompt: str, response: str, **kwargs: Any
     ) -> None:
         """
         Cache response with its embedding for semantic search.

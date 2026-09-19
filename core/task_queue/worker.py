@@ -101,7 +101,7 @@ class TenantAwareWorker(Worker):
     tasks.
     """
 
-    def perform_job(self, job, queue):
+    def perform_job(self, job: Any, queue: Any) -> bool:
         """Wraps job execution with the context it was enqueued under.
 
         Three things happen around ``super().perform_job``:
@@ -139,7 +139,9 @@ class TenantAwareWorker(Worker):
         try:
             with system_scope or nullcontext():
                 with consumer_span(job, queue_name):
-                    return super().perform_job(job, queue)
+                    # RQ ships no py.typed, so the base method is `Any`.
+                    performed: bool = super().perform_job(job, queue)
+                    return performed
         finally:
             if token is not None:
                 reset_tenant_context(token)

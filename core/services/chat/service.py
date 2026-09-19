@@ -38,21 +38,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Sentinel for signaling the end of a synchronous stream wrapped in an async iterator.
-_STREAM_EOF = object()
-
-
-def _next_stream_chunk(iterator: Iterator[str]) -> object:
-    """
-    Safely retrieve the next chunk from a standard iterator.
-
-    Used to wrap synchronous generators in asynchronous flows.
-    """
-    try:
-        return next(iterator)
-    except StopIteration:
-        return _STREAM_EOF
-
 
 class ChatServiceConfig:
     """

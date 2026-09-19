@@ -50,7 +50,7 @@ class EvaluationService:
             self._semaphore = asyncio.Semaphore(self._max_concurrent)
         return self._semaphore
 
-    def start(self):
+    def start(self) -> None:
         """Start listening to events."""
         if self._running:
             return
@@ -67,7 +67,7 @@ class EvaluationService:
         self._running = True
         logger.info("EvaluationService started")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop listening to events and drop the FLOW_COMPLETED subscription."""
         if self._unsubscribe is not None:
             self._unsubscribe()
@@ -75,7 +75,7 @@ class EvaluationService:
         self._running = False
         logger.info("EvaluationService stopped")
 
-    async def _on_flow_completed(self, data: dict[str, Any]):
+    async def _on_flow_completed(self, data: dict[str, Any]) -> None:
         """Handle flow completion event."""
         if not self._running:
             return
@@ -121,7 +121,7 @@ class EvaluationService:
         intent: str,
         semaphore: asyncio.Semaphore | None = None,
         run_id: str | None = None,
-    ):
+    ) -> None:
         """Run evaluation and emit result."""
         # Fall back to the service-wide limiter when called directly (e.g. tests
         # or ad-hoc evaluation), so the method stays usable without a caller-

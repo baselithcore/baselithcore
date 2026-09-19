@@ -5,13 +5,18 @@ Provides the CLI entry point for launching the Baselith-Core development server
 behind a Uvicorn instance with auto-reload capabilities.
 """
 
+import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.panel import Panel
 from rich.table import Table
 
 from core.cli.ui import console, print_error
+
+if TYPE_CHECKING:
+    from core.cli.commands.doctor_checks import CheckResult
 
 
 def run_server(
@@ -231,7 +236,7 @@ def _run_preflight(
     return 1
 
 
-def _is_connectivity_check(check) -> bool:
+def _is_connectivity_check(check: "CheckResult") -> bool:
     if check.name in CONNECTIVITY_CHECKS:
         return True
     if check.name != "LLM Provider":
@@ -241,7 +246,7 @@ def _is_connectivity_check(check) -> bool:
 
 
 def _print_preflight_panel(
-    failures,
+    failures: "Sequence[CheckResult]",
     title: str,
     border_style: str,
 ) -> None:
@@ -263,7 +268,10 @@ def _print_preflight_panel(
     )
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'run' command parser."""
     run_parser = subparsers.add_parser(
         "run",

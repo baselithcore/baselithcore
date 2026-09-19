@@ -4,11 +4,14 @@ Base classes for Evaluators.
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 
 from .protocols import EvaluationResult, Evaluator, QualityLevel
+
+if TYPE_CHECKING:
+    from core.services.llm import LLMService
 
 logger = get_logger(__name__)
 
@@ -20,11 +23,11 @@ class BaseLLMEvaluator(Evaluator, ABC):
     Handles common logic like LLM service retrieval and result parsing.
     """
 
-    def __init__(self, llm_service=None):
-        self._llm_service = llm_service
+    def __init__(self, llm_service: "LLMService | None" = None) -> None:
+        self._llm_service: LLMService | None = llm_service
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> "LLMService":
         """Lazy load LLM service."""
         if self._llm_service is None:
             from core.services.llm import get_llm_service
@@ -68,17 +71,49 @@ class BaseLLMEvaluator(Evaluator, ABC):
             logger.error(f"Evaluation failed in {self.__class__.__name__}: {e}")
             return self._fallback_evaluation(response, query)
 
+    #: What `_parse_result` returns when the model's answer cannot be read as a
+    #: JSON object. Callers treat a missing "score" as 0.0, so an unparsable
+    #: evaluation scores zero — but it now says so in the feedback instead of
+    #: arriving as a silent AttributeError inside `evaluate`.
+    _UNPARSABLE = "Failed to parse evaluation result"
+
     def _parse_result(self, text: str) -> dict[str, Any]:
-        """Parse LLM JSON response."""
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Try to extract JSON from markdown if needed
-            if "```json" in text:
-                start = text.find("```json") + 7
-                end = text.find("```", start)
-                return json.loads(text[start:end])
-            return {"score": 0.0, "feedback": "Failed to parse evaluation result"}
+        """Parse the model's JSON answer, degrading to a scored-zero result.
+
+        The model is asked for a JSON object, and usually sends one. Two shapes
+        it also sends had no path here:
+
+        * **valid JSON that is not an object** — a bare list, number or
+          ``null``. ``json.loads`` accepted it and returned it, so `evaluate`
+          then called ``.get()`` on a list, raised ``AttributeError``, and had
+          it swallowed by its own broad ``except``. The evaluation became a
+          zero with no indication that nothing had been evaluated.
+        * **a ```json fence whose contents are malformed** — the second
+          ``json.loads`` ran *inside* the first ``except`` and was unguarded,
+          so its ``JSONDecodeError`` escaped into the same broad handler.
+
+        Both now return the documented fallback, which is what the third branch
+        already did for text that is not JSON at all.
+        """
+        candidate = text
+        fenced_start = text.find("```json")
+        if fenced_start != -1:
+            # Prefer the fenced block when there is one: models routinely wrap
+            # the object in prose, which makes the whole string unparsable.
+            start = fenced_start + len("```json")
+            end = text.find("```", start)
+            candidate = text[start:end] if end != -1 else text[start:]
+
+        for source in (candidate, text):
+            try:
+                parsed = json.loads(source)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict):
+                result: dict[str, Any] = parsed
+                return result
+
+        return {"score": 0.0, "feedback": self._UNPARSABLE}
 
     def _score_to_quality(self, score: float) -> QualityLevel:
         """Convert normalized score (0.0-1.0) to QualityLevel."""

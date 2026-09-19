@@ -2,6 +2,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from core.graph._cache import SyncTTLCache
 from core.graph.core import GraphDb
 
 
@@ -9,10 +10,11 @@ from core.graph.core import GraphDb
 def mock_dependencies():
     with (
         patch("core.graph.core.Redis") as MockRedis,
-        patch("core.graph.core.create_redis_client") as mock_create_redis,
         patch("core.graph.core.create_sync_redis_client") as mock_sync_redis,
-        patch("core.graph.core.RedisTTLCache") as MockRedisCache,
-        patch("core.graph.core.TTLCache") as MockTTLCache,
+        # The cache is a real SyncTTLCache, not a mock. Patching it with a
+        # MagicMock is what let the async-cache-from-a-sync-method bug live
+        # here undetected: a MagicMock's `get` is synchronous and truthy, so
+        # these tests passed against code that handed callers a coroutine.
         patch("core.graph.core.get_storage_config") as mock_get_config,
         patch("core.graph.core.query_builder") as mock_qb,
         patch("core.graph.core.operations") as mock_ops,
@@ -26,10 +28,6 @@ def mock_dependencies():
         # ``_get_client`` sees a non-None symbol.
         mock_client_instance = mock_sync_redis.return_value
         mock_client_instance.execute_command.return_value = []
-
-        # Setup Cache defaults (Miss by default)
-        MockTTLCache.return_value.get.return_value = None
-        MockRedisCache.return_value.get.return_value = None
 
         # Setup Config Default
         mock_config = MagicMock()
@@ -45,10 +43,7 @@ def mock_dependencies():
 
         yield {
             "Redis": MockRedis,
-            "create_redis": mock_create_redis,
             "create_sync_redis": mock_sync_redis,
-            "RedisCache": MockRedisCache,
-            "TTLCache": MockTTLCache,
             "get_config": mock_get_config,
             "mock_config": mock_config,
             "qb": mock_qb,
@@ -67,22 +62,20 @@ def test_init_disabled(mock_dependencies):
     assert g._cache is None
 
 
-def test_init_enabled_memory_cache(mock_dependencies):
-    """Test enabled with in-memory cache (default backend scenario)."""
-    mock_dependencies["mock_config"].cache_backend = "memory"
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+def test_the_query_cache_is_in_process_whatever_the_backend(mock_dependencies, backend):
+    """`cache_backend` no longer selects the graph's query cache.
+
+    It used to pick between the two ASYNC caches, both of which `query` then
+    called without awaiting. The sync surface gets a sync cache; the setting
+    still governs every other cache in the framework.
+    """
+    mock_dependencies["mock_config"].cache_backend = backend
     g = GraphDb(enabled=True)
     g._ensure_cache_initialized()
+
     assert g.is_enabled()
-    mock_dependencies["TTLCache"].assert_called_once()
-    mock_dependencies["RedisCache"].assert_not_called()
-
-
-def test_init_enabled_redis_cache(mock_dependencies):
-    """Test enabled with redis cache."""
-    mock_dependencies["mock_config"].cache_backend = "redis"
-    g = GraphDb(enabled=True)
-    g._ensure_cache_initialized()
-    mock_dependencies["RedisCache"].assert_called_once()
+    assert isinstance(g._cache, SyncTTLCache)
 
 
 def test_ping_success(mock_dependencies):
@@ -118,18 +111,18 @@ def test_query_execution(mock_dependencies):
 
 
 def test_query_cache_hit(mock_dependencies):
-    """Test read-only query returns cached result."""
-    mock_dependencies["mock_config"].cache_backend = "memory"
+    """A read-only query is served from the cache the second time."""
     g = GraphDb(enabled=True)
     g._ensure_cache_initialized()
-    # Setup cache hit
-    g._cache.get.return_value = ["cached_result"]
+    g._cache.set("seeded", ["cached_result"])
+    mock_dependencies["redis_client"].execute_command.return_value = ["from_backend"]
 
-    res = g.query("MATCH (n) RETURN n")  # Read-only
+    first = g.query("MATCH (n) RETURN n")
+    second = g.query("MATCH (n) RETURN n")
 
-    assert res == ["cached_result"]
-    g._cache.get.assert_called_once()
-    mock_dependencies["redis_client"].execute_command.assert_not_called()
+    assert first == ["from_backend"]
+    assert second == ["from_backend"]
+    assert mock_dependencies["redis_client"].execute_command.call_count == 1
 
 
 def test_query_cache_key_is_tenant_scoped(mock_dependencies):
@@ -140,28 +133,31 @@ def test_query_cache_key_is_tenant_scoped(mock_dependencies):
     g = GraphDb()
     g._ensure_cache_initialized()
 
+    seen: list[str] = []
+    real_get = g._cache.get
+    g._cache.get = lambda key: seen.append(key) or real_get(key)  # type: ignore[method-assign]
+
     with patch("core.context.get_current_tenant_id", return_value="tenant_a"):
         g.query("MATCH (n) RETURN n", {"id": "x"})
-    key_a = g._cache.get.call_args[0][0]
-
     with patch("core.context.get_current_tenant_id", return_value="tenant_b"):
         g.query("MATCH (n) RETURN n", {"id": "x"})
-    key_b = g._cache.get.call_args[0][0]
 
+    key_a, key_b = seen
     assert key_a != key_b
     assert "tenant_a" in key_a
     assert "tenant_b" in key_b
 
 
 def test_query_cache_miss_write(mock_dependencies):
-    """Test write query bypassed cache."""
-    mock_dependencies["mock_config"].cache_backend = "memory"
+    """A write is never served from, nor stored in, the cache."""
     g = GraphDb(enabled=True)
+    g._ensure_cache_initialized()
 
-    g.query("CREATE (n)")  # Write
+    g.query("CREATE (n)")
+    g.query("CREATE (n)")
 
-    g._cache.get.assert_not_called()
-    mock_dependencies["redis_client"].execute_command.assert_called()
+    assert len(g._cache) == 0
+    assert mock_dependencies["redis_client"].execute_command.call_count == 2
 
 
 def test_delegated_operations(mock_dependencies):

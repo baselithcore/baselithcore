@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from core.observability.logging import get_logger
+
+from .protocols import GraphEntity, GraphNode
 
 logger = get_logger(__name__)
 
@@ -247,9 +249,12 @@ def _get_id(node_obj: Any, prop_map: dict[int, str] | None = None) -> str | None
     """Helper to reliably extract 'id' property from node in RedisGraph compact format."""
     # Handle object-based format (if client returns objects)
     if hasattr(node_obj, "properties") and "id" in node_obj.properties:
-        return node_obj.properties["id"]
+        # Property values are untyped scalars client-side; name the one we read.
+        entity_id: str | None = cast(GraphEntity, node_obj).properties["id"]
+        return entity_id
     if isinstance(node_obj, dict) and "id" in node_obj:
-        return node_obj["id"]
+        mapping_id: str | None = node_obj["id"]
+        return mapping_id
 
     # Handle RedisGraph compact format: [node_type, [internal_id, [label_ids], [[prop_id, prop_type, prop_value], ...]]]
     if isinstance(node_obj, list) and len(node_obj) >= 2:
@@ -273,7 +278,8 @@ def _get_id(node_obj: Any, prop_map: dict[int, str] | None = None) -> str | None
                     if isinstance(prop, list) and len(prop) >= 3:
                         prop_id, _, prop_value = prop[0], prop[1], prop[2]
                         if prop_id == target_idx:  # ID property
-                            return prop_value
+                            compact_id: str | None = prop_value
+                            return compact_id
 
     return None
 
@@ -284,7 +290,7 @@ def _extract_properties(node_obj: Any, prop_map: dict[int, str]) -> dict[str, An
 
     # Handle object-based format
     if hasattr(node_obj, "properties"):
-        return node_obj.properties
+        return cast(GraphEntity, node_obj).properties
     if isinstance(node_obj, dict):
         return node_obj
 
@@ -326,7 +332,7 @@ def _extract_labels(node_obj: Any, label_map: dict[int, str]) -> list[str]:
     """Extract labels from RedisGraph compact format node."""
     # Handle object-based format
     if hasattr(node_obj, "labels"):
-        return node_obj.labels
+        return cast(GraphNode, node_obj).labels
 
     # Handle RedisGraph compact format: [node_type, [internal_id, [label_ids], ...]]
     if isinstance(node_obj, list) and len(node_obj) >= 2:

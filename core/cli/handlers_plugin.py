@@ -180,9 +180,13 @@ def dispatch_plugin(args: argparse.Namespace) -> int:
             "identity": lambda: plugin.identity_cmd(),
         }
         m_command = getattr(args, "marketplace_command", "search") or "search"
-        handler = MARKETPLACE_COMMANDS.get(m_command)
-        if handler:
-            return handler()
+        # Bound under its own name: unlike the deps/config tables above, the
+        # marketplace commands print and return ``None``, so ``main()`` has
+        # always coerced this branch to exit code 0.
+        market_handler = MARKETPLACE_COMMANDS.get(m_command)
+        if market_handler:
+            market_handler()
+            return 0
         return 1
 
     # Main command execution

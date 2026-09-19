@@ -10,10 +10,8 @@ import pytest  # noqa: E402
 from core.models.chat import ChatRequest  # noqa: E402
 from core.services.chat.exceptions import ChatServiceError  # noqa: E402
 from core.services.chat.service import (  # noqa: E402
-    _STREAM_EOF,
     ChatService,
     ChatServiceConfig,
-    _next_stream_chunk,
 )
 
 
@@ -38,13 +36,6 @@ def test_initialization(chat_config, mock_plugin_registry):
     assert service.plugin_registry == mock_plugin_registry
     assert service._embedder is None
     assert service._reranker is None
-
-
-def test_next_stream_chunk():
-    it = iter(["a", "b"])
-    assert _next_stream_chunk(it) == "a"
-    assert _next_stream_chunk(it) == "b"
-    assert _next_stream_chunk(it) is _STREAM_EOF
 
 
 def test_embedder_property(chat_service):

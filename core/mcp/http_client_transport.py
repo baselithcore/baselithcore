@@ -187,7 +187,7 @@ class HTTPClientTransport:
         if "error" in payload:
             error = payload["error"]
             raise RuntimeError(f"MCP error {error.get('code')}: {error.get('message')}")
-        result = payload.get("result", {})
+        result: dict[str, Any] = payload.get("result", {})
         negotiated = result.get("protocolVersion")
         if negotiated:
             self._protocol_version = str(negotiated)

@@ -2,6 +2,7 @@
 Shell command - Interactive REPL.
 """
 
+import argparse
 from typing import Any
 
 from core.cli.ui import console, print_header
@@ -61,7 +62,10 @@ def run_shell() -> int:
     return 0
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> None:
     """Register 'shell' command parser."""
     subparsers.add_parser(
         "shell",

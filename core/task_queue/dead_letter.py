@@ -415,7 +415,8 @@ class DeadLetterQueue:
             **kwargs,
             meta={"tenant_id": record.tenant_id, "replayed_from": record.job_id},
         )
-        return enqueued.id
+        # RQ ships no py.typed, so `enqueued.id` is `Any`.
+        return str(enqueued.id)
 
     def purge(self, job_id: str) -> bool:
         """Remove a single record from the DLQ."""

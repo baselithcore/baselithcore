@@ -12,13 +12,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from core.cache import (
-    RedisTTLCache,
-    TTLCache,
-    create_redis_client,
-    create_sync_redis_client,
-)
+from core.cache import create_sync_redis_client
 from core.config import get_storage_config
+from core.graph._cache import SyncTTLCache
 from core.observability import get_logger
 
 # Import specialized modules
@@ -60,11 +56,20 @@ class GraphDb:
         self._timeout = timeout if timeout is not None else config.graph_db_timeout
         self._cache_ttl = config.graph_cache_ttl
         self._client: Redis | None = None
-        self._cache: Any | None = None
+        self._cache: SyncTTLCache | None = None
         self._cache_initialized = False
 
     def _ensure_cache_initialized(self) -> None:
-        """Ensure cache is initialized (lazily)."""
+        """Ensure cache is initialized (lazily).
+
+        The cache is a SYNCHRONOUS one, because :meth:`query` and
+        :meth:`query_decoded` are synchronous. This used to attach the async
+        layer (``TTLCache`` / ``RedisTTLCache``) and call its coroutines
+        without ``await``, which returned a coroutine object in place of the
+        rows under the redis backend and silently disabled caching altogether
+        under the memory one — see :mod:`core.graph._cache` for both failure
+        modes and why an in-process cache is the right size of fix.
+        """
         if self._cache_initialized:
             return
 
@@ -72,17 +77,8 @@ class GraphDb:
         if not self.enabled:
             return
 
-        config = get_storage_config()
         try:
-            if config.cache_backend == "redis":
-                redis_client = create_redis_client(config.cache_redis_url)
-                self._cache = RedisTTLCache(
-                    redis_client,
-                    prefix=f"{config.cache_redis_prefix}:graph",
-                    default_ttl=self._cache_ttl,
-                )
-            else:
-                self._cache = TTLCache(maxsize=1024, ttl=self._cache_ttl)
+            self._cache = SyncTTLCache(maxsize=1024, ttl=self._cache_ttl)
         except Exception as e:
             logger.warning(f"[graphdb] Failed to initialize cache: {e}")
 
@@ -215,14 +211,17 @@ class GraphDb:
                 key_parts.append(f"{k}={safe_params[k]}")
             cache_key = "|".join(key_parts)
 
-            cached = self._cache.get(cache_key)
+            cached: list[Any] | None = self._cache.get(cache_key)
             if cached is not None:
                 # logger.debug("[graphdb] cache hit") # verbose
                 return cached
 
         query_text = query_builder.build_query(cypher, safe_params)
         client = self._get_client()
-        result = client.execute_command(  # type: ignore[union-attr]
+        # redis-py types ``execute_command`` as ``Any`` — the reply shape is
+        # per-command — so the GRAPH.QUERY payload is bound to a named local
+        # rather than returned straight out of an untyped call.
+        result: list[Any] = client.execute_command(
             "GRAPH.QUERY",
             self.graph_name,
             query_text,
@@ -287,12 +286,12 @@ class GraphDb:
             for k in sorted(safe_params.keys()):
                 key_parts.append(f"{k}={safe_params[k]}")
             cache_key = "|".join(key_parts)
-            cached = self._cache.get(cache_key)
+            cached: list[list[Any]] | None = self._cache.get(cache_key)
             if cached is not None:
                 return cached
 
         client = self._get_client()
-        graph = client.graph(self.graph_name)  # type: ignore[union-attr]
+        graph = client.graph(self.graph_name)
         result = graph.query(cypher, dict(safe_params))
         rows: list[list[Any]] = [list(row) for row in result.result_set]
 

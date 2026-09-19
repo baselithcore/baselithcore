@@ -57,7 +57,7 @@ class CredentialsManager:
         Save the API key securely.
         """
 
-        def _sync_save():
+        def _sync_save() -> None:
             self._ensure_dir()
             data = self._load_data_sync()
             data["api_key"] = api_key
@@ -89,7 +89,7 @@ class CredentialsManager:
         Save a centralized Authentication Token (e.g. JWT) and optional user context.
         """
 
-        def _sync_save():
+        def _sync_save() -> None:
             self._ensure_dir()
             data = self._load_data_sync()
             data["auth_token"] = token
@@ -118,7 +118,7 @@ class CredentialsManager:
         Delete all saved credentials (API key, auth token, user profile).
         """
 
-        def _sync_delete():
+        def _sync_delete() -> None:
             if self.credentials_file.exists():
                 try:
                     self.credentials_file.unlink()
@@ -132,7 +132,7 @@ class CredentialsManager:
         Delete the saved API key.
         """
 
-        def _sync_delete():
+        def _sync_delete() -> None:
             data = self._load_data_sync()
             if "api_key" in data:
                 del data["api_key"]
@@ -207,10 +207,29 @@ class CredentialsManager:
             return {}
         try:
             with open(self.credentials_file) as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
+                loaded = json.load(f)
+        except (OSError, ValueError) as e:
+            # ValueError, not JSONDecodeError: it covers that (a subclass) AND
+            # UnicodeDecodeError, so a corrupted or binary credentials file
+            # degrades to "no credentials" like every other unreadable state
+            # instead of propagating out of a function that promises a dict.
             logger.warning(f"Failed to read credentials file: {e}")
             return {}
+
+        if not isinstance(loaded, dict):
+            # Only this class writes the file, and it always dumps an object —
+            # but a hand-edited or truncated file can hold a valid JSON scalar
+            # or array. Returning it would satisfy `json.load` and then break
+            # every caller on `data["api_key"] = ...` with a TypeError this
+            # function's own contract says cannot happen.
+            logger.warning(
+                "Credentials file %s does not contain a JSON object; ignoring it.",
+                self.credentials_file,
+            )
+            return {}
+
+        data: dict[str, Any] = loaded
+        return data
 
 
 class AuthService:
@@ -218,7 +237,7 @@ class AuthService:
     High-level service for handling synchronization with remote Identity Providers.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.manager = CredentialsManager()
 
     async def get_current_identity(self, auth_url: str | None = None) -> dict[str, Any]:

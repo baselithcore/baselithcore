@@ -2,6 +2,7 @@
 Cache utility commands.
 """
 
+import argparse
 import json
 from typing import Any, cast
 
@@ -144,7 +145,10 @@ def run_cache(command: str, json_output: bool = False) -> int:
         return 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'cache' command parser."""
     cache_parser = subparsers.add_parser(
         "cache",

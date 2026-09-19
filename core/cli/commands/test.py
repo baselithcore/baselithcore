@@ -4,6 +4,7 @@ Test command - Run test suite with optimal configuration.
 Wraps pytest with sensible defaults for the baselith-core.
 """
 
+import argparse
 import json
 import subprocess  # nosec B404
 import sys
@@ -147,7 +148,10 @@ def run_test_integration() -> int:
     return run_test(path="tests/integration/", coverage=False, verbose=True)
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'test' command parser."""
     test_parser = subparsers.add_parser(
         "test",
