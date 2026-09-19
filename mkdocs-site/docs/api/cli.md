@@ -25,7 +25,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.35.0  •  https://baselithcore.xyz
+  Multi-Agent, Plugin-First Framework  •  v0.36.0  •  https://baselithcore.xyz
 
 ╭──────────────────────────────────────── Command Menu ────────────────────────────────────────╮
 │   SCAFFOLDING               init            Bootstrap a new project                          │
@@ -287,7 +287,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.35.0     ││   Name       app      │
+│   Version   0.36.0     ││   Name       app      │
 │   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
