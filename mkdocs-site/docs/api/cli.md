@@ -624,6 +624,27 @@ baselith --format json plugin info <name>
 
 ---
 
+### Marketplace commands and exit codes
+
+Every `plugin marketplace` subcommand returns a real exit code, so a script or
+a CI step can branch on it:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command did what was asked. An install that finds the plugin **already installed** counts, so re-running a provisioning script does not fail. A search that matches nothing counts too: the query ran, and "none" is an answer. |
+| `1` | The command did not. The plugin is unknown to the marketplace, the install or publish was rejected, the credentials were missing or no longer verify, or the category was invalid. |
+
+`marketplace identity` follows the same rule: it exits `1` when nothing is
+stored or the stored token no longer verifies, so `baselith plugin marketplace
+identity` can be used as an "am I logged in?" check.
+
+!!! warning "This changed"
+    These commands used to print their outcome and return nothing, which the
+    CLI coerced to `0`. A failed install, an unknown plugin, a rejected
+    publish and a failed login all reported **success**. A pipeline that
+    treated a green exit as "the plugin is installed", or as "the release went
+    out", was not being told the truth.
+
 ### `plugin marketplace list` - List Marketplace Plugins
 
 List all plugins available in the Baselith Marketplace, optionally filtered by
