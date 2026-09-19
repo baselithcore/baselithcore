@@ -75,7 +75,7 @@ class PromptOptimizer:
         self._tune_evaluator = tune_evaluator
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> "LLMService | None":
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:

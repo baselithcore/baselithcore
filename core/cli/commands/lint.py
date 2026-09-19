@@ -4,6 +4,7 @@ Lint command - Run all code quality tools.
 Executes ruff, mypy, and other linters with project configuration.
 """
 
+import argparse
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -264,7 +265,10 @@ def run_lint(
         return 0
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register 'lint' command parser."""
     lint_parser = subparsers.add_parser(
         "lint",

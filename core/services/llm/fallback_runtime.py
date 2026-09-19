@@ -13,141 +13,50 @@ falling through to a second provider would double-spend, not recover. So is a
 policy **refusal**: the model ran, was billed and declined — re-asking a
 different model the thing the first refused is provider shopping, not failover,
 and burying the refusal inside ``AllProvidersFailedError`` would also hide it
-from the refusal accounting that books the spend.
+from the refusal accounting that books the spend. So, finally, is a rejected
+**request** (:class:`~core.services.llm.errors.LLMClientError`: an expired or
+wrong key, an unknown model, a malformed payload): the primary never ran, and
+nothing about a second provider fixes a misconfiguration. Falling through
+there is the failure mode this chain exists to prevent rather than cause — a
+deployment whose hosted key has lapsed quietly serves every request from a
+local model instead, indefinitely, and the only symptom is a warning nobody
+reads. The chain covers outages, not configuration.
+
+Whichever stage answers is counted (``mas_llm_fallback_served_total``) and
+logged with the trail of failures behind it, so "we are running on the
+fallback" is an alertable fact rather than an archaeology exercise.
 """
 
 from __future__ import annotations
 
-import threading
 from functools import partial
 from typing import TYPE_CHECKING
 
 from core.models.fallback import AllProvidersFailedError, FallbackChain, Provider
-from core.observability.logging import get_logger
-from core.resilience.circuit_breaker import CircuitState, get_circuit_breaker
+from core.services.llm._fallback_support import (
+    _breaker_open,
+    _chain_timeout,
+    _clone_service,
+    _settle,
+    _stage_name,
+    _stage_timeout,
+    fatal_exception_types,
+)
+from core.services.llm._fallback_support import (
+    parse_fallback_chain as parse_fallback_chain,  # re-export: see below
+)
+from core.services.llm._fallback_support import (
+    reset_fallback_services as reset_fallback_services,  # re-export: see below
+)
+from core.services.llm.exceptions import LLMProviderError
+
+# ``parse_fallback_chain`` and ``reset_fallback_services`` moved to
+# ``_fallback_support`` when this module was split, but ``core.services.llm``
+# exports them from here and callers import them from here. Re-exported under
+# their own names so both spellings keep resolving.
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
-
-logger = get_logger(__name__)
-
-_SUPPORTED_PROVIDERS = ("openai", "ollama", "huggingface", "anthropic", "gemini")
-
-# Fallback-stage service clones, shared process-wide and keyed by
-# (provider, model) — mirrors the policy-clone cache in ``runtime``.
-_fallback_services: dict[tuple[str, str], LLMService] = {}
-_lock = threading.Lock()
-
-
-def parse_fallback_chain(spec: str) -> list[tuple[str, str]]:
-    """Parse ``LLMConfig.fallback_chain`` into ordered (provider, model) pairs."""
-    entries: list[tuple[str, str]] = []
-    for raw in spec.split(","):
-        item = raw.strip()
-        if not item:
-            continue
-        provider, sep, model = item.partition(":")
-        provider, model = provider.strip(), model.strip()
-        if not sep or not provider or not model:
-            raise ValueError(
-                f"Malformed fallback entry {item!r}: expected 'provider:model'"
-            )
-        if provider not in _SUPPORTED_PROVIDERS:
-            raise ValueError(f"Unsupported fallback provider: {provider}")
-        entries.append((provider, model))
-    return entries
-
-
-def _breaker_open(provider: str) -> bool:
-    """Whether *provider*'s circuit breaker is currently OPEN."""
-    return get_circuit_breaker(f"{provider}_provider").state == CircuitState.OPEN
-
-
-def _clone_service(base: LLMService, provider: str, model: str) -> LLMService:
-    """A cached LLMService clone for a fallback stage (built on first use)."""
-    key = (provider, model)
-    service = _fallback_services.get(key)
-    if service is not None:
-        return service
-    with _lock:
-        service = _fallback_services.get(key)
-        if service is not None:
-            return service
-        from core.services.llm.runtime import api_base_for, api_key_for
-        from core.services.llm.service import LLMService
-
-        config = base.config.model_copy(
-            update={
-                "provider": provider,
-                "model": model,
-                "api_key": api_key_for(base.config, provider),
-                # Endpoints are per-provider. Carrying the primary's URL into a
-                # fallback stage aims it at the wrong server — the classic
-                # shape being a hosted default with ``ollama:…`` behind it,
-                # where the local stage would dial the hosted gateway and
-                # stall until the read timeout.
-                "api_base": api_base_for(base.config, provider),
-                # A clone must never recurse into its own fallback chain.
-                "fallback_chain": "",
-            }
-        )
-        service = LLMService(config=config, enable_cache=False)
-        _fallback_services[key] = service
-        return service
-
-
-def _stage_name(provider: str, model: str) -> str:
-    """A unique stage id for the chain, and the provider it maps back to.
-
-    ``FallbackChain`` requires distinct stage names, and naming a stage after
-    its provider alone made a perfectly ordinary chain illegal: a primary on
-    ``ollama`` with ``ollama:<smaller-model>`` behind it — big model first,
-    cheap model as the safety net — collided with the primary and raised
-    ``duplicate provider names in chain`` on *every* call, turning a fallback
-    into a total outage. The provider stays the breaker key (a rate limit is a
-    property of the provider, not of one model); only the stage id is widened.
-    """
-    return f"{provider}:{model}"
-
-
-def _stage_provider(stage_name: str) -> str:
-    """The provider id behind a stage name, for metrics and log attribution."""
-    return stage_name.split(":", 1)[0]
-
-
-def _stage_timeout(service: LLMService) -> float | None:
-    """The per-stage bound for this service's chain, or ``None`` for unbounded.
-
-    Read defensively: the ``isinstance`` guard mirrors the one in
-    :func:`maybe_run_with_fallback` — a Mock/SimpleNamespace test config
-    answers every attribute with a truthy object, which would otherwise arm a
-    timeout of "some Mock" on every test that touches this path.
-    """
-    value = getattr(service.config, "fallback_stage_timeout", None)
-    return value if isinstance(value, (int, float)) and value > 0 else None
-
-
-def _chain_timeout(service: LLMService) -> float | None:
-    """Wall-clock budget for the whole chain.
-
-    Falls back to ``request_timeout``: without a ceiling the chain can run for
-    stage_count x (request_timeout x retry attempts + backoff), which is many
-    minutes — far past the point the caller gave up. Read defensively for the
-    same reason as :func:`_stage_timeout`.
-    """
-    value = getattr(service.config, "fallback_total_timeout", None)
-    if isinstance(value, (int, float)) and value > 0:
-        return float(value)
-    request_timeout = getattr(service.config, "request_timeout", None)
-    if isinstance(request_timeout, (int, float)) and request_timeout > 0:
-        return float(request_timeout)
-    return None
-
-
-def reset_fallback_services() -> None:
-    """Clear the fallback-stage clone cache (tests / credential rotation)."""
-    with _lock:
-        _fallback_services.clear()
 
 
 async def maybe_run_with_fallback(
@@ -156,7 +65,7 @@ async def maybe_run_with_fallback(
     model: str,
     json_mode: bool,
     **kwargs: object,
-) -> tuple[str, int, str]:
+) -> tuple[str, int, str, str]:
     """Fallback-aware generate: direct provider call when no chain is set.
 
     The ``isinstance`` guard keeps Mock/SimpleNamespace test configs (whose
@@ -170,7 +79,7 @@ async def maybe_run_with_fallback(
     content, tokens = await service._generate_with_retry(
         prompt=prompt, model=model, json_mode=json_mode, **kwargs
     )
-    return content, tokens, service.config.provider
+    return content, tokens, service.config.provider, model
 
 
 async def run_with_fallback(
@@ -179,19 +88,16 @@ async def run_with_fallback(
     model: str,
     json_mode: bool,
     **kwargs: object,
-) -> tuple[str, int, str]:
+) -> tuple[str, int, str, str]:
     """Run the primary provider, falling through the configured chain on failure.
 
-    Returns ``(content, tokens_used, serving_provider_name)`` so the caller
-    can attribute metrics to the provider that actually served the request.
+    Returns:
+        tuple: ``(content, tokens_used, serving_provider, serving_model)`` so
+        the caller can attribute metrics **and cost** to what actually served
+        the request. Both halves matter: billing a fallback answer to the
+        primary's model prices local inference at a hosted rate, which is
+        spend the deployment never made.
     """
-    from core.middleware.cost_control import (
-        BudgetExceededError as MiddlewareBudgetExceededError,
-    )
-    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
-    from core.services.llm.errors import LLMRefusalError
-    from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
-
     primary_name = service.config.provider
 
     async def _primary() -> tuple[str, int]:
@@ -232,30 +138,15 @@ async def run_with_fallback(
         stages,
         stage_timeout_seconds=_stage_timeout(service),
         total_timeout_seconds=_chain_timeout(service),
-        fatal_exceptions=(
-            BudgetExceededError,
-            MiddlewareBudgetExceededError,
-            LoopBudgetExceededError,
-            # A refusal is a decision, not an outage: the model ran and the
-            # call was billed. Falling through would re-ask a second provider
-            # the thing the first declined, and would replace the typed
-            # refusal with a generic LLMProviderError — unreachable refusal
-            # accounting and an unbooked, already-paid-for turn.
-            LLMRefusalError,
-        ),
+        fatal_exceptions=fatal_exception_types(),
     )
     try:
         outcome = await chain.run()
     except AllProvidersFailedError as exc:
         raise LLMProviderError(str(exc)) from exc
-    served_by = _stage_provider(outcome.provider)
-    if outcome.provider != _stage_name(primary_name, model):
-        logger.warning(
-            "llm_fallback_served",
-            extra={"provider": served_by, "primary": primary_name},
-        )
+    served_by, served_model = _settle(outcome, primary_name, model, "text")
     content, tokens = outcome.result
-    return content, tokens, served_by
+    return content, tokens, served_by, served_model
 
 
 async def maybe_run_structured_with_fallback(
@@ -267,7 +158,7 @@ async def maybe_run_structured_with_fallback(
     tool_choice: object = None,
     response_format: object = None,
     **kwargs: object,
-) -> tuple[object, str]:
+) -> tuple[object, str, str]:
     """Fallback-aware **native structured** call (tool calling / typed output).
 
     Same chain discipline as :func:`maybe_run_with_fallback`, applied to
@@ -276,14 +167,9 @@ async def maybe_run_structured_with_fallback(
     stages whose provider lacks native tool support (a coercion stage would
     silently change semantics mid-chain). Budget/deadline errors stay fatal.
 
-    Returns ``(LLMResult, serving_provider_name)``.
+    Returns:
+        tuple: ``(LLMResult, serving_provider, serving_model)``.
     """
-    from core.middleware.cost_control import (
-        BudgetExceededError as MiddlewareBudgetExceededError,
-    )
-    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
-    from core.services.llm.errors import LLMRefusalError
-    from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
     from core.services.llm.structured import _native_with_retry
 
     primary_name = service.config.provider
@@ -301,7 +187,7 @@ async def maybe_run_structured_with_fallback(
         )
 
     if not (isinstance(chain_spec, str) and chain_spec):
-        return await _primary(), primary_name
+        return await _primary(), primary_name, model
 
     stages: list[Provider[object]] = [
         Provider(
@@ -344,29 +230,14 @@ async def maybe_run_structured_with_fallback(
         stages,
         stage_timeout_seconds=_stage_timeout(service),
         total_timeout_seconds=_chain_timeout(service),
-        fatal_exceptions=(
-            BudgetExceededError,
-            MiddlewareBudgetExceededError,
-            LoopBudgetExceededError,
-            # A refusal is a decision, not an outage: the model ran and the
-            # call was billed. Falling through would re-ask a second provider
-            # the thing the first declined, and would replace the typed
-            # refusal with a generic LLMProviderError — unreachable refusal
-            # accounting and an unbooked, already-paid-for turn.
-            LLMRefusalError,
-        ),
+        fatal_exceptions=fatal_exception_types(),
     )
     try:
         outcome = await chain.run()
     except AllProvidersFailedError as exc:
         raise LLMProviderError(str(exc)) from exc
-    served_by = _stage_provider(outcome.provider)
-    if outcome.provider != _stage_name(primary_name, model):
-        logger.warning(
-            "llm_structured_fallback_served",
-            extra={"provider": served_by, "primary": primary_name},
-        )
-    return outcome.result, served_by
+    served_by, served_model = _settle(outcome, primary_name, model, "structured")
+    return outcome.result, served_by, served_model
 
 
 async def maybe_run_messages_with_fallback(
@@ -374,7 +245,7 @@ async def maybe_run_messages_with_fallback(
     messages: object,
     model: str,
     **kwargs: object,
-) -> tuple[object, str]:
+) -> tuple[object, str, str]:
     """Fallback-aware **message API** call (the agentic conversation path).
 
     Same chain discipline as :func:`maybe_run_structured_with_fallback`, applied
@@ -395,14 +266,8 @@ async def maybe_run_messages_with_fallback(
             and the provider's usual parameters.
 
     Returns:
-        tuple: ``(LLMResult, serving_provider_name)``.
+        tuple: ``(LLMResult, serving_provider, serving_model)``.
     """
-    from core.middleware.cost_control import (
-        BudgetExceededError as MiddlewareBudgetExceededError,
-    )
-    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
-    from core.services.llm.errors import LLMRefusalError
-    from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
     from core.services.llm.message_runtime import _messages_with_retry
 
     primary_name = service.config.provider
@@ -412,7 +277,7 @@ async def maybe_run_messages_with_fallback(
         return await _messages_with_retry(service, messages, model, **kwargs)  # type: ignore[arg-type]
 
     if not (isinstance(chain_spec, str) and chain_spec):
-        return await _primary(), primary_name
+        return await _primary(), primary_name, model
 
     stages: list[Provider[object]] = [
         Provider(
@@ -447,26 +312,11 @@ async def maybe_run_messages_with_fallback(
         stages,
         stage_timeout_seconds=_stage_timeout(service),
         total_timeout_seconds=_chain_timeout(service),
-        fatal_exceptions=(
-            BudgetExceededError,
-            MiddlewareBudgetExceededError,
-            LoopBudgetExceededError,
-            # A refusal is a decision, not an outage: the model ran and the
-            # call was billed. Falling through would re-ask a second provider
-            # the thing the first declined, and would replace the typed
-            # refusal with a generic LLMProviderError — unreachable refusal
-            # accounting and an unbooked, already-paid-for turn.
-            LLMRefusalError,
-        ),
+        fatal_exceptions=fatal_exception_types(),
     )
     try:
         outcome = await chain.run()
     except AllProvidersFailedError as exc:
         raise LLMProviderError(str(exc)) from exc
-    served_by = _stage_provider(outcome.provider)
-    if outcome.provider != _stage_name(primary_name, model):
-        logger.warning(
-            "llm_messages_fallback_served",
-            extra={"provider": served_by, "primary": primary_name},
-        )
-    return outcome.result, served_by
+    served_by, served_model = _settle(outcome, primary_name, model, "messages")
+    return outcome.result, served_by, served_model

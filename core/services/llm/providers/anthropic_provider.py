@@ -12,7 +12,7 @@ from core.observability.logging import get_logger
 try:
     import anthropic
 except ImportError:
-    anthropic = None  # type: ignore
+    anthropic = None  # type: ignore[assignment]
 
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens

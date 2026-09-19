@@ -1,12 +1,18 @@
 """Doctor command - advanced system diagnostics."""
 
+import argparse
 import json as json_lib
+from collections.abc import Callable
 
 from rich.table import Table
 
 from core.cli.commands import doctor_checks as checks
 from core.cli.commands import doctor_plugin_checks as plugin_checks
 from core.cli.commands.doctor_checks import CheckResult, apply_fixes
+from core.cli.commands.doctor_llm import (
+    check_llm_fallback_chain,
+    check_llm_local_endpoints,
+)
 from core.cli.ui import Timer, console, print_header, print_timing
 
 _ENV_CONFIG_MARKERS = checks._ENV_CONFIG_MARKERS
@@ -23,7 +29,7 @@ check_plugin_dependencies = plugin_checks.check_plugin_dependencies
 check_plugin_frontends = plugin_checks.check_plugin_frontends
 
 
-def _with_compatible_port_patch(fn):
+def _with_compatible_port_patch(fn: Callable[[], CheckResult]) -> CheckResult:
     original = checks.check_port
     checks.check_port = check_port
     try:
@@ -72,6 +78,9 @@ def run_checks(include_plugins: bool = True) -> list[CheckResult]:
         check_docker(),
         check_core_dependencies(),
         check_llm_provider(),
+        # Where inference actually ends up when the primary is not the answer.
+        check_llm_fallback_chain(),
+        check_llm_local_endpoints(),
         check_redis(),
         check_qdrant(),
         check_postgres(),
@@ -195,7 +204,10 @@ def run_doctor(
     return 0
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> None:
     """Register 'doctor' command parser."""
     doctor_parser = subparsers.add_parser(
         "doctor",

@@ -16,7 +16,7 @@ from core.observability.logging import get_logger
 try:
     import ollama
 except ImportError:
-    ollama = None  # type: ignore
+    ollama = None  # type: ignore[assignment]
 
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError, describe_exception

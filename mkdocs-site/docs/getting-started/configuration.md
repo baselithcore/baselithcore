@@ -68,6 +68,7 @@ Declared in `core.config.app`.
 | `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` |  |
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` |  |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
+| `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
 | `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
 | `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
@@ -114,10 +115,12 @@ Declared in `core.config.app`.
 | `SENTRY_TRACES_SAMPLE_RATE` | `float` | `0.1` | Sentry trace/profile sample rates. Defaults are conservative for production; raise to 1.0 only in pre-prod or for short investigations. |
 | `SERVICE_VERSION` | `str` | *computed* | Service version reported as the `service.version` resource attribute. Defaults to the installed package version. |
 | `STRICT_TENANT_ISOLATION` | `bool` | `True` | If True, enforces strict logical isolation between different tenants. |
-| `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics to stdout (debugging the pipeline locally). |
+| `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics/logs to stdout (debugging the pipeline locally). |
 | `TELEMETRY_ENABLED` | `bool` | `False` |  |
+| `TELEMETRY_LOGS_ENABLED` | `bool` | `False` | Ship log records to the collector over OTLP, in addition to (never instead of) the stdout logging that `kubectl logs` shows. The structlog chain already stamps trace_id/span_id on every entry; exporting the records hands the backend that correlation as structured fields rather than something to re-parse out of a scraped file. |
 | `TELEMETRY_METRICS_ENABLED` | `bool` | `False` | Push OTel-native metrics (e.g. HTTP server/client histograms from auto-instrumentation) to the collector via OTLP. Independent of the Prometheus `/metrics` scrape endpoint, which is always available. |
-| `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces and metrics (OTLP/gRPC). |
+| `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces, metrics and logs. The default is the OTLP/gRPC port; switch to :4318 when selecting `http/protobuf` below (the per-signal `/v1/...` path is appended for you). |
+| `TELEMETRY_OTEL_PROTOCOL`<br>also accepts `OTEL_EXPORTER_OTLP_PROTOCOL` | `str` | `grpc` | OTLP wire protocol: `grpc` (default) or `http/protobuf`. HTTP is what a collector's `otlphttp` receiver speaks, what most vendor ingest endpoints expose, and the only option behind an L7 proxy that will not forward HTTP/2 trailers. `OTEL_EXPORTER_OTLP_PROTOCOL` is the specification's own name for this knob, so it is accepted as an alias — a sidecar or chart that already sets it is honoured without a Baselith-specific variable. |
 | `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | `1.0` | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Lower in high-traffic production to cap cost. |
 
 ## Audit-trail configuration
@@ -657,6 +660,7 @@ Declared in `core.config.services`.
 | `LLM_MAX_TOKENS` | `int \| None` | *empty* | Maximum tokens to generate |
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
 | `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
+| `LLM_PREFLIGHT` | `Literal['auto', 'off', 'warn', 'strict']` | `auto` | Startup LLM posture check: 'auto' (default) fails startup in a production environment and warns elsewhere, 'warn' always logs, 'strict' always fails, 'off' skips. Never calls a hosted provider. |
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
@@ -851,4 +855,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-538 settings documented.
+542 settings documented.

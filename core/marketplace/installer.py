@@ -44,11 +44,11 @@ class PluginInstaller:
     Handles the lifecycle of plugin installation from the marketplace.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_plugin_config()
         self.plugins_dir = Path(self.config.plugins_path)
 
-    def _ensure_plugins_dir(self):
+    def _ensure_plugins_dir(self) -> None:
         """Ensure the plugins directory exists."""
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
 

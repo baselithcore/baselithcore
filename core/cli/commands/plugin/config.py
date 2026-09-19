@@ -43,7 +43,7 @@ def _save_config(data: dict) -> bool:
         return False
 
 
-def _coerce_value(value: str):
+def _coerce_value(value: str) -> bool | int | float | str:
     """Coerce string value to appropriate Python type."""
     if value.lower() == "true":
         return True

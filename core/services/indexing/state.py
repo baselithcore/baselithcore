@@ -46,7 +46,7 @@ class IndexStateStore:
         self._redis: Any | None = None
         self._state_loaded = False
 
-    def _get_redis_client(self):
+    def _get_redis_client(self) -> Any:
         """Initialize and retrieve the Redis client."""
         if self._redis:
             return self._redis

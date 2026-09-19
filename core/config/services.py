@@ -246,6 +246,16 @@ class LLMConfig(BaseSettings):
         "chain; unset falls back to request_timeout.",
     )
 
+    # == Startup posture validation (core.services.llm.preflight) ==
+    preflight: Literal["auto", "off", "warn", "strict"] = Field(
+        default="auto",
+        description=(
+            "Startup LLM posture check: 'auto' (default) fails startup in a "
+            "production environment and warns elsewhere, 'warn' always logs, "
+            "'strict' always fails, 'off' skips. Never calls a hosted provider."
+        ),
+    )
+
     # == Cost-aware model routing ==
     # When enabled, callers may pass task_category to generate_response();
     # the router picks a model tier for that category. Explicit per-call

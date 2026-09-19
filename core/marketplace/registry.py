@@ -192,7 +192,7 @@ class PluginRegistry:
                 "registry."
             ) from e
 
-    def _save_to_cache(self, content: str):
+    def _save_to_cache(self, content: str) -> None:
         """Persist registry data to disk."""
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
 from core.resilience import retry
@@ -360,6 +361,11 @@ async def generate_structured(
         # Held by this frame so a refusal raised out of the coercion path
         # still carries the provider's metered usage to the accounting below.
         fallback_usage: list[Usage] = []
+        # Who ends up answering. Overwritten by the native path when a fallback
+        # stage serves; the coercion path below never fails over, so the
+        # configured provider is already the truth for it.
+        serving_provider = service.config.provider
+        serving_model = model
         try:
             if use_native:
                 extra: dict[str, Any] = {}
@@ -380,6 +386,7 @@ async def generate_structured(
                 (
                     native_result,
                     serving_provider,
+                    serving_model,
                 ) = await maybe_run_structured_with_fallback(
                     service,
                     prompt,
@@ -391,6 +398,7 @@ async def generate_structured(
                 )
                 result = cast("LLMResult", native_result)
                 span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
+                span.set_attribute("gen_ai.response.model", serving_model)
             else:
                 result = await _generate_fallback(
                     service,
@@ -411,10 +419,11 @@ async def generate_structured(
             # or the spend disappears from the middleware ledger, the metrics
             # and the request budget. (The native path never lands here — its
             # refusal is raised by ``apply_stop_reason`` *after* accounting.)
+            billing_model = qualified_model_id(serving_provider, serving_model)
             billed = account_turn(
                 service,
                 span,
-                model=model,
+                model=billing_model,
                 result=LLMResult(
                     stop_reason=STOP_REFUSAL,
                     usage=fallback_usage[-1] if fallback_usage else Usage(),
@@ -422,8 +431,9 @@ async def generate_structured(
                 ),
                 input_tokens=input_tokens,
                 started=started,
+                provider=serving_provider,
             )
-            await record_usage_cost(model, billed)
+            await record_usage_cost(billing_model, billed)
             raise
         except (LoopBudgetExceededError, RateLimitError):
             span.set_attribute("gen_ai.baselith.error", "budget_or_rate_limit")
@@ -435,13 +445,17 @@ async def generate_structured(
             logger.error(f"Structured generation failed: {e}")
             raise LLMProviderError(f"Structured generation failed: {e}") from e
 
+        # The model that answered, provider-namespaced when local: see
+        # ``core.models.pricing.qualified_model_id``.
+        billing_model = qualified_model_id(serving_provider, serving_model)
         billed = account_turn(
             service,
             span,
-            model=model,
+            model=billing_model,
             result=result,
             input_tokens=input_tokens,
             started=started,
+            provider=serving_provider,
         )
         # Book the cost on the tenant's cumulative ledger, exactly as the text
         # and streaming paths do. ``account_turn`` deliberately stops at the
@@ -451,7 +465,7 @@ async def generate_structured(
         # real spend and the tenant cost cap never tripped. Priced
         # independently of the LoopBudget charge, which returns 0 outside an
         # orchestrated request — background jobs meter too. Never raises.
-        await record_usage_cost(model, billed)
+        await record_usage_cost(billing_model, billed)
 
         # Stop-reason policy last: the call is accounted for either way (it was
         # billed), and only then does a refusal abort the caller.

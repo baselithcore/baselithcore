@@ -125,8 +125,22 @@ cache_write_tokens=0, batch=False) -> float`. A negative token count raises
   Display this in dashboards/reports instead of hand-syncing a copy; refresh it
   together with the table.
 - `UNKNOWN_PRICE` — a deliberately high fallback so missing entries are visible.
-- `get_price(model_id, *, table=DEFAULT_PRICING)` — returns the `ModelPrice` or
-  `UNKNOWN_PRICE`.
+- `LOCAL_PROVIDERS` / `LOCAL_PRICE` / `qualified_model_id(provider, model)` —
+  self-hosted inference is capacity-bound, not price-bound, so any
+  `ollama/<model>` id prices at **zero without needing a table row**. This is
+  not cosmetic: a bare local tag has no row, so it used to be priced through
+  the unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — money that
+  was never spent, and enough to abort a budgeted run. Call
+  `qualified_model_id` before costing a turn; it namespaces a model by its
+  provider when that provider is local, and is idempotent. A local endpoint
+  that fronts a paid model can still be priced with an explicit row for the
+  qualified id, which wins.
+- `is_priced(model_id, *, table=DEFAULT_PRICING)` — whether a lookup is backed
+  by a real rate (a row, or a local model's known zero). What is left is a
+  hosted model with no row, which is the case the unknown-model policy and its
+  warning exist for.
+- `get_price(model_id, *, table=DEFAULT_PRICING)` — a table row, else
+  `LOCAL_PRICE` for a local id, else `UNKNOWN_PRICE`.
 - `estimate_cost(model_id, input_tokens, output_tokens, *, cache_read_tokens=0,
   cache_write_tokens=0, batch=False, table=...)` — one-call USD estimate.
 

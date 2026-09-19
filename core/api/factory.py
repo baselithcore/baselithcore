@@ -273,6 +273,14 @@ def create_app() -> FastAPI:
         # X-Request-ID is the correlation id an operator asks a reporter for;
         # a browser client cannot read it off the response unless it is exposed.
         "expose_headers": ["Idempotency-Replayed", "Retry-After", "X-Request-ID"],
+        # How long a browser may cache a preflight answer. Starlette's default
+        # is 600s, so a dashboard doing credentialed JSON calls re-asks OPTIONS
+        # for every distinct URL every ten minutes — a full round trip that
+        # gates the real request. 7200s is the ceiling Chromium honours
+        # (Firefox allows up to 86400); the price is that a change to the
+        # allow-lists above reaches an open browser tab within two hours
+        # rather than ten minutes.
+        "max_age": 7200,
     }
 
     if use_wildcard:
@@ -328,6 +336,17 @@ def create_app() -> FastAPI:
             return {"plugins": {}}
         manifest: dict[str, Any] = plugin_registry.get_frontend_manifest()
         return manifest
+
+    # === Landing redirect (opt-in) ===
+    # Nothing is served at "/" by default; a deployment that has a homepage
+    # (a plugin SPA) names it in BASELITH_ROOT_REDIRECT and the root sends
+    # visitors there instead of 404ing. Registered before the plugin routers
+    # so a plugin cannot take the site root out from under it.
+    _root_redirect = getattr(_app_config, "root_redirect", "")
+    if _root_redirect:
+        from core.api.root_redirect import create_root_redirect_router
+
+        app.include_router(create_root_redirect_router(_root_redirect))
 
     # === Routers ===
     app.include_router(chat.router)

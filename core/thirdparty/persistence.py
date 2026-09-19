@@ -8,11 +8,10 @@ file-based SQLite store that persists each record as a JSON blob keyed by its
 id (providers/functions by ``id``, arrangements by ``reference_number``), so a
 cold start rehydrates the full register.
 
-SQLite (stdlib :mod:`sqlite3`) is chosen deliberately — the same rationale as
-:mod:`plugins.baselithmed.persistence`: it is in the standard library (zero new
-dependencies, no infra), register writes are low-volume, and the same
-``RegisterStore`` protocol can later be implemented against Postgres without
-touching service code. ``check_same_thread=False`` plus an internal
+SQLite (stdlib :mod:`sqlite3`) is chosen deliberately: it is in the standard
+library (zero new dependencies, no infra), register writes are low-volume, and
+the same ``RegisterStore`` protocol can later be implemented against Postgres
+without touching service code. ``check_same_thread=False`` plus an internal
 :class:`~threading.RLock` makes the single connection safe to share across the
 event loop and worker threads; ``PRAGMA journal_mode=WAL`` keeps reads
 non-blocking. Selected only when ``THIRDPARTY_REGISTER_DB_PATH`` is set; unset
@@ -76,7 +75,7 @@ class SQLiteRegisterStore:
         blob = json.dumps(payload, sort_keys=True)
         with self._lock:
             self._conn.execute(
-                f"INSERT INTO {table} (id, data) VALUES (?, ?) "  # nosec B608
+                f"INSERT INTO {table} (id, data) VALUES (?, ?) "  # noqa: S608  # nosec B608
                 "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                 (key, blob),
             )
@@ -86,7 +85,7 @@ class SQLiteRegisterStore:
     ) -> T | None:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {table} WHERE id = ?",  # nosec B608
+                f"SELECT data FROM {table} WHERE id = ?",  # noqa: S608  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
@@ -97,7 +96,7 @@ class SQLiteRegisterStore:
     ) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {table} ORDER BY id ASC"  # nosec B608
+                f"SELECT data FROM {table} ORDER BY id ASC"  # noqa: S608  # nosec B608
             )
             rows = cur.fetchall()
         return [factory(json.loads(r[0])) for r in rows]

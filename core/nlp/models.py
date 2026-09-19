@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import time
 from functools import cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -358,15 +358,21 @@ class CachedEmbedder:
             await self._store_embeddings(cache_updates)
 
         # 5. Format Output
-        final_results: Any = results
+        #
+        # The return type genuinely depends on two runtime flags, so the casts
+        # below are the honest spelling. They replace a `final_results: Any`
+        # plus two `# type: ignore[return-value]` comments, which silenced the
+        # wrong error code anyway: the ignores claimed a return-value mismatch
+        # while mypy was reporting `no-any-return`.
+        final_results: np.ndarray | list[Any] = results
 
         if kwargs.get("convert_to_numpy", True):
             final_results = np.array(results)
 
         if is_single:
-            return final_results[0]  # type: ignore[return-value]
+            return cast("list[float] | np.ndarray", final_results[0])
 
-        return final_results  # type: ignore[return-value]
+        return cast("np.ndarray | list[np.ndarray]", final_results)
 
     async def _store_embeddings(self, cache_updates: list[tuple[str, Any]]) -> None:
         """Write computed embeddings to the cache (batch API when available)."""
@@ -427,7 +433,8 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     _require_sentence_transformers()
     actual_model_name = model_name or chat_config.reranker_model
     assert CrossEncoder is not None
-    return CrossEncoder(actual_model_name)
+    # sentence-transformers ships no py.typed, so the constructor is `Any`.
+    return cast("CrossEncoder", CrossEncoder(actual_model_name))
 
 
 __all__ = [

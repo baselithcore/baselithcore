@@ -80,9 +80,9 @@ def charge_llm_cost(
     :class:`~core.orchestration.limits.BudgetExceededError` when the charge
     pushes the request over its ``budget_usd`` cap.
     """
-    from core.models.pricing import DEFAULT_PRICING
+    from core.models.pricing import is_priced
 
-    unpriced = model not in DEFAULT_PRICING
+    unpriced = not is_priced(model)
     if unpriced:
         # Visibility into a missing pricing entry must not depend on whether
         # an orchestrated request happens to be running.

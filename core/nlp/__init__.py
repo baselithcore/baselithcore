@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 
 @cache
-def get_pipeline(task: str, model_name: str | None = None, **kwargs) -> Any:
+def get_pipeline(task: str, model_name: str | None = None, **kwargs: Any) -> Any:
     """
     Get a HuggingFace pipeline for various NLP tasks.
 

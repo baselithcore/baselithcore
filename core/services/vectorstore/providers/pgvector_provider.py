@@ -240,7 +240,7 @@ class PgVectorProvider:
         """Upsert points (dicts with ``id``, ``vector``, optional ``payload``)."""
         table = _table(collection_name)
         sql = (
-            f"INSERT INTO {table} (id, embedding, payload) "  # nosec B608
+            f"INSERT INTO {table} (id, embedding, payload) "  # noqa: S608  # nosec B608
             "VALUES (%s, %s::vector, %s::jsonb) "
             "ON CONFLICT (id) DO UPDATE SET "
             "embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
@@ -296,13 +296,13 @@ class PgVectorProvider:
             params.extend([encoded, float(score_threshold)])
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         sql = (
-            "SELECT id, payload, 1 - (embedding <=> %s::vector) AS score "  # nosec B608
+            "SELECT id, payload, 1 - (embedding <=> %s::vector) AS score "  # noqa: S608  # nosec B608
             f"FROM {table} {where_sql} "
             "ORDER BY embedding <=> %s::vector LIMIT %s"
         )
         params.extend([encoded, int(limit)])
         ef_search = int(get_vectorstore_config().hnsw_ef_search)
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             if ef_search > 0:
                 async with cur.connection.transaction():
                     # SET takes no bind parameters; the value is an int coerced
@@ -333,10 +333,10 @@ class PgVectorProvider:
         where = ["id = ANY(%s)"]
         where += _filter_where(None, kwargs.get("tenant_id"), params)
         sql = (
-            f"SELECT id, payload FROM {table} "  # nosec B608
+            f"SELECT id, payload FROM {table} "  # noqa: S608  # nosec B608
             f"WHERE {' AND '.join(where)}"
         )
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             rows = await cur.fetchall()
         return [
@@ -352,7 +352,7 @@ class PgVectorProvider:
         table = _table(collection_name)
         async with get_async_cursor() as cur:
             await cur.execute(
-                f"DELETE FROM {table} WHERE id = ANY(%s)",  # nosec B608
+                f"DELETE FROM {table} WHERE id = ANY(%s)",  # noqa: S608  # nosec B608
                 ([str(pid) for pid in point_ids],),
             )
 
@@ -383,9 +383,9 @@ class PgVectorProvider:
             params,
         )
         where_sql = f"WHERE {' AND '.join(where)} " if where else ""
-        sql = f"SELECT id, payload FROM {table} {where_sql}ORDER BY id LIMIT %s"  # nosec B608
+        sql = f"SELECT id, payload FROM {table} {where_sql}ORDER BY id LIMIT %s"  # noqa: S608  # nosec B608
         params.append(int(limit))
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             rows = await cur.fetchall()
         points = [
@@ -414,7 +414,7 @@ class PgVectorProvider:
         where += _filter_where(None, kwargs.get("tenant_id"), params)
         async with get_async_cursor() as cur:
             await cur.execute(
-                f"DELETE FROM {table} "  # nosec B608
+                f"DELETE FROM {table} "  # noqa: S608  # nosec B608
                 f"WHERE {' AND '.join(where)}",
                 params,
             )

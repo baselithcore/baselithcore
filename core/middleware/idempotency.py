@@ -32,7 +32,9 @@ Design notes:
   client errors (``400``/``404``/``409``/``422``) are still cached — replaying
   the identical error is the correct idempotent behaviour.
 
-Follows the IETF ``Idempotency-Key`` header draft / the Stripe model.
+Follows the IETF ``Idempotency-Key`` header draft / the Stripe model. The
+atomic replay-or-lock script and the ``exp`` reader live in
+:mod:`core.middleware._idempotency_store`.
 """
 
 from __future__ import annotations
@@ -50,9 +52,17 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.context import get_current_tenant_id
+from core.middleware._idempotency_store import (
+    REPLAY_OR_LOCK_LUA,
+    jwt_exp,
+    replay_or_lock,
+)
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Historical name, still imported by callers and tests.
+_jwt_exp = jwt_exp
 
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _MAX_KEY_LENGTH = 255
@@ -62,26 +72,6 @@ _MAX_KEY_LENGTH = 255
 # 403 Forbidden (e.g. CSRF), 408 Request Timeout, 425 Too Early, 429 Too Many
 # Requests. Any 5xx is treated the same way (handled separately by range).
 _NON_CACHEABLE_4XX = frozenset({401, 403, 408, 425, 429})
-
-
-def _jwt_exp(token: str) -> float | None:
-    """Read the ``exp`` claim of a compact JWS without verifying it.
-
-    Only ever used to *shorten* a replay TTL, so an unverifiable or forged
-    value cannot widen anything: the route's own verification already decided
-    whether the credential was good when the response was stored. ``None``
-    for anything that is not a three-part token with a numeric ``exp``.
-    """
-    parts = token.split(".")
-    if len(parts) != 3:
-        return None
-    try:
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        claims = orjson.loads(base64.urlsafe_b64decode(payload))
-        exp = claims.get("exp") if isinstance(claims, dict) else None
-        return float(exp) if isinstance(exp, (int, float)) else None
-    except Exception:
-        return None
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -116,9 +106,16 @@ class IdempotencyMiddleware:
         self._prefix = cache_config.cache_prefix + ":idem:"
         self._token_lifetime: int | None = None
         self._redis: Any = None
+        self._replay_or_lock_script: Any = None
         if self.enabled:
             try:
                 self._redis = create_redis_client(cache_config.url)
+                # A client without register_script (a minimal stand-in) keeps
+                # the sequential GET + SET NX path in _replay_or_lock.
+                if hasattr(self._redis, "register_script"):
+                    self._replay_or_lock_script = self._redis.register_script(
+                        REPLAY_OR_LOCK_LUA
+                    )
             except Exception as e:  # pragma: no cover - defensive
                 logger.warning(
                     "Idempotency Redis unavailable (%s); middleware disabled",
@@ -257,24 +254,30 @@ class IdempotencyMiddleware:
             return
         lock_key = storage_key + ":lock"
 
-        # 1) Replay a stored result if present.
-        replayed = await self._try_replay(storage_key, send)
-        if replayed:
-            return
-
-        # 2) Claim the in-flight lock. If someone else holds it, re-check the
-        #    result (they may have just finished) then fail with 409.
+        # 1) Replay a stored result, or claim the in-flight lock — one atomic
+        #    round trip. Fail-open on a storage error: the request simply runs.
         try:
-            acquired = await self._redis.set(
-                lock_key, "1", nx=True, ex=max(1, min(self.ttl_seconds, 300))
+            stored, acquired = await replay_or_lock(
+                self._redis,
+                self._replay_or_lock_script,
+                storage_key,
+                lock_key,
+                max(1, min(self.ttl_seconds, 300)),
             )
         except Exception:
-            await self.app(scope, receive, send)  # fail-open
+            await self.app(scope, receive, send)
             return
 
-        if not acquired:
-            if await self._try_replay(storage_key, send):
+        if stored is not None:
+            if await self._send_stored(stored, send):
                 return
+            # Undecodable entry: execute normally rather than 409 on a lock
+            # that was never taken (the script returns before the SET).
+            await self.app(scope, receive, send)
+            return
+
+        # 2) Lock held by a duplicate still in flight.
+        if not acquired:
             await JSONResponse(
                 status_code=409,
                 content={
@@ -289,13 +292,8 @@ class IdempotencyMiddleware:
             scope, receive, send, storage_key, lock_key, ttl=self._replay_ttl(scope)
         )
 
-    async def _try_replay(self, storage_key: str, send: Send) -> bool:
-        try:
-            stored = await self._redis.get(storage_key)
-        except Exception:
-            return False
-        if not stored:
-            return False
+    async def _send_stored(self, stored: Any, send: Send) -> bool:
+        """Emit a stored response; ``False`` when the entry cannot be decoded."""
         try:
             payload = orjson.loads(stored)
             body = base64.b64decode(payload["body"])

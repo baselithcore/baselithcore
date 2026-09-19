@@ -48,7 +48,7 @@ def by_name(spans: list[SpanRecord], name: str) -> SpanRecord:
 
 class TestAgentIdFor:
     def test_qualifies_with_plugin(self) -> None:
-        assert agent_id_for("researcher", "baselithmed") == "baselithmed:researcher"
+        assert agent_id_for("researcher", "web_scraper") == "web_scraper:researcher"
 
     def test_core_prefix_when_unowned(self) -> None:
         assert agent_id_for("researcher") == "core:researcher"

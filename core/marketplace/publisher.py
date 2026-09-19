@@ -42,7 +42,10 @@ def _inject_integrity(manifest_path: Path, integrity_hash: str) -> bytes | None:
             return json.dumps(data, indent=2).encode("utf-8")
         data = yaml.safe_load(raw) or {}
         data["integrity_sha256"] = integrity_hash
-        return yaml.safe_dump(data, sort_keys=False).encode("utf-8")
+        # PyYAML ships no py.typed in the gate's environment, so safe_dump
+        # is `Any` there and the encode() result with it.
+        signed: bytes = yaml.safe_dump(data, sort_keys=False).encode("utf-8")
+        return signed
     except Exception as exc:
         logger.warning(
             "Failed to inject integrity hash into %s: %s",
@@ -114,7 +117,7 @@ class PluginPublisher:
     Handles packaging and submitting plugins to the central marketplace natively in the core.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_plugin_config()
         self.validator = PluginValidator()
 
@@ -231,7 +234,9 @@ class PluginPublisher:
             )
 
             if response.status_code == 200:
-                return response.json()
+                # The submit endpoint answers with a JSON object envelope.
+                payload: dict[str, Any] = response.json()
+                return payload
             else:
                 try:
                     error_msg = response.json().get("detail", response.text)

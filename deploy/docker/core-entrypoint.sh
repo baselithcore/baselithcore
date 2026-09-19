@@ -19,4 +19,5 @@ exec uvicorn backend:app \
   --no-server-header \
   --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
   --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
-  --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
+  --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}" \
+  ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency "$UVICORN_LIMIT_CONCURRENCY"}

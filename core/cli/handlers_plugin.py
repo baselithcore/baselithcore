@@ -24,8 +24,8 @@ def dispatch_plugin(args: argparse.Namespace) -> int:
             ``marketplace_command``) selects the branch.
 
     Returns:
-        The process exit code: ``0`` on success, ``1`` when the subcommand
-        is unknown or its usage line was printed.
+        The process exit code: the subcommand's own code where it has one,
+        ``1`` when the subcommand is unknown or its usage line was printed.
     """
     from core.cli.commands import plugin
     from core.cli.ui import print_error
@@ -180,9 +180,14 @@ def dispatch_plugin(args: argparse.Namespace) -> int:
             "identity": lambda: plugin.identity_cmd(),
         }
         m_command = getattr(args, "marketplace_command", "search") or "search"
-        handler = MARKETPLACE_COMMANDS.get(m_command)
-        if handler:
-            return handler()
+        market_handler = MARKETPLACE_COMMANDS.get(m_command)
+        if market_handler:
+            # The marketplace commands used to print and return ``None``, which
+            # `main()` coerced to 0 — so a failed install, a plugin that does
+            # not exist, a rejected publish and a failed login all reported
+            # SUCCESS to the shell, and to CI. They return a real exit code
+            # now; pass it through rather than discarding it.
+            return market_handler()
         return 1
 
     # Main command execution

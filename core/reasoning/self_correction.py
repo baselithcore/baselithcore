@@ -7,7 +7,7 @@ applying repairs until a quality threshold or iteration limit is reached.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.observability.logging import get_logger
 
@@ -60,7 +60,7 @@ Corrected response:"""
 
     def __init__(
         self,
-        llm_service=None,
+        llm_service: Any = None,
         max_corrections: int | None = None,
         config: Optional["ReasoningConfig"] = None,
     ):
@@ -96,7 +96,7 @@ Corrected response:"""
         return self._config
 
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:

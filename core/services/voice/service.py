@@ -102,8 +102,14 @@ class VoiceService:
             google_available=bool(self._google_creds),
         )
 
-    def _get_http_client(self):
-        """Lazily create a shared HTTP client for provider calls."""
+    def _get_http_client(self) -> Any:
+        """Lazily create a shared HTTP client for provider calls.
+
+        Returns ``Any`` rather than ``httpx.AsyncClient``: httpx is imported
+        lazily inside the body (it is optional at this layer), so the concrete
+        type is not available at module scope. Matches ``_get_openai_client``
+        below.
+        """
         if self._http_client is None:
             try:
                 import httpx
@@ -217,7 +223,7 @@ class VoiceService:
 
         response = await client.audio.speech.create(
             model=request.model,
-            voice=request.voice,  # type: ignore
+            voice=request.voice,
             input=request.text,
             speed=request.speed,
             response_format=request.format.value,  # type: ignore[arg-type]
@@ -408,7 +414,7 @@ class VoiceService:
 
         transcript = await client.audio.transcriptions.create(
             model=request.model,
-            file=audio_file,  # type: ignore
+            file=audio_file,
             language=request.language,  # type: ignore[arg-type]
         )
 

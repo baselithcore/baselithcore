@@ -96,6 +96,10 @@ def price_unknown_model(
     once per model id per process, regardless of policy, so a missing entry
     is never silently invisible — including under ``zero``.
 
+    A locally-served model never reaches here: it is priced at zero by
+    :func:`core.models.pricing.get_price`, because charging it ``UNKNOWN_PRICE``
+    would bill 100 $/M for inference that cost no money at all.
+
     Raises:
         UnknownModelCostRejected: When the policy is ``reject``.
     """
@@ -137,9 +141,9 @@ def llm_call_cost_usd(
     priced via :func:`price_unknown_model` (``BASELITH_UNKNOWN_MODEL_COST_POLICY``,
     default ``charge``).
     """
-    from core.models.pricing import DEFAULT_PRICING, estimate_cost
+    from core.models.pricing import estimate_cost, is_priced
 
-    if model not in DEFAULT_PRICING:
+    if not is_priced(model):
         return price_unknown_model(
             model,
             prompt_tokens,
@@ -168,11 +172,12 @@ def _reject_unpriced_model(model: str) -> None:
     as "don't meter" and this is where the refusal actually lives.
 
     No-op under the ``charge`` and ``zero`` policies, and for any model that
-    has a pricing entry.
+    has a known rate — a pricing row, or the zero rate of a locally-served
+    model, which is priced, not unpriceable.
     """
-    from core.models.pricing import DEFAULT_PRICING
+    from core.models.pricing import is_priced
 
-    if model in DEFAULT_PRICING:
+    if is_priced(model):
         return
     if get_unknown_model_cost_config().policy != "reject":
         return

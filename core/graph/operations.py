@@ -7,10 +7,11 @@ Provides fundamental graph database operations: create, read, update, delete nod
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from core.observability import get_logger
 
+from .protocols import GraphEntity
 from .query_builder import format_labels, sanitize_label
 
 logger = get_logger(__name__)
@@ -42,14 +43,14 @@ def get_node(
             if isinstance(first_row, list) and len(first_row) > 0:
                 node = first_row[0]
                 if hasattr(node, "properties"):
-                    return node.properties
+                    return cast(GraphEntity, node).properties
                 # Fallback if raw list/dict
                 if isinstance(node, (dict, list)):
                     # If node is a list inside a list (raw format), might need further inspection
                     # but usually client returns Node object
                     return dict(node) if isinstance(node, dict) else {}
             elif hasattr(first_row, "properties"):  # If flattened
-                return first_row.properties
+                return cast(GraphEntity, first_row).properties
 
         return None
     except Exception as exc:

@@ -193,6 +193,7 @@ class VisionResponse:
         import json
 
         try:
-            return json.loads(self.content)
+            parsed = json.loads(self.content)
         except json.JSONDecodeError:
             return None
+        return parsed if isinstance(parsed, dict) else None

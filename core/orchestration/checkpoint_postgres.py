@@ -297,7 +297,7 @@ class PostgresCheckpointStore:
 
     async def load(self, run_id: str) -> Checkpoint | None:
         """Load a checkpoint by ``run_id``, or None if absent."""
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 "SELECT data FROM agent_checkpoints WHERE run_id = %s", (run_id,)
             )
@@ -324,7 +324,7 @@ class PostgresCheckpointStore:
 
     async def list_snapshots(self, run_id: str) -> list[dict[str, Any]]:
         """Version-ascending summaries of the run's recorded snapshots."""
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(_HISTORY_LIST, (run_id,))
             rows = await cur.fetchall()
         return [
@@ -340,7 +340,7 @@ class PostgresCheckpointStore:
 
     async def load_snapshot(self, run_id: str, version: int) -> Checkpoint | None:
         """Full checkpoint state as recorded at ``version``, or None."""
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(_HISTORY_LOAD, (run_id, version))
             row = await cur.fetchone()
         if not row or not isinstance(row, dict):
@@ -363,7 +363,7 @@ class PostgresCheckpointStore:
         recovery pick up") with the operator read path: completed and failed
         runs stay inspectable after the fact.
         """
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 _RUN_LIST,
                 {
@@ -415,7 +415,7 @@ class PostgresCheckpointStore:
         # can actually re-enter.
         sql += " ORDER BY (status <> %s), updated_at ASC LIMIT %s"
         params.extend([STATUS_RUNNING, page_size])
-        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+        async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             rows = await cur.fetchall()
         return [r["run_id"] for r in rows if isinstance(r, dict)]

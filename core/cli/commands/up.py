@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -169,7 +170,10 @@ def _wait_for_health(port: str, timeout: int) -> bool:
     return False
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    formatter_class: type[argparse.HelpFormatter],
+) -> argparse.ArgumentParser:
     """Register the ``up`` command parser."""
     parser = subparsers.add_parser(
         "up",

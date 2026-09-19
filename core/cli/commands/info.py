@@ -2,6 +2,7 @@
 Info command - Display system and project dashboard.
 """
 
+import argparse
 import json as json_lib
 import platform
 from importlib.metadata import PackageNotFoundError, version
@@ -118,7 +119,10 @@ def run_info(json_output: bool = False) -> int:
     return 0
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> None:
     """Register 'info' command parser."""
     info_parser = subparsers.add_parser(
         "info",

@@ -325,7 +325,9 @@ class SandboxService:
             from docker.types import Mount
         except ImportError:
 
-            def Mount(target, source, type="bind", **kwargs):
+            def Mount(
+                target: str, source: str, type: str = "bind", **kwargs: Any
+            ) -> dict[str, Any]:
                 """Mock Mount object for environments where docker-py is missing."""
                 return {"Target": target, "Source": source, "Type": type, **kwargs}
 
@@ -340,7 +342,7 @@ class SandboxService:
         # Ensure image first (async)
         await self.docker_factory.ensure_image()
 
-        def _blocking_run():
+        def _blocking_run() -> ExecutionResult:
             """Synchronous blocking logic for Docker container execution."""
             start_time = time.time()
             container: Container | None = None

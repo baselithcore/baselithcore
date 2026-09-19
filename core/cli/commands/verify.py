@@ -2,6 +2,7 @@
 Verify command - Check installation and dependencies.
 """
 
+import argparse
 import json as json_lib
 import sys
 from pathlib import Path
@@ -231,7 +232,10 @@ def run_verify(json_output: bool = False) -> int:
     return 0 if checks_failed == 0 else 1
 
 
-def register_parser(subparsers, formatter_class):
+def register_parser(
+    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    formatter_class: type[argparse.HelpFormatter],
+) -> None:
     """Register 'verify' command parser."""
     verify_parser = subparsers.add_parser(
         "verify",

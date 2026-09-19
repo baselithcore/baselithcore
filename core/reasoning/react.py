@@ -154,7 +154,7 @@ class ReActAgent(ToolExecutionMixin):
         self,
         tools: list[ToolDefinition] | None = None,
         max_iterations: int = 5,
-        llm_service=None,
+        llm_service: Any = None,
         system_prompt_extra: str = "",
         tool_timeout: float | None = None,
         tool_retries: int = 0,
@@ -382,10 +382,14 @@ class ReActAgent(ToolExecutionMixin):
             (m["content"] for m in messages if m.get("role") == "system"), None
         )
         try:
-            return await llm.generate_response(
+            # The LLM service is reached through an untyped lazy accessor, so
+            # bind the result before returning it rather than handing `Any`
+            # straight back from a method that promises `str`.
+            response: str = await llm.generate_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
             )
+            return response
         except Exception as exc:
             logger.error("ReAct LLM call failed: %s", exc)
             return "Final Answer: An error occurred while processing your request."
@@ -402,7 +406,7 @@ class ReActAgent(ToolExecutionMixin):
             parts.append(f"{role.capitalize()}: {content}")
         return "\n\n".join(parts)
 
-    def _get_llm_service(self):
+    def _get_llm_service(self) -> Any:
         if self._llm_service is not None:
             return self._llm_service
         try:

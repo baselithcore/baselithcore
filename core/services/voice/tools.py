@@ -19,6 +19,7 @@ from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.mcp.server import MCPServer
+    from core.services.voice.service import VoiceService
 
 logger = get_logger(__name__)
 
@@ -30,9 +31,9 @@ def register_voice_tools(server: MCPServer) -> None:
     Args:
         server: MCP server instance
     """
-    _voice_service = None
+    _voice_service: VoiceService | None = None
 
-    async def get_voice_service():
+    async def get_voice_service() -> VoiceService:
         """
         Lazy-initialize and return the VoiceService.
 

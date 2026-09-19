@@ -42,6 +42,15 @@ remain unavailable. The fallback admin credential dependency returns 404 when
 the admin router plugin is absent; it does not grant access. See the
 [Docker Core runbook](../getting-started/docker-core.md) for installation checks.
 
+!!! info "The site root `/`"
+    No route is registered at `/`, so the bare hostname answers `404`: the
+    homepage of an installation is one of the plugin SPAs it loaded, which the
+    framework cannot guess. Setting `BASELITH_ROOT_REDIRECT` to a
+    site-relative path (e.g. `/<plugin>/`) makes `GET /` and `HEAD /` answer a
+    `307` to it; anything that is not such a path — an absolute URL, a
+    protocol-relative `//host`, a backslash, an embedded newline, or `/`
+    itself — fails the boot instead of becoming an open redirect.
+
 ---
 
 ## API Versioning
@@ -57,6 +66,30 @@ POST /v1/chat     # versioned alias — pin new clients here
 Both resolve to the same handler, so versioning is **additive** and breaks no
 existing client. Set `API_V1_ENABLED=false` to disable the aliases. HTML/admin,
 plugin-management, Backstage, and discovery routes are not versioned.
+
+---
+
+## Browser clients (CORS)
+
+Only the origins listed in `ALLOW_ORIGINS` may call the API from a browser;
+the default is empty, which blocks every cross-origin request — the right
+posture for an API with no browser front end. Credentials are allowed for a
+concrete origin list and disabled under the `*` wildcard, which is the
+standard rule (a wildcard and credentials cannot be combined).
+
+Three response headers are **exposed** to the calling script, since a browser
+cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
+report), `Idempotency-Replayed` and `Retry-After`.
+
+A preflight answer stays cacheable in the browser for **7200 seconds**. The
+framework default is Starlette's 600s, at which a dashboard making
+credentialed JSON calls re-asks `OPTIONS` for every distinct URL every ten
+minutes — a full round trip that gates the real request. 7200s is the ceiling
+Chromium honours (Firefox allows up to 86400). The price is latency on a
+policy change: a browser tab that is already open picks up an edited
+`ALLOW_ORIGINS`, method or header list within two hours rather than ten
+minutes, so widen the lists before you need them and treat narrowing as a
+change that reaches clients slowly.
 
 ---
 
@@ -491,7 +524,12 @@ neither gates readiness. Results are cached (~30s).
     Each names its own auditable opt-out in the failure message. A pod
     crash-looping with one of those errors is not an outage to route around;
     it is the framework refusing to serve behind a perimeter that is not
-    there.
+    there. A fourth check refuses the boot for a different reason:
+    `LLM_PREFLIGHT` (`core.services.llm.preflight`, `auto` = strict in
+    production) validates that the deployment will serve from the provider it
+    thinks it will — a configuration that never set `LLM_PROVIDER` inherits
+    the package default and answers every request from a local model on that
+    pod, successfully, which is exactly why nothing downstream reports it.
 
 ---
 

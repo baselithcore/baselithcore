@@ -27,13 +27,12 @@ lose that tenant's working set, which is worse than holding a bounded buffer.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from core.context import get_current_tenant_id
 
 __all__ = ["TenantScopedState", "current_memory_tenant"]
 
-T = TypeVar("T")
 
 #: Where the per-object container map is stashed. Deliberately *not* the name
 #: of any descriptor, so a data descriptor can never shadow its own storage.
@@ -60,7 +59,7 @@ def current_memory_tenant() -> str:
     return get_current_tenant_id()
 
 
-class TenantScopedState(Generic[T]):
+class TenantScopedState[T]:
     """Expose a per-tenant container under one ordinary attribute name.
 
     Assign an instance at class level in place of what used to be an instance

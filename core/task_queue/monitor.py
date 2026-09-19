@@ -101,7 +101,8 @@ class WorkerMonitor:
 
     def get_worker_count(self) -> int:
         """Get number of active workers."""
-        return Worker.count(connection=self._conn)
+        # RQ ships no py.typed, so `Worker.count` is `Any`.
+        return int(Worker.count(connection=self._conn))
 
     def get_queue_info(self, queue_name: str) -> QueueInfo | None:
         """Get information about a specific queue."""

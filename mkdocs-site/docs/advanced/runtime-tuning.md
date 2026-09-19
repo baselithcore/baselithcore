@@ -16,6 +16,9 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | Upper bound on how long a captured response is replayable for a given key; bearer-token replays are additionally capped by the token's own `exp` / the access-token lifetime. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS` | `false` | API | Allow replay for callers presenting **no** credential, bucketed per source address. Off by default: such callers would otherwise share one bucket and could replay each other's responses (see below). |
+| `UVICORN_KEEP_ALIVE` | `75` | API (all three entry points) | Seconds an idle client connection is kept open. uvicorn's own default is 5s — *shorter* than the upstream idle timeout of nginx, ALB and Envoy (60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep it longer than your proxy's. |
+| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30` | API (all three entry points) | Seconds to drain in-flight requests and streams on `SIGTERM` before lifespan teardown. Keep it **below** the orchestrator's termination grace (Kubernetes default 30s; the Helm chart sets 45s). |
+| `UVICORN_LIMIT_CONCURRENCY` | unset (no limit) | API (all three entry points) | Load shedding: above this many concurrent connections/tasks uvicorn answers `503` immediately instead of queueing work until the client or the proxy times out — an explicit "over capacity" the proxy and the HPA can act on, where unbounded queueing shows up as latency collapse across every request. Size it from a load test against one replica; leave unset to keep uvicorn's default. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
 | `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
@@ -119,6 +122,13 @@ response (or one larger than `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES`) is forwarded
 chunk by chunk and never cached. A concurrent duplicate still in flight gets
 `409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
+
+The check that runs before every keyed request — replay a stored response, or
+claim the in-flight lock — is **one atomic Redis round trip** (a Lua script,
+registered once per process, in `core/middleware/_idempotency_store.py`). It
+used to be a `GET` followed by a `SET NX`, plus a third `GET` when the lock was
+held to cover the gap between the two; inside one script there is no gap, so
+the hot path costs a single Redis latency and the `409` needs no re-check.
 
 Replay is **credential-scoped**: the storage key includes a hash of the raw
 `Authorization`/`X-API-Key` header, because the middleware replays *before*

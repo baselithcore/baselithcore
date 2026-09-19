@@ -135,6 +135,16 @@ LLM_ERRORS_TOTAL = Counter(
     "Total number of LLM errors.",
     ["model", "error_type"],
 )
+# A chain that quietly carries production traffic looks exactly like a healthy
+# primary: the request still returns 200, and the only trace is a warning in a
+# log nobody greps. This is the alertable signal — inference moving to another
+# provider (often a local one, on whichever host happens to run it) is an
+# operational event, not an implementation detail.
+LLM_FALLBACK_SERVED_TOTAL = Counter(
+    "mas_llm_fallback_served_total",
+    "LLM calls answered by a fallback stage instead of the configured primary.",
+    ["primary", "served_by", "path"],  # path: text/structured/messages/stream
+)
 
 # === Plugin Metrics ===
 PLUGIN_LOAD_TOTAL = Counter(
@@ -255,6 +265,7 @@ __all__ = [
     "LLM_TOKENS_TOTAL",
     "LLM_LATENCY_SECONDS",
     "LLM_ERRORS_TOTAL",
+    "LLM_FALLBACK_SERVED_TOTAL",
     # Plugin
     "PLUGIN_LOAD_TOTAL",
     "PLUGIN_CALL_LATENCY_SECONDS",

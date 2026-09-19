@@ -153,6 +153,7 @@ def account_turn(
     result: LLMResult,
     input_tokens: int,
     started: float,
+    provider: str | None = None,
 ) -> Usage:
     """Book one completed turn against every per-request ledger and the span.
 
@@ -167,6 +168,9 @@ def account_turn(
         result: What came back (or what is known of it, for a refusal).
         input_tokens: The prompt estimate already booked pre-call.
         started: ``time.perf_counter()`` at the start of the call.
+        provider: The provider that actually served it, when a fallback stage
+            did. Defaults to the configured one — which is right only when no
+            failover happened, and mislabels every Gen AI metric when it did.
 
     Returns:
         Usage: The billed four-bucket record, for the caller's remaining
@@ -192,7 +196,7 @@ def account_turn(
     if service.cost_tracker:
         service.cost_tracker.track_tokens(output_tokens, model=model)
     record_genai_metrics(
-        gen_ai_system(service.config.provider),
+        gen_ai_system(provider or service.config.provider),
         model,
         input_tokens=billed.input_tokens,
         output_tokens=billed.output_tokens,

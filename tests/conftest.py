@@ -12,6 +12,29 @@ os.environ["SECRET_KEY"] = (
 )
 os.environ["ALLOW_ORIGINS"] = '["http://testserver"]'
 
+# === Deterministic LLM posture for the whole suite ===
+# The suite used to inherit the developer's own ``.env``: whichever provider,
+# key and endpoint happened to be on the machine. That makes a green run mean
+# different things on different machines, and — on any host that runs Ollama —
+# lets a test that slipped past its mocks perform REAL local inference and pass
+# because of it. Pin the posture instead, before any settings class binds:
+#
+# * a keyless provider, so constructing a service never needs a credential;
+# * an endpoint on the discard port, so a call that escapes its mock fails in
+#   microseconds against nothing instead of quietly using a real model;
+# * no fallback chain, so failover is only ever exercised by tests that ask
+#   for it explicitly.
+os.environ["LLM_PROVIDER"] = "ollama"
+os.environ["LLM_MODEL"] = "llama3.2"
+os.environ["LLM_FALLBACK_CHAIN"] = ""
+os.environ["LLM_PREFLIGHT"] = "off"
+# Deliberately NOT ``OLLAMA_HOST``: it is the last resort inside
+# ``api_base_for``, and pinning it would change the very resolution order the
+# endpoint tests assert on. The dedicated variable outranks it anyway.
+os.environ["LLM_OLLAMA_API_BASE"] = "http://127.0.0.1:9"
+os.environ["VISION_PROVIDER"] = "openai"
+os.environ["VISION_OLLAMA_HOST"] = "http://127.0.0.1:9"
+
 
 # Fallback body
 
@@ -141,6 +164,49 @@ class DummyService:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_local_inference(request):
+    """Fail loudly instead of quietly running a real local model.
+
+    The endpoint pinned above already points at nothing, but a developer host
+    with ``OLLAMA_HOST`` exported, or a test that builds its own client, can
+    still reach a real server — and a test that silently performs local
+    inference passes for the wrong reason, slowly, and only on the machines
+    that have the model. This makes that a named failure.
+
+    Opt out with ``@pytest.mark.real_llm`` for a test that means it.
+
+    Patches by hand rather than through ``monkeypatch``: requesting that
+    fixture from an autouse one instantiates it earlier than the test's own
+    use of it, which moves its undo to after the asyncio runner tears the event
+    loop down. A test that patched ``time.monotonic`` with a finite
+    ``side_effect`` then had the loop's own clock call consume an exhausted
+    mock, and failed in teardown for a reason that had nothing to do with it.
+    """
+    if request.node.get_closest_marker("real_llm"):
+        yield
+        return
+    try:
+        import ollama
+    except ImportError:
+        yield
+        return
+
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            "a real Ollama client was constructed in a unit test: patch the "
+            "provider, or mark the test with @pytest.mark.real_llm"
+        )
+
+    original = getattr(ollama, "AsyncClient", None)
+    ollama.AsyncClient = _refuse
+    try:
+        yield
+    finally:
+        if original is not None:
+            ollama.AsyncClient = original
+
+
+@pytest.fixture(autouse=True)
 def silence_telemetry(monkeypatch):
     """Placeholder fixture for telemetry silencing (not needed for core tests)."""
     yield
@@ -217,21 +283,29 @@ async def cleanup_global_state_between_tests():
         from core.events import reset_event_bus
         from core.events.listener import EventListener
 
-        # Close and reset global LLM service
+        # Close and reset the global LLM service, if one was ever built.
+        #
+        # Deliberately NOT ``get_llm_service()``: that CREATES the singleton on
+        # demand, so a teardown asking "is there anything to close" built a
+        # provider client for the sole purpose of closing it — in a test that
+        # never touched the LLM at all. Two things follow from that, both of
+        # them seen: constructing it can fail for reasons belonging to no test
+        # in particular, and awaiting its close consumes the event loop's clock,
+        # which a test that patched ``time.monotonic`` with a finite
+        # side_effect has already spent. Read the singleton instead.
         try:
             import asyncio
 
-            from core.services.llm.service import get_llm_service, reset_llm_service
+            from core.services.llm import runtime as _llm_runtime
 
-            # Use a short timeout to prevent hanging
-            svc = get_llm_service()
-            if svc:
+            svc = _llm_runtime._default_service
+            if svc is not None:
                 try:
                     await asyncio.wait_for(svc.close(), timeout=1.0)
-                except Exception:
+                except BaseException:
                     pass
-            reset_llm_service()
-        except ImportError:
+            _llm_runtime.reset_llm_service()
+        except BaseException:
             pass
 
         reset_event_bus()

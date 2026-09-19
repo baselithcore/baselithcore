@@ -7,6 +7,7 @@ Replaces legacy core/vectorstore/indexing.py with DI-based approach.
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from core.config import get_processing_config, get_vectorstore_config
@@ -49,10 +50,10 @@ class IndexingService:
 
     def __init__(
         self,
-        vectorstore_service=None,
-        embedder=None,
-        config=None,
-    ):
+        vectorstore_service: Any = None,
+        embedder: Any = None,
+        config: Any = None,
+    ) -> None:
         """
         Initialize IndexingService.
 
@@ -112,14 +113,14 @@ class IndexingService:
         return len(self._indexed_items)
 
     @property
-    def vectorstore(self):
+    def vectorstore(self) -> Any:
         """Lazy load the vector store service."""
         if self._vectorstore is None:
             self._vectorstore = get_vectorstore_service()
         return self._vectorstore
 
     @property
-    def embedder(self):
+    def embedder(self) -> Any:
         """Lazy load the configured embedder."""
         if self._embedder is None:
             self._embedder = get_embedder(self._config.embedding_model)
@@ -372,7 +373,7 @@ class IndexingService:
         )
         self._registry_version += 1
 
-    async def _iter_source_items(self, source):
+    async def _iter_source_items(self, source: Any) -> AsyncIterator[Any]:
         """
         Safely iterate over items from a source, supporting sync and async iterators.
 

@@ -6,8 +6,7 @@ for the process lifetime, so NIS2/DORA incident records are lost on restart.
 This module adds opt-in, file-based SQLite stores that persist each incident as
 a JSON blob keyed by its id, so a cold start rehydrates the full record set.
 
-SQLite (stdlib :mod:`sqlite3`) is chosen deliberately — the same rationale as
-:mod:`plugins.baselithmed.persistence`:
+SQLite (stdlib :mod:`sqlite3`) is chosen deliberately:
 
     * it is in the Python standard library — zero new dependencies, no infra;
     * incident writes are low-volume (a handful per incident lifecycle), well
@@ -77,7 +76,7 @@ class _SQLiteJsonStore:
         blob = json.dumps(payload, sort_keys=True)
         with self._lock:
             self._conn.execute(
-                f"INSERT INTO {self._TABLE} (id, data) VALUES (?, ?) "  # nosec B608
+                f"INSERT INTO {self._TABLE} (id, data) VALUES (?, ?) "  # noqa: S608  # nosec B608
                 "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                 (key, blob),
             )
@@ -85,7 +84,7 @@ class _SQLiteJsonStore:
     def _fetch[T](self, key: str, factory: Callable[[dict[str, Any]], T]) -> T | None:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {self._TABLE} WHERE id = ?",  # nosec B608
+                f"SELECT data FROM {self._TABLE} WHERE id = ?",  # noqa: S608  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
@@ -94,7 +93,7 @@ class _SQLiteJsonStore:
     def _fetch_all[T](self, factory: Callable[[dict[str, Any]], T]) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT data FROM {self._TABLE} ORDER BY id ASC"  # nosec B608
+                f"SELECT data FROM {self._TABLE} ORDER BY id ASC"  # noqa: S608  # nosec B608
             )
             rows = cur.fetchall()
         return [factory(json.loads(r[0])) for r in rows]

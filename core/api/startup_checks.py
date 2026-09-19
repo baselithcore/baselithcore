@@ -308,6 +308,15 @@ async def run_startup_health_checks() -> None:
         except Exception as exc:
             logger.warning("Could not verify migration status: %s", type(exc).__name__)
 
+    # Which provider will actually serve, and can it. Unlike the probes above
+    # this one can *stop* a rollout (strict mode), because the failure it
+    # catches has no runtime symptom: a deployment that never named a provider
+    # inherits a local default and serves from whatever is installed on the
+    # host, successfully, at a cost that appears in no ledger.
+    from core.services.llm.preflight import run_llm_preflight
+
+    await run_llm_preflight()
+
 
 def start_retention_scheduler(app: Any) -> None:
     """Start the background DSR retention sweep when configured (Art. 5(1)(e)).

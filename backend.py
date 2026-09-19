@@ -18,6 +18,12 @@ app = create_app()
 HOST = _app_config.host
 PORT = _app_config.port
 
+
+def _optional_int(raw: str | None) -> int | None:
+    """``int`` of a non-empty env value, else ``None`` (uvicorn's "unset")."""
+    return int(raw) if raw and raw.strip() else None
+
+
 # === Direct startup (if not running uvicorn from CLI) ===
 if __name__ == "__main__":
     core_config = get_core_config()
@@ -44,4 +50,15 @@ if __name__ == "__main__":
         # cleanup before the supervisor SIGKILLs (k8s default grace: 30s).
         # Same env knob as the container CMD, so tuning it once covers both.
         timeout_graceful_shutdown=int(os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "30")),
+        # Same two knobs the container CMD honours, so `python backend.py`
+        # behind the same proxy behaves the same. uvicorn's own 5s keep-alive
+        # is shorter than every common proxy's upstream idle timeout (nginx,
+        # ALB, Envoy: 60s), so the proxy reused sockets this process had
+        # already closed and surfaced sporadic 502s — the image fixed that
+        # with 75s, and this entry point did not. UVICORN_LIMIT_CONCURRENCY
+        # is load-shedding: above that many concurrent connections/tasks
+        # uvicorn answers 503 at once instead of queueing until the client
+        # or proxy times out; unset keeps uvicorn's default (no limit).
+        timeout_keep_alive=int(os.getenv("UVICORN_KEEP_ALIVE", "75")),
+        limit_concurrency=_optional_int(os.getenv("UVICORN_LIMIT_CONCURRENCY")),
     )

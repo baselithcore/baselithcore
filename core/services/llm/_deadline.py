@@ -16,14 +16,11 @@ LLMService callers.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable
-from typing import TypeVar
 
 __all__ = ["await_within_deadline", "stream_within_deadline"]
 
-T = TypeVar("T")
 
-
-async def await_within_deadline(awaitable: Awaitable[T]) -> T:
+async def await_within_deadline[T](awaitable: Awaitable[T]) -> T:
     """Await ``awaitable``, bounded by the ambient budget's remaining time.
 
     A deadline overrun cancels the underlying call (freeing its connection)
@@ -48,7 +45,7 @@ async def await_within_deadline(awaitable: Awaitable[T]) -> T:
         raise BudgetExceededError("max_seconds", budget.snapshot()) from None
 
 
-async def stream_within_deadline(stream: AsyncIterator[T]) -> AsyncIterator[T]:
+async def stream_within_deadline[T](stream: AsyncIterator[T]) -> AsyncIterator[T]:
     """Yield from ``stream``, each chunk bounded by the budget's remaining time.
 
     The streaming path historically bypassed deadline enforcement: a stalled
@@ -77,7 +74,11 @@ async def stream_within_deadline(stream: AsyncIterator[T]) -> AsyncIterator[T]:
         if remaining is not None and remaining <= 0:
             raise BudgetExceededError("max_seconds", budget.snapshot())
         try:
-            item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+            # The `yield` below is deliberately OUTSIDE this block: a yield
+            # suspended inside an active `asyncio.timeout` lets the deadline
+            # fire while another task holds the event loop.
+            async with asyncio.timeout(remaining):
+                item = await iterator.__anext__()
         except StopAsyncIteration:
             return
         except TimeoutError:
