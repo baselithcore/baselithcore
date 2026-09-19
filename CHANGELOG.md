@@ -5,6 +5,28 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.36.0](https://github.com/baselithcore/baselithcore/compare/v0.35.1...v0.36.0) (2026-09-19)
+
+
+### Bug Fixes
+
+* **cli:** let a failed marketplace command fail ([8472256](https://github.com/baselithcore/baselithcore/commit/8472256abaa3338b84aed846512f8134272d72fc))
+* **cli:** let the CLI own its logging, and re-record the demos it exposed ([3ff8699](https://github.com/baselithcore/baselithcore/commit/3ff86996a52b391977a00be9a18e45eb11c73029))
+* **core:** make the synchronous chat stream actually synchronous ([a19486a](https://github.com/baselithcore/baselithcore/commit/a19486a8ccff9d37adc032da41d320d7f18e8fba))
+* **graph:** give the synchronous query surface a synchronous cache ([20bfc0b](https://github.com/baselithcore/baselithcore/commit/20bfc0bd538158067b942fd05512571ca59faea3))
+
+
+### Features
+
+* **core:** export logs over OTLP, select the wire protocol, modernise packaging ([19ed13e](https://github.com/baselithcore/baselithcore/commit/19ed13ee7a2cc4e9520609dbcee2979de4989e1c))
+* **core:** let a deployment name the landing its root redirects to ([9ecf32e](https://github.com/baselithcore/baselithcore/commit/9ecf32eccfa62290d396683c4fa554cdb24cf1c3))
+* **core:** make LLM failover explicit, accountable and checked at startup ([4586a27](https://github.com/baselithcore/baselithcore/commit/4586a27063dbecb686d78cabf187d69885e7f05d))
+
+
+### Performance Improvements
+
+* **core,deploy:** one Redis round trip per idempotent request, and knobs an operator can see ([400f204](https://github.com/baselithcore/baselithcore/commit/400f20417288428f77379f979244471102cd5f1f))
+
 ## [0.35.1](https://github.com/baselithcore/baselithcore/compare/v0.35.0...v0.35.1) (2026-09-18)
 
 
