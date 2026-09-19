@@ -228,7 +228,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
-runs **8,791 tests** behind a **78% branch-coverage floor**, strict typing,
+runs **8,924 tests** behind a **78% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates. Report vulnerabilities through
 [SECURITY.md](SECURITY.md); release history lives in [CHANGELOG.md](CHANGELOG.md).
 
