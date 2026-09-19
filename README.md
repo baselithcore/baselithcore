@@ -19,7 +19,7 @@
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/baselithcore/baselithcore/main/media/demo-install.gif"
-       alt="Installing BaselithCore from PyPI and bootstrapping a project with the CLI — two commands"
+       alt="Installing BaselithCore from PyPI into a fresh virtualenv, then scaffolding a project with the CLI — empty directory to running skeleton"
        width="900">
 </p>
 
@@ -100,7 +100,7 @@ curl --fail http://localhost:8000/health
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/baselithcore/baselithcore/main/media/demo-runtime.gif"
-       alt="The Compose stack coming up — API, PostgreSQL, FalkorDB and Qdrant all healthy, /health answering ok"
+       alt="The Compose stack coming up — the api, postgres, redis and qdrant containers each reaching Healthy, then /health answering ok"
        width="900">
 </p>
 

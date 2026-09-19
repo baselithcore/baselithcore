@@ -7,6 +7,16 @@
 # point is that a bare Python 3.12 plus uv is enough. Set DEMO_INSTALLER=pip to
 # record the same demo through pip instead.
 #
+# "No project environment active" has to be enforced, not assumed: uv picks the
+# interpreter it can see, so a recording made from an active conda env put that
+# env's path on screen — the demo claiming a bare Python while showing the
+# project's own. Record it with the environment scrubbed and uv restricted to
+# its own managed interpreters, which is what a newcomer actually has:
+#
+#   uv python install 3.12
+#   env -u CONDA_PREFIX -u CONDA_DEFAULT_ENV -u VIRTUAL_ENV \
+#       UV_PYTHON_PREFERENCE=only-managed python3 media/record.py 100 30 ...
+#
 #   python media/record.py 100 30 \
 #       asciinema rec --overwrite -c "./media/demo-install.sh" media/demo-install.cast
 #   agg --font-size 16 --speed 6 --idle-time-limit 0.6 --fps-cap 6 \

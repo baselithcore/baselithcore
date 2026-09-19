@@ -222,6 +222,48 @@ def _debug_log(msg: str) -> None:
         print(f"[baselith-cli] {msg}", file=sys.stderr)
 
 
+def _configure_cli_logging() -> None:
+    """Take ownership of logging for the CLI process.
+
+    ``CoreConfig`` deliberately does not configure logging — it leaves that to
+    whoever owns the process (see the comment in ``core/config/base.py``). The
+    API entry point does it through ``core.observability.setup``; the CLI did
+    not do it at all, so structlog stayed at its unconfigured default. Every
+    command printed library DEBUG records ahead of its own output::
+
+        ❯ baselith plugin validate my_plugin
+        2026-09-18 16:52:47 [debug    ] CacheMetricsCollector initialized
+        2026-09-18 16:52:47 [debug    ] Created metrics for cache '...'
+
+    and ``LOG_LEVEL_CONSOLE`` did nothing, because nothing ever read it.
+
+    A CLI's stdout is a UI — tables, panels, prompts — so the default here is
+    WARNING rather than the INFO the config carries for a server: an operator
+    who wants the chatter asks for it, and gets exactly the level they named.
+    ``log_json`` is treated the same way. ``model_fields_set`` is what makes
+    "the operator chose INFO" distinguishable from "nobody said anything and
+    the field defaults to INFO".
+    """
+    try:
+        from core.config import get_app_config
+        from core.observability.logging import configure_logging
+
+        config = get_app_config()
+        explicit = config.model_fields_set
+        configure_logging(
+            level=(
+                config.log_level_console
+                if "log_level_console" in explicit
+                else "WARNING"
+            ),
+            json_output=config.log_json if "log_json" in explicit else False,
+        )
+    except Exception as e:
+        # A CLI that cannot set up logging must still run its command; the
+        # only cost is the noise this function exists to remove.
+        _debug_log(f"failed to configure logging: {e!r}")
+
+
 def _inject_global_format(parser: argparse.ArgumentParser) -> None:
     """Allow ``--format`` on every (sub)command, at any nesting depth.
 
@@ -255,6 +297,11 @@ def main() -> int:
     # ``plugins/`` resolves from the checkout via pkgutil.extend_path while
     # ``core.*`` stays on the old wheel.
     ensure_checkout_precedence()
+
+    # Before any command module can emit a record: importing them is itself
+    # enough to log (cache metrics register at import time), so this has to
+    # happen ahead of the registration loop below, not next to the dispatch.
+    _configure_cli_logging()
 
     current_version = _get_version()
 

@@ -7,12 +7,20 @@
 #
 #   python media/record.py 100 30 \
 #       asciinema rec --overwrite -c "./media/demo-runtime.sh" media/demo-runtime.cast
-#   agg --font-size 18 --speed 2 --idle-time-limit 0.8 --fps-cap 10 \
+#   agg --font-size 18 --speed 8 --idle-time-limit 0.8 --fps-cap 10 \
 #       media/demo-runtime.cast media/demo-runtime.gif
 #
 # Record it with the images already pulled and the API image already built —
 # a cold first build takes minutes and belongs in the docs, not in a GIF. Do a
 # full `baselith up` once by hand before recording.
+#
+# Bring the stack DOWN first, and move configs/.env.docker.core aside. Recorded
+# over an already-running stack the demo opens on two no-ops — `setup` reports
+# "already aligned" and every container is "Running" before Compose starts —
+# which shows a viewer nothing. From a cold start `setup` writes the file it
+# exists to write, and the containers are actually created and turn Healthy.
+# That takes about 100 seconds of real time, which is why the speed above is 8
+# rather than the 2 that suited the old warm recording.
 #
 # Set DEMO_TEARDOWN=0 to leave the stack running when the demo ends. When the
 # default host ports are taken by another stack, export BASELITH_HTTP_PORT,
@@ -33,6 +41,13 @@ command -v docker >/dev/null 2>&1 || {
 }
 command -v baselith >/dev/null 2>&1 || {
     echo "baselith is not on PATH — activate the environment that provides it." >&2
+    exit 1
+}
+# The last command pipes /health into jq. Without it the recording ends on an
+# empty frame instead of the response, which is the one thing the demo exists
+# to show — so refuse up front rather than record a silent failure.
+command -v jq >/dev/null 2>&1 || {
+    echo "jq is required — the demo pipes /health through it." >&2
     exit 1
 }
 [[ -f $COMPOSE_FILE ]] || {

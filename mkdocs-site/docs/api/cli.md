@@ -71,6 +71,28 @@ The framework supports global flags that modify the behavior of all commands.
 !!! tip "JSON for CI/CD"
     When using `--format json`, all logical output is emitted as a single JSON object to `stdout`. This is the professional standard for automation and pipeline integration. `--format` is the only output-shaping global flag — there is no global `--verbose` flag.
 
+### Log verbosity
+
+A command's output is a user interface — tables, panels, prompts — so the CLI
+configures logging for itself and keeps the console at `WARNING`. Library log
+records stay out of the way of what you asked for.
+
+Two environment variables override that, and are read from the environment or
+`.env`:
+
+| Variable            | Effect                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `LOG_LEVEL_CONSOLE` | Set the console level explicitly — `DEBUG` to see the framework's own records, `ERROR` to see almost nothing. Naming `INFO` gets you `INFO`; leaving it unset gets you `WARNING`, not the `INFO` a server defaults to. |
+| `LOG_JSON`          | `true` renders those records as JSON instead of the readable console format. Unset means readable, whatever a server-side configuration would do. |
+
+```bash
+baselith plugin validate my_plugin                      # just the report
+LOG_LEVEL_CONSOLE=DEBUG baselith plugin validate my_plugin   # and the plumbing
+```
+
+This is separate from `--format`: `--format json` shapes the command's *result*,
+`LOG_JSON` shapes the *log records* around it.
+
 ---
 
 ## General
