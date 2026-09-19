@@ -231,6 +231,11 @@ def _run_preflight(
             "startup on these checks.[/dim]"
         )
     if not failures:
+        # A failed check that is only a warning would otherwise vanish: the
+        # panels below print blocking failures, and nothing else on the startup
+        # path mentions it. Silence is how a degraded feature becomes a
+        # surprise later, so say it once, in yellow, and keep booting.
+        _print_non_blocking(checks, service_failures)
         return 0
 
     _print_preflight_panel(
@@ -244,6 +249,30 @@ def _run_preflight(
     )
     console.print("[dim]Use `baselith run --skip-preflight` only for debugging.[/dim]")
     return 1
+
+
+def _print_non_blocking(
+    checks: "Sequence[CheckResult]",
+    already_reported: "Sequence[CheckResult]",
+) -> None:
+    """Report failed checks that are warnings, once, without blocking boot."""
+    reported = {id(check) for check in already_reported}
+    warnings = [
+        check
+        for check in checks
+        if not check.passed and check.severity != "fail" and id(check) not in reported
+    ]
+    if not warnings:
+        return
+    _print_preflight_panel(
+        warnings,
+        title="[bold yellow]Startup preflight warnings[/bold yellow]",
+        border_style="yellow",
+    )
+    console.print(
+        "[dim]These do not block startup. The features behind them are "
+        "degraded until fixed — run `baselith doctor` for the full report.[/dim]"
+    )
 
 
 def _is_connectivity_check(check: "CheckResult") -> bool:

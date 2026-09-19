@@ -299,7 +299,11 @@ cannot: *will this deployment serve from what it thinks it will?* It reports
   — primary, chain stage and the separately-configured vision provider — is
   probed with `GET /api/tags`, and a model that is not installed is named. It
   is never pulled: several gigabytes is an operator's decision, not a boot
-  step.
+  step. Severity follows the dependency, not the check: a gap on the inference
+  path — the primary, a chain stage — blocks the boot, while one only the
+  vision provider asks for is reported as a warning and the deployment starts.
+  A model no request routes to must not cost a deployment everything it serves,
+  which under `Restart=always` is what a fatal check amounts to.
 
 `auto` (the default) raises in a production environment and warns elsewhere;
 `warn`, `strict` and `off` force the behaviour. It **never calls a hosted

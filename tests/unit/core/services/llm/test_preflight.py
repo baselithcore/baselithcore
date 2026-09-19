@@ -171,6 +171,84 @@ class TestLocalEndpointFindings:
             findings = await check_local_endpoints(config)
         assert any("llava:7b" in f.message for f in findings)
 
+    async def test_a_missing_vision_model_warns_instead_of_blocking(self):
+        """Vision is one feature; the boot it used to stop serves every other.
+
+        On 2026-09-19 a deployment crash-looped for hours because `llava:7b`
+        had been removed from the Ollama host it pointed at — while nothing
+        running there used vision at all.
+        """
+        from core.config import multimodal
+
+        config = _config(provider="openai", model="gpt-4o-mini")
+        multimodal._vision_config = multimodal.VisionConfig(
+            _env_file=None,
+            provider="ollama",
+            ollama_model="llava:7b",
+            ollama_url="http://localhost:11434",
+        )
+        with patch(
+            "core.services.llm.preflight.probe_ollama",
+            AsyncMock(return_value={"mistral:latest"}),
+        ):
+            findings = await check_local_endpoints(config)
+        assert "ollama_vision_model_missing" in _codes(findings)
+        assert [f.severity for f in findings] == ["warning"]
+
+    async def test_an_unreachable_vision_only_endpoint_warns(self):
+        from core.config import multimodal
+
+        config = _config(provider="openai", model="gpt-4o-mini")
+        multimodal._vision_config = multimodal.VisionConfig(
+            _env_file=None,
+            provider="ollama",
+            ollama_model="llava:7b",
+            ollama_url="http://vision-box:11434",
+        )
+        with patch(
+            "core.services.llm.preflight.probe_ollama", AsyncMock(return_value=None)
+        ):
+            findings = await check_local_endpoints(config)
+        assert "ollama_vision_unreachable" in _codes(findings)
+        assert [f.severity for f in findings] == ["warning"]
+
+    async def test_a_missing_primary_model_still_blocks(self):
+        """The model that answers every request is not an optional feature."""
+        config = _config(provider="ollama", model="llama3.2")
+        with patch(
+            "core.services.llm.preflight.probe_ollama",
+            AsyncMock(return_value={"mistral:latest"}),
+        ):
+            findings = await check_local_endpoints(config)
+        assert [f.severity for f in findings] == ["error"]
+
+    async def test_a_model_shared_with_the_primary_still_blocks(self):
+        """Vision reusing the primary's endpoint and model stays blocking.
+
+        Both are resolved rather than written out: ``ollama_url`` only binds
+        through its ``VISION_OLLAMA_HOST`` alias, and a stray ``OLLAMA_HOST``
+        moves the primary — hardcoding either would quietly compare two
+        unrelated targets and prove nothing.
+        """
+        from core.config import multimodal
+        from core.services.llm.preflight import DEFAULT_OLLAMA_ENDPOINT
+        from core.services.llm.runtime import api_base_for
+
+        config = _config(provider="ollama", model="llama3.2")
+        shared = api_base_for(config, "ollama") or DEFAULT_OLLAMA_ENDPOINT
+        with patch.dict(os.environ, {"VISION_OLLAMA_HOST": shared}):
+            multimodal._vision_config = multimodal.VisionConfig(
+                _env_file=None, provider="ollama", ollama_model="llama3.2"
+            )
+        assert multimodal._vision_config.ollama_url == shared
+
+        with patch(
+            "core.services.llm.preflight.probe_ollama",
+            AsyncMock(return_value={"mistral:latest"}),
+        ):
+            findings = await check_local_endpoints(config)
+        assert [f.severity for f in findings] == ["error"]
+
     async def test_a_hosted_only_deployment_probes_nothing(self):
         config = _config(provider="openai", model="gpt-4o-mini")
         with patch("core.services.llm.preflight.probe_ollama", AsyncMock()) as probe:
