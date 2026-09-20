@@ -35,6 +35,14 @@ graph TB
 
 Abstraction for language model providers.
 
+!!! info "Provider SDKs are imported on demand"
+    `core.services.llm.provider_factory` imports a provider client inside the branch that builds it, never at module scope. A deployment configures one provider; importing this module used to import the anthropic, openai, ollama and huggingface clients in order to construct exactly one of them, costing 0.38 s and roughly 1 800 modules on every path that reached the service.
+
+In tests, patch a provider where it is **defined** —
+`core.services.llm.providers.openai_provider.OpenAIProvider` — not as an
+attribute of the factory, which no longer has one. See
+[import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
+
 ### LLM Structure
 
 ```text

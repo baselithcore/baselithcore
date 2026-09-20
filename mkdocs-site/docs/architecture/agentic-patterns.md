@@ -9,6 +9,14 @@ BaselithCore implements **20+ agentic design patterns** organized into 7 categor
 
 ## Pattern Overview
 
+!!! info "Importing a primitive is cheap"
+    `core.orchestration` resolves its exports on first access, so reaching one
+    primitive — `AutonomyPolicy`, `LoopBudget`, a checkpoint store — no longer
+    imports the whole handler graph and the LLM service behind it. The map
+    below still describes what each module does; it no longer describes what
+    importing one of them costs. See
+    [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
+
 The **agentic patterns** are organized into 7 functional categories:
 
 | #   | Pattern                | Category       | Module              | Brief Description                         |
