@@ -11,7 +11,7 @@ example-plugin:
 marketplace:
   enabled: true
 my-plugin:
-  enabled: true
+  enabled: false
 baselithbot:
   enabled: true
   headless: true
