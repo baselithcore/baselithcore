@@ -107,6 +107,19 @@ async def my_operation(data: dict):
         return result
 ```
 
+!!! note "Nesting crosses tracers, not just spans"
+    `get_tracer(name)` returns one tracer per name, and every subsystem asks for
+    its own (`agent`, `llm-service`, `embedding-service`, `prompt-registry`).
+    The "current span" a new child attaches to is a **process-wide** context
+    variable shared by all of them, so a span opened under *another* tracer's
+    span is still its child and stays in the same trace. That is what makes one
+    request read as a single waterfall when the OpenTelemetry SDK is not
+    installed and the framework's own tracer is doing the work; the variable
+    still follows the task, so concurrent requests never merge. A per-tracer
+    variable would isolate the lookup by name and turn every span into the root
+    of its own single-span trace — flattening the waterfall and, with it, any
+    attribution of a model call to the agent that made it.
+
 ### How to Read a Trace in Jaeger
 
 When you open the Jaeger UI (`http://localhost:16686`), you will see:

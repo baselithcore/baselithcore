@@ -146,6 +146,31 @@ class Span:
         }
 
 
+# The span currently open in this task/thread, shared by **every** tracer.
+#
+# Two properties have to hold at once, and each one rules out the obvious
+# implementation of the other:
+#
+# * per task/thread — an instance attribute was shared by every concurrent
+#   request, so a child opened in one task took the span another task had just
+#   started as its parent, and unrelated traces merged;
+# * per process, *not* per tracer — a tracer-scoped ContextVar isolates the
+#   parent lookup by tracer name, and since every subsystem asks for its own
+#   name (``agent``, ``llm-service``, ``embedding-service``, ``prompt-registry``)
+#   nothing ever nested: every span became the root of its own single-span
+#   trace. Without the OTel SDK installed — which is the default deployment —
+#   that flattened the whole waterfall and made the agents map structurally
+#   unable to attribute an LLM call to the agent that made it, or to draw a
+#   single edge.
+#
+# One module-level ContextVar satisfies both: context still follows the task,
+# and parentage is a property of the call stack rather than of which tracer the
+# caller happened to reach for.
+_CURRENT_SPAN: ContextVar[Span | None] = ContextVar(
+    "baselith.tracer.current", default=None
+)
+
+
 class Tracer:
     """
     Tracing interface for creating and managing spans.
@@ -165,12 +190,7 @@ class Tracer:
     ) -> None:
         self._service_name = service_name
         self._exporter = exporter or ConsoleExporter()
-        # Per task/thread, not per tracer: an instance attribute was shared by
-        # every concurrent request, so a child opened in one task took the span
-        # another task had just started as its parent, and traces merged.
-        self._current: ContextVar[Span | None] = ContextVar(
-            f"baselith.tracer.{service_name}", default=None
-        )
+        self._current = _CURRENT_SPAN
         self._completed_spans: list[Span] = []
         self._enabled = True
 
