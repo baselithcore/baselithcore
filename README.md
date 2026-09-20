@@ -240,7 +240,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
-runs **8,924 tests** behind a **78% branch-coverage floor**, strict typing,
+runs **9,026 tests** behind a **78% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates.
 [GOVERNANCE.md](GOVERNANCE.md) says how decisions get made and what needs a
 proposal before code; [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every
