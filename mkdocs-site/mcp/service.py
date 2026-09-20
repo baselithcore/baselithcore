@@ -6,6 +6,16 @@ from typing import Any
 
 from core.observability.logging import get_logger
 
+from .sections import (
+    Section,
+    enclosing_section,
+    estimate_tokens,
+    find_section,
+    parse_sections,
+    preamble_end,
+    span_with_children,
+)
+
 logger = get_logger(__name__)
 
 # Words of five characters or more carry the topical signal. Shorter tokens are
@@ -17,7 +27,19 @@ _KEYWORD_RE = re.compile(r"\w{5,}")
 # in a 115-page corpus, so every document was related to every other one.
 _RELATED_MIN_SIMILARITY = 0.12
 _RELATED_LIMIT = 5
-_SEARCH_LIMIT = 10
+
+# Default number of search hits. Five named sections answer a question; ten
+# full-page hits mostly pad the context window.
+_SEARCH_LIMIT = 5
+_MAX_SEARCH_LIMIT = 20
+
+# A page above this estimated size is answered with its outline instead of its
+# body, so a single lookup cannot spend a fifth of an agent's context. The
+# caller can still ask for the whole thing explicitly.
+_PAGE_TOKEN_BUDGET = 6000
+
+_SNIPPET_BEFORE = 60
+_SNIPPET_AFTER = 140
 
 
 @dataclass
@@ -34,6 +56,7 @@ class _Doc:
     content_lower: str = field(default="", repr=False)
     title_lower: str = field(default="", repr=False)
     keywords: frozenset[str] = field(default_factory=frozenset, repr=False)
+    sections: list[Section] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
         self.content_lower = self.content.lower()
@@ -41,6 +64,22 @@ class _Doc:
         # Precomputed once per read. find_related_pages used to re-tokenize the
         # whole corpus — over two megabytes — on every single call.
         self.keywords = frozenset(_KEYWORD_RE.findall(self.content_lower))
+        self.sections = parse_sections(self.content)
+
+    @property
+    def tokens(self) -> int:
+        return estimate_tokens(self.content)
+
+    def outline(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "heading": s.title,
+                "anchor": s.anchor,
+                "level": s.level,
+                "tokens": s.tokens(self.content),
+            }
+            for s in self.sections
+        ]
 
 
 class DocsService:
@@ -65,7 +104,7 @@ class DocsService:
         """Counter that changes whenever the indexed content changes."""
         return self._revision
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Load Zensical configuration and index pages."""
         if not self.config_path.exists():
             logger.error(f"Zensical config not found at {self.config_path}")
@@ -118,7 +157,9 @@ class DocsService:
             return None
         return candidate
 
-    def _load(self, page_path: str, title: str | None = None, indexed: bool = False):
+    def _load(
+        self, page_path: str, title: str | None = None, indexed: bool = False
+    ) -> _Doc | None:
         """Read a page from disk into the cache, returning the entry or None."""
         full_path = self._resolve(page_path)
         if full_path is None or not full_path.is_file():
@@ -142,7 +183,7 @@ class DocsService:
         self._revision += 1
         return doc
 
-    def _refresh(self, page_path: str):
+    def _refresh(self, page_path: str) -> _Doc | None:
         """Return the cached page, re-reading it if the file changed on disk.
 
         The docs are edited while the server runs — that is the whole point of
@@ -182,27 +223,6 @@ class DocsService:
     # Reads
     # -------------------------------------------------------------------------
 
-    async def get_page_content(self, page_path: str) -> str | None:
-        """Read the content of a markdown page with freshness-checked caching."""
-        doc = self._refresh(page_path)
-        return doc.content if doc else None
-
-    async def get_page_by_title(self, title_query: str) -> dict[str, str] | None:
-        """Find a page by exact or partial title match."""
-        title_query = title_query.lower()
-        for page in self._pages:
-            if (
-                title_query == page["title"].lower()
-                or title_query in page["title"].lower()
-            ):
-                content = await self.get_page_content(page["path"])
-                return {
-                    "title": page["title"],
-                    "path": page["path"],
-                    "content": content or "No content available.",
-                }
-        return None
-
     def get_nav_tree(self) -> list[Any]:
         """Return the hierarchical navigation structure."""
         return self._nav_tree
@@ -211,28 +231,128 @@ class DocsService:
         """Return a list of all indexed pages."""
         return self._pages
 
-    async def get_docs_batch(self, paths: list[str]) -> dict[str, str]:
-        """Fetch multiple documentation pages in a single call."""
-        results = {}
-        for path in paths:
-            content = await self.get_page_content(path)
-            if content:
-                results[path] = content
-        return results
+    def list_pages(self, section: str | None = None) -> list[dict[str, str]]:
+        """List pages, optionally only those under one navigation section."""
+        if not section:
+            return self._pages
+        needle = section.lower()
+        return [p for p in self._pages if needle in p["title"].lower()]
 
-    def get_docs_summary(self) -> list[dict[str, str]]:
-        """Return a list of all pages with titles, paths, and short summaries."""
-        summaries = []
-        for doc in self._refresh_all():
-            snippet = doc.content[:200].strip().replace("\n", " ")
-            if len(doc.content) > 200:
-                snippet += "..."
-            summaries.append({"title": doc.title, "path": doc.path, "summary": snippet})
-        return summaries
+    async def get_page_content(self, page_path: str) -> str | None:
+        """Read the raw markdown of a page, with freshness-checked caching."""
+        doc = self._refresh(page_path)
+        return doc.content if doc else None
+
+    def get_outline(self, page_path: str) -> dict[str, Any] | None:
+        """Return a page's headings and their sizes, without its body."""
+        doc = self._refresh(page_path)
+        if doc is None:
+            return None
+        return {
+            "path": doc.path,
+            "title": doc.title,
+            "tokens": doc.tokens,
+            "lead_tokens": estimate_tokens(doc.content[: preamble_end(doc.sections)]),
+            "sections": doc.outline(),
+        }
+
+    def get_section(self, page_path: str, heading: str) -> dict[str, Any] | None:
+        """Return one section of a page, with its nested subsections."""
+        doc = self._refresh(page_path)
+        if doc is None:
+            return None
+        section = find_section(doc.sections, heading)
+        if section is None:
+            return None
+
+        start, end = span_with_children(doc.sections, section)
+        body = doc.content[start:end].strip()
+        return {
+            "path": doc.path,
+            "page_title": doc.title,
+            "heading": section.title,
+            "anchor": section.anchor,
+            "level": section.level,
+            "tokens": estimate_tokens(body),
+            "content": body,
+        }
+
+    def get_page(self, page_path: str, full: bool = False) -> dict[str, Any] | None:
+        """Return a page's body, or its outline when the body blows the budget.
+
+        A handful of pages in this site cost over twenty thousand tokens.
+        Returning the outline instead turns one ruinous call into two cheap
+        ones, and ``full=True`` is there for the times the whole page is
+        genuinely what is wanted.
+        """
+        doc = self._refresh(page_path)
+        if doc is None:
+            return None
+
+        if full or doc.tokens <= _PAGE_TOKEN_BUDGET or not doc.sections:
+            return {
+                "path": doc.path,
+                "title": doc.title,
+                "tokens": doc.tokens,
+                "content": doc.content,
+            }
+
+        return {
+            "path": doc.path,
+            "title": doc.title,
+            "tokens": doc.tokens,
+            "truncated": True,
+            "reason": (
+                f"Page is ~{doc.tokens} tokens, over the {_PAGE_TOKEN_BUDGET} "
+                "budget. Request one heading with get_doc_section, or call "
+                "again with full=true."
+            ),
+            "sections": doc.outline(),
+        }
+
+    async def get_docs_batch(
+        self, paths: list[str], full: bool = False
+    ) -> dict[str, Any]:
+        """Fetch several pages in one round trip, under the same size budget."""
+        results: dict[str, Any] = {}
+        for path in paths:
+            page = self.get_page(path, full=full)
+            if page is not None:
+                results[path] = page
+        return results
 
     # -------------------------------------------------------------------------
     # Search
     # -------------------------------------------------------------------------
+
+    def _hit(self, doc: _Doc, query_lower: str, score: int) -> dict[str, Any]:
+        """Build one search result, pinned to the section the match sits in."""
+        idx = doc.content_lower.find(query_lower)
+        if idx == -1:
+            idx = 0
+
+        start = max(0, idx - _SNIPPET_BEFORE)
+        end = min(len(doc.content), idx + _SNIPPET_AFTER)
+        snippet = doc.content[start:end].strip()
+        if start > 0:
+            snippet = f"...{snippet}"
+        if end < len(doc.content):
+            snippet = f"{snippet}..."
+
+        hit: dict[str, Any] = {
+            "title": doc.title,
+            "path": doc.path,
+            "snippet": snippet.replace("\n", " "),
+            "score": score,
+        }
+        section = enclosing_section(doc.sections, idx)
+        if section is not None:
+            # The heading is the whole point: it is what get_doc_section takes,
+            # so a hit can be read in full without pulling the page.
+            hit["heading"] = section.title
+            hit["anchor"] = section.anchor
+            hit["section_tokens"] = section.tokens(doc.content)
+        return hit
 
     def _rank(self, query: str, docs: list[_Doc]) -> list[dict[str, Any]]:
         """Score the given pages against the query, best first, untruncated."""
@@ -249,50 +369,29 @@ class DocsService:
                 score += min(50, occurrences * 5)
 
             if score > 0:
-                # Find a better snippet: first occurrence of the query
-                idx = doc.content_lower.find(query_lower)
-                if idx == -1:
-                    idx = 0
-
-                # Contextual snippet
-                start = max(0, idx - 60)
-                end = min(len(doc.content), idx + 140)
-                snippet = doc.content[start:end].strip()
-                if start > 0:
-                    snippet = f"...{snippet}"
-                if end < len(doc.content):
-                    snippet = f"{snippet}..."
-
-                results.append(
-                    {
-                        "title": doc.title,
-                        "path": doc.path,
-                        "snippet": snippet.replace("\n", " "),
-                        "score": score,
-                    }
-                )
+                results.append(self._hit(doc, query_lower, score))
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
-    async def search(self, query: str) -> list[dict[str, Any]]:
-        """Keyword search across the documentation with relevance scoring."""
-        return self._rank(query, self._refresh_all())[:_SEARCH_LIMIT]
-
-    async def search_in_section(
-        self, query: str, section_name: str
+    async def search(
+        self,
+        query: str,
+        section: str | None = None,
+        limit: int = _SEARCH_LIMIT,
     ) -> list[dict[str, Any]]:
-        """Perform a keyword search restricted to a specific documentation section.
+        """Keyword search, optionally scoped to one navigation section.
 
-        The section filter is applied to the corpus *before* ranking. Filtering
-        the global top ten instead — as this used to — returned nothing at all
-        whenever the section's best hit was not also a top-ten hit site-wide.
+        The scope is applied to the corpus *before* ranking. Filtering the
+        global top hits instead — as this used to — returned nothing at all
+        whenever a section's best hit was not also a top hit site-wide.
         """
-        section_lower = section_name.lower()
-        scoped = [
-            doc for doc in self._refresh_all() if section_lower in doc.title_lower
-        ]
-        return self._rank(query, scoped)[:_SEARCH_LIMIT]
+        docs = self._refresh_all()
+        if section:
+            needle = section.lower()
+            docs = [doc for doc in docs if needle in doc.title_lower]
+        limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
+        return self._rank(query, docs)[:limit]
 
     def find_related_pages(self, path: str) -> list[dict[str, Any]]:
         """Find pages related to the target path using keyword overlap analysis."""
@@ -314,7 +413,6 @@ class DocsService:
                         "title": doc.title,
                         "path": doc.path,
                         "score": round(similarity, 4),
-                        "shared_keywords": len(common),
                     }
                 )
 
