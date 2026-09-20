@@ -65,7 +65,7 @@ uv pip install baselith-core        # or: pip install baselith-core
 ```
 
 ```python
-from core.agent import Agent, Crew, Task
+from baselith import Agent, Crew, Task
 
 researcher = Agent(system_prompt="You are a meticulous researcher.")
 writer = Agent(system_prompt="You write crisp executive summaries.")
@@ -80,6 +80,12 @@ report = (await crew.run(inputs={"topic": "vector databases"})).final
 Typed, budgeted and observable from the first line — the
 [quickstart](https://docs.baselithcore.xyz/getting-started/quickstart/) adds
 tools, structured output and a checkpoint store.
+
+`baselith` is the public API and the only surface that carries a
+compatibility promise; `import baselith` costs ~3 ms because names resolve
+lazily. The framework's own packages live under `core.*` and each declares
+what it promises — see [API stability
+tiers](https://docs.baselithcore.xyz/advanced/api-stability/).
 
 Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, with migrations
 applied at startup. From a checkout of this repository, with Docker running:
@@ -229,8 +235,13 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
 runs **8,924 tests** behind a **78% branch-coverage floor**, strict typing,
-architecture-boundary and docs-consistency gates. Report vulnerabilities through
-[SECURITY.md](SECURITY.md); release history lives in [CHANGELOG.md](CHANGELOG.md).
+architecture-boundary and docs-consistency gates.
+[GOVERNANCE.md](GOVERNANCE.md) says how decisions get made and what needs a
+proposal before code; [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every
+space the project uses. Questions belong in
+[SUPPORT.md](SUPPORT.md)'s channels, vulnerabilities in
+[SECURITY.md](SECURITY.md)'s; release history lives in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 

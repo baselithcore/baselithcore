@@ -281,6 +281,9 @@ PY
 FROM deps AS app
 
 COPY pyproject.toml README.md ./
+# `baselith/` is the public facade every downstream import goes through. It is
+# in `packages.find.include`, so the wheel built here needs its source present.
+COPY baselith/ baselith/
 COPY core/ core/
 COPY plugins/ plugins/
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -435,6 +438,7 @@ COPY --chown=appuser:appuser backend.py ./
 # pre-deploy Job) and the in-app ensure_schema() fallback resolve them from /app.
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser migrations/ migrations/
+COPY --chown=appuser:appuser baselith/ baselith/
 COPY --chown=appuser:appuser core/ core/
 COPY --chown=appuser:appuser plugins/ plugins/
 COPY --chown=appuser:appuser configs/ configs/

@@ -14,6 +14,16 @@ Complete API reference for the system.
 
 <div class="feature-card" markdown>
 
+### :material-language-python: Python API
+
+The `baselith` package: the public surface for programs.
+
+[:octicons-arrow-right-24: Go](python.md)
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### :material-api: REST API
 
 HTTP endpoints of the system.
