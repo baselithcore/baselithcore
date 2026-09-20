@@ -54,8 +54,14 @@ ROOT_FILE_RE = re.compile(
 LINK_RE = re.compile(r"\]\(([^)\s#]+\.md)(#[^)]*)?\)")
 ENV_ASSIGN_RE = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)=", re.M)
 ENV_TOKEN_RE = re.compile(r"`([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`")
+#: ``baselith <cmd> [<sub> [<subsub>]]``. Two exclusions keep the console
+#: script apart from the importable package of the same name: a preceding
+#: ``from`` makes it Python (``from baselith import Agent`` is not a CLI
+#: chain), and the separators are spaces rather than ``\s``, so a bare
+#: ``import baselith`` cannot swallow the first word of the next line.
 CLI_RE = re.compile(
-    r"(?<![\w/.-])baselith\s+([a-z][\w-]*)(?:\s+([a-z][\w-]*))?(?:\s+([a-z][\w-]*))?"
+    r"(?<![\w/.-])(?<!from\s)baselith[ \t]+([a-z][\w-]*)"
+    r"(?:[ \t]+([a-z][\w-]*))?(?:[ \t]+([a-z][\w-]*))?"
 )
 ROUTE_RE = re.compile(
     r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/[A-Za-z0-9_\-{}./:]*[A-Za-z0-9_}/])"

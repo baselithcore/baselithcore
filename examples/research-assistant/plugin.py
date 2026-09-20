@@ -2,14 +2,13 @@
 Plugin entry point for Research Assistant.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.plugins.agent_plugin import AgentPlugin
 from core.plugins.interface import PluginMetadata
+
 from .main import ResearchAssistantAgent
 
-
-from core.services.llm import LLMService
 
 class ResearchAssistantPlugin(AgentPlugin):
     """Plugin wrapping the Research Assistant Agent."""
@@ -22,14 +21,14 @@ class ResearchAssistantPlugin(AgentPlugin):
             description="Scientific paper analysis assistant",
             author="Baselith Team",
             required_resources=["llm"],
-            tags=["research", "analysis", "papers"]
+            tags=["research", "analysis", "papers"],
         )
 
     def __init__(self):
         super().__init__()
-        self._agent: Optional[ResearchAssistantAgent] = None
+        self._agent: ResearchAssistantAgent | None = None
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize plugin and its agent."""
         await super().initialize(config)
         # Assuming ResearchAssistantAgent can take an LLM service
@@ -45,19 +44,19 @@ class ResearchAssistantPlugin(AgentPlugin):
     def create_agent(self, service: Any, **kwargs) -> Any:
         return self._agent
 
-    def get_agents(self) -> List[Any]:
+    def get_agents(self) -> list[Any]:
         return [self._agent] if self._agent else []
 
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "research_search",
                 "patterns": ["search papers", "find paper about", "look up study"],
-                "priority": 15
+                "priority": 15,
             },
             {
                 "name": "research_synthesize",
                 "patterns": ["synthesize", "summarize studies", "themes in papers"],
-                "priority": 15
-            }
+                "priority": 15,
+            },
         ]

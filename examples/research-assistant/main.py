@@ -8,13 +8,14 @@ Demonstrates:
 - Multi-document synthesis
 """
 
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
 
-from core.lifecycle import LifecycleMixin, AgentState, AgentError, FrameworkErrorCode
-from core.orchestration.protocols import AgentProtocol
 from pydantic import BaseModel
+
+from core.lifecycle import AgentError, AgentState, FrameworkErrorCode, LifecycleMixin
+from core.observability.logging import get_logger
+from core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
 
@@ -28,11 +29,11 @@ class Paper(BaseModel):
 
     id: str
     title: str
-    authors: List[str] = []
+    authors: list[str] = []
     abstract: str = ""
-    keywords: List[str] = []
-    year: Optional[int] = None
-    citations: List[str] = []  # IDs of cited papers
+    keywords: list[str] = []
+    year: int | None = None
+    citations: list[str] = []  # IDs of cited papers
 
 
 class SearchResult(BaseModel):
@@ -47,7 +48,7 @@ class SearchResult(BaseModel):
 class SynthesisRequest(BaseModel):
     """Multi-paper synthesis request."""
 
-    paper_ids: List[str]
+    paper_ids: list[str]
     topic: str
 
 
@@ -55,8 +56,8 @@ class SynthesisResult(BaseModel):
     """Synthesis result."""
 
     summary: str
-    common_themes: List[str]
-    key_findings: List[str]
+    common_themes: list[str]
+    key_findings: list[str]
 
 
 # ============================================================================
@@ -69,7 +70,7 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
 
     def __init__(self):
         super().__init__()
-        self.papers: Dict[str, Paper] = {}
+        self.papers: dict[str, Paper] = {}
 
     async def _do_startup(self) -> None:
         """Initialize resources and load sample data."""
@@ -103,26 +104,28 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
             citations=["p1"],
         )
 
-    async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> Any:
+    async def execute(self, input: str, context: dict[str, Any] | None = None) -> Any:
         """
         Agent execution entry point.
         Dispatches to internal methods based on input/context.
         """
         if self.state != AgentState.READY:
-            raise AgentError(
-                "Agent not ready", code=FrameworkErrorCode.AGENT_NOT_READY
-            )
+            raise AgentError("Agent not ready", code=FrameworkErrorCode.AGENT_NOT_READY)
 
         # Basic command dispatching for demo purposes
         cmd = input.lower().strip()
         if "search" in cmd:
-            query = context.get("query", cmd.replace("search", "").strip()) if context else cmd.replace("search", "").strip()
+            query = (
+                context.get("query", cmd.replace("search", "").strip())
+                if context
+                else cmd.replace("search", "").strip()
+            )
             return await self.search(query)
         elif "synthesize" in cmd:
             paper_ids = context.get("paper_ids", []) if context else []
             topic = context.get("topic", "general") if context else "general"
             return await self.synthesize(paper_ids, topic)
-        
+
         return {"status": "error", "message": f"Unknown command: {cmd}"}
 
     async def add_paper(self, content: str, filename: str) -> Paper:
@@ -139,13 +142,13 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
             authors=["Unknown Author"],
             abstract=content[:500] if len(content) > 100 else content,
             keywords=[],
-            year=datetime.now().year,
+            year=datetime.now(UTC).year,
         )
 
         self.papers[paper_id] = paper
         return paper
 
-    async def search(self, query: str, limit: int = 10) -> List[SearchResult]:
+    async def search(self, query: str, limit: int = 10) -> list[SearchResult]:
         """Search papers by keyword matching."""
         results = []
         query_lower = query.lower()
@@ -164,7 +167,7 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
 
         return results[:limit]
 
-    async def get_citations(self, paper_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    async def get_citations(self, paper_id: str) -> dict[str, list[dict[str, Any]]]:
         """Get citation graph for a paper."""
         if paper_id not in self.papers:
             return {"nodes": [], "edges": []}
@@ -182,7 +185,7 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
 
         return {"nodes": nodes, "edges": edges}
 
-    async def synthesize(self, paper_ids: List[str], topic: str) -> SynthesisResult:
+    async def synthesize(self, paper_ids: list[str], topic: str) -> SynthesisResult:
         """Generate synthesis from multiple papers."""
         papers = [self.papers[pid] for pid in paper_ids if pid in self.papers]
 
@@ -203,6 +206,8 @@ class ResearchAssistantAgent(LifecycleMixin, AgentProtocol):
             + "\n".join(f"- {p.title}" for p in papers),
             common_themes=common,
             key_findings=[
-                f"Papers span {min(years)} to {max(years)}" if years else "Unknown timeframe"
+                f"Papers span {min(years)} to {max(years)}"
+                if years
+                else "Unknown timeframe"
             ],
         )

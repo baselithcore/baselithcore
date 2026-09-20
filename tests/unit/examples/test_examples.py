@@ -148,3 +148,34 @@ class TestDocumentAnalyzerExample:
         for file_name in required_files:
             file_path = analyzer_path / file_name
             assert file_path.exists(), f"Missing file: {file_name}"
+
+
+class TestReferenceAgentExample:
+    """The reference agent is documentation that has to keep executing.
+
+    It sat in the tree importing ``core.context.tenant_context`` and calling
+    ``agent.initialize()`` — neither of which exists — so the file every
+    best-practices page points at raised ``ImportError`` on its first import.
+    Nothing caught it, because nothing ran it.
+    """
+
+    def test_runs_end_to_end_without_configuration(self) -> None:
+        """No API key, no services: the stub LLM keeps the demo self-contained."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-m", "examples.baselith_standard_example"],
+            capture_output=True,
+            text=True,
+            cwd=EXAMPLES_PATH.parent,
+            timeout=90,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr[-2000:]
+        # The three paths worth proving: the refusal before startup, the
+        # successful run, and the structured rejection of empty input.
+        assert "AGENT_NOT_READY" in result.stdout
+        assert "Response:" in result.stdout
+        assert "AGENT_CONTEXT_INVALID" in result.stdout

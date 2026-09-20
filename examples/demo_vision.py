@@ -21,7 +21,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.services.vision import VisionService, VisionRequest, ImageContent
+from core.services.vision import ImageContent, VisionRequest, VisionService
 
 
 async def demo_analyze_image(service: VisionService, image_path: str) -> None:
@@ -84,7 +84,7 @@ async def main() -> None:
     # Check for image argument
     if len(sys.argv) > 1:
         image_path = sys.argv[1]
-        if not Path(image_path).exists():
+        if not Path(image_path).exists():  # noqa: ASYNC240 - one stat, at startup
             print(f"❌ Image not found: {image_path}")
             return
 
