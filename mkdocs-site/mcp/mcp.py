@@ -1,20 +1,16 @@
+import json
 from typing import Any
 
-# We assume core.mcp.server exists based on the EXTERNAL reference
-try:
-    from core.mcp.server import MCPServer
-except ImportError:
-    # Fallback/Mock if not yet in core - though we should ideally use core
-    # For now, let's assume it's there as per EXTERNAL examples.
-    import sys
-
-    print(
-        "Error: core.mcp.server not found. Ensure core modules are correctly installed.",
-        file=sys.stderr,
-    )
-    raise
+from core.mcp.server import MCPServer
 
 from .service import DocsService
+
+# Every tool here reads markdown off disk and nothing else. Declaring the
+# category matters twice over: ``MCPServer`` defaults tools to ``destructive``,
+# which the fail-closed autonomy policy refuses to run over a transport with no
+# approval channel, and the category is what ``readOnlyHint`` is derived from in
+# the tool listing clients see.
+_READ_ONLY = "read_only"
 
 
 class DocsMCPHandler:
@@ -23,6 +19,7 @@ class DocsMCPHandler:
     def __init__(self, service: DocsService):
         self.service = service
         self._cached_all_docs: str | None = None
+        self._cached_all_docs_revision: int | None = None
 
     def register_tools(self, server: MCPServer):
         """Register documentation tools and resources to the MCP server."""
@@ -30,6 +27,7 @@ class DocsMCPHandler:
         @server.tool(
             name="search_docs",
             description="Search the project documentation with ranked results and snippets",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -48,6 +46,7 @@ class DocsMCPHandler:
         @server.tool(
             name="get_doc_page",
             description="Retrieve the full content of a documentation page by its file path",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -67,6 +66,7 @@ class DocsMCPHandler:
         @server.tool(
             name="get_doc_by_title",
             description="Find and retrieve a documentation page by its title (exact or partial)",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -86,6 +86,7 @@ class DocsMCPHandler:
         @server.tool(
             name="get_nav",
             description="Get the hierarchical navigation structure of the documentation",
+            category=_READ_ONLY,
             input_schema={"type": "object", "properties": {}},
         )
         async def get_nav() -> list[Any]:
@@ -94,7 +95,11 @@ class DocsMCPHandler:
 
         @server.tool(
             name="list_docs",
-            description="List all available documentation pages as a flat list",
+            description=(
+                "List every documentation page as a flat list of paths with "
+                "their full breadcrumb titles"
+            ),
+            category=_READ_ONLY,
             input_schema={"type": "object", "properties": {}},
         )
         async def list_docs() -> list[dict[str, str]]:
@@ -104,6 +109,7 @@ class DocsMCPHandler:
         @server.tool(
             name="get_docs_batch",
             description="Retrieve the full content of multiple documentation pages in a single call",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -123,6 +129,7 @@ class DocsMCPHandler:
         @server.tool(
             name="get_docs_summary",
             description="List all available documentation pages with titles and introductory summaries",
+            category=_READ_ONLY,
             input_schema={"type": "object", "properties": {}},
         )
         async def get_docs_summary() -> list[dict[str, str]]:
@@ -132,6 +139,7 @@ class DocsMCPHandler:
         @server.tool(
             name="find_related_pages",
             description="Find documentation pages related to a specific file based on content similarity",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -150,6 +158,7 @@ class DocsMCPHandler:
         @server.tool(
             name="search_in_section",
             description="Search documentation restricted to a specific section (e.g., 'Architecture')",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -166,15 +175,6 @@ class DocsMCPHandler:
             """Restricted search."""
             return await self.service.search_in_section(query, section)
 
-        @server.tool(
-            name="get_nav_flat",
-            description="Get a flattened list of all documentation paths with their full titles (breadcrumbs)",
-            input_schema={"type": "object", "properties": {}},
-        )
-        async def get_nav_flat() -> list[dict[str, str]]:
-            """Get flat navigation."""
-            return self.service.get_all_pages()
-
         # --- Resources ---
 
         @server.resource(
@@ -184,8 +184,6 @@ class DocsMCPHandler:
             mime_type="application/json",
         )
         async def get_docs_nav_resource(uri: str) -> str:
-            import json
-
             return json.dumps(self.service.get_nav_tree(), indent=2)
 
         @server.resource(
@@ -195,7 +193,13 @@ class DocsMCPHandler:
             mime_type="text/markdown",
         )
         async def get_all_docs_resource(uri: str) -> str:
-            if self._cached_all_docs:
+            # Rebuild whenever any page changed on disk: the concatenation is
+            # expensive enough to cache, and stale enough to be useless if the
+            # cache never expires.
+            if (
+                self._cached_all_docs is not None
+                and self._cached_all_docs_revision == self.service.revision
+            ):
                 return self._cached_all_docs
 
             pages = self.service.get_all_pages()
@@ -206,4 +210,5 @@ class DocsMCPHandler:
                 combined.append(f"# {title}\n\n{content}\n\n---\n")
 
             self._cached_all_docs = "\n".join(combined)
+            self._cached_all_docs_revision = self.service.revision
             return self._cached_all_docs

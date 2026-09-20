@@ -1082,9 +1082,8 @@ Manually add the following configuration to your MCP client (STDIO transport):
 | `get_docs_batch` | Several pages in one round trip |
 | `get_docs_summary` | Condensed overview of the documentation set |
 | `find_related_pages` | Pages related to a given one |
-| `list_docs` | Every available page |
+| `list_docs` | Every page as a flat list of paths with breadcrumb titles |
 | `get_nav` | Navigation tree |
-| `get_nav_flat` | Navigation as a flat list |
 
 Two resources are exposed as well: `mcp://docs/navigation` and
 `mcp://docs/all`.
