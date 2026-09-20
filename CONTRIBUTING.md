@@ -15,12 +15,17 @@ Thank you for your interest in contributing! This document provides the guidelin
 
 ## Code of Conduct
 
-This project adopts a respectful and collaborative code of conduct. We expect all contributors to:
+This project adopts the [Contributor Covenant](CODE_OF_CONDUCT.md) v2.1.
+Participating means agreeing to it. In short, we expect all contributors to:
 
 - Be respectful and inclusive
 - Accept constructive feedback
 - Focus on improving the project
 - Help new contributors
+
+How decisions get made, what needs a proposal before code, and how someone
+becomes a maintainer: [GOVERNANCE.md](GOVERNANCE.md). Where to ask a question
+rather than open an issue: [SUPPORT.md](SUPPORT.md).
 
 ---
 
@@ -261,37 +266,16 @@ use it only for a change an operator has to act on.
 
 ## Bug Reporting
 
-### How to Report
+Open an issue and fill in the **Bug Report** form. It asks for what the old
+hand-copied template asked for, and validates that the two fields that make a
+report actionable are present: a reproducer, and the output of `baselith
+doctor` — which reports the Python version, OS, installed extras and
+configuration state in one paste.
 
-Open an Issue including:
-
-1. Clear **Description** of the bug
-2. **Steps to reproduce** the problem
-3. **Expected behavior** vs observed behavior
-4. **Environment**: Python version, OS, relevant dependencies
-5. **Logs** or traceback (if available)
-
-### Issue Template
-
-```markdown
-## Description
-[Describe the bug]
-
-## Steps to Reproduce
-1. ...
-2. ...
-
-## Expected Behavior
-[What you expected]
-
-## Observed Behavior
-[What actually happened]
-
-## Environment
-- Python: 3.x.x
-- OS: macOS/Linux/Windows
-- Commit: [hash]
-```
+Questions go to
+[Discussions](https://github.com/baselithcore/baselithcore/discussions), not
+issues. Vulnerabilities go through [SECURITY.md](SECURITY.md) and never to a
+public tracker.
 
 ---
 
