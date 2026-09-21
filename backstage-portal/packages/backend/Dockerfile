@@ -12,7 +12,9 @@
 # Alternatively, there is also a multi-stage Dockerfile documented here:
 # https://backstage.io/docs/deployment/docker#multi-stage-build
 
-FROM node:24-trixie-slim
+# Digest-pinned: the tag moves, and a portal that rebuilds onto a silently
+# different base is a portal nobody can reproduce.
+FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 
 # Set Python interpreter for `node-gyp` to use
 ENV PYTHON=/usr/bin/python3

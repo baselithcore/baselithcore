@@ -219,10 +219,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # instead of shipping a model the runtime cannot open.
 ARG SPACY_MODEL="en_core_web_sm"
 ARG SPACY_MODEL_VERSION="3.8.0"
+# The wheel is fetched straight from a GitHub release, outside any index that
+# would vouch for it, so the URL carries its digest: pip refuses the install if
+# the bytes differ. Overriding the two ARGs above therefore means overriding
+# this one too — a mismatch fails the build rather than baking an unverified
+# model, which is the intended direction to fail in.
+ARG SPACY_MODEL_SHA256="1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"
 RUN --mount=type=cache,target=/root/.cache/pip \
     PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --prefix /install \
-      "https://github.com/explosion/spacy-models/releases/download/${SPACY_MODEL}-${SPACY_MODEL_VERSION}/${SPACY_MODEL}-${SPACY_MODEL_VERSION}-py3-none-any.whl" \
+      "https://github.com/explosion/spacy-models/releases/download/${SPACY_MODEL}-${SPACY_MODEL_VERSION}/${SPACY_MODEL}-${SPACY_MODEL_VERSION}-py3-none-any.whl#sha256=${SPACY_MODEL_SHA256}" \
     && PYTHONPATH=/install/lib/python3.12/site-packages BAKED_SPACY_MODEL="${SPACY_MODEL}" \
        python -c "import os, spacy; nlp = spacy.load(os.environ['BAKED_SPACY_MODEL']); assert 'ner' in nlp.pipe_names, nlp.pipe_names; print('[docker] spaCy pipeline:', nlp.pipe_names)"
 
