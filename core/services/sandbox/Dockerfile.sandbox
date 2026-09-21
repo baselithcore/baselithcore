@@ -10,12 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Data Science libraries
+# Install Data Science libraries.
+# Version-pinned, like the base image above: this image is built on the host
+# the first time a sandbox is needed, so an unpinned set means two machines run
+# agent code against two different library versions, and a build months from
+# now is a different sandbox from the one that was reviewed. Resolved together
+# for Python 3.12, so the four move as a set.
 RUN pip install --no-cache-dir \
-    numpy \
-    pandas \
-    matplotlib \
-    scikit-learn
+    numpy==2.5.3 \
+    pandas==3.0.6 \
+    matplotlib==3.11.2 \
+    scikit-learn==1.9.1
 
 # Create a non-root user for security
 RUN useradd -m -u 1000 sandbox
