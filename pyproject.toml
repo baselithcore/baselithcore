@@ -340,7 +340,7 @@ conflicts = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "plugins*"]
+include = ["baselith*", "core*", "plugins*"]
 # In-repo FIXTURES, not product. `plugins/example-plugin` is the reference
 # scaffold the authoring guide walks through and `plugins/test-project` is the
 # throwaway tree the plugin CLI tests scaffold against; `include = ["plugins*"]`
@@ -397,10 +397,14 @@ exclude_dirs = ["tests", "venv", "node_modules", ".git", ".env", "examples"]
 
 [tool.ruff]
 target-version = "py312"
+# ``examples/`` is deliberately NOT excluded. The examples are the first code a
+# user reads, and while ruff skipped them they drifted into exactly what the
+# conventions forbid: implicit Optional, naive timestamps, bare re-raises,
+# blocking file I/O inside async demos. A reference that contradicts the
+# convention it is meant to demonstrate is worse than no reference.
 exclude = [
     "templates/",
     "frontend/",
-    "examples/",
 ]
 
 [tool.ruff.lint]

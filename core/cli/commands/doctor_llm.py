@@ -77,10 +77,19 @@ def check_llm_local_endpoints() -> CheckResult:
         findings = asyncio.run(check_local_endpoints(get_llm_config()))
         if not findings:
             return CheckResult("LLM Local Models", True, "All local targets reachable")
-        first = findings[0]
+        # A gap the deployment cannot serve around headlines the result, and it
+        # is also what decides the severity: a model only the vision service
+        # asks for must not refuse a boot every other plugin depends on, but
+        # it still has to be said out loud.
+        blocking = [f for f in findings if f.severity == "error"]
+        first = (blocking or findings)[0]
         extra = f" (+{len(findings) - 1} more)" if len(findings) > 1 else ""
         return CheckResult(
-            "LLM Local Models", False, f"{first.message}{extra}", first.remedy
+            "LLM Local Models",
+            False,
+            f"{first.message}{extra}",
+            first.remedy,
+            "fail" if blocking else "warn",
         )
     except Exception as e:
         return CheckResult("LLM Local Models", False, f"Error: {e}")

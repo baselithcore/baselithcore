@@ -7,6 +7,14 @@ description: Step-by-step tutorial for creating plugins
 
 A practical guide to plugin development.
 
+!!! tip "Importing from `core.plugins`"
+    Nothing changes for a plugin author: `from core.plugins import Plugin,
+    PluginMetadata, SkillResult` works exactly as before. The package now
+    resolves each export on first access rather than importing every submodule
+    up front, so a plugin that needs only the result envelope no longer pays
+    for the registry, the loader and the hot-reload controller. See
+    [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
+
 ---
 
 ## 1. Scaffold with CLI

@@ -1075,19 +1075,23 @@ Manually add the following configuration to your MCP client (STDIO transport):
 
 | Tool | What it does |
 |------|--------------|
-| `search_docs` | Ranked full-text search with snippets |
-| `search_in_section` | Same, scoped to one documentation section |
-| `get_doc_page` | Full markdown of a page by relative path |
-| `get_doc_by_title` | Full markdown of a page by exact or partial title |
-| `get_docs_batch` | Several pages in one round trip |
-| `get_docs_summary` | Condensed overview of the documentation set |
-| `find_related_pages` | Pages related to a given one |
-| `list_docs` | Every available page |
-| `get_nav` | Navigation tree |
-| `get_nav_flat` | Navigation as a flat list |
+| `search_docs` | Ranked search; every hit names the heading it sits under |
+| `get_doc_section` | One section of a page by heading or anchor, subsections included |
+| `get_doc_outline` | A page's headings and their sizes, without the body |
+| `get_doc_page` | A whole page; one over the budget returns its outline unless `full=true` |
+| `get_docs_batch` | Several pages in one round trip, under the same budget |
+| `list_docs` | Page paths with breadcrumb titles, optionally one nav section |
+| `find_related_pages` | Pages whose vocabulary overlaps a given one |
 
-Two resources are exposed as well: `mcp://docs/navigation` and
-`mcp://docs/all`.
+The intended path is `search_docs` then `get_doc_section`: a hit carries the
+`anchor` the section tool takes, so an answer is read at section granularity
+rather than by pulling the page around it. Pages here run to twenty thousand
+tokens, and a section is a few hundred — which is why `get_doc_page` answers
+an oversized page with its outline until asked twice.
+
+One resource is exposed: `mcp://docs/navigation`. A resource concatenating
+every page used to sit beside it; at over half a million tokens nothing could
+read it, so it is gone.
 
 !!! tip "Verified end to end"
     The docs server runs on `core.mcp.MCPServer`, so it inherits the dual-era

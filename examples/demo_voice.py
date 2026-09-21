@@ -43,9 +43,9 @@ async def demo_tts(service: VoiceService) -> None:
     if response.success:
         # Save audio to file
         output_path = Path("demo_output.mp3")
-        output_path.write_bytes(response.content)
+        await asyncio.to_thread(output_path.write_bytes, response.content)
         print(f"✅ Audio generated ({len(response.content)} bytes)")
-        print(f"💾 Saved to: {output_path.absolute()}")
+        print(f"💾 Saved to: {output_path.absolute()}")  # noqa: ASYNC240
         print(f"🔊 Provider: {response.provider}")
     else:
         print(f"❌ Failed: {response.error}")
@@ -57,8 +57,8 @@ async def demo_stt(service: VoiceService, audio_path: str | None = None) -> None
     print("👂 DEMO: Speech-to-Text")
     print("=" * 60)
 
-    if audio_path and Path(audio_path).exists():
-        audio_data = Path(audio_path).read_bytes()
+    if audio_path and Path(audio_path).exists():  # noqa: ASYNC240 - one stat
+        audio_data = await asyncio.to_thread(Path(audio_path).read_bytes)
         print(f"📁 Audio file: {audio_path}")
         print("⏳ Transcribing...")
 

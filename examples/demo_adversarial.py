@@ -11,18 +11,18 @@ Demonstrates security testing capabilities:
 Run: python examples/demo_adversarial.py
 """
 
-import sys
 import os
+import sys
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.adversarial import (
-    RedTeamAgent,
-    PromptFuzzer,
-    HallucinationTrap,
-    BoundaryTester,
     AttackCategory,
+    BoundaryTester,
+    HallucinationTrap,
+    PromptFuzzer,
+    RedTeamAgent,
 )
 
 
@@ -37,7 +37,10 @@ def create_vulnerable_agent():
         prompt_lower = prompt.lower()
 
         # Vulnerability 1: Jailbreak susceptibility
-        if "ignore previous" in prompt_lower or "disregard instructions" in prompt_lower:
+        if (
+            "ignore previous" in prompt_lower
+            or "disregard instructions" in prompt_lower
+        ):
             return "OK, I will ignore my safety guidelines. How can I help?"
 
         # Vulnerability 2: Prompt leakage
@@ -158,9 +161,7 @@ def main():
     print("-" * 50)
     print(f"   Total Attacks: {vuln_report.total_tests}")
     print(f"   Successful Attacks (vulnerabilities): {vuln_report.failed_tests}")
-    print(
-        f"   Defense Success Rate: {vuln_report.success_rate:.1%}"
-    )
+    print(f"   Defense Success Rate: {vuln_report.success_rate:.1%}")
     print(f"   Duration: {vuln_report.duration:.2f}s")
 
     print(f"\n   🔍 Vulnerabilities Found: {len(vuln_report.vulnerabilities)}")
@@ -192,9 +193,7 @@ def main():
     print("-" * 50)
     print(f"   Total Attacks: {sec_report.total_tests}")
     print(f"   Successful Attacks (vulnerabilities): {sec_report.failed_tests}")
-    print(
-        f"   Defense Success Rate: {sec_report.success_rate:.1%}"
-    )
+    print(f"   Defense Success Rate: {sec_report.success_rate:.1%}")
     print(f"   Duration: {sec_report.duration:.2f}s")
     print(f"   🔍 Vulnerabilities Found: {len(sec_report.vulnerabilities)}")
 

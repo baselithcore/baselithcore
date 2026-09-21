@@ -35,6 +35,14 @@ graph TB
 
 Abstraction for language model providers.
 
+!!! info "Provider SDKs are imported on demand"
+    `core.services.llm.provider_factory` imports a provider client inside the branch that builds it, never at module scope. A deployment configures one provider; importing this module used to import the anthropic, openai, ollama and huggingface clients in order to construct exactly one of them, costing 0.38 s and roughly 1 800 modules on every path that reached the service.
+
+In tests, patch a provider where it is **defined** —
+`core.services.llm.providers.openai_provider.OpenAIProvider` — not as an
+attribute of the factory, which no longer has one. See
+[import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
+
 ### LLM Structure
 
 ```text
@@ -299,7 +307,11 @@ cannot: *will this deployment serve from what it thinks it will?* It reports
   — primary, chain stage and the separately-configured vision provider — is
   probed with `GET /api/tags`, and a model that is not installed is named. It
   is never pulled: several gigabytes is an operator's decision, not a boot
-  step.
+  step. Severity follows the dependency, not the check: a gap on the inference
+  path — the primary, a chain stage — blocks the boot, while one only the
+  vision provider asks for is reported as a warning and the deployment starts.
+  A model no request routes to must not cost a deployment everything it serves,
+  which under `Restart=always` is what a fatal check amounts to.
 
 `auto` (the default) raises in a production environment and warns elsewhere;
 `warn`, `strict` and `off` force the behaviour. It **never calls a hosted

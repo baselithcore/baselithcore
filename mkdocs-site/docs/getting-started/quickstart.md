@@ -81,7 +81,7 @@ in any script:
 
 ```python
 from pydantic import BaseModel
-from core.agent import Agent, Crew, Task
+from baselith import Agent, Crew, Task
 
 class CityInfo(BaseModel):
     city: str
@@ -109,8 +109,14 @@ crew = Crew(
 summary = (await crew.run(inputs={"topic": "vector databases"})).final
 ```
 
-See the [Agent API reference](../core-modules/agent.md) for tools, structured
-output, streaming, and crew processes.
+`baselith` is the public API: everything a program needs, re-exported from
+one place and covered by the [stability
+policy](../advanced/api-stability.md). The `core.*` packages behind it keep
+working and are not deprecated.
+
+See the [Python API](../api/python.md) for the full export list, and the
+[Agent API reference](../core-modules/agent.md) for tools, structured output,
+streaming, and crew processes.
 
 ---
 

@@ -1,0 +1,73 @@
+name: Feature Request
+description: Propose a capability the framework does not have
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Substantial changes are argued before they are built — see
+        [GOVERNANCE.md](https://github.com/baselithcore/baselithcore/blob/main/GOVERNANCE.md).
+        If you are unsure whether an idea is substantial, start in
+        [Discussions](https://github.com/baselithcore/baselithcore/discussions).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you unable to do today? Describe the situation, not the
+        solution — a well-stated problem often has a better answer than the
+        one that prompted the request.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you would like to happen, concretely.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: placement
+    attributes:
+      label: Core or plugin?
+      description: >
+        The Sacred Core rule: `core/` holds only domain-agnostic logic
+        (orchestration, infrastructure, utilities). Domain-specific logic,
+        external integrations and business features belong in `plugins/`.
+        Most requests are plugins, and that is not a demotion.
+      options:
+        - A plugin (domain-specific, an integration, a business capability)
+        - Core (domain-agnostic orchestration or infrastructure)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >
+        Including doing nothing, or solving it outside the framework. What
+        makes those insufficient?
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility
+      description: >
+        Would this change or remove anything that already exists? Name the
+        surface and its
+        [stability tier](https://docs.baselithcore.xyz/advanced/api-stability/)
+        if you know it. Purely additive proposals can say so.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for this idea.
+          required: true

@@ -25,9 +25,18 @@ def test_allowlist_is_sorted_unique_existing_packages() -> None:
 
     assert packages == sorted(set(packages)), "keep the allowlist sorted and unique"
     for name in packages:
-        assert name.startswith("core."), name
+        # The kernel, plus the public facade. ``baselith`` sits outside
+        # ``core/`` — so it is never a ``--candidates`` suggestion — but it is
+        # the package every downstream program imports, and it is strict from
+        # its first commit.
+        assert name == "baselith" or name.startswith("core."), name
         target = package_path(REPO_ROOT, name)
         assert target.is_file() or (target / "__init__.py").is_file(), name
+
+
+def test_the_public_facade_is_strict() -> None:
+    """Nothing downstream should meet a loosely typed symbol at the front door."""
+    assert "baselith" in STRICT_CORE_PACKAGES
 
 
 def test_resilience_stays_strict() -> None:

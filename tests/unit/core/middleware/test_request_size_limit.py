@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.middleware.security_headers import RequestSizeLimitMiddleware
+from core.middleware.security_headers import (
+    RequestSizeLimitMiddleware,
+    clear_request_size_overrides,
+    register_request_size_override,
+)
 
 
 def _scope(headers: list[tuple[bytes, bytes]] | None = None) -> dict:
@@ -174,3 +178,117 @@ async def test_disabled_cap_passes_everything():
         _scope([(b"content-length", b"999999")]), _chunked_receive([]), send
     )
     assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 200
+
+
+# --- per-route overrides ---------------------------------------------------
+#
+# A streaming-upload route accepts bodies the JSON default must keep refusing.
+# Raising ``MAX_REQUEST_SIZE_BYTES`` would lift the guard for every endpoint,
+# so the route's owner registers a cap for its own prefix instead.
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_overrides():
+    clear_request_size_overrides()
+    yield
+    clear_request_size_overrides()
+
+
+def _scope_at(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> dict:
+    return {"type": "http", "method": "POST", "path": path, "headers": headers or []}
+
+
+async def _run(middleware, scope, chunks: list[bytes] | None = None) -> list[dict]:
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, _chunked_receive(chunks or []), send)
+    return sent
+
+
+async def _ok_app(scope, receive, send):
+    while True:
+        message = await receive()
+        if message["type"] != "http.request" or not message.get("more_body"):
+            break
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b"ok"})
+
+
+@pytest.mark.asyncio
+async def test_override_lets_a_larger_body_through_on_its_prefix():
+    register_request_size_override("/plugin/api/upload", 1000)
+    middleware = RequestSizeLimitMiddleware(_ok_app, max_bytes=100)
+
+    sent = await _run(
+        middleware,
+        _scope_at("/plugin/api/upload/doc", [(b"content-length", b"900")]),
+        [b"x" * 900],
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_override_still_enforces_its_own_cap():
+    register_request_size_override("/plugin/api/upload", 1000)
+    middleware = RequestSizeLimitMiddleware(_ok_app, max_bytes=100)
+
+    sent = await _run(
+        middleware,
+        _scope_at("/plugin/api/upload/doc", [(b"content-length", b"1001")]),
+        [b"x" * 1001],
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_override_does_not_leak_to_other_paths():
+    register_request_size_override("/plugin/api/upload", 1000)
+    middleware = RequestSizeLimitMiddleware(_ok_app, max_bytes=100)
+
+    sent = await _run(
+        middleware, _scope_at("/api/chat", [(b"content-length", b"900")]), [b"x" * 900]
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_longest_registered_prefix_wins():
+    register_request_size_override("/plugin", 200)
+    register_request_size_override("/plugin/api/upload", 1000)
+    middleware = RequestSizeLimitMiddleware(_ok_app, max_bytes=100)
+
+    sent = await _run(
+        middleware,
+        _scope_at("/plugin/api/upload/doc", [(b"content-length", b"900")]),
+        [b"x" * 900],
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 200
+
+    sent = await _run(
+        middleware,
+        _scope_at("/plugin/other", [(b"content-length", b"900")]),
+        [b"x" * 900],
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_streaming_body_is_cut_at_the_override_cap():
+    """No Content-Length: the running counter still enforces the override."""
+    register_request_size_override("/plugin/api/upload", 1000)
+    middleware = RequestSizeLimitMiddleware(_ok_app, max_bytes=100)
+
+    sent = await _run(
+        middleware, _scope_at("/plugin/api/upload/doc"), [b"x" * 600, b"x" * 600]
+    )
+    assert next(m for m in sent if m["type"] == "http.response.start")["status"] == 413
+
+
+def test_override_registration_validates_its_arguments():
+    with pytest.raises(ValueError):
+        register_request_size_override("relative/path", 10)
+    with pytest.raises(ValueError):
+        register_request_size_override("/ok", -1)

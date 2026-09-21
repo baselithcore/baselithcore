@@ -8,8 +8,9 @@ personas debate internally to produce balanced, well-reasoned responses.
 
 import asyncio
 import logging
+
+from core.meta import MultiPersonaAgent, PersonaEnsemble
 from core.observability.logging import get_logger
-from core.meta import MultiPersonaAgent, PersonaEnsemble, InternalDebate
 from core.personas import Persona
 
 logging.basicConfig(level=logging.INFO)
@@ -32,16 +33,16 @@ async def demo_basic():
 
     response = await agent.process(query)
 
-    print(f"\n📊 Results:")
+    print("\n📊 Results:")
     print(f"  - Perspectives generated: {response.perspective_count}")
     print(f"  - Debate rounds: {response.debate_result.total_rounds}")
     print(f"  - Consensus level: {response.debate_result.consensus_level.value}")
     print(f"  - Confidence: {response.confidence:.0%}")
 
-    print(f"\n💬 Final Answer:")
+    print("\n💬 Final Answer:")
     print(f"  {response.final_answer[:500]}...")
 
-    print(f"\n📝 Synthesis Rationale:")
+    print("\n📝 Synthesis Rationale:")
     print(f"  {response.synthesis_rationale}")
 
 

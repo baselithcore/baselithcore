@@ -75,17 +75,36 @@ async def execute(self, input: Any, context: dict[str, Any] | None = None) -> An
 
 ---
 
-## 4. Gold Standard Implementation
+## 4. The reference agent
 
-Reference the [Gold Standard Example](https://github.com/baselithcore/baselithcore/blob/main/examples/baselith_standard_example.py) (`examples/baselith_standard_example.py`) for the most complete implementation of these patterns.
+[`examples/baselith_standard_example.py`](https://github.com/baselithcore/baselithcore/blob/main/examples/baselith_standard_example.py)
+implements every pattern on this page in one runnable file. It needs no
+configuration, API key or running service — with nothing registered in the
+container it falls back to a stub LLM, so the lifecycle and error paths stay
+observable on their own:
 
-### Key Features of a Gold Standard Agent
+```bash
+python -m examples.baselith_standard_example
+```
 
-1. **Inherits** from `LifecycleMixin` and `AgentProtocol`.
-2. **Accepts** `agent_id` and `config` in `__init__`.
-3. **Validates** state before execution.
-4. **Uses** structured logging.
-5. **Observes** tenant contexts if applicable.
+A smoke test runs it on every CI run, so it cannot rot into a file that no
+longer imports.
+
+### What it demonstrates
+
+1. **Async by default** — I/O is awaited; blocking work moves off the loop.
+2. **Dependency injection** — collaborators resolved from the container at
+   startup, never constructed inline.
+3. **Lifecycle sovereignty** — `UNINITIALIZED -> STARTING -> READY`, with work
+   refused outside `READY`.
+4. **Multi-tenancy** — execution runs inside a tenant context, restored with
+   the token that bound it.
+5. **Typing and protocols** — typed against `LLMServiceProtocol`, not a
+   concrete service.
+6. **Structured errors** — failures carry a `FrameworkErrorCode` a caller can
+   branch on.
+7. **No domain logic in core** — the behaviour lives in the example; `core/`
+   stays domain-agnostic.
 
 ---
 

@@ -3,7 +3,90 @@ title: Lazy Loading
 description: Lazy loading system to optimize startup and memory footprint
 ---
 
-The lazy loading system reduces startup time and memory footprint by initializing core services **only when necessary**, based on the requirements of active plugins.
+Two independent layers defer work until something asks for it:
+
+- **Import time** — reading one name out of a package must not cost the whole
+  package. Covered immediately below.
+- **Service initialisation** — a connection pool or a vector store is built
+  only when an active plugin declares it. Covered from *Problem Solved*
+  onward, and it is what the rest of this page is about.
+
+They compose: import-time laziness decides what Python parses, service
+laziness decides what connects.
+
+---
+
+## Import-time laziness
+
+A package whose `__init__.py` imports every submodule makes the cost of
+touching *any* of its names the cost of *all* of them. `core.plugins` and
+`core.orchestration` both did, and the bill landed on code that wanted one
+small thing:
+
+| Import | Before | After |
+| --- | --- | --- |
+| `import baselith` | 79 modules | 79 modules |
+| `from core.plugins import SkillResult` | 955 modules, 0.36 s | 226 modules, 0.05 s |
+| `from core.orchestration import AutonomyPolicy` | 3 209 modules | 95 modules |
+| `from core.agent import Agent` | 3 209 modules, 0.61 s | 1 107 modules, 0.28 s |
+
+`SkillResult` is four Pydantic fields. Reaching it imported the plugin
+registry, the loader, the hot-reload controller, a FastAPI router and the
+observability stack, because importing any submodule of a package first runs
+that package's `__init__`.
+
+### How it works
+
+[PEP 562](https://peps.python.org/pep-0562/) module `__getattr__`, built by
+`core._lazy.lazy_exports`. The package keeps the same literal `__all__` and
+adds a table mapping each exported name to the submodule that defines it. A
+name is imported the first time it is read, then cached in the package
+namespace, so later reads are dictionary lookups.
+
+```python
+from core._lazy import lazy_exports
+
+_EXPORTS: Final[dict[str, str]] = {
+    "SkillResult": "result",
+    "PluginLoader": "loader",
+    # "submodule:original" where the package renames on the way out
+    "plugin_management_router": "api:router",
+}
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)
+```
+
+No import site changes. `from core.plugins import SkillResult` still works,
+and so does `core.plugins.loader` — a name that is not an exported symbol is
+tried as a submodule before `AttributeError` is raised, which preserves the
+side effect the eager imports had of binding submodules as attributes.
+
+### Provider SDKs
+
+The same principle applies inside a function. `core.services.llm.provider_factory`
+imported the anthropic, openai, ollama and huggingface clients at module
+scope in order to construct exactly one of them: 0.38 s and roughly 1 800
+modules on every path that reached the LLM service. Each import now sits
+inside the branch that builds that provider.
+
+The consequence for tests: patch a provider where it is **defined**
+(`core.services.llm.providers.openai_provider.OpenAIProvider`), not as an
+attribute of the factory, which no longer has one.
+
+### Keeping it
+
+`tests/unit/test_import_cost.py` holds a module-count budget per import path
+and asserts that no provider SDK is reachable from any of them. Counts rather
+than seconds, because a count is the same on a laptop and on a CI runner. The
+budgets are a ratchet: tighten one when the number drops, never raise one to
+make a red test green. A jump past a budget means a module-scope import landed
+somewhere it should have been deferred.
+
+---
+
+The rest of this page covers the second layer: the lazy loading system that
+reduces startup time and memory footprint by initializing core services **only
+when necessary**, based on the requirements of active plugins.
 
 ## Problem Solved
 

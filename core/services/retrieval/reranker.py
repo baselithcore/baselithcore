@@ -3,7 +3,7 @@ Reranker service for Advanced RAG.
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from core.observability.logging import get_logger
 
@@ -115,9 +115,16 @@ class Reranker:
             # pairs)`: CrossEncoder.predict is an overloaded function, and an
             # overload set cannot be matched against to_thread's single
             # Callable parameter. The closure gives it one concrete signature.
-            # `pairs` is a list of TUPLES for the same reason — that is what
-            # predict's signature declares, even though it accepts lists too.
-            scores = await asyncio.to_thread(lambda: model.predict(pairs))
+            #
+            # The cast is list invariance, not a doubt about the value. From
+            # sentence-transformers 5.x the parameter is `list[PairInput]`,
+            # where `PairInput` is itself a union — so `list[tuple[str, str]]`
+            # is rejected even though every element is a valid `PairInput`.
+            # Widening here keeps `pairs` honestly typed above and avoids
+            # importing the library's private alias to satisfy the checker.
+            scores = await asyncio.to_thread(
+                lambda: model.predict(cast("list[Any]", pairs))
+            )
 
             # Assign new scores
             for idx, score in zip(valid_indices, scores, strict=True):

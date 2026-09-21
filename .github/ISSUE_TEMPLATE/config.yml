@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/baselithcore/baselithcore/discussions
+    about: How do I do X, is this the intended design, here is what I built.
+  - name: Security vulnerability
+    url: https://github.com/baselithcore/baselithcore/security/advisories/new
+    about: Report privately. Never in a public issue.
+  - name: Documentation
+    url: https://docs.baselithcore.xyz
+    about: Installation, quickstart, architecture and per-module reference.

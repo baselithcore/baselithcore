@@ -266,3 +266,47 @@ class TestTracerConcurrency:
             assert child.context.parent_span_id == root.context.span_id
             assert child.context.trace_id == root.context.trace_id
         assert len({root.context.trace_id for root, _ in results}) == 3
+
+    @pytest.mark.asyncio
+    async def test_spans_nest_across_tracers(self):
+        """A span opened under another tracer's span is still its child.
+
+        Every subsystem asks ``get_tracer`` for its own name, so a per-tracer
+        current-span variable made each one the root of a single-span trace:
+        the waterfall was flat and an agents map could not attribute a model
+        call to the agent that made it.
+        """
+        import asyncio
+
+        agent = Tracer("agent", exporter=InMemoryExporter())
+        llm = Tracer("llm-service", exporter=InMemoryExporter())
+
+        with agent.start_span("invoke_agent qa_docs") as parent:
+            await asyncio.sleep(0)
+            with llm.start_span("chat gpt-4o-mini") as child:
+                pass
+
+        assert child.context.parent_span_id == parent.context.span_id
+        assert child.context.trace_id == parent.context.trace_id
+
+    @pytest.mark.asyncio
+    async def test_cross_tracer_nesting_stays_per_task(self):
+        """Sharing the variable across tracers must not merge sibling tasks."""
+        import asyncio
+
+        agent = Tracer("agent", exporter=InMemoryExporter())
+        llm = Tracer("llm-service", exporter=InMemoryExporter())
+
+        async def work(name: str):
+            with agent.start_span(f"invoke_agent {name}") as root:
+                await asyncio.sleep(0.01)
+                with llm.start_span("chat") as child:
+                    await asyncio.sleep(0.01)
+                    return root, child
+
+        results = await asyncio.gather(*(work(n) for n in "abc"))
+
+        for root, child in results:
+            assert child.context.parent_span_id == root.context.span_id
+            assert child.context.trace_id == root.context.trace_id
+        assert len({root.context.trace_id for root, _ in results}) == 3

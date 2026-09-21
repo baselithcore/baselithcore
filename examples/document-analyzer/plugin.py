@@ -2,10 +2,11 @@
 Plugin entry point for Document Analyzer.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.plugins.agent_plugin import AgentPlugin
 from core.plugins.interface import PluginMetadata
+
 from .main import DocumentAnalyzer
 
 
@@ -20,14 +21,14 @@ class DocumentAnalyzerPlugin(AgentPlugin):
             description="Document entity and relationship extraction assistant",
             author="Baselith Team",
             required_resources=["llm"],
-            tags=["nlp", "analysis", "entities"]
+            tags=["nlp", "analysis", "entities"],
         )
 
     def __init__(self):
         super().__init__()
-        self._agent: Optional[DocumentAnalyzer] = None
+        self._agent: DocumentAnalyzer | None = None
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
         self._agent = DocumentAnalyzer()
         # Note: DocumentAnalyzer should ideally have an initialize method too
@@ -39,14 +40,18 @@ class DocumentAnalyzerPlugin(AgentPlugin):
     def create_agent(self, service: Any, **kwargs) -> Any:
         return self._agent
 
-    def get_agents(self) -> List[Any]:
+    def get_agents(self) -> list[Any]:
         return [self._agent] if self._agent else []
 
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "analyze_doc",
-                "patterns": ["analyze document", "extract entities", "who is in this file"],
-                "priority": 15
+                "patterns": [
+                    "analyze document",
+                    "extract entities",
+                    "who is in this file",
+                ],
+                "priority": 15,
             }
         ]

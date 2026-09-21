@@ -8,15 +8,14 @@ Demonstrates:
 - Plugin architecture usage
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
 import uvicorn
-
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
 # ============================================================================
 # Models
@@ -148,7 +147,7 @@ async def analyze_document(file: UploadFile = File(...)):
         result = await analyzer.analyze(content, file.filename or "unknown")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/entities", response_model=list[Entity])
@@ -182,4 +181,6 @@ async def get_graph():
 # ============================================================================
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Loopback only: this is a demo. Binding every interface is a
+    # deployment decision, and the deployment guide covers it.
+    uvicorn.run(app, host="127.0.0.1", port=8001)

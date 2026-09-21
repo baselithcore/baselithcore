@@ -112,11 +112,19 @@ with tracer.start_span("retrieve-documents") as span:
 ```
 
 `tracer.current_span` — and therefore the parent a nested `start_span()`
-picks up — is tracked per task and thread (a `ContextVar`), not per tracer
-instance, so concurrent requests sharing one tracer never nest under each
-other's spans. Without the OTel SDK the same tracer feeds the in-process
-span sink, so this is also what keeps a live trace viewer's waterfalls
-separate under load.
+picks up — is a `ContextVar`, so it is tracked per task and thread and
+concurrent requests never nest under each other's spans. Without the OTel
+SDK the same tracer feeds the in-process span sink, so this is also what
+keeps a live trace viewer's waterfalls separate under load.
+
+That variable is **one per process, shared by every tracer**, not one per
+tracer instance. `get_tracer(name)` hands out a tracer per name and each
+subsystem asks for its own — `agent`, `llm-service`, `embedding-service`,
+`prompt-registry` — so a per-tracer variable would isolate the parent
+lookup by name and make every span the root of its own single-span trace.
+Sharing it is what lets a span opened under another tracer's span remain
+its child, and what lets an agents map attribute a model call to the agent
+that made it.
 
 ### The OTel backbone (`otel.py`)
 

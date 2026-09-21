@@ -10,10 +10,17 @@ from typing import Any
 
 from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.interfaces import LLMProviderProtocol
-from core.services.llm.providers.anthropic_provider import AnthropicProvider
-from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
-from core.services.llm.providers.ollama_provider import OllamaProvider
-from core.services.llm.providers.openai_provider import OpenAIProvider
+
+# Every provider is imported inside the branch that builds it, never at module
+# scope. A deployment configures exactly one, but importing this module used to
+# import all four SDKs: the anthropic and openai clients alone accounted for
+# 0.38 s and roughly 1 800 modules on every `from core.agent import Agent`,
+# whether or not either provider was ever used. ``gemini`` was already lazy for
+# the adjacent reason — it is an optional extra — and the rest follow it.
+#
+# The consequence for tests: patch a provider where it is *defined*
+# (``core.services.llm.providers.openai_provider.OpenAIProvider``), not as an
+# attribute of this module, which no longer has one.
 
 
 def create_provider(config: Any) -> LLMProviderProtocol:
@@ -38,6 +45,8 @@ def create_provider(config: Any) -> LLMProviderProtocol:
     if config.provider == "openai":
         if not api_key_str:
             raise LLMProviderError("OpenAI API key is required")
+        from core.services.llm.providers.openai_provider import OpenAIProvider
+
         return OpenAIProvider(
             api_key=api_key_str,
             request_timeout=request_timeout,
@@ -47,8 +56,14 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             base_url=getattr(config, "api_base", None),
         )
     elif config.provider == "ollama":
+        from core.services.llm.providers.ollama_provider import OllamaProvider
+
         return OllamaProvider(api_base=config.api_base)
     elif config.provider == "huggingface":
+        from core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
+
         return HuggingFaceProvider(
             api_key=api_key_str,
             use_local=config.huggingface_local,
@@ -60,6 +75,8 @@ def create_provider(config: Any) -> LLMProviderProtocol:
         backend = getattr(config, "anthropic_backend", "api") or "api"
         if backend == "api" and not api_key_str:
             raise LLMProviderError("Anthropic API key is required")
+        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
         return AnthropicProvider(
             api_key=api_key_str,
             request_timeout=request_timeout,
@@ -73,7 +90,6 @@ def create_provider(config: Any) -> LLMProviderProtocol:
     elif config.provider == "gemini":
         if not api_key_str:
             raise LLMProviderError("Gemini API key is required")
-        # Lazy import: google-genai is an optional extra ([gemini]).
         from core.services.llm.providers.gemini_provider import GeminiProvider
 
         return GeminiProvider(

@@ -151,6 +151,7 @@ nav = [
       { "Testing"            = "advanced/testing.md" },
       { "Publishing to PyPI" = "advanced/publishing.md" },
       { "Versioning & Deprecation" = "advanced/versioning-and-deprecation.md" },
+      { "API Stability Tiers" = "advanced/api-stability.md" },
       { "Upgrade Notes"     = "advanced/upgrade-notes.md" },
       { "Migration Guide"   = "advanced/migration-guide.md" },
       { "Runbooks"           = "advanced/runbooks.md" },
@@ -158,6 +159,7 @@ nav = [
 
   { "API Reference" = [
       "api/index.md",
+      { "Python API"   = "api/python.md" },
       { "REST API"     = "api/rest.md" },
       { "Client SDKs"  = "api/sdk.md" },
       { "CLI Commands" = "api/cli.md" },
