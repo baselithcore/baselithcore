@@ -7,6 +7,14 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+## [0.37.1](https://github.com/baselithcore/baselithcore/compare/v0.37.0...v0.37.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **image:** pin what the builds still fetched by name ([f24350f](https://github.com/baselithcore/baselithcore/commit/f24350f2ea53c2db708a2eb80c2df77ba5430dea))
+* **sandbox:** pin the libraries the sandbox image installs ([4f27d6c](https://github.com/baselithcore/baselithcore/commit/4f27d6c7414ec07a2fa62bfb115f942c946e2417))
+
 # [0.37.0](https://github.com/baselithcore/baselithcore/compare/v0.36.0...v0.37.0) (2026-09-21)
 
 
