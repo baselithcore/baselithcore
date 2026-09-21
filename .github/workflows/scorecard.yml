@@ -1,0 +1,72 @@
+name: OpenSSF Scorecard
+
+# Scorecard grades the repository's supply-chain posture against the checks
+# OpenSSF publishes: pinned dependencies, branch protection, signed releases,
+# token permissions, fuzzing, SAST, and so on. Most of what it measures is
+# already in place here (actions pinned by SHA, least-privilege tokens,
+# CodeQL + Semgrep + Trivy, SBOM, PEP 740 attestations on every published
+# dist). The point of the job is that a regression in any of it shows up as a
+# finding instead of going unnoticed.
+#
+# Results are uploaded to code scanning, so a drop lands in the same place as
+# every other security finding. The badge in the README reads from the public
+# API, which is only populated for the default branch — hence the schedule
+# rather than a per-PR run.
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly, offset from the CodeQL run so two SARIF uploads do not collide.
+    - cron: '30 5 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Upload the result to the code scanning dashboard.
+      security-events: write
+      # Publish the result so the README badge and the public API can read it.
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc  # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishes the score to the OpenSSF API, which is what the README
+          # badge reads. Nothing but the score and the check results leaves the
+          # repository; the analysis runs on public metadata either way.
+          publish_results: true
+
+      # Kept for 5 days: long enough to compare two weekly runs when a check
+      # regresses, short enough not to accumulate.
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4
+        with:
+          sarif_file: results.sarif

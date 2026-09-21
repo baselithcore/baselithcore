@@ -870,6 +870,18 @@ created — a read-only mount, wrong ownership — still fails the check and sto
 startup. `baselith doctor` itself never creates anything; the diagnostic only
 reports, and `--fix` is what repairs on demand.
 
+Not every failed check blocks the boot. A check may report at `warn` severity,
+which prints a yellow **Startup preflight warnings** panel and starts anyway:
+the feature behind it is degraded, the deployment is not. The distinction is
+per-dependency, not per-check — `LLM Local Models` blocks when the model that
+answers every request is missing from a local endpoint, and only warns when the
+gap is a model just one feature asks for, such as the vision provider's
+(`VISION_PROVIDER=ollama`). A vision model nobody pulled costs image
+understanding; it must not cost a deployment its whole plugin surface, which is
+what a fatal check plus `Restart=always` amounts to. Warnings are printed once
+per start, never hidden: an invisible degradation is the failure mode this
+tier exists to avoid.
+
 ### `test` - Run Tests
 
 Execute the pytest suite with coverage reporting in a structured output. Displays execution timing on completion.

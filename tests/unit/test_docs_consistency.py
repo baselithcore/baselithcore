@@ -60,6 +60,26 @@ def test_extract_cli_and_routes() -> None:
     assert scan.normalize_route("/runs/{run_id}/events/") == "/runs/{}/events"
 
 
+def test_python_imports_are_not_cli_invocations() -> None:
+    """The console script and the importable package share the name ``baselith``.
+
+    Without the exclusions, every ``from baselith import X`` in the docs was
+    reported as an invocation of a ``baselith import`` command that does not
+    exist, and a bare ``import baselith`` swallowed the first word of the
+    following line.
+    """
+    text = (
+        "```python\n"
+        "from baselith import Agent, Crew\n"
+        "import baselith\n"
+        "print(baselith.__version__)\n"
+        "```\n"
+        "Run `baselith doctor` to check the environment.\n"
+    )
+
+    assert [c.value for c in scan.extract_cli_invocations(PAGE, text)] == ["doctor"]
+
+
 def test_settings_fields_derive_prefixed_env_names(tmp_path: Path) -> None:
     (tmp_path / "core" / "config").mkdir(parents=True)
     (tmp_path / "core" / "config" / "demo.py").write_text(

@@ -1,29 +1,32 @@
 import asyncio
 import os
-from typing import Optional
 
-# Standard imports for Baselith-Core
-
-from plugins.reasoning_agent.reasoning_agent import ReasoningAgent
 from core.services.llm.service import LLMService
 
+# Standard imports for Baselith-Core
+from plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+
+
 class MockLLMProvider:
-    def generate(self, prompt: str, model: str = None, json_mode: bool = False):
+    def generate(self, prompt: str, model: str | None = None, json_mode: bool = False):
         # Return dummy thoughts for Game of 24
         if "generate" in prompt.lower() or "thought" in prompt.lower():
             return "1. 8 - 5 = 3\n2. 3 + 8 = 11\n3. 4 * 3 = 12 (No)", 10
         elif "evaluate" in prompt.lower() or "value" in prompt.lower():
-            return "0.5", 5 # score
+            return "0.5", 5  # score
         return "I am thinking...", 5
 
-    def generate_stream(self, prompt: str, model: str = None):
+    def generate_stream(self, prompt: str, model: str | None = None):
         yield "Thinking...", 5
+
 
 class MockLLMService:
     def __init__(self):
         self.provider = MockLLMProvider()
-    
-    def generate_response(self, prompt: str, model: str = None, json: bool = False) -> str:
+
+    def generate_response(
+        self, prompt: str, model: str | None = None, json: bool = False
+    ) -> str:
         # Simple heuristic response generation for the demo
         if "Game of 24" in prompt:
             return "Initial analysis: We need to reach 24 using 3, 3, 8, 8."
@@ -39,18 +42,21 @@ class MockLLMService:
             if "8 / (3 - 8/3)" in prompt or "8 / (1/3)" in prompt:
                 return "1.0"
             return "0.3"
-            
+
         return "I am thinking about step..."
+
 
 async def main():
     print("🚀 Starting Reasoning Agent Demo: Tree of Thoughts")
     print("-------------------------------------------------")
-    
+
     # Initialize Service
     llm_service = None
-    
+
     # Check for OpenAI API Key and configure accordingly
-    openai_key = os.environ.get("EVAL_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    openai_key = os.environ.get("EVAL_OPENAI_API_KEY") or os.environ.get(
+        "OPENAI_API_KEY"
+    )
 
     if openai_key:
         print("🔑 Found OpenAI API Key, using OpenAI provider.")
@@ -67,7 +73,7 @@ async def main():
 
     # Initialize Agent
     agent = ReasoningAgent(service=llm_service)
-    
+
     # Define Problem
     problem = (
         "Solve the Game of 24. "
@@ -75,10 +81,10 @@ async def main():
         "to yield the value 24. "
         "Show your reasoning step-by-step."
     )
-    
+
     print(f"🧩 Problem: {problem}\n")
     print("🤔 Agent is thinking (this might take a moment)...\n")
-    
+
     try:
         solution = await agent.solve(problem, max_steps=3, branching_factor=2)
         print("💡 Final Result:")
@@ -88,7 +94,9 @@ async def main():
     except Exception as e:
         print(f"❌ Error during execution: {e}")
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -62,6 +62,10 @@ STRICT_FLAGS: tuple[str, ...] = (
 #: Packages (or top-level ``core.<module>`` files) that pass
 #: :data:`STRICT_FLAGS`. Sorted, dotted names. Grow only.
 STRICT_CORE_PACKAGES: tuple[str, ...] = (
+    # The public facade. Not under ``core/`` — and so never a ``--candidates``
+    # suggestion — but it is the one package every downstream program imports,
+    # so it is strict from its first commit.
+    "baselith",
     "core._version",
     "core.a2a",
     "core.adversarial",

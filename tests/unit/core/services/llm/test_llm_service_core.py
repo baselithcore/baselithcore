@@ -20,7 +20,7 @@ class TestLLMService:
 
     @patch("core.services.llm.service.TTLCache")
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.provider_factory.OllamaProvider")
+    @patch("core.services.llm.providers.ollama_provider.OllamaProvider")
     def test_initialization_ollama(self, mock_ollama, mock_config, mock_ttl_cache):
         """Test service initialization with Ollama."""
         mock_config.return_value = Mock(
@@ -41,7 +41,7 @@ class TestLLMService:
 
     @patch("core.services.llm.service.TTLCache")
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.provider_factory.OpenAIProvider")
+    @patch("core.services.llm.providers.openai_provider.OpenAIProvider")
     def test_initialization_openai(self, mock_openai, mock_config, mock_ttl_cache):
         """Test service initialization with OpenAI."""
         mock_config.return_value = Mock(
@@ -76,7 +76,7 @@ class TestLLMService:
             LLMService()
 
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.provider_factory.AnthropicProvider")
+    @patch("core.services.llm.providers.anthropic_provider.AnthropicProvider")
     def test_initialization_anthropic(self, mock_anthropic, mock_config):
         """Test service initialization with Anthropic."""
         mock_config.return_value = Mock(

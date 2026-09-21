@@ -13,19 +13,17 @@ Run: python examples/demo_swarm.py
 """
 
 import asyncio
-import os
 
 # Standard imports for Baselith-Core
-
 from core.swarm import (
+    AgentProfile,
+    AgentStatus,
+    Capability,
     Colony,
     ColonyConfig,
-    AgentProfile,
-    Task,
-    AgentStatus,
-    SwarmMessage,
     MessageType,
-    Capability,
+    SwarmMessage,
+    Task,
     TaskPriority,
 )
 

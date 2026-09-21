@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "baselith-docs": {
+      "command": "python",
+      "args": ["-m", "mcp.main"],
+      "env": {
+        "PYTHONPATH": "mkdocs-site"
+      }
+    }
+  }
+}

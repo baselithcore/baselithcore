@@ -42,8 +42,8 @@ async def demo_navigate_and_screenshot(agent: BrowserAgent, url: str) -> None:
     screenshot = await agent.screenshot()
 
     if screenshot:
-        screenshot_path.write_bytes(screenshot)
-        print(f"📷 Screenshot saved: {screenshot_path.absolute()}")
+        await asyncio.to_thread(screenshot_path.write_bytes, screenshot)
+        print(f"📷 Screenshot saved: {screenshot_path.absolute()}")  # noqa: ASYNC240
     else:
         print("⚠️  Could not capture screenshot")
 

@@ -23,6 +23,11 @@ change would surprise an operator who only read the commit subject.
 
 ## What counts as a breaking change
 
+Scaled by the [stability tier](api-stability.md) of the package involved: the
+list below describes the `stable` tier, which is what `baselith` and the four
+packages behind it carry. A `beta` package stages the same change through a
+MINOR, an `experimental` one promises nothing.
+
 - Removing or renaming a public symbol exported from a `core.*` package
   `__init__`, or changing its signature incompatibly.
 - Removing/renaming an HTTP route, or a backward-incompatible change to a
@@ -37,15 +42,19 @@ vars, new flags) are **not** breaking.
 ### Enforcement: the public API surface gate
 
 The first bullet above is enforced, not just declared. `scripts/check_public_api.py`
-snapshots every literal `__all__` under `core/` into
+snapshots every literal `__all__` under `baselith/` and `core/` into
 `scripts/public_api_baseline.json` and fails on any drift — the Python-surface
 twin of the OpenAPI drift gate:
 
-- a **removed** symbol is reported as `BREAKING`: stage it through the
-  deprecation process below and refresh the baseline only in the change that
-  carries the `BREAKING CHANGE:` footer;
+- a **removed** symbol is reported with the release type its removal implies,
+  read from the package's [stability tier](api-stability.md): MAJOR and a
+  `BREAKING CHANGE:` footer for `stable`, a MINOR after a deprecation cycle
+  for `beta`, a plain MINOR for `experimental`;
 - an **added** symbol only needs `--update-baseline`, so every addition to the
   public surface is a conscious, reviewable line in the diff.
+
+The same pass keeps the tier table honest: it must classify exactly the
+packages that exist, and no tier may move away from stability.
 
 ```bash
 python scripts/check_public_api.py            # gate (pre-commit + CI)
@@ -74,16 +83,15 @@ Breaking changes are staged, never abrupt:
    semantic-release turns the footer into the MAJOR bump and the release-note
    entry.
 
-```python
-import warnings
+Use the decorator rather than writing the warning by hand — it fixes the
+wording, marks the symbol's tier, and appends a `.. deprecated::` note to the
+docstring:
 
+```python
+from core.stability import deprecated
+
+@deprecated(since="0.37", removed_in="1.0", alternative="new_api")
 def old_api(*args, **kwargs):
-    warnings.warn(
-        "old_api() is deprecated since 0.12 and will be removed in 1.0; "
-        "use new_api() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     return new_api(*args, **kwargs)
 ```
 

@@ -50,6 +50,16 @@ _LOCAL_PROVIDERS = ("ollama",)
 #: The endpoint an Ollama client reaches when nothing is configured.
 DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434"
 
+#: Marks a local target that only the vision service asks for. A gap there
+#: costs image understanding; a gap on the inference path costs every request,
+#: and only the second one may refuse a boot. On 2026-09-19 that distinction
+#: was the difference between one degraded feature and a deployment that
+#: crash-looped for hours with its whole plugin surface offline.
+VISION_ORIGIN = "vision"
+
+#: The settings an operator changes to move vision off a local model.
+_VISION_SETTINGS = "VISION_PROVIDER / VISION_OLLAMA_MODEL"
+
 Severity = Literal["error", "warning"]
 
 
@@ -225,23 +235,26 @@ async def probe_ollama(base_url: str, timeout: float = 2.0) -> set[str] | None:
     }
 
 
-def _ollama_targets(config: LLMConfig) -> dict[str, set[str]]:
-    """Every ``endpoint -> {model}`` pair this deployment may reach.
+def _ollama_targets(config: LLMConfig) -> dict[str, dict[str, set[str]]]:
+    """Every ``endpoint -> {model -> origins}`` this deployment may reach.
 
     Covers the primary, each local fallback stage and the vision provider,
     because all three land on the same host and any of them can be the one
-    nobody configured.
+    nobody configured. The origins travel with the model because they decide
+    how loudly a gap is reported: the model that answers every request is not
+    the same kind of dependency as the one a single feature calls.
     """
     from core.services.llm._fallback_support import parse_fallback_chain
     from core.services.llm.runtime import api_base_for
 
-    targets: dict[str, set[str]] = {}
+    targets: dict[str, dict[str, set[str]]] = {}
 
-    def add(endpoint: str | None, model: str) -> None:
-        targets.setdefault(endpoint or DEFAULT_OLLAMA_ENDPOINT, set()).add(model)
+    def add(endpoint: str | None, model: str, origin: str) -> None:
+        key = endpoint or DEFAULT_OLLAMA_ENDPOINT
+        targets.setdefault(key, {}).setdefault(model, set()).add(origin)
 
     if config.provider == "ollama":
-        add(api_base_for(config, "ollama"), config.model)
+        add(api_base_for(config, "ollama"), config.model, "primary")
     spec = getattr(config, "fallback_chain", "") or ""
     if spec:
         try:
@@ -250,14 +263,14 @@ def _ollama_targets(config: LLMConfig) -> dict[str, set[str]]:
             stages = []  # already reported by _check_chain
         for provider, model in stages:
             if provider == "ollama":
-                add(api_base_for(config, "ollama"), model)
+                add(api_base_for(config, "ollama"), model, "fallback")
 
     try:
         from core.config.multimodal import get_vision_config
 
         vision = get_vision_config()
         if vision.provider == "ollama":
-            add(vision.ollama_url, vision.ollama_model)
+            add(vision.ollama_url, vision.ollama_model, VISION_ORIGIN)
     except Exception:  # pragma: no cover - vision config is optional surface
         logger.debug("llm_preflight_vision_config_unavailable", exc_info=True)
     return targets
@@ -276,32 +289,57 @@ async def check_local_endpoints(
     for endpoint, models in _ollama_targets(config).items():
         installed = await probe_ollama(endpoint, timeout=timeout)
         if installed is None:
+            optional = all(_vision_only(origins) for origins in models.values())
             findings.append(
                 PreflightFinding(
-                    severity="error",
-                    code="ollama_unreachable",
+                    severity="warning" if optional else "error",
+                    code="ollama_vision_unreachable"
+                    if optional
+                    else "ollama_unreachable",
                     message=(
                         f"Ollama is configured for {sorted(models)} but "
                         f"{endpoint} did not answer"
+                        + (" (image understanding only)" if optional else "")
                     ),
-                    remedy="Start Ollama, or point LLM_OLLAMA_API_BASE elsewhere.",
+                    remedy=(
+                        f"Start Ollama, or point {_VISION_SETTINGS} elsewhere."
+                        if optional
+                        else "Start Ollama, or point LLM_OLLAMA_API_BASE elsewhere."
+                    ),
                 )
             )
             continue
         for model in sorted(models):
-            if not _tag_installed(model, installed):
-                findings.append(
-                    PreflightFinding(
-                        severity="error",
-                        code="ollama_model_missing",
-                        message=(
-                            f"model {model!r} is not installed at {endpoint} "
-                            f"(the first call fails; nothing is pulled for you)"
-                        ),
-                        remedy=f"Run: ollama pull {model}",
-                    )
+            if _tag_installed(model, installed):
+                continue
+            optional = _vision_only(models[model])
+            findings.append(
+                PreflightFinding(
+                    severity="warning" if optional else "error",
+                    code=(
+                        "ollama_vision_model_missing"
+                        if optional
+                        else "ollama_model_missing"
+                    ),
+                    message=(
+                        f"model {model!r} is not installed at {endpoint} "
+                        f"(the first call fails; nothing is pulled for you)"
+                        + (" — image understanding only" if optional else "")
+                    ),
+                    remedy=(
+                        f"Run: ollama pull {model}, or point {_VISION_SETTINGS} "
+                        "at a provider this deployment can serve."
+                        if optional
+                        else f"Run: ollama pull {model}"
+                    ),
                 )
+            )
     return findings
+
+
+def _vision_only(origins: set[str]) -> bool:
+    """Whether *origins* names the vision service and nothing else."""
+    return origins == {VISION_ORIGIN}
 
 
 def _tag_installed(model: str, installed: set[str]) -> bool:

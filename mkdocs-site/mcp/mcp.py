@@ -1,144 +1,191 @@
+import json
 from typing import Any
 
-# We assume core.mcp.server exists based on the EXTERNAL reference
-try:
-    from core.mcp.server import MCPServer
-except ImportError:
-    # Fallback/Mock if not yet in core - though we should ideally use core
-    # For now, let's assume it's there as per EXTERNAL examples.
-    import sys
-
-    print(
-        "Error: core.mcp.server not found. Ensure core modules are correctly installed.",
-        file=sys.stderr,
-    )
-    raise
+from core.mcp.server import MCPServer
 
 from .service import DocsService
 
+# Every tool here reads markdown off disk and nothing else. Declaring the
+# category matters twice over: ``MCPServer`` defaults tools to ``destructive``,
+# which the fail-closed autonomy policy refuses to run over a transport with no
+# approval channel, and the category is what ``readOnlyHint`` is derived from in
+# the tool listing clients see.
+_READ_ONLY = "read_only"
+
+_PATH_DESC = "Page path relative to docs/, e.g. 'core-modules/memory.md'"
+
 
 class DocsMCPHandler:
-    """Handler for Documentation MCP tools."""
+    """Handler for Documentation MCP tools.
+
+    The tool surface is deliberately small. Every definition is resident in the
+    client's context for the whole session, and a tool that invites an
+    expensive call costs more than the one it replaces: retrieval here is meant
+    to go search -> section, not search -> whole page.
+    """
 
     def __init__(self, service: DocsService):
         self.service = service
-        self._cached_all_docs: str | None = None
 
-    def register_tools(self, server: MCPServer):
+    def register_tools(self, server: MCPServer) -> None:
         """Register documentation tools and resources to the MCP server."""
 
         @server.tool(
             name="search_docs",
-            description="Search the project documentation with ranked results and snippets",
+            description=(
+                "Search the documentation. Returns ranked hits with the "
+                "heading each match sits under, to read with get_doc_section."
+            ),
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "query": {"type": "string", "description": "Keywords or phrase"},
+                    "section": {
                         "type": "string",
-                        "description": "Keywords or phrase to search for",
-                    }
+                        "description": "Restrict to a nav section, e.g. 'Core Modules'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum hits (default 5, max 20)",
+                    },
                 },
                 "required": ["query"],
             },
         )
-        async def search_docs(query: str) -> list[dict[str, Any]]:
+        async def search_docs(
+            query: str, section: str | None = None, limit: int = 5
+        ) -> list[dict[str, Any]]:
             """Search documentation."""
-            return await self.service.search(query)
+            return await self.service.search(query, section=section, limit=limit)
 
         @server.tool(
-            name="get_doc_page",
-            description="Retrieve the full content of a documentation page by its file path",
+            name="get_doc_section",
+            description=(
+                "Read one section of a page by its heading or anchor, "
+                "subsections included. Prefer this over get_doc_page."
+            ),
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "path": {"type": "string", "description": _PATH_DESC},
+                    "heading": {
                         "type": "string",
-                        "description": "Relative path (e.g. 'getting-started/installation.md')",
-                    }
+                        "description": "Heading text or anchor from a search hit",
+                    },
+                },
+                "required": ["path", "heading"],
+            },
+        )
+        async def get_doc_section(path: str, heading: str) -> dict[str, Any]:
+            """Read one section of a page."""
+            result = self.service.get_section(path, heading)
+            if result is None:
+                return {
+                    "error": f"No section matching '{heading}' in {path}",
+                    "hint": "Call get_doc_outline for the headings this page has.",
+                }
+            return result
+
+        @server.tool(
+            name="get_doc_outline",
+            description="List a page's headings with their sizes, without its body",
+            category=_READ_ONLY,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": _PATH_DESC},
                 },
                 "required": ["path"],
             },
         )
-        async def get_doc_page(path: str) -> str:
-            """Read a specific doc page."""
-            content = await self.service.get_page_content(path)
-            return content or f"Error: Page not found at {path}"
+        async def get_doc_outline(path: str) -> dict[str, Any]:
+            """Headings of a page."""
+            return self.service.get_outline(path) or {
+                "error": f"Page not found at {path}"
+            }
 
         @server.tool(
-            name="get_doc_by_title",
-            description="Find and retrieve a documentation page by its title (exact or partial)",
+            name="get_doc_page",
+            description=(
+                "Read a whole page. Pages over the size budget return their "
+                "outline instead unless full=true."
+            ),
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "The title of the page to find",
-                    }
+                    "path": {"type": "string", "description": _PATH_DESC},
+                    "full": {
+                        "type": "boolean",
+                        "description": "Return the body even when it is large",
+                    },
                 },
-                "required": ["title"],
+                "required": ["path"],
             },
         )
-        async def get_doc_by_title(title: str) -> dict[str, str]:
-            """Retrieve page by title."""
-            result = await self.service.get_page_by_title(title)
-            return result or {"error": f"No page found with title: {title}"}
-
-        @server.tool(
-            name="get_nav",
-            description="Get the hierarchical navigation structure of the documentation",
-            input_schema={"type": "object", "properties": {}},
-        )
-        async def get_nav() -> list[Any]:
-            """Get navigation tree."""
-            return self.service.get_nav_tree()
-
-        @server.tool(
-            name="list_docs",
-            description="List all available documentation pages as a flat list",
-            input_schema={"type": "object", "properties": {}},
-        )
-        async def list_docs() -> list[dict[str, str]]:
-            """List all doc pages."""
-            return self.service.get_all_pages()
+        async def get_doc_page(path: str, full: bool = False) -> dict[str, Any]:
+            """Read a specific doc page."""
+            return self.service.get_page(path, full=full) or {
+                "error": f"Page not found at {path}"
+            }
 
         @server.tool(
             name="get_docs_batch",
-            description="Retrieve the full content of multiple documentation pages in a single call",
+            description="Read several pages in one call, under the same size budget",
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of relative paths to retrieve",
-                    }
+                        "description": "Relative page paths",
+                    },
+                    "full": {
+                        "type": "boolean",
+                        "description": "Return bodies even when they are large",
+                    },
                 },
                 "required": ["paths"],
             },
         )
-        async def get_docs_batch(paths: list[str]) -> dict[str, str]:
+        async def get_docs_batch(
+            paths: list[str], full: bool = False
+        ) -> dict[str, Any]:
             """Batch retrieve pages."""
-            return await self.service.get_docs_batch(paths)
+            return await self.service.get_docs_batch(paths, full=full)
 
         @server.tool(
-            name="get_docs_summary",
-            description="List all available documentation pages with titles and introductory summaries",
-            input_schema={"type": "object", "properties": {}},
-        )
-        async def get_docs_summary() -> list[dict[str, str]]:
-            """Get all summaries."""
-            return self.service.get_docs_summary()
-
-        @server.tool(
-            name="find_related_pages",
-            description="Find documentation pages related to a specific file based on content similarity",
+            name="list_docs",
+            description=(
+                "List page paths with their breadcrumb titles, optionally "
+                "only one nav section"
+            ),
+            category=_READ_ONLY,
             input_schema={
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "section": {
                         "type": "string",
-                        "description": "The path of the document to find relations for",
-                    }
+                        "description": "Nav section, e.g. 'Getting Started'",
+                    },
+                },
+            },
+        )
+        async def list_docs(section: str | None = None) -> list[dict[str, str]]:
+            """List doc pages."""
+            return self.service.list_pages(section)
+
+        @server.tool(
+            name="find_related_pages",
+            description="Pages whose vocabulary overlaps a given page",
+            category=_READ_ONLY,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": _PATH_DESC},
                 },
                 "required": ["path"],
             },
@@ -147,36 +194,12 @@ class DocsMCPHandler:
             """Find relations."""
             return self.service.find_related_pages(path)
 
-        @server.tool(
-            name="search_in_section",
-            description="Search documentation restricted to a specific section (e.g., 'Architecture')",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "section": {
-                        "type": "string",
-                        "description": "Name of the section to search in",
-                    },
-                },
-                "required": ["query", "section"],
-            },
-        )
-        async def search_in_section(query: str, section: str) -> list[dict[str, Any]]:
-            """Restricted search."""
-            return await self.service.search_in_section(query, section)
-
-        @server.tool(
-            name="get_nav_flat",
-            description="Get a flattened list of all documentation paths with their full titles (breadcrumbs)",
-            input_schema={"type": "object", "properties": {}},
-        )
-        async def get_nav_flat() -> list[dict[str, str]]:
-            """Get flat navigation."""
-            return self.service.get_all_pages()
-
         # --- Resources ---
 
+        # The navigation tree is the one whole-site artefact small enough to
+        # hand over at once. A resource concatenating every page — which this
+        # server used to expose — is over half a million tokens: nothing can
+        # read it, and offering it only invites the attempt.
         @server.resource(
             uri="mcp://docs/navigation",
             name="Documentation Navigation",
@@ -184,26 +207,4 @@ class DocsMCPHandler:
             mime_type="application/json",
         )
         async def get_docs_nav_resource(uri: str) -> str:
-            import json
-
             return json.dumps(self.service.get_nav_tree(), indent=2)
-
-        @server.resource(
-            uri="mcp://docs/all",
-            name="Full Documentation",
-            description="All documentation pages combined into a single text resource",
-            mime_type="text/markdown",
-        )
-        async def get_all_docs_resource(uri: str) -> str:
-            if self._cached_all_docs:
-                return self._cached_all_docs
-
-            pages = self.service.get_all_pages()
-            combined = []
-            for page in pages:
-                content = await self.service.get_page_content(page["path"])
-                title = page.get("title", "Untitled")
-                combined.append(f"# {title}\n\n{content}\n\n---\n")
-
-            self._cached_all_docs = "\n".join(combined)
-            return self._cached_all_docs

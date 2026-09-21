@@ -8,6 +8,18 @@ The `core/orchestration` module manages request routing to appropriate plugins.
 
 ## Module Structure
 
+!!! info "Exports resolve on first access"
+    `__init__.py` maps each exported name to the submodule that defines it and
+    resolves it on first read ([PEP 562](https://peps.python.org/pep-0562/),
+    via `core._lazy.lazy_exports`). Import sites are unchanged — `from core.orchestration
+    import AutonomyPolicy` and `core.orchestration.checkpoint` both still work — but importing one name no
+    longer costs the whole package. Reaching `AutonomyPolicy` used to pull the whole handler graph and the LLM service with it — 3 209 modules; it now loads 95.
+
+    Adding an export means adding it to **both** `_EXPORTS` and the literal
+    `__all__`; a test enforces that they describe the same surface, and the
+    public API surface gate reads only the literal. See
+    [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
+
 ```text
 core/orchestration/
 ├── __init__.py              # Public exports

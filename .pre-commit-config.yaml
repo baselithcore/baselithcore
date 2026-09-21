@@ -72,11 +72,16 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.5
     hooks:
+      # ``examples/`` is deliberately absent from these exclusions. The
+      # examples are the first code a user reads, and unlinted they drifted
+      # into what the conventions forbid — implicit Optional, naive
+      # timestamps, bare re-raises, blocking file I/O inside async demos, and
+      # a reference agent that had stopped importing altogether. Keep them in.
       - id: ruff-check
         args: ['--fix']
-        exclude: ^(templates|examples|backstage-portal)/
+        exclude: ^(templates|backstage-portal)/
       - id: ruff-format
-        exclude: ^(templates|examples|backstage-portal)/
+        exclude: ^(templates|backstage-portal)/
 
   # -----------------------------------------
   # 🔑 Gitleaks (secrets scanning, staged changes)
@@ -418,6 +423,14 @@ repos:
         # gate in ci.yml fails on a spec nobody changed. The generator owns the
         # format; keep prettier off it.
         #
+        # public_api_baseline.json is the same rule: written by
+        # `check_public_api.py --update-baseline` with the same json.dumps, and
+        # it holds dozens of two-element __all__ lists — exactly what prettier
+        # collapses onto one line. The two disagreed on 82 lines, so refreshing
+        # the baseline and running the hooks fought each other every time. The
+        # other generated baselines (file size, exception hygiene, perf budget,
+        # evals) were checked and prettier agrees with them, so they stay in.
+        #
         # A plugin's shipped SPA bundle is the same rule with more at stake:
         # `files:` above matches the bundles, the stylesheet and index.html
         # inside it, and prettier un-minifies what it formats — measured on
@@ -431,6 +444,7 @@ repos:
             | plugins/[^/]+/ui/(dist|out|build)/
             | sdk/openapi\.json$
             | mkdocs-site/docs/api/specs/openapi\.json$
+            | scripts/public_api_baseline\.json$
           )
         args: ['--write']
 
@@ -459,8 +473,8 @@ repos:
     hooks:
       - id: mypy-core
         name: mypy-core
-        entry: mypy core --ignore-missing-imports --incremental --fast-module-lookup
+        entry: mypy core baselith --ignore-missing-imports --incremental --fast-module-lookup
         language: python
         pass_filenames: false
-        files: ^core/.*\.pyi?$
+        files: ^(core|baselith)/.*\.pyi?$
         additional_dependencies: *typing_gate_deps

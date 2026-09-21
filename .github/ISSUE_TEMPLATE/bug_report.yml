@@ -1,0 +1,90 @@
+name: Bug Report
+description: Behaviour that contradicts the documentation
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Two things make a bug actionable: a reproducer
+        and the output of `baselith doctor`.
+
+        **Security vulnerabilities do not belong here** — follow
+        [SECURITY.md](https://github.com/baselithcore/baselithcore/blob/main/SECURITY.md)
+        instead. Questions belong in
+        [Discussions](https://github.com/baselithcore/baselithcore/discussions).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happens
+      description: The behaviour you observed, and what you expected instead.
+      placeholder: Calling X returns Y; the documentation says it returns Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: >
+        The smallest script, `curl`, or command sequence that shows it. Code
+        blocks are formatted automatically — no backticks needed.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`baselith --version`, or the commit hash for a checkout."
+      placeholder: 0.36.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Where the problem shows up.
+      options:
+        - Python library (baselith / core)
+        - HTTP API
+        - CLI
+        - A plugin
+        - MCP / A2A
+        - Deployment (Docker, Helm, Terraform)
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >
+        Paste the output of `baselith doctor`. It reports the Python version,
+        OS, installed extras and configuration state — everything this section
+        used to ask for by hand.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and stack trace
+      description: Relevant output. Redact secrets and tokens before pasting.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
