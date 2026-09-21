@@ -1,4 +1,7 @@
-FROM python:3.12-slim AS base
+# Digest-pinned to the same base the root Dockerfile builds on, so the two
+# images cannot drift onto different Debian package sets. Refresh both
+# together; the root Dockerfile documents how a candidate is verified.
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
