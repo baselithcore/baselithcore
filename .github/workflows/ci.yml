@@ -1236,11 +1236,14 @@ jobs:
         with:
           fetch-depth: 0
           # persist-credentials stays ON here (the default), unlike every other
-          # job: semantic-release pushes the version bump, the changelog and the
-          # tag back to the branch, which needs the token in .git/config. That
-          # is what zizmor's `artipacked` audit flags, and the suppression above
-          # is the deliberate answer: this job cannot do its work without the
-          # credential, and it uploads only dist/, never the .git directory.
+          # job: semantic-release pushes the `v<version>` tag, which needs the
+          # token in .git/config. It pushes nothing to `main` — a repository
+          # ruleset makes that branch pull-request-only, and GITHUB_TOKEN can
+          # never bypass a ruleset, so the version bump and the changelog entry
+          # travel in the release-prep pull request instead. That tag push is
+          # what zizmor's `artipacked` audit flags, and the suppression above is
+          # the deliberate answer: this job cannot tag without the credential,
+          # and it uploads only dist/, never the .git directory.
       - name: Semantic Release
         id: semantic
         uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4  # v4
@@ -1250,11 +1253,9 @@ jobs:
           # from npm at run time could rewrite dist/ and still get provenance.
           # Bump deliberately (majors track the action's semantic-release 24).
           extra_plugins: |
-            @semantic-release/git@11.0.1
             @semantic-release/github@12.0.9
             @semantic-release/commit-analyzer@13.0.1
             @semantic-release/release-notes-generator@14.1.1
-            @semantic-release/changelog@7.0.0
             conventional-changelog-conventionalcommits@10.4.0
             @semantic-release/exec@7.1.0
         env:
@@ -1272,9 +1273,9 @@ jobs:
         # matters more here — these are the artifacts that get a Sigstore
         # provenance attestation and go to PyPI. An attestation over a build
         # nobody can reproduce bit-for-bit proves only that OUR runner made it,
-        # not that the source produces it. `git log -1` runs after
-        # semantic-release has committed the version bump, so the epoch is the
-        # release commit's, not the pre-release one's.
+        # not that the source produces it. `git log -1` is the commit the
+        # release was cut from — the merge of the release-prep pull request,
+        # which is where the version bump now lands.
         run: |
           pip install uv==0.12.0
           uv pip install --system build==1.5.0
