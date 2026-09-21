@@ -43,18 +43,24 @@ hide:
 </div>
 
 ```python
+import asyncio
+
 from core.orchestration import Orchestrator
 
 # Initialize the core orchestrator
 orchestrator = Orchestrator()
 
-# Orchestrate multi-agent collaboration with a single call
-result = await orchestrator.process(
-    "Analyze system architecture and propose optimizations",
-    intent="collaborative_task"
-)
 
-print(result["response"])
+async def main() -> None:
+    # Orchestrate multi-agent collaboration with a single call
+    result = await orchestrator.process(
+        "Analyze system architecture and propose optimizations",
+        intent="collaborative_task",
+    )
+    print(result["response"])
+
+
+asyncio.run(main())
 ```
 
 </div>

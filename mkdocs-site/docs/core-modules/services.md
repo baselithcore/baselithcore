@@ -412,6 +412,21 @@ streaming when `enable_native_tools` is on and the provider implements
 path is replayed as events — the consumer contract is identical. Deadline
 (`stream_within_deadline`) and token/cost accounting match the sibling paths.
 
+!!! danger "Anthropic deltas are read off `content_block_delta`"
+    The Anthropic reader (`core/services/llm/providers/_anthropic_streaming.py`)
+    dispatched on `event.type == "text_delta"` — a shape no Anthropic SDK
+    emits. The delta type lives on `event.delta.type`, inside a
+    `content_block_delta` event, so the branch never matched and both
+    Anthropic streaming paths (`stream_text` and `stream_structured`) yielded
+    no text at all: token counts and the final message were right, the visible
+    answer was empty. Both now normalise the raw `content_block_delta` event,
+    which is also the only one carrying `index` — without it a partial-JSON
+    delta cannot be attributed to the tool call it belongs to. The SDK's own
+    accumulated companions (`TextEvent`, `InputJsonEvent`) are deliberately
+    **not** read, or every chunk would be emitted twice; a top-level
+    `text_delta` / `input_json_delta` is still accepted for hand-built doubles
+    and wrappers that forward bare delta objects.
+
 ### Batch generation (offline, −50% cost)
 
 `core/services/llm/batch.py` — for offline workloads (eval replays,
@@ -1128,6 +1143,39 @@ BaselithCore enforces strict multi-tenant isolation at the service level. The `V
 - **Deletion**: Documents can only be deleted if they belong to the active tenant.
 
 This isolation is executed **server-side** by the underlying provider (e.g., Qdrant), ensuring that data remains segmented even if internal identifiers are leaked.
+
+!!! danger "The ambient tenant is assigned, never defaulted"
+    `query_points()` and `query_points_groups()` — the raw-query escape
+    hatches — **assign** `tenant_id = get_current_tenant_id()` over whatever
+    the caller passed, rather than `setdefault`-ing it. A caller-supplied
+    `tenant_id` in `**kwargs` used to win, which turned anything that forwards
+    caller-controlled filter kwargs into a cross-tenant read. There is no
+    supported way to query another tenant from inside a request bound to one.
+
+### Reserved payload keys
+
+The indexing pipeline owns six payload keys, and caller metadata may not
+shadow them:
+
+```python
+# core/services/vectorstore/_indexing.py
+RESERVED_PAYLOAD_KEYS = frozenset(
+    {"text", "source", "document_id", "tenant_id", "chunk_index", "chunk_count"}
+)
+```
+
+Document metadata is merged **under** the keys the pipeline writes; a
+colliding key is dropped and logged once per document as
+`indexing_metadata_reserved_keys_dropped` (with the `document_id` and the
+sorted key names). The merge used to run the other way — `payload.update(metadata)`
+*after* the literal — so a document whose metadata carried `tenant_id` named
+whatever tenant it liked, and since every isolation check downstream reads
+back this same payload (the pgvector `payload @>` predicate, the Qdrant field
+condition), one poisoned write was readable by the tenant it named. The other
+five are read back just as literally — a hit's content comes from `text` and
+its document id from `document_id` — so shadowing any of them corrupts
+retrieval in its own way. Keep your own metadata on distinct keys; a prefix
+such as `app_source` is enough.
 
 ### Payload Indexes & Grouped Retrieval
 

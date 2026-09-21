@@ -67,6 +67,8 @@ uv pip install baselith-core        # or: pip install baselith-core
 ```
 
 ```python
+import asyncio
+
 from baselith import Agent, Crew, Task
 
 researcher = Agent(system_prompt="You are a meticulous researcher.")
@@ -76,7 +78,14 @@ crew = Crew(agents=[researcher, writer], tasks=[
     Task("Research {topic} and list the key facts.", agent=researcher),
     Task("Write a summary from the research.", agent=writer),
 ])
-report = (await crew.run(inputs={"topic": "vector databases"})).final
+
+
+async def main() -> None:
+    result = await crew.run(inputs={"topic": "vector databases"})
+    print(result.final)
+
+
+asyncio.run(main())
 ```
 
 Typed, budgeted and observable from the first line — the

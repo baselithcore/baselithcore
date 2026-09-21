@@ -14,45 +14,104 @@ from rich.prompt import Prompt
 from core import __version__ as FRAMEWORK_VERSION
 from core.cli.ui import console, print_error, print_panel, print_step, print_success
 
+_AGENT_MODULE = '''"""The project's first agent.
+
+Run it with ``python -m app.agent``. ``Agent.run`` is a coroutine, so it needs
+a running event loop — hence ``asyncio.run`` at the bottom.
+"""
+
+import asyncio
+
+from baselith import Agent
+
+
+async def current_time(timezone: str = "UTC") -> str:
+    """Return the current time in a timezone.
+
+    Args:
+        timezone: IANA timezone name, e.g. "Europe/Rome".
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo(timezone)).isoformat()
+
+
+agent = Agent(
+    system_prompt="You are a concise assistant.",
+    tools=[current_time],
+)
+
+
+async def main() -> None:
+    """Ask the agent one question and print the answer."""
+    result = await agent.run("What time is it in Europe/Rome?")
+    print(result.text)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+'''
+
+_AGENT_TEST_MODULE = '''"""The scaffolded agent is importable and declares its tool."""
+
+from app.agent import agent
+
+
+def test_agent_exposes_its_tool() -> None:
+    assert "current_time" in agent.tool_names
+'''
+
+#: Templates the CLI can scaffold without a checkout of this repository.
+#:
+#: ``full`` and ``chat-only`` used to sit here with an empty ``files`` dict.
+#: The scaffolder only checked that ``files`` *was* a dict, so each of them
+#: created an empty directory and then printed "Created project at ..." — and
+#: the interactive prompt offered both by name. They are removed rather than
+#: stubbed: a template that produces nothing is worse than one that is not
+#: offered. The richer starters (``rag-system``, ``multi-agent-collab``,
+#: ``baselith-core-template``) are directories under ``templates/`` and are
+#: discovered at runtime, from a checkout of this repository.
 PROJECT_TEMPLATES = {
     "minimal": {
-        "description": "Minimal project with core dependencies only",
+        "description": "Minimal project: one agent, wired to the public API",
         "files": {
             "README.md": """# {project_name}
 
-A Baselith-Core project.
+A BaselithCore project.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Install dependencies
 pip install -e .
-
-# Run the server
-baselith run
+python -m app.agent
 ```
 
-## Project Structure
+## Layout
 
 ```
 {project_name}/
-├── app/           # Application code
-├── core/          # Core framework (from MAS)
-├── plugins/       # Your custom plugins
-├── configs/       # Configuration files
-└── tests/         # Test files
+├── app/           # Your application code; app/agent.py is the entry point
+├── plugins/       # Your plugins — domain logic belongs here
+├── tests/         # Your tests
+├── .env           # Local configuration
+└── pyproject.toml
+```
+
+The framework is a dependency (`baselith-core`), not a directory inside this
+project. Import it as `baselith`:
+
+```python
+from baselith import Agent
 ```
 """,
             "pyproject.toml": """[project]
 name = "{project_name}"
-version = "{framework_version}"
-description = "Baselith-Core project"
-requires-python = ">=3.11"
+version = "0.1.0"
+description = "A BaselithCore project"
+requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn>=0.32.0",
-    "pydantic>=2.9.0",
-    "pydantic-settings>=2.0.0",
+    "baselith-core>={framework_version}",
 ]
 
 [project.optional-dependencies]
@@ -61,9 +120,11 @@ dev = ["pytest", "pytest-cov", "pytest-asyncio"]
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "plugins*"]
 """,
-            ".env": """# {project_name} Configuration
-# Copy to .env and customize
+            ".env": """# {project_name} configuration
 
 CORE_LOG_LEVEL=INFO
 CORE_DEBUG=false
@@ -71,22 +132,61 @@ CORE_DEBUG=false
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.1:8b
 """,
+            ".gitignore": """__pycache__/
+*.py[cod]
+.venv/
+.env
+.pytest_cache/
+""",
             "app/__init__.py": '"""Application module."""\n',
+            "app/agent.py": _AGENT_MODULE,
             "plugins/.gitkeep": "",
             "tests/__init__.py": '"""Test module."""\n',
+            "tests/test_agent.py": _AGENT_TEST_MODULE,
         },
-    },
-    "full": {
-        "description": "Full project with all services configured",
-        "files": {
-            # Include minimal files plus more
-        },
-    },
-    "chat-only": {
-        "description": "Chat service only, minimal footprint",
-        "files": {},
     },
 }
+
+
+#: A directory under ``templates/`` is a *project* starter when it has a
+#: README and something to run or install. The marker matters because that
+#: tree also holds scaffolds that are not projects — ``plugin-template`` is a
+#: plugin, ``backstage`` is a portal — and offering either as a project
+#: template hands the operator a directory ``baselith run`` cannot start.
+_PROJECT_MARKERS = ("pyproject.toml", "requirements.txt", "main.py", "agent.py")
+
+
+def _is_project_template(directory: Path) -> bool:
+    """Whether a ``templates/`` directory scaffolds a runnable project."""
+    if not (directory / "README.md").is_file():
+        return False
+    return any((directory / marker).is_file() for marker in _PROJECT_MARKERS)
+
+
+def available_templates() -> list[str]:
+    """Every template this invocation can actually scaffold.
+
+    The built-in ones always work; the directory ones need a checkout of this
+    repository, because ``templates/`` is not shipped in the wheel, so a
+    ``pip install baselith-core`` user sees only the built-ins.
+
+    Returns:
+        Template names, built-ins first, each of which will produce a project.
+    """
+    names = list(PROJECT_TEMPLATES)
+    templates_dir = find_project_root() / "templates"
+    if templates_dir.is_dir():
+        names.extend(
+            sorted(
+                entry.name
+                for entry in templates_dir.iterdir()
+                if entry.is_dir()
+                and not entry.name.startswith(".")
+                and entry.name not in PROJECT_TEMPLATES
+                and _is_project_template(entry)
+            )
+        )
+    return names
 
 
 def find_project_root() -> Path:
@@ -167,8 +267,11 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         return 1
 
     if not template:
-        # Check available templates to offer in prompt
-        choices = ["minimal", "full", "chat-only", "rag-system", "baselith-core"]
+        # Offer what actually exists. The list used to be a hardcoded five,
+        # two of which scaffolded nothing and one of which ("baselith-core")
+        # matched neither an internal template nor a directory, so three of
+        # the five choices were dead ends.
+        choices = available_templates()
         template = Prompt.ask(
             "[bold cyan]? Which template would you like to use?[/bold cyan]",
             choices=choices,
@@ -231,6 +334,12 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         )
         files_to_create = cast(dict[str, str], template_data.get("files", {}))
 
+    if not files_to_create:
+        # A template that writes nothing used to create the directory anyway
+        # and report success, leaving the operator to discover the emptiness.
+        print_error(f"Template '{template}' contains no files; nothing was created.")
+        return 1
+
     try:
         # Create project directory
         project_path.mkdir(parents=True)
@@ -269,9 +378,18 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         except ValueError:
             cd_target = project_path
 
+        # ``baselith run`` starts a server from ``backend.py``, so it is the
+        # right next step only for a template that scaffolds one. The panel
+        # used to name it unconditionally, which sent anyone who took the
+        # minimal template to a command that exits with "backend.py not found".
+        if "backend.py" in files_to_create:
+            last_step = "[bold]baselith[/bold] run"
+        else:
+            last_step = "[bold]python[/bold] -m app.agent"
+
         next_steps = f"""[bold]cd[/bold] {cd_target}
 [bold]pip[/bold] install -e .
-[bold]baselith[/bold] run"""
+{last_step}"""
         print_panel(next_steps, title="Next steps", style="green")
 
         return 0

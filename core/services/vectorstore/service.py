@@ -408,7 +408,11 @@ class VectorStoreService:
             **kwargs: Direct provider-specific arguments (e.g., complex filters).
         """
         collection_name = collection_name or self.config.collection_name
-        kwargs.setdefault("tenant_id", get_current_tenant_id())
+        # Assignment, not ``setdefault``: the ambient tenant is the only tenant
+        # this call may read. A caller-supplied ``tenant_id`` in **kwargs used
+        # to win, which turned a raw-query escape hatch into a cross-tenant
+        # read for anything that forwarded caller-controlled filter kwargs.
+        kwargs["tenant_id"] = get_current_tenant_id()
 
         try:
             if hasattr(self.provider, "query_points"):
@@ -450,7 +454,11 @@ class VectorStoreService:
             **kwargs: Direct provider-specific arguments (e.g. filters).
         """
         collection_name = collection_name or self.config.collection_name
-        kwargs.setdefault("tenant_id", get_current_tenant_id())
+        # Assignment, not ``setdefault``: the ambient tenant is the only tenant
+        # this call may read. A caller-supplied ``tenant_id`` in **kwargs used
+        # to win, which turned a raw-query escape hatch into a cross-tenant
+        # read for anything that forwarded caller-controlled filter kwargs.
+        kwargs["tenant_id"] = get_current_tenant_id()
 
         try:
             if hasattr(self.provider, "query_points_groups"):

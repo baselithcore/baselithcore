@@ -7,6 +7,7 @@ LLM clients, Vector stores) are initialized only upon their first
 functional call, significantly reducing system cold-start latency.
 """
 
+import asyncio
 from typing import Any
 
 from core.observability.logging import get_logger, redact_url_credentials
@@ -142,6 +143,25 @@ async def initialize_redis() -> Any:
     return redis_client
 
 
+async def _memory_provider(collection: str) -> Any | None:
+    """Build the memory backing store without stalling the event loop.
+
+    The construction itself lives in :func:`core.memory.providers.build_memory_provider`
+    so the lazy registry and the process-wide singleton cannot disagree about
+    whether memories are persisted. It runs in a worker thread because the
+    vector client performs a server compatibility check when it is built.
+
+    Args:
+        collection: Vector-store collection to keep this memory in.
+
+    Returns:
+        A provider, or ``None`` when persistence is off or unavailable.
+    """
+    from core.memory.providers import build_memory_provider
+
+    return await asyncio.to_thread(build_memory_provider, collection)
+
+
 async def initialize_memory() -> Any:
     """
     Lazy initialize the core AgentMemory manager.
@@ -152,9 +172,15 @@ async def initialize_memory() -> Any:
         Any: The global AgentMemory instance.
     """
     from core.memory.manager import AgentMemory
+    from core.services.llm.service import get_llm_service
 
     logger.info("🧠 Lazy initializing AgentMemory...")
-    memory_manager = AgentMemory()
+    memory_manager = AgentMemory(
+        provider=await _memory_provider("agent_memory"),
+        # Compaction refuses to run without a summarizer rather than replacing
+        # a batch of memories with a truncation of three of them.
+        llm_service=get_llm_service(),
+    )
     logger.info("✅ AgentMemory initialized")
     return memory_manager
 
@@ -218,7 +244,11 @@ async def initialize_hierarchical_memory() -> Any:
     llm_service = get_llm_service()
     embedder = get_embedder()
 
-    memory = HierarchicalMemory(llm_service=llm_service, embedder=embedder)
+    memory = HierarchicalMemory(
+        llm_service=llm_service,
+        embedder=embedder,
+        provider=await _memory_provider("hierarchical_memory"),
+    )
     logger.info("✅ HierarchicalMemory initialized")
     return memory
 

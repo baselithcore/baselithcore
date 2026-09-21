@@ -1033,6 +1033,46 @@ adapter.register_function(my_async_func, name="do_thing")
 adapter.register_all_tools()
 ```
 
+### The bundled tools call the real services
+
+The implementations behind the bundled RAG and reasoning tools live in
+`core/mcp/_builtin_tools.py`:
+
+| Tool | What it now does | When the service is unavailable |
+| --- | --- | --- |
+| `search_knowledge_base` | Embeds the query off the event loop and searches through `VectorStoreService`, returning each hit's id, content, score and metadata | One-entry list carrying `error`; an empty corpus returns `[]`, which is a different answer |
+| `index_document` | Indexes the document through `VectorStoreService` and reports `chunks_written` | `{"status": "error", "error": ...}` — `status` is only `indexed` when the store confirmed a write |
+| `plan_task` | Runs the [Tree-of-Thoughts](reasoning.md) search and returns its steps and winning solution | `{"status": "error", "error": ...}` — never a canned plan |
+
+!!! danger "They used to return invented data"
+    `search_knowledge_base` answered every query with one fabricated hit scored
+    `0.95`, `index_document` reported `{"status": "indexed"}` without writing
+    anything, and `plan_task` returned the same three generic steps for every
+    task. All three are registered by `register_all_tools`, so any deployment
+    with the MCP HTTP transport enabled served them to real clients. A
+    well-formed fabrication is worse than an unimplemented tool: the model on
+    the other side cannot tell a placeholder from an answer, so it reads one
+    as retrieved fact and cites it. Every path now either does the work or
+    reports that it could not.
+
+!!! note "The `default` collection is a sentinel, not a collection name"
+    The tool schemas advertise `default` as the collection; it means *the
+    configured collection*. Passing it through would search a collection
+    literally named `default`. Any other value is used as-is. `top_k` falls
+    back to `MCP_RAG_DEFAULT_TOP_K` (default `5`).
+
+!!! note "`plan_task` searches on a short leash"
+    The caller is an MCP client the server does not control and every
+    expansion is a billed LLM call, so the search is bounded to `k=3`,
+    `max_steps=4`, `iterations=6` rather than the engine's own default. The
+    ambient `LoopBudget` still applies and aborts earlier when it is the
+    tighter limit.
+
+Tenant isolation is not re-implemented in these tools: both storage paths go
+through `VectorStoreService`, which resolves the tenant from the ambient
+request context and applies it to every read and write — see
+[Services › Tenant Isolation](services.md#tenant-isolation).
+
 ---
 
 ## Documentation MCP Server

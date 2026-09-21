@@ -23,6 +23,55 @@ logger = get_logger(__name__)
 _PROVIDER_FANOUT_LIMIT = 8
 
 
+class MemoryCompactionUnsupported(RuntimeError):
+    """The configured provider cannot support a safe compaction run."""
+
+
+def _pruned_ids(
+    read: list[MemoryItem], compressed_items: list[MemoryItem], folded: set[str]
+) -> set[str]:
+    """Derive which of the items read were dropped as below-threshold.
+
+    The compressor reports a ``pruned_count`` but not which items it scored
+    that way. Rather than re-run its thresholds here — two copies of a decay
+    curve drift apart — the set is derived: anything read that neither
+    survived into the output nor went into a summary was pruned.
+
+    Args:
+        read: The batch that was enumerated.
+        compressed_items: What the compressor returned.
+        folded: Ids already accounted for by a summary.
+
+    Returns:
+        The pruned ids, as strings.
+    """
+    survivors = {
+        str(item.id) for item in compressed_items if not item.metadata.get("is_summary")
+    }
+    return {str(item.id) for item in read} - survivors - folded
+
+
+def _folded_source_ids(compressed_items: list[MemoryItem]) -> set[str]:
+    """Collect the ids the compressor reports as folded into a summary.
+
+    Only these are deleted. A summary that does not record its sources deletes
+    nothing, which costs a little space and cannot lose a memory.
+
+    Args:
+        compressed_items: What the compressor returned.
+
+    Returns:
+        The source ids, as strings.
+    """
+    consumed: set[str] = set()
+    for item in compressed_items:
+        if not item.metadata.get("is_summary"):
+            continue
+        for source_id in item.metadata.get("source_ids") or ():
+            consumed.add(str(source_id))
+    return consumed
+
+
 class OptimizationMixin:
     """
     Extends AgentMemory with maintenance operations.
@@ -51,20 +100,71 @@ class OptimizationMixin:
 
         logger.info("Memory consolidation complete")
 
+    async def _enumerate_for_compression(self, safe_limit: int) -> list[MemoryItem]:
+        """Read the batch compaction will act on, in provider order.
+
+        Raises:
+            MemoryCompactionUnsupported: The provider cannot enumerate. Not a
+                soft failure: compaction deletes what it reads, so an
+                approximate read is a silent data-loss path.
+        """
+        list_items = getattr(self.provider, "list_items", None)
+        if not callable(list_items):
+            raise MemoryCompactionUnsupported(
+                f"{type(self.provider).__name__} cannot enumerate its contents; "
+                "compaction needs a deterministic read of what it is about to "
+                "delete."
+            )
+        page, _next_offset = await list_items(limit=safe_limit)
+        return list(page)
+
     async def compress_old_memories(
         self,
         days_threshold: int = 7,
         strategy: str = "summarization",
         batch_limit: int = 500,
+        prune: bool = False,
     ) -> Optional["CompressionResult"]:
-        """Archive or summarze older memories to reclaim space.
+        """Fold low-relevance memories into summaries to reclaim space.
+
+        Destructive: the source items that go into a summary are deleted once
+        it is written. Three preconditions therefore gate the run, and each
+        one aborts instead of degrading.
+
+        * **A provider that can enumerate.** The batch used to come from
+          ``provider.search("")`` — the nearest neighbours of the empty
+          string's embedding, an arbitrary slice that changed between runs —
+          and every id in it was then deleted. Compaction now reads the batch
+          in provider order, so what it deletes is what it looked at.
+        * **A real summarizer.** Without an ``llm_service`` the compressor
+          falls back to ``" | ".join(m.content[:100] for m in memories[:3])``.
+          Trading a batch of memories for a 300-character truncation of three
+          of them is data loss, not compression, so it is refused.
+        * **Sources it can address.** Only the items actually folded into a
+          summary are deleted, and only when the summary records which ones
+          those were. Items the compressor chose to keep are left alone rather
+          than deleted and rewritten.
+
+        Pruning is separate and opt-in. The relevance calculator also drops
+        items below ``pruning_threshold`` from its output; deleting those is a
+        discard, not a compression, since nothing is written in their place.
+        The old delete-everything-we-read step performed that discard as a
+        side effect of compaction, so a caller asking to reclaim space silently
+        lost every memory the decay curve had aged out. The candidates are
+        reported as ``pruned_count`` whether or not ``prune`` is set, so an
+        operator can see the count before authorising the deletion.
 
         Args:
-            days_threshold: Age threshold for compression (unused at this layer,
-                may be applied by provider/compressor).
+            days_threshold: Age threshold for compression (applied by the
+                relevance calculator, not at this layer).
             strategy: Compression strategy name.
-            batch_limit: Max memories to fetch per compression run. Keeps the
-                operation bounded to avoid tenant-wide DoS on large stores.
+            batch_limit: Max memories to read per run. Keeps the operation
+                bounded on large stores.
+            prune: Also delete the items the calculator scored below the
+                pruning threshold. Off by default.
+
+        Returns:
+            The compression result, or ``None`` when a precondition failed.
         """
         if not self.provider:
             logger.warning("No provider configured, cannot compress memories")
@@ -76,12 +176,23 @@ class OptimizationMixin:
             MemoryCompressor,
         )
 
+        llm_service = getattr(self, "llm_service", None)
+        if llm_service is None:
+            logger.warning(
+                "memory_compression_skipped_no_summarizer",
+                extra={"strategy": strategy},
+            )
+            return None
+
         safe_limit = max(1, min(int(batch_limit), 1000))
         import time as _time
 
         _start = _time.monotonic()
         try:
-            all_memories = await self.provider.search("", limit=safe_limit)
+            all_memories = await self._enumerate_for_compression(safe_limit)
+        except MemoryCompactionUnsupported as e:
+            logger.warning("memory_compression_unsupported", extra={"reason": str(e)})
+            return None
         except Exception as e:
             logger.error(f"Failed to fetch memories for compression: {e}")
             return None
@@ -95,24 +206,41 @@ class OptimizationMixin:
             )
 
         strategy_enum = CompressionStrategy(strategy)
-        compressor = MemoryCompressor(embedder=self.embedder)
+        compressor = MemoryCompressor(llm_service=llm_service, embedder=self.embedder)
         compressed_items, result = await compressor.compress(
             all_memories, strategy=strategy_enum
         )
 
+        consumed = _folded_source_ids(compressed_items)
+        removable = set(consumed)
+        if prune:
+            removable |= _pruned_ids(all_memories, compressed_items, consumed)
+
+        new_summaries = [
+            item for item in compressed_items if item.metadata.get("is_summary")
+        ]
+        if not removable and not new_summaries:
+            logger.info(
+                "memory_compression_noop",
+                extra={
+                    "original_count": result.original_count,
+                    "prune_candidates": result.pruned_count,
+                },
+            )
+            return result
+
         try:
-            # Delete phase fully precedes add phase (compressed summaries are
-            # new items). Providers with a batch API get ONE filtered delete
-            # round-trip for the whole batch; the fallback fans out per-item
-            # deletes under a bounded concurrency ceiling, since
-            # ``all_memories`` can be up to ``safe_limit`` items.
+            # Write the summaries before deleting their sources: a crash
+            # between the two then leaves a recoverable duplicate rather than
+            # a hole. Providers with a batch API do each phase in one
+            # round-trip; the fallback fans out under a concurrency ceiling.
+            await add_items(
+                self.provider, new_summaries, fanout_limit=_PROVIDER_FANOUT_LIMIT
+            )
             await delete_items(
                 self.provider,
-                [str(item.id) for item in all_memories],
+                sorted(removable),
                 fanout_limit=_PROVIDER_FANOUT_LIMIT,
-            )
-            await add_items(
-                self.provider, compressed_items, fanout_limit=_PROVIDER_FANOUT_LIMIT
             )
         except Exception as e:
             logger.error(f"Failed to update provider during compression: {e}")
@@ -126,6 +254,8 @@ class OptimizationMixin:
                 "compressed_count": result.compressed_count,
                 "pruned_count": result.pruned_count,
                 "summaries_created": result.summaries_created,
+                "deleted_count": len(removable),
+                "pruned": prune,
                 "fetch_ms": round(_fetch_ms, 2),
                 "strategy": strategy,
                 "days_threshold": days_threshold,

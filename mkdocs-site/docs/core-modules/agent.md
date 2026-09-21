@@ -41,7 +41,10 @@ result.iterations        # LLM round-trips used
 - **Plain-Python tools** — pass sync or async callables; the JSON schema is
   inferred from type hints and the docstring (explicit
   `ToolDefinition`s are accepted too). The tool loop runs until the model
-  answers without tool calls, bounded by `max_iterations`.
+  answers without tool calls, bounded by `max_iterations`. A sync callable
+  runs in a worker thread, every call is bounded by `tool_timeout`, and the
+  calls of one turn overlap — see
+  [How a tool call runs](#how-a-tool-call-runs).
 - **A real message history** — the loop keeps a
   [neutral `Message` history](messages.md) and only ever appends to it: the
   assistant turn goes back **verbatim** (thinking blocks included), and every
@@ -74,6 +77,12 @@ result.iterations        # LLM round-trips used
 | `llm_service` | shared service | Injection seam for tests |
 | `autonomy_policy` | `None` | When set, tools whose category needs approval at the active level are gated through the enforcement chokepoint. Left `None` deliberately: there is no ambient policy to inherit here, and defaulting to one would start demanding approval for every effectful tool of every existing typed agent, with no channel to approve on. |
 | `tool_ledger` | `None` | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run |
+| `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
+
+`agent.tool_names` reads back the tools an agent is armed with — their names
+in declaration order, as a `tuple[str, ...]`. It is the public counterpart of
+the private `_tools` dict that callers (and the scaffolded project) used to
+reach into.
 
 ## What `run()` raises
 
@@ -94,6 +103,51 @@ orchestrated request is subject to exactly the same caps as any other path.
     supplied — and a *fresh* id per attempt is a different run by definition, so
     the ledger has nothing to match and every effectful tool executes again. Pass
     a **stable** id across retries of the same logical run.
+
+## How a tool call runs
+
+Resolution, argument validation and the gates live in
+`core/agent/_tool_dispatch.py`; the execution itself lives in
+`core/agent/_tool_runtime.py`, which gives the typed loop the three properties
+the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
+
+- **Off the event loop.** A synchronous tool runs in a worker thread
+  (`asyncio.to_thread`) instead of inline on the loop. `tools=[my_function]`
+  invites ordinary blocking callables, and one blocking HTTP client or file
+  read on the loop stalls every other in-flight request in the process for as
+  long as it takes. Async tools are awaited directly, as before.
+- **Bounded.** `tool_timeout` caps each call at `120.0` seconds by default,
+  shrunk to whatever the ambient [`LoopBudget`](orchestration.md) has left so
+  a tool cannot outlive the request whose answer it is computing. An elapsed
+  deadline comes back to the model as a failed `tool_result` and the loop
+  continues: the call failed, not the run.
+- **Overlapped.** When one turn carries several tool calls, the model emitted
+  all of them before seeing any result, so they are independent by
+  construction. The approved ones run concurrently under a semaphore of
+  `MAX_PARALLEL_TOOL_CALLS = 8` (`core/reasoning/react_tools.py`), so the turn
+  costs the slowest call instead of the sum. Each result is written back at
+  the index of the call that produced it, so the `tool_result` blocks stay in
+  the order the model asked regardless of completion order.
+
+!!! danger "Gates run strictly in order, before anything executes"
+    Every call of the turn is resolved, argument-checked and gated in emission
+    order, and only the survivors are then overlapped. The ordering is
+    load-bearing: `ApprovalPendingError` and `BudgetExceededError` are
+    fail-closed refusals that abort the turn, and a refusal is worthless if a
+    later tool in the same turn has already run its side effect. Unknown-tool
+    and denial observations are filled in at their own index.
+
+!!! note "Ledger keys are unchanged"
+    Each call's step is still its position in the run — assigned before
+    anything executes rather than as results arrive — so a resumed run
+    produces the same `tool_ledger` keys as the sequential loop this replaced.
+
+!!! warning "A timeout stops the wait, not the thread"
+    Cancelling on a deadline stops the *await*. A synchronous tool already
+    running in a worker thread cannot be interrupted; Python has no mechanism
+    for it. The agent stops waiting and reports the timeout, and bounding the
+    work itself — a client-side timeout on your HTTP call, say — stays the
+    tool's job.
 
 ## Relationship to the orchestrator
 

@@ -9,15 +9,107 @@ ephemeral in-memory storage for testing and transient state.
 import asyncio
 import inspect
 from typing import Any, cast
+from uuid import UUID
 
 from core.models.domain import Document
 from core.observability.logging import get_logger
 from core.services.vectorstore.service import get_vectorstore_service
 
+from ._in_memory_provider import InMemoryProvider
 from .interfaces import MemoryProvider
 from .types import MemoryItem, MemoryType
 
 logger = get_logger(__name__)
+
+
+def _stored_id(document_id: str) -> UUID | None:
+    """Recover a ``MemoryItem`` id from the id the vector store round-tripped.
+
+    Items are written with ``Document.id = str(item.id)``, so the identity
+    survives the store and comes back on the payload's ``document_id``.
+    Reconstruction used to drop it and let ``MemoryItem`` mint a fresh uuid,
+    which made every read-back unaddressable: a delete keyed on the recalled
+    item's id referred to a row that had never existed, so compression removed
+    nothing and its summaries accumulated next to the originals it believed it
+    had replaced.
+
+    Args:
+        document_id: The id the store returned.
+
+    Returns:
+        The parsed uuid, or ``None`` for an id this store did not write.
+    """
+    try:
+        return UUID(document_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _memory_item_from(doc: Document, score: float) -> MemoryItem:
+    """Rebuild a :class:`MemoryItem` from a stored document.
+
+    Args:
+        doc: The document the vector store returned.
+        score: Its similarity score.
+
+    Returns:
+        The item, carrying its stored identity when the store round-tripped
+        one.
+    """
+    item = MemoryItem(
+        content=doc.content,
+        memory_type=MemoryType(doc.metadata.get("type", MemoryType.LONG_TERM.value)),
+        metadata=doc.metadata,
+        score=score,
+    )
+    stored = _stored_id(doc.id)
+    if stored is not None:
+        item.id = stored
+    return item
+
+
+def build_memory_provider(collection: str) -> MemoryProvider | None:
+    """Build the persistent backing store for agent memory, or ``None``.
+
+    The single construction site for memory persistence, so the lazy-registry
+    bootstrap and the process-wide singleton cannot disagree about whether
+    memories survive a restart. Both used to be built with no provider at all:
+    the long-term tier fell back to a bounded in-process deque searched by
+    substring, so "long-term memory" meant a few hundred items that died with
+    the worker and were invisible to every other one.
+
+    Cheap to call: the vector client is constructed here, but the embedder is
+    resolved on first query (see
+    :meth:`VectorMemoryProvider._resolve_embedder`), so nothing loads a model
+    on the calling thread.
+
+    Args:
+        collection: Vector-store collection to keep this memory in.
+
+    Returns:
+        A provider, or ``None`` when persistence is off or unavailable — in
+        which case the reason is logged, naming the consequence.
+    """
+    from core.config.memory import get_memory_runtime_config
+
+    if not get_memory_runtime_config().persistence_enabled:
+        logger.warning(
+            "memory_persistence_disabled",
+            extra={"consequence": "memories are lost when this process exits"},
+        )
+        return None
+
+    try:
+        return VectorMemoryProvider(collection_name=collection)
+    except Exception as exc:
+        logger.warning(
+            "memory_persistence_unavailable",
+            extra={
+                "error": str(exc),
+                "consequence": "memories are lost when this process exits",
+            },
+        )
+        return None
 
 
 class VectorMemoryProvider(MemoryProvider):
@@ -77,11 +169,15 @@ class VectorMemoryProvider(MemoryProvider):
         """
         if not items:
             return
+        # Resolve rather than demand: the vector store owns the "an embedder is
+        # required" error, and refusing here would turn a loud, specific
+        # failure into a silent dropped write.
+        embedder = await self._resolve_embedder()
         try:
             await self.vector_service.index(
                 documents=[self._to_document(item) for item in items],
                 collection_name=self.collection_name,
-                embedder=self.embedder,
+                embedder=embedder,
             )
         except Exception as e:
             logger.error(f"Failed to add memory to vector store: {e}")
@@ -164,6 +260,33 @@ class VectorMemoryProvider(MemoryProvider):
             logger.error(f"Failed to batch retrieve memory items: {e}")
             return []
 
+    async def _resolve_embedder(self) -> Any | None:
+        """The embedder, loading the default one on first use if none was given.
+
+        Constructing it loads a sentence-transformer model, which is slow and
+        synchronous. Deferring it to the first query that actually needs one
+        keeps the provider cheap to build, so a *synchronous* construction site
+        — ``core.memory.get_memory()`` — can wire persistence without loading a
+        model on whatever thread happened to call it.
+
+        Returns:
+            The embedder, or ``None`` when one cannot be built.
+        """
+        if self.embedder is not None:
+            return self.embedder
+
+        def _load() -> Any:
+            from core.nlp.models import get_embedder
+
+            return get_embedder()
+
+        try:
+            self.embedder = await asyncio.to_thread(_load)
+        except Exception as e:
+            logger.warning(f"Could not load the default embedder: {e}")
+            return None
+        return self.embedder
+
     async def search(
         self,
         query: str,
@@ -178,16 +301,17 @@ class VectorMemoryProvider(MemoryProvider):
         hot path embeds the query once and reuses the vector across memory tiers.
         """
         if query_vector is None:
-            if not self.embedder:
+            embedder = await self._resolve_embedder()
+            if embedder is None:
                 logger.warning("No embedder configured, cannot perform vector search")
                 return []
 
             # Generate query vector. Await an async embedder; otherwise offload
             # the blocking sync encode to a thread so we never stall the loop.
-            if inspect.iscoroutinefunction(self.embedder.encode):
-                encoded = await self.embedder.encode(query)
+            if inspect.iscoroutinefunction(embedder.encode):
+                encoded = await embedder.encode(query)
             else:
-                encoded = await asyncio.to_thread(self.embedder.encode, query)
+                encoded = await asyncio.to_thread(embedder.encode, query)
             query_vector = encoded.tolist() if hasattr(encoded, "tolist") else encoded
         assert query_vector is not None
 
@@ -219,20 +343,54 @@ class VectorMemoryProvider(MemoryProvider):
                     if type_val and type_val != memory_type.value:
                         continue
 
-                item = MemoryItem(
-                    content=doc.content,
-                    memory_type=MemoryType(
-                        doc.metadata.get("type", MemoryType.LONG_TERM.value)
-                    ),
-                    metadata=doc.metadata,
-                    score=score,
-                )
-                memory_items.append(item)
+                memory_items.append(_memory_item_from(doc, score))
             except Exception as e:
                 logger.warning(f"Failed to reconstruct memory item: {e}")
                 continue
 
         return memory_items
+
+    async def list_items(
+        self, limit: int = 100, offset: Any | None = None
+    ) -> tuple[list[MemoryItem], Any]:
+        """Enumerate stored memories in provider order, one page at a time.
+
+        This is the deterministic counterpart to :meth:`search`. Maintenance
+        work — compaction, retention — needs to know *which* items it is
+        acting on; a similarity query cannot answer that, because it ranks by
+        distance from some query vector and silently returns a different slice
+        each time the corpus changes. Compaction used to call ``search("")``
+        and treat the nearest neighbours of the empty string's embedding as
+        "the old memories".
+
+        Args:
+            limit: Page size.
+            offset: Continuation token from the previous page, or ``None``.
+
+        Returns:
+            The page and the token for the next one (``None`` when exhausted).
+        """
+        try:
+            page = await self.vector_service.scroll(
+                collection_name=self.collection_name, limit=limit, offset=offset
+            )
+        except Exception as e:
+            logger.error(f"Failed to enumerate vector memory: {e}")
+            return [], None
+
+        points, next_offset = page if isinstance(page, tuple) else (page, None)
+        items: list[MemoryItem] = []
+        for point in points or []:
+            payload = getattr(point, "payload", {}) or {}
+            document = Document(
+                id=payload.get("document_id", str(getattr(point, "id", ""))),
+                content=payload.get("text", ""),
+                metadata=payload,
+            )
+            if not document.content:
+                continue
+            items.append(_memory_item_from(document, score=1.0))
+        return items, next_offset
 
     async def clear(self, memory_type: MemoryType | None = None) -> None:
         """Clear memories from the vector store."""
@@ -270,90 +428,8 @@ class VectorMemoryProvider(MemoryProvider):
             raise
 
 
-class InMemoryProvider(MemoryProvider):
-    """
-    Volatile, RAM-only memory store.
-
-    Designed for lightweight ephemeral context, testing environments,
-    or scenarios where persistence is explicitly not required.
-    """
-
-    def __init__(self) -> None:
-        self._checkpoints: dict[str, MemoryItem] = {}
-
-    async def add(self, item: MemoryItem) -> None:
-        """
-        Add a memory item to the in-memory store.
-
-        Args:
-            item: The MemoryItem to store.
-        """
-        self._checkpoints[str(item.id)] = item
-
-    async def get(self, item_id: str) -> MemoryItem | None:
-        """
-        Retrieve a memory item by its ID.
-
-        Args:
-            item_id: Unique identifier for the memory item.
-
-        Returns:
-            The stored MemoryItem if found, else None.
-        """
-        return self._checkpoints.get(item_id)
-
-    async def search(
-        self,
-        query: str,
-        memory_type: MemoryType | None = None,
-        limit: int = 5,
-        min_score: float = 0.0,
-        query_vector: list[float] | None = None,
-    ) -> list[MemoryItem]:
-        """
-        Search for memory items in the in-memory store by keyword.
-
-        Args:
-            query: The text query to search for.
-            memory_type: Optional filter by memory category.
-            limit: Maximum number of results to return.
-            min_score: Minimum relevance score (ignored for in-memory).
-            query_vector: Precomputed embedding; ignored (this store matches by
-                keyword, not vector similarity).
-
-        Returns:
-            A list of matching MemoryItem objects.
-        """
-        # Simple keyword match for in-memory
-        results = []
-        for item in self._checkpoints.values():
-            if memory_type and item.memory_type != memory_type:
-                continue
-            if query.lower() in item.content.lower():
-                # Fake score
-                item.score = 1.0
-                results.append(item)
-        return results[:limit]
-
-    async def delete(self, item_id: str) -> bool:
-        """Delete a specific memory item by ID."""
-        if item_id in self._checkpoints:
-            del self._checkpoints[item_id]
-            return True
-        return False
-
-    async def clear(self, memory_type: MemoryType | None = None) -> None:
-        """
-        Clear memories from the in-memory store.
-
-        Args:
-            memory_type: Optional filter to clear only a specific category.
-        """
-        if memory_type:
-            self._checkpoints = {
-                k: v
-                for k, v in self._checkpoints.items()
-                if v.memory_type != memory_type
-            }
-        else:
-            self._checkpoints.clear()
+__all__ = [
+    "InMemoryProvider",
+    "VectorMemoryProvider",
+    "build_memory_provider",
+]

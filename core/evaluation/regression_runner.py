@@ -302,6 +302,7 @@ async def run_regression_async(
 
     from dataclasses import replace
 
+    from core.evaluation.base import judge_unavailable
     from core.observability.logging import get_logger
     from core.utils.concurrency import bounded_gather
 
@@ -315,6 +316,19 @@ async def run_regression_async(
         """One judge draw; ``None`` when the call errored."""
         try:
             outcome = await judge.evaluate(output_text, question)
+            if judge_unavailable(outcome):
+                # The evaluators catch their own provider errors and answer
+                # with a scored-zero fallback, so the ``except`` below never
+                # fired for the failure mode it was written for: an outage
+                # scored every sample 0.0, the median landed under
+                # ``judge_min_score``, and the nightly gate reported the whole
+                # corpus as a regression. The flag is what tells an absent
+                # judgement from a harsh one.
+                logger.warning(
+                    "LLM judge unavailable for case %s (keeping deterministic verdict)",
+                    case_id,
+                )
+                return None
             return float(outcome.score)
         except Exception as exc:  # judge flake must not turn CI red
             logger.warning(

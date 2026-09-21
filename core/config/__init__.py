@@ -30,7 +30,12 @@ from core.config.environment import get_runtime_environment, is_production_env
 from core.config.evaluation import EvaluationConfig, evaluation_config
 from core.config.events import EventsConfig, get_events_config
 from core.config.mcp import MCPConfig, MCPServerSpec, get_mcp_config
-from core.config.memory import SupermemoryConfig, get_supermemory_config
+from core.config.memory import (
+    MemoryRuntimeConfig,
+    SupermemoryConfig,
+    get_memory_runtime_config,
+    get_supermemory_config,
+)
 from core.config.orchestration import (
     OrchestrationConfig,
     RouterConfig,
@@ -96,6 +101,7 @@ __all__ = [
     "SecurityConfig",
     "SemanticCacheConfig",
     "StorageConfig",
+    "MemoryRuntimeConfig",
     "SupermemoryConfig",
     "SwarmConfig",
     "TaskQueueConfig",
@@ -127,6 +133,7 @@ __all__ = [
     "get_security_config",
     "get_semantic_cache_config",
     "get_storage_config",
+    "get_memory_runtime_config",
     "get_supermemory_config",
     "get_web_concurrency",
     "set_web_concurrency",

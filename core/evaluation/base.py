@@ -15,6 +15,28 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Metadata key on an :class:`EvaluationResult` meaning "no judgement was
+#: made" — the provider was unreachable, or its reply could not be read. The
+#: accompanying score is 0.0 either way, so a caller that gates on a minimum
+#: score must consult this flag or it reads an outage as a suite of failures.
+JUDGE_UNAVAILABLE = "fallback"
+
+
+def judge_unavailable(outcome: EvaluationResult) -> bool:
+    """True when ``outcome`` records an absent judgement rather than a verdict.
+
+    ``Evaluator`` is a protocol, so ``outcome`` is whatever an implementation
+    returns; a result without metadata is read as a real judgement.
+
+    Args:
+        outcome: What an evaluator returned.
+
+    Returns:
+        Whether the judge failed to produce a judgement.
+    """
+    metadata = getattr(outcome, "metadata", None) or {}
+    return bool(metadata.get(JUDGE_UNAVAILABLE))
+
 
 class BaseLLMEvaluator(Evaluator, ABC):
     """
@@ -64,7 +86,14 @@ class BaseLLMEvaluator(Evaluator, ABC):
                 feedback=result.get("feedback", ""),
                 should_refine=result.get("should_refine", False),
                 aspects=result.get("aspects", {}),
-                metadata={"evaluator": self.__class__.__name__},
+                metadata={
+                    "evaluator": self.__class__.__name__,
+                    # An unreadable reply is a judge that did not answer, not a
+                    # judgement of zero. Gates read this flag to tell the two
+                    # apart; refinement loops can keep treating the score as a
+                    # score.
+                    JUDGE_UNAVAILABLE: result.get("feedback") == self._UNPARSABLE,
+                },
             )
 
         except Exception as e:
@@ -129,11 +158,18 @@ class BaseLLMEvaluator(Evaluator, ABC):
             return QualityLevel.POOR
 
     def _fallback_evaluation(self, response: str, query: str) -> EvaluationResult:
-        """Default fallback when LLM fails."""
+        """Default fallback when the judge could not be reached or read.
+
+        The score is 0.0 so a refinement loop keeps iterating rather than
+        accepting an unchecked answer, but :data:`JUDGE_UNAVAILABLE` says the
+        zero is an absence of judgement. Without that distinction a provider
+        outage scored every case 0.0, and a gate comparing against a minimum
+        score read a whole suite of real failures.
+        """
         return EvaluationResult(
             score=0.0,
             quality=QualityLevel.POOR,
             feedback="Evaluation failed (fallback)",
             should_refine=True,
-            metadata={"fallback": True},
+            metadata={JUDGE_UNAVAILABLE: True},
         )

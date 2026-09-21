@@ -54,7 +54,7 @@ core/config/
 ├── observability.py      # ObservabilityConfig (metric cardinality, trace exemplars)
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
-├── memory.py             # SupermemoryConfig (intelligent memory layer)
+├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 ├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
@@ -856,6 +856,45 @@ SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
     `SUPERMEMORY_ENABLED` defaults to `false`. The `supermemory` SDK is only
     imported at provider instantiation time, so having the package installed
     does not affect startup until the provider is actually used.
+
+---
+
+### Memory Runtime Config
+
+`MemoryRuntimeConfig` holds the runtime behaviour of the in-process agent
+memory (`AgentMemory`). All fields use the `MEMORY_` prefix. The factory is
+`lru_cache`d and lives in the module — it is **not** re-exported from
+`core.config`.
+
+```python
+from core.config.memory import get_memory_runtime_config
+
+config = get_memory_runtime_config()
+
+print(config.persistence_enabled)           # True   (MEMORY_PERSISTENCE_ENABLED)
+print(config.context_folding_enabled)       # False  (MEMORY_CONTEXT_FOLDING_ENABLED)
+print(config.context_fold_threshold_chars)  # 2000   (MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS)
+```
+
+**`.env` Variables**:
+
+```env
+MEMORY_PERSISTENCE_ENABLED=true           # Back agent memory with the vector store
+MEMORY_CONTEXT_FOLDING_ENABLED=false      # LLM-summarize older turns instead of truncating
+MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS=2000  # Below this, the verbatim fast-path runs
+```
+
+!!! warning "Persistence off means every memory dies with the process"
+    `MEMORY_PERSISTENCE_ENABLED` defaults to `true`: the memory managers built
+    by `core/bootstrap/lazy_init.py` receive a `VectorMemoryProvider` over the
+    configured vector store, so long-term memories survive a restart and are
+    shared between workers. Set it `false` — or leave the provider unbuildable,
+    which is a warning rather than a startup failure — and the long-term tier
+    degrades to a bounded in-process deque searched by substring, losing
+    everything on exit. The bootstrap logs the consequence by name
+    (`memory_persistence_disabled` / `memory_persistence_unavailable`). Full
+    behaviour: [Memory › Persistence at
+    bootstrap](memory.md#persistence-at-bootstrap).
 
 ---
 

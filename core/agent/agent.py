@@ -49,10 +49,10 @@ from pydantic import BaseModel, ValidationError
 
 from core.agent._tool_dispatch import (
     build_tool_specs,
-    execute_tool,
     gate_context,
     system_prompt_for,
 )
+from core.agent._tool_runtime import execute_tool_calls
 from core.observability.logging import get_logger
 from core.orchestration.idempotency import (
     ToolLedger,
@@ -78,6 +78,10 @@ logger = get_logger(__name__)
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+#: Default per-tool-call deadline. Generous enough for a slow HTTP tool, short
+#: enough that a hung one fails the turn instead of the process.
+DEFAULT_TOOL_TIMEOUT_SECONDS: float = 120.0
 
 
 class AgentOutputValidationError(RuntimeError):
@@ -149,6 +153,11 @@ class Agent[OutputT]:
             same run. A plain callable is ``destructive`` by default (see
             :class:`~core.reasoning.react.ToolDefinition`), so tools opt out of
             the ledger by declaring ``read_only``, never by omission.
+        tool_timeout: Per-call wall-clock cap in seconds, shrunk further by
+            whatever an ambient ``LoopBudget`` has left. ``None`` removes the
+            cap, which is how the loop behaved before: a tool that never
+            returned pinned the agent, since nothing else in the typed loop
+            carries a deadline.
     """
 
     def __init__(
@@ -164,6 +173,7 @@ class Agent[OutputT]:
         llm_service: Any | None = None,
         autonomy_policy: Any | None = None,
         tool_ledger: ToolLedger | None = None,
+        tool_timeout: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> None:
         self.model = model
         self.output_type = output_type
@@ -171,6 +181,7 @@ class Agent[OutputT]:
         self.max_retries = max_retries
         self.max_iterations = max_iterations
         self.task_category = task_category
+        self.tool_timeout = tool_timeout
         self._llm_service = llm_service
         # Read back by ``_tool_dispatch.gate_context``, which also honours the
         # same attribute set directly on an instance by a host.
@@ -198,6 +209,16 @@ class Agent[OutputT]:
 
         return get_llm_service()
 
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Names of the tools this agent can call, in declaration order.
+
+        The public way to ask what an agent is armed with. Without it the only
+        answer was ``agent._tools``, which is how the scaffolded project and a
+        good deal of test code came to reach into a private dict.
+        """
+        return tuple(self._tools)
+
     def _tool_specs(self) -> list[LLMToolSpec] | None:
         """Tool definitions for the model, annotated with their category."""
         return build_tool_specs(self._tools)
@@ -210,19 +231,6 @@ class Agent[OutputT]:
             name=self.output_type.__name__,
             strict=True,
         )
-
-    async def _invoke(self, definition: ToolDefinition, call: ToolCall) -> Any:
-        """Call the tool and return its raw value.
-
-        Rendering it for the model (JSON-encoding, ``SkillResult`` unpacking,
-        truncation, the injection scan and the untrusted envelope) happens at
-        the single seam in :mod:`core.agent._tool_dispatch` — doing any of it
-        here would make this a second one.
-        """
-        result = definition.fn(**(call.arguments or {}))
-        if inspect.isawaitable(result):
-            result = await result
-        return result
 
     def _ledger_key(
         self, definition: ToolDefinition, call: ToolCall, run_id: str | None, step: int
@@ -311,18 +319,23 @@ class Agent[OutputT]:
             history.append(message_from_result(result))
 
             if result.tool_calls:
+                # Gated in order, then overlapped: the provider emitted every
+                # call of this turn before seeing any result, so they are
+                # independent and running them serially paid the sum of their
+                # latencies. The step of each call is its position in the run,
+                # so a loop that legitimately calls one tool twice with
+                # identical arguments is not collapsed into one ledger entry.
+                outcomes = await execute_tool_calls(
+                    self,
+                    list(result.tool_calls),
+                    context=context,
+                    run_id=run_id,
+                    step_offset=len(tool_calls_made),
+                )
                 results: list[ToolResultBlock] = []
-                for call in result.tool_calls:
-                    observation, is_error = await execute_tool(
-                        self,
-                        call,
-                        context=context,
-                        run_id=run_id,
-                        # The step is the call's position in the run, so a loop
-                        # that legitimately calls one tool twice with identical
-                        # arguments is not collapsed into one ledger entry.
-                        step=len(tool_calls_made),
-                    )
+                for call, (observation, is_error) in zip(
+                    result.tool_calls, outcomes, strict=True
+                ):
                     tool_calls_made.append(call.name)
                     results.append(
                         ToolResultBlock(

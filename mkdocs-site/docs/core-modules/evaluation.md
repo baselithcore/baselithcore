@@ -20,7 +20,7 @@ core/services/evaluation/      # the service layer
 
 core/evaluation/               # the evaluation toolkit
 ├── __init__.py                # Public exports
-├── base.py                    # BaseLLMEvaluator
+├── base.py                    # BaseLLMEvaluator, JUDGE_UNAVAILABLE, judge_unavailable
 ├── protocols.py               # Evaluator protocol, EvaluationResult, QualityLevel
 ├── judges.py                  # Relevance/Coherence/Faithfulness/CompositeEvaluator
 ├── consensus.py               # ConsensusEvaluator (same question, several judges)
@@ -159,6 +159,34 @@ scored on whatever samples survived, and only a case whose samples *all*
 errored keeps its deterministic result and is recorded in
 `report.judge_errors`. A flaky judge can never turn CI red on its own.
 Deterministically failed cases are not judged (no wasted LLM calls).
+
+!!! danger "An outage is not a score of zero"
+    The shipped evaluators catch their own provider errors and answer with a
+    scored-zero fallback, so nothing ever raised out of `judge.evaluate()` and
+    the runner's `except` never fired for the failure mode it was written for:
+    an outage scored every sample `0.0`, every median landed under
+    `judge_min_score`, and the gate reported the whole corpus as a regression.
+    The fallback now carries a metadata flag and the runner reads it — an
+    unavailable draw is discarded exactly like an errored one, so a case whose
+    draws are all unavailable keeps its deterministic verdict and lands in
+    `report.judge_errors`.
+
+```python
+from core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
+
+outcome = await judge.evaluate(answer, question)
+judge_unavailable(outcome)           # True -> no judgement was made
+outcome.metadata[JUDGE_UNAVAILABLE]  # the same flag, stored under key "fallback"
+```
+
+Any gate that compares `outcome.score` against a minimum owes itself that
+check first: the score is `0.0` either way, and only the flag separates an
+absent judgement from a harsh one. The score deliberately stays `0.0` so a
+refinement loop keeps iterating rather than accepting an unchecked answer.
+`BaseLLMEvaluator` sets the flag for you, both when the call fails and when the
+reply cannot be parsed; an evaluator written from scratch that swallows
+provider errors owes its callers the same flag, because a result carrying no
+metadata is read as a real judgement.
 
 `judge_samples` and `judge_concurrency` default to
 `EvaluationConfig.judge_samples` (`3`, env `EVAL_JUDGE_SAMPLES`) and

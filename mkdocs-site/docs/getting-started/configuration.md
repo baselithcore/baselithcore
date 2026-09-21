@@ -297,6 +297,7 @@ Declared in `core.config.memory`.
 | --- | --- | --- | --- |
 | `MEMORY_CONTEXT_FOLDING_ENABLED` | `bool` | `False` | Wire a ContextFolder into AgentMemory: long working memory gets LLM-summarized (recent turns verbatim) instead of hard-truncated. Off keeps the previous truncation behaviour. |
 | `MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` | `int` | `2000` | Fold only when the assembled context exceeds this size (below it the verbatim fast-path is used, no LLM call). |
+| `MEMORY_PERSISTENCE_ENABLED` | `bool` | `True` | Back agent memory with the configured vector store, so long-term memories survive a restart and are shared between workers. Off keeps everything in the process: the long-term tier degrades to a bounded in-process deque searched by substring, and every memory is lost when the process exits. |
 | `SUPERMEMORY_API_KEY` :material-key: | `SecretStr \| None` | *empty* | API key from console.supermemory.ai |
 | `SUPERMEMORY_BASE_URL` | `str \| None` | *empty* | Base URL override for self-hosted Supermemory instances |
 | `SUPERMEMORY_DEFAULT_TAG` | `str` | `baselithcore_default` | Default container tag used when no agent/tenant ID is specified |
@@ -855,4 +856,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-542 settings documented.
+543 settings documented.
