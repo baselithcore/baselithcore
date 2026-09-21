@@ -37,11 +37,12 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CI_WORKFLOW = WORKFLOWS / "ci.yml"
 PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
-# Files that must carry this release's version number after a release, and the
-# regex that finds the version inside each. `.releaserc` has to rewrite every
-# one of them AND list it as a git asset: a prepareCmd that edits a file
-# semantic-release does not commit changes the runner's working tree and
-# nothing else.
+# Files that must carry this release's version number. `.releaserc`'s prepareCmd
+# rewrites every one of them on the runner, which is what makes the published
+# artifacts carry the right number — but `main` is pull-request-only, so nothing
+# commits those rewrites back. The tree has to arrive at `main` already bumped,
+# and `test_every_version_bearing_file_matches_the_source_of_truth` is what
+# says so.
 VERSION_BEARING_FILES = (
     "core/_version.py",
     "deploy/helm/baselithcore/Chart.yaml",
@@ -54,6 +55,21 @@ VERSION_BEARING_FILES = (
     "sdk/openapi.json",
     "mkdocs-site/docs/api/specs/openapi.json",
 )
+
+# Where the full version sits inside each of them. SECURITY.md is absent on
+# purpose: its table carries the minor only, and
+# `test_security_policy_supports_the_current_minor` is what checks it.
+VERSION_PATTERNS = {
+    "core/_version.py": r'^__version__ = "([^"]+)"$',
+    "deploy/helm/baselithcore/Chart.yaml": r'^appVersion: "([^"]+)"$',
+    "sdk/python/baselith_sdk/version.py": r'^__version__ = "([^"]+)"$',
+    "sdk/typescript/src/client.ts": r"^const VERSION = '([^']+)';$",
+}
+JSON_VERSION_KEYS = {
+    "sdk/typescript/package.json": ("version",),
+    "sdk/openapi.json": ("info", "version"),
+    "mkdocs-site/docs/api/specs/openapi.json": ("info", "version"),
+}
 
 
 def _pyproject() -> dict[str, Any]:
@@ -191,15 +207,47 @@ def test_release_rewrites_every_version_bearing_file() -> None:
         )
 
 
-def test_every_rewritten_file_is_committed_by_the_release() -> None:
-    """Rewriting without committing only edits the runner's working tree."""
-    assets = _plugin_config(_releaserc(), "@semantic-release/git")["assets"]
-    for path in VERSION_BEARING_FILES:
-        assert path in assets, (
-            f"prepareCmd rewrites {path} but @semantic-release/git does not "
-            "commit it, so the change is discarded when the runner is torn "
-            "down and the next release starts from the stale value."
+def test_the_release_does_not_try_to_push_to_main() -> None:
+    """A release that commits cannot run against a pull-request-only branch."""
+    names = {
+        entry[0] if isinstance(entry, list) else entry
+        for entry in _releaserc()["plugins"]
+    }
+    assert "@semantic-release/git" not in names, (
+        "A repository ruleset makes `main` pull-request-only, and a workflow's "
+        "GITHUB_TOKEN can never bypass a ruleset: the plugin's push is refused "
+        "with GH013 and the release dies in `prepare` — no tag, no GitHub "
+        "Release, no PyPI upload, no image. The bump and the changelog entry "
+        "belong to the release-prep pull request instead."
+    )
+
+
+def test_every_version_bearing_file_matches_the_source_of_truth() -> None:
+    """Nothing commits the bump any more, so the tree has to arrive with it."""
+    assert set(VERSION_PATTERNS) | set(JSON_VERSION_KEYS) | {"SECURITY.md"} == set(
+        VERSION_BEARING_FILES
+    ), "VERSION_BEARING_FILES and the two lookup tables have drifted apart."
+
+    found: dict[str, str] = {}
+    for path, pattern in VERSION_PATTERNS.items():
+        match = re.search(
+            pattern, (REPO_ROOT / path).read_text(encoding="utf-8"), re.MULTILINE
         )
+        assert match is not None, f"{path} no longer has a line matching {pattern!r}"
+        found[path] = match.group(1)
+    for path, keys in JSON_VERSION_KEYS.items():
+        document: Any = json.loads((REPO_ROOT / path).read_text(encoding="utf-8"))
+        for key in keys:
+            document = document[key]
+        found[path] = document
+
+    stale = {path: value for path, value in found.items() if value != __version__}
+    assert not stale, (
+        f"these files disagree with core/_version.py ({__version__}): {stale}. "
+        "Run .releaserc's prepareCmd in the release-prep pull request — the "
+        "release job runs it too, but only on the runner, so an unbumped tree "
+        "publishes a version it does not itself record."
+    )
 
 
 def test_security_policy_supports_the_current_minor() -> None:
