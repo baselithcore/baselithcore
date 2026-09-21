@@ -148,7 +148,14 @@ class TestWhenTheLedgerIsBypassed:
         assert effect.calls == 2
 
     @pytest.mark.asyncio
-    async def test_without_a_ledger_the_loop_is_unchanged(self):
+    async def test_the_default_ledger_still_deduplicates(self):
+        """No injected ledger is not the same as no ledger.
+
+        ``tool_ledger=None`` used to mean *nothing was recorded*, so a typed
+        agent re-charged the card on every retry of the same run — the defect
+        the ledger exists to prevent, absent from the surface the quickstart
+        teaches. It now falls back to the process-wide ledger.
+        """
         effect = _Counter()
         for _ in range(2):
             agent = Agent(
@@ -156,6 +163,27 @@ class TestWhenTheLedgerIsBypassed:
                 llm_service=_charging_service(),
             )
             await agent.run("pay", run_id="run-1")
+        assert effect.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_the_ledger_can_be_switched_off(self, monkeypatch):
+        """An operator can still choose to record nothing, explicitly."""
+        from core.orchestration.ledger_factory import reset_tool_ledger
+
+        monkeypatch.setenv("ORCHESTRATOR_TOOL_LEDGER", "off")
+        import core.config.orchestration as orchestration_config
+
+        monkeypatch.setattr(orchestration_config, "_orchestration_config", None)
+        reset_tool_ledger()
+
+        effect = _Counter()
+        for _ in range(2):
+            agent = Agent(
+                tools=[_tool(effect, "charge_card", "external_side_effect")],
+                llm_service=_charging_service(),
+            )
+            await agent.run("pay", run_id="run-1")
+
         assert effect.calls == 2
 
     @pytest.mark.asyncio

@@ -361,7 +361,7 @@ async def _dispatch(
 ) -> tuple[str, bool]:
     """Run the tool (or replay it from the ledger) and render the result."""
     key = agent._ledger_key(definition, call, run_id, step)
-    ledger = agent._tool_ledger
+    ledger = agent._ledger()
     if key is not None and ledger is not None:
         held = await ledger.begin(key, run_id=run_id or "", tool=call.name)
         if held is not None:

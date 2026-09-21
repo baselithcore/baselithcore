@@ -80,7 +80,7 @@ result.iterations        # LLM round-trips used
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
 | `autonomy_policy` | `None` | When set, tools whose category needs approval at the active level are gated through the enforcement chokepoint. Left `None` deliberately: there is no ambient policy to inherit here, and defaulting to one would start demanding approval for every effectful tool of every existing typed agent, with no channel to approve on. |
-| `tool_ledger` | `None` | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run |
+| `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
 | `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
 
 `agent.tool_names` reads back the tools an agent is armed with — their names
@@ -102,11 +102,23 @@ validation and iteration exhaustion. Both come from the shared enforcement
 chokepoint (`core.orchestration.enforcement`), so an `Agent` embedded in an
 orchestrated request is subject to exactly the same caps as any other path.
 
+!!! note "Effectful tools are deduplicated by default now"
+    `tool_ledger=None` used to mean *no ledger at all*, so a typed agent re-ran
+    a payment or an outbound webhook on every retry of the same `run_id` — the
+    deduplication the runtime documents, missing from the surface the
+    quickstart teaches. It now falls back to the process-wide ledger from
+    `core/orchestration/ledger_factory.py`: durable where Postgres is
+    configured, in-process (with a warning naming the consequence) where it is
+    not. Set `ORCHESTRATOR_TOOL_LEDGER=off` to get the old behaviour back
+    deployment-wide — see
+    [Orchestration › Choosing the ledger](orchestration.md#choosing-the-ledger-orchestrator_tool_ledger).
+
 !!! tip "`run_id` is what makes deduplication possible"
-    `agent.run(prompt, run_id=...)` is ignored unless a `tool_ledger` was
-    supplied — and a *fresh* id per attempt is a different run by definition, so
-    the ledger has nothing to match and every effectful tool executes again. Pass
-    a **stable** id across retries of the same logical run.
+    The ledger stays inert unless `agent.run(prompt, run_id=...)` carries a
+    **stable** id across retries of the same logical run: a *fresh* id per
+    attempt is a different call by definition, so the ledger has nothing to
+    match and every effectful tool executes again. Without a `run_id` it is
+    never consulted at all.
 
 ## How a tool call runs
 

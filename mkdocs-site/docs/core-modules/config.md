@@ -448,6 +448,7 @@ print(config.confidence_threshold)           # 0.6
 print(config.checkpoint_enabled)             # True   (ORCHESTRATOR_CHECKPOINT_ENABLED)
 print(config.checkpoint_backend)             # "auto" (ORCHESTRATOR_CHECKPOINT_BACKEND)
 print(config.checkpoint_memory_max_entries)  # 1000   (ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES)
+print(config.tool_ledger)                    # "auto" (ORCHESTRATOR_TOOL_LEDGER)
 ```
 
 **`.env` Variables**:
@@ -466,6 +467,11 @@ ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
 ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=false
 ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT=200         # 0 = unlimited snapshots per run
 ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory backend only
+
+# Backing store for the tool idempotency ledger: 'auto' takes Postgres when
+# POSTGRES_ENABLED, else the in-process ledger (warned); 'postgres' fails
+# loudly instead; 'memory' is always in-process; 'off' records nothing.
+ORCHESTRATOR_TOOL_LEDGER=auto                     # 'auto' | 'postgres' | 'memory' | 'off'
 
 # Burst limit on side-effecting tool invocations — opt-in, in-process,
 # keyed (tenant, tool); categories destructive / external_side_effect only.
@@ -487,6 +493,17 @@ ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
     Set `ORCHESTRATOR_CHECKPOINT_ENABLED=false` to run without
     checkpointing. Full flow:
     [Orchestration › Durable checkpointing & resume](orchestration.md#durable-checkpointing-resume).
+
+!!! note "`ORCHESTRATOR_TOOL_LEDGER` picks who remembers an effectful call"
+    The tool idempotency ledger keeps a redelivered or resumed run from
+    repeating a payment, a webhook or an email. `auto` (the default) resolves
+    to the durable Postgres ledger when `POSTGRES_ENABLED=true` and otherwise
+    to the in-process one, **logging the consequence** — deduplication then
+    holds inside one worker only. `postgres` refuses to start the ledger it
+    cannot build (`DurableLedgerUnavailable`) rather than degrading quietly,
+    `memory` is the single-worker/test choice, and `off` disables recording
+    entirely. The ledger is process-wide and built on first use. Full flow:
+    [Orchestration › Choosing the ledger](orchestration.md#choosing-the-ledger-orchestrator_tool_ledger).
 
 ---
 

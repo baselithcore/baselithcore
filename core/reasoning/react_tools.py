@@ -260,12 +260,23 @@ class ToolExecutionMixin:
     # Idempotency ledger (non-read_only categories only)
     # ------------------------------------------------------------------
 
+    #: Sentinel distinguishing "not resolved yet" from "resolved to nothing".
+    _LEDGER_UNSET = object()
+
     def _ledger(self) -> Any:
-        """The agent's tool ledger, created in-process on first use."""
-        ledger = getattr(self, "_tool_ledger", None)
-        if ledger is None:
+        """The agent's tool ledger, resolved once on first use.
+
+        ``None`` is a real answer (``ORCHESTRATOR_TOOL_LEDGER=off``), so it is
+        cached like any other: testing the ledger itself for ``None`` would
+        re-resolve — and re-log — on every effectful call.
+        """
+        ledger = getattr(self, "_tool_ledger", self._LEDGER_UNSET)
+        if ledger is self._LEDGER_UNSET or (
+            ledger is None and not getattr(self, "_tool_ledger_resolved", False)
+        ):
             ledger = new_ledger()
             self._tool_ledger = ledger
+            self._tool_ledger_resolved = True
         return ledger
 
     def _ledger_entries(self) -> int:

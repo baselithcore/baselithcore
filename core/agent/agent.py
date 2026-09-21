@@ -145,11 +145,15 @@ class Agent[OutputT]:
             channel to approve on. Every other control at the chokepoint
             (contract, plugin capability, budget, rate limit, hooks, audit)
             applies either way.
-        tool_ledger: Optional :class:`~core.orchestration.idempotency.ToolLedger`.
-            When supplied *and* ``run`` is given a ``run_id``, every tool
-            outside the ``read_only`` category is recorded before it executes
-            and its result replayed instead of re-executed on a retry of the
-            same run. A plain callable is ``destructive`` by default (see
+        tool_ledger: :class:`~core.orchestration.idempotency.ToolLedger` to
+            record effectful calls in. Defaults to the process-wide ledger
+            (:mod:`core.orchestration.ledger_factory`), which is durable when
+            the deployment has Postgres. Given a ``run_id`` on ``run``, every
+            tool outside the ``read_only`` category is recorded before it
+            executes and its result replayed instead of re-executed on a retry
+            of the same run; without one the ledger is inert, because a fresh
+            id per attempt is a different call by definition. A plain callable
+            is ``destructive`` by default (see
             :class:`~core.reasoning.react.ToolDefinition`), so tools opt out of
             the ledger by declaring ``read_only``, never by omission.
         tool_timeout: Per-call wall-clock cap in seconds, shrunk further by
@@ -241,11 +245,45 @@ class Agent[OutputT]:
         — a fresh id per attempt is a different call by definition), and the
         tool is not ``read_only``.
         """
-        if self._tool_ledger is None or not run_id:
+        if not run_id or self._ledger() is None:
             return None
         if not requires_idempotency(definition.category):
             return None
         return derive_idempotency_key(run_id, step, call.name, call.arguments)
+
+    def _ledger(self) -> ToolLedger | None:
+        """The ledger for this agent: the injected one, or the shared default.
+
+        Defaulting matters more than it looks. ``tool_ledger=None`` used to
+        mean *no ledger at all*, so a typed agent re-ran a payment or an
+        outbound webhook on every retry of the same run — the exact defect
+        :mod:`core.orchestration.idempotency` exists to prevent, absent from
+        the surface the quickstart teaches. It costs nothing when it is not
+        needed: without a stable ``run_id`` there is nothing to deduplicate
+        against, so the ledger stays untouched.
+
+        Returns:
+            The ledger, or ``None`` when one cannot be built.
+        """
+        if self._tool_ledger is not None:
+            return self._tool_ledger
+        from core.orchestration.ledger_factory import (
+            DurableLedgerUnavailable,
+            get_tool_ledger,
+        )
+
+        try:
+            self._tool_ledger = get_tool_ledger()
+        except DurableLedgerUnavailable:
+            # Deliberately not swallowed. The operator asked for the durable
+            # ledger by name; answering with *no* ledger would be worse than
+            # the in-process fallback ``auto`` would have given, and the
+            # opposite of what that setting promises.
+            raise
+        except Exception as exc:
+            logger.warning(f"tool ledger unavailable, calls are not deduped: {exc}")
+            return None
+        return self._tool_ledger
 
     def _parse_output(self, text: str) -> OutputT:
         assert self.output_type is not None

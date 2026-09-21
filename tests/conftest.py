@@ -262,6 +262,46 @@ def _restore_isolated_env_toggles():
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_tool_ledger():
+    """Keep the idempotency ledger in-process, and unshared between tests.
+
+    The ledger backend is chosen from configuration, and ``auto`` reaches for
+    Postgres whenever ``POSTGRES_ENABLED`` is on — which it is by default. On a
+    developer machine with the compose stack up, that quietly pointed unit
+    tests at a real database: an effectful tool recorded a row, the next run of
+    the same test found it and refused to execute, and the suite failed for a
+    reason that had nothing to do with the code under test.
+
+    The ledger is also a process-wide singleton, so it is reset around every
+    test: a claim left by one test must not decide another's outcome.
+    ``core.orchestration.ledger_factory`` has its own tests, which set the
+    variable themselves.
+    """
+    from core.orchestration.ledger_factory import reset_tool_ledger
+
+    saved = os.environ.get("ORCHESTRATOR_TOOL_LEDGER")
+    os.environ["ORCHESTRATOR_TOOL_LEDGER"] = "memory"
+    _reset_orchestration_config()
+    reset_tool_ledger()
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("ORCHESTRATOR_TOOL_LEDGER", None)
+        else:
+            os.environ["ORCHESTRATOR_TOOL_LEDGER"] = saved
+        _reset_orchestration_config()
+        reset_tool_ledger()
+
+
+def _reset_orchestration_config() -> None:
+    """Drop the cached orchestration settings so the env change is read."""
+    import core.config.orchestration as orchestration_config
+
+    orchestration_config._orchestration_config = None
+
+
+@pytest.fixture(autouse=True)
 def _reset_assumed_production_posture():
     """create_app() arms a process-global hardened posture when auth is on and
     no environment is declared; reset it around every test so the flag cannot

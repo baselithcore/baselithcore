@@ -368,6 +368,7 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` | `float` | `300.0` | Minimum progress silence before a 'running' checkpoint is re-entered by the recovery sweep. Recent progress means some worker still owns the run, and resuming it anyway would execute the same agent loop twice. Keep it at or above the sweep interval. |
 | `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` | `float` | `1800.0` | Progress-silence threshold after which a 'running' checkpoint is marked failed by the stale-run sweep. |
 | `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` | `float` | `300.0` | Interval between background crash-recovery sweeps (resume interrupted runs + fail wedged ones) when checkpoint_resume_on_startup is enabled. |
+| `ORCHESTRATOR_TOOL_LEDGER` | `Literal['auto', 'postgres', 'memory', 'off']` | `auto` | Backing store for the tool idempotency ledger, which keeps a redelivered or resumed run from repeating an effectful call. 'auto' uses Postgres when POSTGRES_ENABLED, else the in-process ledger with a warning; 'postgres' requires it and fails loudly instead of silently deduplicating within one worker only; 'memory' always uses the in-process ledger (single-worker deployments and tests); 'off' records nothing, so every retry re-executes every effectful call. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED` | `bool` | `False` | Enforce a sliding-window burst limit on side-effecting tool invocations (categories destructive/external_side_effect), keyed (tenant, tool). In-process; off by default. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS` | `int` | `30` | Invocations allowed per (tenant, tool) inside one window. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS` | `float` | `60.0` | Sliding-window length in seconds for the tool rate limit. |
@@ -856,4 +857,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-543 settings documented.
+544 settings documented.

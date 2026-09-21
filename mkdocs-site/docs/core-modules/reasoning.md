@@ -363,6 +363,20 @@ durable mode a multi-tool turn executes sequentially so the replay cursors
 stay deterministic — see the note under
 [Concurrent multi-tool turns](#concurrent-multi-tool-turns).
 
+**Across processes, not just across a resume.** Checkpoint replay covers one
+run's recorded steps; the idempotency ledger covers the same call arriving
+again from outside (a redelivered task, a second replica). Both loop variants
+claim a ledger entry for every non-`read_only` tool through
+`claim_ledger_entry` (`core/reasoning/react_tool_gate.py`), and the ledger a
+host did not wire is now resolved from configuration by `new_ledger()` —
+one process-wide instance chosen by `ORCHESTRATOR_TOOL_LEDGER`, instead of a
+fresh in-process one per agent. `ORCHESTRATOR_TOOL_LEDGER=off` yields no
+ledger at all, which the claim path treats as a configured choice rather than
+a missing dependency: the call runs, unrecorded. So does a ledger that errors
+or times out — the loop fails open either way. Full flow, and the four
+values the setting takes:
+[Orchestration › Choosing the ledger](orchestration.md#choosing-the-ledger-orchestrator_tool_ledger).
+
 ### Bounded history & deadlines
 
 Both loop variants bound their resource use on long runs:
