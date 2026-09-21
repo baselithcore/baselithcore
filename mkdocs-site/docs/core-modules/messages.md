@@ -233,7 +233,10 @@ never spent on nothing.
 
 ## In the agent loop
 
-`core/agent/agent.py` keeps the history and only ever appends to it:
+Both loops keep the history and only ever append to it — the typed
+`core/agent/agent.py` and the ReAct loop the orchestrator runs
+(`core/reasoning/react_native.py`), through the one round trip in
+[`core/services/llm/message_transport.py`](services.md#one-round-trip-for-a-message-history):
 
 ```text
 user(prompt)

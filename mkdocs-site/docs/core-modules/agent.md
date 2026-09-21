@@ -54,7 +54,11 @@ result.iterations        # LLM round-trips used
   as one, and keeps the prompt prefix byte-stable so the provider's prompt cache
   can serve it. `AgentResult.messages` is the conversation the loop actually
   sent, oldest first. A service that predates the message API still works — the
-  history is flattened into a transcript for it.
+  history is flattened into a transcript for it. The round trip itself is
+  [`generate_over_messages`](services.md#one-round-trip-for-a-message-history)
+  (`core/services/llm/message_transport.py`), now shared with the
+  [ReAct loop](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) —
+  same transport, same degradation, no behaviour change on this side.
 - **Streaming** — `agent.run_stream(prompt)` yields text chunks
   (text-only: `output_type`/tools are rejected on the stream path).
 - **The whole runtime underneath** — calls go through `LLMService`, so

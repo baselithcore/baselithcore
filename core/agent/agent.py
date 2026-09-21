@@ -60,12 +60,11 @@ from core.orchestration.idempotency import (
     requires_idempotency,
 )
 from core.reasoning.react import ToolDefinition
+from core.services.llm.message_transport import generate_over_messages
 from core.services.llm.messages import (
-    CONVERGENCE_NUDGE,
     Message,
     ToolResultBlock,
     message_from_result,
-    render_as_prompt,
 )
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -403,55 +402,19 @@ class Agent[OutputT]:
     ) -> LLMResult:
         """One model round-trip for the conversation so far.
 
-        The history is passed as a *copy*: the loop appends to its own list
-        after every turn, and handing the live object to the service would let
-        a later append rewrite what an earlier call was given (and make every
-        traced request look identical).
-
-        A service that does not advertise ``supports_messages is True`` — an
-        injected double, or one built before the message API — is called
-        through the legacy ``generate(prompt=...)`` path with the history
-        rendered as a transcript, plus the convergence nudge a flattened
-        conversation needs (it has no ``tool_result`` block to say the work
-        came back, so without the instruction it re-requests calls it was
-        already answered). It loses the structure, not the conversation.
-
-        The identity check is deliberate: ``getattr`` on a ``Mock`` answers
-        with a truthy ``Mock``, and a double that cannot serve a message list
-        must not be handed one.
+        The transport itself — the message API, or the legacy flattened
+        transcript for a service that predates it — lives in
+        :mod:`core.services.llm.message_transport`, shared with the ReAct loop
+        so the two cannot drift apart.
         """
-        send = getattr(service, "generate_messages", None)
-        if getattr(service, "supports_messages", False) is True and callable(send):
-            # ``service`` is intentionally untyped (an LLMService, or whatever
-            # a caller injected), so the result is narrowed at this one seam.
-            return cast(
-                "LLMResult",
-                await send(
-                    list(history),
-                    model=self.model,
-                    tools=specs,
-                    response_format=response_format,
-                    system=system,
-                    task_category=self.task_category,
-                ),
-            )
-        transcript = render_as_prompt(history)
-        if any(
-            isinstance(block, ToolResultBlock)
-            for message in history
-            for block in message.content
-        ):
-            transcript = f"{transcript}\n\n{CONVERGENCE_NUDGE}"
-        return cast(
-            "LLMResult",
-            await service.generate(
-                transcript,
-                model=self.model,
-                tools=specs,
-                response_format=response_format,
-                system_prompt=system,
-                task_category=self.task_category,
-            ),
+        return await generate_over_messages(
+            service,
+            history,
+            specs=specs,
+            response_format=response_format,
+            system=system,
+            model=self.model,
+            task_category=self.task_category,
         )
 
     async def run_stream(self, prompt: str) -> AsyncIterator[str]:

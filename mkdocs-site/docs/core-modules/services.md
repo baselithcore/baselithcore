@@ -382,8 +382,64 @@ so classification runs on the cheap tier out of the box.
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
 provider support and drives its Thought/Action/Observation loop over
-`generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
-text.
+`LLMResult.tool_calls` instead of regex-parsing action text — through
+`generate_messages(...)` where the service has it, and `generate(tools=...)`
+where it does not.
+
+### One round trip for a message history
+
+`core/services/llm/message_transport.py` is the single seam both agent loops
+send a conversation through. Only one of them had it for a while: the typed
+[`Agent`](agent.md) spoke the [message API](messages.md), while the ReAct loop
+the orchestrator actually runs rebuilt a flat prompt every turn. This is that
+round trip, written once, so the two cannot drift apart again.
+
+```python
+from core.services.llm.message_transport import generate_over_messages
+from core.services.llm.messages import Message
+
+history = [Message.user("population of Rome?")]
+
+result = await generate_over_messages(
+    llm_service,               # an LLMService, or whatever a caller injected
+    history,                   # list[Message], oldest first
+    specs=specs,               # list[LLMToolSpec] | None
+    response_format=None,      # ResponseFormat | None
+    system="You are a precise geography assistant.",
+    model=None,                # deployment default
+    task_category=None,        # cost-aware routing hint
+)
+```
+
+Everything after `history` is keyword-only, and the return is the ordinary
+`LLMResult`. Import it by path; it is deliberately not re-exported from
+`core.services.llm`.
+
+**Two paths, one contract.** `service_supports_messages(service)` decides:
+`service.generate_messages(...)` when the service advertises
+`supports_messages` **and** that method is callable, otherwise
+`render_as_prompt(history)` through the legacy `generate(prompt=...)`. The
+degraded path appends
+[`CONVERGENCE_NUDGE`](messages.md#degradation-render_as_prompt) whenever the
+history contains a `ToolResultBlock` — a flattened conversation has no
+`tool_result` block to say the work came back, so without the instruction the
+model re-requests calls it has already been answered until the iteration cap.
+It loses the structure, not the conversation.
+
+**The history is passed as a copy, always.** A loop appends to its own list
+after every turn, and handing the live object to the service would let a later
+append rewrite what an earlier call was given — and make every traced request
+look identical.
+
+!!! danger "The capability check is `is True`, deliberately"
+    `getattr` on a `Mock` answers with a truthy `Mock`, so
+    `service_supports_messages` compares `supports_messages` with `True` by
+    identity. Without that, a bare `AsyncMock` double would be routed down the
+    message path and silently exercise the wrong seam.
+
+See [Neutral Message API](messages.md) for the types themselves, and
+[Reasoning › The turn is a message](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt)
+for what the ReAct loop appends between round trips.
 
 ### Streaming with tool calls
 
