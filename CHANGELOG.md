@@ -1,9 +1,34 @@
 # Changelog
 
-All notable changes to this project are documented here. This file is
-maintained automatically by semantic-release from Conventional Commits and
-follows [Keep a Changelog](https://keepachangelog.com) and
+All notable changes to this project are documented here. Every entry mirrors
+the GitHub Release notes semantic-release generates from Conventional Commits,
+and is written into this file by the release-prep pull request: `main` is
+pull-request-only, so the release job cannot commit here. Follows
+[Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
+
+# [0.37.0](https://github.com/baselithcore/baselithcore/compare/v0.36.0...v0.37.0) (2026-09-21)
+
+
+### Bug Fixes
+
+* **core:** let spans nest across tracers, not only within one ([8124508](https://github.com/baselithcore/baselithcore/commit/8124508f11665718a8fd35d90ee75d6e3907d6e1))
+* **core:** satisfy list invariance at the reranker's predict call ([ca30830](https://github.com/baselithcore/baselithcore/commit/ca30830d585420882cc4246bc9308baf7adae7d4))
+* **core:** stop a model one feature needs from refusing the whole boot ([60b8f87](https://github.com/baselithcore/baselithcore/commit/60b8f8787a5e1ac9f650d69633be159563f65cf4))
+* **docs-mcp:** unblock the documentation server and repair its search ([3e4dad2](https://github.com/baselithcore/baselithcore/commit/3e4dad229828c6be34f77ad91b916523c0b35d8c))
+* **examples:** repair the reference agent and lint every example ([13b23ae](https://github.com/baselithcore/baselithcore/commit/13b23ae760dcdef7aa544cdc66c25945114caf67))
+
+
+### Features
+
+* **core:** add the baselith public facade and API stability tiers ([85a9bde](https://github.com/baselithcore/baselithcore/commit/85a9bdec2de0ce1e8cbe9f8c158be3a318319f03))
+* **core:** let an upload route raise its own body-size cap ([6aafc35](https://github.com/baselithcore/baselithcore/commit/6aafc35612013791a70c9269d546ae49b6b3740c))
+
+
+### Performance Improvements
+
+* **core:** resolve package exports and provider SDKs lazily ([21b13fb](https://github.com/baselithcore/baselithcore/commit/21b13fba9b11d99cec486b5eec11269344e42dc5))
+* **docs-mcp:** serve documentation by section instead of by page ([02540e8](https://github.com/baselithcore/baselithcore/commit/02540e883b2571ed00d9e556c503e063df5bcc29))
 
 # [0.36.0](https://github.com/baselithcore/baselithcore/compare/v0.35.1...v0.36.0) (2026-09-19)
 

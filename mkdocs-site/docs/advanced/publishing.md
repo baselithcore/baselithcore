@@ -11,24 +11,32 @@ The version lives in `core/_version.py` (single source of truth):
 __version__ = "0.31.0"
 ```
 
-Do **not** edit it manually. semantic-release rewrites the file
-(`@semantic-release/exec` `prepareCmd` in `.releaserc`) from the Conventional
-Commits merged to `main` — `fix:`/`perf:` bump PATCH, `feat:` bumps MINOR, a
-`BREAKING CHANGE:` footer bumps MAJOR. See
+The number itself is derived, never chosen: semantic-release reads the
+Conventional Commits merged to `main` — `fix:`/`perf:` bump PATCH, `feat:` bumps
+MINOR, a `BREAKING CHANGE:` footer bumps MAJOR. See
 [Versioning & Deprecation](versioning-and-deprecation.md).
+
+`main` is pull-request-only (a repository ruleset), and a workflow's
+`GITHUB_TOKEN` can never bypass a ruleset, so the release job **cannot commit
+the bump back**. Run `.releaserc`'s `prepareCmd` in the release-prep pull
+request instead — it rewrites every file that carries the version in one go —
+and add the CHANGELOG entry there. The release job still runs the same
+`prepareCmd` on the runner, so the published artifacts carry the right version
+even if that step was forgotten; only the tracked files would be left behind.
 
 ## 2. The release pipeline
 
 Both jobs live in `.github/workflows/ci.yml` and run only on `main`:
 
 1. **`release` (Semantic Release)** — after `python_test` passes, semantic-release
-   analyses the commits, writes `core/_version.py` and `CHANGELOG.md` — plus
-   every other file that carries the version: the Helm chart's `appVersion`,
-   the `SECURITY.md` support table, both client SDKs and `info.version` in the
-   two checked-in `openapi.json` copies (which the `openapi_drift` gate would
-   otherwise flag on the first PR after the release) — commits them as
-   `chore(release): <version> [skip ci]`, tags `v<version>` and creates the
-   GitHub Release. If a release was cut it then builds the distribution
+   analyses the commits, writes `core/_version.py` on the runner — plus every
+   other file that carries the version: the Helm chart's `appVersion`, the
+   `SECURITY.md` support table, both client SDKs and `info.version` in the two
+   checked-in `openapi.json` copies — then tags `v<version>` and creates the
+   GitHub Release. Those rewrites stay on the runner and feed the build; the
+   commit that carries them into the tree is the release-prep pull request's,
+   because `main` takes no direct pushes. If a release was cut it then builds
+   the distribution
    with `python3 -m build`, generates a CycloneDX SBOM (attached to the GitHub
    Release), attests build provenance for `dist/*`
    (`actions/attest-build-provenance`) and uploads `dist/` as the
