@@ -59,6 +59,8 @@ __all__ = [
     "build_tool_specs",
     "execute_tool",
     "gate_context",
+    "prepare_tool_call",
+    "run_prepared_call",
     "system_prompt_for",
 ]
 
@@ -271,9 +273,40 @@ async def execute_tool(
         ApprovalPendingError: A durable human-in-the-loop pause.
         BudgetExceededError: A per-request cap was hit (fail-closed).
     """
+    definition, early = await prepare_tool_call(agent, call, context)
+    if definition is None:
+        assert early is not None
+        return early
+    return await run_prepared_call(agent, definition, call, run_id=run_id, step=step)
+
+
+async def prepare_tool_call(
+    agent: Agent, call: ToolCall, context: dict[str, Any]
+) -> tuple[ToolDefinition | None, tuple[str, bool] | None]:
+    """Resolve and gate one call without running it.
+
+    Separated from the execution half so a multi-tool turn can gate its calls
+    strictly in order and then overlap only the approved invocations. Gate
+    order is load-bearing: approval and budget refusals are fail-closed and
+    abort the turn, so a tool later in the turn must not already be running
+    when an earlier one is denied.
+
+    Args:
+        agent: The owning agent.
+        call: What the model asked for.
+        context: The gate context from :func:`gate_context`.
+
+    Returns:
+        ``(definition, None)`` when the call may run, or ``(None, outcome)``
+        with the observation to return in its place.
+
+    Raises:
+        ApprovalPendingError: A durable human-in-the-loop pause.
+        BudgetExceededError: A per-request cap was hit (fail-closed).
+    """
     definition = agent._tools.get(call.name)
     if definition is None:
-        return _runtime_error(
+        return None, _runtime_error(
             f"Error: unknown tool {escape_untrusted_markers(call.name)!r}"
         )
 
@@ -282,12 +315,35 @@ async def execute_tool(
         # Before the gate on purpose: a call the model got wrong must not
         # consume an approval, a rate-limit slot, a budget entry or a ledger
         # claim for work that was never going to run.
-        return _runtime_error(invalid)
+        return None, _runtime_error(invalid)
 
     denial = await _gate(definition, call, context)
     if denial is not None:
-        return _runtime_error(denial)
+        return None, _runtime_error(denial)
 
+    return definition, None
+
+
+async def run_prepared_call(
+    agent: Agent,
+    definition: ToolDefinition,
+    call: ToolCall,
+    *,
+    run_id: str | None = None,
+    step: int = 0,
+) -> tuple[str, bool]:
+    """Run an already-gated call and render its result.
+
+    Args:
+        agent: The owning agent.
+        definition: The tool, as resolved by :func:`prepare_tool_call`.
+        call: What the model asked for.
+        run_id: Identifier shared by every attempt at this run.
+        step: Position of the call within the run.
+
+    Returns:
+        tuple[str, bool]: ``(observation, is_error)``.
+    """
     started = time.perf_counter()
     observation, ok = await _dispatch(agent, definition, call, run_id, step)
     await dispatch_post_hook(
@@ -305,14 +361,16 @@ async def _dispatch(
 ) -> tuple[str, bool]:
     """Run the tool (or replay it from the ledger) and render the result."""
     key = agent._ledger_key(definition, call, run_id, step)
-    ledger = agent._tool_ledger
+    ledger = agent._ledger()
     if key is not None and ledger is not None:
         held = await ledger.begin(key, run_id=run_id or "", tool=call.name)
         if held is not None:
             return _replayed(call.name, key, held)
 
     try:
-        raw = await agent._invoke(definition, call)
+        from core.agent._tool_runtime import invoke_tool
+
+        raw = await invoke_tool(agent, definition, call)
     except Exception as exc:
         logger.warning(f"agent tool {call.name} failed: {exc}")
         if key is not None and ledger is not None:

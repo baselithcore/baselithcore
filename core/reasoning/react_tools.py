@@ -39,6 +39,27 @@ logger = get_logger(__name__)
 MAX_PARALLEL_TOOL_CALLS = 8
 
 
+def observation_is_error(observation: str) -> bool:
+    """Whether an observation describes a failure rather than a result.
+
+    The loop's own narration is the only part of an observation outside the
+    untrusted envelope, and it is the part that carries the ``Error`` prefix.
+    Tool-controlled text is sealed inside the envelope and has its markers
+    escaped, so it cannot forge one — which is what makes reading the prefix
+    sound rather than a guess. The ledger already decided success this way;
+    naming it keeps the one convention in one place, so the flag the model
+    sees on a ``tool_result`` block and the outcome the ledger records cannot
+    disagree.
+
+    Args:
+        observation: The rendered observation.
+
+    Returns:
+        True when the observation is a runtime-authored failure.
+    """
+    return observation.startswith("Error")
+
+
 def _unknown_tool_message(name: str, tools: dict[str, ToolDefinition]) -> str:
     """Runtime narration for a tool the model invented.
 
@@ -239,12 +260,23 @@ class ToolExecutionMixin:
     # Idempotency ledger (non-read_only categories only)
     # ------------------------------------------------------------------
 
+    #: Sentinel distinguishing "not resolved yet" from "resolved to nothing".
+    _LEDGER_UNSET = object()
+
     def _ledger(self) -> Any:
-        """The agent's tool ledger, created in-process on first use."""
-        ledger = getattr(self, "_tool_ledger", None)
-        if ledger is None:
+        """The agent's tool ledger, resolved once on first use.
+
+        ``None`` is a real answer (``ORCHESTRATOR_TOOL_LEDGER=off``), so it is
+        cached like any other: testing the ledger itself for ``None`` would
+        re-resolve — and re-log — on every effectful call.
+        """
+        ledger = getattr(self, "_tool_ledger", self._LEDGER_UNSET)
+        if ledger is self._LEDGER_UNSET or (
+            ledger is None and not getattr(self, "_tool_ledger_resolved", False)
+        ):
             ledger = new_ledger()
             self._tool_ledger = ledger
+            self._tool_ledger_resolved = True
         return ledger
 
     def _ledger_entries(self) -> int:
@@ -360,7 +392,7 @@ class ToolExecutionMixin:
         observation = await self._invoke_tool_uncheckpointed(tool, args, kwargs)
         if key is not None:
             try:
-                if observation.startswith("Error"):
+                if observation_is_error(observation):
                     await self._ledger().fail(key, observation)
                 else:
                     await self._ledger().complete(key, observation)
@@ -452,4 +484,4 @@ class ToolExecutionMixin:
         return f"Error executing '{safe_name}': exhausted retries"
 
 
-__all__ = ["ToolExecutionMixin"]
+__all__ = ["ToolExecutionMixin", "observation_is_error"]

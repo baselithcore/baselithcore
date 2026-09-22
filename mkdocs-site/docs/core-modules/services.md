@@ -382,8 +382,64 @@ so classification runs on the cheap tier out of the box.
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
 provider support and drives its Thought/Action/Observation loop over
-`generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
-text.
+`LLMResult.tool_calls` instead of regex-parsing action text — through
+`generate_messages(...)` where the service has it, and `generate(tools=...)`
+where it does not.
+
+### One round trip for a message history
+
+`core/services/llm/message_transport.py` is the single seam both agent loops
+send a conversation through. Only one of them had it for a while: the typed
+[`Agent`](agent.md) spoke the [message API](messages.md), while the ReAct loop
+the orchestrator actually runs rebuilt a flat prompt every turn. This is that
+round trip, written once, so the two cannot drift apart again.
+
+```python
+from core.services.llm.message_transport import generate_over_messages
+from core.services.llm.messages import Message
+
+history = [Message.user("population of Rome?")]
+
+result = await generate_over_messages(
+    llm_service,               # an LLMService, or whatever a caller injected
+    history,                   # list[Message], oldest first
+    specs=specs,               # list[LLMToolSpec] | None
+    response_format=None,      # ResponseFormat | None
+    system="You are a precise geography assistant.",
+    model=None,                # deployment default
+    task_category=None,        # cost-aware routing hint
+)
+```
+
+Everything after `history` is keyword-only, and the return is the ordinary
+`LLMResult`. Import it by path; it is deliberately not re-exported from
+`core.services.llm`.
+
+**Two paths, one contract.** `service_supports_messages(service)` decides:
+`service.generate_messages(...)` when the service advertises
+`supports_messages` **and** that method is callable, otherwise
+`render_as_prompt(history)` through the legacy `generate(prompt=...)`. The
+degraded path appends
+[`CONVERGENCE_NUDGE`](messages.md#degradation-render_as_prompt) whenever the
+history contains a `ToolResultBlock` — a flattened conversation has no
+`tool_result` block to say the work came back, so without the instruction the
+model re-requests calls it has already been answered until the iteration cap.
+It loses the structure, not the conversation.
+
+**The history is passed as a copy, always.** A loop appends to its own list
+after every turn, and handing the live object to the service would let a later
+append rewrite what an earlier call was given — and make every traced request
+look identical.
+
+!!! danger "The capability check is `is True`, deliberately"
+    `getattr` on a `Mock` answers with a truthy `Mock`, so
+    `service_supports_messages` compares `supports_messages` with `True` by
+    identity. Without that, a bare `AsyncMock` double would be routed down the
+    message path and silently exercise the wrong seam.
+
+See [Neutral Message API](messages.md) for the types themselves, and
+[Reasoning › The turn is a message](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt)
+for what the ReAct loop appends between round trips.
 
 ### Streaming with tool calls
 
@@ -411,6 +467,21 @@ streaming when `enable_native_tools` is on and the provider implements
 `generate_structured_stream` (Anthropic); otherwise the buffered structured
 path is replayed as events — the consumer contract is identical. Deadline
 (`stream_within_deadline`) and token/cost accounting match the sibling paths.
+
+!!! danger "Anthropic deltas are read off `content_block_delta`"
+    The Anthropic reader (`core/services/llm/providers/_anthropic_streaming.py`)
+    dispatched on `event.type == "text_delta"` — a shape no Anthropic SDK
+    emits. The delta type lives on `event.delta.type`, inside a
+    `content_block_delta` event, so the branch never matched and both
+    Anthropic streaming paths (`stream_text` and `stream_structured`) yielded
+    no text at all: token counts and the final message were right, the visible
+    answer was empty. Both now normalise the raw `content_block_delta` event,
+    which is also the only one carrying `index` — without it a partial-JSON
+    delta cannot be attributed to the tool call it belongs to. The SDK's own
+    accumulated companions (`TextEvent`, `InputJsonEvent`) are deliberately
+    **not** read, or every chunk would be emitted twice; a top-level
+    `text_delta` / `input_json_delta` is still accepted for hand-built doubles
+    and wrappers that forward bare delta objects.
 
 ### Batch generation (offline, −50% cost)
 
@@ -1128,6 +1199,39 @@ BaselithCore enforces strict multi-tenant isolation at the service level. The `V
 - **Deletion**: Documents can only be deleted if they belong to the active tenant.
 
 This isolation is executed **server-side** by the underlying provider (e.g., Qdrant), ensuring that data remains segmented even if internal identifiers are leaked.
+
+!!! danger "The ambient tenant is assigned, never defaulted"
+    `query_points()` and `query_points_groups()` — the raw-query escape
+    hatches — **assign** `tenant_id = get_current_tenant_id()` over whatever
+    the caller passed, rather than `setdefault`-ing it. A caller-supplied
+    `tenant_id` in `**kwargs` used to win, which turned anything that forwards
+    caller-controlled filter kwargs into a cross-tenant read. There is no
+    supported way to query another tenant from inside a request bound to one.
+
+### Reserved payload keys
+
+The indexing pipeline owns six payload keys, and caller metadata may not
+shadow them:
+
+```python
+# core/services/vectorstore/_indexing.py
+RESERVED_PAYLOAD_KEYS = frozenset(
+    {"text", "source", "document_id", "tenant_id", "chunk_index", "chunk_count"}
+)
+```
+
+Document metadata is merged **under** the keys the pipeline writes; a
+colliding key is dropped and logged once per document as
+`indexing_metadata_reserved_keys_dropped` (with the `document_id` and the
+sorted key names). The merge used to run the other way — `payload.update(metadata)`
+*after* the literal — so a document whose metadata carried `tenant_id` named
+whatever tenant it liked, and since every isolation check downstream reads
+back this same payload (the pgvector `payload @>` predicate, the Qdrant field
+condition), one poisoned write was readable by the tenant it named. The other
+five are read back just as literally — a hit's content comes from `text` and
+its document id from `document_id` — so shadowing any of them corrupts
+retrieval in its own way. Keep your own metadata on distinct keys; a prefix
+such as `app_source` is enough.
 
 ### Payload Indexes & Grouped Retrieval
 

@@ -809,11 +809,60 @@ If you run `baselith init` without arguments, the CLI will enter an **Interactiv
 
 **Available Templates**:
 
-- `minimal`: Minimal project with core only
-- `full`: Full project with all services configured
-- `chat-only`: Chat service only, minimal footprint
-- `rag-system`: RAG system with vector store and memory
-- `baselith-core`: BaselithCore system with swarm and A2A
+The wizard offers exactly what this invocation can scaffold
+(`available_templates()`): the built-in templates, plus every directory under
+`templates/` that actually contains files.
+
+- `minimal` — built in: one agent, wired to the public API. The only template
+  a `pip install baselith-core` user sees, since `templates/` is not shipped
+  in the wheel.
+- `rag-system`, `multi-agent-collab`, `baselith-core-template`,
+  `custom-agent-template`, `plugin-template`, `backstage` — directories under
+  `templates/`, so they need a checkout of this repository.
+
+A template that would write no files is refused (exit code `1`) instead of
+creating an empty project.
+
+!!! warning "`full`, `chat-only` and `baselith-core` are gone"
+    The prompt used to offer a hardcoded five. `full` and `chat-only` carried
+    an empty `files` dict, so each created an empty directory and then printed
+    "Created project at …"; `baselith-core` matched neither a built-in
+    template nor a directory under `templates/` (the directory is
+    `baselith-core-template`). Three of the five choices were dead ends.
+    Scripts pinning `--template full` or `--template chat-only` now get
+    `Unknown template or directory` and a list of what exists — pass
+    `--template minimal`.
+
+**What `minimal` scaffolds**: a project that depends on `baselith-core`
+(`requires-python = ">=3.12"`, its own `version = "0.1.0"`) and runs as it
+stands — `README.md`, `pyproject.toml`, `.env`, `.gitignore`, an `app/`
+package holding `agent.py`, a `tests/` package holding `test_agent.py`, and a
+`.gitkeep` under `plugins/`. `app/agent.py` builds an
+[`Agent`](../core-modules/agent.md) with one tool over the public facade and
+runs it:
+
+```python
+from baselith import Agent
+
+agent = Agent(system_prompt="You are a concise assistant.", tools=[current_time])
+```
+
+```bash
+cd my-assistant
+pip install -e .
+python -m app.agent
+```
+
+The generated `pyproject.toml` used to carry the framework's own version
+number and pin `fastapi`/`uvicorn`/`pydantic` directly, with no
+`baselith-core` dependency and no code at all: a project that could not import
+the framework that generated it.
+
+!!! note "A `plugins/` directory in the working directory redirects the target"
+    `init` creates the project under `plugins/<name>/` when the directory it
+    is run from already contains a `plugins/` folder — which is what makes the
+    command usable for scaffolding inside a checkout. Run it anywhere else and
+    the project is created as `<name>/`.
 
 **Example**:
 

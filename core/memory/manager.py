@@ -7,7 +7,7 @@ mixins to provide a unified 'AgentMemory' interface that handles
 everything from raw storage to semantic context synthesis.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.observability.logging import get_logger
 
@@ -69,6 +69,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
         short_term_limit: int = 50,  # Legacy param support
         working_memory_limit: int = 10,  # Legacy param support
         context_folder: Optional["ContextFolder"] = None,
+        llm_service: Any | None = None,
     ):
         """
         Configure the memory orchestration layer.
@@ -80,8 +81,13 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
             short_term_limit: Maximum items retained in the rolling buffer.
             working_memory_limit: Size limit for active 'top-of-mind' context.
             context_folder: Service for hierarchical organization and folding.
+            llm_service: Summarizer used by compaction. Without one,
+                :meth:`compress_old_memories` refuses to run rather than
+                replace a batch of memories with a truncation of three of
+                them.
         """
         self.provider = provider
+        self.llm_service = llm_service
         self.graph_provider = graph_provider
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold

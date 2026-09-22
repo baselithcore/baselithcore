@@ -43,6 +43,9 @@ core/orchestration/
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
 ├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── idempotency.py           # Cross-process tool ledger: derive key, claim, replay
+├── idempotency_postgres.py  # Postgres-backed ToolLedger (tool_invocations)
+├── ledger_factory.py        # Ledger resolution (ORCHESTRATOR_TOOL_LEDGER)
 ├── recovery.py              # Crash recovery: re-enter interrupted runs via process(resume=True)
 ├── run_events.py            # Structured per-run_id AgentEvent stream (stream_run_events)
 ├── run_events_bridge.py     # Redis bridge fanning run events out across replicas
@@ -808,6 +811,7 @@ await ledger.complete(key, result)
 | `InMemoryToolLedger` | Bounded in-process ledger; dedupes a retry inside one worker only |
 | `PostgresToolLedger` | Durable `tool_invocations` table shared by every replica (`idempotency_postgres.py`) |
 | `requires_idempotency` | `False` only for `read_only`; an unknown category is effectful |
+| `get_tool_ledger` | The process-wide ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`ledger_factory.py`); `None` when the ledger is switched off |
 
 `begin` is the whole hot path: one round trip that both claims the key and
 returns the row already holding it. A `lookup`-then-`begin` pair would be two
@@ -824,19 +828,81 @@ tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
 window, not an audit log.
 
-The typed `Agent` consumes it directly:
+The typed `Agent` consumes it **by default** — it no longer has to be handed
+one:
 
 ```python
-agent = Agent(tools=[charge_card], tool_ledger=PostgresToolLedger())
+agent = Agent(tools=[charge_card])
 await agent.run("pay the invoice", run_id="order-7-attempt")
+
+# Override the process-wide choice where a run needs its own store
+agent = Agent(tools=[charge_card], tool_ledger=PostgresToolLedger(tenant_id="acme"))
 ```
 
 **A stable `run_id` across attempts is what makes deduplication possible at
 all** — a fresh id per attempt is a different run by definition, and every
-effectful tool executes again. Without a `run_id`, or without a ledger, the
-loop behaves exactly as before. A plain callable is `destructive` by default
-(see `ToolDefinition`), so tools opt *out* of the ledger by declaring
-`read_only`, never by omission.
+effectful tool executes again. Without a `run_id` the ledger stays inert, and
+`ORCHESTRATOR_TOOL_LEDGER=off` turns it off deployment-wide. A plain callable
+is `destructive` by default (see `ToolDefinition`), so tools opt *out* of the
+ledger by declaring `read_only`, never by omission.
+
+#### Choosing the ledger (`ORCHESTRATOR_TOOL_LEDGER`)
+
+Everything above existed — the protocol, the durable table, its migration and
+its tests — and **nothing ever constructed it**: every call site built
+`InMemoryToolLedger()` directly, so `PostgresToolLedger` was unreachable in a
+running deployment. That is worse than shipping no durable ledger at all. The
+in-process one deduplicates exactly the case a developer tests — a retry
+inside one worker — and stops helping with a second replica or after a
+restart, which is precisely when a redelivered task re-runs a payment or an
+outbound webhook. The gap only opens where it is hardest to notice.
+
+`core/orchestration/ledger_factory.py` makes the choice explicit:
+
+```python
+from core.orchestration.ledger_factory import get_tool_ledger, reset_tool_ledger
+
+ledger = get_tool_ledger()   # None when the ledger is switched off
+```
+
+| `ORCHESTRATOR_TOOL_LEDGER` | What you get |
+|---|---|
+| `auto` (default) | Postgres when `POSTGRES_ENABLED`, otherwise the in-process ledger **with a warning naming the consequence** (`tool_ledger_in_process_only`): calls are deduplicated within this worker only, and a redelivered task or a second replica can repeat an effectful call. |
+| `postgres` | The durable ledger, or `DurableLedgerUnavailable` when `POSTGRES_ENABLED` is off or it cannot be built. Degrading silently would hand back per-worker deduplication under the name of the cross-replica guarantee the operator asked for. |
+| `memory` | Always the in-process ledger — single-worker deployments and tests. |
+| `off` | No ledger at all: every retry re-executes every effectful call (warned once as `tool_ledger_disabled`). The honest way to say *this deployment has no effectful tools*, and the way back to the pre-default behaviour. |
+
+`DurableLedgerUnavailable` reports two things: `POSTGRES_ENABLED` is off while
+`postgres` was demanded, and a ledger that cannot be **constructed** (a failing
+`psycopg` import). It is not a connectivity probe — constructing the ledger
+opens no connection, so a database that is merely unreachable surfaces on the
+first claim, where the loop fails open (below). Both the ReAct loop and the
+typed `Agent` let it propagate: answering an operator who asked for the durable
+ledger by name with *no ledger at all* would be worse than the in-process
+fallback `auto` would have given them. Any other resolution failure is still
+caught on the `Agent` side, logged as `tool ledger unavailable, calls are not
+deduped`, and the tool runs unrecorded.
+
+**One ledger per process, deliberately.** `get_tool_ledger()` builds on first
+use and caches. A per-agent ledger cannot deduplicate two agents in the same
+worker — the one case the in-process ledger is supposed to cover — and
+sharing one store cannot collapse calls from different runs, because the
+derived key already carries the `run_id`. `reset_tool_ledger()` drops the
+cache for tests and for a process that reloads configuration; the ledger owns
+no connection, so dropping it cancels nothing in flight.
+
+!!! warning "A ledger error fails open — by design, and you should know it"
+    `claim_ledger_entry` logs a failed claim and lets the call proceed
+    *unrecorded* rather than raising. A database outage therefore costs the
+    exactly-once guarantee, not the ability to run effectful tools at all — a
+    deliberate trade, and pre-existing. Calls to the durable ledger are also
+    bounded by `LEDGER_TIMEOUT_SECONDS` (`5.0`, not configurable): the
+    connection pool would otherwise wait 30 s **per tool call** before the same
+    fail-open, so an unreachable database is a short pause rather than a
+    stalled fleet. A circuit breaker (`tool_ledger`, two failures to open,
+    30 s to retry) then stops the fleet paying even that bound for the
+    duration of an outage. The in-process ledger cannot block and is left
+    unwrapped.
 
 ### Durable human-in-the-loop approvals (pause → decide → resume)
 

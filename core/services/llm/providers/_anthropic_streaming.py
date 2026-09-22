@@ -52,6 +52,52 @@ logger = get_logger(__name__)
 __all__ = ["stream_structured", "stream_text"]
 
 
+def _content_delta(event: Any) -> tuple[str, int, str] | None:
+    """Normalise one stream event into ``(kind, block_index, payload)``.
+
+    ``kind`` is ``"text"`` or ``"input_json"``; anything else returns ``None``.
+
+    The SDK's stream helper yields the raw wire events *and* its own
+    accumulated companions for the same delta (``TextEvent`` with
+    ``type="text"``, ``InputJsonEvent`` with ``type="input_json"``). Only the
+    raw ``content_block_delta`` is read here, for two reasons: it is the event
+    that carries ``index``, without which a partial-JSON delta cannot be
+    attributed to the tool call it belongs to, and reading both shapes would
+    emit every text chunk twice.
+
+    A *top-level* ``text_delta`` / ``input_json_delta`` type is accepted as
+    well. No Anthropic SDK sends that shape — the delta type lives on
+    ``event.delta.type``, never on ``event.type`` — so it cannot double up
+    with the raw path; it is honoured because a hand-built double or a wrapper
+    that forwards bare delta objects does produce it.
+
+    Args:
+        event: One item from the provider stream iterator.
+
+    Returns:
+        The normalised delta, or ``None`` for events that carry no content.
+    """
+    etype = getattr(event, "type", "")
+    if etype == "content_block_delta":
+        delta = getattr(event, "delta", None)
+        dtype = getattr(delta, "type", "")
+        index = getattr(event, "index", -1)
+        if dtype == "text_delta":
+            return ("text", index, getattr(delta, "text", "") or "")
+        if dtype == "input_json_delta":
+            return ("input_json", index, getattr(delta, "partial_json", "") or "")
+        return None
+    if etype == "text_delta":
+        return ("text", getattr(event, "index", -1), getattr(event, "text", "") or "")
+    if etype == "input_json_delta":
+        return (
+            "input_json",
+            getattr(event, "index", -1),
+            getattr(event, "partial_json", "") or "",
+        )
+    return None
+
+
 async def stream_structured(
     provider: AnthropicProvider,
     prompt: str,
@@ -104,12 +150,18 @@ async def stream_structured(
                     if block is not None and getattr(block, "type", "") == "tool_use":
                         open_tools[getattr(ev, "index", -1)] = block.id
                         yield ToolCallStarted(id=block.id, name=block.name)
-                elif etype == "text_delta":
-                    yield TextDelta(ev.text)
-                elif etype == "input_json_delta":
-                    call_id = open_tools.get(getattr(ev, "index", -1))
-                    if call_id is not None:
-                        yield ToolCallDelta(id=call_id, arguments_delta=ev.partial_json)
+                    continue
+                delta = _content_delta(ev)
+                if delta is None:
+                    continue
+                kind, index, payload = delta
+                if kind == "text":
+                    if payload:
+                        yield TextDelta(payload)
+                    continue
+                call_id = open_tools.get(index)
+                if call_id is not None:
+                    yield ToolCallDelta(id=call_id, arguments_delta=payload)
 
             final = await stream.get_final_message()
 
@@ -206,11 +258,7 @@ async def stream_text(
             prompt_usage = Usage()
             async for chunk in stream:
                 ctype = getattr(chunk, "type", "")
-                if ctype == "text_delta":
-                    text = chunk.text
-                    output_tokens += estimate_tokens(text, model)
-                    yield text, prompt_tokens + output_tokens
-                elif ctype == "message_start":
+                if ctype == "message_start":
                     # Exact prompt-side usage, cache buckets included.
                     started = Usage.from_anthropic(
                         getattr(getattr(chunk, "message", None), "usage", None)
@@ -228,6 +276,13 @@ async def stream_text(
                         # Carry the correction to the consumer without
                         # inventing text.
                         yield "", billed.total
+                    continue
+                delta = _content_delta(chunk)
+                if delta is None or delta[0] != "text" or not delta[2]:
+                    continue
+                text = delta[2]
+                output_tokens += estimate_tokens(text, model)
+                yield text, prompt_tokens + output_tokens
 
     except Exception as e:
         logger.error(f"Anthropic streaming error: {describe_exception(e)}")

@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Payload keys the pipeline owns. Retrieval reads all of them and tenant
+#: isolation reads ``tenant_id``, so caller metadata may not set any of them.
+RESERVED_PAYLOAD_KEYS = frozenset(
+    {"text", "source", "document_id", "tenant_id", "chunk_index", "chunk_count"}
+)
+
 
 async def index_documents(
     service: VectorStoreService,
@@ -105,9 +111,27 @@ async def index_documents(
         offset = plan["offset"]
         doc_vectors = all_vectors[offset : offset + len(chunks)]
 
+        # Caller metadata cannot shadow a key the pipeline owns. The merge
+        # used to run the other way (``payload.update(metadata)`` after the
+        # literal), so a document whose metadata carried ``tenant_id`` named
+        # whatever tenant it liked — and every isolation check downstream reads
+        # back this same payload (the pgvector ``payload @>`` predicate, the
+        # Qdrant field condition), so one poisoned write was readable by the
+        # tenant it named. Computed per document: the shadowing set cannot vary
+        # between chunks of the same document.
+        shadowed = RESERVED_PAYLOAD_KEYS.intersection(metadata)
+        if shadowed:
+            logger.warning(
+                "indexing_metadata_reserved_keys_dropped",
+                document_id=doc_id,
+                keys=sorted(shadowed),
+            )
+        safe_metadata = {k: v for k, v in metadata.items() if k not in shadowed}
+
         doc_points = []
         for idx, (chunk, vector) in enumerate(zip(chunks, doc_vectors, strict=True)):
             payload = {
+                **safe_metadata,
                 "text": chunk,
                 "source": getattr(doc, "clean_path", doc.id),
                 "document_id": doc_id,
@@ -115,7 +139,6 @@ async def index_documents(
                 "chunk_index": idx,
                 "chunk_count": len(chunks),
             }
-            payload.update(metadata)
 
             doc_points.append(
                 {

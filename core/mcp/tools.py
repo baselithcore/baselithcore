@@ -267,26 +267,9 @@ class MCPToolAdapter:
             query: str, top_k: int | None = None, collection: str = "default"
         ) -> list[dict[str, Any]]:
             """Search the knowledge base."""
-            config = get_mcp_config()
-            limit = top_k or config.mcp_rag_default_top_k
+            from core.mcp._builtin_tools import search_knowledge_base as _search
 
-            # Placeholder - would integrate with actual VectorStore service
-            try:
-                # from core.services.vector_store import VectorStore
-                # store = VectorStore()
-                # results = await store.search(query, k=limit, collection=collection)
-                pass
-            except ImportError:
-                return [{"error": "VectorStore service not available"}]
-
-            return [
-                {
-                    "id": "placeholder",
-                    "content": f"Search results for: {query}",
-                    "score": 0.95,
-                    "metadata": {"collection": collection, "limit": limit},
-                }
-            ]
+            return await _search(query, top_k=top_k, collection=collection)
 
         @self.server.tool(
             name="index_document",
@@ -318,12 +301,9 @@ class MCPToolAdapter:
             collection: str = "default",
         ) -> dict[str, Any]:
             """Index a document."""
-            # Placeholder - would integrate with actual Indexing service
-            return {
-                "status": "indexed",
-                "collection": collection,
-                "content_length": len(content),
-            }
+            from core.mcp._builtin_tools import index_document as _index
+
+            return await _index(content, metadata=metadata, collection=collection)
 
         logger.info("mcp_rag_tools_registered")
 
@@ -399,16 +379,9 @@ class MCPToolAdapter:
         )
         async def plan_task(task_description: str, context: str = "") -> dict[str, Any]:
             """Plan a complex task."""
-            # Placeholder - would integrate with ToT reasoning
-            return {
-                "task": task_description,
-                "steps": [
-                    {"step": 1, "description": "Analyze requirements"},
-                    {"step": 2, "description": "Break down into subtasks"},
-                    {"step": 3, "description": "Execute plan"},
-                ],
-                "status": "planned",
-            }
+            from core.mcp._builtin_tools import plan_task as _plan
+
+            return await _plan(task_description, context=context)
 
         logger.info("mcp_reasoning_tools_registered")
 
