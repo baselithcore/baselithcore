@@ -179,6 +179,21 @@ A plugin that creates state directories per identity needs the same treatment
 for its own root — a writable path, and a seed only if the image ships content
 it cannot regenerate.
 
+Moving that file off the image costs the deploy-time schema Job, and the chart
+now says so instead of letting it through: `database.pluginSchemaInit` refuses
+to render alongside a `PLUGIN_CONFIG_PATH` outside `/app/configs/`. The Job is
+a hook pod and mounts none of these volumes, so the file is absent when it
+runs — every plugin reads as enabled with an *empty* config block, and a
+plugin that chooses its storage in that block builds the wrong one. The
+symptom is a Job that prints `<plugin>: schema ready`, creates no table and
+exits 0, followed by an application that boots against a schema which is not
+there. A release that wants both the writable file and the Job has to give up
+one of them: `plugins.config` below keeps the Job, and
+`database.pluginSchemaInit.enabled: false` keeps the toggles — the second only
+honestly when every plugin's tables come from a migration, or when the
+deployment still lets the serving process hold DDL (`DB_RUNTIME_DDL=true`),
+which a least-privilege role cannot do.
+
 The opposite stance exists too. When the plugin set is a property of the
 release rather than something an admin toggles at runtime — a per-customer
 SaaS cell rendered from a spec, a GitOps overlay — put the `plugins.yaml`

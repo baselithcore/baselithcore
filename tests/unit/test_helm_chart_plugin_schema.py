@@ -8,9 +8,13 @@ before the application."""
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+
+import pytest
 import yaml
 
-from tests.unit.helm import render
+from tests.unit.helm import CHART_DIR, render
 
 
 class TestPluginSchemaJob:
@@ -69,3 +73,44 @@ class TestPluginSchemaJob:
         # create a table even if it tried.
         assert env["DB_USER"]["value"] == "owner"
         assert env["DB_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"] == "pg-owner"
+
+    @staticmethod
+    def _render_result(plugin_config_path: str) -> subprocess.CompletedProcess[str]:
+        """Render with the Job on and the plugin set at ``plugin_config_path``."""
+        helm = shutil.which("helm")
+        if helm is None:  # pragma: no cover — depends on the host toolchain
+            pytest.skip("helm binary not available")
+        return subprocess.run(
+            [
+                helm,
+                "template",
+                "release",
+                str(CHART_DIR),
+                "--set",
+                "database.pluginSchemaInit.enabled=true",
+                "--set",
+                f"config.PLUGIN_CONFIG_PATH={plugin_config_path}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_refuses_a_plugin_set_the_job_cannot_read(self) -> None:
+        """A hook pod mounts no application volume.
+
+        Point PLUGIN_CONFIG_PATH at one and the file is simply absent when the
+        Job runs: every plugin reads as enabled with an empty config block, and
+        a plugin that picks its storage in that block builds the wrong one —
+        `<plugin>: schema ready`, no table, exit 0, and an application that
+        then boots against a schema that is not there.
+        """
+        result = self._render_result("/app/data/configs/plugins.yaml")
+        assert result.returncode != 0
+        assert "mutually exclusive" in result.stderr
+        assert "plugins.config" in result.stderr
+
+    def test_allows_a_plugin_set_that_rides_inside_the_image(self) -> None:
+        """The Job runs the same image, so an in-image path it does carry."""
+        result = self._render_result("/app/configs/plugins.yaml")
+        assert result.returncode == 0, result.stderr[-2000:]

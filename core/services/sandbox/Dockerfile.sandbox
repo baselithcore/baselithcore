@@ -5,22 +5,33 @@
 # a candidate digest has to pass.
 FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# No build-essential, and no apt step at all. It was here to compile source
+# distributions, and the pinned set below resolves to wheels on both
+# linux/amd64 and linux/arm64, so nothing is left to compile — while a C
+# toolchain inside the one image that executes agent-supplied code is a
+# capability handed to the payload for free. `--only-binary=:all:` on the
+# install keeps the two facts tied together: if a future recompile of
+# requirements.sandbox.txt ever pulls a source distribution, the build fails
+# here instead of silently needing a compiler back.
 
 # Install Data Science libraries.
-# Version-pinned, like the base image above: this image is built on the host
-# the first time a sandbox is needed, so an unpinned set means two machines run
+# Hash-pinned, like the base image above: this image is built on the host the
+# first time a sandbox is needed, so an unpinned set means two machines run
 # agent code against two different library versions, and a build months from
-# now is a different sandbox from the one that was reviewed. Resolved together
-# for Python 3.12, so the four move as a set.
-RUN pip install --no-cache-dir \
-    numpy==2.5.3 \
-    pandas==3.0.6 \
-    matplotlib==3.11.2 \
-    scikit-learn==1.9.1
+# now is a different sandbox from the one that was reviewed.
+#
+# The four direct pins live in requirements.sandbox.in; requirements.sandbox.txt
+# is the compiled closure — every transitive dependency pinned to a version AND
+# to the sha256 of each distribution that may satisfy it. Version pins alone
+# left both halves open: the transitive set floated (contourpy, scipy, pillow
+# and the rest resolved to whatever the index held that morning), and even a
+# pinned version still trusts whatever bytes the index serves under that name.
+# `--require-hashes` closes both, and makes pip fail loudly rather than quietly
+# install an unlisted dependency.
+COPY requirements.sandbox.txt /tmp/requirements.sandbox.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary=:all: \
+    -r /tmp/requirements.sandbox.txt \
+    && rm /tmp/requirements.sandbox.txt
 
 # Create a non-root user for security
 RUN useradd -m -u 1000 sandbox

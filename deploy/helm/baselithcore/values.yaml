@@ -513,6 +513,11 @@ extraVolumeMounts: []
 #       - from: /app/configs/plugins.yaml
 #         to: /app/data/configs/plugins.yaml
 #
+#   It also costs `database.pluginSchemaInit`, which refuses to render beside
+#   it: that Job is a hook pod, mounts none of these volumes, and would read no
+#   plugin set at all — building a schema from empty config blocks instead of
+#   the real ones, and exiting 0 about it.
+#
 # `from` may be a file or a directory. A destination that already exists is
 # never touched, so restarts and upgrades keep whatever the running deployment
 # wrote — a changed image default reaches an existing volume only if you delete
@@ -668,6 +673,11 @@ database:
   # Harmless otherwise: a plugin with no schema of its own does nothing, and
   # the DDL each plugin runs is idempotent.
   pluginSchemaInit:
+    # It reads the plugin set the way the application does, from
+    # PLUGIN_CONFIG_PATH — and being a hook pod it mounts no application
+    # volume, so a path outside the image is refused at render time rather
+    # than producing a schema built from empty config blocks. Use
+    # `plugins.config` for a release that needs both.
     enabled: false
     backoffLimit: 1
     activeDeadlineSeconds: 900
