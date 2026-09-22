@@ -8,6 +8,7 @@ Handles the two-stage retrieval process:
 
 import hashlib
 import json
+import struct
 from collections.abc import Sequence
 from typing import Any
 
@@ -16,6 +17,87 @@ from core.models.domain import Document, SearchResult
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _canonical(value: Any) -> Any:
+    """Render ``value`` as something :func:`json.dumps` can order and compare.
+
+    Only shapes whose identity is genuinely captured are handled — Pydantic
+    models (every Qdrant filter is one) and sets. Anything else is left to
+    ``json.dumps``, which raises ``TypeError``; the caller turns that into a
+    cache *miss*. Falling back to ``repr`` here would be worse than useless:
+    the default ``repr`` carries a memory address, so equal filters would key
+    differently within one process, and an object that defines ``__repr__``
+    without covering every field could make different filters key the same.
+
+    Args:
+        value: Object encountered while canonicalizing the cache key.
+
+    Returns:
+        A JSON-encodable stand-in for ``value``.
+
+    Raises:
+        TypeError: When the object has no faithful representation.
+    """
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        return dump(mode="json")
+    if isinstance(value, (set, frozenset)):
+        return sorted(str(item) for item in value)
+    raise TypeError(f"no stable cache representation for {type(value).__name__}")
+
+
+def _search_cache_key(
+    *,
+    collection_name: str,
+    tenant_id: str | None,
+    retrieval_limit: int,
+    query_vector: Sequence[float],
+    rerank: bool,
+    query_text: str | None,
+    provider_kwargs: dict[str, Any],
+) -> str | None:
+    """Key the search cache on every input that can change the result rows.
+
+    The previous key hashed the query vector's **first ten components** and
+    omitted the provider kwargs entirely, so two distinct embeddings sharing a
+    head collided, and one vector searched with and without a ``document_id``
+    restriction shared a single entry for the whole TTL. ``query_text`` matters
+    too, but only when ``rerank`` is on: that is the one path where it reorders
+    the rows, and folding it in unconditionally would split entries that are
+    genuinely identical.
+
+    Args:
+        collection_name: Collection being searched.
+        tenant_id: Ambient tenant, already enforced on the query itself.
+        retrieval_limit: Row count actually requested from the provider.
+        query_vector: The full query embedding.
+        rerank: Whether the cross-encoder stage will reorder the rows.
+        query_text: Question driving that re-ranking stage, if any.
+        provider_kwargs: Everything else forwarded to the provider, filters
+            included.
+
+    Returns:
+        A stable cache key, or ``None`` when an argument has no faithful
+        representation — in which case the caller skips the cache rather than
+        risk serving another query's rows.
+    """
+    digest = hashlib.sha256()
+    try:
+        components = [float(component) for component in query_vector]
+        digest.update(struct.pack(f"<{len(components)}d", *components))
+        digest.update(
+            json.dumps(
+                provider_kwargs, sort_keys=True, default=_canonical, ensure_ascii=False
+            ).encode("utf-8")
+        )
+        if rerank and query_text is not None:
+            digest.update(query_text.encode("utf-8"))
+    except (TypeError, ValueError, struct.error) as exc:
+        logger.debug(f"Search cache disabled for this call — unkeyable input: {exc}")
+        return None
+    fingerprint = digest.hexdigest()[:32]
+    return f"{collection_name}:{tenant_id}:{retrieval_limit}:{fingerprint}:rr={rerank}"
 
 
 class SearchOrchestrator:
@@ -59,11 +141,17 @@ class SearchOrchestrator:
 
         cache_key = None
         if use_cache and self.search_cache and self._search_cache_enabled:
-            vector_hash = hashlib.sha256(
-                json.dumps(list(query_vector)[:10]).encode()
-            ).hexdigest()[:16]
-            cache_key = f"{collection_name}:{tenant_id}:{retrieval_limit}:{vector_hash}:rr={rerank}"
+            cache_key = _search_cache_key(
+                collection_name=collection_name,
+                tenant_id=tenant_id,
+                retrieval_limit=retrieval_limit,
+                query_vector=query_vector,
+                rerank=rerank,
+                query_text=query_text,
+                provider_kwargs=kwargs,
+            )
 
+        if cache_key is not None and self.search_cache is not None:
             cached_results = await self.search_cache.get(cache_key)
             if cached_results is not None:
                 logger.debug(f"Search cache hit for key {cache_key[:20]}...")

@@ -62,6 +62,26 @@ def _model_name(model: Any) -> str:
     return type(model).__name__
 
 
+def _cache_key(text: str, model_id: str) -> str:
+    """Cache key scoped to both the text and the model that embedded it.
+
+    Keying on the text alone made two models of the same width share every
+    entry — the Redis prefix only carries the embedding *dimension*, and 384 is
+    the common case — so one model's vector could be returned for a query the
+    other embedded, which corrupts every similarity score computed from it. The
+    sibling cache in :mod:`core.services.vectorstore.embedding_cache` keys the
+    same way; keep the two in step.
+
+    Args:
+        text: Text being embedded.
+        model_id: Identifier of the model producing the vector.
+
+    Returns:
+        Hex digest to use as the cache key.
+    """
+    return hashlib.sha256(f"{model_id}:{text}".encode()).hexdigest()
+
+
 def _token_usage_enabled() -> bool:
     """Whether embedding spans should carry ``gen_ai.usage.input_tokens``."""
     try:
@@ -175,6 +195,9 @@ class CachedEmbedder:
         """
         self.model = model
         self._cache = cache
+        #: Resolved once: every cache key is scoped by it, so two models of the
+        #: same width cannot answer for each other (see :func:`_cache_key`).
+        self._model_id = _model_name(model)
 
         if self._cache is None:
             try:
@@ -191,8 +214,9 @@ class CachedEmbedder:
                 logger.warning(f"[embedder] Failed to initialize cache: {e}")
 
         # Coalesces concurrent misses for the same single text (keyed by the
-        # same sha256 the cache uses) so a popular query is encoded once
-        # instead of once per concurrent caller.
+        # same `_cache_key` the cache uses, so the lock is scoped per model as
+        # well as per text) so a popular query is encoded once instead of once
+        # per concurrent caller.
         #
         # The cross-worker layer is offered only when the resolved cache is a
         # RedisTTLCache — i.e. genuinely shared between pods, so a worker that
@@ -287,9 +311,7 @@ class CachedEmbedder:
         inputs: list[str] = [sentences] if is_single else list(sentences)  # type: ignore[list-item]
 
         # 1. Identify hashes
-        hashes: list[str] = [
-            hashlib.sha256(text.encode("utf-8")).hexdigest() for text in inputs
-        ]
+        hashes: list[str] = [_cache_key(text, self._model_id) for text in inputs]
 
         # 2. Check cache
         results: list[Any] = [None] * len(inputs)
