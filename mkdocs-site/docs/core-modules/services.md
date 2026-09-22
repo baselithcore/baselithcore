@@ -1610,6 +1610,27 @@ BaselithCore supports two types of sandboxing for secure code execution:
   literals) are logged in `warn` mode or rejected with
   `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
   executes the payload.
+- **Reproducible image**: the bundled `core/services/sandbox/Dockerfile.sandbox`
+  is built on the host the first time a sandbox is needed, so nothing about it
+  is allowed to float. The base image is digest-pinned, and the data-science
+  stack installs from `requirements.sandbox.txt` — a compiled closure where
+  every package, transitive ones included, is pinned to a version *and* to the
+  sha256 of each distribution that may satisfy it, under
+  `pip install --require-hashes --only-binary=:all:`. Two hosts therefore build
+  the same sandbox, and the one that runs agent-supplied code is the one that
+  was reviewed. Edit the direct pins in `requirements.sandbox.in` and recompile
+  with the `uv pip compile` line in its header; never hand-edit the `.txt`.
+- **No toolchain in the image**: the wheels-only install above leaves nothing to
+  compile, so the image installs no compiler — a C toolchain sitting in the one
+  image that executes agent-supplied code is a capability handed to the payload.
+- **The recipe ships**: `core/services/sandbox/Dockerfile.sandbox` and its
+  `requirements.sandbox.txt` are package data, carried by the wheel and the
+  sdist, so a `pip install baselith-core` can build the hardened image. They
+  were absent from the distribution up to 0.37.0, which left installed
+  deployments with the fail-closed `RuntimeError` (or, under
+  `SANDBOX_ALLOW_UNHARDENED_BASE`, an unreviewed base image);
+  `scripts/check_distribution_artifacts.py` now asserts both on the built
+  artifacts.
 
 ### Compute Metering & Budget Charging
 

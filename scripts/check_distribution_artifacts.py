@@ -3,7 +3,8 @@
 Two directions, because a distribution can be wrong in both:
 
 * every official plugin must arrive with the manifest and README the loader
-  and the marketplace read, and
+  and the marketplace read, the sandbox image recipe must arrive with the
+  module that builds from it, and
 * the in-repo FIXTURE plugins must not arrive at all. ``plugins/example-plugin``
   (the authoring-guide scaffold) and ``plugins/test-project`` (the tree the
   plugin CLI tests scaffold against) were swept into the wheel by
@@ -34,6 +35,21 @@ PLUGIN_FILES = (
     "plugins/web_scraper/manifest.yaml",
     "plugins/web_scraper/README.md",
 )
+# The sandbox image recipe. ``core/services/sandbox/docker_factory.py`` builds
+# ``agent-sandbox:latest`` from these at first use and FAILS CLOSED when they
+# are absent, so a wheel that omits them costs a pip-installed deployment the
+# Docker sandbox provider — or, with ``SANDBOX_ALLOW_UNHARDENED_BASE``, swaps
+# the reviewed image for one nobody looked at. They are data files inside a
+# package: they ship only because ``[tool.setuptools.package-data]`` names
+# them, which is the same silently-stops-matching failure as the fixtures
+# below, in the other direction. They shipped in neither artifact until the
+# entry was added.
+SANDBOX_FILES = (
+    "core/services/sandbox/Dockerfile.sandbox",
+    "core/services/sandbox/requirements.sandbox.txt",
+)
+#: Every member both artifacts must carry.
+REQUIRED_FILES = PLUGIN_FILES + SANDBOX_FILES
 # Wheel-only: the sdist is the source archive and may legitimately carry the
 # fixtures (installing from it re-runs the backend, which applies the same
 # `exclude`). The wheel is what `pip install baselith-core` unpacks verbatim.
@@ -53,9 +69,9 @@ def _sdist_has_members(path: Path) -> list[str]:
     missing: list[str] = []
     with tarfile.open(path, "r:gz") as archive:
         names = archive.getnames()
-        for plugin_file in PLUGIN_FILES:
-            if not any(name.endswith(plugin_file) for name in names):
-                missing.append(plugin_file)
+        for required in REQUIRED_FILES:
+            if not any(name.endswith(required) for name in names):
+                missing.append(required)
     return missing
 
 
@@ -63,9 +79,9 @@ def _wheel_has_members(path: Path) -> list[str]:
     missing: list[str] = []
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        for plugin_file in PLUGIN_FILES:
-            if plugin_file not in names:
-                missing.append(plugin_file)
+        for required in REQUIRED_FILES:
+            if required not in names:
+                missing.append(required)
     return missing
 
 
