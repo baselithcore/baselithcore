@@ -440,6 +440,18 @@ baselith plugin create --interactive  # Interactive wizard
 - Environment variables
 - Auto-registration in `configs/plugins.yaml`
 
+**Generated code**:
+
+- The scaffolded `manifest.yaml` sets `min_core_version` to the version of the
+  framework that ran the command (`core._version.__version__`). It used to be
+  a hard-coded `0.31.0`, six minor releases behind. That value is the version
+  you scaffolded against. Raise it on purpose when you start relying on newer
+  APIs. Never lower it without testing against the older release.
+- The generated Python uses PEP 585/604 builtins (`dict[...]`, `list[...]`,
+  `X | None`), sorted import blocks and no placeholder-less f-strings. A fresh
+  scaffold of any type (`agent`, `router`, `graph`) passes the repository's
+  own ruff configuration as generated.
+
 ---
 
 ### `plugin validate` - Validate Plugin

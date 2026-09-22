@@ -316,6 +316,31 @@ print(result.redactions)        # e.g. {"email": 2, "phone": 1} or None
 | `redactions` | `dict[str, int] \| None` | PII type → count redacted |
 | `warnings` | `list[str] \| None` | Truncation / harmful-content notes |
 
+When `filter_harmful_content` is on, each match of `HARMFUL_PATTERNS`
+(case-insensitive) is replaced with `[CONTENT_FILTERED]`, a
+`harmful_content:<category>` warning is appended and `is_safe` goes `False`.
+There are three categories:
+
+| Category | Matches |
+|----------|---------|
+| `violence` | `kill` / `murder` / `harm` / `hurt` followed by `yourself` / `someone` / `people` |
+| `weapons` | `how to make` / `build` / `create`, then an optional `a`, then `bomb` / `weapon` / `explosive` |
+| `illegal_activity` | Instructional phrasing only: `how to` / `steps to` / `ways to` followed by `steal`, `hack into` or `break into` |
+
+`illegal_activity` flags instructions for the act, not mentions of it.
+It used to match the bare words `steal`, `hack` and `break into`, which
+filtered ordinary technical prose ("a quick hack", "someone tried to hack our
+server"). That is everyday output for the coding and browser agents the engine
+ships. "Someone tried to hack our server" now passes. "Steps to hack into the
+server" is still filtered.
+
+!!! warning "A regex backstop, not a classifier"
+    These output patterns are a coarse last line of defence. They match fixed
+    phrasings and understand no context: rephrased harmful content gets
+    through, and an innocent sentence that happens to fit a pattern is masked.
+    Content moderation belongs to the input-side classifier and moderation
+    layers described above.
+
 Regex PII redaction covers `email`, `phone`, `ssn`, `credit_card`,
 `ip_address`, and two EU patterns — `iban` and `codice_fiscale` (the Italian
 tax code) — replacing each match with `[TYPE_REDACTED]`. The IBAN regex

@@ -47,6 +47,30 @@ core/evaluation/               # the evaluation toolkit
     [Integration with Optimization Loop](#integration-with-optimization-loop).
     Everything else referenced on this page lives in `core/evaluation/`.
 
+`metrics.py` holds `FaithfulnessEvaluator` and `AnswerRelevancyEvaluator`,
+thin wrappers around DeepEval's metrics (threshold default `0.7`, judge model
+`EvaluationConfig.model`). DeepEval is resolved **when an evaluator is
+constructed**, not when the module is imported, by the module-level
+`_ensure_deepeval()`:
+
+- evaluation disabled (`EVAL_ENABLED`, default `false`): nothing is imported,
+  so the opt-in still holds;
+- enabled but `deepeval` not installed: a warning is logged and the evaluator
+  is built without a metric, so `measure()` logs "Skipping" and returns `0.0`;
+- enabled and installed: the metric is bound and `measure()` returns its score.
+
+Turning evaluation on *after* the import now takes effect. `scripts/run_eval.py`
+imports the module and only then sets `evaluation_config.enabled = True`.
+When the check ran at import time, that ordering left every evaluator without
+a metric: each case logged "Skipping" and scored `0.0`, which looked the same
+as an unfaithful answer.
+
+!!! warning "`0.0` is also the value of \"not measured\""
+    A skipped measurement (no metric) and a failed one (the DeepEval call
+    raised, logged at error level) both still return `0.0`. The score alone
+    cannot tell "not measured" apart from "unfaithful". Read the logs before
+    you trust a zero.
+
 ---
 
 ## Evaluation Metrics

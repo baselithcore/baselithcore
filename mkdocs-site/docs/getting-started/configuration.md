@@ -789,6 +789,8 @@ Declared in `core.config.vectorstore`.
 | `VECTORSTORE_PORT` | `int` | `6333` | Vector store HTTP/REST port |
 | `VECTORSTORE_PROVIDER` | `Literal['qdrant', 'pgvector']` | `qdrant` | Vector store provider: 'qdrant' (dedicated vector DB) or 'pgvector' (PostgreSQL + vector extension, reuses the shared pool). |
 | `VECTORSTORE_QDRANT_MODE`<br>also accepts `QDRANT_MODE` | `str` | `server` | Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk. |
+| `VECTORSTORE_SEARCH_CACHE_ENABLED` | `bool` | `True` | Cache vector search results in Redis (keyed per tenant, vector, filter and re-rank question). |
+| `VECTORSTORE_SEARCH_CACHE_TTL` | `int` | `300` | Lifetime of a cached search result, in seconds. |
 | `VECTORSTORE_SEARCH_LIMIT` | `int` | `10` | Default number of search results |
 | `VECTORSTORE_TIMEOUT_SECONDS` | `float` | `30.0` | Per-request timeout (seconds) for vector store calls |
 
@@ -857,4 +859,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-544 settings documented.
+546 settings documented.

@@ -1283,12 +1283,13 @@ path instead of issuing one query per document.
 
 `SearchOrchestrator` (`core/services/vectorstore/orchestrator.py`) fronts the
 two-stage search with a Redis-backed result cache (`RedisCache(prefix="search")`),
-consulted whenever the caller leaves `use_cache=True`. Two switches are read off
-the config with `getattr` — `search_cache_enabled` (default `True`) and
-`search_cache_ttl` (default `300` seconds). Neither is a declared
-`VectorStoreConfig` field, so neither is settable from the environment: the
-defaults stand unless a caller constructs the service with its own config
-object.
+consulted whenever the caller leaves `use_cache=True`. Two declared
+`VectorStoreConfig` fields control it: `search_cache_enabled` (default `True`,
+env `VECTORSTORE_SEARCH_CACHE_ENABLED`) and `search_cache_ttl` (default `300`
+seconds, `ge=1`, env `VECTORSTORE_SEARCH_CACHE_TTL`). Before these fields were
+declared, both services read the attributes with `getattr` against a model that
+ignores unknown keys, so setting either variable had no effect. See
+[Configuration › Services Config](config.md#services-config-llm-vectorstore-chat).
 
 The key is built by `_search_cache_key()` and covers **every input that can
 change the rows**. Its shape is

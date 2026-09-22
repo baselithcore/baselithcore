@@ -402,7 +402,21 @@ VECTORSTORE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
 QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
 VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
+VECTORSTORE_SEARCH_CACHE_ENABLED=true  # Cache vector search results in Redis
+VECTORSTORE_SEARCH_CACHE_TTL=300     # Cached result lifetime in seconds (>= 1)
 ```
+
+!!! note "Search result cache switches"
+    `search_cache_enabled` (default `True`, env
+    `VECTORSTORE_SEARCH_CACHE_ENABLED`) and `search_cache_ttl` (default `300`
+    seconds, `ge=1`, env `VECTORSTORE_SEARCH_CACHE_TTL`) are declared
+    `VectorStoreConfig` fields. The search orchestrator and the vector store
+    service always read them with `getattr`, but until now neither was
+    declared. The model ignores unknown keys (`extra="ignore"`), so an
+    env-driven deployment could not disable the cache or change its TTL, and
+    setting either variable did nothing. A TTL of `0` is rejected because some
+    cache backends read `0` as "never expire". See
+    [Services › Search Result Cache](services.md#search-result-cache).
 
 !!! note "Bounding LLM concurrency"
     `max_concurrent_requests` (default `0` = unlimited, env

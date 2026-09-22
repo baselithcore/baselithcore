@@ -13,7 +13,7 @@ license: LicenseRef-Proprietary
 category: AI
 readiness: alpha
 tenancy: shared
-min_core_version: 0.31.0
+min_core_version: {min_core_version}
 entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources: []
@@ -36,14 +36,17 @@ __all__ = ["{class_name}Plugin"]
         "plugin.py": '''"""
 {class_name} Plugin implementation.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from core.plugins.agent_plugin import AgentPlugin
+
 from .agent import {class_name}Agent
+
 
 class {class_name}Plugin(AgentPlugin):
     """Plugin providing the {class_name} Agent."""
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize the plugin."""
         await super().initialize(config)
         # Setup resources if needed
@@ -51,19 +54,20 @@ class {class_name}Plugin(AgentPlugin):
     def create_agent(self, service: Any, **kwargs) -> {class_name}Agent:
         """Factory method for the agent."""
         return {class_name}Agent(
-            agent_id=f"{name}-agent",
+            agent_id="{name}-agent",
             config=self._config
         )
 
-    def get_agents(self) -> List[Any]:
+    def get_agents(self) -> list[Any]:
         return []
 ''',
         "agent.py": '''"""
 {class_name} Agent implementation.
 """
-from typing import Any, Dict, Optional
+from typing import Any
+
+from core.lifecycle import AgentState, LifecycleMixin
 from core.observability.logging import get_logger
-from core.lifecycle import LifecycleMixin, AgentState
 from core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
@@ -73,20 +77,20 @@ class {class_name}Agent(LifecycleMixin, AgentProtocol):
     {class_name} agent implementation.
     """
     
-    def __init__(self, agent_id: str, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, agent_id: str, config: dict[str, Any] | None = None) -> None:
         super().__init__()
         self.agent_id = agent_id
         self.config = config or {{}}
     
     async def _do_startup(self) -> None:
         """Handle agent startup."""
-        logger.info(f"Agent {name} starting up...")
+        logger.info("Agent {name} starting up...")
 
     async def _do_shutdown(self) -> None:
         """Handle agent shutdown."""
-        logger.info(f"Agent {name} shutting down...")
+        logger.info("Agent {name} shutting down...")
 
-    async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def execute(self, input: str, context: dict[str, Any] | None = None) -> str:
         """
         Execute agent logic.
         """
@@ -107,7 +111,7 @@ license: LicenseRef-Proprietary
 category: Utilities
 readiness: alpha
 tenancy: shared
-min_core_version: 0.31.0
+min_core_version: {min_core_version}
 entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources: []
@@ -123,23 +127,27 @@ tags:
         "__init__.py": '''"""
 {name} Plugin.
 """
-from .router import router
 from .plugin import {class_name}Plugin
+from .router import router
 
 __all__ = ["router", "{class_name}Plugin"]
 ''',
         "plugin.py": '''"""
 {class_name} Router Plugin implementation.
 """
-from typing import Any, Dict, Optional
-from core.plugins.router_plugin import RouterPlugin
+from typing import Any
+
 from fastapi import APIRouter
+
+from core.plugins.router_plugin import RouterPlugin
+
 from .router import router
+
 
 class {class_name}Plugin(RouterPlugin):
     """Plugin providing the {class_name} API endpoints."""
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
 
     def get_router_prefix(self) -> str:
@@ -175,7 +183,7 @@ license: LicenseRef-Proprietary
 category: Knowledge
 readiness: alpha
 tenancy: shared
-min_core_version: 0.31.0
+min_core_version: {min_core_version}
 entry_point: plugin:{class_name}Plugin
 plugin_dependencies: {{}}
 required_resources:
@@ -199,16 +207,18 @@ __all__ = ["{class_name}Plugin"]
         "plugin.py": '''"""
 {class_name} Graph Plugin implementation.
 """
-from typing import Any, Dict, List
+from typing import Any
+
 from core.plugins.graph_plugin import GraphPlugin
+
 
 class {class_name}Plugin(GraphPlugin):
     """Plugin extending the Graph Schema."""
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
 
-    def register_entity_types(self) -> List[Dict[str, Any]]:
+    def register_entity_types(self) -> list[dict[str, Any]]:
         """Register custom entity types."""
         return [
             {{
@@ -221,7 +231,7 @@ class {class_name}Plugin(GraphPlugin):
             }}
         ]
 
-    def register_relationship_types(self) -> List[Dict[str, Any]]:
+    def register_relationship_types(self) -> list[dict[str, Any]]:
         """Register custom relationship types."""
         return [
             {{
