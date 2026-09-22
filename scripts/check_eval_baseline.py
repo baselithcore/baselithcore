@@ -43,7 +43,16 @@ _SUITES: dict[str, str] = {
     "cases": "*.yaml",
     "red_team": "*.yaml",
     "runs": "*.json",
+    "scenarios": "*.yaml",
 }
+
+#: Suites whose entries are summed into one ratchet floor, because a case may
+#: legitimately move between them. Migrating a case from a hand-written
+#: recording to a replayed scenario *strengthens* the gate — the run is then
+#: produced by the real agent loop — but it empties one directory and fills
+#: another, which a per-directory floor reads as a deletion. The floor is on
+#: the total: every case still has a run behind it.
+_COUNTED_TOGETHER: dict[str, tuple[str, ...]] = {"runs": ("runs", "scenarios")}
 
 #: Baseline keys that carry metadata rather than a per-suite case count.
 DATASET_HASH_KEY = "dataset_sha256"
@@ -83,16 +92,24 @@ def _count_file(path: Path) -> int:
     return len(data) if isinstance(data, list) else 0
 
 
+def _count_suite(evals_dir: Path, suite: str) -> int:
+    """Entries in one suite directory."""
+    suite_dir = evals_dir / suite
+    if not suite_dir.is_dir():
+        return 0
+    return sum(_count_file(f) for f in sorted(suite_dir.glob(_SUITES[suite])))
+
+
 def count_suites(evals_dir: Path) -> dict[str, int]:
-    """Per-suite case counts for every ratcheted suite directory."""
-    counts: dict[str, int] = {}
-    for suite, pattern in _SUITES.items():
-        suite_dir = evals_dir / suite
-        total = 0
-        if suite_dir.is_dir():
-            for file in sorted(suite_dir.glob(pattern)):
-                total += _count_file(file)
-        counts[suite] = total
+    """Per-suite case counts, with :data:`_COUNTED_TOGETHER` applied."""
+    merged = {member for members in _COUNTED_TOGETHER.values() for member in members}
+    counts: dict[str, int] = {
+        suite: _count_suite(evals_dir, suite)
+        for suite in _SUITES
+        if suite not in merged
+    }
+    for name, members in _COUNTED_TOGETHER.items():
+        counts[name] = sum(_count_suite(evals_dir, member) for member in members)
     return counts
 
 

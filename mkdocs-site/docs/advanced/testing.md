@@ -496,7 +496,16 @@ An `AsyncMock` proves the loop *calls* the service; it cannot prove the loop
 sent the right thing. `tests/golden/` drives the real `core.agent.Agent` with a
 **cassette** — an ordered list of provider turns in
 `tests/golden/cassettes/<name>.json` — and every turn asserts what the loop
-sent before answering:
+sent before answering.
+
+The machinery itself lives in
+[`core/evaluation/cassette.py`](../core-modules/evaluation.md#cassettes);
+`tests/golden/cassette.py` re-exports it. It moved there when the eval
+regression gate gained a second use for it — `core` cannot import from the test
+tree, and two copies of a replay harness drift. Alongside `prompt_contains`,
+`tools` and `response_format` below, an `expect` block can pin the *shape* of
+the conversation: `roles`, `tool_results` (by `tool_use_id`, with `contains`
+and `is_error`) and `envelope`.
 
 ```json
 {

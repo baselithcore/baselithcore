@@ -415,10 +415,14 @@ jobs:
           npm test
 
   evals:
-    # Deterministic eval regression gate: replays evals/runs/ recordings
-    # against evals/cases/ trajectory cases. No LLM call, no API key, no
-    # network — a change that breaks an agent-flow contract (tools used,
-    # output keywords, call/latency/cost budgets) fails this job.
+    # Deterministic eval regression gate. No LLM call, no API key, no network.
+    # Two sources, and the difference is what this job can catch: scenarios in
+    # evals/scenarios/ are driven through the *real* agent loop against a
+    # recorded provider script, so a change to prompt assembly, tool dispatch,
+    # the message history or answer parsing moves the trajectory and fails
+    # here; recordings in evals/runs/ are hand-written fixtures and only fail
+    # for an edited corpus file. Both are graded against evals/cases/ (tools
+    # used, output keywords, call/latency/cost budgets).
     name: Eval Regression Gate
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
