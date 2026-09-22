@@ -3,7 +3,7 @@ name: baselithcore
 description: BaselithCore — modular orchestration engine for production-grade agentic AI.
 type: application
 # Chart version (SemVer) — bump on chart changes, independent of appVersion.
-version: 0.8.0
+version: 0.8.2
 # Tracks the BaselithCore application release (core/_version.py) and, because
 # `image.tag` defaults to empty, it IS the image tag a plain `helm install`
 # pulls. It had drifted a release behind (0.31.0 against a 0.32.0 codebase),
