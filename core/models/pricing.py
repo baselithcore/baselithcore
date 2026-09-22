@@ -169,9 +169,21 @@ PRICING_AS_OF: Final[str] = "2026-09-13"
 DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
     # Anthropic ($/1M tokens, input/output) — verified against the official
     # model catalog on PRICING_AS_OF. Cache read/write use the derived
-    # defaults (0.1x / 1.25x input); batch uses the derived default (0.5x).
-    "claude-fable-5-1": ModelPrice(10.0, 50.0),
+    # defaults (0.1x / 1.25x input) unless the row names its own rate; batch
+    # uses the derived default (0.5x).
+    #
+    # Claude Fable 5.1 is the row that breaks the 0.1x cache-read derivation:
+    # it publishes $0.25/MTok against a $10 input rate (0.025x), so deriving
+    # the rate billed 4x — on the term that dominates an agent loop, whose
+    # prefix is cached by design, and on the number the tenant budget gate
+    # aborts against (rate verified 2026-09-22).
+    "claude-fable-5-1": ModelPrice(10.0, 50.0, cache_read_usd_per_million=0.25),
     "claude-fable-5": ModelPrice(10.0, 50.0),
+    # Mythos 5.1 prices input and output exactly as Fable 5.1 does, but its
+    # cache-read rate was left open at launch and is not published, so the
+    # derived 0.1x stands rather than an assumed 0.25. Over-charging closes a
+    # budget early, which the operator sees and can raise; under-charging lets
+    # a run overspend a cap silently.
     "claude-mythos-5-1": ModelPrice(10.0, 50.0),
     "claude-mythos-5": ModelPrice(10.0, 50.0),
     "claude-opus-5": ModelPrice(5.0, 25.0),

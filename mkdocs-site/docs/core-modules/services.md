@@ -379,6 +379,41 @@ routing is a hint, never an error — unknown categories fall back to the
 config default. The intent classifier passes `task_category="classification"`
 so classification runs on the cheap tier out of the box.
 
+**The routed pick must be servable by the configured provider.** The built-in
+policy names Claude ids for every category, so switching `LLM_ROUTING_ENABLED`
+on in an OpenAI, Gemini, Ollama or HuggingFace deployment used to ask that
+provider for a model it has never heard of — one 404 per categorized call, from
+a feature sold as a cost optimization. `routed_model()` now resolves the pick's
+vendor family from its id prefix and checks it against the configured provider:
+
+| Family | Id prefixes | Providers that serve it |
+| ------ | ----------- | ----------------------- |
+| Anthropic | `claude-` | `anthropic`, `bedrock`, `vertex` |
+| OpenAI | `gpt-`, `o1-`, `o3-` | `openai`, `azure`, `azure_openai` |
+| Google | `gemini-` | `gemini`, `vertex`, `google` |
+
+`LLM_PROVIDER` itself accepts only `openai`, `ollama`, `huggingface`,
+`anthropic` and `gemini`; the extra names in the table exist for configs that
+carry a provider string of their own. Anthropic-on-Bedrock/Vertex is
+`LLM_PROVIDER=anthropic` plus `LLM_ANTHROPIC_BACKEND` (below), which already
+resolves to the Anthropic family.
+
+On a mismatch `routed_model()` logs a warning naming the model and the provider,
+then resolves to `None` — the module's existing "fall back to the configured
+default model" contract, so routing stays a hint and never raises. The check is deliberately **one-sided**:
+it rejects only a *provable* mismatch. An id whose family cannot be recognized
+passes untouched — that covers every local Ollama tag (`llama3.2`,
+`qwen2.5-coder`), which is whatever the operator pulled — as does a config that
+names no provider at all.
+
+!!! warning "Non-Anthropic deployments need their own policy for routing to do anything"
+    The built-in policy is Claude-only, so on any provider outside the
+    Anthropic family — `openai` (what `.env.example` ships), the package
+    default `ollama`, `gemini`, `huggingface` — every categorized call is
+    blocked by the guard and falls back to `LLM_MODEL`. Routing stays a no-op
+    until `LLM_ROUTING_POLICY` maps the categories onto that provider's own
+    model ids, e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`.
+
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
 provider support and drives its Thought/Action/Observation loop over
@@ -1088,6 +1123,7 @@ Semantic search and vector indexing.
 core/services/vectorstore/
 ├── __init__.py
 ├── service.py                # VectorStoreService
+├── orchestrator.py           # SearchOrchestrator: retrieval, re-rank, result cache
 ├── embedding_cache.py        # Cached embedding generation (model-scoped keys)
 ├── chunking.py               # Text chunking utilities (default pipeline)
 ├── recursive_splitter.py     # The recursive character splitter (no LangChain)
@@ -1149,7 +1185,7 @@ results = await vs.search(
     query_vector=query_embedding,   # Sequence[float]
     k=5,
     collection_name="documents",
-    query_text="find similar documents",   # optional, enables caching/rerank context
+    query_text="find similar documents",   # drives re-ranking; part of the cache key only when rerank=True
 )
 
 for result in results:           # Sequence[SearchResult]
@@ -1242,6 +1278,58 @@ indexes at startup — so tenant-filtered lookups stay fast as collections grow.
 For per-document retrieval, `query_points_groups` returns the best-scoring chunk
 per document in a **single** round trip. Chat retrieval uses it for its fallback
 path instead of issuing one query per document.
+
+### Search Result Cache
+
+`SearchOrchestrator` (`core/services/vectorstore/orchestrator.py`) fronts the
+two-stage search with a Redis-backed result cache (`RedisCache(prefix="search")`),
+consulted whenever the caller leaves `use_cache=True`. Two switches are read off
+the config with `getattr` — `search_cache_enabled` (default `True`) and
+`search_cache_ttl` (default `300` seconds). Neither is a declared
+`VectorStoreConfig` field, so neither is settable from the environment: the
+defaults stand unless a caller constructs the service with its own config
+object.
+
+The key is built by `_search_cache_key()` and covers **every input that can
+change the rows**. Its shape is
+`<collection>:<tenant_id>:<retrieval_limit>:<fingerprint>:rr=<rerank>`, where
+the fingerprint is the leading 32 hex digits of a sha256 over:
+
+1. the **full** query vector, packed as little-endian doubles;
+2. every provider kwarg — the injected `tenant_id`, a `query_filter`, a
+   `document_id` restriction, anything else forwarded to the provider —
+   canonically serialized (JSON with sorted keys; Pydantic models through
+   `model_dump(mode="json")`, sets as sorted strings);
+3. `query_text`, but **only when `rerank=True`**. That is the one path where
+   the question reorders the rows; folding it in unconditionally would split
+   entries that are genuinely identical.
+
+Note `retrieval_limit`, not `k`: a re-ranked search deepens retrieval to
+`max(k * 3, 20)`, and the cached rows are what the provider was actually asked
+for.
+
+The previous key hashed the query vector's **first ten components** and omitted
+the provider kwargs entirely. Two distinct embeddings that agreed on their head
+collided, and the same vector searched with and without a filter shared one
+entry for the whole TTL — the second caller was served the first caller's rows.
+
+!!! danger "An unkeyable argument skips the cache; it is never keyed loosely"
+    `_canonical()` represents only the shapes whose identity it genuinely
+    captures (Pydantic models — every Qdrant filter is one — and sets).
+    Anything else raises, `_search_cache_key()` returns `None`, and the call
+    **bypasses the cache on both the read and the write side**, logging at
+    `DEBUG` (`Search cache disabled for this call — unkeyable input: ...`).
+    Falling back to `repr()` would be worse than useless: the default `repr`
+    carries a memory address, so equal filters would key differently inside one
+    process, and a partial `__repr__` could make different filters key the same.
+    A steady stream of those debug lines is the signal that some caller passes
+    an opaque filter object and is paying full provider latency on every query.
+
+!!! info "The key format changed — expect one cold window per rollout"
+    Entries written by an older build can no longer be addressed by the new key
+    builder, so they are effectively invalidated on deploy and simply expire on
+    their own TTL. The first requests after a rollout re-query the provider;
+    there is nothing to purge.
 
 ### Embedding Generation
 
