@@ -255,6 +255,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
         short_term_limit: int = 50,
         working_memory_limit: int = 10,
         context_folder: "ContextFolder" | None = None,
+        llm_service: Any | None = None,
     ) -> None: ...
 
     async def add_memory(
@@ -292,6 +293,11 @@ returned scores, so a weak vector-store neighbour is not injected into the
 prompt as noise. `min_score` overrides the gate per call (`0.0` restores
 ungated recall).
 
+`llm_service` is the summarizer compaction uses. Without one,
+`compress_old_memories` refuses to run rather than fold a batch of memories
+into a truncation of three of them — see
+[What compaction requires](#what-compaction-requires).
+
 ```python
 
     async def compress_old_memories(
@@ -299,6 +305,7 @@ ungated recall).
         days_threshold: int = 7,
         strategy: str = "summarization",
         batch_limit: int = 500,
+        prune: bool = False,
     ) -> "CompressionResult" | None: ...
 ```
 
@@ -348,7 +355,7 @@ compressor with a list of `MemoryItem`s.
 ```python
 from core.memory.compression import MemoryCompressor, CompressionStrategy
 
-compressor = MemoryCompressor()
+compressor = MemoryCompressor(llm_service=llm_service)
 
 # memories: list[MemoryItem]
 compressed, result = await compressor.compress(
@@ -357,6 +364,53 @@ compressed, result = await compressor.compress(
 )
 print(result.compression_ratio)
 ```
+
+`MemoryCompressor` without an `llm_service` still produces a "summary": the
+fallback is `" | ".join(m.content[:100] for m in memories[:3])`. Driving the
+compressor yourself, that is your call to make; through `AgentMemory` it is
+refused, because there the summary replaces the originals.
+
+### What compaction requires
+
+`compress_old_memories` is destructive — the items folded into a summary are
+deleted once it is written — so three preconditions gate a run. None of them
+degrades the run: the first two abort it and return `None`, the third leaves
+the sources in place:
+
+| Precondition | Why | Without it |
+| --- | --- | --- |
+| A provider that can enumerate (`list_items`) | What gets deleted must be what was read | Returns `None`, logged as `memory_compression_unsupported` |
+| An `llm_service` on the `AgentMemory` | A summary that is a truncation of three items is data loss, not compression | Returns `None`, logged as `memory_compression_skipped_no_summarizer` |
+| Summaries that record their `source_ids` | Only the items a summary actually absorbed may be deleted | The summary is written and nothing is deleted — space, not a memory, is what is lost |
+
+The batch used to come from `provider.search("")` — the nearest neighbours of
+the empty string's embedding, an arbitrary slice that changed between runs —
+and afterwards *every* id it had returned was deleted, including the items the
+compressor had scored high enough to keep. Enumeration
+([`list_items`](#enumerating-a-provider)) is what makes the read deterministic.
+
+The write order changed with it: the summaries are added **before** their
+sources are deleted, so a crash between the two phases leaves a recoverable
+duplicate rather than a hole.
+
+### Pruning is opt-in
+
+The relevance calculator also classifies items below `pruning_threshold` (and
+past `max_age_days`) as prune candidates and drops them from the compressor's
+output. Deleting those is a discard, not a compression — nothing is written in
+their place — so it is a separate, off-by-default request:
+
+```python
+result = await memory.compress_old_memories(days_threshold=7)
+result.pruned_count   # candidates the decay curve aged out — counted, not deleted
+
+result = await memory.compress_old_memories(days_threshold=7, prune=True)
+# now those candidates are deleted alongside the folded sources
+```
+
+`pruned_count` is reported either way, so the count can be reviewed before the
+deletion is authorised. The old delete-everything-we-read step performed that
+discard as a silent side effect of every compaction run.
 
 ### Compression Process
 
@@ -432,6 +486,15 @@ await provider.delete_many(["id-1", "id-2", "id-3"])
 `VectorStoreService.delete_documents()` — one filtered delete for the whole
 batch instead of one round-trip per ID.
 
+!!! note "A recalled item keeps the id it was stored under"
+    Items are written with `Document.id = str(item.id)`, so the identity
+    survives the store and comes back on the payload's `document_id`;
+    `search()` restores it on the reconstructed `MemoryItem`. Reconstruction
+    used to drop it and let `MemoryItem` mint a fresh uuid, which made every
+    read-back unaddressable — a delete keyed on the recalled item's id named a
+    row that had never existed, so compaction removed nothing and its
+    summaries accumulated next to the originals they were meant to replace.
+
 ### Batched maintenance writes
 
 `consolidate()` and `compress_old_memories()` each rewrite a whole batch of
@@ -459,19 +522,46 @@ Implement them when your backend can index or delete a batch in one call; skip
 them and you get the bounded fan-out (`_PROVIDER_FANOUT_LIMIT = 8` concurrent
 round trips, so a large compaction cannot open hundreds at once).
 
-!!! note "Delete still precedes add"
-    In `compress_old_memories()` the delete phase completes before the add
-    phase — the compressed summaries are new items, not updates. With a
-    batch-capable provider the delete phase is **one** filtered round-trip
-    (`delete_items` → `provider.delete_many`) for the whole batch. Order
-    within each phase is irrelevant, which is what makes the fan-out, the
-    batch upsert and the batch delete safe.
+!!! note "Add now precedes delete"
+    In `compress_old_memories()` the summaries are written **before** their
+    source items are deleted: the summaries are new items, not updates, so a
+    crash between the phases leaves a recoverable duplicate rather than a
+    hole. (The order used to be the other way round.) With a batch-capable
+    provider each phase is **one** round-trip for the whole batch — an upsert
+    via `add_items` → `provider.add_many`, then one filtered delete via
+    `delete_items` → `provider.delete_many`. Order *within* a phase is
+    irrelevant, which is what makes the fan-out, the batch upsert and the
+    batch delete safe.
+
+### Enumerating a provider
+
+`list_items(limit=100, offset=None) -> tuple[list[MemoryItem], Any]` is the
+deterministic counterpart of `search`. Maintenance work — compaction,
+retention — has to know *which* items it is acting on, and a similarity query
+cannot answer that: it ranks by distance from some query vector and returns a
+different slice whenever the corpus changes.
+
+```python
+items, offset = await provider.list_items(limit=200)
+while offset is not None:
+    page, offset = await provider.list_items(limit=200, offset=offset)
+    items.extend(page)
+```
+
+`VectorMemoryProvider` pages through the vector store's scroll API;
+`InMemoryProvider` walks its insertion order. The second element is the
+continuation token for the next page and `None` once the store is exhausted.
+Like `add_many`/`delete_many`, `list_items` is an optional extension
+discovered by duck typing rather than a method on the `MemoryProvider`
+protocol — a provider without it keeps working, and
+[compaction](#what-compaction-requires) is the one operation that refuses to
+run against it.
 
 ### InMemoryProvider
 
 A lightweight, dependency-free provider useful for tests and local runs. It
-implements the item-at-a-time protocol only, so batch writes and deletes take
-the fan-out path above.
+implements the item-at-a-time protocol plus `list_items`, so batch writes and
+deletes take the fan-out path above while compaction can still enumerate it.
 
 ```python
 from core.memory.providers import InMemoryProvider
@@ -565,7 +655,8 @@ neighbors = await graph.get_neighbors(
 ```python
 from core.memory import AgentMemory, MemoryType
 
-memory = AgentMemory(provider=provider, embedder=embedder)
+# llm_service is what lets step 4 run; without it compaction returns None
+memory = AgentMemory(provider=provider, embedder=embedder, llm_service=llm_service)
 
 # 1. Enrich the prompt with relevant past memories
 relevant = await memory.recall(query, limit=5)
@@ -577,7 +668,7 @@ relevant = await memory.recall(query, limit=5)
 await memory.add_memory(query, memory_type=MemoryType.EPISODIC)
 await memory.add_memory(answer, memory_type=MemoryType.EPISODIC)
 
-# 4. Periodically reclaim space
+# 4. Periodically reclaim space (prune=True also deletes the aged-out items)
 await memory.compress_old_memories(days_threshold=7)
 ```
 
@@ -591,8 +682,8 @@ await memory.compress_old_memories(days_threshold=7)
 
 `AgentMemory` is configured through constructor arguments
 (`similarity_threshold`, `short_term_limit`, `working_memory_limit`,
-`provider`, `graph_provider`, `embedder`, `context_folder`). The only
-dedicated `MEMORY_*` environment variables are the runtime knobs on
+`provider`, `graph_provider`, `embedder`, `context_folder`, `llm_service`).
+The only dedicated `MEMORY_*` environment variables are the runtime knobs on
 `MemoryRuntimeConfig` (`core/config/memory.py`, env prefix `MEMORY_`, read via
 `get_memory_runtime_config()`):
 
@@ -600,6 +691,42 @@ dedicated `MEMORY_*` environment variables are the runtime knobs on
 | ------- | ------- | ------- |
 | `MEMORY_CONTEXT_FOLDING_ENABLED` | `false` | Wire a `ContextFolder` into every `AgentMemory` (older turns LLM-summarized instead of hard-truncated) — see [Proactive Context Folding](#proactive-context-folding-agentfold) |
 | `MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` | `2000` | Fold only when the assembled context exceeds this many characters; below it the verbatim fast-path runs with no LLM call |
+| `MEMORY_PERSISTENCE_ENABLED` | `true` | Back the bootstrapped memory managers with the configured vector store — see [Persistence at bootstrap](#persistence-at-bootstrap) |
+
+### Persistence at bootstrap
+
+The `memory` and `hierarchical_memory` resources built by
+`core/bootstrap/lazy_init.py` are constructed **with** a
+`VectorMemoryProvider` (collections `agent_memory` and `hierarchical_memory`)
+and an embedder, so long-term memories outlive the process and are shared
+between workers. Both used to be constructed with no provider at all, and that
+is not a degraded mode anyone chose: without one, `HierarchicalMemory`'s
+long-term tier is a bounded in-process deque (`ltm.max_items`, default `500`
+per tenant) searched by keyword, and an `AgentMemory` long-term write lands in
+the working-memory buffer instead of a store. Either way the memories die with
+the worker and are invisible to every other one. The bootstrapped
+`AgentMemory` also receives an `llm_service`, which is what lets
+[compaction](#what-compaction-requires) run.
+
+Set `MEMORY_PERSISTENCE_ENABLED=false` to keep everything in the process
+again. The bootstrap logs a warning naming the consequence
+(`memory_persistence_disabled` when it is switched off,
+`memory_persistence_unavailable` when the provider could not be built — an
+unreachable backend does not fail startup) and the long-term tier degrades to
+the in-process deque, so every memory is lost on exit.
+
+!!! note "The provider is built off the event loop"
+    Constructing the vector client runs a server compatibility check and the
+    embedder loads a sentence-transformer model — both synchronous and slow.
+    The build runs in a worker thread (`asyncio.to_thread`), so it does not
+    stall in-flight requests.
+
+!!! warning "`get_memory()` is a separate, provider-less singleton"
+    `core.memory.get_memory()` still returns a bare `AgentMemory()`: no
+    provider, no embedder, no `llm_service`. Persistence is wired on the
+    lazily-initialized `memory` resource, so reach for it via the lazy
+    registry (`get_lazy_registry().get_or_create("memory")`) or pass your own
+    provider when you construct an `AgentMemory` yourself.
 
 The optional [Supermemory](supermemory.md) layer is configured separately via
 `SUPERMEMORY_*` variables (see the [Configuration](config.md) page), and the

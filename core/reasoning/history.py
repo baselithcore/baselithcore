@@ -16,10 +16,15 @@ compaction entirely).
 
 from __future__ import annotations
 
+import json
 import os
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 from core.utils.tokens import estimate_tokens
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from core.services.llm.messages import Message
 
 logger = get_logger(__name__)
 
@@ -142,4 +147,163 @@ def compact_messages(
     return result
 
 
-__all__ = ["compact_history", "compact_messages", "history_token_budget"]
+def _shorten(block: Any, field: str, text: str) -> tuple[Any, int]:
+    """Collapse one block's text, returning the block and the tokens saved.
+
+    Idempotent, which :func:`compact_history` gets for free by checking the
+    marker on the whole entry: a block already carrying ``[compacted]`` is
+    left exactly as it is. Without that check a long run compacts the same
+    block on every pass, stacking a second marker and eating twelve more
+    characters of real content each time.
+
+    Args:
+        block: The block to shorten.
+        field: Name of its text attribute.
+        text: Its current value.
+
+    Returns:
+        ``(block, tokens_saved)`` — the original object when nothing changed.
+    """
+    from dataclasses import replace
+
+    if text.startswith(_COMPACT_MARKER):
+        return block, 0
+    shorter = _compact_entry(text)
+    if shorter == text:
+        return block, 0
+    saved = estimate_tokens(text) - estimate_tokens(shorter)
+    if saved <= 0:
+        return block, 0
+    return replace(block, **{field: shorter}), saved
+
+
+def _compact_blocks(message: Message) -> tuple[Message, int]:
+    """Return a copy of *message* with its long text collapsed, and the saving.
+
+    Only two block kinds are touched. A ``ToolUseBlock`` carries the call the
+    model made and the id its result is correlated by, so shortening it breaks
+    the pairing the provider validates. A ``ThinkingBlock`` must be replayed
+    byte-for-byte; a turn containing one is skipped whole, because editing its
+    neighbouring text can invalidate the signature that travels with it.
+
+    Args:
+        message: The message to compact.
+
+    Returns:
+        ``(message, tokens_saved)`` — the original object when nothing changed.
+    """
+    from dataclasses import replace
+
+    from core.services.llm.messages import TextBlock, ThinkingBlock, ToolResultBlock
+
+    if any(isinstance(block, ThinkingBlock) for block in message.content):
+        return message, 0
+
+    saved = 0
+    blocks = []
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            block, gained = _shorten(block, "text", block.text)
+        elif isinstance(block, ToolResultBlock):
+            block, gained = _shorten(block, "content", block.content)
+        else:
+            gained = 0
+        saved += gained
+        blocks.append(block)
+
+    if saved <= 0:
+        # Not merely "nothing to do": re-compacting an already-short excerpt
+        # can *grow* the estimate (the marker is itself tokens), and applying
+        # that would both re-prefix the text and push the running total the
+        # wrong way. The marker guard below makes this unreachable for a block
+        # this function wrote; the check keeps it unreachable for any other.
+        return message, 0
+    return replace(message, content=blocks), saved
+
+
+def compact_message_history(
+    history: list[Message],
+    max_tokens: int | None = None,
+    *,
+    keep_recent: int = 4,
+) -> list[Message]:
+    """Bound a :class:`~core.services.llm.messages.Message` history.
+
+    The structural counterpart to :func:`compact_history`. A message loop
+    cannot be bounded by dropping turns: a provider rejects a conversation
+    whose ``tool_use`` has no answering ``tool_result``, and the first user
+    turn is the task itself. So nothing is ever removed — the *contents* of
+    older text and tool-result blocks are collapsed to head excerpts, which
+    shrinks the prompt while leaving every id, every pairing and every
+    thinking block exactly where the API expects them.
+
+    Args:
+        history: Messages, oldest first.
+        max_tokens: Token budget; defaults to :func:`history_token_budget`.
+            ``0`` (or negative) disables compaction.
+        keep_recent: Number of newest messages always kept intact.
+
+    Returns:
+        A new list; the input and its messages are not mutated.
+    """
+    budget = history_token_budget() if max_tokens is None else max_tokens
+    if budget <= 0 or not history:
+        return list(history)
+
+    def _block_size(block: Any) -> int:
+        """Every block's weight, not only the two that are compactable.
+
+        A ``ToolUseBlock``'s arguments and a ``ThinkingBlock``'s payload are
+        sent and billed like any other content. Counting them as zero let a
+        history dominated by either measure as comfortably under budget and
+        never compact at all, which is the case compaction exists for.
+        """
+        for attribute in ("text", "content"):
+            value = getattr(block, attribute, None)
+            if isinstance(value, str):
+                return estimate_tokens(value)
+        for attribute in ("input", "payload"):
+            value = getattr(block, attribute, None)
+            if isinstance(value, dict):
+                return estimate_tokens(json.dumps(value, default=str))
+        data = getattr(block, "data", None) or getattr(block, "url", None)
+        return estimate_tokens(data) if isinstance(data, str) else 0
+
+    def _size(message: Message) -> int:
+        return sum(_block_size(block) for block in message.content)
+
+    result = list(history)
+    total = sum(_size(message) for message in result)
+    if total <= budget:
+        return result
+
+    compacted = 0
+    # Index 0 is the task the loop was given; compacting it would leave the
+    # model guessing at its own objective.
+    cutoff = max(len(result) - keep_recent, 0)
+    for index in range(1, cutoff):
+        if total <= budget:
+            break
+        replacement, saved = _compact_blocks(result[index])
+        if not saved:
+            continue
+        result[index] = replacement
+        total -= saved
+        compacted += 1
+
+    if compacted:
+        logger.debug(
+            "react_message_history_compacted messages=%d budget=%d est_tokens=%d",
+            compacted,
+            budget,
+            total,
+        )
+    return result
+
+
+__all__ = [
+    "compact_history",
+    "compact_message_history",
+    "compact_messages",
+    "history_token_budget",
+]

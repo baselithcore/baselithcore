@@ -6,6 +6,8 @@ the intent router that picks the handler for a request.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -67,6 +69,18 @@ class OrchestrationConfig(BaseSettings):
         "LoopBudget.token_pressure() when no token cap is set so context "
         "auto-tuning still has a signal. 0 disables that fallback.",
     )
+    tool_ledger: Literal["auto", "postgres", "memory", "off"] = Field(
+        default="auto",
+        description="Backing store for the tool idempotency ledger, which "
+        "keeps a redelivered or resumed run from repeating an effectful call. "
+        "'auto' uses Postgres when POSTGRES_ENABLED, else the in-process "
+        "ledger with a warning; 'postgres' requires it and fails loudly "
+        "instead of silently deduplicating within one worker only; 'memory' "
+        "always uses the in-process ledger (single-worker deployments and "
+        "tests); 'off' records nothing, so every retry re-executes every "
+        "effectful call.",
+    )
+
     recovery_sweep_interval_seconds: float = Field(
         default=300.0,
         gt=0,

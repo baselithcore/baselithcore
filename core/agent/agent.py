@@ -49,10 +49,10 @@ from pydantic import BaseModel, ValidationError
 
 from core.agent._tool_dispatch import (
     build_tool_specs,
-    execute_tool,
     gate_context,
     system_prompt_for,
 )
+from core.agent._tool_runtime import execute_tool_calls
 from core.observability.logging import get_logger
 from core.orchestration.idempotency import (
     ToolLedger,
@@ -60,12 +60,11 @@ from core.orchestration.idempotency import (
     requires_idempotency,
 )
 from core.reasoning.react import ToolDefinition
+from core.services.llm.message_transport import generate_over_messages
 from core.services.llm.messages import (
-    CONVERGENCE_NUDGE,
     Message,
     ToolResultBlock,
     message_from_result,
-    render_as_prompt,
 )
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -78,6 +77,10 @@ logger = get_logger(__name__)
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+#: Default per-tool-call deadline. Generous enough for a slow HTTP tool, short
+#: enough that a hung one fails the turn instead of the process.
+DEFAULT_TOOL_TIMEOUT_SECONDS: float = 120.0
 
 
 class AgentOutputValidationError(RuntimeError):
@@ -142,13 +145,22 @@ class Agent[OutputT]:
             channel to approve on. Every other control at the chokepoint
             (contract, plugin capability, budget, rate limit, hooks, audit)
             applies either way.
-        tool_ledger: Optional :class:`~core.orchestration.idempotency.ToolLedger`.
-            When supplied *and* ``run`` is given a ``run_id``, every tool
-            outside the ``read_only`` category is recorded before it executes
-            and its result replayed instead of re-executed on a retry of the
-            same run. A plain callable is ``destructive`` by default (see
+        tool_ledger: :class:`~core.orchestration.idempotency.ToolLedger` to
+            record effectful calls in. Defaults to the process-wide ledger
+            (:mod:`core.orchestration.ledger_factory`), which is durable when
+            the deployment has Postgres. Given a ``run_id`` on ``run``, every
+            tool outside the ``read_only`` category is recorded before it
+            executes and its result replayed instead of re-executed on a retry
+            of the same run; without one the ledger is inert, because a fresh
+            id per attempt is a different call by definition. A plain callable
+            is ``destructive`` by default (see
             :class:`~core.reasoning.react.ToolDefinition`), so tools opt out of
             the ledger by declaring ``read_only``, never by omission.
+        tool_timeout: Per-call wall-clock cap in seconds, shrunk further by
+            whatever an ambient ``LoopBudget`` has left. ``None`` removes the
+            cap, which is how the loop behaved before: a tool that never
+            returned pinned the agent, since nothing else in the typed loop
+            carries a deadline.
     """
 
     def __init__(
@@ -164,6 +176,7 @@ class Agent[OutputT]:
         llm_service: Any | None = None,
         autonomy_policy: Any | None = None,
         tool_ledger: ToolLedger | None = None,
+        tool_timeout: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> None:
         self.model = model
         self.output_type = output_type
@@ -171,6 +184,7 @@ class Agent[OutputT]:
         self.max_retries = max_retries
         self.max_iterations = max_iterations
         self.task_category = task_category
+        self.tool_timeout = tool_timeout
         self._llm_service = llm_service
         # Read back by ``_tool_dispatch.gate_context``, which also honours the
         # same attribute set directly on an instance by a host.
@@ -198,6 +212,16 @@ class Agent[OutputT]:
 
         return get_llm_service()
 
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Names of the tools this agent can call, in declaration order.
+
+        The public way to ask what an agent is armed with. Without it the only
+        answer was ``agent._tools``, which is how the scaffolded project and a
+        good deal of test code came to reach into a private dict.
+        """
+        return tuple(self._tools)
+
     def _tool_specs(self) -> list[LLMToolSpec] | None:
         """Tool definitions for the model, annotated with their category."""
         return build_tool_specs(self._tools)
@@ -211,19 +235,6 @@ class Agent[OutputT]:
             strict=True,
         )
 
-    async def _invoke(self, definition: ToolDefinition, call: ToolCall) -> Any:
-        """Call the tool and return its raw value.
-
-        Rendering it for the model (JSON-encoding, ``SkillResult`` unpacking,
-        truncation, the injection scan and the untrusted envelope) happens at
-        the single seam in :mod:`core.agent._tool_dispatch` — doing any of it
-        here would make this a second one.
-        """
-        result = definition.fn(**(call.arguments or {}))
-        if inspect.isawaitable(result):
-            result = await result
-        return result
-
     def _ledger_key(
         self, definition: ToolDefinition, call: ToolCall, run_id: str | None, step: int
     ) -> str | None:
@@ -234,11 +245,45 @@ class Agent[OutputT]:
         — a fresh id per attempt is a different call by definition), and the
         tool is not ``read_only``.
         """
-        if self._tool_ledger is None or not run_id:
+        if not run_id or self._ledger() is None:
             return None
         if not requires_idempotency(definition.category):
             return None
         return derive_idempotency_key(run_id, step, call.name, call.arguments)
+
+    def _ledger(self) -> ToolLedger | None:
+        """The ledger for this agent: the injected one, or the shared default.
+
+        Defaulting matters more than it looks. ``tool_ledger=None`` used to
+        mean *no ledger at all*, so a typed agent re-ran a payment or an
+        outbound webhook on every retry of the same run — the exact defect
+        :mod:`core.orchestration.idempotency` exists to prevent, absent from
+        the surface the quickstart teaches. It costs nothing when it is not
+        needed: without a stable ``run_id`` there is nothing to deduplicate
+        against, so the ledger stays untouched.
+
+        Returns:
+            The ledger, or ``None`` when one cannot be built.
+        """
+        if self._tool_ledger is not None:
+            return self._tool_ledger
+        from core.orchestration.ledger_factory import (
+            DurableLedgerUnavailable,
+            get_tool_ledger,
+        )
+
+        try:
+            self._tool_ledger = get_tool_ledger()
+        except DurableLedgerUnavailable:
+            # Deliberately not swallowed. The operator asked for the durable
+            # ledger by name; answering with *no* ledger would be worse than
+            # the in-process fallback ``auto`` would have given, and the
+            # opposite of what that setting promises.
+            raise
+        except Exception as exc:
+            logger.warning(f"tool ledger unavailable, calls are not deduped: {exc}")
+            return None
+        return self._tool_ledger
 
     def _parse_output(self, text: str) -> OutputT:
         assert self.output_type is not None
@@ -311,18 +356,23 @@ class Agent[OutputT]:
             history.append(message_from_result(result))
 
             if result.tool_calls:
+                # Gated in order, then overlapped: the provider emitted every
+                # call of this turn before seeing any result, so they are
+                # independent and running them serially paid the sum of their
+                # latencies. The step of each call is its position in the run,
+                # so a loop that legitimately calls one tool twice with
+                # identical arguments is not collapsed into one ledger entry.
+                outcomes = await execute_tool_calls(
+                    self,
+                    list(result.tool_calls),
+                    context=context,
+                    run_id=run_id,
+                    step_offset=len(tool_calls_made),
+                )
                 results: list[ToolResultBlock] = []
-                for call in result.tool_calls:
-                    observation, is_error = await execute_tool(
-                        self,
-                        call,
-                        context=context,
-                        run_id=run_id,
-                        # The step is the call's position in the run, so a loop
-                        # that legitimately calls one tool twice with identical
-                        # arguments is not collapsed into one ledger entry.
-                        step=len(tool_calls_made),
-                    )
+                for call, (observation, is_error) in zip(
+                    result.tool_calls, outcomes, strict=True
+                ):
                     tool_calls_made.append(call.name)
                     results.append(
                         ToolResultBlock(
@@ -390,55 +440,19 @@ class Agent[OutputT]:
     ) -> LLMResult:
         """One model round-trip for the conversation so far.
 
-        The history is passed as a *copy*: the loop appends to its own list
-        after every turn, and handing the live object to the service would let
-        a later append rewrite what an earlier call was given (and make every
-        traced request look identical).
-
-        A service that does not advertise ``supports_messages is True`` — an
-        injected double, or one built before the message API — is called
-        through the legacy ``generate(prompt=...)`` path with the history
-        rendered as a transcript, plus the convergence nudge a flattened
-        conversation needs (it has no ``tool_result`` block to say the work
-        came back, so without the instruction it re-requests calls it was
-        already answered). It loses the structure, not the conversation.
-
-        The identity check is deliberate: ``getattr`` on a ``Mock`` answers
-        with a truthy ``Mock``, and a double that cannot serve a message list
-        must not be handed one.
+        The transport itself — the message API, or the legacy flattened
+        transcript for a service that predates it — lives in
+        :mod:`core.services.llm.message_transport`, shared with the ReAct loop
+        so the two cannot drift apart.
         """
-        send = getattr(service, "generate_messages", None)
-        if getattr(service, "supports_messages", False) is True and callable(send):
-            # ``service`` is intentionally untyped (an LLMService, or whatever
-            # a caller injected), so the result is narrowed at this one seam.
-            return cast(
-                "LLMResult",
-                await send(
-                    list(history),
-                    model=self.model,
-                    tools=specs,
-                    response_format=response_format,
-                    system=system,
-                    task_category=self.task_category,
-                ),
-            )
-        transcript = render_as_prompt(history)
-        if any(
-            isinstance(block, ToolResultBlock)
-            for message in history
-            for block in message.content
-        ):
-            transcript = f"{transcript}\n\n{CONVERGENCE_NUDGE}"
-        return cast(
-            "LLMResult",
-            await service.generate(
-                transcript,
-                model=self.model,
-                tools=specs,
-                response_format=response_format,
-                system_prompt=system,
-                task_category=self.task_category,
-            ),
+        return await generate_over_messages(
+            service,
+            history,
+            specs=specs,
+            response_format=response_format,
+            system=system,
+            model=self.model,
+            task_category=self.task_category,
         )
 
     async def run_stream(self, prompt: str) -> AsyncIterator[str]:

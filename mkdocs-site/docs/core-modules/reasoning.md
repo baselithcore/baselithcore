@@ -172,7 +172,10 @@ keyword arguments, multi-tool turns, no text parsing.
   **and** the active provider advertises `supports_native_tools` (auto never
   lands on the prompt-coercion fallback); `True` forces the structured loop;
   `False` forces the legacy text loop. Orchestrated path: set
-  `context["native_tools"]`.
+  `context["native_tools"]`. Either transport qualifies as "structured": a
+  service exposing only `generate_messages()` is native-capable, and demanding
+  a `generate()` would have routed it into the regex text parser — the weakest
+  path available — instead.
 - **Tool schemas** — `ToolDefinition.parameters` takes an explicit JSON-Schema
   object; when omitted, the schema is inferred from the callable's signature
   (annotations → JSON types, parameters without defaults → `required`).
@@ -182,6 +185,48 @@ keyword arguments, multi-tool turns, no text parsing.
   default** (`LLM_ENABLE_NATIVE_TOOLS=false` restores the legacy text loop
   everywhere); the `supports_native_tools` guard keeps providers without a
   native API on the text path regardless.
+
+#### The turn is a message, not a rebuilt prompt
+
+The native loop keeps a [neutral `Message` history](messages.md) and only ever
+**appends** to it. It does not rebuild a prompt string per iteration any more:
+
+```text
+user(query)
+  → assistant turn VERBATIM       (message_from_result: thinking + text + tool_use)
+  → ONE user message holding every ToolResultBlock of that turn
+  → assistant …
+```
+
+The transport is
+[`generate_over_messages`](services.md#one-round-trip-for-a-message-history),
+shared with the typed [`Agent`](agent.md) so the two loops cannot drift apart
+— and a service built before the message API still runs, on the flattened
+transcript.
+
+What the old flat prompt lost, and the history does not:
+
+| Lost by rebuilding a transcript | Carried by the history |
+|---|---|
+| Which call a result answers | `ToolResultBlock.tool_use_id` |
+| Whether that call failed | `ToolResultBlock.is_error` |
+| The assistant turn as the API wants it replayed | `message_from_result(result)`, thinking blocks included |
+| Any prompt-cache hit | Append-only, so the prefix stays byte-stable |
+
+Every tool result of a turn goes back in **one** `Message.tool_results([...])`:
+a provider rejects a conversation whose parallel `tool_use` blocks are answered
+apart, or one whose `tool_use` has no answering `tool_result` at all.
+
+!!! note "Why `is_error` can be read off the observation text"
+    The flag comes from `observation_is_error(observation)`
+    (`core/reasoning/react_tools.py`) — true when the observation starts with
+    `Error`. That prefix is one a tool cannot forge: the loop's own narration is
+    the only part of an observation *outside* the
+    [untrusted-output envelope](orchestration.md#untrusted-output-envelope),
+    while tool-controlled text is sealed inside it with its markers escaped.
+    The idempotency ledger already decided success this way; single-sourcing the
+    convention keeps the flag the model sees and the outcome the ledger records
+    from disagreeing.
 
 #### Concurrent multi-tool turns
 
@@ -210,7 +255,8 @@ slots at once. Text-parsed turns are unaffected — the legacy loop emits one
     fail-closed refusals that abort the turn, and a refusal is worthless if a
     later tool in the same turn has already run its side effect. Unknown-tool
     and denial observations are filled in at their own index, so the trace and
-    transcript stay in emission order regardless of completion order.
+    the `tool_result` blocks stay in emission order regardless of completion
+    order.
 
     Any gate you add in a subclass must keep this contract — do the check in
     the sequential pass, never inside the concurrent `_invoke_tool` phase.
@@ -317,6 +363,20 @@ durable mode a multi-tool turn executes sequentially so the replay cursors
 stay deterministic — see the note under
 [Concurrent multi-tool turns](#concurrent-multi-tool-turns).
 
+**Across processes, not just across a resume.** Checkpoint replay covers one
+run's recorded steps; the idempotency ledger covers the same call arriving
+again from outside (a redelivered task, a second replica). Both loop variants
+claim a ledger entry for every non-`read_only` tool through
+`claim_ledger_entry` (`core/reasoning/react_tool_gate.py`), and the ledger a
+host did not wire is now resolved from configuration by `new_ledger()` —
+one process-wide instance chosen by `ORCHESTRATOR_TOOL_LEDGER`, instead of a
+fresh in-process one per agent. `ORCHESTRATOR_TOOL_LEDGER=off` yields no
+ledger at all, which the claim path treats as a configured choice rather than
+a missing dependency: the call runs, unrecorded. So does a ledger that errors
+or times out — the loop fails open either way. Full flow, and the four
+values the setting takes:
+[Orchestration › Choosing the ledger](orchestration.md#choosing-the-ledger-orchestrator_tool_ledger).
+
 ### Bounded history & deadlines
 
 Both loop variants bound their resource use on long runs:
@@ -329,13 +389,24 @@ Both loop variants bound their resource use on long runs:
   iteration cap never actually bounded the loop: a turn that produced no
   approved tool call cost nothing, and the agent could spin to its own
   constructor `max_iterations` regardless of the request budget.
-- **History compaction** — before each LLM turn the conversation history is
-  deterministically compacted (`core/reasoning/history.py`): beyond
-  `BASELITH_REACT_HISTORY_MAX_TOKENS` (default 8000) the oldest entries
-  collapse to head-excerpts while the newest turns, the system prompt and the
-  original task stay intact. No extra LLM call — predictable cost, no added
-  prompt-injection surface. The trace keeps full fidelity; only the prompt
-  sent to the model is compacted.
+- **History compaction** — before each LLM turn the conversation is
+  deterministically compacted (`core/reasoning/history.py`) against
+  `BASELITH_REACT_HISTORY_MAX_TOKENS` (default `8000`; `0` disables compaction
+  entirely). No extra LLM call — predictable cost, no added prompt-injection
+  surface. The trace keeps full fidelity; only what is sent to the model
+  shrinks. The text loop calls `compact_history()`, which collapses the oldest
+  transcript lines to head excerpts; the native loop calls
+  `compact_message_history()`, its structural counterpart. Both keep the newest
+  `keep_recent=4` entries intact, and the system prompt sits outside the
+  history either way.
+- **Compacting a message history never drops a turn** — a provider rejects a
+  conversation whose `tool_use` has no answering `tool_result`, so
+  `compact_message_history()` shortens the *contents* of older blocks
+  (`TextBlock.text`, `ToolResultBlock.content`) rather than removing anything.
+  Three things are left alone: a `ToolUseBlock` (it carries the correlation id
+  its result is paired by), any message holding a `ThinkingBlock` (editing the
+  text beside it can invalidate the signature that travels with it), and index
+  `0` — the task itself, which the model would otherwise be left guessing at.
 - **Budget-aware tool timeout** — inside an orchestrated request the
   effective per-tool timeout is `min(tool_timeout, LoopBudget remaining
   seconds)`, so a single tool call can never outlive the request's

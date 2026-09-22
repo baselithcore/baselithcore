@@ -80,6 +80,8 @@ You don't need the server to build agents — the typed library surface works
 in any script:
 
 ```python
+import asyncio
+
 from pydantic import BaseModel
 from baselith import Agent, Crew, Task
 
@@ -93,8 +95,6 @@ async def lookup_population(city: str) -> str:
 
 # A typed single agent — tools and output schema inferred, output validated.
 agent = Agent(output_type=CityInfo, tools=[lookup_population])
-result = await agent.run("Tell me about Rome")
-result.output  # -> CityInfo (validated, auto-retried on schema failure)
 
 # A collaborative crew — sequential by default, prior outputs feed later tasks.
 researcher = Agent(system_prompt="You are a meticulous researcher.")
@@ -106,8 +106,22 @@ crew = Crew(
         Task("Write a summary from the research.", agent=writer),
     ],
 )
-summary = (await crew.run(inputs={"topic": "vector databases"})).final
+
+
+async def main() -> None:
+    result = await agent.run("Tell me about Rome")
+    result.output  # -> CityInfo (validated, auto-retried on schema failure)
+
+    summary = (await crew.run(inputs={"topic": "vector databases"})).final
+    print(summary)
+
+
+asyncio.run(main())
 ```
+
+Both entry points are coroutines, so they need a running event loop:
+`asyncio.run` at the bottom of a script, or `await` directly inside an
+existing async application (a FastAPI handler, a notebook cell).
 
 `baselith` is the public API: everything a program needs, re-exported from
 one place and covered by the [stability

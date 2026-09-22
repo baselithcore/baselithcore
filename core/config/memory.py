@@ -113,6 +113,15 @@ class MemoryRuntimeConfig(BaseSettings):
         "(below it the verbatim fast-path is used, no LLM call).",
     )
 
+    persistence_enabled: bool = Field(
+        default=True,
+        description="Back agent memory with the configured vector store, so "
+        "long-term memories survive a restart and are shared between "
+        "workers. Off keeps everything in the process: the long-term tier "
+        "degrades to a bounded in-process deque searched by substring, and "
+        "every memory is lost when the process exits.",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_memory_runtime_config() -> MemoryRuntimeConfig:

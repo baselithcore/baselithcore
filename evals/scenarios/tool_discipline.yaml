@@ -1,0 +1,115 @@
+# Live-replay scenarios for tool discipline: ordering, arguments, failures.
+#
+# See evals/scenarios/core_flows.yaml for what a scenario is and why it can
+# fail where a recorded fixture cannot.
+
+- case_id: order_plan_then_execute
+  description: Plan before executing; the order is the assertion.
+  prompt: "Plan and then run a script that lists the files in the workspace"
+  cost_usd: 0.03
+  tools:
+    - name: plan_task
+      description: Break a goal into ordered steps.
+      category: read_only
+      returns: "1) list workspace files 2) report them"
+    - name: execute_code
+      description: Run a snippet in the sandbox and return its output.
+      category: mutating
+      returns: "README.md, core/, plugins/, tests/"
+  turns:
+    - expect:
+        tools: [execute_code, plan_task]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_plan_1
+            name: plan_task
+            arguments: {goal: "list workspace files"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_plan_1
+            is_error: false
+        envelope: true
+      result:
+        tool_calls:
+          - id: call_exec_1
+            name: execute_code
+            arguments:
+              language: python
+              code: "import os; print(os.listdir('.'))"
+    - expect:
+        roles: [user, assistant, user, assistant, user]
+        tool_results:
+          - tool_use_id: call_exec_1
+            is_error: false
+            contains: ["README.md"]
+      result:
+        text: >-
+          Plan: 1) list workspace files 2) report them. Executed: README.md,
+          core/, plugins/, tests/.
+
+- case_id: args_search_query_grounded
+  description: The argument the model chose must reach the tool unchanged.
+  prompt: "What does the LoopBudget guard against?"
+  cost_usd: 0.01
+  tools:
+    - name: search_knowledge_base
+      description: Search the knowledge base for a phrase.
+      category: read_only
+      returns: >-
+        LoopBudget caps iterations, tool calls, tokens, cost and wall-clock for
+        one orchestrated request.
+  turns:
+    - expect:
+        tools: [search_knowledge_base]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_search_1
+            name: search_knowledge_base
+            arguments: {query: "LoopBudget"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_search_1
+            is_error: false
+        envelope: true
+      result:
+        text: >-
+          LoopBudget guards against runaway loops: it caps iterations, tokens,
+          cost and wall-clock for one run and stops the loop when any budget is
+          exhausted.
+
+- case_id: tool_failure_surfaced_not_hidden
+  description: >-
+    A failing tool must reach the model as a failure. The assertion that
+    matters is `is_error: true` on the tool_result block — a loop that reports
+    a failure as a successful call returning the word "Error" leaves the model
+    unable to tell the two apart, and it answers as if the fetch had worked.
+  prompt: "Fetch https://example.com/does-not-exist and summarise it"
+  cost_usd: 0.009
+  tools:
+    - name: scrape_url
+      description: Fetch a URL and return its readable text.
+      category: read_only
+      fails: "HTTP 404 Not Found"
+  turns:
+    - expect:
+        tools: [scrape_url]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_scrape_1
+            name: scrape_url
+            arguments: {url: "https://example.com/does-not-exist"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_scrape_1
+            is_error: true
+            contains: ["404"]
+      result:
+        text: >-
+          The fetch failed with HTTP 404 (page not found), so there is nothing
+          to summarise. Check the URL or give me another page.

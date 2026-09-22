@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 from core.orchestration.idempotency import (
-    InMemoryToolLedger,
     ToolCallInFlight,
     derive_idempotency_key,
     requires_idempotency,
@@ -186,9 +185,16 @@ def validate_arguments(tool: ToolDefinition, arguments: dict[str, Any]) -> None:
         logger.warning("Tool '%s' declares an invalid schema: %s", tool.name, exc)
 
 
-def new_ledger() -> InMemoryToolLedger:
-    """A fresh in-process ledger (the default when the host wires none)."""
-    return InMemoryToolLedger()
+def new_ledger() -> Any:
+    """The ledger to use when the host wires none.
+
+    Resolved from configuration rather than hardcoded to the in-process one,
+    and shared across the process — see
+    :mod:`core.orchestration.ledger_factory` for why both matter.
+    """
+    from core.orchestration.ledger_factory import get_tool_ledger
+
+    return get_tool_ledger()
 
 
 def new_run_id() -> str:
@@ -218,7 +224,10 @@ async def claim_ledger_entry(
         another worker holds the claim right now (an error observation). A
         ``None`` key means the ledger is not in play for this category.
     """
-    if not requires_idempotency(tool.category):
+    if ledger is None or not requires_idempotency(tool.category):
+        # ``None`` is a configured choice (ORCHESTRATOR_TOOL_LEDGER=off), not a
+        # missing dependency: the call runs, unrecorded, as it did before the
+        # ledger existed.
         return None, None
     key = derive_idempotency_key(run_id, step, tool.name, args)
     try:

@@ -20,7 +20,7 @@ core/services/evaluation/      # the service layer
 
 core/evaluation/               # the evaluation toolkit
 ├── __init__.py                # Public exports
-├── base.py                    # BaseLLMEvaluator
+├── base.py                    # BaseLLMEvaluator, JUDGE_UNAVAILABLE, judge_unavailable
 ├── protocols.py               # Evaluator protocol, EvaluationResult, QualityLevel
 ├── judges.py                  # Relevance/Coherence/Faithfulness/CompositeEvaluator
 ├── consensus.py               # ConsensusEvaluator (same question, several judges)
@@ -30,6 +30,8 @@ core/evaluation/               # the evaluation toolkit
 ├── bake_off.py                # run_bake_off multi-model comparison
 ├── trajectory.py              # trajectory-aware case evaluation
 ├── regression_runner.py       # CI replay runner
+├── replay.py                  # scenario -> run produced by the real agent loop
+├── cassette.py                # recorded-provider cassettes (shared with tests/golden/)
 ├── promotion.py               # promote_run / scrub_text
 ├── red_team.py                # red-team corpus loader, runner, report
 ├── fairness.py                # evaluate_fairness / FairnessReport / GroupOutcome
@@ -159,6 +161,34 @@ scored on whatever samples survived, and only a case whose samples *all*
 errored keeps its deterministic result and is recorded in
 `report.judge_errors`. A flaky judge can never turn CI red on its own.
 Deterministically failed cases are not judged (no wasted LLM calls).
+
+!!! danger "An outage is not a score of zero"
+    The shipped evaluators catch their own provider errors and answer with a
+    scored-zero fallback, so nothing ever raised out of `judge.evaluate()` and
+    the runner's `except` never fired for the failure mode it was written for:
+    an outage scored every sample `0.0`, every median landed under
+    `judge_min_score`, and the gate reported the whole corpus as a regression.
+    The fallback now carries a metadata flag and the runner reads it — an
+    unavailable draw is discarded exactly like an errored one, so a case whose
+    draws are all unavailable keeps its deterministic verdict and lands in
+    `report.judge_errors`.
+
+```python
+from core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
+
+outcome = await judge.evaluate(answer, question)
+judge_unavailable(outcome)           # True -> no judgement was made
+outcome.metadata[JUDGE_UNAVAILABLE]  # the same flag, stored under key "fallback"
+```
+
+Any gate that compares `outcome.score` against a minimum owes itself that
+check first: the score is `0.0` either way, and only the flag separates an
+absent judgement from a harsh one. The score deliberately stays `0.0` so a
+refinement loop keeps iterating rather than accepting an unchecked answer.
+`BaseLLMEvaluator` sets the flag for you, both when the call fails and when the
+reply cannot be parsed; an evaluator written from scratch that swallows
+provider errors owes its callers the same flag, because a result carrying no
+metadata is read as a real judgement.
 
 `judge_samples` and `judge_concurrency` default to
 `EvaluationConfig.judge_samples` (`3`, env `EVAL_JUDGE_SAMPLES`) and
@@ -346,10 +376,11 @@ assert not result.passed  # 0.07 > 0.05
 ## Regression runner (CI integration)
 
 `core/evaluation/regression_runner.py` turns the trajectory evaluator
-into a deterministic CI job. Cases are YAML files; recorded runs are a
-JSON file with the captured outputs and trajectories. The runner
-reports `RegressionReport.meets_threshold` so CI can fail the build
-when the pass rate dips below the configured gate.
+into a deterministic CI job. Cases are YAML files; the runs graded against
+them come from two places — a [replayed scenario](#replayed-scenarios) driven
+through the real agent loop, or a hand-written recording in a JSON capture
+file. The runner reports `RegressionReport.meets_threshold` so CI can fail
+the build when the pass rate dips below the configured gate.
 
 ### Public API
 
@@ -391,17 +422,27 @@ The repository wires this runner into CI as a **blocking job** (`evals` in
 `.github/workflows/ci.yml`), driven by `scripts/run_regression_evals.py`:
 
 - **Corpus**: [`evals/cases/`](https://github.com/baselithcore/baselithcore/tree/main/evals)
-  holds the trajectory cases (RAG grounding, scraper/indexing flows, planning,
+  holds the 30 trajectory cases (RAG grounding, scraper/indexing flows, planning,
   sandboxed code-exec, no-tool QA, destructive-request refusal, budget-bounded
-  multistep), and `evals/runs/recorded_runs.json` the matching recordings.
-- **Deterministic by design**: no LLM call, no API key, no network — the gate
-  replays the recordings, so a red job always means a broken contract, never
-  provider flakiness. Threshold is `1.0`: every checked-in recording must pass
-  its case.
+  multistep).
+- **Two sources, and they are not equivalent**: `evals/scenarios/*.yaml` is
+  [replayed](#replayed-scenarios) through the real agent (6 cases today), while
+  `evals/runs/recorded_runs.json` holds hand-written fixtures (the remaining
+  24). A case is served by one or the other, **never both** — the gate exits
+  `2` on a case that has both, and on a scenario with no matching case.
+- **Deterministic by design**: no LLM call, no API key, no network — the
+  provider's half of every conversation is scripted — so a red job always means
+  a broken contract, never provider flakiness. Threshold is `1.0`: every run
+  must pass its case. The run prints the split it graded, e.g.
+  `30/30 cases passed (6 replayed through the agent, 24 fixtures)`.
+- **A scenario that will not replay fails the gate** (exit `1`), it is not
+  skipped: the conversation the loop builds has changed, which is the whole
+  point of replaying it.
 - **Keeping it honest**: when a flow legitimately changes (prompts, tools,
-  routing), update the recording in the same change. The unit guard
+  routing), the run changes in the same commit as the case. The unit guard
   `tests/unit/core/evaluation/test_regression_gate_assets.py` fails locally if
-  cases and recordings drift apart.
+  cases and runs drift apart, if a case is served twice, or if the corpus ever
+  goes back to being fixtures only.
 - The LLM-as-judge path (`run_regression_async`) is deliberately *not* part of
   the merge gate — judge scoring needs credentials and is non-deterministic;
   run it manually or on a schedule.
@@ -411,13 +452,172 @@ prompts through the orchestrator, persists the resulting outputs and
 trajectories, and runs the regression suite as a final gate before the
 deployment pipeline.
 
+### Replayed scenarios (`evals/scenarios/`) {#replayed-scenarios}
+
+A recorded run is an object somebody typed, graded against expectations
+somebody typed. `evals/runs/recorded_runs.json` held 30 of them, and the gate
+that graded them ran in seconds without a provider call — but it could **not**
+go red for a change to the agent, to prompt assembly, to the router, to tool
+schemas or to output parsing. Only an edited YAML file or a bug in the
+evaluator could fail it. That is a floor, not a guard.
+
+`core/evaluation/replay.py` closes the gap without putting an API key in CI. A
+**scenario** carries the provider's half of a conversation plus the tools the
+agent had; replaying it drives the *real* loop — real prompt assembly, real
+tool dispatch with its gates and
+[untrusted-output envelope](orchestration.md#untrusted-output-envelope), real
+message history, real answer parsing — and the trajectory that comes out is
+what the evaluator grades.
+
+```yaml
+# evals/scenarios/core_flows.yaml
+- case_id: rag_grounded_answer
+  description: One retrieval turn, then a grounded answer.
+  prompt: "What storage backends does BaselithCore support?"
+  cost_usd: 0.012
+  tools:
+    - name: search_knowledge_base
+      description: Search the knowledge base for a phrase.
+      category: read_only
+      returns: "Storage: Postgres (relational), Qdrant (vectors), Redis (cache/queues)."
+  turns:
+    - expect:
+        tools: [search_knowledge_base]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_search_1
+            name: search_knowledge_base
+            arguments: {query: "storage backends"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_search_1
+            is_error: false
+            contains: ["Postgres"]
+        envelope: true
+      result:
+        text: >-
+          BaselithCore supports Postgres for relational storage, Qdrant as the
+          vector store, and Redis for caching and queues.
+```
+
+| Key | Meaning |
+|---|---|
+| `case_id` | Must match a case in `evals/cases/` — that is how the produced run finds its expectations |
+| `prompt` | The user turn the agent is given |
+| `tools` | The tools the agent is constructed with: deterministic stubs, see below |
+| `turns` | The provider script, one entry per round-trip — `expect` is asserted before the turn answers, `result` is what comes back (`text`, `tool_calls`, `stop_reason`, `tokens_used`) |
+| `system_prompt` | Optional system prompt for the agent |
+| `cost_usd` | Cost attributed to the run (default `0.0`). A replay spends nothing, so this carries the original capture's cost forward and keeps the case's `max_cost_usd` assertion meaningful |
+| `description` | Free text, for the reader |
+
+Tools are stubs on purpose: what is under test is the loop around the tool, not
+the tool. Each entry declares a `name`, an optional `description` (the model
+sees it, so editing it can legitimately move a trajectory), a `category`
+(default `read_only`, so a scenario does not silently exercise the effectful
+path) and either `returns:` — any JSON value handed back — or `fails:` with a
+message, which makes the stub raise so the scenario can pin how the loop
+reports a **failing** tool. Every dispatch is recorded with the arguments the
+loop actually passed, and that recording *is* the graded trajectory.
+
+```python
+from pathlib import Path
+
+from core.evaluation.replay import load_scenarios, replay_scenario
+
+scenarios = load_scenarios(Path("evals/scenarios"))
+run = await replay_scenario(scenarios[0])   # a RecordedRun, ready to grade
+```
+
+| Symbol | Purpose |
+|---|---|
+| `load_scenarios(directory)` | Load every `.yaml` / `.yml` file under `directory`, in filename order. A missing directory, a malformed scenario or a duplicate `case_id` raises — a corpus that cannot be loaded is a gate failure, never an empty run |
+| `ReplayScenario` | `case_id`, `prompt`, `cassette`, `tools`, `system_prompt`, `cost_usd` |
+| `ReplayTool` | One stub: `name`, `description`, `category` (default `"read_only"`), `returns`, `fails` |
+| `replay_scenario(scenario)` | **async** — run the agent against the script and return a `RecordedRun` |
+| `ReplayError` | The scenario would not load, the loop diverged from the script, or the run failed outright |
+
+!!! note "This measures the runtime, not the model"
+    A scenario's provider turns are fixed, so a replay cannot tell you whether
+    the model chose well — only whether the runtime around it still behaves.
+    Model quality stays the [LLM-as-judge](#llm-as-judge-gate-opt-in) pass's
+    job: credentials, a schedule, and a median over samples.
+
+Neither `replay` nor `cassette` is re-exported from `core.evaluation`; import
+them from their own modules, as above.
+
+### What the replay gate actually catches {#what-replay-catches}
+
+Measured, not assumed. Each of these defects was injected into the loop and the
+gate went red. Four are caught at **replay** time — the conversation the loop
+built stopped matching the script, which raises `CassetteMismatch`, re-raised
+as `ReplayError` so the gate exits `1` naming the turn — and one at
+**evaluation** time, on the trajectory the run produced:
+
+| Injected defect | Caught by | Where |
+|---|---|---|
+| The untrusted-content envelope dropped from tool results | `envelope: true` | replay |
+| A failing tool reported as a successful call | `tool_results[].is_error` | replay |
+| The assistant turn re-narrated into a transcript instead of replayed as a message | `roles` | replay |
+| The tool result's content lost on the way back to the model | `tool_results[].contains` | replay |
+| The dispatcher dropping a tool's arguments | the case's `expected_tool_args` | evaluation |
+
+None of these can fail a hand-written fixture, because no hand-written fixture
+runs the loop. The first is pinned by
+`tests/unit/core/evaluation/test_regression_gate_assets.py::test_the_gate_catches_a_real_regression`,
+so the claim stays checked rather than ageing into folklore.
+
+Six cases are replayed today — `rag_grounded_answer`, `simple_qa_no_tools`,
+`multistep_scrape_then_index`, `order_plan_then_execute`,
+`args_search_query_grounded`, `tool_failure_surfaced_not_hidden`. The other 24
+are still fixtures; migrating them is follow-up work, one case at a time,
+deleting the fixture in the same change.
+
+### Cassettes: the shared replay machinery {#cassettes}
+
+`core/evaluation/cassette.py` is what plays a provider script through the
+`LLMService` surface the agent loop calls. It used to live in
+`tests/golden/cassette.py` and moved because `core` cannot import from the test
+tree and both consumers need the same machinery: the
+[golden trajectory tests](../advanced/testing.md#golden-trajectories-recorded-llm-cassettes)
+pin the loop's wire contract with it, and the eval gate drives its scenarios
+through it. `tests/golden/cassette.py` is now a re-export shim, so existing
+`from tests.golden.cassette import ...` keeps working.
+
+| Symbol | Purpose |
+|---|---|
+| `Cassette` | A named, ordered list of `Turn`s; `load(name, directory=CASSETTE_DIR)` / `save(directory=CASSETTE_DIR)` for the JSON form under `tests/golden/cassettes/` |
+| `Turn` | One round-trip: an `Expect` and the `LLMResult` that answers it |
+| `Expect` | What the turn asserts about the call it answers (below) |
+| `RecordedLLMService` | Replays a cassette into the loop. `supports_messages=True` by default, because that is the path production takes; `assert_exhausted()` fails when the loop finished without playing every recorded turn |
+| `RecordingLLMService` | Wraps a live service and captures a cassette — record once with credentials, replay forever without |
+| `CassetteMismatch` | An `AssertionError`: the loop called the provider differently than the cassette expects |
+
+An `expect` block asserts on the conversation the loop builds. Every field is
+optional:
+
+| Field | Asserts |
+|---|---|
+| `tools` | The exact set of tool names offered |
+| `roles` | The exact role sequence of the history sent, oldest first — this is what catches a loop that rebuilds the conversation instead of appending to it |
+| `tool_results` | One entry per `tool_result` block in the final message, in order: `tool_use_id` (the result is correlated to the call that produced it), `contains`, `is_error`. A turn answering several tool calls must carry them in **one** message, so the length of this list is itself an assertion |
+| `envelope` | Every tool-result body is sealed in the untrusted-content envelope |
+| `prompt_contains` | Substrings of the sent conversation, rendered as a transcript — also exactly what a service without the message API receives |
+| `system_prompt_contains` | Substrings of the system prompt |
+| `response_format` | The structured-output schema name |
+
 ### Promoting production runs (`promotion.py`)
 
 The durable checkpoint store already persists everything a regression
 recording needs — query, final answer, and the ordered tool trajectory.
 `core/evaluation/promotion.py` exploits that: `promote_run` converts a
 **completed** checkpoint into the exact JSON shape `load_recorded_runs`
-replays, so real production behavior becomes a deterministic CI fixture.
+replays, so real production behavior becomes a deterministic CI fixture. A
+promoted run lands under `evals/runs/`, so it is exactly that — a fixture. It
+pins the flow, but only a [scenario](#replayed-scenarios) re-runs the loop;
+promoting one to a scenario means deleting the fixture, because the gate
+rejects a case served by both.
 
 ```python
 from pathlib import Path
@@ -627,14 +827,24 @@ red-team case or a trimmed regression suite weakens the gate without any
 test failing. `scripts/check_eval_baseline.py` freezes the current per-suite
 case counts in `evals/baseline.json` (the same ratchet pattern as
 `scripts/check_file_size.py`): a run fails when any suite under `evals/` —
-`cases/`, `red_team/`, `runs/` — has fewer entries than its baselined count.
-Growing a suite is always allowed; after growing one, refresh the floor so
-it sticks:
+`cases/`, `red_team/`, `runs/`, `scenarios/` — has fewer entries than its
+baselined count. Growing a suite is always allowed; after growing one, refresh
+the floor so it sticks:
 
 ```bash
 python scripts/check_eval_baseline.py                    # verify (CI)
 python scripts/check_eval_baseline.py --update-baseline  # after adding cases
 ```
+
+`runs/` and `scenarios/` are counted **together** under the `runs` key
+(`_COUNTED_TOGETHER` in the script), because migrating a case from a
+hand-written fixture to a [replayed scenario](#replayed-scenarios) empties one
+directory and fills the other — which a per-directory floor would read as a
+deletion. The floor is on the total, which is the invariant worth protecting:
+every case still has a run behind it. `scenarios/` is also folded into
+`dataset_sha256`, the hash over every corpus file's path and contents, so
+editing a scenario in place — relaxing an `expect` block, say — fails the gate
+until the baseline is refreshed and the change is declared in the diff.
 
 The check runs in CI as part of the **Architecture Boundaries** job, so a
 shrunken corpus fails the build alongside boundary and file-size violations.

@@ -1,0 +1,102 @@
+# Live-replay scenarios for the core agentic flows.
+#
+# Unlike evals/runs/recorded_runs.json — hand-written objects graded against
+# hand-written expectations — a scenario is the *provider's* side of a
+# conversation. The gate replays it through the real agent: real prompt
+# assembly, real tool dispatch with its gates and untrusted-output envelope,
+# real message history, real answer parsing. The trajectory that comes out is
+# what gets graded, so a change to any of those moves it and the gate fails.
+#
+# Each `case_id` must match a case in evals/cases/ and must NOT also appear in
+# recorded_runs.json — one source of truth per case.
+#
+# `expect` blocks are assertions on the conversation the loop builds; a
+# mismatch raises and fails the gate, naming the turn.
+
+- case_id: rag_grounded_answer
+  description: One retrieval turn, then a grounded answer.
+  prompt: "What storage backends does BaselithCore support?"
+  cost_usd: 0.012
+  tools:
+    - name: search_knowledge_base
+      description: Search the knowledge base for a phrase.
+      category: read_only
+      returns: "Storage: Postgres (relational), Qdrant (vectors), Redis (cache/queues)."
+  turns:
+    - expect:
+        tools: [search_knowledge_base]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_search_1
+            name: search_knowledge_base
+            arguments: {query: "storage backends"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_search_1
+            is_error: false
+            contains: ["Postgres"]
+        envelope: true
+      result:
+        text: >-
+          BaselithCore supports Postgres for relational storage, Qdrant as the
+          vector store, and Redis for caching and queues.
+
+- case_id: simple_qa_no_tools
+  description: A question the model answers without touching a tool.
+  prompt: "What does the acronym RAG stand for?"
+  cost_usd: 0.004
+  tools:
+    - name: search_knowledge_base
+      description: Search the knowledge base for a phrase.
+      category: read_only
+      returns: "unused"
+  turns:
+    - expect:
+        tools: [search_knowledge_base]
+        roles: [user]
+      result:
+        text: "RAG stands for Retrieval-Augmented Generation."
+
+- case_id: multistep_scrape_then_index
+  description: Two tools in sequence, the second fed by the first.
+  prompt: "Scrape https://example.com/docs and add it to the knowledge base"
+  cost_usd: 0.06
+  tools:
+    - name: scrape_url
+      description: Fetch a URL and return its readable text.
+      category: read_only
+      returns: "Example Docs — installation, configuration, deployment."
+    - name: index_document
+      description: Index a document into the knowledge base.
+      category: mutating
+      returns: "indexed 1 document (3 chunks)"
+  turns:
+    - expect:
+        tools: [index_document, scrape_url]
+        roles: [user]
+      result:
+        tool_calls:
+          - id: call_scrape_1
+            name: scrape_url
+            arguments: {url: "https://example.com/docs"}
+    - expect:
+        roles: [user, assistant, user]
+        tool_results:
+          - tool_use_id: call_scrape_1
+            is_error: false
+            contains: ["Example Docs"]
+        envelope: true
+      result:
+        tool_calls:
+          - id: call_index_1
+            name: index_document
+            arguments: {content: "Example Docs — installation, configuration, deployment."}
+    - expect:
+        roles: [user, assistant, user, assistant, user]
+        tool_results:
+          - tool_use_id: call_index_1
+            is_error: false
+      result:
+        text: "The docs page was scraped and its content indexed into the knowledge base."
