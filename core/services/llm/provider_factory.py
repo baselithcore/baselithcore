@@ -58,7 +58,11 @@ def create_provider(config: Any) -> LLMProviderProtocol:
     elif config.provider == "ollama":
         from core.services.llm.providers.ollama_provider import OllamaProvider
 
-        return OllamaProvider(api_base=config.api_base)
+        return OllamaProvider(
+            api_base=config.api_base,
+            request_timeout=request_timeout,
+            connect_timeout=connect_timeout,
+        )
     elif config.provider == "huggingface":
         from core.services.llm.providers.huggingface_provider import (
             HuggingFaceProvider,

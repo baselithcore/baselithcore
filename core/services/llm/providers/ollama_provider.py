@@ -61,13 +61,23 @@ class OllamaProvider:
     # Forced tool_choice isn't supported upstream, so forcing is best-effort.
     supports_native_tools: bool = True
 
-    def __init__(self, api_base: str | None = None):
+    def __init__(
+        self,
+        api_base: str | None = None,
+        *,
+        request_timeout: float | None = None,
+        connect_timeout: float | None = None,
+    ):
         """
         Initialize the Ollama provider.
 
         Args:
             api_base: Overriding base URL for the Ollama server.
                       If omitted, it resolves via framework services config.
+            request_timeout: Per-request deadline in seconds. The config the
+                      service was built with sets it; omitted, the framework
+                      default applies.
+            connect_timeout: TCP connect deadline in seconds, same fallback.
         """
         from core.config.services import get_llm_config
         from core.services.llm.runtime import api_base_for
@@ -82,8 +92,16 @@ class OllamaProvider:
         self.api_base = api_base or api_base_for(llm_config, "ollama")
         # Explicit deadline: without it the underlying httpx client waits
         # forever on a hung local server, pinning the calling worker.
+        # The service's own config wins: a policy-pinned slow local model
+        # used to be cut off at the process-wide default however long its
+        # own config allowed.
         self._timeout = httpx.Timeout(
-            llm_config.request_timeout, connect=llm_config.connect_timeout
+            request_timeout
+            if request_timeout is not None
+            else llm_config.request_timeout,
+            connect=connect_timeout
+            if connect_timeout is not None
+            else llm_config.connect_timeout,
         )
         self.client: Any = None
 
