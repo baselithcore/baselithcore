@@ -254,6 +254,12 @@ the check you run after changing a local service.
 `configs/.env.docker.core`, the env file the Docker Compose runtime reads, and
 stops there.
 
+The generated Docker Core profile also pins the document-ingestion defaults
+used by the runtime image: `VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3`,
+`VECTORSTORE_EMBEDDING_DIM=1024`, MiniLM as the explicit fallback model, and
+`DOCUMENTS_PDF_READER=auto` so PDF ingestion uses Docling when the documents
+runtime includes it and falls back to the legacy pypdf/OCR path otherwise.
+
 Both preserve a credential that is already valid and generate a `DB_PASSWORD`
 and a `SECRET_KEY` only where a placeholder is still in place. Neither downloads
 the core image nor builds it — `baselith up` does that — and neither starts a
@@ -1199,6 +1205,11 @@ is also what [`init`](#init---initialize-project) writes into a new project's
 keys it added or changed; a file that already matches the profile is left
 untouched. Generated files are written `0600` — see the note under the
 [`up`](#up---docker-runtime) command.
+
+For `docker-core`, the normalized profile includes the same RAG/document
+defaults as `setup docker-core`: bge-m3/1024 for embeddings, MiniLM/384 as the
+operator fallback, and `DOCUMENTS_PDF_READER=auto` for Docling-first PDF
+ingestion with pypdf/OCR fallback.
 
 ### `config check-env` - Detect Misspelled Variables
 
