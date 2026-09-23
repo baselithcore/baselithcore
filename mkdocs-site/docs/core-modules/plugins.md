@@ -445,6 +445,14 @@ build output exists, resolving `path` against the plugin directory and
 `output_dir` against `path` exactly as the installer does. See
 [Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
 
+`display_name` is an optional, presentation-only name (e.g. `CV Intake`).
+`name` keys the plugin's routes, `configs/plugins.yaml` entry, env prefix,
+stored data and grants, so it is never renamed for looks; `display_name` is
+what consoles show and what the Backstage exporter uses as the Component and
+API titles (`plugin_title()` in `core/plugins/exporters/component_entity.py`).
+Absent, the title is derived from `name` (`my_plugin` → "My Plugin"), and the
+catalog entity name stays the registry name either way.
+
 `PluginManifestModel` accepts `entrypoint` as a legacy spelling of
 `entry_point`; `from_model()` prefers the canonical key and falls back to the
 legacy one, so an old manifest keeps resolving its class while the schema stays

@@ -109,6 +109,7 @@ class PluginMetadata:
         plugin_id: str = "",
         repository: str = "",
         extensions: dict[str, Any] | None = None,
+        display_name: str = "",
     ):
         """
         Initialize plugin metadata.
@@ -159,8 +160,14 @@ class PluginMetadata:
             extensions: Vendor-extension keys (``x-*``) from the manifest,
                 keyed as written. The core never reads them; they are carried
                 so the plugin that owns them can (see :meth:`extension`).
+            display_name: Human-readable name shown by consoles and the
+                Backstage catalog (e.g. ``"CV Intake"``). Presentation only:
+                ``name`` stays the identifier every route, config key, grant
+                and table is keyed by. Empty ⇒ consumers derive a title from
+                ``name`` (see ``exporters.component_entity.plugin_title``).
         """
         self.name = name
+        self.display_name = (display_name or "").strip()
         self.version = version
         self.description = description
         self.author = author
@@ -300,6 +307,7 @@ class PluginMetadata:
         """
         data: dict[str, Any] = {
             "name": self.name,
+            "display_name": self.display_name,
             "version": self.version,
             "description": self.description,
             "author": self.author,
@@ -346,6 +354,7 @@ class PluginMetadata:
         """
         return cls(
             name=model.name,
+            display_name=model.display_name,
             version=model.version,
             description=model.description,
             author=model.author,

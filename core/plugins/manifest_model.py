@@ -130,6 +130,9 @@ class PluginManifestModel(BaseModel):
 
     # --- Identity -----------------------------------------------------------
     name: str = ""
+    #: Human-readable name for consoles and the catalog. Presentation only —
+    #: ``name`` remains the identifier; empty ⇒ a title derived from ``name``.
+    display_name: str = ""
     version: str = "0.1.0"
     description: str = ""
     author: str = ""

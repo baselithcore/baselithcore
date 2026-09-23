@@ -140,6 +140,7 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | Field                   | Required | Description                                                  |
 | ----------------------- | -------- | ------------------------------------------------------------ |
 | `name`                  | Yes      | Unique plugin identifier — **must equal the plugin's directory name** |
+| `display_name`          | No       | Human-readable name (e.g. `CV Intake`) shown by consoles and used as the Backstage Component title. **Presentation only**: `name` keeps keying routes (`/api/<name>`), the `configs/plugins.yaml` entry, env prefixes, stored data and grants — so to change how a plugin reads, set `display_name`; never rename `name`. Absent ⇒ a title derived from `name` (`my_plugin` → "My Plugin"). |
 | `version`               | Yes      | Semantic version (e.g., `1.2.3`)                             |
 | `description`           | Yes      | Brief description of plugin functionality                    |
 | `author`                | No       | Plugin author name or organization                           |
