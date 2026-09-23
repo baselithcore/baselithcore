@@ -51,12 +51,25 @@ class VectorStoreConfig(BaseSettings):
     # == Embedding Settings ==
     # Model used to convert text into numerical vectors.
     embedding_model: str = Field(
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default="BAAI/bge-m3",
         description="Embedding model name",
     )
 
     # Dimension size of the vectors produced by the model.
-    embedding_dim: int = Field(default=384, description="Embedding dimension")
+    embedding_dim: int = Field(default=1024, description="Embedding dimension")
+    embedding_fallback_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description=(
+            "Operator fallback embedding model. Use it together with "
+            "VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; "
+            "switching models requires a matching vector dimension and a fresh "
+            "or migrated collection."
+        ),
+    )
+    embedding_fallback_dim: int = Field(
+        default=384,
+        description="Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL.",
+    )
 
     # Embeddings are deterministic per model, so a long TTL is safe; the TTL
     # exists to bound Redis memory, not to refresh values.

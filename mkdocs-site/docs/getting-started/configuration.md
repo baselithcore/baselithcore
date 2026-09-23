@@ -422,7 +422,10 @@ Declared in `core.config.processing`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `DOCLING_CONTEXT_TOKENS` | `int` | `520` | Approximate local context budget persisted with each Docling chunk for RAG prompts. |
+| `DOCLING_TARGET_CHUNK_TOKENS` | `int` | `240` | Target token budget for Docling HybridChunker embedding chunks. |
 | `DOCUMENTS_EXTENSIONS` | `Annotated[tuple[str, ...], NoDecode]` | `('.md', '.markdown', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.tif', '.tiff')` | NoDecode + csv_list: `.env.example` documents `DOCUMENTS_EXTENSIONS=pdf,docx,txt,md`, and a tuple is a "complex" type to pydantic-settings exactly like a list — so the documented value raised a SettingsError out of the whole ProcessingConfig. |
+| `DOCUMENTS_PDF_READER` | `Literal['auto', 'pypdf', 'docling']` | `auto` | PDF parser for filesystem ingestion. 'auto' uses Docling when the documents runtime includes it, then falls back to pypdf/OCR; 'pypdf' keeps the legacy text reader; 'docling' requires Docling. |
 | `DOCUMENTS_ROOT` | `str` | `documents` |  |
 | `ENABLE_SPACY_DOCUMENTS` | `bool` | `True` |  |
 | `MINERU_BACKEND` | `Literal['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client']` | `pipeline` | MinerU engine. 'pipeline' is the only CPU-friendly choice. |
@@ -778,8 +781,10 @@ Declared in `core.config.vectorstore`.
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
-| `VECTORSTORE_EMBEDDING_DIM` | `int` | `384` | Embedding dimension |
-| `VECTORSTORE_EMBEDDING_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model name |
+| `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
+| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
+| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Operator fallback embedding model. Use it together with VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; switching models requires a matching vector dimension and a fresh or migrated collection. |
+| `VECTORSTORE_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model name |
 | `VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED` | `bool` | `False` | Record gen_ai.usage.input_tokens on embedding spans. Costs an extra tokenizer pass per cache miss; off by default. |
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
 | `VECTORSTORE_HNSW_EF_CONSTRUCTION` | `int` | `64` | HNSW build-time candidate list size (pgvector 'ef_construction'); must be >= 2 * hnsw_m. |
@@ -857,4 +862,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-544 settings documented.
+549 settings documented.

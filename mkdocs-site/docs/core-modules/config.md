@@ -53,6 +53,7 @@ core/config/
 ├── _collections.py       # csv_list — the parser every NoDecode collection field uses
 ├── observability.py      # ObservabilityConfig (metric cardinality, trace exemplars)
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
+├── processing.py         # ProcessingConfig (documents, web crawling, OCR, NLP)
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
@@ -365,8 +366,8 @@ vs = get_vectorstore_config()
 print(vs.collection_name)      # "documents"  (VECTORSTORE_COLLECTION_NAME)
 print(vs.host)                 # "localhost"  (VECTORSTORE_HOST / VECTORSTORE_QDRANT_HOST)
 print(vs.port)                 # 6333         (VECTORSTORE_PORT)
-print(vs.embedding_model)      # "sentence-transformers/all-MiniLM-L6-v2"
-print(vs.embedding_dim)        # 384          (VECTORSTORE_EMBEDDING_DIM)
+print(vs.embedding_model)      # "BAAI/bge-m3"
+print(vs.embedding_dim)        # 1024         (VECTORSTORE_EMBEDDING_DIM)
 ```
 
 **`.env` Variables**:
@@ -396,7 +397,10 @@ LLM_ANTHROPIC_VERTEX_REGION=         # Vertex region (unset = CLOUD_ML_REGION)
 VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
-VECTORSTORE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
+VECTORSTORE_EMBEDDING_DIM=1024
+VECTORSTORE_EMBEDDING_FALLBACK_MODEL=sentence-transformers/all-MiniLM-L6-v2
+VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 
 # Managed/remote Qdrant — both unset for the loopback compose default
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
@@ -429,6 +433,29 @@ VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store cal
     Qdrant instance works with authentication and TLS, and a hung server fails
     fast into the retry/circuit-breaker wrappers instead of stalling callers.
     See [Services › VectorStore](services.md#vectorstore-service).
+
+---
+
+### Processing Config
+
+`ProcessingConfig` (`core/config/processing.py`) holds document ingestion, web
+crawling, OCR, and NLP settings. Filesystem PDF ingestion uses
+`DOCUMENTS_PDF_READER=auto` by default: Docling is included in the `documents`
+extra and full Docker image, while the legacy pypdf/OCR path remains the
+fallback for minimal installs or parser failures.
+
+```env
+DOCUMENTS_EXTENSIONS=pdf,docx,txt,md
+DOCUMENTS_PDF_READER=auto            # auto | pypdf | docling
+DOCLING_TARGET_CHUNK_TOKENS=240      # embedding-sized Docling chunks
+DOCLING_CONTEXT_TOKENS=520           # retrieved prompt context budget
+```
+
+`auto` is the compatibility setting: it improves PDF structure in the standard
+document runtime without making Docling mandatory for every minimal core
+installation. See
+[Services › PDF Reader Strategy](services.md#pdf-reader-strategy) for the
+runtime indexing behavior.
 
 ---
 

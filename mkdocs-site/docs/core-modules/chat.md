@@ -49,7 +49,7 @@ from core.chat.dependencies import ChatDependencyConfig
 
 # Configure and instantiate
 config = ChatDependencyConfig(
-    embedder_model="sentence-transformers/all-MiniLM-L6-v2",
+    embedder_model="BAAI/bge-m3",
     reranker_model="cross-encoder/ms-marco-MiniLM-L-6-v2",
     history_max_turns=10,
 )

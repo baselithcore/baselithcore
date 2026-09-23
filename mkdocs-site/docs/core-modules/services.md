@@ -1799,6 +1799,31 @@ would make every later incremental run skip it, losing it permanently.
 That isolation is only as strong as the store's error reporting, which is why
 the indexing path upserts durably (`wait=True`, see *Write Durability* above).
 
+### PDF Reader Strategy
+
+Filesystem ingestion keeps the legacy pypdf/OCR reader as the stable fallback,
+and the `documents` extra / full Docker image now include Docling for richer PDF
+structure. The selection is controlled by `DOCUMENTS_PDF_READER`:
+
+- `auto` (default): try Docling first, then fall back to pypdf/OCR if Docling is
+  unavailable or cannot parse the file.
+- `pypdf`: force the previous reader path.
+- `docling`: require Docling for PDFs and skip files that cannot be parsed by it.
+
+When Docling is active, the reader sends structured chunks to the vector store
+instead of only raw full-document text. Each chunk keeps page numbers, headings,
+provenance, original text, and a compact same-page context window. The embedding
+text remains compact and metadata-aware, while the stored payload keeps the
+larger prompt context. This preserves the normal vectorstore indexing contract:
+embeddings, tenant isolation, bulk upsert, and search all still happen in
+`VectorStoreService`.
+
+The default Docling budgets are intentionally close to the lab baseline:
+`DOCLING_TARGET_CHUNK_TOKENS=240` for embedding-sized chunks and
+`DOCLING_CONTEXT_TOKENS=520` for the retrieved prompt context. Tune them only
+when the corpus shape requires it; the core fallback remains deterministic for
+minimal installations that do not include the `documents` extra.
+
 ### Persistence
 
 The indexing state (document fingerprints) is persisted to Redis under `baselith:indexing:state`. This means incremental indexing survives application restarts — only genuinely changed documents are re-indexed.
@@ -1907,7 +1932,8 @@ LLM_CONNECT_TIMEOUT=5
 # VectorStore
 VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
-VECTORSTORE_EMBEDDING_MODEL=all-MiniLM-L6-v2
+VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
+VECTORSTORE_EMBEDDING_DIM=1024
 EMBEDDING_CACHE_TTL=604800   # 7 days
 QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
 QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
