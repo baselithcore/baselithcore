@@ -580,6 +580,9 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # CPU-bound work freezes the whole API. With WEB_CONCURRENCY>1 also set
 # PROMETHEUS_MULTIPROC_DIR (e.g. /tmp/prometheus) so /metrics aggregates across
 # workers instead of answering per-process — the Helm chart does this for you.
+# This image pins OMP_NUM_THREADS/OPENBLAS_NUM_THREADS=1 above; outside it (a
+# VM running `baselith run --workers N`) backend.py gives each worker
+# CPUs / N threads unless those variables are already set.
 # --timeout-keep-alive: uvicorn's 5s default is shorter than the idle timeout of
 # the upstream keepalive pool of every common reverse proxy (nginx 60s, ALB 60s,
 # Envoy 60s), so the proxy reuses sockets uvicorn already closed and surfaces

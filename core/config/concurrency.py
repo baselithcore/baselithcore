@@ -22,9 +22,19 @@ from __future__ import annotations
 
 import os
 
-__all__ = ["WEB_CONCURRENCY_ENV", "get_web_concurrency", "set_web_concurrency"]
+__all__ = [
+    "THREAD_POOL_ENV_VARS",
+    "WEB_CONCURRENCY_ENV",
+    "get_web_concurrency",
+    "set_web_concurrency",
+    "share_cpu_threads",
+]
 
 WEB_CONCURRENCY_ENV = "BASELITH_WEB_CONCURRENCY"
+
+#: The math libraries' thread-pool sizes, read once when torch, numpy or
+#: onnxruntime first load — which is why they must be set before any import.
+THREAD_POOL_ENV_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
 
 
 def get_web_concurrency() -> int:
@@ -51,3 +61,44 @@ def set_web_concurrency(workers: int) -> None:
         os.environ[WEB_CONCURRENCY_ENV] = str(workers)
     else:
         os.environ.pop(WEB_CONCURRENCY_ENV, None)
+
+
+def _available_cpus() -> int:
+    """CPUs this process may run on (honours affinity and cgroup cpusets)."""
+    affinity = getattr(os, "sched_getaffinity", None)  # absent on macOS
+    if affinity is not None:
+        try:
+            return max(1, len(affinity(0)))
+        except OSError:
+            pass
+    return max(1, os.cpu_count() or 1)
+
+
+def share_cpu_threads() -> int | None:
+    """Split the CPUs between the workers' math thread pools.
+
+    Every worker process sizes its torch/OpenMP pool to the whole machine,
+    so N workers running a model at once start N x cores threads on cores
+    threads' worth of CPU. On an 8-core host with four workers that was 32
+    busy threads, a load average of 37 and minutes of a stalled API while
+    each worker embedded the same documents.
+
+    Gives each worker ``cpus // workers`` threads (at least one) by setting
+    :data:`THREAD_POOL_ENV_VARS`, only where the operator set nothing, so an
+    explicit ``OMP_NUM_THREADS`` always wins. Must run before torch or numpy
+    is imported. A single-process run is left alone.
+
+    Returns:
+        The per-worker thread count applied, or ``None`` when single-process.
+    """
+    workers = get_web_concurrency()
+    try:
+        workers = max(workers, int(os.environ.get("WEB_CONCURRENCY", "") or 1))
+    except ValueError:
+        pass
+    if workers < 2:
+        return None
+    per_worker = max(1, _available_cpus() // workers)
+    for name in THREAD_POOL_ENV_VARS:
+        os.environ.setdefault(name, str(per_worker))
+    return per_worker

@@ -165,9 +165,13 @@ def run_server(
         # Children inherit this and can tell they are one of several
         # processes — the only way for a plugin to know that request-spanning
         # state cannot live in its own memory.
-        from core.config.concurrency import set_web_concurrency
+        from core.config.concurrency import (
+            set_web_concurrency,
+            share_cpu_threads,
+        )
 
         set_web_concurrency(workers if not reload else 1)
+        share_cpu_threads()
 
         uvicorn.run(**config)
         return 0

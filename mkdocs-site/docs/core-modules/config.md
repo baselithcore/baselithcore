@@ -858,6 +858,34 @@ OTel `deployment.environment` resource attribute. Keep `ENVIRONMENT` itself on
 a known name too: `DEPLOYMENT_ENVIRONMENT` falls back to it, but so does the
 hardening gate.
 
+### Web concurrency and CPU thread pools
+
+`core/config/concurrency.py` is stdlib-only, like the runtime-environment
+helpers, because it runs before anything heavy is imported.
+`set_web_concurrency(n)` records the server's process count in
+`BASELITH_WEB_CONCURRENCY` (children inherit it), and `get_web_concurrency()`
+reads it back — `1` when single-process — so a plugin can tell that
+request-spanning state cannot live in its own memory.
+
+`share_cpu_threads()` splits the CPUs between the workers' math thread pools.
+torch, numpy and onnxruntime size their pool to every core the first time they
+load, so N workers each running a model start N × cores threads on cores
+threads' worth of CPU. With two or more workers (the larger of
+`BASELITH_WEB_CONCURRENCY` and `WEB_CONCURRENCY`) it sets `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` (the `THREAD_POOL_ENV_VARS`
+tuple) to `cpus // workers`, at least one, where `cpus` honours CPU affinity
+and cgroup cpusets when the platform exposes them. It uses `setdefault`, so a
+value the operator set always wins, and returns the per-worker count, or
+`None` for a single-process run, which it leaves alone. It must run before
+torch or numpy is imported: `backend.py` and `baselith run` call it at startup.
+
+```python
+from core.config.concurrency import set_web_concurrency, share_cpu_threads
+
+set_web_concurrency(4)
+share_cpu_threads()   # 2 on an 8-core host: OMP/MKL/OPENBLAS_NUM_THREADS=2
+```
+
 ---
 
 ### Supermemory Config

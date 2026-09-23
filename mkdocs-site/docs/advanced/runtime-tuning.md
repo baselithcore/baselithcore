@@ -302,6 +302,17 @@ the kind of divergence that disappears when there is one file. Raise them
 deliberately, together with the pod's CPU request, if you profile a CPU-bound
 embedding path.
 
+Outside the image — a VM or bare-metal host started with
+`baselith run --workers N`, or `uvicorn backend:app` with `WEB_CONCURRENCY=N` —
+nothing sets those variables, and each worker sized its pool to every core:
+four workers loading an embedding model at once ran 32 threads on 8 cores.
+`core.config.concurrency.share_cpu_threads()` now gives each worker
+`cpus // N` threads (at least one) through `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS`. `backend.py` calls it before
+anything imports torch or numpy, and `baselith run` before it spawns the
+workers. A value you set yourself always wins, and a single-process run is left
+alone.
+
 ## OpenTelemetry GenAI semantic conventions
 
 LLM spans now use the OTel

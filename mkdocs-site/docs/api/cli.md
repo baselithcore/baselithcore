@@ -936,6 +936,14 @@ and the container's own command, so the three entry points behave alike:
 | `timeout_keep_alive` | `$UVICORN_KEEP_ALIVE`, default 75s | uvicorn's own 5s is shorter than the upstream idle timeout of every common proxy (nginx, ALB, Envoy: 60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep the app side longer than the proxy side. |
 | `limit_concurrency` | `$UVICORN_LIMIT_CONCURRENCY`, unset by default | Load shedding: above this many concurrent connections uvicorn answers `503` at once instead of queueing until something times out. Only passed when the variable is set, so the default stays uvicorn's (no limit). |
 
+With `--workers` above one (and no `--reload`), `run` also splits the CPUs
+between the workers' math thread pools before it spawns them: each worker gets
+`cpus // workers` threads (at least one) through `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS`, so four workers loading an
+embedding model on 8 cores run 8 threads rather than 32. A value you exported
+yourself always wins. See
+[Config › Web concurrency](../core-modules/config.md#web-concurrency-and-cpu-thread-pools).
+
 The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
 its `catalog/` and `compliance/` subdirectories) and prints what it created.
 A directory that is merely absent is a `mkdir`, not a reason to refuse to boot:
