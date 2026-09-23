@@ -319,7 +319,8 @@ baselith --format json info   # Machine-readable JSON for CI
 
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
-| `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+| `--json`        | Emit machine-readable JSON output for CI/CD pipelines |
+| `--format json` | Same output, through the global formatting flag       |
 
 **Example Output**:
 
@@ -348,7 +349,8 @@ baselith --format json verify   # Machine-readable JSON for CI
 
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
-| `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+| `--json`        | Emit machine-readable JSON output for CI/CD pipelines |
+| `--format json` | Same output, through the global formatting flag       |
 
 ---
 
@@ -411,6 +413,13 @@ now, instead of reinstalling one plugin at a time.
 ```bash
 baselith plugin sync --docker
 ```
+
+A plugin counts as enabled by the same rule the runtime applies
+(`core.plugins.config_file.plugin_enabled`), read from the same file
+(`configs/plugins.yaml`, or the path in `PLUGIN_CONFIG_PATH`): with no config
+file every plugin is enabled; otherwise a plugin must have an entry — under its
+name or its `-`/`_` variant — that does not say `enabled: false`. An entry
+without an `enabled` key counts as enabled.
 
 For every enabled plugin the command validates the installation manifest and
 the declared core bounds, writes the combined Python requirements, builds the

@@ -290,8 +290,18 @@ class StorageConfig(BaseSettings):
     graph_db_url: str = Field(default="redis://localhost:6379", alias="GRAPH_DB_URL")
     graph_db_name: str = Field(default="agent_graph", alias="GRAPH_DB_NAME")
     graph_db_timeout: float = Field(default=2.0, alias="GRAPH_DB_TIMEOUT", ge=0.1)
-    graph_similar_top_k: int = Field(default=5, alias="GRAPH_SIMILAR_TOP_K", ge=1)
-    graph_rag_enabled: bool = Field(default=False, alias="GRAPH_RAG_ENABLED")
+    # Deprecated, no effect: no retrieval path queries the graph yet.
+    graph_similar_top_k: int = Field(
+        default=5,
+        alias="GRAPH_SIMILAR_TOP_K",
+        ge=1,
+        description="Deprecated, no effect: nothing reads it",
+    )
+    graph_rag_enabled: bool = Field(
+        default=False,
+        alias="GRAPH_RAG_ENABLED",
+        description="Deprecated, no effect: nothing reads it",
+    )
     graph_cache_ttl: int = Field(default=3600, alias="GRAPH_CACHE_TTL")
 
     # === Cache Backend ===
@@ -310,7 +320,12 @@ class StorageConfig(BaseSettings):
     # Cost control / Performance related to usage
     graph_query_limit: int = Field(default=30, alias="GRAPH_QUERY_LIMIT", ge=1)
     graph_max_hops: int = Field(default=3, alias="GRAPH_MAX_HOPS", ge=1)
-    graph_query_timeout: float = Field(default=5.0, alias="GRAPH_QUERY_TIMEOUT", ge=0.1)
+    graph_query_timeout: float = Field(
+        default=5.0,
+        alias="GRAPH_QUERY_TIMEOUT",
+        ge=0.1,
+        description="Deprecated, no effect: nothing reads it",
+    )
     # Per-request cap on *relational* (Postgres) queries. Distinct from the graph
     # (Cypher) budget above: a single agentic HTTP request legitimately issues
     # hundreds of SQL statements (tool reads + the final transcript write), so

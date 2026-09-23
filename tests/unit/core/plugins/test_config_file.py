@@ -78,3 +78,14 @@ class TestEnableRule:
         assert plugin_enabled(configs, "blog_forge", "blog-forge") is True
         configs = {"document_sources": {}}
         assert plugin_enabled(configs, "document_sources", "document-sources") is True
+
+
+def test_shipped_config_enables_api_routers(monkeypatch):
+    # The shipped file is non-empty, so a plugin it omits is never loaded.
+    # ``api_routers`` carries prompts, WebSocket chat, async runs, webhooks,
+    # privacy, compliance, approvals and run controls: dropping it from the
+    # file silently 404s all of them.
+    monkeypatch.delenv(PLUGIN_CONFIG_PATH_ENV, raising=False)
+    repo_root = Path(__file__).resolve().parents[4]
+    configs = read_plugin_configs(repo_root)
+    assert plugin_enabled(configs, "api_routers", "api-routers")

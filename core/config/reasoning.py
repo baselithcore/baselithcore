@@ -4,10 +4,13 @@ Tree-of-Thoughts search shape: branching, depth and the scoring policy that
 decides which branches survive.
 """
 
+import logging
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class ReasoningConfig(BaseSettings):
@@ -21,12 +24,34 @@ class ReasoningConfig(BaseSettings):
         extra="ignore",
     )
 
-    max_depth: int = Field(default=3, description="Maximum search depth")
-    branching_factor: int = Field(default=3, description="Branching factor per node")
-    beam_width: int = Field(default=3, description="Beam width for search")
-    strategy: Literal["bfs", "dfs"] = Field(
-        default="bfs", description="Search strategy"
+    max_depth: int = Field(
+        default=3,
+        ge=1,
+        description="Default ToT depth (max_steps) for the reasoning handler",
     )
+    branching_factor: int = Field(
+        default=3,
+        ge=1,
+        description="Default ToT branching factor (k) for the reasoning handler",
+    )
+    beam_width: int = Field(
+        default=3,
+        description="Deprecated and ignored: the ToT engine has no beam search",
+    )
+    strategy: Literal["bfs", "mcts"] = Field(
+        default="bfs",
+        description="Default ToT search strategy for the reasoning handler: "
+        "'bfs' (bounded best-first expansion) or 'mcts'. The retired 'dfs' "
+        "value, never implemented, is read as 'bfs'.",
+    )
+
+    @field_validator("strategy", mode="before")
+    @classmethod
+    def _retire_dfs(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "dfs":
+            logger.warning("TOT_STRATEGY=dfs was never implemented; using 'bfs'")
+            return "bfs"
+        return value
 
     # Self-correction settings
     self_correction_max_iterations: int = Field(

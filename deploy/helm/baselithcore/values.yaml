@@ -450,8 +450,7 @@ telemetry:
 # the blocks above, so an operator can still drive TELEMETRY_* by hand.
 config:
   CORE_LOG_LEVEL: INFO
-  CORE_LOG_FORMAT: json
-  CORE_LOG_STRUCTURED: "true"
+  LOG_JSON: "true"
   APP_ENV: production
   AUTH_REQUIRED: "true"
   SECURITY_HEADERS_ENABLED: "true"
@@ -537,16 +536,15 @@ seedFromImage: []
 # click in a pod, and the running state can never drift from the manifest.
 #
 # The map is the plugins.yaml content verbatim: plugin name -> its block. Note
-# the loader's rule (core/api/lifespan.py): when the file has any entries, a
+# the loader's rule (core/plugins/config_file.py): when the file has any entries, a
 # plugin absent from it is NOT loaded, so list every plugin the release needs,
 # system plugins included.
 #
 #   plugins:
 #     config:
-#       auth: {enabled: true}
 #       api_routers: {enabled: true}
-#       baselithcontrol: {enabled: true, require_admin: false}
-#       compliance: {enabled: true, require_admin: true}
+#       browser_agent: {enabled: true}
+#       baselithbot: {enabled: true, headless: true}
 #
 # Mutually exclusive with `config.PLUGIN_CONFIG_PATH` and with a
 # `seedFromImage` entry from /app/configs/plugins.yaml; the chart refuses to

@@ -44,12 +44,12 @@ class CoreConfig(BaseSettings):
 
     log_format: str = Field(
         default="text",
-        description="Logging format (text or json)",
+        description="Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON",
     )
 
     log_structured: bool = Field(
         default=False,
-        description="Enable structured logging (JSON format)",
+        description="Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON",
     )
 
     # Directories

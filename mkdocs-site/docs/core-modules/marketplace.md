@@ -316,10 +316,14 @@ Marketplace URLs and cache behaviour come from `PluginConfig`
 | Registry URL (discovery/install) | `MARKETPLACE_CENTRAL_URL`, `PLUGIN_REGISTRY_URL`, `REGISTRY_URL` | `…/api/marketplace/plugins/registry.json` |
 | Auth/IdP URL | `MARKETPLACE_AUTH_URL`, `PLUGIN_AUTH_URL`, `AUTH_URL` | `https://marketplace.baselithcore.xyz` |
 | Registry cache TTL (seconds) | `PLUGIN_REGISTRY_CACHE_TTL` | `3600` |
-| Plugins install directory | `PLUGIN_PLUGINS_PATH` | `plugins` |
+| Plugin root (install target and runtime scan) | `PLUGIN_PLUGINS_PATH` | `plugins` |
 
 The registry/auth URLs may be overridden (e.g. for local mirrors), but the
 publish endpoint always targets `OFFICIAL_MARKETPLACE_URL`.
+
+`PLUGIN_PLUGINS_PATH` is also the directory the runtime loads plugins from, so
+a plugin installed there is picked up on the next start — see
+[Plugins › PluginLoader](plugins.md#pluginloader).
 
 !!! warning "Registry URL scheme + SSRF"
     The registry feeds the installer, so two guards apply. **Transport**:

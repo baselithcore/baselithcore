@@ -272,6 +272,15 @@ class LLMConfig(BaseSettings):
         "Empty uses the built-in default policy.",
     )
 
+    routing_max_cost_per_1k_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description="Budget cap for routed calls: when the routed model's "
+        "approximate cost per 1K tokens exceeds it, the priciest model in the "
+        "policy pool that fits is used instead (cheapest if none fits). Empty "
+        "disables the cap.",
+    )
+
     # == Extended thinking by task category ==
     # When enabled, calls that carry a task_category (and no explicit
     # effort/thinking_budget) get the default effort tier for that category
@@ -364,100 +373,19 @@ class LLMConfig(BaseSettings):
         return self
 
 
-# VectorStoreConfig moved to core.config.vectorstore (module size cap);
-# re-exported here so existing imports keep working.
+# VectorStoreConfig and ChatConfig moved to their own modules (module size
+# cap); re-exported here so existing imports keep working.
+from core.config.chat import ChatConfig, get_chat_config  # noqa: E402
 from core.config.vectorstore import (  # noqa: E402
     VectorStoreConfig,
     get_vectorstore_config,
     get_vectorstore_config_no_lazy,
 )
 
-
-class ChatConfig(BaseSettings):
-    """
-    Configuration for the Chat orchestration engine.
-
-    Defines the logic for RAG (Retrieval-Augmented Generation),
-    reranking, and response caching.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="CHAT_",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    # If True, streams the response tokens back to the client in real-time.
-    memory_enabled: bool = Field(
-        default=False,
-        description=(
-            "Give the chat Orchestrator an AgentMemory so runs recall past "
-            "interactions and write new ones back. Off by default: it adds an "
-            "embedding + store round-trip per request."
-        ),
-    )
-    streaming_enabled: bool = Field(
-        default=True, description="Enable streaming responses"
-    )
-
-    # Number of documents to pull in the first broad sweep from vector search.
-    initial_search_k: int = Field(
-        default=20, description="Initial number of documents to retrieve"
-    )
-
-    # Final number of best-match documents to feed into the LLM context.
-    final_top_k: int = Field(
-        default=5, description="Final number of documents after reranking"
-    )
-
-    # Limit on history turns sent to the LLM (to manage context window).
-    max_history_length: int = Field(
-        default=10, description="Maximum conversation history length"
-    )
-
-    # If enabled, uses a secondary model to re-score documents for better precision.
-    enable_reranking: bool = Field(
-        default=True, description="Enable document reranking"
-    )
-
-    reranker_model: str = Field(
-        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
-        description="Reranker model name",
-    )
-
-    # Max documents to pass to the reranker engine.
-    rerank_max_candidates: int = Field(
-        default=50, description="Maximum number of candidates to rerank"
-    )
-
-    # == Exact Match Caching ==
-    enable_response_cache: bool = Field(
-        default=True, description="Enable response exact-match caching"
-    )
-
-    response_cache_ttl: int = Field(
-        default=3600, description="Response cache TTL in seconds"
-    )
-
-    # External factory/plugin orchestration
-    service_factory: str | None = Field(
-        default=None,
-        alias="CHAT_SERVICE_FACTORY",
-        description="Import path to a custom chat service factory",
-    )
-
-    service_config_file: str | None = Field(
-        default=None,
-        alias="CHAT_SERVICE_CONFIG_FILE",
-        description="Path to an external YAML/JSON chat config file",
-    )
-
-
 # --- Service Configuration Singletons ---
 # These are the primary entry points for accessing settings across the core.
 
 _llm_config: LLMConfig | None = None
-_chat_config: ChatConfig | None = None
 
 
 def get_llm_config() -> LLMConfig:
@@ -469,17 +397,6 @@ def get_llm_config() -> LLMConfig:
             f"Initialized LLMConfig with provider={_llm_config.provider}, model={_llm_config.model}"
         )
     return _llm_config
-
-
-def get_chat_config() -> ChatConfig:
-    """Retrieve or initialize the global ChatConfig singleton."""
-    global _chat_config
-    if _chat_config is None:
-        _chat_config = ChatConfig()
-        logger.info(
-            f"Initialized ChatConfig with streaming={_chat_config.streaming_enabled}"
-        )
-    return _chat_config
 
 
 __all__ = [

@@ -202,10 +202,9 @@ content under `plugins.config` instead:
 ```yaml
 plugins:
   config:
-    auth: {enabled: true}
     api_routers: {enabled: true}
-    baselithcontrol: {enabled: true, require_admin: false}
-    compliance: {enabled: true, require_admin: true}
+    browser_agent: {enabled: true}
+    baselithbot: {enabled: true, headless: true}
 ```
 
 The chart renders it into a ConfigMap mounted read-only over

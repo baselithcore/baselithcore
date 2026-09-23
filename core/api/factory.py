@@ -377,6 +377,9 @@ def create_app() -> FastAPI:
         # so side-effecting tool categories are rejected at the default
         # (SUPERVISED) level instead of executing unsupervised.
         mcp_server = create_mcp_server_with_tools(autonomy_policy=AutonomyPolicy())
+        # Plugins activate later, in the lifespan: the runtime hooks find the
+        # server here and register each plugin's tools as it comes up.
+        app.state.mcp_server = mcp_server
         app.include_router(create_mcp_http_router(mcp_server))
 
     if ENABLE_FEEDBACK:

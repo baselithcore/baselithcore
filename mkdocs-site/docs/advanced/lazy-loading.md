@@ -146,17 +146,20 @@ graph TB
 
 ## Plugin Activation at Startup
 
-Service initialization is lazy, but **plugin activation is not** for plugins you mark
-enabled. At startup the lifespan iterates the discovered plugins and **eagerly activates
-every plugin with `enabled: true`** in `configs/plugins.yaml`, so its routers, handlers,
-and static mounts are wired before the first HTTP request. This is gated by
-`PLUGIN_AUTO_LOAD` (default `true`):
+Service initialization is lazy, but **plugin activation is not** for enabled plugins.
+At startup the lifespan (`PluginRuntimeHooks.auto_activate`,
+`core/api/_plugin_runtime.py`) iterates the discovered plugins and **eagerly activates
+every one that `configs/plugins.yaml` enables**, so its routers, handlers, MCP tools
+and static mounts are wired before the first HTTP request. "Enabled" is the rule
+discovery already applied (`core.plugins.config_file.plugin_enabled`): no config file
+enables every plugin; a non-empty file enables the plugins it names unless their entry
+says `enabled: false`. This is gated by `PLUGIN_AUTO_LOAD` (default `true`):
 
-| State in `plugins.yaml`                        | `PLUGIN_AUTO_LOAD=true` (default)                                       | `PLUGIN_AUTO_LOAD=false`                 |
-| ---------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- |
-| `enabled: true`                                | Activated eagerly at startup                                            | Activated on first request to its prefix |
-| Entry present, `enabled` omitted               | Discovered; activated on first request to its prefix                    | Same — on-demand only                    |
-| `enabled: false`, or absent from a non-empty file | **Never auto-activated** — not discovered, and refused on request        | Same                                     |
+| State in `plugins.yaml`                                  | `PLUGIN_AUTO_LOAD=true` (default)                                 | `PLUGIN_AUTO_LOAD=false`                 |
+| -------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------- |
+| No config file (or an empty one)                         | Every discovered plugin activated eagerly at startup              | Activated on first request to its prefix |
+| `enabled: true`, or entry present with `enabled` omitted | Activated eagerly at startup                                      | Activated on first request to its prefix |
+| `enabled: false`, or absent from a non-empty file        | **Never auto-activated** — not discovered, and refused on request | Same                                     |
 
 On-request activation (`PluginActivationMiddleware`) only applies to plugins that
 are in the enabled discovery set but not yet imported. `ResourceAnalyzer.discover_plugins`

@@ -286,7 +286,7 @@ baselith run | grep "ERROR"
 # Enable high-fidelity development logs
 CORE_DEBUG=true
 CORE_LOG_LEVEL=DEBUG
-CORE_LOG_FORMAT=text  # Use 'json' for production-style parsing
+LOG_JSON=false  # Readable console logs; 'true' for production-style JSON
 ```
 
 ### Tracing with Jaeger

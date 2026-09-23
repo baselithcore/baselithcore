@@ -25,6 +25,7 @@ sequenceDiagram
 
     C->>F: POST /chat {"query": "..."} (require_user)
     F->>CS: handle_chat_async(ChatRequest)
+    CS->>CS: load_history(user:conversation_id) -> history_text
     CS->>O: process(query, context)
     O->>O: guard_input_async(query), LoopBudget
     par memory recall
@@ -40,6 +41,7 @@ sequenceDiagram
     O->>E: emit_sync(FLOW_COMPLETED, {...})
     O->>O: guard_output_async(result)
     O-->>CS: result dict
+    CS->>CS: record_turn(query, response) [answers only]
     CS-->>F: ChatResponse(answer, metadata, sources, conversation_id)
     F-->>C: JSON body
 ```
@@ -100,7 +102,7 @@ The body is `ChatRequest` (`core/models/chat.py`):
 | Field                 | Type           | Default | Notes                                               |
 | --------------------- | -------------- | ------- | --------------------------------------------------- |
 | `query`               | `str`          | —       | Required, 1–8000 characters                         |
-| `conversation_id`     | `str \| None`  | `None`  | Echoed back on the response                         |
+| `conversation_id`     | `str \| None`  | `None`  | Keys the conversation history; echoed back          |
 | `stream`              | `bool \| None` | `False` | Accepted for compatibility; use `/chat/stream`      |
 | `rag_only`            | `bool`         | `False` | Forwarded into the orchestrator context             |
 | `kb_label`            | `str \| None`  | `None`  | Knowledge-base selector, forwarded into the context |
@@ -168,8 +170,8 @@ first-call `EXPIRE` Lua script — one round trip per request.
 ## Phase 2: Bridging to the Orchestrator
 
 `ChatService.handle_chat_async` (`core/services/chat/service.py`) validates the
-query with `InputGuard`, builds the orchestration context from the request and
-hands off to `self.agent` — a lazily constructed
+query with `InputGuard`, loads the conversation's prior turns, builds the
+orchestration context from the request and hands off to `self.agent` — a lazily constructed
 `Orchestrator(plugin_registry=..., checkpoint_store=get_default_checkpoint_store())`:
 
 ```python title="core/services/chat/service.py (trimmed)"
@@ -178,12 +180,19 @@ async def handle_chat_async(self, req: ChatRequest) -> ChatResponse:
     if not guard_result.is_valid:
         raise ChatServiceError(f"Blocked by InputGuard: {guard_result.blocked_reason}")
 
+    history_key = self._history_key(req)  # None when history is off or no id
+    turns, history_text = await load_history(self.history_manager, history_key)
     context = {
         "conversation_id": req.conversation_id,
         "rag_only": req.rag_only,
         "kb_label": req.kb_label,
+        HISTORY_TEXT_KEY: history_text,  # "history_text"
     }
     result = await self.agent.process(req.query, context)
+    if is_recordable(result):  # no error, non-empty response
+        await record_turn(
+            self.history_manager, history_key, turns, req.query, result["response"]
+        )
 
     return ChatResponse(
         answer=result.get("response", ""),
@@ -269,6 +278,7 @@ feedback and skills-catalog facades to the context.
 | Key                                       | Set by                  | Content                                             |
 | ----------------------------------------- | ----------------------- | --------------------------------------------------- |
 | `conversation_id`, `rag_only`, `kb_label` | `ChatService`           | Copied from `ChatRequest`                           |
+| `history_text`                            | `ChatService`           | Prior turns of this conversation (empty without one) — [Chat › Conversation History](../core-modules/chat.md#conversation-history) |
 | `loop_budget`                             | `process()`             | Per-request `LoopBudget`                            |
 | `contract_validator`, `autonomy_policy`   | `process()`             | Only when configured on the orchestrator            |
 | `modality`                                | `annotate_modality`     | Attachment modality hint                            |
@@ -299,9 +309,11 @@ The strategies run in order, cheapest first:
    short-circuits without any network call.
 2. **LLM** — only when no keyword matched, `llm_enabled=True` and at least one
    plugin intent is registered. The result is used when
-   `confidence >= confidence_threshold` (constructor default `0.6`) and is
+   `confidence >= confidence_threshold` (`ORCHESTRATOR_CONFIDENCE_THRESHOLD`,
+   default `0.6`, when the orchestrator builds the classifier) and is
    LRU-cached per input text.
-3. **Default** — `default_intent` (constructor default `"qa_docs"`) with
+3. **Default** — `default_intent` (`ORCHESTRATOR_DEFAULT_INTENT`, default
+   `"qa_docs"`) with
    `confidence=0.5` and `method="default"`.
 
 ### Pattern Registration

@@ -598,8 +598,8 @@ result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
     - **`iterations`** — MCTS rollout budget; bounds total work so a run can never spin unconditionally.
 
 `solve()` is tuned **only** through these arguments. `ReasoningConfig` (env
-prefix `TOT_`) is not read by the ToT engine — see
-[Configuration](#configuration) for what it does govern.
+prefix `TOT_`) supplies the defaults the orchestrator's reasoning handler
+passes in — see [Configuration](#configuration).
 
 #### Deadline and convergence bounds on async MCTS
 
@@ -779,7 +779,7 @@ print(f"Answer: {answer}")
 ## Configuration
 
 `ReasoningConfig` (`core/config/reasoning.py`, env prefix `TOT_`) is consumed
-by exactly two components:
+by the self-correction and thought-cache components:
 
 | Setting | Default | Read by |
 | ------- | ------- | ------- |
@@ -796,10 +796,16 @@ TOT_THOUGHT_CACHE_MAXSIZE=1000
 TOT_THOUGHT_CACHE_TTL=1800.0
 ```
 
-!!! warning "Declared but not read: `TOT_MAX_DEPTH`, `TOT_BRANCHING_FACTOR`, `TOT_BEAM_WIDTH`, `TOT_STRATEGY`"
-    These fields exist on `ReasoningConfig` (defaults `3`, `3`, `3`, `"bfs"`;
-    `TOT_STRATEGY` accepts only `bfs`/`dfs`) but **no engine reads them**.
-    `TreeOfThoughts.solve()` takes depth, branching and strategy exclusively
-    from its own arguments (`max_steps=5`, `k=3`, `strategy="mcts"` or
-    `"bfs"`, `iterations`), so setting these variables has no effect on a
-    search.
+The orchestrator's `ReasoningHandler` (`core/orchestration/handlers/reasoning.py`)
+reads three more fields as the defaults of its Tree-of-Thoughts run. A request
+context carrying `k`, `max_steps` or `strategy` still overrides them:
+
+| Setting | Default | Handler argument |
+| ------- | ------- | ---------------- |
+| `TOT_BRANCHING_FACTOR` | `3` | `k` |
+| `TOT_MAX_DEPTH` | `3` | `max_steps` |
+| `TOT_STRATEGY` | `bfs` | `strategy` (`bfs` or `mcts`; the never-implemented `dfs` is read as `bfs` with a warning) |
+
+`TOT_BEAM_WIDTH` is deprecated and ignored: the engine has no beam search.
+Calling `TreeOfThoughts.solve()` directly still takes depth, branching and
+strategy from its own arguments only.

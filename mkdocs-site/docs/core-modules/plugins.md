@@ -342,6 +342,15 @@ loaded plugins are registered into — `PluginLoader(plugins_dir, registry,
 lifecycle_manager=None)`; the optional `lifecycle_manager` receives state
 transitions.
 
+The application runtime (`core/api/lifespan.py`) builds its loader and its
+`ResourceAnalyzer` on `PLUGIN_PLUGINS_PATH` (`PluginConfig.plugins_path`,
+default `plugins`, resolved against the working directory), the same root
+[marketplace](marketplace.md#configuration) installs write to. Before, the
+runtime hard-coded `plugins/`, so a plugin installed into a custom path was
+never loaded. The middleware pre-discovery above scans `PLUGIN_PLUGINS_PATH`
+only when the variable is set explicitly; otherwise it scans the checkout's own
+`plugins/`, independent of the working directory.
+
 ```python
 from pathlib import Path
 from core.plugins import PluginLoader, PluginRegistry
@@ -892,24 +901,34 @@ only on the `PluginMetrics` dataclass itself, not in the dict.
 
 ## Configuration
 
-Plugins are configured via `configs/plugins.yaml`.
+Plugins are configured via `configs/plugins.yaml` (or the file
+`PLUGIN_CONFIG_PATH` names), a flat mapping keyed by plugin name:
 
 ```yaml title="configs/plugins.yaml"
-plugins:
-  weather-agent:
-    enabled: true
-    config:
-      api_key: "${WEATHER_API_KEY}"
-      cache_ttl: 300
+api_routers:
+  enabled: true
 
-  analytics:
-    enabled: true
-    config:
-      batch_size: 100
+weather-agent:
+  cache_ttl: 300     # no `enabled` key: counts as enabled
 
-  legacy-plugin:
-    enabled: false  # Disabled
+legacy-plugin:
+  enabled: false     # Disabled
 ```
+
+One reader and one rule (`core.plugins.config_file.read_plugin_configs` /
+`plugin_enabled`) decide which plugins run, for discovery, startup
+auto-activation and `baselith plugin sync` alike:
+
+| Config file                                  | Plugin runs when                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| Missing, empty, unreadable or not a mapping  | Always — every discovered plugin                                  |
+| Non-empty                                    | It has an entry (name, directory name or `-`/`_` variant) that does not say `enabled: false` |
+
+Because a non-empty file excludes every plugin it does not list, the shipped file
+carries an `api_routers` entry: without it the routers that plugin adds at
+startup (`/prompts`, `/chat/ws`, async agent runs, and the feature-gated
+webhooks, privacy, compliance, approvals and runs APIs) are never mounted. Values are literal — there is no `${VAR}` interpolation;
+secrets go in the plugin-local `.env` described below.
 
 ### Accessing Configuration
 

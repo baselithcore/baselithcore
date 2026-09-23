@@ -42,7 +42,8 @@ core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, ChatConfig (re-exports VectorStoreConfig, VisionConfig, VoiceConfig)
+├── services.py           # LLMConfig (re-exports ChatConfig, VectorStoreConfig, VisionConfig, VoiceConfig)
+├── chat.py               # ChatConfig
 ├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
 ├── multimodal.py         # VisionConfig, VoiceConfig, FineTuningConfig
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
@@ -345,9 +346,10 @@ APP_TIMEZONE=Europe/Rome
 
 These live in `core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
 `VectorStoreConfig` the `VECTORSTORE_` prefix, and `ChatConfig` the `CHAT_`
-prefix. `VectorStoreConfig` itself now lives in `core/config/vectorstore.py`
-(extracted for the file-size cap); `core.config.services` re-exports it, so
-existing imports are unchanged.
+prefix. `VectorStoreConfig` and `ChatConfig` themselves now live in
+`core/config/vectorstore.py` and `core/config/chat.py` (extracted for the
+file-size cap); `core.config.services` re-exports both, so existing imports are
+unchanged.
 
 ```python
 from core.config import get_llm_config, get_vectorstore_config
@@ -1006,6 +1008,18 @@ documented but bound nothing: an explicit `alias=` **replaces** the class's
 field, and the fine-tuning credentials silently shared the chat provider's key.
 Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
 field should answer to both.
+
+### Settings that bind but do nothing
+
+The reverse drift — a field that binds its variable while no code reads it —
+passes that gate, because the setting is real to pydantic. Such fields are not
+deleted: removing one changes nothing at runtime, but it hides the fact from a
+deployment that still sets the variable. Their description
+starts with **"Deprecated, no effect"** and names the setting that does the job
+where one exists (for example `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` point
+to `LOG_JSON`, `CHAT_MAX_HISTORY_LENGTH` to `CHAT_MEMORY_MAX_TURNS`). The
+generated [reference](../getting-started/configuration.md) carries the same
+wording.
 
 ## Validation
 

@@ -151,7 +151,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         self,
         intent_classifier: IntentClassifier | None = None,
         plugin_registry: "PluginRegistry" | None = None,
-        default_intent: str = "qa_docs",
+        default_intent: str | None = None,  # ORCHESTRATOR_DEFAULT_INTENT
         memory_manager: "AgentMemory" | None = None,
         human_intervention: "HumanIntervention" | None = None,
         feedback_collector: "FeedbackCollector" | None = None,
@@ -219,6 +219,15 @@ streaming story. Retrieval is delegated to `StandardRagHandler.retrieve()` and
 the shared prompt constants (`RAG_SYSTEM_PROMPT`, `RAG_NOT_FOUND_MESSAGE`,
 `build_rag_user_prompt` in `handlers/rag.py`), so the two paths cannot drift;
 generation then streams tokens via `LLMService.generate_response_stream`.
+
+Both handlers build the user prompt with
+`build_rag_user_prompt(context_text, query, history="")`, passing
+`context.get("history_text", "")` — the prior turns the chat service loads for
+the request's `conversation_id` (see
+[Chat › Conversation History](chat.md#conversation-history)). With history the
+prompt reads `Conversation so far:`, then `Context:`, `Question:` and `Answer:`;
+without it the first block is omitted. The retrieved context stays the only
+source of facts, and retrieval runs on the raw query.
 
 !!! note "Sources ride on the context, not the stream"
     The stream chunk protocol carries text only, so the streaming RAG handler
@@ -318,14 +327,17 @@ print(classifier.get_available_intents())
 
 ```mermaid
 flowchart TD
-    Query --> LLM{LLM enabled?}
-    LLM --> |yes, conf >= threshold| Handler[Selected intent]
-    LLM --> |no / low conf| Keywords[Keyword match by priority]
-    Keywords --> |match| Handler
-    Keywords --> |no match| Default[Default intent]
+    Query --> Keywords[Keyword match by priority]
+    Keywords --> |match| Handler[Selected intent]
+    Keywords --> |no match| LLM{LLM enabled?}
+    LLM --> |yes, conf >= threshold| Handler
+    LLM --> |no / low conf| Default[Default intent]
 ```
 
-The default intent is `qa_docs` and the default confidence threshold is `0.6`.
+The default intent is `ORCHESTRATOR_DEFAULT_INTENT` (default `qa_docs`) and the
+confidence threshold is `ORCHESTRATOR_CONFIDENCE_THRESHOLD` (default `0.6`)
+when the `Orchestrator` builds the classifier itself; see
+[Configuration](#configuration).
 
 ---
 
@@ -434,6 +446,19 @@ ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=false
 ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30
 ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
 ```
+
+The first three settings are read by `Orchestrator.__init__`. Leaving
+`default_intent=None` uses `ORCHESTRATOR_DEFAULT_INTENT`, and when no
+`intent_classifier` is passed, the `IntentClassifier` the orchestrator builds
+gets `confidence_threshold=ORCHESTRATOR_CONFIDENCE_THRESHOLD` and
+`telemetry_enabled=ORCHESTRATOR_ENABLE_TELEMETRY`. A classifier you pass in
+keeps its own values.
+
+!!! note "The built-in RAG handler is tied to `qa_docs`"
+    `StandardRagHandler` (and its streaming twin) is auto-registered only when
+    the default intent is `qa_docs` and no plugin already handles it. Set
+    `ORCHESTRATOR_DEFAULT_INTENT` to anything else and that intent needs a
+    handler from a plugin or `register_handler()`.
 
 The semantic `Router` is configured separately via `RouterConfig`
 (`ROUTER_` prefix: `score_threshold`, `max_candidates`, `retrieval_limit`),

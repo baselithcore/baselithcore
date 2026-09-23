@@ -20,6 +20,15 @@ from core.guardrails.input_guard import InputGuard
 from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
 from core.services.chat.exceptions import ChatServiceError
+from core.services.chat.utils.conversation import (
+    HISTORY_TEXT_KEY,
+    build_chat_memory,
+    conversation_key,
+    is_recordable,
+    load_history,
+    record_turn,
+    recording_stream,
+)
 from core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
 from core.utils.concurrency import drain_async_iterator
 
@@ -54,6 +63,7 @@ class ChatServiceConfig:
         reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         history_enabled: bool = True,
         history_max_turns: int = 10,
+        memory_enabled: bool = False,
     ) -> None:
         """
         Args:
@@ -64,6 +74,7 @@ class ChatServiceConfig:
             reranker_model: ID of the cross-encoder used for semantic validation.
             history_enabled: If True, tracks conversation state across turns.
             history_max_turns: Maximum context window for historical memory.
+            memory_enabled: Give the orchestrator long-term ``AgentMemory``.
         """
         self.initial_search_k = initial_search_k
         self.final_top_k = final_top_k
@@ -72,6 +83,7 @@ class ChatServiceConfig:
         self.reranker_model = reranker_model
         self.history_enabled = history_enabled
         self.history_max_turns = history_max_turns
+        self.memory_enabled = memory_enabled
 
 
 class ChatService:
@@ -174,6 +186,12 @@ class ChatService:
             )
         return self._history_manager
 
+    def _history_key(self, req: ChatRequest) -> str | None:
+        """Storage key for this request's conversation; ``None`` = stateless."""
+        if not self.config.history_enabled:
+            return None
+        return conversation_key(req.conversation_id)
+
     @property
     def agent(self) -> OrchestratorProtocol:
         """
@@ -218,23 +236,10 @@ class ChatService:
         return self._agent
 
     def _build_memory_manager(self) -> Any | None:
-        """Long-term memory for the orchestrator, or ``None`` when disabled.
-
-        Gated by ``CHAT_MEMORY_ENABLED`` (default ``false``): with it on, the
-        loop recalls past interactions before answering and writes the exchange
-        back afterwards, at the cost of an embedding and store round-trip per
-        request. A construction failure degrades to no memory rather than
-        failing the chat request.
-        """
-        if not getattr(self.config, "memory_enabled", False):
+        """Long-term memory for the orchestrator (see ``build_chat_memory``)."""
+        if not self.config.memory_enabled:
             return None
-        try:
-            from core.memory.manager import AgentMemory
-
-            return AgentMemory()
-        except Exception as e:  # pragma: no cover - optional dependency path
-            logger.warning(f"Chat memory disabled: AgentMemory unavailable ({e})")
-            return None
+        return build_chat_memory()
 
     def handle_chat(self, req: ChatRequest) -> ChatResponse:
         """
@@ -364,14 +369,25 @@ class ChatService:
                     f"Blocked by InputGuard: {guard_result.blocked_reason or 'Potentially harmful content detected'}"
                 )
 
+            history_key = self._history_key(req)
+            turns, history_text = await load_history(self.history_manager, history_key)
             context = {
                 "conversation_id": req.conversation_id,
                 "rag_only": req.rag_only,
                 "kb_label": req.kb_label,
+                HISTORY_TEXT_KEY: history_text,
             }
 
             # Async execution of the orchestration pipeline.
             result = await self.agent.process(req.query, context)
+            if is_recordable(result):
+                await record_turn(
+                    self.history_manager,
+                    history_key,
+                    turns,
+                    req.query,
+                    result["response"],
+                )
 
             return ChatResponse(
                 answer=result.get("response", ""),
@@ -408,13 +424,22 @@ class ChatService:
 
                 return _single_response()
 
+            history_key = self._history_key(req)
+            turns, history_text = await load_history(self.history_manager, history_key)
             context = {
                 "conversation_id": req.conversation_id,
                 "rag_only": req.rag_only,
                 "kb_label": req.kb_label,
+                HISTORY_TEXT_KEY: history_text,
             }
 
-            return self.agent.process_stream(req.query, context)
+            return recording_stream(
+                self.agent.process_stream(req.query, context),
+                self.history_manager,
+                history_key,
+                turns,
+                req.query,
+            )
 
         except Exception:
             self._record_metric("chat_request_errors_total", route="stream")

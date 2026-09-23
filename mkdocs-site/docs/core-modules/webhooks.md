@@ -108,9 +108,13 @@ ok = verify_signature(
     secret="whsec_...",
     body=raw_request_body,           # bytes, exactly as received
     header=request.headers["X-Baselith-Signature"],
-    tolerance_seconds=300,
 )
 ```
+
+`tolerance_seconds` bounds the timestamp age. Left at `None` (the default) it
+reads `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` (default `300`), so the setting
+governs every caller that does not pass an explicit value; pass an integer to
+override it per call, or `0` to disable the freshness check.
 
 ## Delivery, retries & dead-lettering
 
@@ -182,6 +186,6 @@ of never mixing them up.
 | `WEBHOOK_MAX_CONNECTIONS`             | `20`    | Cap on concurrent outbound delivery sockets    |
 | `WEBHOOK_MAX_ATTEMPTS`                | `4`     | Delivery attempts before dead-lettering        |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS`       | `1`     | Base backoff (exponential + jitter)            |
-| `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `300`   | Max signature age accepted by `verify_signature` |
+| `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `300`   | Max signature age `verify_signature` accepts when called without `tolerance_seconds`; `0` disables the check |
 | `WEBHOOK_ALLOW_INTERNAL`              | `false` | Bypass the SSRF guard (local dev only)         |
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT`    | `50`    | Per-tenant registration cap                    |

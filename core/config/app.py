@@ -263,10 +263,21 @@ class AppConfig(BaseSettings):
         default=4096, alias="CHAT_RERANK_CACHE_MAXSIZE", ge=1
     )
 
-    analysis_cache_enabled: bool = Field(default=True, alias="ANALYSIS_CACHE_ENABLED")
-    analysis_cache_ttl: float = Field(default=86400.0, alias="ANALYSIS_CACHE_TTL")
+    analysis_cache_enabled: bool = Field(
+        default=True,
+        alias="ANALYSIS_CACHE_ENABLED",
+        description="Deprecated, no effect: nothing reads it",
+    )
+    analysis_cache_ttl: float = Field(
+        default=86400.0,
+        alias="ANALYSIS_CACHE_TTL",
+        description="Deprecated, no effect: nothing reads it",
+    )
     analysis_cache_maxsize: int = Field(
-        default=128, alias="ANALYSIS_CACHE_MAXSIZE", ge=1
+        default=128,
+        alias="ANALYSIS_CACHE_MAXSIZE",
+        ge=1,
+        description="Deprecated, no effect: nothing reads it",
     )
 
     # === Chat Memory ===

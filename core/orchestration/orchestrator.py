@@ -77,7 +77,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         self,
         intent_classifier: IntentClassifier | None = None,
         plugin_registry: PluginRegistry | None = None,
-        default_intent: str = "qa_docs",
+        default_intent: str | None = None,
         memory_manager: AgentMemory | None = None,
         human_intervention: HumanIntervention | None = None,
         feedback_collector: FeedbackCollector | None = None,
@@ -96,6 +96,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
                 Defaults to an LLM-powered classifier if None.
             plugin_registry: Source of truth for active plugins and their handlers.
             default_intent: Fallback routing (typically standard RAG).
+                Defaults to ``ORCHESTRATOR_DEFAULT_INTENT`` (``qa_docs``).
             memory_manager: Interface for long-term and short-term memory retrieval.
             human_intervention: Controller for managing tasks requiring user approval.
             feedback_collector: Component for tracking performance metrics and reinforcement.
@@ -110,6 +111,11 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
                 declarative skills. Defaults to a registry-backed
                 ``SkillService`` when a plugin registry is available.
         """
+        from core.config.orchestration import get_orchestration_config
+
+        orchestration_config = get_orchestration_config()
+        if default_intent is None:
+            default_intent = orchestration_config.default_intent
         self.plugin_registry = plugin_registry
         self.default_intent = default_intent
         self.memory_manager = memory_manager
@@ -138,6 +144,8 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
             plugin_registry=plugin_registry,
             default_intent=default_intent,
             llm_service=llm_service,
+            confidence_threshold=orchestration_config.confidence_threshold,
+            telemetry_enabled=orchestration_config.enable_telemetry,
         )
 
         # Handler registries for specialized execution logic.

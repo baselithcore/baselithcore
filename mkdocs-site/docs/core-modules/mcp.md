@@ -67,7 +67,9 @@ IDEs.
   API surface at `MCP_HTTP_PATH` (default `/mcp`,
   `core/mcp/http_transport.py`). One JSON-RPC message per `POST` (batching was
   removed in 2025-06-18; arrays get `400`), `GET` returns `405` (no
-  server-initiated stream).
+  server-initiated stream). `create_app()` keeps the server on
+  `app.state.mcp_server`; each plugin's `get_mcp_tools()` is registered on it
+  as the plugin activates — see [Plugin tools](#plugin-tools).
 - **Modern requests (2026-07-28)** are **stateless**: no session is required or
   minted, and a stale `Mcp-Session-Id` is ignored. They must carry the standard
   headers, validated against the body
@@ -585,8 +587,9 @@ message on the stream carries `io.modelcontextprotocol/subscriptionId` in
 `_meta` — the JSON-RPC id of the listen request — because on stdio all
 subscriptions share one channel and the client must demultiplex them.
 
-Registering a tool, resource, template or prompt announces the matching
-`list_changed` to the streams that opted in; `notify_resource_updated(uri)`
+Registering a tool, resource, template or prompt — or removing a tool with
+`server.unregister_tool(name)`, which returns whether the tool existed —
+announces the matching `list_changed` to the streams that opted in; `notify_resource_updated(uri)`
 announces a content change to the streams watching that URI. When the server
 ends a subscription it answers the listen request with an empty result, so the
 client can tell a graceful close from a dropped transport.
@@ -709,6 +712,7 @@ core/mcp/
 ├── uri_template.py             # RFC 6570 Level-1 resource templates
 ├── errors.py                   # InvalidParams / ResourceNotFound → JSON-RPC codes
 ├── tools.py                    # MCPToolAdapter (wrap internal functions as MCP tools)
+├── plugin_tools.py             # per-plugin get_mcp_tools() registration / withdrawal
 └── types.py                    # MCPTool, MCPResource, MCPResourceTemplate, MCPPrompt
 ```
 
@@ -1033,6 +1037,38 @@ adapter.register_function(my_async_func, name="do_thing")
 adapter.register_all_tools()
 ```
 
+`register_plugin_tools()` registers the tools of the plugins that are
+initialized **at the moment it runs**, taken from the `PluginRegistry` in the
+`ServiceRegistry` (none registered, nothing happens). It suits a standalone
+server built after its plugins are up. The app's HTTP-mounted server is built
+before any plugin activates, so it is fed per plugin instead — next section.
+
+### Plugin tools
+
+Plugins expose tools through `get_mcp_tools()`, a list of dicts with `name`,
+`description`, `input_schema`, `handler` (async, called with the tool
+arguments as keyword arguments) and an optional `category`.
+`core.mcp.plugin_tools` puts them on a server and takes them off again:
+
+| Function | Behaviour |
+| -------- | --------- |
+| `register_plugin_mcp_tools(server, plugin)` | Registers every well-formed entry and returns the registered names. An entry without `name` or `handler` is skipped with a warning; a `get_mcp_tools()` that raises contributes nothing. Neither stops the caller. An undeclared `category` registers the tool as `destructive`. |
+| `unregister_plugin_mcp_tools(server, names)` | Calls `server.unregister_tool()` for each name. |
+
+In the app, the plugin runtime hooks (`core/api/_plugin_runtime.py`) call these
+on the server stored at `app.state.mcp_server`: registration on every activation
+— startup auto-activation and hot reload, replacing the plugin's previous set —
+and withdrawal on the plugin's `on_after_disable` hook. Each change announces
+`tools/list_changed`. With `MCP_HTTP_TRANSPORT_ENABLED=false` there is no
+server, and nothing is registered.
+
+Every registered handler is wrapped: a call that arrives after the plugin stopped
+being initialized (a call racing a disable) raises `PluginToolUnavailableError`
+instead of running against a plugin that has already shut down. Plugin tools pass
+the same [autonomy approval gate](#autonomy-approval-gate) as any other tool, so
+the HTTP-mounted server — created with a SUPERVISED `AutonomyPolicy()` — rejects
+every plugin tool not declared `read_only`.
+
 ### The bundled tools call the real services
 
 The implementations behind the bundled RAG and reasoning tools live in
@@ -1195,8 +1231,6 @@ The relevant environment variables:
 MCP_SERVER_NAME=baselith-core
 MCP_SERVER_VERSION=2.0.0
 MCP_CLIENT_REQUEST_TIMEOUT=30.0
-MCP_STDIO_TRANSPORT_ENABLED=true
-MCP_SSE_TRANSPORT_ENABLED=false
 MCP_EXECUTE_CODE_TIMEOUT=30
 MCP_RAG_DEFAULT_TOP_K=5
 MCP_ALLOW_INTERNAL_ENDPOINTS=false
@@ -1220,6 +1254,11 @@ MCP_ALLOWED_COMMANDS=python,python3,node,npx,uvx,uv,deno,bun,bunx
 # Stdio commands stay behind MCP_ALLOWED_COMMANDS.
 MCP_SERVERS=
 ```
+
+`MCP_STDIO_TRANSPORT_ENABLED` and `MCP_SSE_TRANSPORT_ENABLED` are deprecated
+and have no effect: stdio runs whenever the server is launched as a process,
+and the served network transport is Streamable HTTP, switched by
+`MCP_HTTP_TRANSPORT_ENABLED`.
 
 ### Client transports and tunables
 

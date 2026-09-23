@@ -212,13 +212,14 @@ async def initialize_evolution() -> Any:
     """
     from core.di.lazy_registry import get_lazy_registry
     from core.learning.evolution import EvolutionService
-    from core.memory.manager import AgentMemory
 
     logger.info("🧬 Lazy initializing Evolution Service...")
 
-    # Get memory (will be lazy-initialized if not already)
+    # Factories are keyed by resource name (RESOURCE_FACTORIES), never by
+    # class. Asking for ``AgentMemory`` raised KeyError on every boot, which
+    # the lifespan logged and swallowed, so evolution never started.
     lazy_registry = get_lazy_registry()
-    memory_manager = await lazy_registry.get_or_create(AgentMemory)
+    memory_manager: Any = await lazy_registry.get_or_create("memory")
 
     evolution_service = EvolutionService(memory_manager=memory_manager)
     evolution_service.start()

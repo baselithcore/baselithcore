@@ -109,6 +109,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One reader shared with create_app()'s middleware pre-discovery, so the
     # two never disagree on which plugins this process runs.
     plugin_configs: dict[str, Any] = read_plugin_configs()
+    # PLUGIN_PLUGINS_PATH: the directory marketplace installs write to, so the
+    # runtime must scan the same one (it was hard-coded to ``plugins/``).
+    from core.config.plugins import get_plugin_config
+
+    plugins_root = Path(get_plugin_config().plugins_path)
 
     analyzer = None
     try:
@@ -122,7 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from core.plugins.discovery import iter_entry_point_plugin_dirs
         from core.plugins.resource_analyzer import ResourceAnalyzer
 
-        analyzer = ResourceAnalyzer(Path("plugins/"))
+        analyzer = ResourceAnalyzer(plugins_root)
         # Entry-point plugins ship no directory under plugins/, so their
         # required_resources have to be threaded in explicitly here — otherwise
         # such a plugin is discovered below but activates against a resource
@@ -209,7 +214,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     plugin_registry = PluginRegistry()
     ServiceRegistry.register(PluginRegistry, plugin_registry)
     plugin_loader = PluginLoader(
-        Path("plugins/"), plugin_registry, lifecycle_manager=lifecycle_manager
+        plugins_root, plugin_registry, lifecycle_manager=lifecycle_manager
     )
 
     hot_reload_controller = HotReloadController(
@@ -270,7 +275,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app, plugin_registry, plugin_configs, lifecycle_manager, hot_reload_controller
     )
     _mount_plugin_static = hooks.mount_plugin_static
-    _get_plugin_runtime_config = hooks.get_plugin_runtime_config
     _activate_plugin_for_runtime = hooks.activate_plugin_for_runtime
 
     plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
@@ -318,35 +322,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # before the first HTTP request lands. Without this the bare ``baselith
     # run`` only exposes core routes and every plugin endpoint is 404 until
     # an authenticated admin call flips the lifecycle state manually.
-    # Iterate the *discovered* plugins (keyed by canonical manifest name) rather
-    # than the raw config keys: a plugin's directory/config key (``baselithbot``)
-    # may differ from its manifest name (``BaselithBot``), and the loader keys
-    # lifecycle state by the canonical name. ``_get_plugin_runtime_config``
-    # resolves the matching ``configs/plugins.yaml`` entry across name/dir
-    # variants, so we read ``enabled`` from there.
     try:
-        from core.config.plugins import get_plugin_config
-
         if get_plugin_config().auto_load:
-            for canonical_name in discoveries.keys():
-                plugin_conf = _get_plugin_runtime_config(canonical_name)
-                if not plugin_conf.get("enabled", False):
-                    continue
-                try:
-                    activated = await _activate_plugin_for_runtime(canonical_name)
-                    if activated:
-                        logger.info("✅ Plugin auto-activated: %s", canonical_name)
-                    else:
-                        logger.warning(
-                            "❌ Plugin auto-activation failed: %s", canonical_name
-                        )
-                except Exception as exc:
-                    logger.error(
-                        "Plugin auto-activation %s raised: %s",
-                        canonical_name,
-                        exc,
-                        exc_info=True,
-                    )
+            await hooks.auto_activate(discoveries)
     except Exception as exc:
         logger.warning("Plugin auto-activation setup failed: %s", exc)
 

@@ -3,7 +3,10 @@ title: Core Services
 description: LLM, VectorStore, Vision, Voice, and other services
 ---
 
-The `core/services` module provides domain-agnostic services.
+The `core/services` module provides domain-agnostic services. The chat service
+(`core/services/chat/`: request handling, streaming and per-conversation history)
+is documented in [Chat & RAG](chat.md), in particular
+[Conversation History](chat.md#conversation-history).
 
 ## Overview
 
@@ -378,6 +381,13 @@ precedence is **pinned > per-call `model=` > routed > config default**, and
 routing is a hint, never an error — unknown categories fall back to the
 config default. The intent classifier passes `task_category="classification"`
 so classification runs on the cheap tier out of the box.
+
+`LLM_ROUTING_MAX_COST_PER_1K_USD` (unset by default; must be `> 0` when set)
+adds a budget cap on top. When the routed model's approximate cost per 1K
+tokens (500 in / 500 out, from the pricing table) exceeds it, the router
+substitutes the *priciest* model in the policy pool that still fits
+(`rule="cost_guard"`); when none fits, it takes the cheapest one rather than
+raise. The provider check below still applies to the substituted model.
 
 **The routed pick must be servable by the configured provider.** The built-in
 policy names Claude ids for every category, so switching `LLM_ROUTING_ENABLED`
@@ -1684,11 +1694,18 @@ print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECO
 
 BaselithCore supports two types of sandboxing for secure code execution:
 
-1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` and resource limits. It provides a good balance between performance and security for most tasks.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
+  For the Docker provider, `build_sandbox_runtime_kwargs(enable_network=None)`
+  (`core/services/sandbox/policy.py`) returns `network_mode="none"` unless
+  `SANDBOX_ENABLE_NETWORK=true`, which switches it to `"bridge"`, Docker's
+  default network. Nothing else in the hardened policy changes: no
+  capabilities, no privilege escalation, read-only root, non-root uid,
+  resource ceilings. Passing `enable_network=` explicitly overrides the setting
+  for one call.
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 - **Pre-execution static analysis**: Python payloads are AST-analyzed before
@@ -1777,7 +1794,8 @@ SANDBOX_PROVIDER=sbx
 
 # Docker specific
 SANDBOX_IMAGE=python:3.12-slim
-SANDBOX_DOCKER_SOCKET=/var/run/docker.sock
+SANDBOX_DOCKER_SOCKET=/var/run/docker.sock   # honoured only when set explicitly
+SANDBOX_ENABLE_NETWORK=false                 # true = bridge network (egress)
 
 # Sbx specific
 SANDBOX_SBX_PATH=sbx
@@ -1789,6 +1807,19 @@ SANDBOX_TIMEOUT=30
 # Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
 SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 ```
+
+The Docker client connects through `docker.from_env()` (`DOCKER_HOST`, the
+TLS variables, the default socket). `SANDBOX_DOCKER_SOCKET` pins it to
+`unix://<socket>` instead, but only when the variable is set explicitly and
+`DOCKER_HOST` is unset: the field's default value alone changes nothing, and a
+`DOCKER_HOST` pointing at a remote sandbox daemon always wins.
+
+!!! warning "Network egress for untrusted code is opt-in"
+    `SANDBOX_ENABLE_NETWORK=true` lets agent-supplied code reach anything the
+    Docker bridge can route to: the internet, and possibly services on the
+    host's networks. It applies to every Docker sandbox the process starts
+    (one-shot, streaming and pooled). Leave it off unless the workload needs
+    egress.
 
 !!! note "Installation"
     To use the `sbx` provider, you must install the `sbx` CLI tool on your host. On macOS, use `brew install docker/tap/sbx`.

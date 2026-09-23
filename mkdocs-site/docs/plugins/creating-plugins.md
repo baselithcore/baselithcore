@@ -326,7 +326,8 @@ class MyPlugin(AgentPlugin):
                 "name": "my_tool",
                 "description": "A custom tool",
                 "input_schema": {"type": "object", "properties": {}},
-                "handler": self.handle_tool
+                "handler": self.handle_tool,  # async, called with the tool arguments
+                "category": "read_only",  # omitted = "destructive"
             }
         ]
 ```
@@ -355,6 +356,13 @@ The `Plugin` interface provides several hooks for registering components:
 
 !!! tip "Routing"
     The orchestrator uses these patterns to identify when a user request should be handled by your plugin's agents.
+
+`get_mcp_tools()` entries reach the HTTP-mounted MCP server (`/mcp`) when the plugin
+activates — at startup or through hot reload — and are withdrawn when it is
+disabled, with a `tools/list_changed` notification each time. An entry without
+`name` or `handler` is skipped. `category` (`read_only`, `mutating`, `destructive`,
+`external_side_effect`) feeds the autonomy gate; leaving it out registers the tool
+as `destructive`. See [MCP › Plugin tools](../core-modules/mcp.md#plugin-tools).
 
 ---
 
@@ -451,7 +459,15 @@ my-plugin:
 The file is a **flat mapping keyed by plugin name**: there is no `plugins:` wrapper
 and no `config:` sub-key (a nested layout is never matched, and the plugin runs as if
 it had no entry). The whole entry — `enabled` included — is passed to
-`initialize(config)`. Values are literal; there is no `${VAR}` interpolation, so
+`initialize(config)`.
+
+Which plugins run follows one rule (`core.plugins.config_file.plugin_enabled`),
+shared by discovery, startup auto-activation and `baselith plugin sync`: with no
+config file every discovered plugin runs; once the file lists anything, only the
+listed plugins run, and an entry runs unless it says `enabled: false` — an entry
+without an `enabled` key counts as enabled. `PLUGIN_CONFIG_PATH` (default
+`configs/plugins.yaml`) points at a different file, which must resolve inside the
+working directory. Values are literal; there is no `${VAR}` interpolation, so
 secrets go in the plugin-local `.env` described below.
 
 ### Configuration Access

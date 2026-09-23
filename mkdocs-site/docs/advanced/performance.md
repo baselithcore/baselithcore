@@ -40,8 +40,9 @@ Plugins are **discovered** at startup in lazy-import mode (manifest metadata
 only, no module import). What happens next depends on `PLUGIN_AUTO_LOAD`
 (`core/api/lifespan.py`):
 
-- `PLUGIN_AUTO_LOAD=true` (the default): every plugin marked `enabled: true` in
-  `configs/plugins.yaml` is **activated during startup**, so its routers and
+- `PLUGIN_AUTO_LOAD=true` (the default): every plugin that
+  `configs/plugins.yaml` enables — listed without `enabled: false`, or every
+  plugin when there is no config file — is **activated during startup**, so its routers and
   handlers are mounted before the first request lands. Plugins left disabled in
   the config stay discovered-but-unloaded and cost nothing until an admin
   enables them at runtime through the admin plugin API
