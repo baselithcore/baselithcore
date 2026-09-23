@@ -1,6 +1,7 @@
 import os
 import sys
 import types
+from pathlib import Path
 from typing import Iterable, Sequence
 from unittest.mock import AsyncMock, MagicMock
 
@@ -426,3 +427,30 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         new_content = badge_re.sub(new_badge, content)
         if new_content != content:
             readme_path.write_text(new_content, encoding="utf-8")
+
+
+#: Checked-in configuration a test must never rewrite. ``baselith plugin
+#: create/enable`` write ``configs/plugins.yaml`` relative to the cwd, which in
+#: a test run is the checkout: one unpatched call flipped a tracked entry, and
+#: the change was committed along with unrelated work.
+_TRACKED_CONFIGS = tuple(
+    Path(__file__).resolve().parents[1] / relative
+    for relative in ("configs/plugins.yaml", ".env.example")
+)
+_TRACKED_SNAPSHOT = {
+    path: path.read_bytes() for path in _TRACKED_CONFIGS if path.exists()
+}
+
+
+@pytest.fixture(autouse=True)
+def _tracked_configs_stay_untouched(request):
+    """Fail the test that rewrites a tracked config file, and undo the write."""
+    yield
+    for path, original in _TRACKED_SNAPSHOT.items():
+        if path.read_bytes() != original:
+            path.write_bytes(original)
+            pytest.fail(
+                f"{request.node.nodeid} rewrote {path.name}; patch the writer "
+                "or run it under tmp_path",
+                pytrace=False,
+            )

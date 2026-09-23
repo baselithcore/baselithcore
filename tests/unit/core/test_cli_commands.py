@@ -72,9 +72,13 @@ class TestCLIPlugins:
 
         assert found_a or mock_console.print.called
 
+    # Registration writes configs/plugins.yaml relative to the cwd, which in a
+    # test run is the checkout: unpatched, it flipped the tracked file's
+    # ``my-plugin`` entry to enabled.
+    @patch("core.cli.commands.plugin.create._register_plugin_config")
     @patch("core.cli.commands.plugin.create.Path")
     @patch("builtins.print")
-    def test_create_plugin_success(self, mock_print, mock_path):
+    def test_create_plugin_success(self, mock_print, mock_path, mock_register):
         plugins_dir = MagicMock()
         mock_path.return_value = plugins_dir
         plugins_dir.exists.return_value = True  # plugins dir exists
@@ -84,6 +88,7 @@ class TestCLIPlugins:
         new_plugin_dir.exists.return_value = False  # plugin does not exist
 
         assert create_plugin("my-plugin", "agent") == 0
+        mock_register.assert_called_once_with("my-plugin")
         new_plugin_dir.mkdir.assert_called_with(parents=True)
         # Should write at least 3 files
         assert new_plugin_dir.__truediv__.call_count >= 3
