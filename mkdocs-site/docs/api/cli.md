@@ -305,6 +305,11 @@ of falling back to the package version default.
 
 Show a high-level overview of the system architecture, versions, and active plugins.
 
+**Plugins** counts the directories under `plugins/` that actually hold a plugin
+— a `plugin.py` or a `manifest.yaml`/`.yml`/`.json` — the same rule `doctor`
+applies. A removed or renamed plugin leaves gitignored residue behind
+(`__pycache__`, a built `ui/`, local data); those directories are not counted.
+
 ```bash
 baselith info
 baselith --format json info   # Machine-readable JSON for CI
