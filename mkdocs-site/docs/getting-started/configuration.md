@@ -71,7 +71,7 @@ Declared in `core.config.app`.
 | `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
 | `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
-| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
+| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in core/chat RAG pipeline only |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
@@ -166,7 +166,7 @@ Declared in `core.config.cache`.
 | `CACHE_CROSS_WORKER_SINGLE_FLIGHT` | `bool` | `False` | Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis lock, not just within one event loop. With WEB_CONCURRENCY>1 or several pods, in-process coalescing still lets N workers issue N identical LLM/embedding calls for one key; this elects ONE worker per key and the others read the winner's value back out of the shared cache. Only takes effect where the backing cache is backing cache is genuinely shared (Redis) — an in-process store gives the losing worker nothing to read back. Fail-open: if Redis is unreachable the path degrades to in-process coalescing. |
 | `CACHE_MAXSIZE_DEFAULT` | `int` | `256` | Default maximum size for in-memory caches |
 | `CACHE_TTL_DEFAULT` | `float` | `300.0` | Default TTL in seconds for caches |
-| `CACHE_REDIS_URL` | `str` | `redis://redis:6379/1` | Redis connection URL |
+| `CACHE_REDIS_URL` | `str` | `redis://localhost:6379/1` | Redis connection URL |
 | `REDIS_CACHE_PREFIX` | `str` | `baselithcore:cache` | Prefix for Redis cache keys |
 | `REDIS_CACHE_TTL` | `float` | `3600.0` | Default TTL for Redis cache entries |
 | `REDIS_HEALTH_CHECK_INTERVAL` | `float` | `30.0` | Seconds between idle-connection health checks (0 disables) |
@@ -186,14 +186,13 @@ Declared in `core.config.chat`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `CHAT_ENABLE_RERANKING` | `bool` | `True` | Enable document reranking |
-| `CHAT_ENABLE_RESPONSE_CACHE` | `bool` | `True` | Deprecated, no effect: nothing reads it (the live chat path has no answer cache) |
+| `CHAT_ENABLE_RESPONSE_CACHE` | `bool` | `True` | Deprecated, no effect: nothing reads it; the chat answer cache is CHAT_RESPONSE_CACHE_ENABLED |
 | `CHAT_FINAL_TOP_K` | `int` | `5` | Final number of documents after reranking |
 | `CHAT_INITIAL_SEARCH_K` | `int` | `20` | Initial number of documents to retrieve |
 | `CHAT_LONG_TERM_MEMORY_ENABLED` | `bool` | `False` | Give the chat Orchestrator an AgentMemory so runs recall past interactions and write new ones back. Off by default: it adds an embedding + store round-trip per request. Distinct from CHAT_MEMORY_ENABLED, which governs per-conversation history. |
 | `CHAT_MAX_HISTORY_LENGTH` | `int` | `10` | Deprecated, no effect: nothing reads it; conversation history is sized by CHAT_MEMORY_MAX_TURNS |
 | `CHAT_RERANKER_MODEL` | `str` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model name |
 | `CHAT_RERANK_MAX_CANDIDATES` | `int` | `50` | Maximum number of candidates to rerank |
-| `CHAT_RESPONSE_CACHE_TTL` | `int` | `3600` | Response cache TTL in seconds |
 | `CHAT_SERVICE_CONFIG_FILE` | `str \| None` | *empty* | Path to an external YAML/JSON chat config file |
 | `CHAT_SERVICE_FACTORY` | `str \| None` | *empty* | Import path to a custom chat service factory |
 | `CHAT_STREAMING_ENABLED` | `bool` | `True` | Enable streaming responses |
@@ -243,6 +242,25 @@ Declared in `core.config.events`.
 | `EVENT_ENABLE_WILDCARDS` | `bool` | `True` |  |
 | `EVENT_HANDLER_TIMEOUT` | `float` | `30.0` | Max seconds a single event handler may run before being cancelled |
 | `EVENT_MAX_HISTORY` | `int` | `100` |  |
+
+## Guardrails configuration (`GUARDRAILS_`)
+
+Declared in `core.config.guardrails`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `GUARDRAILS_ALLOWED_TOPICS` | `str \| None` | *empty* | Free-text description of the in-scope domain. Set, the LLM input taxonomy may rule a query out_of_scope; unset, it never does |
+| `GUARDRAILS_BLOCK_CODE_EXECUTION` | `bool` | `True` | Block code-execution payloads in queries |
+| `GUARDRAILS_BLOCK_INJECTION_PATTERNS` | `bool` | `True` | Block known prompt-injection phrasings |
+| `GUARDRAILS_CUSTOM_BLOCK_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Extra case-insensitive regexes that block a query (comma-separated or a JSON array) |
+| `GUARDRAILS_FILTER_HARMFUL_CONTENT` | `bool` | `True` | Filter harmful content from responses |
+| `GUARDRAILS_FILTER_PII` | `bool` | `True` | Redact PII from responses |
+| `GUARDRAILS_INPUT_ENABLED` | `bool` | `True` | Run the input guard on every query |
+| `GUARDRAILS_MAX_INPUT_LENGTH` | `int` | `10000` | Longest query accepted, in characters |
+| `GUARDRAILS_MAX_OUTPUT_LENGTH` | `int` | `50000` | Longest response returned, in characters |
+| `GUARDRAILS_MODERATION_ENABLED` | `bool` | `True` | Allow the content-moderation layer; it still needs BASELITH_MODERATION_PROVIDER to do anything |
+| `GUARDRAILS_MODERATION_THRESHOLD` | `float` | `0.7` | Moderation score at or above which content is flagged |
+| `GUARDRAILS_OUTPUT_ENABLED` | `bool` | `True` | Run the output guard on every response |
 
 ## Security-incident reporting configuration
 
@@ -815,6 +833,7 @@ Declared in `core.config.webhooks`.
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT` | `int` | `50` | Cap registrations per tenant to bound fan-out and memory. |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS` | `float` | `1.0` | Base backoff (seconds); exponential with jitter between attempts. |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `int` | `300` | Signature freshness window enforced by verify_signature (seconds). |
+| `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `float` | `10.0` | Per-delivery HTTP timeout (seconds). |
 
 ## World-model configuration (`WORLD_MODEL_`)
@@ -867,4 +886,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-547 settings documented.
+559 settings documented.

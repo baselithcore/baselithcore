@@ -695,7 +695,9 @@ under `/api/backstage`. All endpoints require admin or job credentials.
 ## A2A Discovery
 
 Agent-to-agent discovery card (`core/a2a/router.py`), advertising this
-instance's capabilities. No authentication required.
+instance's capabilities. No authentication required. The default app mounts
+the card only, not the A2A JSON-RPC endpoint, so the card advertises
+`streaming: false`.
 
 | Method & path                       | Description                                        |
 | ----------------------------------- | -------------------------------------------------- |

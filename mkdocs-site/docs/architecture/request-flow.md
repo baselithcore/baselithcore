@@ -565,7 +565,14 @@ When `TransparencyService` is enabled the route also writes
 `/chat/stream` speaks **Server-Sent Events** (`text/event-stream`).
 `handle_chat_stream_async` runs `Orchestrator.process_stream(query, context)`
 and the route wraps it in an `SSEResponse`, which pins the media type on the
-class so the OpenAPI schema advertises it too:
+class so the OpenAPI schema advertises it too. When the intent has a stream
+handler, `process_stream` runs it under the same per-request loop controls as
+`process()` — `LoopBudget` (token/USD caps, `max_seconds` deadline), tenant
+guard, memory recall (when long-term memory is enabled), capability injection,
+output guard — and schedules the memory write only once the stream completes; a budget breach ends the stream
+with `Request aborted: <reason>`. Durable checkpointing applies to the
+non-streaming path only. See
+[Orchestration › Streaming pipeline](../core-modules/orchestration.md#streaming-pipeline).
 
 | Frame | When | Payload |
 | --- | --- | --- |

@@ -13,7 +13,7 @@ example-plugin:
 marketplace:
   enabled: true
 my-plugin:
-  enabled: false
+  enabled: true
 baselithbot:
   enabled: true
   headless: true

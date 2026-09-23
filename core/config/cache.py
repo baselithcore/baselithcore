@@ -83,7 +83,7 @@ class RedisCacheConfig(BaseSettings):
     )
 
     url: str = Field(
-        default="redis://redis:6379/1",
+        default="redis://localhost:6379/1",
         alias="CACHE_REDIS_URL",
         description="Redis connection URL",
     )

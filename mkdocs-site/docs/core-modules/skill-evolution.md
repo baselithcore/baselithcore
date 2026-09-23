@@ -7,6 +7,12 @@ declarative skills** ([Declarative Skills](skills.md)), and every new
 skill version passes a **validation gate** that can roll the skill back —
 while the accumulated knowledge persists regardless.
 
+!!! note "Library API — not wired by default"
+    Nothing in the default app builds a `SkillEvolutionService`, a
+    `WikiMaintainer` or a `SkillGate`. Construct the service
+    (`build_skill_evolution_service()`), call `start()` to subscribe it to
+    evaluation events, and drive `evolve()` yourself.
+
 ## Layers
 
 | Layer | Implementation |

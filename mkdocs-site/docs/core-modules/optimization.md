@@ -5,6 +5,14 @@ description: Automated prompt tuning and agent performance optimization
 
 The `core/optimization` module implements an active learning loop that monitors agent performance and suggests (or applies) improvements to system prompts.
 
+!!! note "Library API — not wired by default"
+    The default app never starts an `OptimizationLoop` and never calls
+    `PromptOptimizer`, `auto_tune`, `compile_prompt` or the evolutionary
+    search: the "autonomous process" below runs only after host code calls
+    `OptimizationLoop.start()`, which subscribes it to evaluation events. The
+    one piece the running app uses is `core.optimization.caching.RedisCache`,
+    behind the vector-store search cache.
+
 ## Overview
 
 The optimization system closes the gap between deployment and peak performance by analyzing user feedback and LLM metrics to identify behavioral gaps.

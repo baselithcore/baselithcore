@@ -41,7 +41,8 @@ The `core/config` architecture solves these by providing **strongly-typed config
 core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
-├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
+├── app.py                # AppConfig (server, tenancy, telemetry, CHAT_GUARDRAILS_*)
+├── guardrails.py         # GuardrailsSettings (GUARDRAILS_ prefix) — the live guards
 ├── services.py           # LLMConfig (re-exports ChatConfig, VectorStoreConfig, VisionConfig, VoiceConfig)
 ├── chat.py               # ChatConfig
 ├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
@@ -61,6 +62,7 @@ core/config/
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
 ├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+├── webhooks.py           # WebhookConfig (WEBHOOKS_ENABLED, WEBHOOK_STORE, WEBHOOK_*)
 └── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
 
@@ -68,7 +70,10 @@ The per-module env tables live with the module they configure — e.g. the
 declarative `MCP_SERVERS` registry under
 [MCP › Configuration](mcp.md#configuration) and sandbox metering
 (`SANDBOX_COST_PER_COMPUTE_SECOND`) under
-[Services › Sandbox Configuration](services.md#sandbox-configuration).
+[Services › Sandbox Configuration](services.md#sandbox-configuration), the
+`GUARDRAILS_*` input/output guard settings under
+[Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
+under [Webhooks › Configuration](webhooks.md#configuration).
 
 ---
 
@@ -292,7 +297,10 @@ CORE_DETERMINISTIC_MODE=false
 ### App Config
 
 `AppConfig` holds server, multi-tenancy, telemetry, cost-control, and
-guardrail settings. Fields use explicit aliases (no shared prefix).
+chat settings. Fields use explicit aliases (no shared prefix). Its
+`CHAT_GUARDRAILS_*` fields configure only the keyword guard of the opt-in
+`core/chat` RAG pipeline; the guards every request runs read `GUARDRAILS_*`
+(`core/config/guardrails.py`).
 
 ```python
 from core.config import get_app_config
@@ -640,7 +648,7 @@ SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8  # Min Jaccard of word n-gram fingerpri
 
 !!! note "`RedisCacheConfig.url` is redacted on every dump"
     The Redis connection URL (`RedisCacheConfig.url`, env `CACHE_REDIS_URL`,
-    default `"redis://redis:6379/1"`) can embed `user:password@` credentials.
+    default `"redis://localhost:6379/1"`, the same as `StorageConfig.cache_redis_url`) can embed `user:password@` credentials.
     It follows the same contract as the `StorageConfig` DSNs: the attribute
     stays a plain, usable `str`, while `repr()`, `model_dump()` and
     `model_dump_json()` strip the userinfo — so the credential never lands in
@@ -1008,6 +1016,16 @@ documented but bound nothing: an explicit `alias=` **replaces** the class's
 field, and the fine-tuning credentials silently shared the chat provider's key.
 Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
 field should answer to both.
+
+A second guard, `tests/unit/core/config/test_env_binding_uniqueness.py`, walks
+every `BaseSettings` class under `core/config/` and fails when a variable bound
+by several classes carries more than one concrete default (a `None` default
+defers to the class's own fallback and is not compared). Sharing a variable on
+purpose is fine — a provider API key read by several integrations — as long as
+the defaults agree. It was introduced after `CHAT_RESPONSE_CACHE_TTL` (bound by
+both `AppConfig` and `ChatConfig`, now `AppConfig` only) and `CACHE_REDIS_URL`
+(different hosts in `RedisCacheConfig` and `StorageConfig`, now both
+`redis://localhost:6379/1`) had drifted.
 
 ### Settings that bind but do nothing
 

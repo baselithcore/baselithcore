@@ -7,6 +7,14 @@ description: Intelligent task planning, decomposition, and budget-aware executio
 
 The `core/planning` module enables agents to handle complex goals by breaking them down into manageable subtasks. It supports **Budget-Aware Planning** to ensure efficient resource usage (steps, tokens, latency).
 
+!!! note "Library API — not wired by default"
+    The orchestrator does not plan on its own: no route, handler or startup
+    hook calls `TaskPlanner`, `plan_to_workflow` or `approve_plan` in the
+    default app. Call them from host or plugin code — for example, build a plan,
+    convert it with `plan_to_workflow`, and register the result with
+    `Orchestrator.register_workflow` (see
+    [Workflows](workflows.md#orchestrator-bridge-workflowflowhandler)).
+
 **Key Features**:
 
 - **Hierarchical Planning**: Decomposes high-level goals into step-by-step plans

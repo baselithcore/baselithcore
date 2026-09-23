@@ -2,6 +2,17 @@
 
 The `core/chat/` module implements the production-ready conversational pipeline, including retrieval-augmented generation (RAG), streaming, conversation history, and plugin-extensible flow handlers.
 
+!!! note "Two RAG paths — only one runs by default"
+    The `qa_docs` intent the running app answers is served by
+    `StandardRagHandler` (`core/orchestration/handlers/rag.py`) and its
+    streaming twin — see
+    [Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
+    The step pipeline described under [RAG Workflow](#rag-workflow)
+    (`RagWorkflowHandler`, the `workflow_*` modules, the `mixins/retrieval_*`
+    layers, `precheck.py`, `reranking.py` and the two answer-cache layers) is a
+    **library API**: no route, startup hook or handler registration reaches it
+    in the default app.
+
 ## Module Structure
 
 ```yaml
@@ -131,6 +142,13 @@ CHAT_LONG_TERM_MEMORY_ENABLED=true
 
 ## RAG Workflow
 
+!!! note "Library API — not wired by default"
+    Nothing in the default app registers `RagWorkflowHandler`. Opt in from host
+    code by registering it for an intent, as its docstring shows:
+    `orchestrator.register_handler("rag_full", RagWorkflowHandler(service))`.
+    Until then the steps below, the answer caches and the `CHAT_GUARDRAILS_*`
+    keyword guard (`core/chat/guardrails.py`) do not run.
+
 The RAG pipeline is implemented natively as an **Orchestrator-compatible
 `FlowHandler`** (`RagWorkflowHandler` in `core/chat/rag_workflow.py`) driving a
 typed `AgentState` through explicit steps — conditional early exits
@@ -174,8 +192,9 @@ planner.plan_backlog(state)  # mutates state in place; returns None
 
 ## Answer caching: two layers, two freshness contracts
 
-The RAG pipeline can serve a repeated question from cache at **two different
-points**, and the difference between them is not performance but *freshness*.
+The `RagWorkflowHandler` pipeline (opt-in — see [RAG Workflow](#rag-workflow);
+the default `qa_docs` handler has no answer cache) can serve a repeated
+question from cache at **two different points**, and the difference between them is not performance but *freshness*.
 Understanding which guarantee you are buying matters more than the latency
 number.
 
@@ -193,7 +212,7 @@ graph TD
     G --> W[Write BOTH cache layers]
 ```
 
-### Layer 1 — response cache (always on)
+### Layer 1 — response cache (`CHAT_RESPONSE_CACHE_ENABLED`, default `true`)
 
 `RetrievalContextMixin.check_cache` keys on
 `(normalized_query, sha256(history_text + context))`. Because the retrieved

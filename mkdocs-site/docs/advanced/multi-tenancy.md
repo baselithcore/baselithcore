@@ -319,10 +319,12 @@ itself with [`system_tenant_scope()`](#system-tenant-scope) instead.
 **2. The policies.** `migrations/versions/008_row_level_security.py` enables RLS
 and creates a `tenant_isolation` policy on every tenant-scoped table;
 `009_tool_invocations.py` adds the same policy to the table it creates, and
-`010_system_tenant_rls_exemption.py` widens the predicate across all seven. The
-current list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
-`a2a_tasks`, `agent_checkpoints`, `tool_invocations` — lives in
-`core.db.ddl.RLS_PROTECTED_TABLES`.
+`010_system_tenant_rls_exemption.py` widens the predicate across all seven.
+`011_webhooks.py` creates `webhook_endpoints` and `webhook_deliveries` with the
+widened policy (system-tenant escape included) from the start. The current
+list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
+`a2a_tasks`, `agent_checkpoints`, `tool_invocations`, `webhook_deliveries`,
+`webhook_endpoints` — lives in `core.db.ddl.RLS_PROTECTED_TABLES`.
 
 The policy is symmetric: for an ordinary tenant a row is visible, **and may be
 written**, only when its `tenant_id` equals the session's. So a cross-tenant
@@ -486,10 +488,11 @@ tenant must bind that tenant.
     -- <session> = COALESCE(current_setting('app.tenant_id', true), 'default')
     ```
 
-    It covers all **seven** protected tables (008's six plus `tool_invocations`
-    from 009 — the union is `core.db.ddl.RLS_PROTECTED_TABLES`), and
-    `downgrade()` restores 008/009's predicate byte-identically, so the chain is
-    reversible.
+    It covers the **seven** tables protected at that point (008's six plus
+    `tool_invocations` from 009), and `downgrade()` restores 008/009's
+    predicate byte-identically, so the chain is reversible. Migration 011's two
+    webhook tables are born with this predicate; `core.db.ddl.RLS_PROTECTED_TABLES`
+    is the union of all three lists.
 
     **Ordinary tenants are unchanged.** The escape compares the *session*, not
     the row: for a session bound to `acme` the second disjunct is

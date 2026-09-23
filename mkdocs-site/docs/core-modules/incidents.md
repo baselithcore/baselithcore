@@ -15,6 +15,11 @@ authority under GDPR. That remains the operator's action. What it does produce
 is the structured record that backs each filing, with the reporting clock made
 explicit, so an overdue obligation is detectable rather than silently missed.
 
+!!! note "Library API — not wired by default"
+    No route, startup hook or scheduler in the default app creates incidents or
+    checks their deadlines: the incident services are called from your own
+    code (an operator tool, an alerting hook, a plugin route).
+
 ## NIS2 reporting (Art. 23)
 
 | Milestone               | Deadline (from awareness)      |

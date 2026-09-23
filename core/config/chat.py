@@ -73,12 +73,11 @@ class ChatConfig(BaseSettings):
     # == Exact Match Caching ==
     enable_response_cache: bool = Field(
         default=True,
-        description="Deprecated, no effect: nothing reads it (the live chat path has no answer cache)",
+        description="Deprecated, no effect: nothing reads it; the chat answer cache is CHAT_RESPONSE_CACHE_ENABLED",
     )
 
-    response_cache_ttl: int = Field(
-        default=3600, description="Response cache TTL in seconds"
-    )
+    # CHAT_RESPONSE_CACHE_TTL belongs to AppConfig.chat_response_cache_ttl; a
+    # second field here bound the same variable with its own default.
 
     # External factory/plugin orchestration
     service_factory: str | None = Field(

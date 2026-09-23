@@ -157,7 +157,7 @@ without bespoke integration:
 curl http://localhost:8000/.well-known/agent-card.json
 # { "name": "Baselith-Core", "version": "0.11.x",
 #   "protocolVersion": "0.3.0", "preferredTransport": "JSONRPC",
-#   "capabilities": { "streaming": true, ... }, ... }
+#   "capabilities": { "streaming": false, ... }, ... }
 ```
 
 | Path | Role | Constant |
@@ -193,10 +193,17 @@ For the full JSON-RPC task backend (`message/send`, `tasks/get`,
 `tasks/cancel`), use `create_a2a_router(server)` instead — by default it also
 exposes the well-known endpoint.
 
+!!! note "The main app mounts discovery only"
+    `core.api.factory` includes `create_wellknown_router` and nothing else from
+    `core/a2a`: the JSON-RPC endpoint (`POST /a2a`, `message/stream`, the
+    guards) is not mounted by the default app, so its card advertises
+    `streaming: false`. Include `create_a2a_router(server)` in your own app, or
+    run `create_standalone_app`, to serve it.
+
 ### Streaming (`message/stream`)
 
-The agent card advertises `streaming=True` **and** the backend honours it:
-`create_a2a_router` serves `message/stream` as **Server-Sent Events**
+A card built with `streaming=True` is honoured when the JSON-RPC backend is
+mounted: `create_a2a_router` serves `message/stream` as **Server-Sent Events**
 (`text/event-stream`). Each A2A event is one `data:` frame; the sequence is the
 task snapshot followed by a terminal `status-update` event carrying
 `final: true`. Conformant peers read until `final: true` — previously this

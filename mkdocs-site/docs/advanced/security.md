@@ -915,7 +915,9 @@ External managers (HashiCorp Vault, cloud KMS) are registered at startup via
 ### Encryption at Rest
 
 Protect PII columns and other sensitive values with authenticated AES-256-GCM
-field encryption. Opt-in via `DATA_ENCRYPTION_KEYS`:
+field encryption. Opt-in via `DATA_ENCRYPTION_KEYS`. Within the framework only
+the Postgres webhook store uses it (endpoint secrets and headers); your own
+columns are encrypted by calling the encryptor:
 
 ```python
 from core.security import get_field_encryptor
@@ -1314,7 +1316,7 @@ Before go-live, verify every point:
 - [x] No hardcoded secrets in code
 - [x] `.env` in `.gitignore`
 - [x] Secrets manager in production (Vault, AWS SM) — `SECRETS_BACKEND=file` or a registered backend
-- [x] Encryption at rest for PII/sensitive fields (`DATA_ENCRYPTION_KEYS`)
+- [x] Encryption at rest for PII/sensitive fields (`DATA_ENCRYPTION_KEYS`; the framework encrypts only webhook secrets itself — your columns call the encryptor)
 - [x] Documented key-rotation procedure
 
 ---

@@ -26,8 +26,47 @@ graph LR
   (fans out concurrently to subscribers), and `replay_delivery()`.
 - **`WebhookDispatcher`** — signs, SSRF-checks, POSTs with bounded retries, and
   records the outcome.
-- **`WebhookStore`** — pluggable persistence (`InMemoryWebhookStore` by default;
-  swap in a durable backend behind the same Protocol).
+- **`WebhookStore`** — pluggable persistence behind one Protocol:
+  `InMemoryWebhookStore` by default, `PostgresWebhookStore` with
+  `WEBHOOK_STORE=postgres` (see [Durable store](#durable-store-webhook_storepostgres)).
+
+### Durable store (`WEBHOOK_STORE=postgres`)
+
+The in-memory store is process-local: endpoints and delivery records vanish on
+restart and are invisible to a second replica — and to the RQ worker, which is
+where the `agent.*` events are emitted — so an endpoint registered through the
+API can silently never fire in a multi-process deployment.
+`get_webhook_service()` reads `WEBHOOK_STORE` once, when it builds the global
+service: `memory` (the default) keeps the in-memory store, `postgres` selects
+`PostgresWebhookStore` (`core/webhooks/store_postgres.py`).
+
+- **Schema.** The `webhook_endpoints` and `webhook_deliveries` tables are
+  created only by `migrations/versions/011_webhooks.py` — the store runs no DDL,
+  so apply the migration first. Both tables carry the `tenant_isolation`
+  row-level-security policy, including the system-tenant escape, and are listed
+  in `core.db.ddl.RLS_PROTECTED_TABLES` (see
+  [Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)).
+- **Secrets at rest.** An endpoint's signing `secret` and its `headers` (which
+  routinely carry an `Authorization` value) are encrypted with the process field
+  encryptor (AES-256-GCM, keys from `DATA_ENCRYPTION_KEYS`), bound to the
+  endpoint id as associated data so a ciphertext cannot be moved to another
+  row. Without keys they are stored as written and the store logs
+  `webhook_secrets_stored_unencrypted` once. Reading an **encrypted** row
+  without keys raises `RuntimeError` rather than sign deliveries with the wrong
+  secret; plaintext rows written before the keys were configured keep reading
+  after they are.
+- **Retention.** `PostgresWebhookStore.purge_deliveries_before(cutoff)` deletes
+  delivery records created before `cutoff` (unix seconds) and returns the count.
+  Nothing in the app schedules it — call it from your own job.
+
+```python
+import time
+
+from core.webhooks.store_postgres import PostgresWebhookStore
+
+store = PostgresWebhookStore()
+removed = await store.purge_deliveries_before(time.time() - 30 * 86400)
+```
 
 ## Enabling & registering
 
@@ -57,7 +96,7 @@ Framework components emit through the same seam:
 | `loop.escalated` | An engineered loop that loses its campaign (see [Loop Engineering › Default escalation](loops.md#default-escalation-escalationpy)) | The resumable outcome payload |
 | `agent.completed` | The async agent-run job when a queued run finishes (see [Task Queue › Async agent runs](task-queue.md#async-agent-runs-agentasync)) | `task_id`, `answer`, `metadata` |
 | `agent.failed` | The async agent-run job when a queued run raises | `task_id`, `error` |
-| `workflow.failed` (conventional — the name is the workflow's `on_failure` field) | `WorkflowScheduler` when a scheduled run fails (see [Workflows › Scheduled workflows](workflows.md#scheduled-workflows-workflowscheduler)) | `workflow_id`, `workflow_name`, `schedule`, `status`, `error` |
+| `workflow.failed` (conventional — the name is the workflow's `on_failure` field) | `WorkflowScheduler` when a scheduled run fails — the scheduler is not started by the default app (see [Workflows › Scheduled workflows](workflows.md#scheduled-workflows-workflowscheduler)) | `workflow_id`, `workflow_name`, `schedule`, `status`, `error` |
 
 All framework emissions are best-effort: a webhook outage never fails the run
 that triggered it.
@@ -182,6 +221,7 @@ of never mixing them up.
 | Variable                              | Default | Description                                    |
 | ------------------------------------- | ------- | ---------------------------------------------- |
 | `WEBHOOKS_ENABLED`                    | `false` | Master switch for the subsystem                |
+| `WEBHOOK_STORE`                       | `memory` | `memory` (process-local) or `postgres` (needs migration 011) |
 | `WEBHOOK_TIMEOUT_SECONDS`             | `10`    | Per-delivery HTTP timeout                      |
 | `WEBHOOK_MAX_CONNECTIONS`             | `20`    | Cap on concurrent outbound delivery sockets    |
 | `WEBHOOK_MAX_ATTEMPTS`                | `4`     | Delivery attempts before dead-lettering        |

@@ -34,6 +34,7 @@ core/guardrails/
 ├── __init__.py
 ├── code_review.py      # review_code, CodeReview, CodeReviewComment (generated code)
 ├── config.py           # GuardrailsConfig (plain dataclass) + regex pattern tables
+│                       #   (env surface: core/config/guardrails.py, GUARDRAILS_*)
 ├── input_guard.py      # InputGuard, InputValidationResult (direct user input)
 ├── output_guard.py     # OutputGuard, OutputFilterResult
 ├── moderation.py       # ModerationVerdict, OpenAIModerator, get_moderator
@@ -63,9 +64,33 @@ from core.guardrails.pii import PIIEngine, PresidioEngine, get_pii_engine
 
 ## Configuration
 
-`GuardrailsConfig` is a plain `@dataclass` (no env-var loading). Construct it
-explicitly and pass it to a guard; both guards default to `GuardrailsConfig()`
-when none is given.
+`GuardrailsConfig` is a plain `@dataclass` — the value object the guards
+consume. Its environment surface is `GuardrailsSettings`
+(`core/config/guardrails.py`, prefix `GUARDRAILS_`), and
+`core.guardrails.moderation.get_guardrails_config()` builds the dataclass from
+it. That function is the one construction site for the guards the running app
+uses: the orchestrator's guard pair (`core/orchestration/guard_pipeline.py`,
+built once per process), the content-moderation layer, and `ChatService`'s
+`InputGuard`. An `InputGuard()` / `OutputGuard()` constructed **without** a
+config still uses the dataclass defaults and ignores the environment.
+
+| Variable | Default | Field |
+|----------|---------|-------|
+| `GUARDRAILS_INPUT_ENABLED` | `true` | `input_enabled` |
+| `GUARDRAILS_MAX_INPUT_LENGTH` | `10000` | `max_input_length` |
+| `GUARDRAILS_BLOCK_INJECTION_PATTERNS` | `true` | `block_injection_patterns` |
+| `GUARDRAILS_BLOCK_CODE_EXECUTION` | `true` | `block_code_execution` |
+| `GUARDRAILS_CUSTOM_BLOCK_PATTERNS` | empty | `custom_block_patterns` — case-insensitive regexes, comma-separated or a JSON array |
+| `GUARDRAILS_ALLOWED_TOPICS` | unset | `allowed_topics` — the topical rail; set, the `out_of_scope` verdict becomes reachable (see [Intent taxonomy](#intent-taxonomy-classify)) |
+| `GUARDRAILS_OUTPUT_ENABLED` | `true` | `output_enabled` |
+| `GUARDRAILS_FILTER_PII` | `true` | `filter_pii` |
+| `GUARDRAILS_FILTER_HARMFUL_CONTENT` | `true` | `filter_harmful_content` |
+| `GUARDRAILS_MAX_OUTPUT_LENGTH` | `50000` | `max_output_length` |
+| `GUARDRAILS_MODERATION_ENABLED` | `true` | `moderation_enabled` — still needs `BASELITH_MODERATION_PROVIDER` to do anything |
+| `GUARDRAILS_MODERATION_THRESHOLD` | `0.7` | `moderation_threshold` (`0.0`–`1.0`) |
+
+`allowed_url_domains` has no variable; set it in code. In code, construct the
+dataclass and pass it to a guard:
 
 ```python
 from core.guardrails import GuardrailsConfig
@@ -91,13 +116,15 @@ config = GuardrailsConfig(
 )
 ```
 
-!!! note "No `GUARDRAILS_*` environment variables"
-    `GuardrailsConfig` is not a Pydantic settings class — there is no
-    `.env` integration. Configure it in code. The two env-driven switches
-    are the moderation **provider** (`BASELITH_MODERATION_PROVIDER`, below)
-    and the PII **engine** (`BASELITH_PII_ENGINE`, see
-    [PII engine seam](#pii-engine-seam-ner-redaction)): naming a provider or
-    engine is a deployment decision, not a dataclass field.
+!!! note "`GUARDRAILS_*` versus `CHAT_GUARDRAILS_*`"
+    `CHAT_GUARDRAILS_*` (on `AppConfig`) configure only the keyword guard of
+    the opt-in `core/chat` RAG pipeline (`core/chat/guardrails.py`, used by
+    `RagWorkflowHandler` — see
+    [Chat › RAG Workflow](chat.md#rag-workflow)); they do not touch the guards
+    above. Two further env-driven switches sit outside `GuardrailsConfig`: the
+    moderation **provider** (`BASELITH_MODERATION_PROVIDER`, below) and the PII
+    **engine** (`BASELITH_PII_ENGINE`, see
+    [PII engine seam](#pii-engine-seam-ner-redaction)).
 
 ---
 
@@ -181,7 +208,7 @@ returns a richer verdict — an `InputClassification` with `intent`,
 | Intent | Meaning |
 |--------|---------|
 | `in_scope` | A legitimate request this assistant should handle |
-| `out_of_scope` | A benign request outside the assistant's domain — only ever returned when `GuardrailsConfig.allowed_topics` defines a topical rail |
+| `out_of_scope` | A benign request outside the assistant's domain — only ever returned when `GuardrailsConfig.allowed_topics` (`GUARDRAILS_ALLOWED_TOPICS`) defines a topical rail |
 | `jailbreak` | An attempt to override, extract, or bypass instructions/persona/safety rules |
 | `harmful` | A request for content or actions that could cause real-world harm |
 

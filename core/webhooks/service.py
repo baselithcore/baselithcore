@@ -186,5 +186,16 @@ def get_webhook_service() -> WebhookService:
     """Get or create the global webhook service."""
     global _webhook_service
     if _webhook_service is None:
-        _webhook_service = WebhookService()
+        _webhook_service = WebhookService(store=_configured_store())
     return _webhook_service
+
+
+def _configured_store() -> WebhookStore | None:
+    """The store ``WEBHOOK_STORE`` selects; ``None`` keeps the in-memory one."""
+    from core.config.webhooks import get_webhook_config
+
+    if get_webhook_config().store == "postgres":
+        from core.webhooks.store_postgres import PostgresWebhookStore
+
+        return PostgresWebhookStore()
+    return None

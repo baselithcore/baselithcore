@@ -13,11 +13,17 @@ The implementation is **standard-library only** — no new dependency — and is
 compatible with off-the-shelf authenticator apps (Google Authenticator, Authy,
 1Password, Microsoft Authenticator) via the `otpauth://` provisioning URI.
 
+!!! note "Library API — not wired by default"
+    No route in the default app performs a TOTP step-up, and nothing reads
+    `MFA_ENABLED` beyond the `AuthManager.mfa_enabled` property — setting it
+    alone changes nothing. Your login flow calls `AuthManager.mfa`.
+
 ## Design
 
 - **Opt-in & additive.** Disabled by default (`MFA_ENABLED=false`). Enabling it
   has no effect on existing JWT / API-key / OIDC paths — it is a step-up your
   application invokes during login, not a middleware that rewrites auth.
+
 - **Storage-agnostic.** The framework does not own a user store, so MFA is a set
   of primitives plus a config-bound `TOTPProvider`. Your application persists
   the enrollment secret (encrypted at rest) and the recovery-code hashes.
@@ -31,7 +37,7 @@ compatible with off-the-shelf authenticator apps (Google Authenticator, Authy,
 
 | Setting       | Env var       | Default        | Description                                        |
 | ------------- | ------------- | -------------- | -------------------------------------------------- |
-| `mfa_enabled` | `MFA_ENABLED` | `false`        | Master switch for the MFA step-up.                 |
+| `mfa_enabled` | `MFA_ENABLED` | `false`        | Exposed as `AuthManager.mfa_enabled` for your login flow to check; nothing in the framework acts on it. |
 | `mfa_issuer`  | `MFA_ISSUER`  | `BaselithCore` | Issuer label shown in the user's authenticator app.|
 
 ## Enrollment flow

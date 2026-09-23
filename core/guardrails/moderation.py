@@ -35,8 +35,14 @@ _MAX_MODERATION_CHARS = 8192
 
 
 def get_guardrails_config() -> GuardrailsConfig:
-    """Guardrails config used by moderation (seam for tests/overrides)."""
-    return GuardrailsConfig()
+    """The runtime guardrails config, built from the ``GUARDRAILS_*`` settings.
+
+    One construction site for the guards the orchestrator and the chat
+    service run, and for moderation (a seam for tests/overrides).
+    """
+    from core.config.guardrails import get_guardrails_settings
+
+    return GuardrailsConfig(**get_guardrails_settings().model_dump())
 
 
 @dataclass

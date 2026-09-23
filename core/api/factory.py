@@ -60,7 +60,10 @@ def _build_agent_card(app_config: AppConfig) -> AgentCard:
         name=getattr(app_config, "app_name", "Baselith-Core"),
         description="BaselithCore orchestration engine for production agentic AI.",
         version=__version__,
-        agentCapabilities=AgentCapabilities(streaming=True),
+        # The default app mounts only this discovery card, not the A2A
+        # JSON-RPC endpoint (core.a2a.router.create_a2a_router), so it must not
+        # promise message streaming a peer could not reach.
+        agentCapabilities=AgentCapabilities(streaming=False),
     )
 
 

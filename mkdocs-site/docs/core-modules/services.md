@@ -533,6 +533,10 @@ path is replayed as events — the consumer contract is identical. Deadline
 `core/services/llm/batch.py` — for offline workloads (eval replays,
 consolidation summaries, labeling) that don't need interactive latency:
 
+!!! note "Library API — not wired by default"
+    No framework code path calls `generate_batch`; it is a helper for your own
+    offline jobs.
+
 ```python
 from core.services.llm.batch import BatchPrompt, generate_batch
 
@@ -1583,6 +1587,14 @@ both (a no-op if never used).
 ## Voice Service
 
 Speech synthesis and recognition.
+
+!!! note "Library API — not wired by default"
+    No route or handler in the default app calls `VoiceService`, and the MCP
+    tool adapters in `core/services/voice/tools.py` and
+    `core/services/vision/tools.py` (`register_voice_tools(server)`,
+    `register_vision_tools(server)`) are not registered on any server the app
+    mounts. Call the service directly, or register the tools on your own
+    `MCPServer`.
 
 ### Voice Structure
 

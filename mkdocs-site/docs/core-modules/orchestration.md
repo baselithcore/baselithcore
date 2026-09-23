@@ -93,8 +93,9 @@ async for chunk in orchestrator.process_stream(
     print(chunk, end="")
 ```
 
-`process` injects a per-request `LoopBudget` at `context["loop_budget"]` and,
-when configured, a `ContractValidator` at `context["contract_validator"]` and
+`process` injects a per-request `LoopBudget` at `context["loop_budget"]` (so
+does `process_stream` when the intent has a stream handler — see
+[Streaming pipeline](#streaming-pipeline)) and, when configured, a `ContractValidator` at `context["contract_validator"]` and
 the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
 
@@ -200,11 +201,24 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 
 `process_stream` yields real, guarded output on every path:
 
-- **Streaming handler registered** — chunks from the intent's `StreamHandler`
-  pass through the streaming output guard
+- **Streaming handler registered** — `stream_with_loop_controls`
+  (`core/orchestration/mixins/_streaming.py`) runs the handler under the same
+  per-request controls as `process()`: a fresh `LoopBudget` bound at
+  `context["loop_budget"]` and as the ambient budget — so the token/USD caps
+  (charged when the LLM stream ends) and the `max_seconds` deadline of the LLM
+  streaming path apply to `/chat/stream` — plus the tenant-isolation check,
+  modality annotation, memory recall (when the orchestrator has a memory
+  manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
+  injection. Chunks pass through the streaming output guard
   (`core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
   streaming moderation) before they reach the caller; see
-  [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy).
+  [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
+  memory manager, the background memory write is scheduled only when the
+  stream **completes** — a stream that errors or is abandoned by the client
+  records nothing. A budget breach ends the stream with
+  `Request aborted: <reason>`; text still held in the output guard's holdback
+  window at that point is not flushed. Durable checkpointing stays on the
+  non-streaming path: a half-sent stream cannot be resumed by replaying it.
 - **No streaming handler** — the query runs through the full non-streaming
   `process()` pipeline (memory, budget, checkpoint, output guard) and the
   final `response` is emitted as a single chunk: a real answer delivered late
@@ -346,6 +360,10 @@ when the `Orchestrator` builds the classifier itself; see
 `core/orchestration/router.py` provides a semantic `Router` that maps a query
 to candidate agents using vector similarity. It is a separate component from
 the `Orchestrator` (there is no `FlowRouter`).
+
+!!! note "Library API — not wired by default"
+    The orchestrator dispatches by intent and never consults `Router`; nothing
+    in the default app constructs one. Use it from your own handler.
 
 ```python
 from core.orchestration.router import Router, RouteRequest
@@ -564,7 +582,9 @@ as everywhere else in the pipeline.
 
 `core/orchestration/limits.py` enforces hard caps so a runaway loop
 cannot burn budget. A fresh `LoopBudget` is instantiated per request
-by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
+by `ExecutionMixin.process` — and by `process_stream` when the intent has a
+stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed as
+`context["loop_budget"]`.
 
 | Symbol | Purpose |
 |--------|---------|
@@ -1527,6 +1547,10 @@ returns one of `AGENTIC` / `DETERMINISTIC` / `AMBIGUOUS` for a task
 description. It is conservative: when in doubt the recommendation is
 `AGENTIC`. Use it at the front of the orchestrator to skip the loop on
 clearly deterministic requests.
+
+!!! note "Library API — not wired by default"
+    The orchestrator does not call `TaskClassifier` itself; the short-circuit
+    exists only where your handler or entry point invokes it.
 
 ```python
 from core.orchestration.task_classifier import (

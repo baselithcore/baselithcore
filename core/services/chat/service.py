@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from core.guardrails.input_guard import InputGuard
+from core.guardrails.moderation import get_guardrails_config
 from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
 from core.services.chat.exceptions import ChatServiceError
@@ -271,7 +272,7 @@ class ChatService:
                 )
 
             # Validate input using Guardrails
-            guard_result = InputGuard().validate(req.query)
+            guard_result = InputGuard(get_guardrails_config()).validate(req.query)
             if not guard_result.is_valid:
                 raise ChatServiceError(
                     f"Blocked by InputGuard: {guard_result.blocked_reason or 'Potentially harmful content detected'}"
@@ -363,7 +364,7 @@ class ChatService:
         try:
             self._record_metric("chat_requests_total", route="async_sync")
             # Validate input using Guardrails
-            guard_result = InputGuard().validate(req.query)
+            guard_result = InputGuard(get_guardrails_config()).validate(req.query)
             if not guard_result.is_valid:
                 raise ChatServiceError(
                     f"Blocked by InputGuard: {guard_result.blocked_reason or 'Potentially harmful content detected'}"
