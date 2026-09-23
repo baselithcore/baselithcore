@@ -124,8 +124,10 @@ class TestCLIPlugins:
         assert delete_local_plugin("my-plugin") == 0
         mock_shutil.rmtree.assert_called_once_with(target_plugin)
 
+    # Without this the sync writes the checkout's configs/plugins.yaml.
+    @patch("core.cli.commands.plugin.local_manage._sync_config_enabled")
     @patch("core.cli.commands.plugin.local_manage.Path")
-    def test_disable_plugin_success(self, mock_path):
+    def test_disable_plugin_success(self, mock_path, mock_sync):
         from core.cli.commands.plugin import disable_local_plugin
 
         plugins_dir = MagicMock()
@@ -142,6 +144,7 @@ class TestCLIPlugins:
 
         assert disable_local_plugin("my-plugin") == 0
         plugin_file.rename.assert_called()
+        mock_sync.assert_called_once_with("my-plugin", False)
 
 
 class TestCLIConfig:
