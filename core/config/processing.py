@@ -52,6 +52,32 @@ class ProcessingConfig(BaseSettings):
         alias="DOCUMENTS_EXTENSIONS",
     )
     documents_root: str = Field(default="documents", alias="DOCUMENTS_ROOT")
+    documents_pdf_reader: Literal["auto", "pypdf", "docling"] = Field(
+        default="auto",
+        alias="DOCUMENTS_PDF_READER",
+        description=(
+            "PDF parser for filesystem ingestion. 'auto' uses Docling when the "
+            "documents runtime includes it, then falls back to pypdf/OCR; "
+            "'pypdf' keeps the legacy text reader; 'docling' requires Docling."
+        ),
+    )
+    docling_target_chunk_tokens: int = Field(
+        default=240,
+        ge=64,
+        le=2048,
+        alias="DOCLING_TARGET_CHUNK_TOKENS",
+        description="Target token budget for Docling HybridChunker embedding chunks.",
+    )
+    docling_context_tokens: int = Field(
+        default=520,
+        ge=128,
+        le=4096,
+        alias="DOCLING_CONTEXT_TOKENS",
+        description=(
+            "Approximate local context budget persisted with each Docling chunk "
+            "for RAG prompts."
+        ),
+    )
 
     # === Web Crawling ===
     web_documents_enabled: bool = Field(default=False, alias="WEB_DOCUMENTS_ENABLED")

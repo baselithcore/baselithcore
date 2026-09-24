@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from core.config import get_processing_config
 from core.nlp.spacy_utils import extract_spacy_metadata, is_spacy_available
@@ -137,6 +137,57 @@ class FilesystemDocumentSource:
         logger.warning(f"[filesystem] Unsupported extension {suffix} for {path}")
         return None
 
+    def _read_file_with_metadata_sync(
+        self, path: Path
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Read a file and return optional reader-specific metadata.
+
+        Most readers only return text. PDF ingestion can additionally provide
+        structured chunks (pages/provenance/context) that the vectorstore indexer
+        consumes directly.
+        """
+        suffix = path.suffix.lower()
+        if suffix not in self.PDF_EXTENSIONS:
+            content = self._read_file_sync(path)
+            return (content, {}) if content else None
+
+        pdf_reader = _proc_config.documents_pdf_reader
+        if pdf_reader in {"auto", "docling"}:
+            try:
+                from .docling_reader import read_pdf_with_docling
+
+                structured = read_pdf_with_docling(
+                    path,
+                    target_tokens=_proc_config.docling_target_chunk_tokens,
+                    context_tokens=_proc_config.docling_context_tokens,
+                )
+            except ImportError as exc:
+                if pdf_reader == "docling":
+                    logger.warning(
+                        "[filesystem] Docling is required but not installed: %s", exc
+                    )
+                    return None
+            except Exception as exc:
+                if pdf_reader == "docling":
+                    logger.warning(
+                        "[filesystem] Error reading PDF with Docling %s: %s", path, exc
+                    )
+                    return None
+                logger.debug(
+                    "[filesystem] Docling unavailable for %s, falling back: %s",
+                    path,
+                    exc,
+                )
+            else:
+                if structured and structured.content:
+                    metadata = dict(structured.metadata)
+                    if structured.chunks:
+                        metadata["ingestion_chunks"] = structured.chunks
+                    return structured.content, metadata
+
+        content = readers.read_pdf(path)
+        return (content, {"pdf_reader": "pypdf"}) if content else None
+
     def _derive_title(self, content: str, path: Path) -> str:
         """
         Attempt to derive a meaningful title from document content or filename.
@@ -156,7 +207,7 @@ class FilesystemDocumentSource:
                 return stripped[:120].strip()
         return path.stem.replace("_", " ").replace("-", " ").strip() or path.stem
 
-    def _document_metadata(self, path: Path, content: str) -> dict[str, str]:
+    def _document_metadata(self, path: Path, content: str) -> dict[str, Any]:
         """
         Extract metadata for the given document.
 
@@ -173,7 +224,7 @@ class FilesystemDocumentSource:
         except ValueError:
             relative_path = path.name
 
-        metadata: dict[str, str] = {
+        metadata: dict[str, Any] = {
             "origin": "filesystem",
             "source": str(path),
             "relative_path": str(relative_path).replace("\\", "/"),
@@ -220,9 +271,12 @@ class FilesystemDocumentSource:
             return None
 
         loop = asyncio.get_running_loop()
-        content = await loop.run_in_executor(None, self._read_file_sync, path)
-        if not content:
+        read_result = await loop.run_in_executor(
+            None, self._read_file_with_metadata_sync, path
+        )
+        if not read_result:
             return None
+        content, reader_metadata = read_result
 
         # Fingerprint computation can also be CPU intensive for large files
         fingerprint = await loop.run_in_executor(
@@ -234,6 +288,7 @@ class FilesystemDocumentSource:
         metadata = await loop.run_in_executor(
             None, self._document_metadata, path, content
         )
+        metadata.update(reader_metadata)
 
         return DocumentItem(
             uid=build_kb_label(path),

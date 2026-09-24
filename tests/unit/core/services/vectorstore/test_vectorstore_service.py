@@ -180,6 +180,61 @@ class TestVectorStoreService:
 
     @pytest.mark.asyncio
     @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    async def test_index_uses_reader_supplied_structured_chunks(
+        self, mock_get_embeddings
+    ):
+        """Readers can provide page/provenance-aware chunks for indexing."""
+        seen_texts = []
+
+        def _capture(_embedder, texts, _cache, **_kwargs):
+            seen_texts.extend(texts)
+            return [[0.1, 0.2] for _ in texts]
+
+        mock_config = Mock(
+            provider="qdrant",
+            collection_name="test",
+            embedding_dim=384,
+            embedding_model="test-model",
+            search_limit=10,
+        )
+        mock_provider = AsyncMock()
+        service = VectorStoreService(config=mock_config, provider=mock_provider)
+        mock_get_embeddings.side_effect = _capture
+
+        document = Document(
+            id="doc1",
+            content="full document text that should not be split",
+            metadata={
+                "filename": "sample.pdf",
+                "ingestion_chunks": [
+                    {
+                        "text": "context used in prompts",
+                        "embedding_text": "semantic input",
+                        "original_text": "original chunk text",
+                        "pages": [8],
+                        "headings": ["Timeline"],
+                        "provenance": [{"page": 8, "ref": "#/texts/1"}],
+                        "parser": "docling",
+                    }
+                ],
+            },
+        )
+
+        count = await service.index([document], embedder=Mock())
+
+        assert count == 1
+        assert seen_texts == ["File: sample.pdf\n\nsemantic input"]
+        point = mock_provider.upsert.call_args.kwargs["points"][0]
+        payload = point["payload"]
+        assert payload["text"] == "context used in prompts"
+        assert payload["original_text"] == "original chunk text"
+        assert payload["pages"] == [8]
+        assert payload["headings"] == ["Timeline"]
+        assert payload["parser"] == "docling"
+        assert "ingestion_chunks" not in payload
+
+    @pytest.mark.asyncio
+    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_upserts_durably_by_default(self, mock_get_embeddings):
         """Indexing must wait for the write, so it is visible and errors surface.
 
