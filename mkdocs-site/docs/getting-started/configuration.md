@@ -891,4 +891,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-559 settings documented.
+564 settings documented.
