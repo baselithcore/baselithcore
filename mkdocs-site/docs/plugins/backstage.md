@@ -73,6 +73,7 @@ arriving from two locations is a conflict in Backstage.
 | Manifest / runtime source | Catalog destination |
 | :--- | :--- |
 | `name` | `metadata.name` (format-sanitised; raw id kept in `baselith.ai/plugin-id`) |
+| `display_name` (optional) | `metadata.title`; absent ⇒ derived from `name` (`my_plugin` → "My Plugin") |
 | `description` | `metadata.description` |
 | `author` | `spec.owner` → `group:default/<slug>` (the Group entity is emitted too) |
 | `readiness` | `spec.lifecycle` (`stable/ga/production` → `production`, `deprecated` → `deprecated`, else `experimental`) + `baselith.ai/readiness` label |

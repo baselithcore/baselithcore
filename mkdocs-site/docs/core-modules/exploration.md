@@ -10,6 +10,11 @@ sources, identifies knowledge gaps, and generates testable hypotheses. It is
 distinct from passive search tools: it expands queries, aggregates findings, and
 scores confidence.
 
+!!! note "Library API — not wired by default"
+    Nothing in the default app constructs a `ProactiveExplorer` or a
+    `HypothesisGenerator`. Use them from host or plugin code, with the knowledge
+    sources you register.
+
 ---
 
 ## Public API

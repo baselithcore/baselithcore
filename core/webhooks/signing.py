@@ -84,7 +84,7 @@ def verify_signature(
     body: bytes,
     header: str,
     *,
-    tolerance_seconds: int = 300,
+    tolerance_seconds: int | None = None,
     now: int | None = None,
 ) -> bool:
     """Verify a webhook signature header against the body and secret.
@@ -94,7 +94,8 @@ def verify_signature(
         body: The raw request body bytes (exactly as received).
         header: The received signature header value.
         tolerance_seconds: Max allowed age of the timestamp. ``0`` disables the
-            freshness check.
+            freshness check; ``None`` (the default) uses
+            ``WEBHOOK_SIGNATURE_TOLERANCE_SECONDS`` (300 unless configured).
         now: Override the current unix time (testing).
 
     Returns:
@@ -103,6 +104,10 @@ def verify_signature(
     ts, sig = _parse_header(header)
     if ts is None or not sig:
         return False
+    if tolerance_seconds is None:
+        from core.config.webhooks import get_webhook_config
+
+        tolerance_seconds = get_webhook_config().signature_tolerance_seconds
     if tolerance_seconds > 0:
         current = now if now is not None else int(time.time())
         if abs(current - ts) > tolerance_seconds:

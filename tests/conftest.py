@@ -1,6 +1,7 @@
 import os
 import sys
 import types
+from pathlib import Path
 from typing import Iterable, Sequence
 from unittest.mock import AsyncMock, MagicMock
 
@@ -426,3 +427,41 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         new_content = badge_re.sub(new_badge, content)
         if new_content != content:
             readme_path.write_text(new_content, encoding="utf-8")
+
+
+#: Checked-in configuration a test must never rewrite. ``baselith plugin
+#: create/enable`` write ``configs/plugins.yaml`` relative to the cwd, which in
+#: a test run is the checkout: one unpatched call flipped a tracked entry, and
+#: the change was committed along with unrelated work.
+_TRACKED_CONFIGS = tuple(
+    Path(__file__).resolve().parents[1] / relative
+    for relative in ("configs/plugins.yaml", ".env.example")
+)
+#: Content *and* mtime: a writer that rewrites the same bytes still truncates
+#: the file first, and under ``pytest -n auto`` another worker's guard reads
+#: that empty window and fails an innocent test. Only the mtime shows it.
+_TRACKED_SNAPSHOT = {
+    path: (path.read_bytes(), path.stat().st_mtime_ns)
+    for path in _TRACKED_CONFIGS
+    if path.exists()
+}
+
+
+@pytest.fixture(autouse=True)
+def _tracked_configs_stay_untouched(request):
+    """Fail the test that rewrites a tracked config file, and undo the write."""
+    yield
+    for path, (original, mtime_ns) in _TRACKED_SNAPSHOT.items():
+        if path.stat().st_mtime_ns == mtime_ns and path.read_bytes() == original:
+            continue
+        if path.read_bytes() != original:
+            path.write_bytes(original)
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+        # Under xdist the file is shared by every worker, so the writer may be
+        # a test running concurrently elsewhere rather than this one.
+        pytest.fail(
+            f"{request.node.nodeid} (or a test running concurrently on another "
+            f"xdist worker) rewrote {path.name}; patch the writer or run it "
+            "under tmp_path",
+            pytrace=False,
+        )

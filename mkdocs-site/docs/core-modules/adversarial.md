@@ -7,6 +7,12 @@ description: Adversarial scenario simulation and robustness testing
 
 The Adversarial module provides built-in mechanisms for red-teaming and robustness testing. It enables developers to simulate adversarial scenarios against agents to ensure guardrails and self-correction loops are functioning correctly in production environments.
 
+!!! note "Library API — not wired by default"
+    `core/adversarial` is a testing toolkit you run yourself; the default app
+    never invokes `RedTeamAgent` or the fuzzer. The red-team regression gate
+    that runs in CI is `core/evaluation/red_team.py` (see
+    [Evaluation](evaluation.md)).
+
 ---
 
 ## Module Structure

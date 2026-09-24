@@ -387,56 +387,29 @@ class MCPToolAdapter:
 
     def register_plugin_tools(self) -> None:
         """
-        Register tools exposed by plugins.
+        Register tools exposed by the plugins initialized right now.
 
-        Iterates through the PluginRegistry and registers tools from
-        initialized plugins that implement get_mcp_tools().
+        Iterates the PluginRegistry and registers the tools of each
+        initialized plugin that implements ``get_mcp_tools()``. In the app,
+        plugins activate after the server is built, so the lifespan's runtime
+        hooks call :func:`core.mcp.plugin_tools.register_plugin_mcp_tools`
+        per activated plugin instead; this bulk form serves standalone
+        servers built once the plugins are already up.
         """
         try:
             from core.di import ServiceRegistry
+            from core.mcp.plugin_tools import register_plugin_mcp_tools
             from core.plugins import PluginRegistry
-
-            if ServiceRegistry.has(PluginRegistry):
-                registry = ServiceRegistry.get(PluginRegistry)
-                plugins = registry.get_all()
-            else:
-                # Fallback to a new instance if not registered (e.g. standalone/test)
-                registry = PluginRegistry()
-                plugins = registry.get_all()
-
-            for plugin in plugins:
-                if not plugin.is_initialized():
-                    continue
-
-                try:
-                    tools = plugin.get_mcp_tools()
-                    for tool_def in tools:
-                        name = tool_def.get("name")
-                        description = tool_def.get("description")
-                        schema = tool_def.get("input_schema")
-                        handler = tool_def.get("handler")
-
-                        if name and handler:
-                            self.server.register_tool(
-                                name=name,
-                                description=description or "",
-                                input_schema=schema or {},
-                                handler=handler,
-                                category=tool_def.get("category", "destructive"),
-                            )
-                            logger.info(
-                                "mcp_plugin_tool_registered",
-                                plugin=plugin.metadata.name,
-                                tool=name,
-                            )
-                except Exception as e:
-                    logger.error(
-                        "mcp_plugin_tool_registration_failed",
-                        plugin=plugin.metadata.name,
-                        error=str(e),
-                    )
         except ImportError:
             logger.warning("mcp_plugin_registry_unavailable")
+            return
+
+        if not ServiceRegistry.has(PluginRegistry):
+            logger.debug("mcp_plugin_registry_not_registered")
+            return
+        for plugin in ServiceRegistry.get(PluginRegistry).get_all():
+            if plugin.is_initialized():
+                register_plugin_mcp_tools(self.server, plugin)
 
     def register_all_tools(self) -> None:
         """Register all available tool categories."""

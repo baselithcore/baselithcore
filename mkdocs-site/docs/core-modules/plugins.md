@@ -342,6 +342,15 @@ loaded plugins are registered into — `PluginLoader(plugins_dir, registry,
 lifecycle_manager=None)`; the optional `lifecycle_manager` receives state
 transitions.
 
+The application runtime (`core/api/lifespan.py`) builds its loader and its
+`ResourceAnalyzer` on `PLUGIN_PLUGINS_PATH` (`PluginConfig.plugins_path`,
+default `plugins`, resolved against the working directory), the same root
+[marketplace](marketplace.md#configuration) installs write to. Before, the
+runtime hard-coded `plugins/`, so a plugin installed into a custom path was
+never loaded. The middleware pre-discovery above scans `PLUGIN_PLUGINS_PATH`
+only when the variable is set explicitly; otherwise it scans the checkout's own
+`plugins/`, independent of the working directory.
+
 ```python
 from pathlib import Path
 from core.plugins import PluginLoader, PluginRegistry
@@ -435,6 +444,14 @@ are declarative metadata: the runtime carries them, the CLI acts on them —
 build output exists, resolving `path` against the plugin directory and
 `output_dir` against `path` exactly as the installer does. See
 [Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
+
+`display_name` is an optional, presentation-only name (e.g. `CV Intake`).
+`name` keys the plugin's routes, `configs/plugins.yaml` entry, env prefix,
+stored data and grants, so it is never renamed for looks; `display_name` is
+what consoles show and what the Backstage exporter uses as the Component and
+API titles (`plugin_title()` in `core/plugins/exporters/component_entity.py`).
+Absent, the title is derived from `name` (`my_plugin` → "My Plugin"), and the
+catalog entity name stays the registry name either way.
 
 `PluginManifestModel` accepts `entrypoint` as a legacy spelling of
 `entry_point`; `from_model()` prefers the canonical key and falls back to the
@@ -892,24 +909,34 @@ only on the `PluginMetrics` dataclass itself, not in the dict.
 
 ## Configuration
 
-Plugins are configured via `configs/plugins.yaml`.
+Plugins are configured via `configs/plugins.yaml` (or the file
+`PLUGIN_CONFIG_PATH` names), a flat mapping keyed by plugin name:
 
 ```yaml title="configs/plugins.yaml"
-plugins:
-  weather-agent:
-    enabled: true
-    config:
-      api_key: "${WEATHER_API_KEY}"
-      cache_ttl: 300
+api_routers:
+  enabled: true
 
-  analytics:
-    enabled: true
-    config:
-      batch_size: 100
+weather-agent:
+  cache_ttl: 300     # no `enabled` key: counts as enabled
 
-  legacy-plugin:
-    enabled: false  # Disabled
+legacy-plugin:
+  enabled: false     # Disabled
 ```
+
+One reader and one rule (`core.plugins.config_file.read_plugin_configs` /
+`plugin_enabled`) decide which plugins run, for discovery, startup
+auto-activation and `baselith plugin sync` alike:
+
+| Config file                                  | Plugin runs when                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| Missing, empty, unreadable or not a mapping  | Always — every discovered plugin                                  |
+| Non-empty                                    | It has an entry (name, directory name or `-`/`_` variant) that does not say `enabled: false` |
+
+Because a non-empty file excludes every plugin it does not list, the shipped file
+carries an `api_routers` entry: without it the routers that plugin adds at
+startup (`/prompts`, `/chat/ws`, async agent runs, and the feature-gated
+webhooks, privacy, compliance, approvals and runs APIs) are never mounted. Values are literal — there is no `${VAR}` interpolation;
+secrets go in the plugin-local `.env` described below.
 
 ### Accessing Configuration
 

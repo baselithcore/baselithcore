@@ -7,6 +7,22 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.39.0](https://github.com/baselithcore/baselithcore/compare/v0.38.2...v0.39.0) (2026-09-23)
+
+
+### Bug Fixes
+
+* **cli:** count real plugins not gitignored residue in info/doctor ([e2e95bc](https://github.com/baselithcore/baselithcore/commit/e2e95bccbad1a3f5d3a24b5820a1de201fa8ca6f))
+* **core:** stop the output guard, eval metrics, scaffold and search cache misleading ([2ba1f07](https://github.com/baselithcore/baselithcore/commit/2ba1f0712b060fc1ccf24b1103f242005285f549))
+* **tests:** stop a CLI test rewriting the tracked plugins.yaml ([1cfe3f4](https://github.com/baselithcore/baselithcore/commit/1cfe3f4279661591705fcbce86bc8debd5c062b4))
+
+
+### Features
+
+* **core:** put streaming under the loop's controls, durable webhooks, env guardrails ([c26948e](https://github.com/baselithcore/baselithcore/commit/c26948ef6021f8a21e35f30e6050429a418955b5))
+* **core:** wire what core declared but never ran ([6962f33](https://github.com/baselithcore/baselithcore/commit/6962f3339885a48d78b0dcfa3bb774856db2d834))
+* **plugins:** optional manifest display_name for consoles and the catalog ([17d27da](https://github.com/baselithcore/baselithcore/commit/17d27da29233223a514af7db12868de97f68f7b1))
+
 ## [0.37.1](https://github.com/baselithcore/baselithcore/compare/v0.37.0...v0.37.1) (2026-09-21)
 
 

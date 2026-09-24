@@ -695,7 +695,9 @@ under `/api/backstage`. All endpoints require admin or job credentials.
 ## A2A Discovery
 
 Agent-to-agent discovery card (`core/a2a/router.py`), advertising this
-instance's capabilities. No authentication required.
+instance's capabilities. No authentication required. The default app mounts
+the card only, not the A2A JSON-RPC endpoint, so the card advertises
+`streaming: false`.
 
 | Method & path                       | Description                                        |
 | ----------------------------------- | -------------------------------------------------- |
@@ -768,6 +770,13 @@ registered at lifespan, so `baselith docs generate` misses them;
 `scripts/export_openapi.py` mounts them explicitly and the committed
 `sdk/openapi.json` therefore includes them (see
 [Client SDKs › OpenAPI schema](sdk.md#openapi-schema)).
+
+These routes exist only while the `api_routers` plugin is active. A non-empty
+`configs/plugins.yaml` loads only the plugins it lists, so the shipped file
+carries an `api_routers` entry (`enabled: true`); a custom config file that
+omits it leaves these routers unmounted (the table rows marked "mounted by
+`create_app()`" are unaffected). See
+[Plugin Activation at Startup](../advanced/lazy-loading.md#plugin-activation-at-startup).
 
 ### Feature-gated routers
 

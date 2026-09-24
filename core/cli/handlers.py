@@ -66,6 +66,17 @@ UNSCOPED_COMMANDS: frozenset[str] = frozenset(
 UNSCOPED_SUBCOMMANDS: frozenset[tuple[str, str]] = frozenset({("queue", "worker")})
 
 
+def _wants_json(args: argparse.Namespace) -> bool:
+    """Whether the caller asked for JSON, by ``--json`` or ``--format json``.
+
+    Every subcommand accepts the global ``--format``; a handler that read only
+    its local ``--json`` silently printed text for ``--format json``.
+    """
+    return bool(getattr(args, "json", False)) or (
+        getattr(args, "format", "text") == "json"
+    )
+
+
 def _subcommand(command: str, args: argparse.Namespace) -> str | None:
     """The parsed subcommand of *command*, if it has one.
 
@@ -184,7 +195,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         start_services=getattr(args, "start_services", False),
         migrate=getattr(args, "migrate", False),
         wait_timeout=getattr(args, "wait_timeout", 60),
-        json_output=getattr(args, "json", False) or args.format == "json",
+        json_output=_wants_json(args),
     )
 
 
@@ -205,7 +216,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     if command == "env":
         return ensure_env_profile(
             getattr(args, "profile", "dev"),
-            json_output=getattr(args, "json", False) or args.format == "json",
+            json_output=_wants_json(args),
         )
     if command == "check-env":
         return check_env()
@@ -216,7 +227,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     """Execute the 'verify' command to check system integrity."""
     from core.cli.commands.verify import run_verify
 
-    return run_verify(json_output=getattr(args, "json", False))
+    return run_verify(json_output=_wants_json(args))
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -255,7 +266,7 @@ def cmd_db(args: argparse.Namespace) -> int:
 
     return run_db(
         getattr(args, "db_command", "status") or "status",
-        json_output=getattr(args, "json", False) or args.format == "json",
+        json_output=_wants_json(args),
     )
 
 
@@ -288,7 +299,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from core.cli.commands.doctor import run_doctor
 
     return run_doctor(
-        json_output=getattr(args, "json", False),
+        json_output=_wants_json(args),
         fix=getattr(args, "fix", False),
         include_plugins=not getattr(args, "core_only", False),
     )
@@ -320,7 +331,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     """Execute the 'info' command to display project and system details."""
     from core.cli.commands.info import run_info
 
-    return run_info(json_output=getattr(args, "json", False))
+    return run_info(json_output=_wants_json(args))
 
 
 # NOT the dispatch table. ``core.cli.__main__`` builds its own map, which is

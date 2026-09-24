@@ -129,6 +129,12 @@ loop = EngineeredLoop(act=act, verify=verify, escalate=page_oncall,
 
 ## Production wiring (`flow_handler.py`)
 
+!!! note "Library API — not wired by default"
+    Nothing in the default app registers a `LoopFlowHandler`; the intent below
+    exists only once your host code registers it. (`StallGuard` is also used by
+    the ReAct loop in `core/reasoning/react.py` when it is given a
+    `stall_threshold`.)
+
 The bare primitive above has no path to the orchestrator's machinery.
 `LoopFlowHandler` closes that gap — mirroring
 [`WorkflowFlowHandler`](workflows.md#orchestrator-bridge-workflowflowhandler),

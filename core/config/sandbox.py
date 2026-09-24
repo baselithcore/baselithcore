@@ -34,9 +34,16 @@ class SandboxConfig(BaseSettings):
         "execution. 0 (default) keeps cost_usd at 0 while compute_seconds "
         "is still recorded.",
     )
-    enable_network: bool = Field(default=False, description="Enable network in sandbox")
+    enable_network: bool = Field(
+        default=False,
+        description="Give Docker sandbox containers the default bridge network "
+        "(egress for untrusted code). Off: network_mode none.",
+    )
     docker_socket: str = Field(
-        default="/var/run/docker.sock", description="Docker socket path"
+        default="/var/run/docker.sock",
+        description="Docker daemon socket for the sandbox client. Used only when "
+        "set explicitly and DOCKER_HOST is unset; otherwise Docker's own client "
+        "environment decides.",
     )
     sbx_path: str = Field(default="sbx", description="Path to the sbx CLI binary")
     sbx_profile: str | None = Field(

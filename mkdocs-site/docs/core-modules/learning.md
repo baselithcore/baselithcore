@@ -11,6 +11,14 @@ periodically optimize their action-selection policy. A separate
 `EvolutionService` reacts to evaluation events to refine memory and trigger
 automatic fine-tuning.
 
+!!! note "Library API — not wired by default"
+    `ContinuousLearner`, `PersistentLearner` and `AutoFineTuningService` are
+    not constructed by the default app. The orchestrator accepts a
+    `feedback_collector=`, but the one the chat service builds is created
+    without it. `EvolutionService` is started at boot only when a loaded plugin
+    lists `evolution` in its manifest's `required_resources`; otherwise
+    construct and `start()` it yourself as shown below.
+
 ---
 
 ## Module Structure

@@ -44,6 +44,20 @@ The **agentic patterns** are organized into 7 functional categories:
 | 21  | **Task Queue**         | Infrastructure | `core/task_queue/`  | Distributed queues for async jobs         |
 | 22  | **Evaluation**         | Infrastructure | `core/services/evaluation/` | LLM response quality evaluation       |
 
+!!! note "In the running app versus in the library"
+    A pattern having a module does not mean the default app runs it. These are
+    **library APIs** — no route, handler registration, startup hook or
+    scheduler reaches them until host or plugin code calls them:
+    `core/reflection/`, `core/planning/`, `core/world_model/` (except the
+    signed-mandate and payment chain the `payments` plugin builds on),
+    `core/exploration/`, `core/adversarial/`, `core/meta/`, `core/human/`
+    (the orchestrator the chat service builds has no `HumanIntervention`;
+    approvals go through the durable `/approvals` path), and `core/learning/`
+    (`EvolutionService` starts at boot only when a plugin lists `evolution` in
+    `required_resources`). In memory, the chat loop uses `AgentMemory` — not
+    `HierarchicalMemory`, the scratchpad or a graph provider. Each module page
+    carries the same note with its opt-in.
+
 ### Distribution by Category
 
 - **Control**: 3 patterns (Reflection, Guardrails, Goals)
@@ -141,8 +155,10 @@ safe_output = output.filtered_output
 
 !!! note "Applied in the loop — streaming included"
     `Orchestrator.process` runs both guards automatically
-    (`core/orchestration/guard_pipeline.py`), and `process_stream` filters
-    streamed chunks through `guard_stream`
+    (`core/orchestration/guard_pipeline.py`), and `process_stream` — which
+    binds the same per-request `LoopBudget`, tenant guard and memory recall
+    around a stream handler (`core/orchestration/mixins/_streaming.py`) —
+    filters streamed chunks through `guard_stream`
     (`core/orchestration/stream_guard.py`) with a holdback window, so
     redaction patterns split across chunk boundaries are still caught. The
     inbound gate (`guard_input_async`) also layers **content moderation**
@@ -730,8 +746,10 @@ if result.success and result.job:
 
 !!! note "Triggering"
     Automatic, feedback-driven triggering of fine-tuning jobs is handled by
-    `AutoFineTuningService` in `core/learning/` (wired to evaluation events),
-    which delegates the actual run to `FineTuningPipeline`.
+    `AutoFineTuningService` in `core/learning/` (wired to evaluation events
+    once an `EvolutionService` is started — not by default, see the note under
+    [Pattern Overview](#pattern-overview)), which delegates the actual run to
+    `FineTuningPipeline`.
 
 ---
 
@@ -945,15 +963,15 @@ live under `core/` and stay out of the way of plugin code.
 | Neutral message history (tool-call correlation, `is_error`, verbatim thinking, stable cache prefix) | `core/services/llm/messages.py`, `message_runtime.py` | `Message`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock`, `to_anthropic`, `to_openai`, `message_from_result`, `render_as_prompt`, `MessageCapableProvider` | [Neutral Message API](../core-modules/messages.md) |
 | One message round trip shared by both agent loops (typed `Agent` **and** the orchestrated ReAct loop; degrades to a rendered transcript + `CONVERGENCE_NUDGE`) | `core/services/llm/message_transport.py` | `generate_over_messages`, `service_supports_messages` | [Services](../core-modules/services.md#one-round-trip-for-a-message-history) |
 | ReAct native loop over an append-only message history (compaction that shortens block contents instead of dropping a turn) | `core/reasoning/react_native.py`, `core/reasoning/history.py`, `core/reasoning/react_tools.py` | `run_native_loop`, `compact_message_history`, `observation_is_error` | [Reasoning](../core-modules/reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) |
-| Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
+| Agentic-vs-deterministic router (library API — not wired by default) | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
 | Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
 | Cross-process tool idempotency (process-wide ledger chosen by `ORCHESTRATOR_TOOL_LEDGER`: `auto`/`postgres`/`memory`/`off`; a ledger error fails open, the call runs unrecorded) | `core/orchestration/idempotency.py`, `idempotency_postgres.py`, `ledger_factory.py`, `core/reasoning/react_tool_gate.py` | `derive_idempotency_key`, `ToolLedger`, `InMemoryToolLedger`, `PostgresToolLedger`, `get_tool_ledger`, `reset_tool_ledger`, `DurableLedgerUnavailable`, `claim_ledger_entry` | [Orchestration](../core-modules/orchestration.md#choosing-the-ledger-orchestrator_tool_ledger) |
 | Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
 | Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
 | Crash-recovery sweep (one per fleet, cross-replica locked) + stale-run sweep (heartbeat-aware, `awaiting_approval` never swept) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `sweep_stale_runs`, `StaleSweepReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md#stale-run-sweep-sweep_stale_runs) |
-| Plan-approve gate (rendered plan → human sign-off before execution; fail closed) | `core/planning/approval.py` | `approve_plan`, `render_plan_for_review`, `PlanRejectedError` | [Planning](../core-modules/planning.md#plan-approve-gate) |
+| Plan-approve gate (rendered plan → human sign-off before execution; fail closed) (library API — not wired by default) | `core/planning/approval.py` | `approve_plan`, `render_plan_for_review`, `PlanRejectedError` | [Planning](../core-modules/planning.md#plan-approve-gate) |
 | Async agent runs on the task queue (202 + status poll, terminal `agent.completed`/`agent.failed` webhooks) | `core/task_queue/jobs/agent_run.py`, `plugins/api_routers/async_runs.py` | `run_agent_task`, `POST /agent/async`, `GET /agent/status/{task_id}` | [Task Queue](../core-modules/task-queue.md#async-agent-runs-agentasync) |
-| Cron + scheduled workflows (stdlib Vixie-semantics parser; deterministic in-process scheduler, `on_failure` webhook) | `core/task_queue/cron.py`, `core/workflows/schedule.py` | `CronExpression`, `WorkflowScheduler`, `WorkflowDefinition.schedule` / `.on_failure` | [Workflow Engine](../core-modules/workflows.md#scheduled-workflows-workflowscheduler) |
+| Cron + scheduled workflows (stdlib Vixie-semantics parser; deterministic in-process scheduler, `on_failure` webhook) (the scheduler is a library API — not started by default) | `core/task_queue/cron.py`, `core/workflows/schedule.py` | `CronExpression`, `WorkflowScheduler`, `WorkflowDefinition.schedule` / `.on_failure` | [Workflow Engine](../core-modules/workflows.md#scheduled-workflows-workflowscheduler) |
 | Hierarchical crew + coordination tax (manager brief → review → one bounded revision; per-task latency/cost) | `core/agent/crew.py`, `core/agent/crew_hierarchical.py` | `Crew(process="hierarchical", manager=...)`, `TaskResult.latency_ms` / `.cost_usd` / `.review`, `CrewResult.breakdown` | [Agent API](../core-modules/agent.md#hierarchical-process-manager-led) |
 | Group chat (shared transcript, pluggable speaker selection, bounded by rounds/predicate/`LoopBudget`) | `core/agent/group_chat.py` | `GroupChat`, `RoundRobinSelector`, `LLMManagerSelector`, `CapabilitySelector`, `GroupChatResult.terminated_by` | [Agent API](../core-modules/agent.md#group-chat-groupchat-speaker-selection) |
 | Document-aware splitting + hierarchical (small-to-big) chunking | `core/services/vectorstore/splitters.py`, `core/services/vectorstore/chunking_hierarchical.py` | `select_splitter`, `MarkdownHeaderSplitter`, `PythonCodeSplitter`, `HierarchicalChunker`, `expand_to_parents` | [Services](../core-modules/services.md#hierarchical-chunking-small-to-big-retrieval) |
@@ -963,24 +981,26 @@ live under `core/` and stay out of the way of plugin code.
 | Sandbox compute metering + streaming execution (budget-charged; timeout kills the container) | `core/services/sandbox/service.py`, `core/services/sandbox/streaming.py` | `ExecutionResult.compute_seconds` / `.cost_usd`, `execute_code_async(budget=)`, `execute_code_stream`, `SANDBOX_COST_PER_COMPUTE_SECOND` | [Services](../core-modules/services.md#compute-metering-budget-charging) |
 | Skill ergonomics: catalog BM25 pre-filter + sandboxed bundled scripts | `core/plugins/skills_service.py`, `core/plugins/skill_scripts.py` | `render_catalog(query=)`, `run_skill_script`, `make_run_skill_script_tool`, `SkillScriptResult` | [Declarative Skills](../core-modules/skills.md#bundled-files-scripts-references-assets) |
 | Declarative external MCP server registry (allowlist fail-closed, per-server autonomy category) | `core/config/mcp.py`, `core/mcp/declarative.py` | `MCPServerSpec`, `MCPConfig.mcp_servers`, `mount_configured_servers`, `make_mcp_tool_fns` | [MCP Integration](../core-modules/mcp.md#declarative-external-server-registry-mcp_servers) |
+| Plugin tools on the HTTP-mounted MCP server (registered per activation, withdrawn on disable, calls refused once the plugin is down; undeclared category = `destructive`) | `core/mcp/plugin_tools.py`, `core/api/_plugin_runtime.py` | `register_plugin_mcp_tools`, `unregister_plugin_mcp_tools`, `PluginToolUnavailableError`, `MCPServer.unregister_tool` | [MCP Integration](../core-modules/mcp.md#plugin-tools) |
+| Conversation history on `/chat` and `/chat/stream` (loaded before orchestration as `history_text`, recorded after a real answer, keyed per user; the default `qa_docs` prompt opens with `Conversation so far:`) | `core/services/chat/utils/conversation.py`, `core/orchestration/handlers/rag.py` | `load_history`, `record_turn`, `recording_stream`, `conversation_key`, `build_rag_user_prompt(..., history=)` | [Chat & RAG](../core-modules/chat.md#conversation-history) |
 | Run promotion into the eval corpus (scrubbed, fail-closed) + fine-tuning scrub gate | `core/evaluation/promotion.py`, `scripts/promote_run.py`, `core/learning/auto_finetuning.py` | `promote_run`, `scrub_text`, `PromotionError`, `samples_dropped_poisoned` | [Evaluation](../core-modules/evaluation.md#promoting-production-runs-promotionpy) |
-| Distillation → retrieval (strategy patterns as few-shot examples; loop priming) | `core/skill_evolution/distillation.py`, `core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
+| Distillation → retrieval (strategy patterns as few-shot examples; loop priming) (library API — not wired by default) | `core/skill_evolution/distillation.py`, `core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
 | Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
 | Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
-| Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
+| Section-bounded scratchpad (library API — not wired by default) | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
 | Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
 | Trajectory eval + CI runner (incl. `reference_fact` groundedness, multi-model bake-off) | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py`, `core/evaluation/bake_off.py` | `TrajectoryEvaluator`, `RegressionReport`, `run_bake_off`, `BakeOffResult` | [Evaluation](../core-modules/evaluation.md) |
 | Engineered loop (verifier-owned iteration) | `core/loops/engineered.py`, `stall.py`, `lessons.py`, `fingerprint.py` | `EngineeredLoop`, `StallGuard`, `LessonLog`, `failure_fingerprint` | [Loop Engineering](../core-modules/loops.md) |
-| Loop-as-handler bridge (budget-bound, checkpointed outcome, default escalation, wiki-primed first attempt) | `core/loops/flow_handler.py`, `escalation.py`, `rubric.py`, `goal.py`, `priming.py` | `LoopFlowHandler(pattern_store=...)`, `build_default_escalation`, `rubric_verifier`, `harden_goal`, `prime_lessons` | [Loop Engineering](../core-modules/loops.md#production-wiring-flow_handlerpy) |
+| Loop-as-handler bridge (budget-bound, checkpointed outcome, default escalation, wiki-primed first attempt) (library API — not wired by default) | `core/loops/flow_handler.py`, `escalation.py`, `rubric.py`, `goal.py`, `priming.py` | `LoopFlowHandler(pattern_store=...)`, `build_default_escalation`, `rubric_verifier`, `harden_goal`, `prime_lessons` | [Loop Engineering](../core-modules/loops.md#production-wiring-flow_handlerpy) |
 | Handoff cycle guard (no revisit, hop-capped) | `core/swarm/types.py`, `core/config/swarm.py` | `HandoffCycleGuard`, `Handoff.hop_count` / `.visited`, `SwarmConfig.max_handoff_hops` | [Swarm Intelligence](../core-modules/swarm.md) |
-| Governed self-modification (eval gates + `self_modify` approval + audit) | `core/skill_evolution/gating.py`, `core/skill_evolution/types.py`, `core/optimization/tune_gate.py` | `SkillGate`, `FitnessVector`, `review_candidate`, `TuneEvaluator` | [Skill Evolution](../core-modules/skill-evolution.md#governed-self-modification) |
-| Evolutionary search (per-instance Pareto archive, diff-bounded reflective mutation, holdout anti-gaming audit) | `core/optimization/evolution/` | `EvolutionEngine`, `CandidateArchive`, `ReflectiveMutator`, `EvolutionBudget`, `EvolutionReport.holdout_regressed` | [Optimization](../core-modules/optimization.md#evolutionary-search-coreoptimizationevolution) |
-| DSPy-lite prompt compilation (bootstrap few-shot demos, eval-gated candidate landing) | `core/optimization/compile.py` | `compile_prompt`, `CompiledPrompt`, `DEMOS_HEADER` | [Optimization](../core-modules/optimization.md#dspy-lite-prompt-compilation-compile_prompt) |
+| Governed self-modification (eval gates + `self_modify` approval + audit) (library API — not wired by default) | `core/skill_evolution/gating.py`, `core/skill_evolution/types.py`, `core/optimization/tune_gate.py` | `SkillGate`, `FitnessVector`, `review_candidate`, `TuneEvaluator` | [Skill Evolution](../core-modules/skill-evolution.md#governed-self-modification) |
+| Evolutionary search (per-instance Pareto archive, diff-bounded reflective mutation, holdout anti-gaming audit) (library API — not wired by default) | `core/optimization/evolution/` | `EvolutionEngine`, `CandidateArchive`, `ReflectiveMutator`, `EvolutionBudget`, `EvolutionReport.holdout_regressed` | [Optimization](../core-modules/optimization.md#evolutionary-search-coreoptimizationevolution) |
+| DSPy-lite prompt compilation (bootstrap few-shot demos, eval-gated candidate landing) (library API — not wired by default) | `core/optimization/compile.py` | `compile_prompt`, `CompiledPrompt`, `DEMOS_HEADER` | [Optimization](../core-modules/optimization.md#dspy-lite-prompt-compilation-compile_prompt) |
 | Multi-judge consensus | `core/evaluation/consensus.py` | `ConsensusEvaluator` | [Evaluation](../core-modules/evaluation.md) |
 | Red-team regression gate | `core/evaluation/red_team.py`, `evals/red_team/` | `load_red_team_cases`, `run_red_team_suite` | [Evaluation](../core-modules/evaluation.md) |
 | Outcome-fed model routing | `core/models/routing_stats.py` | `RoutingScoreboard`, `LearnedModelRouter` | [Domain Models](../core-modules/models.md) |
-| Generator-Challenger debate | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
+| Generator-Challenger debate (library API — not wired by default) | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
 | Few-shot example library | `core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
 | LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost`, `qualified_model_id` | [Chat & RAG](../core-modules/chat.md) |
 | LLM failover posture (what a chain does and does not absorb; startup validation) | `core/services/llm/_fallback_support.py`, `preflight.py` | `fatal_exception_types`, `record_fallback_served`, `run_llm_preflight` | [Services](../core-modules/services.md) |

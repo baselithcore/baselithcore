@@ -18,6 +18,13 @@ behaves exactly as before (`get_field_encryptor()` returns `None`, secrets
 resolve from the process environment). The SSRF guard is **on by default**
 everywhere it is wired in — see below.
 
+Field encryption is a primitive, not a blanket policy: the only framework
+component that calls `get_field_encryptor()` is the Postgres webhook store,
+which encrypts endpoint secrets and headers (see
+[Webhooks › Durable store](webhooks.md#durable-store-webhook_storepostgres)).
+Every other table the framework writes is stored as written; encrypt your own
+columns with the encryptor as shown below.
+
 ---
 
 ## Encryption at rest

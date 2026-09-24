@@ -16,6 +16,7 @@ from core.chat.dependencies import (
     ChatDependencyConfig,
     create_default_dependencies,
 )
+from core.config.chat import get_chat_config
 from core.observability.logging import get_logger
 from core.services.chat import ChatService as CoreChatService
 from core.services.chat import ChatServiceConfig
@@ -70,6 +71,7 @@ class ChatService(CoreChatService):
             reranker_model=dep_cfg.reranker_model,
             history_enabled=dep_cfg.history_enabled,
             history_max_turns=dep_cfg.history_max_turns,
+            memory_enabled=get_chat_config().long_term_memory_enabled,
         )
 
         # Initialize core service with injected dependencies

@@ -51,12 +51,25 @@ class VectorStoreConfig(BaseSettings):
     # == Embedding Settings ==
     # Model used to convert text into numerical vectors.
     embedding_model: str = Field(
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default="BAAI/bge-m3",
         description="Embedding model name",
     )
 
     # Dimension size of the vectors produced by the model.
-    embedding_dim: int = Field(default=384, description="Embedding dimension")
+    embedding_dim: int = Field(default=1024, description="Embedding dimension")
+    embedding_fallback_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description=(
+            "Operator fallback embedding model. Use it together with "
+            "VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; "
+            "switching models requires a matching vector dimension and a fresh "
+            "or migrated collection."
+        ),
+    )
+    embedding_fallback_dim: int = Field(
+        default=384,
+        description="Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL.",
+    )
 
     # Embeddings are deterministic per model, so a long TTL is safe; the TTL
     # exists to bound Redis memory, not to refresh values.
@@ -70,6 +83,19 @@ class VectorStoreConfig(BaseSettings):
     # Number of documents to return by default in vector searches.
     search_limit: int = Field(
         default=10, description="Default number of search results"
+    )
+    # Both were read with getattr by the search orchestrator and the service,
+    # but never declared — and this model ignores unknown keys — so setting
+    # either variable did nothing and the cache could not be turned off.
+    search_cache_enabled: bool = Field(
+        default=True,
+        description="Cache vector search results in Redis (keyed per tenant, "
+        "vector, filter and re-rank question).",
+    )
+    search_cache_ttl: int = Field(
+        default=300,
+        ge=1,
+        description="Lifetime of a cached search result, in seconds.",
     )
 
     # Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk.

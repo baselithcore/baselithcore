@@ -13,7 +13,7 @@ class AuctionConfig(BaseModel):
     """Configuration for task auctions."""
 
     bidding_timeout: float = Field(
-        default=5.0, description="Timeout for bidding in seconds"
+        default=5.0, description="Deprecated, no effect: nothing reads it"
     )
     min_bids: int = Field(default=1, description="Minimum number of bids required")
     max_bids: int = Field(default=10, description="Maximum number of bids allowed")

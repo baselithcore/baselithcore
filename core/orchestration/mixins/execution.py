@@ -31,6 +31,9 @@ from core.orchestration.mixins._failure_paths import (
 )
 from core.orchestration.run_events import EventType, publish_run_event
 
+#: What a stream says when its handler fails mid-answer.
+STREAM_ERROR_MESSAGE = "[ERROR] The answer could not be completed. Please retry."
+
 try:
     from core.events import EventNames, get_event_bus
 
@@ -407,7 +410,7 @@ class ExecutionMixin:
             Response tokens/chunks
         """
         from core.orchestration.guard_pipeline import guard_input_async
-        from core.orchestration.stream_guard import guard_stream, moderate_stream
+        from core.orchestration.mixins._streaming import stream_with_loop_controls
 
         # Input guardrails (regex + optional content moderation) run before
         # any classification/LLM spend, same as the non-streaming path.
@@ -441,16 +444,19 @@ class ExecutionMixin:
                 yield response
             return
 
-        # Execute streaming handler — bound to its owning plugin (LLM policy).
-        # Chunks pass through the streaming output guard (redaction across
-        # chunk boundaries via a holdback window) and then the opt-in
-        # streaming moderation layer (see core.orchestration.stream_guard).
+        # Execute streaming handler under the same per-request controls as
+        # process() — budget, tenant guard, memory recall and write — bound to
+        # its owning plugin, with chunks through the streaming output guard and
+        # the opt-in moderation layer (core.orchestration.mixins._streaming).
         try:
-            with dispatch_attribution(self, intent):
-                async for chunk in moderate_stream(
-                    guard_stream(handler.handle(query, context))
-                ):
-                    yield chunk
+            async for chunk in stream_with_loop_controls(
+                self, query, context, intent, handler
+            ):
+                yield chunk
         except Exception as e:
-            logger.error(f"Stream handler error for intent {intent}: {e}")
-            yield f"[ERROR] {e!s}"
+            # The client gets a generic line: the exception text can carry
+            # provider URLs, SQL or file paths, and the log already has it.
+            logger.error(
+                f"Stream handler error for intent {intent}: {e}", exc_info=True
+            )
+            yield STREAM_ERROR_MESSAGE

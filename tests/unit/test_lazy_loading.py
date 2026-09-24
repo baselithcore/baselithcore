@@ -337,3 +337,41 @@ class TestLazyLoadingIntegration:
         assert registry.is_initialized("postgres")
         assert not registry.is_initialized("llm")
         assert not registry.is_initialized("graph")
+
+
+class TestEvolutionFactory:
+    """The evolution factory resolves its memory dependency by resource name."""
+
+    def setup_method(self):
+        reset_lazy_registry()
+
+    def teardown_method(self):
+        reset_lazy_registry()
+
+    @pytest.mark.asyncio
+    async def test_evolution_gets_memory_by_resource_name(self, monkeypatch):
+        # Regression: it asked the registry for the ``AgentMemory`` type while
+        # factories are keyed by name, so every boot raised KeyError.
+        import core.learning.evolution as evolution_module
+        from core.bootstrap.lazy_init import initialize_evolution
+
+        sentinel_memory = object()
+        started: list[object] = []
+
+        class _FakeEvolution:
+            def __init__(self, memory_manager):
+                self.memory_manager = memory_manager
+
+            def start(self):
+                started.append(self.memory_manager)
+
+        async def _memory_factory():
+            return sentinel_memory
+
+        monkeypatch.setattr(evolution_module, "EvolutionService", _FakeEvolution)
+        get_lazy_registry().register_factory("memory", _memory_factory)
+
+        service = await initialize_evolution()
+
+        assert service.memory_manager is sentinel_memory
+        assert started == [sentinel_memory]

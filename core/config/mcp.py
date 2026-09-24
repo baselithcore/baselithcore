@@ -91,10 +91,15 @@ class MCPConfig(BaseSettings):
 
     # === Transport Settings ===
     mcp_stdio_transport_enabled: bool = Field(
-        default=True, alias="MCP_STDIO_TRANSPORT_ENABLED"
+        default=True,
+        alias="MCP_STDIO_TRANSPORT_ENABLED",
+        description="Deprecated, no effect: nothing reads it; stdio runs when the server is launched as a process",
     )
     mcp_sse_transport_enabled: bool = Field(
-        default=False, alias="MCP_SSE_TRANSPORT_ENABLED"
+        default=False,
+        alias="MCP_SSE_TRANSPORT_ENABLED",
+        description="Deprecated, no effect: nothing reads it; the served transport is Streamable HTTP "
+        "(MCP_HTTP_TRANSPORT_ENABLED)",
     )
 
     # === Streamable HTTP transport (MCP spec 2025-06-18) ===

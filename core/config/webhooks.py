@@ -7,6 +7,7 @@ Opt-in and default-off so the feature adds nothing until configured.
 """
 
 import logging
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,13 @@ class WebhookConfig(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
     enabled: bool = Field(default=False, alias="WEBHOOKS_ENABLED")
+
+    # Where endpoints and delivery records live. "memory" is process-local:
+    # lost on restart and invisible to other replicas and to the RQ worker.
+    # "postgres" needs migration 011 applied.
+    store: Literal["memory", "postgres"] = Field(
+        default="memory", alias="WEBHOOK_STORE"
+    )
 
     # Per-delivery HTTP timeout (seconds).
     timeout_seconds: float = Field(default=10.0, alias="WEBHOOK_TIMEOUT_SECONDS", gt=0)

@@ -255,7 +255,9 @@ tell a policy decision from a learned one. Without a scoreboard,
 The router is wired into `LLMService` via `core.services.llm.model_routing`:
 enable with `LLM_ROUTING_ENABLED=true` and (optionally) override the policy
 with `LLM_ROUTING_POLICY` — a JSON object mapping category values to model ids
-(e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`). Callers pass
+(e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`);
+`LLM_ROUTING_MAX_COST_PER_1K_USD` (unset by default) is forwarded as the
+`max_cost_per_1k_usd` budget hint of `ModelRouter.select()`. Callers pass
 `task_category="classification"` (etc.) to `generate_response()`/`generate()`;
 model precedence is **pinned > per-call > routed > config default**. See
 [LLM service](services.md) for details.

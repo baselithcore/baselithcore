@@ -47,19 +47,11 @@ def run_info(json_output: bool = False) -> int:
             except Exception:
                 project_name = "Unknown"
 
-        # Count plugins
-        plugins_dir = Path.cwd() / "plugins"
-        plugin_count = (
-            len(
-                [
-                    p
-                    for p in plugins_dir.iterdir()
-                    if p.is_dir() and not p.name.startswith(".")
-                ]
-            )
-            if plugins_dir.exists()
-            else 0
-        )
+        # Count plugins — directories that hold one, not every directory:
+        # a removed plugin's gitignored residue is still a directory.
+        from core.cli.commands.doctor_plugin_checks import local_plugins
+
+        plugin_count = len(local_plugins())
 
     # ── JSON output ──────────────────────────
     if json_output:

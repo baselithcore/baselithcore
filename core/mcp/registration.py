@@ -119,6 +119,21 @@ class RegistrationMixin:
         logger.info("mcp_tool_registered", tool_name=name, category=category)
         self._announce(self.notify_tools_changed)
 
+    def unregister_tool(self, name: str) -> bool:
+        """Remove a registered tool and announce the list change.
+
+        Args:
+            name: The tool to remove.
+
+        Returns:
+            Whether a tool by that name was registered.
+        """
+        if self._tools.pop(name, None) is None:
+            return False
+        logger.info("mcp_tool_unregistered", tool_name=name)
+        self._announce(self.notify_tools_changed)
+        return True
+
     def tool(
         self,
         name: str | None = None,

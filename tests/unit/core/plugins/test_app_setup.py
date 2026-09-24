@@ -247,3 +247,34 @@ class SignedPlugin(Plugin):
 
     assert applied == 1
     assert len(app.middleware) == 1
+
+
+def test_explicit_plugins_path_setting_is_scanned(tmp_path, monkeypatch):
+    # Regression: PLUGIN_PLUGINS_PATH steered marketplace installs only; the
+    # runtime loaders kept scanning plugins/, so installed plugins never ran.
+    import core.config.plugins as plugin_config_module
+    from core.config.plugins import PluginConfig
+
+    _write_plugin(
+        tmp_path / "custom_root" / "mw_plugin",
+        """
+from core.plugins import Plugin
+
+
+class _Marker:
+    pass
+
+
+class MwPlugin(Plugin):
+    @classmethod
+    def setup_app_middleware(cls, app):
+        app.add_middleware(_Marker)
+""",
+    )
+    monkeypatch.setattr(
+        plugin_config_module,
+        "_plugin_config",
+        PluginConfig(plugins_path=tmp_path / "custom_root"),
+    )
+    app = _FakeApp()
+    assert apply_plugin_app_middleware(app, plugin_configs={}) == 1

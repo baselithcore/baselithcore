@@ -5,6 +5,7 @@ Handles container client lifecycle and sandbox image management.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any, TypeAlias
 
@@ -27,6 +28,15 @@ logger = get_logger(__name__)
 SANDBOX_DOCKERFILE = Path(__file__).parent / "Dockerfile.sandbox"
 
 
+def _connect() -> DockerClient:
+    config = get_sandbox_config()
+    # An explicit SANDBOX_DOCKER_SOCKET pins the daemon; otherwise Docker's own
+    # client environment (DOCKER_HOST, TLS vars, the default socket) decides.
+    if "docker_socket" in config.model_fields_set and not os.environ.get("DOCKER_HOST"):
+        return docker.DockerClient(base_url=f"unix://{config.docker_socket}")
+    return docker.from_env()
+
+
 class DockerFactory:
     """
     Factory for managing Docker client and images.
@@ -47,7 +57,9 @@ class DockerFactory:
         """
         Lazily initialize and return the Docker client.
 
-        Connects to the local Docker daemon using environment variables.
+        An explicitly set ``SANDBOX_DOCKER_SOCKET`` pins the daemon socket
+        unless ``DOCKER_HOST`` is set; otherwise Docker's client environment
+        decides, as before.
 
         Returns:
             DockerClient: The initialized Docker client.
@@ -57,7 +69,7 @@ class DockerFactory:
         """
         if self._client is None:
             try:
-                self._client = docker.from_env()
+                self._client = _connect()
             except DockerException as e:
                 logger.error(f"Failed to initialize Docker client: {e}")
                 raise

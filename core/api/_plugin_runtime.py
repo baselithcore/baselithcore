@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from core.api.spa import SPAStaticFiles
 from core.observability.logging import get_logger
 from core.plugins import PluginState
+from core.plugins.config_file import plugin_enabled
 
 logger = get_logger(__name__)
 
@@ -49,6 +51,8 @@ class PluginRuntimeHooks:
         self._activation_lock = asyncio.Lock()
         self._mounted_routes: set[str] = set()
         self._mounted_static: set[str] = set()
+        self._mcp_tools: dict[str, list[str]] = {}
+        self._mcp_disable_hooked: set[str] = set()
 
     def mount_plugin_routes(self, plugin: Any) -> None:
         plugin_name = plugin.metadata.name
@@ -104,6 +108,39 @@ class PluginRuntimeHooks:
         static_path = self._registry.get_all_static_paths().get(plugin.metadata.name)
         if static_path:
             self.mount_plugin_static(plugin.metadata.name, static_path)
+        self.expose_plugin_mcp_tools(plugin)
+
+    def expose_plugin_mcp_tools(self, plugin: Any) -> None:
+        """Register the plugin's MCP tools on the HTTP-mounted server, if any.
+
+        The server is built in ``create_app()`` before any plugin is active,
+        so its own bulk registration saw none; this runs per activation
+        (startup and hot reload) and withdraws the tools on disable.
+        """
+        server = getattr(self._app.state, "mcp_server", None)
+        if server is None:
+            return
+        from core.mcp.plugin_tools import register_plugin_mcp_tools
+
+        name = plugin.metadata.name
+        self.withdraw_plugin_mcp_tools(name)
+        self._mcp_tools[name] = register_plugin_mcp_tools(server, plugin)
+        if name not in self._mcp_disable_hooked:
+            # Bound to the name: the lifecycle may hand the hook ``None``.
+            async def _withdraw(*_args: Any) -> None:
+                self.withdraw_plugin_mcp_tools(name)
+
+            self._lifecycle.register_hook(name, "on_after_disable", _withdraw)
+            self._mcp_disable_hooked.add(name)
+
+    def withdraw_plugin_mcp_tools(self, plugin_name: str) -> None:
+        names = self._mcp_tools.pop(plugin_name, [])
+        server = getattr(self._app.state, "mcp_server", None)
+        if server is None or not names:
+            return
+        from core.mcp.plugin_tools import unregister_plugin_mcp_tools
+
+        unregister_plugin_mcp_tools(server, names)
 
     def get_plugin_runtime_config(self, plugin_name: str) -> dict[str, Any]:
         discovery = self._registry.get_discovered_plugin(plugin_name)
@@ -119,6 +156,38 @@ class PluginRuntimeHooks:
                     return self._configs[candidate]
 
         return self._configs.get(plugin_name, {})
+
+    async def auto_activate(self, discoveries: Mapping[str, Any]) -> None:
+        """Activate every discovered plugin the config file enables.
+
+        Iterates the *discovered* plugins (keyed by canonical manifest name),
+        not the raw config keys: a directory/config key (``baselithbot``) may
+        differ from the manifest name (``BaselithBot``), and lifecycle state
+        is keyed by the canonical name. Enablement goes through
+        :func:`core.plugins.config_file.plugin_enabled` — the rule discovery
+        already applied — so a block without ``enabled:`` (or no config file
+        at all) activates the plugin instead of discovering it and leaving it
+        dormant.
+        """
+        for canonical_name, discovery in discoveries.items():
+            if not plugin_enabled(
+                self._configs, discovery.directory_name, canonical_name
+            ):
+                continue
+            try:
+                activated = await self.activate_plugin_for_runtime(canonical_name)
+            except Exception as exc:
+                logger.error(
+                    "Plugin auto-activation %s raised: %s",
+                    canonical_name,
+                    exc,
+                    exc_info=True,
+                )
+                continue
+            if activated:
+                logger.info("✅ Plugin auto-activated: %s", canonical_name)
+            else:
+                logger.warning("❌ Plugin auto-activation failed: %s", canonical_name)
 
     async def activate_plugin_for_runtime(self, plugin_name: str) -> bool:
         async with self._activation_lock:

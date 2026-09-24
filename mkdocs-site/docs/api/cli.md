@@ -305,6 +305,11 @@ of falling back to the package version default.
 
 Show a high-level overview of the system architecture, versions, and active plugins.
 
+**Plugins** counts the directories under `plugins/` that actually hold a plugin
+— a `plugin.py` or a `manifest.yaml`/`.yml`/`.json` — the same rule `doctor`
+applies. A removed or renamed plugin leaves gitignored residue behind
+(`__pycache__`, a built `ui/`, local data); those directories are not counted.
+
 ```bash
 baselith info
 baselith --format json info   # Machine-readable JSON for CI
@@ -314,7 +319,8 @@ baselith --format json info   # Machine-readable JSON for CI
 
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
-| `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+| `--json`        | Emit machine-readable JSON output for CI/CD pipelines |
+| `--format json` | Same output, through the global formatting flag       |
 
 **Example Output**:
 
@@ -343,7 +349,8 @@ baselith --format json verify   # Machine-readable JSON for CI
 
 | Flag            | Description                                           |
 | --------------- | ----------------------------------------------------- |
-| `--format json` | Emit machine-readable JSON output for CI/CD pipelines |
+| `--json`        | Emit machine-readable JSON output for CI/CD pipelines |
+| `--format json` | Same output, through the global formatting flag       |
 
 ---
 
@@ -407,6 +414,13 @@ now, instead of reinstalling one plugin at a time.
 baselith plugin sync --docker
 ```
 
+A plugin counts as enabled by the same rule the runtime applies
+(`core.plugins.config_file.plugin_enabled`), read from the same file
+(`configs/plugins.yaml`, or the path in `PLUGIN_CONFIG_PATH`): with no config
+file every plugin is enabled; otherwise a plugin must have an entry — under its
+name or its `-`/`_` variant — that does not say `enabled: false`. An entry
+without an `enabled` key counts as enabled.
+
 For every enabled plugin the command validates the installation manifest and
 the declared core bounds, writes the combined Python requirements, builds the
 declared frontends, rebuilds and restarts the `api` service, waits for
@@ -439,6 +453,18 @@ baselith plugin create --interactive  # Interactive wizard
 - Plugin name, type, description, author, tags
 - Environment variables
 - Auto-registration in `configs/plugins.yaml`
+
+**Generated code**:
+
+- The scaffolded `manifest.yaml` sets `min_core_version` to the version of the
+  framework that ran the command (`core._version.__version__`). It used to be
+  a hard-coded `0.31.0`, six minor releases behind. That value is the version
+  you scaffolded against. Raise it on purpose when you start relying on newer
+  APIs. Never lower it without testing against the older release.
+- The generated Python uses PEP 585/604 builtins (`dict[...]`, `list[...]`,
+  `X | None`), sorted import blocks and no placeholder-less f-strings. A fresh
+  scaffold of any type (`agent`, `router`, `graph`) passes the repository's
+  own ruff configuration as generated.
 
 ---
 
@@ -909,6 +935,14 @@ and the container's own command, so the three entry points behave alike:
 | `timeout_graceful_shutdown` | `$GRACEFUL_SHUTDOWN_TIMEOUT`, default 30s | Bounds the drain so a Ctrl-C or `SIGTERM` with open streams still runs lifespan cleanup before the supervisor kills the process. |
 | `timeout_keep_alive` | `$UVICORN_KEEP_ALIVE`, default 75s | uvicorn's own 5s is shorter than the upstream idle timeout of every common proxy (nginx, ALB, Envoy: 60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep the app side longer than the proxy side. |
 | `limit_concurrency` | `$UVICORN_LIMIT_CONCURRENCY`, unset by default | Load shedding: above this many concurrent connections uvicorn answers `503` at once instead of queueing until something times out. Only passed when the variable is set, so the default stays uvicorn's (no limit). |
+
+With `--workers` above one (and no `--reload`), `run` also splits the CPUs
+between the workers' math thread pools before it spawns them: each worker gets
+`cpus // workers` threads (at least one) through `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS`, so four workers loading an
+embedding model on 8 cores run 8 threads rather than 32. A value you exported
+yourself always wins. See
+[Config › Web concurrency](../core-modules/config.md#web-concurrency-and-cpu-thread-pools).
 
 The preflight first creates any missing data directory (`$CORE_DATA_DIR` plus
 its `catalog/` and `compliance/` subdirectories) and prints what it created.

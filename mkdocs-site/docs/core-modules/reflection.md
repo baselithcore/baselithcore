@@ -5,6 +5,12 @@ description: Self-evaluation and iterative response refinement
 
 The `core/reflection` module empowers agents to **evaluate and improve their own responses** through an iterative process. This self-correction capability significantly enhances the quality and accuracy of agent outputs.
 
+!!! note "Library API — not wired by default"
+    No route, handler registration or startup hook in the default app invokes
+    `core/reflection`: answers from the orchestrator are not self-evaluated or
+    refined. Call `ReflectionAgent.reflect()` yourself — from a flow handler you
+    register, or from plugin code — on the response you want refined.
+
 ## How the Loop Works
 
 Reflection is implemented as a cycle: **Evaluate → Refine → Repeat**. The agent does

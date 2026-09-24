@@ -129,7 +129,7 @@ services:
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
-      - CORE_LOG_FORMAT=json
+      - LOG_JSON=true
       - HOST=0.0.0.0
       - PORT=8000
       - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
@@ -272,7 +272,7 @@ services:
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
-      - CORE_LOG_FORMAT=json
+      - LOG_JSON=true
       - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
@@ -393,6 +393,7 @@ networks:
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime reads both `APP_ENV` and `ENVIRONMENT` (`APP_ENV` wins) to activate production-only checks consistently. The aliases `prod`, `prd` and `live` now resolve to `production` too, and an environment name the framework does not recognise is treated as production — see [Environment naming](#environment-naming).
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
+    JSON logs are selected by `LOG_JSON` (default `true`), which the `api` and `worker` services set explicitly; the older `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` are deprecated and have no effect — see [Production Configuration](#production-configuration).
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `compose.yaml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `compose.sandbox.yaml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
@@ -463,8 +464,13 @@ Two further changes to the same effect:
 - **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
   imports it (the tree's only `torch` import is the Hugging Face provider, and
   `sentence-transformers` needs torchvision only for image models, which no
-  plugin loads). The only thing in `uv.lock` that wants it is mineru's
+  plugin loads). The only thing in `uv.lock` that wanted it was mineru's
   *optional* `pipeline` extra, which `requirements.txt` does not install.
+  *Superseded:* `docling`, now in the `documents` extra, depends on it, so the
+  image installs `torchvision==0.28.0` from the same CPU index as torch. The
+  PyPI wheel the lock would otherwise pull is built against the CUDA torch, and
+  beside the CPU build its ops never register (`operator torchvision::nms does
+  not exist`), which broke the model pre-cache step.
 - **The Chromium install moved above the source `COPY`s.** It is the largest
   single step (1.39GB) and depends on nothing but the installed dependencies;
   sitting below them, a one-line code change invalidated it and the build

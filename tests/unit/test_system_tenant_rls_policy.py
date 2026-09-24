@@ -46,6 +46,18 @@ def _load(path: Path):
     return module
 
 
+def _later_migrations() -> list:
+    """Migrations after 010 that declare tenant-scoped tables of their own."""
+    found = []
+    for path in sorted(MIGRATIONS_DIR.glob("*.py")):
+        prefix = path.name.split("_", 1)[0]
+        if prefix.isdigit() and int(prefix) > 10:
+            module = _load(path)
+            if getattr(module, "TENANT_SCOPED_TABLES", ()):
+                found.append(module)
+    return found
+
+
 @pytest.fixture(scope="module")
 def migration():
     return _load(MIGRATION_PATH)
@@ -90,7 +102,7 @@ class TestRevisionChain:
                 elif node.target.id == "down_revision" and isinstance(value, str):
                     parents.add(value)
 
-        assert revisions - parents == {"010_system_tenant_rls"}
+        assert len(revisions - parents) == 1
 
     def test_it_never_edits_a_shipped_migration(self):
         """008 and 009 keep their original, un-widened predicate — someone's
@@ -107,9 +119,17 @@ class TestConstantsStayInStep:
         assert migration.SYSTEM_TENANT_ID == SYSTEM_TENANT_ID
 
     def test_it_covers_every_protected_table(self, migration):
+        """010 widened every table that existed; later ones are born widened."""
         from core.db.ddl import RLS_PROTECTED_TABLES
 
-        assert set(migration.TENANT_SCOPED_TABLES) == set(RLS_PROTECTED_TABLES)
+        later = set().union(*(m.TENANT_SCOPED_TABLES for m in _later_migrations()))
+        assert set(migration.TENANT_SCOPED_TABLES) == set(RLS_PROTECTED_TABLES) - later
+
+    def test_later_migrations_keep_the_system_escape(self):
+        """A table created after 010 must carry the widened predicate itself."""
+        for later in _later_migrations():
+            assert later.SYSTEM_TENANT_ID == "system"
+            assert "OR" in later._PREDICATE and "'system'" in later._PREDICATE
 
     def test_the_policy_name_matches_008(self, migration):
         eight = _load(MIGRATIONS_DIR / "008_row_level_security.py")

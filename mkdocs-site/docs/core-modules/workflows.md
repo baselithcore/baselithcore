@@ -442,6 +442,11 @@ resume, so there is nothing a later deploy could change underneath it.
 
 ## Scheduled workflows (`WorkflowScheduler`)
 
+!!! note "Library API — not wired by default"
+    The default app never constructs or starts a `WorkflowScheduler`, so a
+    `schedule` on a definition fires only once your code registers it and
+    drives `run_due` / `run_forever`, as below.
+
 `WorkflowDefinition` carries two optional scheduling fields, both serialized
 by `to_dict()`/`from_dict()`:
 

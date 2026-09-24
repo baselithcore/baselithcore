@@ -12,7 +12,7 @@ services:
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
-      - CORE_LOG_FORMAT=json
+      - LOG_JSON=true
       - HOST=0.0.0.0
       - PORT=8000
       - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
@@ -221,7 +221,7 @@ services:
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
-      - CORE_LOG_FORMAT=json
+      - LOG_JSON=true
       - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client

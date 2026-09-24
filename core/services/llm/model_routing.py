@@ -11,11 +11,11 @@ to ``None`` so the caller falls back to the config default model. Explicit
 per-call models and policy-pinned models are resolved *before* routing in
 ``LLMService._resolve_model``.
 
-An optional ``routing_max_cost_per_1k_usd`` config attribute (read via
-``getattr`` so it works whether or not ``LLMConfig`` declares the field yet)
-is forwarded as the router's ``max_cost_per_1k_usd`` budget hint: when the
+``routing_max_cost_per_1k_usd`` (``LLM_ROUTING_MAX_COST_PER_1K_USD``) is
+forwarded as the router's ``max_cost_per_1k_usd`` budget hint: when the
 category's normal pick is pricier than the hint, the router substitutes the
-cheapest candidate in its policy pool that fits instead.
+priciest candidate in its policy pool that still fits (the cheapest when none
+does). It is read via ``getattr`` so duck-typed test configs work.
 """
 
 from __future__ import annotations

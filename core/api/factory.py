@@ -60,7 +60,10 @@ def _build_agent_card(app_config: AppConfig) -> AgentCard:
         name=getattr(app_config, "app_name", "Baselith-Core"),
         description="BaselithCore orchestration engine for production agentic AI.",
         version=__version__,
-        agentCapabilities=AgentCapabilities(streaming=True),
+        # The default app mounts only this discovery card, not the A2A
+        # JSON-RPC endpoint (core.a2a.router.create_a2a_router), so it must not
+        # promise message streaming a peer could not reach.
+        agentCapabilities=AgentCapabilities(streaming=False),
     )
 
 
@@ -377,6 +380,9 @@ def create_app() -> FastAPI:
         # so side-effecting tool categories are rejected at the default
         # (SUPERVISED) level instead of executing unsupervised.
         mcp_server = create_mcp_server_with_tools(autonomy_policy=AutonomyPolicy())
+        # Plugins activate later, in the lifespan: the runtime hooks find the
+        # server here and register each plugin's tools as it comes up.
+        app.state.mcp_server = mcp_server
         app.include_router(create_mcp_http_router(mcp_server))
 
     if ENABLE_FEEDBACK:

@@ -3,7 +3,10 @@ title: Core Services
 description: LLM, VectorStore, Vision, Voice, and other services
 ---
 
-The `core/services` module provides domain-agnostic services.
+The `core/services` module provides domain-agnostic services. The chat service
+(`core/services/chat/`: request handling, streaming and per-conversation history)
+is documented in [Chat & RAG](chat.md), in particular
+[Conversation History](chat.md#conversation-history).
 
 ## Overview
 
@@ -379,6 +382,13 @@ routing is a hint, never an error — unknown categories fall back to the
 config default. The intent classifier passes `task_category="classification"`
 so classification runs on the cheap tier out of the box.
 
+`LLM_ROUTING_MAX_COST_PER_1K_USD` (unset by default; must be `> 0` when set)
+adds a budget cap on top. When the routed model's approximate cost per 1K
+tokens (500 in / 500 out, from the pricing table) exceeds it, the router
+substitutes the *priciest* model in the policy pool that still fits
+(`rule="cost_guard"`); when none fits, it takes the cheapest one rather than
+raise. The provider check below still applies to the substituted model.
+
 **The routed pick must be servable by the configured provider.** The built-in
 policy names Claude ids for every category, so switching `LLM_ROUTING_ENABLED`
 on in an OpenAI, Gemini, Ollama or HuggingFace deployment used to ask that
@@ -522,6 +532,10 @@ path is replayed as events — the consumer contract is identical. Deadline
 
 `core/services/llm/batch.py` — for offline workloads (eval replays,
 consolidation summaries, labeling) that don't need interactive latency:
+
+!!! note "Library API — not wired by default"
+    No framework code path calls `generate_batch`; it is a helper for your own
+    offline jobs.
 
 ```python
 from core.services.llm.batch import BatchPrompt, generate_batch
@@ -712,14 +726,6 @@ a line of code. Three framework pieces compose the mechanism:
    singleton, unless the bound plugin has a policy: then it returns a cached
    `LLMService` clone built for the pinned `(provider, model)` pair, sharing
    the central config's timeouts, caching and cost accounting.
-
-Every provider takes `request_timeout` and `connect_timeout` from the
-`LLMConfig` its service was built with — Ollama included. A caller that builds
-`LLMService(config=LLMConfig(..., request_timeout=600))` for a slow local model
-gets that deadline; Ollama used to read the process-wide `LLM_REQUEST_TIMEOUT`
-instead, so a long structured generation on a large local model was cut off at
-the global default however long its own config allowed. A provider built
-directly with no explicit timeouts still falls back to the global values.
 
 ```python
 from core.services.llm import PluginLLMPolicy, set_plugin_llm_policy_resolver
@@ -1291,12 +1297,13 @@ path instead of issuing one query per document.
 
 `SearchOrchestrator` (`core/services/vectorstore/orchestrator.py`) fronts the
 two-stage search with a Redis-backed result cache (`RedisCache(prefix="search")`),
-consulted whenever the caller leaves `use_cache=True`. Two switches are read off
-the config with `getattr` — `search_cache_enabled` (default `True`) and
-`search_cache_ttl` (default `300` seconds). Neither is a declared
-`VectorStoreConfig` field, so neither is settable from the environment: the
-defaults stand unless a caller constructs the service with its own config
-object.
+consulted whenever the caller leaves `use_cache=True`. Two declared
+`VectorStoreConfig` fields control it: `search_cache_enabled` (default `True`,
+env `VECTORSTORE_SEARCH_CACHE_ENABLED`) and `search_cache_ttl` (default `300`
+seconds, `ge=1`, env `VECTORSTORE_SEARCH_CACHE_TTL`). Before these fields were
+declared, both services read the attributes with `getattr` against a model that
+ignores unknown keys, so setting either variable had no effect. See
+[Configuration › Services Config](config.md#services-config-llm-vectorstore-chat).
 
 The key is built by `_search_cache_key()` and covers **every input that can
 change the rows**. Its shape is
@@ -1581,6 +1588,14 @@ both (a no-op if never used).
 
 Speech synthesis and recognition.
 
+!!! note "Library API — not wired by default"
+    No route or handler in the default app calls `VoiceService`, and the MCP
+    tool adapters in `core/services/voice/tools.py` and
+    `core/services/vision/tools.py` (`register_voice_tools(server)`,
+    `register_vision_tools(server)`) are not registered on any server the app
+    mounts. Call the service directly, or register the tools on your own
+    `MCPServer`.
+
 ### Voice Structure
 
 ```text
@@ -1691,11 +1706,18 @@ print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECO
 
 BaselithCore supports two types of sandboxing for secure code execution:
 
-1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` and resource limits. It provides a good balance between performance and security for most tasks.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
+  For the Docker provider, `build_sandbox_runtime_kwargs(enable_network=None)`
+  (`core/services/sandbox/policy.py`) returns `network_mode="none"` unless
+  `SANDBOX_ENABLE_NETWORK=true`, which switches it to `"bridge"`, Docker's
+  default network. Nothing else in the hardened policy changes: no
+  capabilities, no privilege escalation, read-only root, non-root uid,
+  resource ceilings. Passing `enable_network=` explicitly overrides the setting
+  for one call.
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 - **Pre-execution static analysis**: Python payloads are AST-analyzed before
@@ -1784,7 +1806,8 @@ SANDBOX_PROVIDER=sbx
 
 # Docker specific
 SANDBOX_IMAGE=python:3.12-slim
-SANDBOX_DOCKER_SOCKET=/var/run/docker.sock
+SANDBOX_DOCKER_SOCKET=/var/run/docker.sock   # honoured only when set explicitly
+SANDBOX_ENABLE_NETWORK=false                 # true = bridge network (egress)
 
 # Sbx specific
 SANDBOX_SBX_PATH=sbx
@@ -1796,6 +1819,19 @@ SANDBOX_TIMEOUT=30
 # Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
 SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 ```
+
+The Docker client connects through `docker.from_env()` (`DOCKER_HOST`, the
+TLS variables, the default socket). `SANDBOX_DOCKER_SOCKET` pins it to
+`unix://<socket>` instead, but only when the variable is set explicitly and
+`DOCKER_HOST` is unset: the field's default value alone changes nothing, and a
+`DOCKER_HOST` pointing at a remote sandbox daemon always wins.
+
+!!! warning "Network egress for untrusted code is opt-in"
+    `SANDBOX_ENABLE_NETWORK=true` lets agent-supplied code reach anything the
+    Docker bridge can route to: the internet, and possibly services on the
+    host's networks. It applies to every Docker sandbox the process starts
+    (one-shot, streaming and pooled). Leave it off unless the workload needs
+    egress.
 
 !!! note "Installation"
     To use the `sbx` provider, you must install the `sbx` CLI tool on your host. On macOS, use `brew install docker/tap/sbx`.
@@ -1916,6 +1952,31 @@ would make every later incremental run skip it, losing it permanently.
 That isolation is only as strong as the store's error reporting, which is why
 the indexing path upserts durably (`wait=True`, see *Write Durability* above).
 
+### PDF Reader Strategy
+
+Filesystem ingestion keeps the legacy pypdf/OCR reader as the stable fallback,
+and the `documents` extra / full Docker image now include Docling for richer PDF
+structure. The selection is controlled by `DOCUMENTS_PDF_READER`:
+
+- `auto` (default): try Docling first, then fall back to pypdf/OCR if Docling is
+  unavailable or cannot parse the file.
+- `pypdf`: force the previous reader path.
+- `docling`: require Docling for PDFs and skip files that cannot be parsed by it.
+
+When Docling is active, the reader sends structured chunks to the vector store
+instead of only raw full-document text. Each chunk keeps page numbers, headings,
+provenance, original text, and a compact same-page context window. The embedding
+text remains compact and metadata-aware, while the stored payload keeps the
+larger prompt context. This preserves the normal vectorstore indexing contract:
+embeddings, tenant isolation, bulk upsert, and search all still happen in
+`VectorStoreService`.
+
+The default Docling budgets are intentionally close to the lab baseline:
+`DOCLING_TARGET_CHUNK_TOKENS=240` for embedding-sized chunks and
+`DOCLING_CONTEXT_TOKENS=520` for the retrieved prompt context. Tune them only
+when the corpus shape requires it; the core fallback remains deterministic for
+minimal installations that do not include the `documents` extra.
+
 ### Persistence
 
 The indexing state (document fingerprints) is persisted to Redis under `baselith:indexing:state`. This means incremental indexing survives application restarts — only genuinely changed documents are re-indexed.
@@ -2024,7 +2085,8 @@ LLM_CONNECT_TIMEOUT=5
 # VectorStore
 VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
-VECTORSTORE_EMBEDDING_MODEL=all-MiniLM-L6-v2
+VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
+VECTORSTORE_EMBEDDING_DIM=1024
 EMBEDDING_CACHE_TTL=604800   # 7 days
 QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
 QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint

@@ -170,8 +170,7 @@ class ScraperConfig(BaseSettings):
         description="Playwright navigation wait condition",
     )
     playwright_screenshot: bool = Field(
-        default=False,
-        description="Take screenshots with Playwright",
+        default=False, description="Deprecated, no effect: nothing reads it"
     )
 
     # Logging

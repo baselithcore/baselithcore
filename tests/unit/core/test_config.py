@@ -109,7 +109,7 @@ class TestVectorStoreConfig:
             assert config.collection_name == "documents"
             assert config.host == "localhost"
             assert config.port == 6333
-            assert config.embedding_dim == 384
+            assert config.embedding_dim == 1024
             assert config.search_limit == 10
 
     def test_env_variable_override(self):

@@ -10,6 +10,12 @@ context as variables, an `Action` declares effects/preconditions/cost/risk, and
 the subsystem can predict next states, simulate action paths via MCTS, score
 risk, and plan rollbacks — all before anything executes in the real world.
 
+!!! note "Library API — not wired by default"
+    The prediction, simulation, risk and rollback services are not invoked by
+    the default app — call them from host or plugin code. The exception is the
+    signed-mandate and payment chain (`mandates.py`, `payments.py`), which the
+    official `payments` plugin builds on.
+
 There is **no** `WorldModel` or `Entity` class; the public surface is a set of
 data types plus four service classes.
 
