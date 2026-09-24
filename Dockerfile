@@ -50,7 +50,7 @@ FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1
 WORKDIR /app
 
 # --- Build-time args ---
-ARG EMBEDDER_MODEL="sentence-transformers/all-MiniLM-L6-v2"
+ARG EMBEDDER_MODEL="BAAI/bge-m3"
 ARG RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on \

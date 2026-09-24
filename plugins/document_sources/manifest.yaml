@@ -19,6 +19,7 @@ python_dependencies:
 - Pillow==12.1.1
 - pytesseract==0.3.10
 - mineru[pipeline]>=3.4.4,<4
+- docling>=2.130.0,<3
 optional_resources:
 - internet
 # Declared capabilities. The web source fetches operator-supplied URLs and the
@@ -34,5 +35,5 @@ permissions:
   secrets: []
   filesystem:
   - '*'
-integrity_sha256: 58184b35602ffde0a212c5710a6908e584fa9f549e90661fe520f9e0dc80b8f1
+integrity_sha256: ad44dd38560caf54bf1a6d53a1ca56451dd95374155ada5ab6c7389c870a67e8
 hash_surface_version: 5

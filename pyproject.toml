@@ -150,6 +150,10 @@ documents = [
   "python-pptx>=1.0.2,<2",
   "openpyxl==3.1.5",
   "xlrd>=2.0.2",
+  # Structured PDF parsing/chunking for document ingestion. Kept in the
+  # documents extra (not base install) because it pulls the ML/document stack;
+  # the runtime still falls back to pypdf/OCR when unavailable.
+  "docling>=2.130.0,<3",
 ]
 ocr = [
   # Floor rather than `==` for the same reason as the document parsers: this
