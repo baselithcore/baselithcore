@@ -86,7 +86,9 @@ class StandardRagStreamHandler:
         context["sources"] = list(set(sources))
 
         async for chunk in self._rag.llm_service.generate_response_stream(
-            prompt=build_rag_user_prompt(context_text, query),
+            prompt=build_rag_user_prompt(
+                context_text, query, context.get("history_text", "")
+            ),
             system_prompt=RAG_SYSTEM_PROMPT,
         ):
             yield chunk

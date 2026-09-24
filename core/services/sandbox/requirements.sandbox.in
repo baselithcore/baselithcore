@@ -1,0 +1,19 @@
+# Direct dependency pins for the agent sandbox image. The compiled closure
+# lives in requirements.sandbox.txt, which is what Dockerfile.sandbox installs
+# — edit this file, never that one.
+#
+# Regenerate after any edit here (uv 0.12.0, the version the root Dockerfile
+# pins), from this directory:
+#
+#   uv pip compile requirements.sandbox.in --universal --python-version 3.12 \
+#       --generate-hashes --no-annotate --no-header \
+#       -o requirements.sandbox.txt
+#
+# --universal, because the image is built on whatever host first needs a
+# sandbox: linux/amd64 in CI, linux/arm64 on an Apple Silicon workstation. A
+# platform-specific resolution would hold hashes for one of those two only and
+# fail the build on the other.
+numpy==2.5.3
+pandas==3.0.6
+matplotlib==3.11.2
+scikit-learn==1.9.1

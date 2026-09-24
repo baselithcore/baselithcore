@@ -80,11 +80,11 @@ CACHE_REDIS_URL=redis://localhost:6379/1
 
 `RedisTTLCache`, `create_redis_client` and the shared pools read
 `RedisCacheConfig` (`core/config/cache.py`, `get_redis_cache_config()`):
-`url` ← `CACHE_REDIS_URL` (default `redis://redis:6379/1`), `cache_prefix`
+`url` ← `CACHE_REDIS_URL` (default `redis://localhost:6379/1`, shared with `StorageConfig`), `cache_prefix`
 (default `baselithcore:cache`), `cache_ttl` (default `3600.0` s) and the pool
 bounds (`max_connections` default `50`). `StorageConfig.cache_redis_url`
-(`core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with a
-different fallback (`redis://localhost:6379/1`) and is what
+(`core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with the
+same default and is what
 `core/bootstrap/lazy_init.py` and `core/chat/dependencies.py` use for the
 bootstrap client — set the variable and both agree.
 

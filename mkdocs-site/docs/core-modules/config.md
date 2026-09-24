@@ -41,8 +41,10 @@ The `core/config` architecture solves these by providing **strongly-typed config
 core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
-├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, ChatConfig (re-exports VectorStoreConfig, VisionConfig, VoiceConfig)
+├── app.py                # AppConfig (server, tenancy, telemetry, CHAT_GUARDRAILS_*)
+├── guardrails.py         # GuardrailsSettings (GUARDRAILS_ prefix) — the live guards
+├── services.py           # LLMConfig (re-exports ChatConfig, VectorStoreConfig, VisionConfig, VoiceConfig)
+├── chat.py               # ChatConfig
 ├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
 ├── multimodal.py         # VisionConfig, VoiceConfig, FineTuningConfig
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
@@ -61,6 +63,7 @@ core/config/
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
 ├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+├── webhooks.py           # WebhookConfig (WEBHOOKS_ENABLED, WEBHOOK_STORE, WEBHOOK_*)
 └── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
 
@@ -68,7 +71,10 @@ The per-module env tables live with the module they configure — e.g. the
 declarative `MCP_SERVERS` registry under
 [MCP › Configuration](mcp.md#configuration) and sandbox metering
 (`SANDBOX_COST_PER_COMPUTE_SECOND`) under
-[Services › Sandbox Configuration](services.md#sandbox-configuration).
+[Services › Sandbox Configuration](services.md#sandbox-configuration), the
+`GUARDRAILS_*` input/output guard settings under
+[Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
+under [Webhooks › Configuration](webhooks.md#configuration).
 
 ---
 
@@ -292,7 +298,10 @@ CORE_DETERMINISTIC_MODE=false
 ### App Config
 
 `AppConfig` holds server, multi-tenancy, telemetry, cost-control, and
-guardrail settings. Fields use explicit aliases (no shared prefix).
+chat settings. Fields use explicit aliases (no shared prefix). Its
+`CHAT_GUARDRAILS_*` fields configure only the keyword guard of the opt-in
+`core/chat` RAG pipeline; the guards every request runs read `GUARDRAILS_*`
+(`core/config/guardrails.py`).
 
 ```python
 from core.config import get_app_config
@@ -346,9 +355,10 @@ APP_TIMEZONE=Europe/Rome
 
 These live in `core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
 `VectorStoreConfig` the `VECTORSTORE_` prefix, and `ChatConfig` the `CHAT_`
-prefix. `VectorStoreConfig` itself now lives in `core/config/vectorstore.py`
-(extracted for the file-size cap); `core.config.services` re-exports it, so
-existing imports are unchanged.
+prefix. `VectorStoreConfig` and `ChatConfig` themselves now live in
+`core/config/vectorstore.py` and `core/config/chat.py` (extracted for the
+file-size cap); `core.config.services` re-exports both, so existing imports are
+unchanged.
 
 ```python
 from core.config import get_llm_config, get_vectorstore_config
@@ -406,7 +416,21 @@ VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
 QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
 VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
+VECTORSTORE_SEARCH_CACHE_ENABLED=true  # Cache vector search results in Redis
+VECTORSTORE_SEARCH_CACHE_TTL=300     # Cached result lifetime in seconds (>= 1)
 ```
+
+!!! note "Search result cache switches"
+    `search_cache_enabled` (default `True`, env
+    `VECTORSTORE_SEARCH_CACHE_ENABLED`) and `search_cache_ttl` (default `300`
+    seconds, `ge=1`, env `VECTORSTORE_SEARCH_CACHE_TTL`) are declared
+    `VectorStoreConfig` fields. The search orchestrator and the vector store
+    service always read them with `getattr`, but until now neither was
+    declared. The model ignores unknown keys (`extra="ignore"`), so an
+    env-driven deployment could not disable the cache or change its TTL, and
+    setting either variable did nothing. A TTL of `0` is rejected because some
+    cache backends read `0` as "never expire". See
+    [Services › Search Result Cache](services.md#search-result-cache).
 
 !!! note "Bounding LLM concurrency"
     `max_concurrent_requests` (default `0` = unlimited, env
@@ -651,7 +675,7 @@ SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8  # Min Jaccard of word n-gram fingerpri
 
 !!! note "`RedisCacheConfig.url` is redacted on every dump"
     The Redis connection URL (`RedisCacheConfig.url`, env `CACHE_REDIS_URL`,
-    default `"redis://redis:6379/1"`) can embed `user:password@` credentials.
+    default `"redis://localhost:6379/1"`, the same as `StorageConfig.cache_redis_url`) can embed `user:password@` credentials.
     It follows the same contract as the `StorageConfig` DSNs: the attribute
     stays a plain, usable `str`, while `repr()`, `model_dump()` and
     `model_dump_json()` strip the userinfo — so the credential never lands in
@@ -861,6 +885,34 @@ OTel `deployment.environment` resource attribute. Keep `ENVIRONMENT` itself on
 a known name too: `DEPLOYMENT_ENVIRONMENT` falls back to it, but so does the
 hardening gate.
 
+### Web concurrency and CPU thread pools
+
+`core/config/concurrency.py` is stdlib-only, like the runtime-environment
+helpers, because it runs before anything heavy is imported.
+`set_web_concurrency(n)` records the server's process count in
+`BASELITH_WEB_CONCURRENCY` (children inherit it), and `get_web_concurrency()`
+reads it back — `1` when single-process — so a plugin can tell that
+request-spanning state cannot live in its own memory.
+
+`share_cpu_threads()` splits the CPUs between the workers' math thread pools.
+torch, numpy and onnxruntime size their pool to every core the first time they
+load, so N workers each running a model start N × cores threads on cores
+threads' worth of CPU. With two or more workers (the larger of
+`BASELITH_WEB_CONCURRENCY` and `WEB_CONCURRENCY`) it sets `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` (the `THREAD_POOL_ENV_VARS`
+tuple) to `cpus // workers`, at least one, where `cpus` honours CPU affinity
+and cgroup cpusets when the platform exposes them. It uses `setdefault`, so a
+value the operator set always wins, and returns the per-worker count, or
+`None` for a single-process run, which it leaves alone. It must run before
+torch or numpy is imported: `backend.py` and `baselith run` call it at startup.
+
+```python
+from core.config.concurrency import set_web_concurrency, share_cpu_threads
+
+set_web_concurrency(4)
+share_cpu_threads()   # 2 on an 8-core host: OMP/MKL/OPENBLAS_NUM_THREADS=2
+```
+
 ---
 
 ### Supermemory Config
@@ -1019,6 +1071,28 @@ documented but bound nothing: an explicit `alias=` **replaces** the class's
 field, and the fine-tuning credentials silently shared the chat provider's key.
 Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
 field should answer to both.
+
+A second guard, `tests/unit/core/config/test_env_binding_uniqueness.py`, walks
+every `BaseSettings` class under `core/config/` and fails when a variable bound
+by several classes carries more than one concrete default (a `None` default
+defers to the class's own fallback and is not compared). Sharing a variable on
+purpose is fine — a provider API key read by several integrations — as long as
+the defaults agree. It was introduced after `CHAT_RESPONSE_CACHE_TTL` (bound by
+both `AppConfig` and `ChatConfig`, now `AppConfig` only) and `CACHE_REDIS_URL`
+(different hosts in `RedisCacheConfig` and `StorageConfig`, now both
+`redis://localhost:6379/1`) had drifted.
+
+### Settings that bind but do nothing
+
+The reverse drift — a field that binds its variable while no code reads it —
+passes that gate, because the setting is real to pydantic. Such fields are not
+deleted: removing one changes nothing at runtime, but it hides the fact from a
+deployment that still sets the variable. Their description
+starts with **"Deprecated, no effect"** and names the setting that does the job
+where one exists (for example `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` point
+to `LOG_JSON`, `CHAT_MAX_HISTORY_LENGTH` to `CHAT_MEMORY_MAX_TURNS`). The
+generated [reference](../getting-started/configuration.md) carries the same
+wording.
 
 ## Validation
 

@@ -34,7 +34,15 @@ class OutputFilterResult:
 HARMFUL_PATTERNS = [
     (r"\b(kill|murder|harm|hurt)\s+(yourself|someone|people)\b", "violence"),
     (r"\b(how\s+to\s+make|build|create)\s+(a\s+)?(bomb|weapon|explosive)\b", "weapons"),
-    (r"\b(steal|hack|break\s+into)\b", "illegal_activity"),
+    # Instructions for the act, not a mention of it. The bare-word form
+    # ``\b(steal|hack|break\s+into)\b`` rewrote any answer containing "hack" —
+    # "a quick hack", "someone tried to hack our server" — to
+    # [CONTENT_FILTERED] and flagged it unsafe, which is ordinary prose for the
+    # coding and browser agents this engine ships.
+    (
+        r"\b(?:how\s+to|steps?\s+to|ways?\s+to)\s+(?:steal|hack\s+into|break\s+into)\b",
+        "illegal_activity",
+    ),
 ]
 
 

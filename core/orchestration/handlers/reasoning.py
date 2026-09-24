@@ -93,9 +93,14 @@ class ReasoningHandler(BaseFlowHandler):
 
     async def _run_tot(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """Tree-of-Thoughts search (the default strategy)."""
-        k = context.get("k", 3)
-        max_steps = context.get("max_steps", 3)
-        strategy = context.get("strategy", "bfs")
+        # The engine is tuned only through arguments; the handler is where the
+        # TOT_* settings become the defaults a request can still override.
+        from core.config.reasoning import get_reasoning_config
+
+        tot_config = get_reasoning_config()
+        k = context.get("k", tot_config.branching_factor)
+        max_steps = context.get("max_steps", tot_config.max_depth)
+        strategy = context.get("strategy", tot_config.strategy)
 
         result = await self.tot_engine.solve(
             problem=query, k=k, max_steps=max_steps, strategy=strategy

@@ -298,7 +298,7 @@ class BackstageProvider:
             return build_plugin_api_definition(
                 document,
                 prefixes=prefixes,
-                title=_slugify_title(plugin.metadata.name),
+                title=_plugin_title(plugin.metadata),
                 description=plugin.metadata.description,
                 exact_paths=exact_paths,
             )
@@ -392,6 +392,13 @@ def _slugify_title(name: str) -> str:
     from .component_entity import slugify_title
 
     return slugify_title(name)
+
+
+def _plugin_title(meta: object) -> str:
+    """The plugin's display name, else its slug title (see ``plugin_title``)."""
+    from .component_entity import plugin_title
+
+    return plugin_title(meta)
 
 
 # Re-exported for callers that previously imported the table from this module.

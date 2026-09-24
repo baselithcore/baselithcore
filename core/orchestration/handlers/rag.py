@@ -30,9 +30,20 @@ RAG_NOT_FOUND_MESSAGE = (
 )
 
 
-def build_rag_user_prompt(context_text: str, query: str) -> str:
-    """Compose the user prompt from the retrieved context block and the query."""
-    return f"Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
+def build_rag_user_prompt(context_text: str, query: str, history: str = "") -> str:
+    """Compose the user prompt from the context block, prior turns and the query.
+
+    Args:
+        context_text: The retrieved document fragments.
+        query: The user's current question.
+        history: Prior turns of this conversation, oldest first (the chat
+            service puts them in the context under ``history_text``). They
+            let a follow-up ("and the second one?") resolve against what was
+            already said; the retrieved context stays the only source of
+            facts.
+    """
+    history_block = f"Conversation so far:\n{history}\n\n" if history else ""
+    return f"{history_block}Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
 
 
 class StandardRagHandler(BaseFlowHandler):
@@ -185,7 +196,9 @@ class StandardRagHandler(BaseFlowHandler):
                 }
 
             response = await self.llm_service.generate_response(
-                prompt=build_rag_user_prompt(context_text, query),
+                prompt=build_rag_user_prompt(
+                    context_text, query, context.get("history_text", "")
+                ),
                 system_prompt=RAG_SYSTEM_PROMPT,
             )
 

@@ -88,6 +88,26 @@ class TestSigning:
     def test_malformed_header(self):
         assert not verify_signature("secret", b"x", "garbage", tolerance_seconds=0)
 
+    def test_default_tolerance_comes_from_config(self, monkeypatch):
+        # Regression: WEBHOOK_SIGNATURE_TOLERANCE_SECONDS was declared but the
+        # verifier hard-coded 300, so the setting changed nothing.
+        import core.config.webhooks as webhook_config
+
+        body = b"x"
+        hdr = build_signature_header("secret", body, timestamp=1000)
+        monkeypatch.setattr(
+            webhook_config,
+            "_webhook_config",
+            WebhookConfig(WEBHOOK_SIGNATURE_TOLERANCE_SECONDS=3600),
+        )
+        assert verify_signature("secret", body, hdr, now=1000 + 1800)
+        monkeypatch.setattr(
+            webhook_config,
+            "_webhook_config",
+            WebhookConfig(WEBHOOK_SIGNATURE_TOLERANCE_SECONDS=60),
+        )
+        assert not verify_signature("secret", body, hdr, now=1000 + 1800)
+
 
 # === SSRF ===
 class TestSSRF:

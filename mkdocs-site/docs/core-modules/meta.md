@@ -11,6 +11,11 @@ points are synthesized into a single balanced answer. A separate, adversarial
 Generator-Challenger protocol is provided for high-stakes tasks where factual
 accuracy matters more than consensus.
 
+!!! note "Library API — not wired by default"
+    Neither `MultiPersonaAgent` / `InternalDebate` nor
+    `GeneratorChallengerProtocol` is invoked by the default app. Call them from
+    a flow handler you register or from plugin code.
+
 ---
 
 ## Module Structure

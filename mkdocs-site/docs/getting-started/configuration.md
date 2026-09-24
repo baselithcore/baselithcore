@@ -64,14 +64,14 @@ Declared in `core.config.app`.
 | `ACTIVE_LEARNING_MAX_POSITIVE_RATE` | `float` | `0.6` |  |
 | `ACTIVE_LEARNING_MIN_TOTAL` | `int` | `4` |  |
 | `AGENT_MAX_TOKENS`<br>also accepts `LLM_BUDGET_MAX_TOKENS` | `int` | `10000` | Per-agent-run runaway cap, not a monthly budget: one chat run that burns more than this is aborted by CostControlMiddleware. |
-| `ANALYSIS_CACHE_ENABLED` | `bool` | `True` |  |
-| `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` |  |
-| `ANALYSIS_CACHE_TTL` | `float` | `86400.0` |  |
+| `ANALYSIS_CACHE_ENABLED` | `bool` | `True` | Deprecated, no effect: nothing reads it |
+| `ANALYSIS_CACHE_MAXSIZE` | `int` | `128` | Deprecated, no effect: nothing reads it |
+| `ANALYSIS_CACHE_TTL` | `float` | `86400.0` | Deprecated, no effect: nothing reads it |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
 | `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
 | `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
-| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` |  |
+| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in core/chat RAG pipeline only |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
@@ -150,9 +150,9 @@ Declared in `core.config.base`.
 | `CORE_DEBUG` | `bool` | `False` | Enable debug mode |
 | `CORE_DETERMINISTIC_MODE` | `bool` | `False` | When enabled, ensures reproducible execution by pinning seeds and disabling non-deterministic features (e.g., setting LLM temperature to 0 and bypassing caches). |
 | `CORE_DOCUMENTS_DIR` | `Path` | `Path('documents')` | Directory for document storage |
-| `CORE_LOG_FORMAT` | `str` | `text` | Logging format (text or json) |
+| `CORE_LOG_FORMAT` | `str` | `text` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
 | `CORE_LOG_LEVEL` | `str` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
-| `CORE_LOG_STRUCTURED` | `bool` | `False` | Enable structured logging (JSON format) |
+| `CORE_LOG_STRUCTURED` | `bool` | `False` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
 | `CORE_MAX_WORKERS` | `int` | `4` | Maximum number of worker threads for parallel orchestration and background tasks |
 | `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Directory containing plugins |
 | `CORE_RANDOM_SEED` | `int` | `42` | Random seed when deterministic_mode is enabled |
@@ -166,7 +166,7 @@ Declared in `core.config.cache`.
 | `CACHE_CROSS_WORKER_SINGLE_FLIGHT` | `bool` | `False` | Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis lock, not just within one event loop. With WEB_CONCURRENCY>1 or several pods, in-process coalescing still lets N workers issue N identical LLM/embedding calls for one key; this elects ONE worker per key and the others read the winner's value back out of the shared cache. Only takes effect where the backing cache is backing cache is genuinely shared (Redis) — an in-process store gives the losing worker nothing to read back. Fail-open: if Redis is unreachable the path degrades to in-process coalescing. |
 | `CACHE_MAXSIZE_DEFAULT` | `int` | `256` | Default maximum size for in-memory caches |
 | `CACHE_TTL_DEFAULT` | `float` | `300.0` | Default TTL in seconds for caches |
-| `CACHE_REDIS_URL` | `str` | `redis://redis:6379/1` | Redis connection URL |
+| `CACHE_REDIS_URL` | `str` | `redis://localhost:6379/1` | Redis connection URL |
 | `REDIS_CACHE_PREFIX` | `str` | `baselithcore:cache` | Prefix for Redis cache keys |
 | `REDIS_CACHE_TTL` | `float` | `3600.0` | Default TTL for Redis cache entries |
 | `REDIS_HEALTH_CHECK_INTERVAL` | `float` | `30.0` | Seconds between idle-connection health checks (0 disables) |
@@ -178,6 +178,24 @@ Declared in `core.config.cache`.
 | `SEMANTIC_CACHE_MAXSIZE` | `int` | `1000` | Maximum number of semantic cache entries per tenant |
 | `SEMANTIC_CACHE_THRESHOLD` | `float` | `0.85` | Minimum similarity threshold (0.0-1.0) |
 | `SEMANTIC_CACHE_TTL` | `float` | `3600.0` | TTL in seconds for semantic cache entries |
+
+## Chat configuration (`CHAT_`)
+
+Declared in `core.config.chat`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `CHAT_ENABLE_RERANKING` | `bool` | `True` | Enable document reranking |
+| `CHAT_ENABLE_RESPONSE_CACHE` | `bool` | `True` | Deprecated, no effect: nothing reads it; the chat answer cache is CHAT_RESPONSE_CACHE_ENABLED |
+| `CHAT_FINAL_TOP_K` | `int` | `5` | Final number of documents after reranking |
+| `CHAT_INITIAL_SEARCH_K` | `int` | `20` | Initial number of documents to retrieve |
+| `CHAT_LONG_TERM_MEMORY_ENABLED` | `bool` | `False` | Give the chat Orchestrator an AgentMemory so runs recall past interactions and write new ones back. Off by default: it adds an embedding + store round-trip per request. Distinct from CHAT_MEMORY_ENABLED, which governs per-conversation history. |
+| `CHAT_MAX_HISTORY_LENGTH` | `int` | `10` | Deprecated, no effect: nothing reads it; conversation history is sized by CHAT_MEMORY_MAX_TURNS |
+| `CHAT_RERANKER_MODEL` | `str` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model name |
+| `CHAT_RERANK_MAX_CANDIDATES` | `int` | `50` | Maximum number of candidates to rerank |
+| `CHAT_SERVICE_CONFIG_FILE` | `str \| None` | *empty* | Path to an external YAML/JSON chat config file |
+| `CHAT_SERVICE_FACTORY` | `str \| None` | *empty* | Import path to a custom chat service factory |
+| `CHAT_STREAMING_ENABLED` | `bool` | `True` | Enable streaming responses |
 
 ## AI-governance configuration (EU AI Act, GDPR accountability artefacts)
 
@@ -224,6 +242,25 @@ Declared in `core.config.events`.
 | `EVENT_ENABLE_WILDCARDS` | `bool` | `True` |  |
 | `EVENT_HANDLER_TIMEOUT` | `float` | `30.0` | Max seconds a single event handler may run before being cancelled |
 | `EVENT_MAX_HISTORY` | `int` | `100` |  |
+
+## Guardrails configuration (`GUARDRAILS_`)
+
+Declared in `core.config.guardrails`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `GUARDRAILS_ALLOWED_TOPICS` | `str \| None` | *empty* | Free-text description of the in-scope domain. Set, the LLM input taxonomy may rule a query out_of_scope; unset, it never does |
+| `GUARDRAILS_BLOCK_CODE_EXECUTION` | `bool` | `True` | Block code-execution payloads in queries |
+| `GUARDRAILS_BLOCK_INJECTION_PATTERNS` | `bool` | `True` | Block known prompt-injection phrasings |
+| `GUARDRAILS_CUSTOM_BLOCK_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Extra case-insensitive regexes that block a query (comma-separated or a JSON array) |
+| `GUARDRAILS_FILTER_HARMFUL_CONTENT` | `bool` | `True` | Filter harmful content from responses |
+| `GUARDRAILS_FILTER_PII` | `bool` | `True` | Redact PII from responses |
+| `GUARDRAILS_INPUT_ENABLED` | `bool` | `True` | Run the input guard on every query |
+| `GUARDRAILS_MAX_INPUT_LENGTH` | `int` | `10000` | Longest query accepted, in characters |
+| `GUARDRAILS_MAX_OUTPUT_LENGTH` | `int` | `50000` | Longest response returned, in characters |
+| `GUARDRAILS_MODERATION_ENABLED` | `bool` | `True` | Allow the content-moderation layer; it still needs BASELITH_MODERATION_PROVIDER to do anything |
+| `GUARDRAILS_MODERATION_THRESHOLD` | `float` | `0.7` | Moderation score at or above which content is flagged |
+| `GUARDRAILS_OUTPUT_ENABLED` | `bool` | `True` | Run the output guard on every response |
 
 ## Security-incident reporting configuration
 
@@ -283,8 +320,8 @@ Declared in `core.config.mcp`.
 | `MCP_SERVER_INSTRUCTIONS` | `str` | *empty* | Optional natural-language guidance returned by `server/discover`. |
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
 | `MCP_SERVER_VERSION` | `str` | `2.0.0` |  |
-| `MCP_SSE_TRANSPORT_ENABLED` | `bool` | `False` |  |
-| `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` |  |
+| `MCP_SSE_TRANSPORT_ENABLED` | `bool` | `False` | Deprecated, no effect: nothing reads it; the served transport is Streamable HTTP (MCP_HTTP_TRANSPORT_ENABLED) |
+| `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` | Deprecated, no effect: nothing reads it; stdio runs when the server is launched as a process |
 | `MCP_TASK_POLL_INTERVAL_MS` | `int` | `1000` |  |
 | `MCP_TASK_TTL_MS` | `int` | `3600000` | How long a task handle stays resolvable, and how often the client should poll it. Both are hints carried in the CreateTaskResult. |
 | `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `float` | `60.0` | Server-side deadline on one `tools/call` handler. Without it a hung tool holds the request (and, on HTTP, the connection) indefinitely. 0 disables the deadline. |
@@ -388,7 +425,7 @@ Declared in `core.config.plugins`.
 | `PLUGIN_CONFIG_PATH` | `Path \| None` | *empty* | Path to plugin configuration file |
 | `PLUGIN_ENABLED` | `bool` | `True` | Enable plugin system |
 | `PLUGIN_OFFICIAL_MARKETPLACE_URL` | `str` | `https://marketplace.baselithcore.xyz` | Official Marketplace and Registry URLs This is the hardcoded "Source of Truth" for the official marketplace. |
-| `PLUGIN_PLUGINS_PATH` | `Path` | `Path('plugins')` | Directory where plugins are installed |
+| `PLUGIN_PLUGINS_PATH` | `Path` | `Path('plugins')` | Plugin root: where marketplace installs write and what the runtime loaders scan |
 | `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Per-plugin configuration |
 | `PLUGIN_PUBLISH_WORKSPACE_ROOT` | `Path \| None` | *empty* | POST /api/backstage/publish only packages plugin directories inside this root (e.g. the Backstage Scaffolder workspace mount). Fail-closed: while unset the publish endpoint is disabled, so a job/admin caller can never point the publisher at an arbitrary host directory. |
 | `PLUGIN_REGISTRY_CACHE_TTL` | `int` | `3600` | TTL for local registry cache in seconds |
@@ -473,11 +510,11 @@ Declared in `core.config.reasoning`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `TOT_BEAM_WIDTH` | `int` | `3` | Beam width for search |
-| `TOT_BRANCHING_FACTOR` | `int` | `3` | Branching factor per node |
-| `TOT_MAX_DEPTH` | `int` | `3` | Maximum search depth |
+| `TOT_BEAM_WIDTH` | `int` | `3` | Deprecated and ignored: the ToT engine has no beam search |
+| `TOT_BRANCHING_FACTOR` | `int` | `3` | Default ToT branching factor (k) for the reasoning handler |
+| `TOT_MAX_DEPTH` | `int` | `3` | Default ToT depth (max_steps) for the reasoning handler |
 | `TOT_SELF_CORRECTION_MAX_ITERATIONS` | `int` | `2` | Maximum self-correction iterations |
-| `TOT_STRATEGY` | `Literal['bfs', 'dfs']` | `bfs` | Search strategy |
+| `TOT_STRATEGY` | `Literal['bfs', 'mcts']` | `bfs` | Default ToT search strategy for the reasoning handler: 'bfs' (bounded best-first expansion) or 'mcts'. The retired 'dfs' value, never implemented, is read as 'bfs'. |
 | `TOT_THOUGHT_CACHE_MAXSIZE` | `int` | `1000` | Maximum entries in thought cache |
 | `TOT_THOUGHT_CACHE_TTL` | `float` | `1800.0` | Thought cache TTL in seconds (30 min) |
 
@@ -518,8 +555,8 @@ Declared in `core.config.sandbox`.
 | --- | --- | --- | --- |
 | `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
 | `SANDBOX_COST_PER_COMPUTE_SECOND` | `float` | `0.0` | USD charged per wall-clock compute second of sandbox execution. 0 (default) keeps cost_usd at 0 while compute_seconds is still recorded. |
-| `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker socket path |
-| `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Enable network in sandbox |
+| `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker daemon socket for the sandbox client. Used only when set explicitly and DOCKER_HOST is unset; otherwise Docker's own client environment decides. |
+| `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Give Docker sandbox containers the default bridge network (egress for untrusted code). Off: network_mode none. |
 | `SANDBOX_IMAGE` | `str` | `python:3.12-slim` | Docker image for sandbox |
 | `SANDBOX_PROVIDER` | `Literal['docker', 'sbx']` | `docker` | Sandbox provider (docker or sbx) |
 | `SANDBOX_SBX_PATH` | `str` | `sbx` | Path to the sbx CLI binary |
@@ -550,7 +587,7 @@ Declared in `core.config.scraper`.
 | `SCRAPER_MAX_PAGES` | `int` | `100` | Maximum pages to crawl |
 | `SCRAPER_MAX_RETRIES` | `int` | `3` | Maximum retry attempts |
 | `SCRAPER_PLAYWRIGHT_HEADLESS` | `bool` | `True` | Run Playwright in headless mode |
-| `SCRAPER_PLAYWRIGHT_SCREENSHOT` | `bool` | `False` | Take screenshots with Playwright |
+| `SCRAPER_PLAYWRIGHT_SCREENSHOT` | `bool` | `False` | Deprecated, no effect: nothing reads it |
 | `SCRAPER_PLAYWRIGHT_WAIT_UNTIL` | `Literal['load', 'domcontentloaded', 'networkidle']` | `networkidle` | Playwright navigation wait condition |
 | `SCRAPER_RATE_LIMIT_ENABLED` | `bool` | `True` | Enable rate limiting |
 | `SCRAPER_RATE_LIMIT_PERIOD_SECONDS` | `float` | `1.0` | Rate limit period in seconds |
@@ -628,18 +665,6 @@ Declared in `core.config.services`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `CHAT_ENABLE_RERANKING` | `bool` | `True` | Enable document reranking |
-| `CHAT_ENABLE_RESPONSE_CACHE` | `bool` | `True` | Enable response exact-match caching |
-| `CHAT_FINAL_TOP_K` | `int` | `5` | Final number of documents after reranking |
-| `CHAT_INITIAL_SEARCH_K` | `int` | `20` | Initial number of documents to retrieve |
-| `CHAT_MAX_HISTORY_LENGTH` | `int` | `10` | Maximum conversation history length |
-| `CHAT_MEMORY_ENABLED` | `bool` | `False` | Give the chat Orchestrator an AgentMemory so runs recall past interactions and write new ones back. Off by default: it adds an embedding + store round-trip per request. |
-| `CHAT_RERANKER_MODEL` | `str` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model name |
-| `CHAT_RERANK_MAX_CANDIDATES` | `int` | `50` | Maximum number of candidates to rerank |
-| `CHAT_RESPONSE_CACHE_TTL` | `int` | `3600` | Response cache TTL in seconds |
-| `CHAT_SERVICE_CONFIG_FILE` | `str \| None` | *empty* | Path to an external YAML/JSON chat config file |
-| `CHAT_SERVICE_FACTORY` | `str \| None` | *empty* | Import path to a custom chat service factory |
-| `CHAT_STREAMING_ENABLED` | `bool` | `True` | Enable streaming responses |
 | `LLM_ANTHROPIC_API_KEY` :material-key:<br>also accepts `ANTHROPIC_API_KEY` | `SecretStr \| None` | *empty* | Dedicated Anthropic key for the per-plugin LLM policy. LLM_API_KEY belongs to LLM_PROVIDER; a plugin pinned to another provider is served by that provider's own key. Blank means the provider is reported as not configured. |
 | `LLM_ANTHROPIC_AWS_REGION` | `str \| None` | *empty* | Bedrock region (falls back to the SDK's AWS_REGION) |
 | `LLM_ANTHROPIC_BACKEND` | `Literal['api', 'bedrock', 'vertex']` | `api` | Anthropic serving backend: api, bedrock, or vertex |
@@ -669,6 +694,7 @@ Declared in `core.config.services`.
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
+| `LLM_ROUTING_MAX_COST_PER_1K_USD` | `float \| None` | *empty* | Budget cap for routed calls: when the routed model's approximate cost per 1K tokens exceeds it, the priciest model in the policy pool that fits is used instead (cheapest if none fits). Empty disables the cap. |
 | `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
@@ -707,9 +733,9 @@ Declared in `core.config.storage`.
 | `GRAPH_DB_URL` | `str` | `redis://localhost:6379` |  |
 | `GRAPH_MAX_HOPS` | `int` | `3` |  |
 | `GRAPH_QUERY_LIMIT` | `int` | `30` | Cost control / Performance related to usage |
-| `GRAPH_QUERY_TIMEOUT` | `float` | `5.0` |  |
-| `GRAPH_RAG_ENABLED` | `bool` | `False` |  |
-| `GRAPH_SIMILAR_TOP_K` | `int` | `5` |  |
+| `GRAPH_QUERY_TIMEOUT` | `float` | `5.0` | Deprecated, no effect: nothing reads it |
+| `GRAPH_RAG_ENABLED` | `bool` | `False` | Deprecated, no effect: nothing reads it |
+| `GRAPH_SIMILAR_TOP_K` | `int` | `5` | Deprecated, no effect: nothing reads it |
 | `POSTGRES_ENABLED` | `bool` | `True` |  |
 | `QUEUE_REDIS_URL` | `str` | `redis://localhost:6379/2` |  |
 | `SQL_QUERY_LIMIT` | `int` | `0` | Per-request cap on *relational* (Postgres) queries. Distinct from the graph (Cypher) budget above: a single agentic HTTP request legitimately issues hundreds of SQL statements (tool reads + the final transcript write), so the tight graph limit must never gate SQL. 0 = unlimited (default) — set a positive value only to guard against pathological query fan-out. |
@@ -794,6 +820,8 @@ Declared in `core.config.vectorstore`.
 | `VECTORSTORE_PORT` | `int` | `6333` | Vector store HTTP/REST port |
 | `VECTORSTORE_PROVIDER` | `Literal['qdrant', 'pgvector']` | `qdrant` | Vector store provider: 'qdrant' (dedicated vector DB) or 'pgvector' (PostgreSQL + vector extension, reuses the shared pool). |
 | `VECTORSTORE_QDRANT_MODE`<br>also accepts `QDRANT_MODE` | `str` | `server` | Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk. |
+| `VECTORSTORE_SEARCH_CACHE_ENABLED` | `bool` | `True` | Cache vector search results in Redis (keyed per tenant, vector, filter and re-rank question). |
+| `VECTORSTORE_SEARCH_CACHE_TTL` | `int` | `300` | Lifetime of a cached search result, in seconds. |
 | `VECTORSTORE_SEARCH_LIMIT` | `int` | `10` | Default number of search results |
 | `VECTORSTORE_TIMEOUT_SECONDS` | `float` | `30.0` | Per-request timeout (seconds) for vector store calls |
 
@@ -810,6 +838,7 @@ Declared in `core.config.webhooks`.
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT` | `int` | `50` | Cap registrations per tenant to bound fan-out and memory. |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS` | `float` | `1.0` | Base backoff (seconds); exponential with jitter between attempts. |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `int` | `300` | Signature freshness window enforced by verify_signature (seconds). |
+| `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `float` | `10.0` | Per-delivery HTTP timeout (seconds). |
 
 ## World-model configuration (`WORLD_MODEL_`)
@@ -862,4 +891,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-549 settings documented.
+564 settings documented.

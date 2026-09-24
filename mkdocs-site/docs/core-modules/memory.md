@@ -593,6 +593,10 @@ system_ctx = await ctx.get_context("current user task")
 
 Knowledge graph integration for entity relationship tracking and multi-hop reasoning.
 
+!!! note "Library API — not wired by default"
+    The memory the default app builds has no `graph_provider`; the graph is
+    consulted only when you pass one to `AgentMemory(graph_provider=...)`.
+
 ```python
 from core.memory.graph_provider import SimpleGraphMemoryProvider
 from core.memory.manager import AgentMemory
@@ -755,6 +759,11 @@ from `StorageConfig` / `VectorStoreConfig`.
 that an agent writes during a run and re-reads to refocus on the goal.
 Distinct from STM/MTM/LTM because it is *written by the agent itself*
 and bounded per-section.
+
+!!! note "Library API — not wired by default"
+    No handler in the default app creates or writes a `Scratchpad`
+    (`AgentState.scratchpad_ref` is never set by the running loop). Give one to
+    your own handler or tool.
 
 ### Public API
 

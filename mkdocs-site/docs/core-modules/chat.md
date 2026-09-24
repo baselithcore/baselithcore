@@ -2,6 +2,17 @@
 
 The `core/chat/` module implements the production-ready conversational pipeline, including retrieval-augmented generation (RAG), streaming, conversation history, and plugin-extensible flow handlers.
 
+!!! note "Two RAG paths — only one runs by default"
+    The `qa_docs` intent the running app answers is served by
+    `StandardRagHandler` (`core/orchestration/handlers/rag.py`) and its
+    streaming twin — see
+    [Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
+    The step pipeline described under [RAG Workflow](#rag-workflow)
+    (`RagWorkflowHandler`, the `workflow_*` modules, the `mixins/retrieval_*`
+    layers, `precheck.py`, `reranking.py` and the two answer-cache layers) is a
+    **library API**: no route, startup hook or handler registration reaches it
+    in the default app.
+
 ## Module Structure
 
 ```yaml
@@ -103,26 +114,40 @@ registry = PluginRegistry()
 chat = ChatService(plugin_registry=registry)
 ```
 
-### Long-term memory (`CHAT_MEMORY_ENABLED`, default `false`)
+### Long-term memory (`CHAT_LONG_TERM_MEMORY_ENABLED`, default `false`)
 
 The `Orchestrator` that `ChatService` builds takes an optional
-`memory_manager`. It is `None` unless `CHAT_MEMORY_ENABLED=true`, in which case
-the service constructs an `AgentMemory` (`core/memory/manager.py`) and the loop
-recalls past interactions before answering and writes the exchange back
-afterwards. That costs an embedding and a store round-trip per request, which
-is why it is opt-in; conversation history (the last turns replayed into the
-prompt) is a separate, always-on mechanism described under
+`memory_manager`. It is `None` unless `CHAT_LONG_TERM_MEMORY_ENABLED=true`, in
+which case the service constructs an `AgentMemory` (`core/memory/manager.py`)
+with the persistent provider and the LLM summarizer the lazy `memory` resource
+uses, and the loop recalls past interactions before answering and writes the
+exchange back afterwards. That costs an embedding and a store round-trip per
+request, which is why it is opt-in. Conversation history (the last turns
+replayed into the prompt) is a separate mechanism, governed by
+`CHAT_MEMORY_ENABLED` and described under
 [Conversation History](#conversation-history). If `AgentMemory` cannot be
 constructed the service logs a warning and continues without memory rather than
 failing the request.
 
 ```env
-CHAT_MEMORY_ENABLED=true
+CHAT_LONG_TERM_MEMORY_ENABLED=true
 ```
+
+!!! warning "Renamed from `CHAT_MEMORY_ENABLED`"
+    Both settings used to be bound to `CHAT_MEMORY_ENABLED` with opposite
+    defaults, and the long-term one was never read, so it could not be turned
+    on. `CHAT_MEMORY_ENABLED` now only governs conversation history.
 
 ---
 
 ## RAG Workflow
+
+!!! note "Library API — not wired by default"
+    Nothing in the default app registers `RagWorkflowHandler`. Opt in from host
+    code by registering it for an intent, as its docstring shows:
+    `orchestrator.register_handler("rag_full", RagWorkflowHandler(service))`.
+    Until then the steps below, the answer caches and the `CHAT_GUARDRAILS_*`
+    keyword guard (`core/chat/guardrails.py`) do not run.
 
 The RAG pipeline is implemented natively as an **Orchestrator-compatible
 `FlowHandler`** (`RagWorkflowHandler` in `core/chat/rag_workflow.py`) driving a
@@ -167,8 +192,9 @@ planner.plan_backlog(state)  # mutates state in place; returns None
 
 ## Answer caching: two layers, two freshness contracts
 
-The RAG pipeline can serve a repeated question from cache at **two different
-points**, and the difference between them is not performance but *freshness*.
+The `RagWorkflowHandler` pipeline (opt-in — see [RAG Workflow](#rag-workflow);
+the default `qa_docs` handler has no answer cache) can serve a repeated
+question from cache at **two different points**, and the difference between them is not performance but *freshness*.
 Understanding which guarantee you are buying matters more than the latency
 number.
 
@@ -186,7 +212,7 @@ graph TD
     G --> W[Write BOTH cache layers]
 ```
 
-### Layer 1 — response cache (always on)
+### Layer 1 — response cache (`CHAT_RESPONSE_CACHE_ENABLED`, default `true`)
 
 `RetrievalContextMixin.check_cache` keys on
 `(normalized_query, sha256(history_text + context))`. Because the retrieved
@@ -313,8 +339,44 @@ CHAT_RAG_PRECHECK_MAXSIZE=256 # in-process backend only
 
 ## Conversation History
 
-`ChatHistoryManager` (`core/services/chat/utils/history.py`) is async,
-cache-backed, and keyed by `conversation_id`. It exposes `load` (returns the
+`POST /chat` and `POST /chat/stream` are stateful per `conversation_id`.
+`handle_chat_async` and `handle_chat_stream_async` load the conversation's prior
+turns **before** orchestration and pass them to the flow handler in the context
+under `history_text` (oldest first, preceded by the rolling summary when there is
+one). The default `qa_docs` handler places them in the prompt as
+`Conversation so far:` ahead of the retrieved context — see
+[Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
+Retrieval itself still runs on the raw query; there is no query rewriting.
+
+The turn is recorded **after** the answer, and only a real answer: a result
+carrying `error`, or an empty `response`, is not stored. On the streaming route
+the turn is recorded once the stream completes; a stream that raises or that the
+client abandons is not recorded, so a partial answer is never replayed to the
+model as something it said. A failure to load or store history is logged and the
+request proceeds without it.
+
+The storage key is `<user_id>:<conversation_id>` (`anonymous` when there is no
+authenticated user), on top of the history cache's tenant namespace. Inside one
+tenant, a client that reuses or guesses another user's `conversation_id` gets a
+separate, empty conversation. A request without `conversation_id` is stateless.
+The helpers live in `core/services/chat/utils/conversation.py`.
+
+History is on when `ChatDependencyConfig.history_enabled` is true; it defaults to
+`CHAT_MEMORY_ENABLED` (`core/config/app.py`, default `true`), and the manager
+follows the other `CHAT_MEMORY_*` settings:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CHAT_MEMORY_ENABLED` | `true` | Load and record conversation turns |
+| `CHAT_MEMORY_MAX_TURNS` | `6` | Recent turns replayed into the prompt |
+| `CHAT_MEMORY_TTL` | `3600.0` | Seconds a conversation stays in the history cache |
+| `CHAT_MEMORY_MAX_SESSIONS` | `1024` | Conversations held by the history cache |
+| `CHAT_MEMORY_SUMMARY_ENABLED` | `true` | Fold older turns into a rolling summary |
+| `CHAT_MEMORY_SUMMARY_MAX_TURNS` | `8` | Turns kept in the summary |
+| `CHAT_MEMORY_SUMMARY_MAX_CHARS` | `800` | Summary length cap |
+
+`ChatHistoryManager` (`core/services/chat/utils/history.py`) is the storage layer
+underneath: async, cache-backed, and keyed by the string it is given. It exposes `load` (returns the
 trimmed turns plus a formatted history/summary string) and `append_turn`:
 
 ```python

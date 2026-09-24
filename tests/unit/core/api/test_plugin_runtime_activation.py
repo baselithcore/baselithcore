@@ -167,3 +167,52 @@ def test_invalid_plugin_name_not_mounted(tmp_path: Any) -> None:
     # A valid slug mounts normally (static + SPA index present).
     hooks.mount_plugin_static("good-plugin", tmp_path)
     assert "/plugins/good-plugin/static" in app.mounts
+
+
+def _hooks_with_configs(
+    graph: dict[str, dict[str, str]], configs: dict[str, dict[str, Any]]
+) -> tuple[PluginRuntimeHooks, _HotReload]:
+    hooks, hot = _hooks(graph)
+    hooks._configs = configs
+    return hooks, hot
+
+
+def _discoveries(*names: str) -> dict[str, Any]:
+    return {
+        n: SimpleNamespace(name=n, directory_name=n.replace("-", "_")) for n in names
+    }
+
+
+@pytest.mark.asyncio
+async def test_auto_activate_treats_missing_enabled_key_as_enabled() -> None:
+    # Regression: startup required an explicit ``enabled: true`` while
+    # discovery (and every other loader) treats a missing key as enabled, so a
+    # bare ``api_routers: {}`` block was discovered and then left dormant.
+    hooks, hot = _hooks_with_configs(
+        {"api-routers": {}, "off": {}},
+        {"api_routers": {}, "off": {"enabled": False}},
+    )
+    await hooks.auto_activate(_discoveries("api-routers", "off"))
+    assert hot.enabled == ["api-routers"]
+
+
+@pytest.mark.asyncio
+async def test_auto_activate_without_config_file_activates_everything() -> None:
+    hooks, hot = _hooks_with_configs({"a": {}, "b": {}}, {})
+    await hooks.auto_activate(_discoveries("a", "b"))
+    assert hot.enabled == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_auto_activate_isolates_a_failing_plugin() -> None:
+    hooks, hot = _hooks_with_configs({"bad": {}, "good": {}}, {})
+    original = hot.enable_plugin
+
+    async def _enable(name: str, config: dict[str, Any]) -> bool:
+        if name == "bad":
+            raise RuntimeError("boom")
+        return await original(name, config)
+
+    hot.enable_plugin = _enable  # type: ignore[method-assign]
+    await hooks.auto_activate(_discoveries("bad", "good"))
+    assert hot.enabled == ["good"]

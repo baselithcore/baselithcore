@@ -85,17 +85,39 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 ### Embedding cache & miss coalescing
 
 `CachedEmbedder` fronts the sentence-transformers model with a TTL cache keyed
-by the sha256 of the input text: a `RedisTTLCache` when `CACHE_BACKEND=redis`
-(key prefix `<CACHE_REDIS_PREFIX>:embed:<dim>`), else an in-process `TTLCache`.
-If the Redis client fails to build, the embedder logs a warning and runs
-uncached rather than failing.
+by `sha256(f"{model_id}:{text}")` (module-level `_cache_key`): a `RedisTTLCache`
+when `CACHE_BACKEND=redis` (key prefix `<CACHE_REDIS_PREFIX>:embed:<dim>`), else
+an in-process `TTLCache`. If the Redis client fails to build, the embedder logs
+a warning and runs uncached rather than failing.
+
+The model id is in the key because the Redis prefix only carries the embedding
+**dimension**. Keying on the text alone made two models of the same width share
+every entry — 384 is the common case, the width of the default
+`sentence-transformers/all-MiniLM-L6-v2` — so one model's vector could be
+returned for a query the other embedded, which corrupts every similarity score
+computed from it. `CachedEmbedder` resolves the id once in `__init__`
+(`self._model_id`, from `_model_name()`: the model card's base model or name,
+falling back to the class name) — so two models that expose neither can still
+collide, and models that carry their card metadata are what to pass.
+
+!!! warning "The two embedding caches must key the same way"
+    `core/services/vectorstore/embedding_cache.py` has always composed
+    `sha256(f"{model_id}:{text}")`, and this one now matches. They are separate
+    code paths under separate Redis prefixes, so they never read each other's
+    entries; what they share is the rule, and a deployment is only free of
+    cross-model collisions while both sides follow it. Change one, change both.
+
+!!! info "The key format changed — one recompute per cached text"
+    Entries written by an older build can no longer be addressed, so they are
+    orphaned: never read again, expiring on their own TTL, with each affected
+    text encoded once more on first use after the upgrade.
 
 Concurrent misses for the *same single text* (the stampede-prone shape: many
 requests embedding the same query) are coalesced through a
 `LayeredSingleFlight` built via `build_single_flight`, keyed by the same
-sha256 the cache uses, so a popular query is encoded once instead of once per
-concurrent caller. Batch encodes are untouched to preserve model-level
-batching.
+`_cache_key` the cache uses — so the lock is scoped per model as well as per
+text, and a popular query is encoded once instead of once per concurrent
+caller. Batch encodes are untouched to preserve model-level batching.
 
 The **cross-worker layer** (one encoder per key across all workers/pods, via a
 Redis lock; losers read the winner's embedding back out of the shared cache)

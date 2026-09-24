@@ -3,7 +3,10 @@ title: Core Services
 description: LLM, VectorStore, Vision, Voice, and other services
 ---
 
-The `core/services` module provides domain-agnostic services.
+The `core/services` module provides domain-agnostic services. The chat service
+(`core/services/chat/`: request handling, streaming and per-conversation history)
+is documented in [Chat & RAG](chat.md), in particular
+[Conversation History](chat.md#conversation-history).
 
 ## Overview
 
@@ -379,6 +382,48 @@ routing is a hint, never an error — unknown categories fall back to the
 config default. The intent classifier passes `task_category="classification"`
 so classification runs on the cheap tier out of the box.
 
+`LLM_ROUTING_MAX_COST_PER_1K_USD` (unset by default; must be `> 0` when set)
+adds a budget cap on top. When the routed model's approximate cost per 1K
+tokens (500 in / 500 out, from the pricing table) exceeds it, the router
+substitutes the *priciest* model in the policy pool that still fits
+(`rule="cost_guard"`); when none fits, it takes the cheapest one rather than
+raise. The provider check below still applies to the substituted model.
+
+**The routed pick must be servable by the configured provider.** The built-in
+policy names Claude ids for every category, so switching `LLM_ROUTING_ENABLED`
+on in an OpenAI, Gemini, Ollama or HuggingFace deployment used to ask that
+provider for a model it has never heard of — one 404 per categorized call, from
+a feature sold as a cost optimization. `routed_model()` now resolves the pick's
+vendor family from its id prefix and checks it against the configured provider:
+
+| Family | Id prefixes | Providers that serve it |
+| ------ | ----------- | ----------------------- |
+| Anthropic | `claude-` | `anthropic`, `bedrock`, `vertex` |
+| OpenAI | `gpt-`, `o1-`, `o3-` | `openai`, `azure`, `azure_openai` |
+| Google | `gemini-` | `gemini`, `vertex`, `google` |
+
+`LLM_PROVIDER` itself accepts only `openai`, `ollama`, `huggingface`,
+`anthropic` and `gemini`; the extra names in the table exist for configs that
+carry a provider string of their own. Anthropic-on-Bedrock/Vertex is
+`LLM_PROVIDER=anthropic` plus `LLM_ANTHROPIC_BACKEND` (below), which already
+resolves to the Anthropic family.
+
+On a mismatch `routed_model()` logs a warning naming the model and the provider,
+then resolves to `None` — the module's existing "fall back to the configured
+default model" contract, so routing stays a hint and never raises. The check is deliberately **one-sided**:
+it rejects only a *provable* mismatch. An id whose family cannot be recognized
+passes untouched — that covers every local Ollama tag (`llama3.2`,
+`qwen2.5-coder`), which is whatever the operator pulled — as does a config that
+names no provider at all.
+
+!!! warning "Non-Anthropic deployments need their own policy for routing to do anything"
+    The built-in policy is Claude-only, so on any provider outside the
+    Anthropic family — `openai` (what `.env.example` ships), the package
+    default `ollama`, `gemini`, `huggingface` — every categorized call is
+    blocked by the guard and falls back to `LLM_MODEL`. Routing stays a no-op
+    until `LLM_ROUTING_POLICY` maps the categories onto that provider's own
+    model ids, e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`.
+
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
 provider support and drives its Thought/Action/Observation loop over
@@ -487,6 +532,10 @@ path is replayed as events — the consumer contract is identical. Deadline
 
 `core/services/llm/batch.py` — for offline workloads (eval replays,
 consolidation summaries, labeling) that don't need interactive latency:
+
+!!! note "Library API — not wired by default"
+    No framework code path calls `generate_batch`; it is a helper for your own
+    offline jobs.
 
 ```python
 from core.services.llm.batch import BatchPrompt, generate_batch
@@ -1088,6 +1137,7 @@ Semantic search and vector indexing.
 core/services/vectorstore/
 ├── __init__.py
 ├── service.py                # VectorStoreService
+├── orchestrator.py           # SearchOrchestrator: retrieval, re-rank, result cache
 ├── embedding_cache.py        # Cached embedding generation (model-scoped keys)
 ├── chunking.py               # Text chunking utilities (default pipeline)
 ├── recursive_splitter.py     # The recursive character splitter (no LangChain)
@@ -1149,7 +1199,7 @@ results = await vs.search(
     query_vector=query_embedding,   # Sequence[float]
     k=5,
     collection_name="documents",
-    query_text="find similar documents",   # optional, enables caching/rerank context
+    query_text="find similar documents",   # drives re-ranking; part of the cache key only when rerank=True
 )
 
 for result in results:           # Sequence[SearchResult]
@@ -1242,6 +1292,59 @@ indexes at startup — so tenant-filtered lookups stay fast as collections grow.
 For per-document retrieval, `query_points_groups` returns the best-scoring chunk
 per document in a **single** round trip. Chat retrieval uses it for its fallback
 path instead of issuing one query per document.
+
+### Search Result Cache
+
+`SearchOrchestrator` (`core/services/vectorstore/orchestrator.py`) fronts the
+two-stage search with a Redis-backed result cache (`RedisCache(prefix="search")`),
+consulted whenever the caller leaves `use_cache=True`. Two declared
+`VectorStoreConfig` fields control it: `search_cache_enabled` (default `True`,
+env `VECTORSTORE_SEARCH_CACHE_ENABLED`) and `search_cache_ttl` (default `300`
+seconds, `ge=1`, env `VECTORSTORE_SEARCH_CACHE_TTL`). Before these fields were
+declared, both services read the attributes with `getattr` against a model that
+ignores unknown keys, so setting either variable had no effect. See
+[Configuration › Services Config](config.md#services-config-llm-vectorstore-chat).
+
+The key is built by `_search_cache_key()` and covers **every input that can
+change the rows**. Its shape is
+`<collection>:<tenant_id>:<retrieval_limit>:<fingerprint>:rr=<rerank>`, where
+the fingerprint is the leading 32 hex digits of a sha256 over:
+
+1. the **full** query vector, packed as little-endian doubles;
+2. every provider kwarg — the injected `tenant_id`, a `query_filter`, a
+   `document_id` restriction, anything else forwarded to the provider —
+   canonically serialized (JSON with sorted keys; Pydantic models through
+   `model_dump(mode="json")`, sets as sorted strings);
+3. `query_text`, but **only when `rerank=True`**. That is the one path where
+   the question reorders the rows; folding it in unconditionally would split
+   entries that are genuinely identical.
+
+Note `retrieval_limit`, not `k`: a re-ranked search deepens retrieval to
+`max(k * 3, 20)`, and the cached rows are what the provider was actually asked
+for.
+
+The previous key hashed the query vector's **first ten components** and omitted
+the provider kwargs entirely. Two distinct embeddings that agreed on their head
+collided, and the same vector searched with and without a filter shared one
+entry for the whole TTL — the second caller was served the first caller's rows.
+
+!!! danger "An unkeyable argument skips the cache; it is never keyed loosely"
+    `_canonical()` represents only the shapes whose identity it genuinely
+    captures (Pydantic models — every Qdrant filter is one — and sets).
+    Anything else raises, `_search_cache_key()` returns `None`, and the call
+    **bypasses the cache on both the read and the write side**, logging at
+    `DEBUG` (`Search cache disabled for this call — unkeyable input: ...`).
+    Falling back to `repr()` would be worse than useless: the default `repr`
+    carries a memory address, so equal filters would key differently inside one
+    process, and a partial `__repr__` could make different filters key the same.
+    A steady stream of those debug lines is the signal that some caller passes
+    an opaque filter object and is paying full provider latency on every query.
+
+!!! info "The key format changed — expect one cold window per rollout"
+    Entries written by an older build can no longer be addressed by the new key
+    builder, so they are effectively invalidated on deploy and simply expire on
+    their own TTL. The first requests after a rollout re-query the provider;
+    there is nothing to purge.
 
 ### Embedding Generation
 
@@ -1485,6 +1588,14 @@ both (a no-op if never used).
 
 Speech synthesis and recognition.
 
+!!! note "Library API — not wired by default"
+    No route or handler in the default app calls `VoiceService`, and the MCP
+    tool adapters in `core/services/voice/tools.py` and
+    `core/services/vision/tools.py` (`register_voice_tools(server)`,
+    `register_vision_tools(server)`) are not registered on any server the app
+    mounts. Call the service directly, or register the tools on your own
+    `MCPServer`.
+
 ### Voice Structure
 
 ```text
@@ -1595,11 +1706,18 @@ print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECO
 
 BaselithCore supports two types of sandboxing for secure code execution:
 
-1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` and resource limits. It provides a good balance between performance and security for most tasks.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
+  For the Docker provider, `build_sandbox_runtime_kwargs(enable_network=None)`
+  (`core/services/sandbox/policy.py`) returns `network_mode="none"` unless
+  `SANDBOX_ENABLE_NETWORK=true`, which switches it to `"bridge"`, Docker's
+  default network. Nothing else in the hardened policy changes: no
+  capabilities, no privilege escalation, read-only root, non-root uid,
+  resource ceilings. Passing `enable_network=` explicitly overrides the setting
+  for one call.
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 - **Pre-execution static analysis**: Python payloads are AST-analyzed before
@@ -1610,6 +1728,27 @@ BaselithCore supports two types of sandboxing for secure code execution:
   literals) are logged in `warn` mode or rejected with
   `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
   executes the payload.
+- **Reproducible image**: the bundled `core/services/sandbox/Dockerfile.sandbox`
+  is built on the host the first time a sandbox is needed, so nothing about it
+  is allowed to float. The base image is digest-pinned, and the data-science
+  stack installs from `requirements.sandbox.txt` — a compiled closure where
+  every package, transitive ones included, is pinned to a version *and* to the
+  sha256 of each distribution that may satisfy it, under
+  `pip install --require-hashes --only-binary=:all:`. Two hosts therefore build
+  the same sandbox, and the one that runs agent-supplied code is the one that
+  was reviewed. Edit the direct pins in `requirements.sandbox.in` and recompile
+  with the `uv pip compile` line in its header; never hand-edit the `.txt`.
+- **No toolchain in the image**: the wheels-only install above leaves nothing to
+  compile, so the image installs no compiler — a C toolchain sitting in the one
+  image that executes agent-supplied code is a capability handed to the payload.
+- **The recipe ships**: `core/services/sandbox/Dockerfile.sandbox` and its
+  `requirements.sandbox.txt` are package data, carried by the wheel and the
+  sdist, so a `pip install baselith-core` can build the hardened image. They
+  were absent from the distribution up to 0.37.0, which left installed
+  deployments with the fail-closed `RuntimeError` (or, under
+  `SANDBOX_ALLOW_UNHARDENED_BASE`, an unreviewed base image);
+  `scripts/check_distribution_artifacts.py` now asserts both on the built
+  artifacts.
 
 ### Compute Metering & Budget Charging
 
@@ -1667,7 +1806,8 @@ SANDBOX_PROVIDER=sbx
 
 # Docker specific
 SANDBOX_IMAGE=python:3.12-slim
-SANDBOX_DOCKER_SOCKET=/var/run/docker.sock
+SANDBOX_DOCKER_SOCKET=/var/run/docker.sock   # honoured only when set explicitly
+SANDBOX_ENABLE_NETWORK=false                 # true = bridge network (egress)
 
 # Sbx specific
 SANDBOX_SBX_PATH=sbx
@@ -1679,6 +1819,19 @@ SANDBOX_TIMEOUT=30
 # Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
 SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 ```
+
+The Docker client connects through `docker.from_env()` (`DOCKER_HOST`, the
+TLS variables, the default socket). `SANDBOX_DOCKER_SOCKET` pins it to
+`unix://<socket>` instead, but only when the variable is set explicitly and
+`DOCKER_HOST` is unset: the field's default value alone changes nothing, and a
+`DOCKER_HOST` pointing at a remote sandbox daemon always wins.
+
+!!! warning "Network egress for untrusted code is opt-in"
+    `SANDBOX_ENABLE_NETWORK=true` lets agent-supplied code reach anything the
+    Docker bridge can route to: the internet, and possibly services on the
+    host's networks. It applies to every Docker sandbox the process starts
+    (one-shot, streaming and pooled). Leave it off unless the workload needs
+    egress.
 
 !!! note "Installation"
     To use the `sbx` provider, you must install the `sbx` CLI tool on your host. On macOS, use `brew install docker/tap/sbx`.

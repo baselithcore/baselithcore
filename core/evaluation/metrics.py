@@ -4,6 +4,7 @@ Controlled by EvaluationConfig to prevent accidental usage.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from core.config.evaluation import evaluation_config
 from core.observability.logging import get_logger
@@ -61,19 +62,43 @@ class BaseMetricWrapper:
         return result.score >= self.threshold
 
 
-# Attempt to import deepeval if enabled
+# DeepEval is resolved lazily, when an evaluator is built — not at import. The
+# decision used to be taken here from ``evaluation_config.is_enabled``, which
+# defaults to False, so a caller that imported this module and *then* enabled
+# evaluation (``scripts/run_eval.py`` does exactly that) got evaluators with no
+# metric: every case logged "Skipping" and scored 0.0, indistinguishable from
+# an unfaithful answer. The module-level names stay because tests patch them.
 DEEPEVAL_AVAILABLE = False
-try:
-    if evaluation_config.is_enabled:
-        from deepeval.metrics import (
-            AnswerRelevancyMetric,
-            FaithfulnessMetric,
-        )
-        from deepeval.test_case import LLMTestCase
+FaithfulnessMetric: Any = None
+AnswerRelevancyMetric: Any = None
+LLMTestCase: Any = None
 
-        DEEPEVAL_AVAILABLE = True
-except ImportError:
-    logger.warning("DeepEval not installed. Evaluation capabilities disabled.")
+
+def _ensure_deepeval() -> bool:
+    """Import DeepEval if evaluation is enabled now; report whether it is usable.
+
+    Returns:
+        ``True`` once the DeepEval classes are bound at module level. ``False``
+        while evaluation is disabled (nothing is imported — the opt-in holds)
+        or when the dependency is missing.
+    """
+    global DEEPEVAL_AVAILABLE, FaithfulnessMetric, AnswerRelevancyMetric, LLMTestCase
+    if DEEPEVAL_AVAILABLE:
+        return True
+    if not evaluation_config.is_enabled:
+        return False
+    try:
+        from deepeval.metrics import AnswerRelevancyMetric as _AnswerRelevancy
+        from deepeval.metrics import FaithfulnessMetric as _Faithfulness
+        from deepeval.test_case import LLMTestCase as _TestCase
+    except ImportError:
+        logger.warning("DeepEval not installed. Evaluation capabilities disabled.")
+        return False
+    FaithfulnessMetric = _Faithfulness
+    AnswerRelevancyMetric = _AnswerRelevancy
+    LLMTestCase = _TestCase
+    DEEPEVAL_AVAILABLE = True
+    return True
 
 
 class FaithfulnessEvaluator(BaseMetricWrapper):
@@ -89,7 +114,7 @@ class FaithfulnessEvaluator(BaseMetricWrapper):
         # Base init sets metric_name/threshold — skipping it left
         # ``is_successful`` raising AttributeError on both subclasses.
         super().__init__("faithfulness", threshold)
-        if DEEPEVAL_AVAILABLE:
+        if _ensure_deepeval():
             self.metric = FaithfulnessMetric(
                 threshold=threshold, model=evaluation_config.model, include_reason=True
             )
@@ -141,7 +166,7 @@ class AnswerRelevancyEvaluator(BaseMetricWrapper):
             threshold: Minimum score for success. Defaults to 0.7.
         """
         super().__init__("answer_relevancy", threshold)
-        if DEEPEVAL_AVAILABLE:
+        if _ensure_deepeval():
             self.metric = AnswerRelevancyMetric(
                 threshold=threshold, model=evaluation_config.model, include_reason=True
             )

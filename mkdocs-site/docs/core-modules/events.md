@@ -405,6 +405,11 @@ them to a live member.
 | `RedisEventStream` | Redis Streams backend (`stream_redis.py`): `XADD`, `XREADGROUP`, `XACK`, `XAUTOCLAIM` |
 | `DurableEventBridge` | Publishes to the log *and* the local bus, and replays the log onto this process's bus (`durable.py`) |
 
+!!! note "Library API — not wired by default"
+    The framework's own emissions go to the in-process bus only; nothing in the
+    default app constructs an `EventStream` or a `DurableEventBridge`. Build and
+    start the bridge yourself, as below, and publish through it.
+
 ```python
 from core.events import DurableEventBridge, get_event_bus
 from core.events.stream_redis import RedisEventStream

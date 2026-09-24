@@ -1,3 +1,5 @@
+api_routers:
+  enabled: true
 reasoning_agent:
   enabled: false
   max_steps: 5

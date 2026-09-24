@@ -59,9 +59,11 @@ def _enabled() -> bool:
 def _guards() -> tuple[Any, Any]:
     """Build the guard pair once (compiled regexes are reused across calls)."""
     from core.guardrails.input_guard import InputGuard
+    from core.guardrails.moderation import get_guardrails_config
     from core.guardrails.output_guard import OutputGuard
 
-    return InputGuard(), OutputGuard()
+    config = get_guardrails_config()
+    return InputGuard(config), OutputGuard(config)
 
 
 def guard_input(query: str) -> dict[str, Any] | None:

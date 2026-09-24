@@ -7,6 +7,15 @@ description: Three-tier memory architecture (STM, MTM, LTM) for efficient agent 
 
 The `HierarchicalMemory` module enables agents to manage context efficiently over long lifetimes using a biological-inspired three-tier architecture. This system automatically moves information between Short-Term Memory (STM), Medium-Term Memory (MTM), and Long-Term Memory (LTM) based on capacity and relevance.
 
+!!! note "Library API — not wired by default"
+    The default app never constructs a `HierarchicalMemory`: the chat loop's
+    long-term memory (`CHAT_LONG_TERM_MEMORY_ENABLED`) is `AgentMemory`, and the
+    `hierarchical_memory` resource of the lazy registry is not built at startup.
+    The automatic consolidation described below happens inside an instance you
+    create — directly, or with
+    `await get_lazy_registry().get_or_create("hierarchical_memory")`
+    (`core.di.lazy_registry`).
+
 **Key Features**:
 
 - **Automatic Consolidation**: Moves items from STM to MTM when capacity is reached (runs as a background task)

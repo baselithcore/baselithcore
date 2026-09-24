@@ -3,9 +3,15 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
-from core.api.factory import create_app
-from core.config import get_app_config, get_core_config
-from core.observability.logging import get_logger
+# Before anything imports torch or numpy: their thread pools are sized once,
+# at first import, and N workers each taking every core oversubscribe the host.
+from core.config.concurrency import share_cpu_threads
+
+share_cpu_threads()
+
+from core.api.factory import create_app  # noqa: E402
+from core.config import get_app_config, get_core_config  # noqa: E402
+from core.observability.logging import get_logger  # noqa: E402
 
 load_dotenv()
 

@@ -11,6 +11,16 @@ ask a human for approval, input, a selection, or to send a notification. This is
 essential for enterprise safety before sensitive actions (destructive API calls,
 financial transactions, production deployments).
 
+!!! note "Library API — not wired by default"
+    The default app never constructs a `HumanIntervention`: the orchestrator
+    the chat service builds is created without `human_intervention=`, so
+    nothing on the request path calls it. Approval pauses in the running app
+    go through the durable checkpoint path and the `/approvals` API instead
+    (see
+    [Orchestration › Durable approvals](orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)).
+    Pass `human_intervention=HumanIntervention(callback=...)` when you build an
+    `Orchestrator` in host code.
+
 ---
 
 ## Module Structure

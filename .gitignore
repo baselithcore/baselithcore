@@ -16,6 +16,7 @@
 CLAUDE.md
 
 .agents/
+app.log
 
 
 # --- Python and Packaging ---

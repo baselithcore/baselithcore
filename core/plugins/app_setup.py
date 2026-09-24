@@ -170,7 +170,16 @@ def apply_plugin_app_middleware(
         Count of plugins whose ``setup_app_middleware`` hook ran successfully.
     """
     if plugins_dir is None:
-        plugins_dir = Path(__file__).resolve().parents[2] / "plugins"
+        from core.config.plugins import get_plugin_config
+
+        plugin_config = get_plugin_config()
+        # Same root the lifespan scans when PLUGIN_PLUGINS_PATH is set;
+        # otherwise the checkout's plugins/, independent of the cwd.
+        plugins_dir = (
+            Path(plugin_config.plugins_path)
+            if "plugins_path" in plugin_config.model_fields_set
+            else Path(__file__).resolve().parents[2] / "plugins"
+        )
     configs = read_plugin_configs() if plugin_configs is None else plugin_configs
 
     if not plugins_dir.exists():

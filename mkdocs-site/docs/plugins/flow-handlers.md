@@ -63,9 +63,13 @@ Two protocols are defined in `core/orchestration/protocols.py`:
 
     Stream handlers exist for the built-in `qa_docs` intent (`StandardRagStreamHandler`)
     and for anything host code wires explicitly with
-    `orchestrator.register_handler(intent, handler, stream_handler=...)` — the seam
-    `core/chat/rag_workflow.py` and `core/workflows/flow_handler.py` use. See
-    [Orchestration › Streaming](../core-modules/orchestration.md).
+    `orchestrator.register_handler(intent, handler, stream_handler=...)`. That is
+    the same `register_handler` seam `RagWorkflowHandler`
+    (`core/chat/rag_workflow.py`) and `WorkflowFlowHandler`
+    (`core/workflows/flow_handler.py`) are registered through, as flow handlers
+    only. A registered stream handler runs under the same per-request budget,
+    tenant guard and memory controls as `process()`. See
+    [Orchestration › Streaming pipeline](../core-modules/orchestration.md#streaming-pipeline).
 
 ### What a handler must return
 

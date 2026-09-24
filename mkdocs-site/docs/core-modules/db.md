@@ -131,7 +131,9 @@ ordinary query error naming it, instead of an opaque permission error on a
 `CREATE`.
 
 `RLS_PROTECTED_TABLES` lists the tenant-scoped tables carrying a
-`tenant_isolation` row-level-security policy. See
+`tenant_isolation` row-level-security policy — including `webhook_endpoints`
+and `webhook_deliveries`, which migration `011_webhooks` creates with the
+system-tenant escape already in the predicate. See
 [Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
 for the two-role deployment that makes those policies effective.
 

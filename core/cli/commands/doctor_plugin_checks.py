@@ -39,17 +39,30 @@ def local_plugin_dirs() -> list[Path]:
     ]
 
 
+def is_local_plugin_dir(plugin_dir: Path) -> bool:
+    """Whether *plugin_dir* holds a plugin: an entry point or a manifest.
+
+    A directory under ``plugins/`` is not a plugin by being there. A removed or
+    renamed plugin leaves its gitignored residue behind (``__pycache__``, a
+    built ``ui/``, local data), and counting those directories reported more
+    plugins than the checkout carries.
+    """
+    return (plugin_dir / "plugin.py").exists() or any(
+        (plugin_dir / f"manifest{ext}").exists() for ext in (".yaml", ".yml", ".json")
+    )
+
+
+def local_plugins() -> list[Path]:
+    """Plugin directories under ``plugins/`` (see :func:`is_local_plugin_dir`)."""
+    return [p for p in local_plugin_dirs() if is_local_plugin_dir(p)]
+
+
 def check_plugins() -> CheckResult:
     """Check if plugins directory exists and local plugins have basic shape."""
     plugins_path = Path.cwd() / "plugins"
     if not plugins_path.exists():
         return CheckResult("Plugins", False, "plugins/ directory not found")
-    plugins = [
-        p
-        for p in local_plugin_dirs()
-        if (p / "plugin.py").exists()
-        or any((p / f"manifest{ext}").exists() for ext in (".yaml", ".yml", ".json"))
-    ]
+    plugins = local_plugins()
     if not plugins:
         return CheckResult("Plugins", True, "No plugins installed (optional)")
     missing_manifest = [

@@ -41,6 +41,14 @@ def slugify_title(name: str) -> str:
     return name.replace("-", " ").replace("_", " ").title()
 
 
+def plugin_title(meta: object) -> str:
+    """The name a human sees: the manifest ``display_name``, else the slug title."""
+    display = getattr(meta, "display_name", "")
+    if isinstance(display, str) and display.strip():
+        return display.strip()
+    return slugify_title(str(getattr(meta, "name", "")))
+
+
 async def build_component_entity(
     provider: BackstageProvider, plugin: Plugin
 ) -> dict[str, Any]:
@@ -165,7 +173,7 @@ async def build_component_entity(
         "metadata": {
             "name": entity_name,
             "namespace": DEFAULT_NAMESPACE,
-            "title": slugify_title(meta.name),
+            "title": plugin_title(meta),
             "description": meta.description,
             "labels": labels,
             "annotations": annotations,
@@ -176,4 +184,4 @@ async def build_component_entity(
     }
 
 
-__all__ = ["build_component_entity", "slugify_title"]
+__all__ = ["build_component_entity", "plugin_title", "slugify_title"]

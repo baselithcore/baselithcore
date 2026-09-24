@@ -37,7 +37,9 @@ class PluginConfig(BaseSettings):
     )
 
     plugins_path: Path = Field(
-        default=Path("plugins"), description="Directory where plugins are installed"
+        default=Path("plugins"),
+        description="Plugin root: where marketplace installs write and what the "
+        "runtime loaders scan",
     )
 
     config_path: Path | None = Field(

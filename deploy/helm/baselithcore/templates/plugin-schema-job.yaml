@@ -1,4 +1,33 @@
 {{- if .Values.database.pluginSchemaInit.enabled }}
+{{- /*
+This Job reads the plugin set from PLUGIN_CONFIG_PATH, like the application —
+but it is a hook pod, and it mounts none of the application's volumes. Point
+that path at a writable volume and the file simply is not there when the Job
+runs: `read_plugin_configs()` returns nothing, and every plugin is taken as
+enabled with an EMPTY config block. A plugin that chooses its storage in that
+block then builds the wrong one — an in-memory store instead of the Postgres
+schema the deployment asked for — prints `<plugin>: schema ready`, creates no
+table, and the Job exits 0. The application boots afterwards against a schema
+that does not exist.
+
+So the combination is refused here, the way plugins-configmap.yaml refuses its
+own. The three ways out, in the order worth preferring:
+
+  * `plugins.config` — the declarative set, rendered into a ConfigMap both this
+    Job and the application read. The set stops depending on a file somebody
+    may have edited in a pod.
+  * leave PLUGIN_CONFIG_PATH inside the image (/app/configs/...), which the Job
+    carries too.
+  * `database.pluginSchemaInit.enabled: false`, which is only honest when every
+    plugin's tables come from a migration — or when the deployment lets the
+    serving process hold DDL (DB_RUNTIME_DDL=true), which a least-privilege
+    role cannot do.
+*/ -}}
+{{- with (.Values.config).PLUGIN_CONFIG_PATH }}
+{{- if not (hasPrefix "/app/configs/" .) }}
+{{- fail (printf "database.pluginSchemaInit and config.PLUGIN_CONFIG_PATH=%s are mutually exclusive: the schema Job mounts no application volume, so it cannot read that file — it would take every plugin as enabled with an empty config and build the wrong schema, silently and with exit 0. Use plugins.config, or keep PLUGIN_CONFIG_PATH inside the image, or set database.pluginSchemaInit.enabled=false." .) }}
+{{- end }}
+{{- end }}
 # Builds every enabled plugin's schema, at deploy time, as the table owner.
 #
 # A plugin that creates its tables from the serving process cannot run in a

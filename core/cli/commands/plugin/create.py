@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core._version import __version__
 from core.cli.ui import console, print_error, print_info, print_step, print_success
 
 from .const import PLUGIN_TEMPLATE
@@ -141,7 +142,11 @@ def _create_from_template(name: str, plugin_type: str, register: bool = True) ->
         with console.status("[bold green]Generating plugin files..."):
             for file_name, content in template.items():
                 file_path = plugin_path / file_name
-                final_content = content.format(name=name, class_name=class_name)
+                final_content = content.format(
+                    name=name,
+                    class_name=class_name,
+                    min_core_version=__version__,
+                )
                 file_path.write_text(final_content)
 
         print_success(f"Created plugin at [bold]{plugin_path}[/bold]")

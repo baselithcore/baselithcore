@@ -5,6 +5,10 @@ a pluggable backend. Flags are **opt-in**: with nothing registered and no
 `BASELITH_FLAG_*` overrides set, `is_enabled` returns the call-site default, so
 framework behaviour is unchanged.
 
+!!! note "Library API — not wired by default"
+    No framework code path calls `is_enabled` or `get_feature_flags()` — the
+    registry gates only the call sites you write.
+
 ## Usage
 
 ```python

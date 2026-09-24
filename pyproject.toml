@@ -377,6 +377,18 @@ version = {attr = "core._version.__version__"}
     "catalog/**/*.md",
     "examples/**/*.yaml",
 ]
+# The sandbox image recipe, scoped to its own package rather than added to the
+# `"*"` list above — nothing else in the tree has a Dockerfile to ship.
+# `core/services/sandbox/docker_factory.py` builds `agent-sandbox:latest` from
+# these at first use and fails closed when they are absent; before this entry
+# they were not in the wheel at all, so every pip-installed deployment either
+# lost the Docker sandbox provider to a RuntimeError or fell back to an
+# unreviewed base image. scripts/check_distribution_artifacts.py asserts both
+# on the built wheel and sdist.
+"core.services.sandbox" = [
+    "Dockerfile.sandbox",
+    "requirements.sandbox.txt",
+]
 
 # `ui/dist/**/*` above is a deliberately broad include — it has to be, because
 # the bundle's filenames are content-hashed and cannot be enumerated. That

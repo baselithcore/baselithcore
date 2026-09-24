@@ -93,8 +93,9 @@ async for chunk in orchestrator.process_stream(
     print(chunk, end="")
 ```
 
-`process` injects a per-request `LoopBudget` at `context["loop_budget"]` and,
-when configured, a `ContractValidator` at `context["contract_validator"]` and
+`process` injects a per-request `LoopBudget` at `context["loop_budget"]` (so
+does `process_stream` when the intent has a stream handler — see
+[Streaming pipeline](#streaming-pipeline)) and, when configured, a `ContractValidator` at `context["contract_validator"]` and
 the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
 
@@ -151,7 +152,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         self,
         intent_classifier: IntentClassifier | None = None,
         plugin_registry: "PluginRegistry" | None = None,
-        default_intent: str = "qa_docs",
+        default_intent: str | None = None,  # ORCHESTRATOR_DEFAULT_INTENT
         memory_manager: "AgentMemory" | None = None,
         human_intervention: "HumanIntervention" | None = None,
         feedback_collector: "FeedbackCollector" | None = None,
@@ -200,11 +201,24 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 
 `process_stream` yields real, guarded output on every path:
 
-- **Streaming handler registered** — chunks from the intent's `StreamHandler`
-  pass through the streaming output guard
+- **Streaming handler registered** — `stream_with_loop_controls`
+  (`core/orchestration/mixins/_streaming.py`) runs the handler under the same
+  per-request controls as `process()`: a fresh `LoopBudget` bound at
+  `context["loop_budget"]` and as the ambient budget — so the token/USD caps
+  (charged when the LLM stream ends) and the `max_seconds` deadline of the LLM
+  streaming path apply to `/chat/stream` — plus the tenant-isolation check,
+  modality annotation, memory recall (when the orchestrator has a memory
+  manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
+  injection. Chunks pass through the streaming output guard
   (`core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
   streaming moderation) before they reach the caller; see
-  [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy).
+  [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
+  memory manager, the background memory write is scheduled only when the
+  stream **completes** — a stream that errors or is abandoned by the client
+  records nothing. A budget breach ends the stream with
+  `Request aborted: <reason>`; text still held in the output guard's holdback
+  window at that point is not flushed. Durable checkpointing stays on the
+  non-streaming path: a half-sent stream cannot be resumed by replaying it.
 - **No streaming handler** — the query runs through the full non-streaming
   `process()` pipeline (memory, budget, checkpoint, output guard) and the
   final `response` is emitted as a single chunk: a real answer delivered late
@@ -219,6 +233,15 @@ streaming story. Retrieval is delegated to `StandardRagHandler.retrieve()` and
 the shared prompt constants (`RAG_SYSTEM_PROMPT`, `RAG_NOT_FOUND_MESSAGE`,
 `build_rag_user_prompt` in `handlers/rag.py`), so the two paths cannot drift;
 generation then streams tokens via `LLMService.generate_response_stream`.
+
+Both handlers build the user prompt with
+`build_rag_user_prompt(context_text, query, history="")`, passing
+`context.get("history_text", "")` — the prior turns the chat service loads for
+the request's `conversation_id` (see
+[Chat › Conversation History](chat.md#conversation-history)). With history the
+prompt reads `Conversation so far:`, then `Context:`, `Question:` and `Answer:`;
+without it the first block is omitted. The retrieved context stays the only
+source of facts, and retrieval runs on the raw query.
 
 !!! note "Sources ride on the context, not the stream"
     The stream chunk protocol carries text only, so the streaming RAG handler
@@ -318,14 +341,17 @@ print(classifier.get_available_intents())
 
 ```mermaid
 flowchart TD
-    Query --> LLM{LLM enabled?}
-    LLM --> |yes, conf >= threshold| Handler[Selected intent]
-    LLM --> |no / low conf| Keywords[Keyword match by priority]
-    Keywords --> |match| Handler
-    Keywords --> |no match| Default[Default intent]
+    Query --> Keywords[Keyword match by priority]
+    Keywords --> |match| Handler[Selected intent]
+    Keywords --> |no match| LLM{LLM enabled?}
+    LLM --> |yes, conf >= threshold| Handler
+    LLM --> |no / low conf| Default[Default intent]
 ```
 
-The default intent is `qa_docs` and the default confidence threshold is `0.6`.
+The default intent is `ORCHESTRATOR_DEFAULT_INTENT` (default `qa_docs`) and the
+confidence threshold is `ORCHESTRATOR_CONFIDENCE_THRESHOLD` (default `0.6`)
+when the `Orchestrator` builds the classifier itself; see
+[Configuration](#configuration).
 
 ---
 
@@ -334,6 +360,10 @@ The default intent is `qa_docs` and the default confidence threshold is `0.6`.
 `core/orchestration/router.py` provides a semantic `Router` that maps a query
 to candidate agents using vector similarity. It is a separate component from
 the `Orchestrator` (there is no `FlowRouter`).
+
+!!! note "Library API — not wired by default"
+    The orchestrator dispatches by intent and never consults `Router`; nothing
+    in the default app constructs one. Use it from your own handler.
 
 ```python
 from core.orchestration.router import Router, RouteRequest
@@ -434,6 +464,19 @@ ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=false
 ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30
 ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
 ```
+
+The first three settings are read by `Orchestrator.__init__`. Leaving
+`default_intent=None` uses `ORCHESTRATOR_DEFAULT_INTENT`, and when no
+`intent_classifier` is passed, the `IntentClassifier` the orchestrator builds
+gets `confidence_threshold=ORCHESTRATOR_CONFIDENCE_THRESHOLD` and
+`telemetry_enabled=ORCHESTRATOR_ENABLE_TELEMETRY`. A classifier you pass in
+keeps its own values.
+
+!!! note "The built-in RAG handler is tied to `qa_docs`"
+    `StandardRagHandler` (and its streaming twin) is auto-registered only when
+    the default intent is `qa_docs` and no plugin already handles it. Set
+    `ORCHESTRATOR_DEFAULT_INTENT` to anything else and that intent needs a
+    handler from a plugin or `register_handler()`.
 
 The semantic `Router` is configured separately via `RouterConfig`
 (`ROUTER_` prefix: `score_threshold`, `max_candidates`, `retrieval_limit`),
@@ -539,7 +582,9 @@ as everywhere else in the pipeline.
 
 `core/orchestration/limits.py` enforces hard caps so a runaway loop
 cannot burn budget. A fresh `LoopBudget` is instantiated per request
-by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
+by `ExecutionMixin.process` — and by `process_stream` when the intent has a
+stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed as
+`context["loop_budget"]`.
 
 | Symbol | Purpose |
 |--------|---------|
@@ -1502,6 +1547,10 @@ returns one of `AGENTIC` / `DETERMINISTIC` / `AMBIGUOUS` for a task
 description. It is conservative: when in doubt the recommendation is
 `AGENTIC`. Use it at the front of the orchestrator to skip the loop on
 clearly deterministic requests.
+
+!!! note "Library API — not wired by default"
+    The orchestrator does not call `TaskClassifier` itself; the short-circuit
+    exists only where your handler or entry point invokes it.
 
 ```python
 from core.orchestration.task_classifier import (

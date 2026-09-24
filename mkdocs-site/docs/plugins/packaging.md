@@ -99,6 +99,7 @@ hash_surface_version: 5           # Written by `baselith plugin sign`. Advisory.
 | Field                   | Required | Description                                      |
 | ----------------------- | -------- | ------------------------------------------------ |
 | `name`                  | ✅        | Unique plugin name (lowercase, hyphen-separated) |
+| `display_name`          | ❌        | Human-readable name for consoles and the Backstage title (e.g. "CV Intake"); presentation only — `name` stays the identifier |
 | `version`               | ✅        | SemVer version (e.g., "1.0.0")                   |
 | `description`           | ✅        | Brief description                                |
 | `author`                | ❌        | Author name or organization                      |

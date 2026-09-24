@@ -38,9 +38,18 @@ spec:
   # every reconcile. Rendered only where it does something.
   pollingInterval: {{ .Values.worker.keda.pollingInterval }}
   {{- end }}
+  {{- if eq (int .Values.worker.keda.minReplicaCount) 0 }}
   # How long the backlog must stay empty before the last surplus replica goes.
   # A worker that has just loaded an embedder is expensive to throw away.
+  #
+  # Same rule as pollingInterval above, and KEDA says so just as loudly:
+  # "CooldownPeriod is configured but is not relevant. CooldownPeriod is only
+  # relevant when minReplicaCount = 0 or idleReplicaCount = 0", once per
+  # reconcile. Above zero the descent is the HPA's, through the
+  # scaleDown.stabilizationWindowSeconds below — which still takes this value,
+  # so nothing is lost by rendering the field only where KEDA reads it.
   cooldownPeriod: {{ .Values.worker.keda.cooldownPeriod }}
+  {{- end }}
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:

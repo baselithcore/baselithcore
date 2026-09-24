@@ -48,10 +48,11 @@ def _build_ulimits() -> list[Any]:
     return [Ulimit(name=name, soft=value, hard=value) for name, value in _ULIMITS]
 
 
-def build_sandbox_runtime_kwargs() -> dict[str, Any]:
+def build_sandbox_runtime_kwargs(enable_network: bool | None = None) -> dict[str, Any]:
     """Return conservative Docker runtime options for untrusted code.
 
-    The container gets no network, no capabilities, no privilege escalation, a
+    The container gets no network (unless ``SANDBOX_ENABLE_NETWORK`` opts in),
+    no capabilities, no privilege escalation, a
     **read-only root filesystem**, a non-root uid and hard resource ceilings.
     ``/tmp`` is the single writable path — a ``noexec,nosuid`` tmpfs, so code
     can stage scratch files there but cannot write a binary and run it.
@@ -67,12 +68,21 @@ def build_sandbox_runtime_kwargs() -> dict[str, Any]:
     fail with ``PermissionError``, for no isolation benefit that ``read_only``
     does not already provide.
 
+    Args:
+        enable_network: Give the container the default bridge network.
+            ``None`` (the default) reads ``SANDBOX_ENABLE_NETWORK``, which is
+            off: sandboxed code gets egress only when an operator opts in.
+
     Returns:
         Keyword arguments to splat into ``containers.run`` / ``containers.create``.
     """
+    if enable_network is None:
+        from core.config.sandbox import get_sandbox_config
+
+        enable_network = get_sandbox_config().enable_network
 
     return {
-        "network_mode": "none",
+        "network_mode": "bridge" if enable_network else "none",
         "mem_limit": "128m",
         "cpu_period": 100000,
         "cpu_quota": 50000,

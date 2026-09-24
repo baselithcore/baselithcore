@@ -84,6 +84,19 @@ class VectorStoreConfig(BaseSettings):
     search_limit: int = Field(
         default=10, description="Default number of search results"
     )
+    # Both were read with getattr by the search orchestrator and the service,
+    # but never declared — and this model ignores unknown keys — so setting
+    # either variable did nothing and the cache could not be turned off.
+    search_cache_enabled: bool = Field(
+        default=True,
+        description="Cache vector search results in Redis (keyed per tenant, "
+        "vector, filter and re-rank question).",
+    )
+    search_cache_ttl: int = Field(
+        default=300,
+        ge=1,
+        description="Lifetime of a cached search result, in seconds.",
+    )
 
     # Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk.
     qdrant_mode: str = Field(

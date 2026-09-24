@@ -349,17 +349,18 @@ def _load_manifest(path: Path) -> dict[str, Any] | None:
 
 
 def _plugin_enabled(plugin_name: str) -> bool:
-    config = Path("configs") / "plugins.yaml"
-    if not config.is_file():
-        return False
-    try:
-        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
-        if not isinstance(data, dict):
-            raise ValueError("configs/plugins.yaml must contain a mapping")
-        entry = data.get(plugin_name)
-        return bool(entry.get("enabled")) if isinstance(entry, dict) else bool(entry)
-    except (OSError, yaml.YAMLError) as exc:
-        raise ValueError("Cannot read configs/plugins.yaml") from exc
+    """Whether the runtime would load ``plugin_name``.
+
+    Delegates to the loaders' shared reader and rule
+    (:mod:`core.plugins.config_file`): ``PLUGIN_CONFIG_PATH``, ``-``/``_``
+    name variants, a block without ``enabled:`` counting as enabled, and no
+    file meaning every plugin runs. A private reader here disagreed on all
+    four, so ``plugin sync`` could skip the requirements and frontend of a
+    plugin the runtime then loaded.
+    """
+    from core.plugins.config_file import plugin_enabled, read_plugin_configs
+
+    return plugin_enabled(read_plugin_configs(), plugin_name, plugin_name)
 
 
 def _compose(args: list[str]) -> int:

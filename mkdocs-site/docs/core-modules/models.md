@@ -112,6 +112,20 @@ The two derived defaults are exposed as `effective_cache_read_usd_per_million` /
 `effective_cache_write_usd_per_million`, so a model that does not publish its own
 cache rates still prices correctly.
 
+A row may also **override** a derivation by naming the rate, and one in
+`DEFAULT_PRICING` does: `claude-fable-5-1` carries
+`cache_read_usd_per_million=0.25` against a `$10` input rate — `0.025 ×`, not
+the derived `0.1 ×`. The derivation is right for the Opus, Sonnet and Haiku
+families and wrong here, and it billed **four times** the published rate, on
+the term that dominates an agent loop (whose prefix is cached by design) and on
+the number the tenant budget gate aborts against.
+
+`claude-mythos-5-1` deliberately keeps the derived rate: its cache-read price
+was left open at launch and is not published. Over-charging closes a budget
+early, which an operator sees and can raise; under-charging overspends a cap
+silently. When a rate is unknown, the derivation is the safe direction to be
+wrong in.
+
 `estimate(prompt_tokens, completion_tokens, *, cache_read_tokens=0,
 cache_write_tokens=0, batch=False) -> float`. A negative token count raises
 `ValueError`.
@@ -123,7 +137,10 @@ cache_write_tokens=0, batch=False) -> float`. A negative token count raises
   default; override per deployment for negotiated rates.
 - `PRICING_AS_OF` — the snapshot date of `DEFAULT_PRICING` (ISO string).
   Display this in dashboards/reports instead of hand-syncing a copy; refresh it
-  together with the table.
+  together with the table. It marks a **full re-verification pass**, not the
+  last edit: the Fable 5.1 cache-read correction above (that one rate
+  re-verified on 2026-09-22) intentionally left the date where it was, since
+  moving it would assert that every other vendor's row had been checked too.
 - `UNKNOWN_PRICE` — a deliberately high fallback so missing entries are visible.
 - `LOCAL_PROVIDERS` / `LOCAL_PRICE` / `qualified_model_id(provider, model)` —
   self-hosted inference is capacity-bound, not price-bound, so any
@@ -238,7 +255,9 @@ tell a policy decision from a learned one. Without a scoreboard,
 The router is wired into `LLMService` via `core.services.llm.model_routing`:
 enable with `LLM_ROUTING_ENABLED=true` and (optionally) override the policy
 with `LLM_ROUTING_POLICY` — a JSON object mapping category values to model ids
-(e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`). Callers pass
+(e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`);
+`LLM_ROUTING_MAX_COST_PER_1K_USD` (unset by default) is forwarded as the
+`max_cost_per_1k_usd` budget hint of `ModelRouter.select()`. Callers pass
 `task_category="classification"` (etc.) to `generate_response()`/`generate()`;
 model precedence is **pinned > per-call > routed > config default**. See
 [LLM service](services.md) for details.
