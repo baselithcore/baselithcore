@@ -138,14 +138,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages"
 
 # Torch CPU-only, pinned for reproducible builds and kept in step with
-# uv.lock. >=2.6 closes CVE-2025-32434 (torch.load RCE). Neither torchaudio nor
-# torchvision is installed: nothing in core/ or plugins/ imports them (the
-# tree's only torch import is core/services/llm/providers/huggingface_provider
-# .py, and sentence-transformers needs torchvision only for image models, which
-# no plugin loads). The only thing in uv.lock that wants torchvision is
-# mineru's OPTIONAL `pipeline` extra, which the export above does not select —
-# verified on the built image, where `import torchvision` raises
-# ModuleNotFoundError and everything else works.
+# uv.lock. >=2.6 closes CVE-2025-32434 (torch.load RCE). torchaudio is not
+# installed: nothing in the image imports it.
+#
+# torchvision IS installed, from the same CPU index and pinned to the release
+# paired with torch 2.13 (0.28.0, the version uv.lock resolves). `docling`, in
+# the `documents` extra, depends on it, so the locked set below carries
+# `torchvision==0.28.0` — and left to that step it arrives as the PyPI wheel,
+# built against the CUDA torch. Next to the CPU torch its C++ ops never
+# register: `import transformers` then dies on `operator torchvision::nms does
+# not exist`, which took down the model pre-cache step below. Installed here as
+# 0.28.0+cpu, the later `==0.28.0` requirement is already satisfied (PEP 440
+# lets a local label match a plain pin), exactly as torch is.
 #
 # Every install targets --prefix /install (the only tree the runtime stage
 # copies) and runs with that tree on PYTHONPATH, so pip judges "already
@@ -187,6 +191,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install \
         torch==2.13.0 \
+        torchvision==0.28.0 \
         --index-url https://download.pytorch.org/whl/cpu \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install -r /tmp/requirements.image.txt \

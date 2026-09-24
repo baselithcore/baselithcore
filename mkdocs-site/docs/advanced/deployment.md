@@ -464,8 +464,13 @@ Two further changes to the same effect:
 - **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
   imports it (the tree's only `torch` import is the Hugging Face provider, and
   `sentence-transformers` needs torchvision only for image models, which no
-  plugin loads). The only thing in `uv.lock` that wants it is mineru's
+  plugin loads). The only thing in `uv.lock` that wanted it was mineru's
   *optional* `pipeline` extra, which `requirements.txt` does not install.
+  *Superseded:* `docling`, now in the `documents` extra, depends on it, so the
+  image installs `torchvision==0.28.0` from the same CPU index as torch. The
+  PyPI wheel the lock would otherwise pull is built against the CUDA torch, and
+  beside the CPU build its ops never register (`operator torchvision::nms does
+  not exist`), which broke the model pre-cache step.
 - **The Chromium install moved above the source `COPY`s.** It is the largest
   single step (1.39GB) and depends on nothing but the installed dependencies;
   sitting below them, a one-line code change invalidated it and the build

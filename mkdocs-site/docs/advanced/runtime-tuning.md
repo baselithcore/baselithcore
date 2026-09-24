@@ -267,9 +267,11 @@ verification per request instead of two, with no trust widening.
 
 There is one `Dockerfile`, multi-stage, and local, dev and production all
 build it. It pins PyTorch (`torch==2.13.0`, CPU wheels, in step with
-`uv.lock`) so the largest dependency no longer floats between builds; neither
-`torchaudio` nor `torchvision` is installed, because nothing in `core/` or
-`plugins/` imports them. Every install targets the `/install` prefix the
+`uv.lock`) so the largest dependency no longer floats between builds.
+`torchvision` comes from the same CPU index, pinned to the paired release
+(`0.28.0`), because `docling` in the `documents` extra depends on it and the
+PyPI wheel is built against the CUDA torch; `torchaudio` is not installed,
+because nothing imports it. Every install targets the `/install` prefix the
 runtime stage copies, with that tree on `PYTHONPATH` for the later installs —
 otherwise pip would consider a torch living in the build stage's own
 site-packages "already installed" and resolve nothing into the runtime, or
