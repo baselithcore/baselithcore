@@ -71,9 +71,15 @@ def api_key_from_config(config: LLMConfig, provider: str) -> SecretStr | None:
         "openai": config.openai_api_key,
         "huggingface": config.huggingface_api_key,
         "gemini": getattr(config, "gemini_api_key", None),
+        "vllm": getattr(config, "vllm_api_key", None),
     }.get(provider)
     if _nonblank(dedicated) is not None:
         return dedicated
+    if provider == "vllm":
+        # Never the primary key: ``LLM_API_KEY`` also answers to
+        # ``LLM_OPENAI_API_KEY``, and a hosted key must not reach a self-hosted
+        # server. vLLM authenticates with its own key or none at all.
+        return None
     if provider == config.provider:
         return _nonblank(config.api_key)
     return None
@@ -131,6 +137,13 @@ def api_base_for(config: LLMConfig, provider: str) -> str | None:
         if config.provider == "ollama" and config.api_base:
             return config.api_base
         return os.environ.get("OLLAMA_HOST") or None
+    if provider == "vllm":
+        # Same shape as Ollama minus an SDK-level environment variable: vLLM
+        # clients have none, and its default port is this backend's own.
+        dedicated = getattr(config, "vllm_api_base", None)
+        if dedicated:
+            return str(dedicated)
+        return config.api_base if config.provider == "vllm" else None
     # The shared ``api_base`` is only meaningful for the provider it was
     # configured for; every other provider must fall back to its SDK default.
     if provider == config.provider:
@@ -159,11 +172,32 @@ def provider_configured(config: LLMConfig, provider: str) -> bool:
     """
     if provider == "ollama":
         return True
+    if provider == "vllm":
+        # Keyless is the common case; what a vLLM stage cannot do without is
+        # an endpoint, since none is ever guessed.
+        return api_base_for(config, provider) is not None
     if provider == "huggingface":
         return config.huggingface_local or api_key_for(config, provider) is not None
     if provider == "gemini" and not _gemini_sdk_available():
         return False
     return api_key_for(config, provider) is not None
+
+
+def provider_setup_hint(provider: str) -> str:
+    """The setting an operator changes to make *provider* usable.
+
+    Most providers lack a key; vLLM lacks an endpoint, and telling its
+    operator to "set the API key" sends them after the wrong setting.
+
+    Args:
+        provider: The provider a diagnostic found unconfigured.
+
+    Returns:
+        str: One sentence naming the setting.
+    """
+    if provider == "vllm":
+        return "Set LLM_VLLM_API_BASE to the vLLM server (http://gpu-host:8000/v1)."
+    return f"Set the API key for {provider!r}."
 
 
 def _get_default_service() -> LLMService:
@@ -274,5 +308,6 @@ __all__ = [
     "api_key_from_config",
     "get_llm_service",
     "provider_configured",
+    "provider_setup_hint",
     "reset_llm_service",
 ]

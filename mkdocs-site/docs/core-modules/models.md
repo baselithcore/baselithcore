@@ -144,7 +144,8 @@ cache_write_tokens=0, batch=False) -> float`. A negative token count raises
 - `UNKNOWN_PRICE` — a deliberately high fallback so missing entries are visible.
 - `LOCAL_PROVIDERS` / `LOCAL_PRICE` / `qualified_model_id(provider, model)` —
   self-hosted inference is capacity-bound, not price-bound, so any
-  `ollama/<model>` id prices at **zero without needing a table row**. This is
+  `ollama/<model>` or `vllm/<model>` id prices at **zero without needing a
+  table row**. This is
   not cosmetic: a bare local tag has no row, so it used to be priced through
   the unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — money that
   was never spent, and enough to abort a budgeted run. Call

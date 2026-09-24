@@ -691,13 +691,16 @@ Declared in `core.config.services`.
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
 | `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
 | `LLM_PREFLIGHT` | `Literal['auto', 'off', 'warn', 'strict']` | `auto` | Startup LLM posture check: 'auto' (default) fails startup in a production environment and warns elsewhere, 'warn' always logs, 'strict' always fails, 'off' skips. Never calls a hosted provider. |
-| `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
+| `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini', 'vllm']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, gemini, or vllm) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
 | `LLM_ROUTING_MAX_COST_PER_1K_USD` | `float \| None` | *empty* | Budget cap for routed calls: when the routed model's approximate cost per 1K tokens exceeds it, the priciest model in the policy pool that fits is used instead (cheapest if none fits). Empty disables the cap. |
 | `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
+| `LLM_VLLM_API_BASE` | `str \| None` | *empty* | vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is appended when missing). Falls back to LLM_API_BASE only when LLM_PROVIDER=vllm. Required for vLLM: there is no default. |
+| `LLM_VLLM_API_KEY` :material-key:<br>also accepts `VLLM_API_KEY` | `SecretStr \| None` | *empty* | The key the vLLM server was started with (--api-key / VLLM_API_KEY). Leave empty for a keyless server. |
+| `LLM_VLLM_NATIVE_TOOLS` | `bool` | `True` | Whether the vLLM server supports native tool calling (started with --enable-auto-tool-choice --tool-call-parser &lt;parser>). Set false to use prompt-coerced tool calls instead. |
 | `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
 ## Storage configuration
@@ -891,4 +894,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-564 settings documented.
+567 settings documented.

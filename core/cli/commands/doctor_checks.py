@@ -392,14 +392,14 @@ def check_llm_provider() -> CheckResult:
         # anthropic/gemini used to pass unconditionally: the check reported a
         # healthy provider for a deployment that had no key for it and would
         # fail on its first request.
-        from core.services.llm.runtime import provider_configured
+        from core.services.llm.runtime import provider_configured, provider_setup_hint
 
         if not provider_configured(config, provider):
             return CheckResult(
                 "LLM Provider",
                 False,
                 f"{provider.upper()} has no usable credentials",
-                f"Set the API key for {provider}.",
+                provider_setup_hint(provider),
             )
         return CheckResult("LLM Provider", True, f"Provider: {provider}")
     except Exception as e:

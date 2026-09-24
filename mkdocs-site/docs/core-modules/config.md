@@ -369,6 +369,7 @@ print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
 print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
 print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
+print(llm.vllm_api_base)       # None         (LLM_VLLM_API_BASE — required for vllm)
 print(llm.preflight)           # "auto"       (LLM_PREFLIGHT — startup posture check)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
@@ -386,10 +387,14 @@ print(vs.embedding_dim)        # 1024         (VECTORSTORE_EMBEDDING_DIM)
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
 # LLM_API_BASE is the endpoint of LLM_PROVIDER, not a global base URL. With
-# LLM_PROVIDER=openai it reaches any OpenAI-compatible server (Azure OpenAI
-# gateway, vLLM, LiteLLM, OpenRouter); empty keeps the SDK default.
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible gateway (Azure OpenAI,
+# LiteLLM, OpenRouter); empty keeps the SDK default. Self-hosted vLLM has its
+# own provider (LLM_PROVIDER=vllm) and its own endpoint below.
 LLM_API_BASE=http://localhost:11434
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
+LLM_VLLM_API_BASE=                   # vLLM server (http://gpu-host:8000/v1); no default
+LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
+LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)

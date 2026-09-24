@@ -63,6 +63,21 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
         )
+    elif config.provider == "vllm":
+        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from core.services.llm.runtime import api_base_for
+
+        # Only the dedicated key, never ``api_key``: that field also answers to
+        # LLM_OPENAI_API_KEY, so falling back to it sent a hosted OpenAI key to
+        # the self-hosted server the moment the default provider became vLLM.
+        # The endpoint follows ``api_base_for``, the rule every other seam uses.
+        return VLLMProvider(
+            api_base=api_base_for(config, "vllm"),
+            api_key=getattr(config, "vllm_api_key", None),
+            request_timeout=request_timeout,
+            connect_timeout=connect_timeout,
+            native_tools=getattr(config, "vllm_native_tools", True),
+        )
     elif config.provider == "huggingface":
         from core.services.llm.providers.huggingface_provider import (
             HuggingFaceProvider,

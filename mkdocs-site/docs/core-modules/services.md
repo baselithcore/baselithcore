@@ -25,10 +25,11 @@ graph TB
         OpenAI[OpenAI]
         Ollama[Ollama]
         HF[HuggingFace]
+        VLLM[vLLM]
         Qdrant[Qdrant]
     end
 
-    LLM --> OpenAI & Ollama & HF
+    LLM --> OpenAI & Ollama & HF & VLLM
     VS --> Qdrant
 ```
 
@@ -62,6 +63,7 @@ core/services/llm/
 │   ├── _anthropic_client.py    # api|bedrock|vertex SDK client construction
 │   ├── openai_provider.py
 │   ├── ollama_provider.py
+│   ├── vllm_provider.py        # OpenAI-compatible, self-hosted (subclasses OpenAIProvider)
 │   └── huggingface_provider.py
 ├── cost_control.py     # Cost control
 └── exceptions.py
@@ -232,6 +234,7 @@ within a 1:3–3:1 ratio; earlier models only their fixed sizes).
 | Anthropic (`tools` + `output_config.format`) | ✅ |
 | OpenAI (`tools` + `response_format` json_schema) | ✅ |
 | Ollama (`tools` + `format` schema) | ✅ |
+| vLLM (`tools` + `response_format` json_schema, guided decoding) | ✅ when the server runs `--enable-auto-tool-choice` (`LLM_VLLM_NATIVE_TOOLS`) |
 | Gemini (`function_declarations` + `response_schema`) | ✅ (optional extra `[gemini]`) |
 | HuggingFace | ❌ (fallback only) |
 
@@ -282,7 +285,7 @@ bugs closed at once: a fallback answer used to be priced at the *primary's*
 rate, and a self-hosted model, having no pricing row, was priced through the
 unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — spend that never
 happened, large enough to abort a budgeted run. Any `ollama/<model>` id now
-prices at zero without needing a table row, while tokens are still metered, so
+(and `vllm/<model>`) prices at zero without needing a table row, while tokens are still metered, so
 a run cannot escape its token cap by moving to a local model. A local endpoint
 that fronts a paid model can still be priced by adding an explicit row for its
 qualified id.
@@ -314,7 +317,11 @@ cannot: *will this deployment serve from what it thinks it will?* It reports
   path — the primary, a chain stage — blocks the boot, while one only the
   vision provider asks for is reported as a warning and the deployment starts.
   A model no request routes to must not cost a deployment everything it serves,
-  which under `Restart=always` is what a fatal check amounts to.
+  which under `Restart=always` is what a fatal check amounts to. vLLM targets
+  (primary or chain stage) are probed with `GET /v1/models`: an unreachable
+  server (`vllm_unreachable`), a rejected key (`vllm_unauthorized`) and a model
+  the server does not serve under that name (`vllm_model_missing`, listing
+  what it does serve) are all inference-path errors.
 
 `auto` (the default) raises in a production environment and warns elsewhere;
 `warn`, `strict` and `off` force the behaviour. It **never calls a hosted
@@ -403,7 +410,7 @@ vendor family from its id prefix and checks it against the configured provider:
 | Google | `gemini-` | `gemini`, `vertex`, `google` |
 
 `LLM_PROVIDER` itself accepts only `openai`, `ollama`, `huggingface`,
-`anthropic` and `gemini`; the extra names in the table exist for configs that
+`anthropic`, `gemini` and `vllm`; the extra names in the table exist for configs that
 carry a provider string of their own. Anthropic-on-Bedrock/Vertex is
 `LLM_PROVIDER=anthropic` plus `LLM_ANTHROPIC_BACKEND` (below), which already
 resolves to the Anthropic family.
@@ -621,7 +628,7 @@ llm = LLMService(
 )
 ```
 
-Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
+Switch providers (OpenAI, Anthropic, Gemini, Ollama, vLLM, HuggingFace) via `LLM_PROVIDER` /
 `LLM_MODEL` in the environment. All providers implement an async interface that
 `LLMService` invokes via `await`.
 
@@ -629,16 +636,17 @@ Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
 
 `OpenAIProvider` accepts an optional `base_url`, and the provider factory
 forwards `LLMConfig.api_base` (env `LLM_API_BASE`) when `LLM_PROVIDER=openai`
-— so the default provider can be any OpenAI-compatible server: an Azure
-OpenAI gateway, vLLM, LiteLLM, OpenRouter. Left unset (`None`), the SDK
-default (`api.openai.com`) applies.
+— so the default provider can be any OpenAI-compatible *hosted* gateway: an
+Azure OpenAI gateway, LiteLLM, OpenRouter. Left unset (`None`), the SDK
+default (`api.openai.com`) applies. A self-hosted vLLM server has its own
+provider (below).
 
 ```python
 from core.services.llm.providers.openai_provider import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="sk-...",
-    base_url="http://localhost:8000/v1",   # vLLM / LiteLLM / gateway
+    base_url="https://litellm.internal/v1",   # LiteLLM / gateway
 )
 ```
 
@@ -646,6 +654,53 @@ provider = OpenAIProvider(
 or fallback stage that switches provider resolves the endpoint that belongs to
 the provider actually called, via `api_base_for` (see
 [Central Per-Plugin LLM Policy](#central-per-plugin-llm-policy)).
+
+#### vLLM (`LLM_PROVIDER=vllm`)
+
+`VLLMProvider` talks to a self-hosted `vllm serve` over its OpenAI-compatible
+API. It reuses the OpenAI request path — native tool calling, structured output
+via `response_format` json_schema (enforced server-side by guided decoding),
+streaming with an exact terminal usage chunk — and fixes what reaching vLLM
+*as* `openai` got wrong:
+
+| Concern | As `openai` + `LLM_API_BASE` | As `vllm` |
+| ------- | ---------------------------- | --------- |
+| API key | mandatory (a fake one) | optional; `EMPTY` is sent for a keyless server |
+| Circuit breaker | `openai_provider` — a GPU outage opened the hosted OpenAI stage too | `vllm_provider`, its own |
+| Cost | unpriced → `UNKNOWN_PRICE` (100 $/M) | `vllm/<model>` priced at zero, tokens still metered |
+| Errors | reported as OpenAI's | reported as vLLM's |
+| Startup check | none | `GET /v1/models`: server up, key accepted, model served |
+
+```bash
+# Server side
+vllm serve Qwen/Qwen3-8B --served-model-name qwen3-8b \
+    --enable-auto-tool-choice --tool-call-parser hermes --api-key "$VLLM_API_KEY"
+
+# Framework side
+LLM_PROVIDER=vllm
+LLM_MODEL=qwen3-8b                        # must match --served-model-name
+LLM_VLLM_API_BASE=http://gpu-host:8000/v1 # /v1 is appended when missing
+LLM_VLLM_API_KEY=                         # the server's --api-key; empty = keyless
+LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-choice
+```
+
+- **The endpoint is required.** There is no default: vLLM's `:8000` is also
+  where this backend listens, so a guessed `localhost:8000` would call the
+  framework itself. `LLM_API_BASE` is honoured only when `vllm` is the default
+  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,vllm:qwen3-8b`)
+  reads `LLM_VLLM_API_BASE`.
+- **Only the dedicated key is ever sent.** `LLM_VLLM_API_KEY` (or
+  `VLLM_API_KEY`, the variable the server itself reads); `LLM_API_KEY` is
+  ignored for vLLM even when it is the default provider, because that field
+  also answers to `LLM_OPENAI_API_KEY` and a hosted OpenAI key must never
+  reach a self-hosted box. No dedicated key means a keyless request.
+- **Tool calling is a server flag.** Without `--enable-auto-tool-choice` and a
+  `--tool-call-parser` matching the model, set `LLM_VLLM_NATIVE_TOOLS=false`:
+  tool use then goes through prompt coercion instead of a rejected request.
+- **vLLM-only sampling parameters** (`top_k`, `min_p`, `repetition_penalty`,
+  `chat_template_kwargs` — e.g. `{"enable_thinking": false}` for Qwen3) travel
+  in `extra_body`, forwarded untouched.
+- **No image generation**: `generate_image` raises before any request.
 
 #### Anthropic serving backends (`LLM_ANTHROPIC_BACKEND`)
 
@@ -767,9 +822,11 @@ started until it is restarted.
 Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
 to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
-resolves the lookup; `provider_configured` reports which providers a policy may
-pin). Ollama stays keyless.
+`LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN`, `LLM_VLLM_API_KEY`/`VLLM_API_KEY`
+(`core.services.llm.runtime.api_key_for` resolves the lookup;
+`provider_configured` reports which providers a policy may pin). Ollama stays
+keyless; vLLM is keyless-capable and counts as configured once
+`LLM_VLLM_API_BASE` names its server.
 
 **Endpoints are per-provider too.** `LLM_API_BASE` is the endpoint of the
 *default* `LLM_PROVIDER` — it is not a global base URL. A policy (or a fallback
