@@ -197,8 +197,8 @@ a diagnostic must not spend money or depend on a vendor being reachable. The
 same checks run once at startup (`LLM_PREFLIGHT`, see
 [LLM service](../core-modules/services.md)). A vLLM primary or chain stage is
 probed with `GET /v1/models`, which names a model the server does not serve
-under that id; an unconfigured vLLM provider points at `LLM_VLLM_API_BASE`
-rather than at an API key it does not need.
+under that id; an unconfigured vLLM provider is reported as *not configured*
+and points at `LLM_VLLM_API_BASE` rather than at an API key it does not need.
 
 **JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 

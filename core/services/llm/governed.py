@@ -40,6 +40,10 @@ from core.services.llm.runtime import api_base_for, api_key_for
 
 logger = get_logger(__name__)
 
+#: Providers reachable through an OpenAI-compatible client: OpenAI itself and
+#: a self-hosted vLLM server (see :attr:`GovernedClientConfig.speaks_openai`).
+OPENAI_WIRE_PROVIDERS: frozenset[str] = frozenset({"openai", "vllm"})
+
 
 @dataclass(frozen=True)
 class GovernedClientConfig:
@@ -74,6 +78,32 @@ class GovernedClientConfig:
     def key(self) -> str | None:
         """The raw API key string for handing to an SDK, or ``None``."""
         return self.api_key.get_secret_value() if self.api_key is not None else None
+
+    @property
+    def speaks_openai(self) -> bool:
+        """Whether an OpenAI-compatible client can serve this target.
+
+        ``vllm`` is the OpenAI Chat Completions protocol on a self-hosted
+        server: a plugin whose bundled SDK speaks OpenAI serves it by pointing
+        that client at :attr:`api_base` (already the ``/v1`` root) with
+        :meth:`openai_key`. Treating it as unservable used to drop a vLLM pin
+        silently, while the console reported the plugin as pinned.
+        """
+        return self.provider in OPENAI_WIRE_PROVIDERS
+
+    def openai_key(self) -> str | None:
+        """The key an OpenAI SDK client should send for this target.
+
+        vLLM usually runs keyless, but the OpenAI SDKs refuse an empty key, so
+        its placeholder stands in; the server ignores it without ``--api-key``.
+        Every other provider returns :meth:`key` unchanged.
+        """
+        key = self.key()
+        if key is None and self.provider == "vllm":
+            from core.services.llm.providers.vllm_provider import VLLM_NO_KEY
+
+            return VLLM_NO_KEY
+        return key
 
 
 def resolve_governed_client_config(
@@ -117,13 +147,22 @@ def resolve_governed_client_config(
             )
             return None
         model = policy.model or (config.model if provider == config.provider else None)
+        api_base = api_base_for(config, provider)
+        if provider == "vllm" and api_base:
+            # Hand every consumer the OpenAI root it would otherwise have to
+            # derive itself: a missing ``/v1`` is a 404 on every call.
+            from core.services.llm.providers.vllm_provider import (
+                normalize_vllm_base_url,
+            )
+
+            api_base = normalize_vllm_base_url(api_base)
         return GovernedClientConfig(
             provider=provider,
             model=model,
             api_key=api_key_for(config, provider),
             # Per-provider, never the default provider's URL — see
             # ``core.services.llm.runtime.api_base_for``.
-            api_base=api_base_for(config, provider),
+            api_base=api_base,
         )
     except Exception:
         logger.warning(
@@ -135,4 +174,8 @@ def resolve_governed_client_config(
         return None
 
 
-__all__ = ["GovernedClientConfig", "resolve_governed_client_config"]
+__all__ = [
+    "OPENAI_WIRE_PROVIDERS",
+    "GovernedClientConfig",
+    "resolve_governed_client_config",
+]

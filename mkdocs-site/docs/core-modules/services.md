@@ -826,7 +826,10 @@ config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 (`core.services.llm.runtime.api_key_for` resolves the lookup;
 `provider_configured` reports which providers a policy may pin). Ollama stays
 keyless; vLLM is keyless-capable and counts as configured once
-`LLM_VLLM_API_BASE` names its server.
+`LLM_VLLM_API_BASE` names its server. A vLLM key may also arrive through the
+credential seam (an operator storing it from an admin console): the provider
+sends `LLM_VLLM_API_KEY` first, else that stored key, and the startup probe
+and governed clients use the same one.
 
 **Endpoints are per-provider too.** `LLM_API_BASE` is the endpoint of the
 *default* `LLM_PROVIDER` — it is not a global base URL. A policy (or a fallback
@@ -895,11 +898,20 @@ plugin and point their own client at that governed target:
 from core.services.llm import resolve_governed_client_config
 
 gov = resolve_governed_client_config("my-plugin")   # None ⇒ keep your own defaults
-if gov is not None and gov.provider in ("openai", "ollama"):
-    base_url, api_key, model = gov.api_base, gov.key(), gov.model
-    # build the plugin's own SDK client pointed at (provider, base_url, api_key)
+if gov is not None and gov.speaks_openai:            # openai or vllm
+    base_url, api_key, model = gov.api_base, gov.openai_key(), gov.model
+    # build the plugin's own OpenAI client pointed at (base_url, api_key)
     # and use `model` as the default model.
 ```
+
+**vLLM through a plugin's own SDK.** vLLM speaks the OpenAI protocol, so an
+engine that bundles an OpenAI client can serve a vLLM pin — and must, or the pin
+is dropped while the console reports the plugin as pinned.
+`GovernedClientConfig.speaks_openai` is true for `openai` and `vllm`
+(`OPENAI_WIRE_PROVIDERS`); for `vllm`, `api_base` already arrives as the `/v1`
+root, and `openai_key()` returns vLLM's own key or the `EMPTY` placeholder the
+OpenAI SDKs require for a keyless server. Never substitute the engine's own
+OpenAI key: it belongs to api.openai.com.
 
 `resolve_governed_client_config(plugin_name)` returns a `GovernedClientConfig`
 (`provider`, `model`, `api_key: SecretStr | None`, `api_base`) — exactly the pin

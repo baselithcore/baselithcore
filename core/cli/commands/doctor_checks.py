@@ -398,7 +398,7 @@ def check_llm_provider() -> CheckResult:
             return CheckResult(
                 "LLM Provider",
                 False,
-                f"{provider.upper()} has no usable credentials",
+                f"{provider.upper()} is not configured",
                 provider_setup_hint(provider),
             )
         return CheckResult("LLM Provider", True, f"Provider: {provider}")

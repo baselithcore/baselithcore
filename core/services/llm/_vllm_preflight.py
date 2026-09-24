@@ -128,9 +128,11 @@ async def check_vllm_endpoints(
         list: One finding per unreachable server, rejected key or unserved model.
     """
     from core.services.llm.preflight import PreflightFinding
-    from core.services.llm.runtime import api_key_from_config
+    from core.services.llm.runtime import api_key_for
 
-    secret = api_key_from_config(config, "vllm")
+    # ``api_key_for``: the dedicated key, else one stored from the console —
+    # the same key the provider will send, so the probe answers for it.
+    secret = api_key_for(config, "vllm")
     api_key = secret.get_secret_value() if secret is not None else None
     findings: list[PreflightFinding] = []
     for target, models in vllm_targets(config).items():
