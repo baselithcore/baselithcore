@@ -140,6 +140,10 @@ async def generate_image(
         LLMProviderError: The active provider cannot generate images, or the
             generation failed.
     """
+    from core.services.llm._late_binding import governed_target
+
+    # A funnel-issued service answers for whoever is calling now.
+    service = governed_target(service)
     provider = getattr(service, "provider", None)
     if provider is None or not hasattr(provider, "generate_image"):
         name = type(provider).__name__ if provider is not None else "none"

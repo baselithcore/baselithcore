@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from core.config import get_llm_config
 from core.observability.logging import get_logger
+from core.services.llm._late_binding import mark_funnel_issued
 from core.services.llm.credentials import resolve_llm_credential
 from core.services.llm.policy import (
     PluginLLMPolicy,
@@ -206,7 +207,9 @@ def _get_default_service() -> LLMService:
     if _default_service is None:
         from core.services.llm.service import LLMService
 
-        _default_service = LLMService()
+        # Funnel-issued: a caller that keeps it still follows the pin of
+        # whoever calls through it (see ``_late_binding``).
+        _default_service = mark_funnel_issued(LLMService())
     return _default_service
 
 
@@ -265,7 +268,7 @@ def _service_for_policy(policy: PluginLLMPolicy) -> LLMService | None:
             # A pinned model is governance, not a hint: it also wins over the
             # plugin's own per-call ``model=`` overrides.
             service._pinned_model = policy.model
-        _policy_services[key] = service
+        _policy_services[key] = mark_funnel_issued(service)
         return service
 
 

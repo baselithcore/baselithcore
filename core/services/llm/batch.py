@@ -254,6 +254,10 @@ async def generate_batch(
     """
     if not prompts:
         return []
+    from core.services.llm._late_binding import governed_target
+
+    # A funnel-issued service answers for whoever is calling now.
+    service = governed_target(service)
     ids = [p.custom_id for p in prompts]
     if len(set(ids)) != len(ids):
         raise ValueError("BatchPrompt.custom_id values must be unique")

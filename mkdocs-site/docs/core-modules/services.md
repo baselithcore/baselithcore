@@ -879,6 +879,20 @@ Gemini is pinnable too, but its SDK is an optional extra
 `provider_configured` additionally requires `google-genai` to be importable —
 a key alone would otherwise advertise a pin that fails on the first call.
 
+**The pin is read at call time, not when the service is fetched.** A service
+issued by `get_llm_service()` — the default singleton or a policy clone, and
+therefore also the one dependency injection hands out — re-resolves the pin on
+every call (`generate_response`, `generate`, `generate_messages`,
+`generate_response_stream`, and the module-level `generate_image`,
+`generate_batch`, `generate_stream_events`) and forwards the call to the
+service that pin selects for whoever is calling. A plugin that keeps the
+service it got at load time — an agent, a flow handler, a DI-injected client —
+therefore follows the console: the pin decides for the plugin bound to the
+call, and a re-pin applies to the next call with no restart. Before this, such a
+plugin ran on whatever was in force when it fetched the service (usually the
+deployment default, since nothing is bound while plugins load). Services built
+from an explicit `LLMService(config=...)` are not re-routed (see below).
+
 !!! warning "Scope: the shared funnel only"
     A policy governs LLM calls that reach a provider through
     `get_llm_service()`. Code constructing its own `LLMService(config=...)`,

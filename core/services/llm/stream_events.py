@@ -101,6 +101,10 @@ async def generate_stream_events(
     """
     import time
 
+    from core.services.llm._late_binding import governed_target
+
+    # A funnel-issued service answers for whoever is calling now.
+    service = governed_target(service)
     model = service._resolve_model(model)
     native_enabled = getattr(service.config, "enable_native_tools", False) is True
     provider_stream = getattr(service.provider, "generate_structured_stream", None)

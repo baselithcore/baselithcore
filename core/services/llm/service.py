@@ -15,6 +15,7 @@ from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
+from core.services.llm._late_binding import follows_policy
 from core.services.llm._telemetry import (
     gen_ai_system,
     report_tokens_to_middleware,
@@ -241,6 +242,7 @@ class LLMService:
             )
             raise RateLimitError(str(e), retry_after=retry_after) from e
 
+    @follows_policy
     async def generate_response(
         self,
         prompt: str,
@@ -301,6 +303,7 @@ class LLMService:
             usage_sink=usage_sink,
         )
 
+    @follows_policy
     async def generate(
         self,
         prompt: str,
@@ -360,6 +363,7 @@ class LLMService:
             allow_refusal=allow_refusal,
         )
 
+    @follows_policy
     async def generate_messages(
         self,
         messages: "list[Any]",
@@ -421,6 +425,7 @@ class LLMService:
             allow_refusal=allow_refusal,
         )
 
+    @follows_policy
     async def generate_response_stream(
         self,
         prompt: str,
