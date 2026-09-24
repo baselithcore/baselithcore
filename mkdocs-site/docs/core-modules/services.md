@@ -701,6 +701,16 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
   `chat_template_kwargs` — e.g. `{"enable_thinking": false}` for Qwen3) travel
   in `extra_body`, forwarded untouched.
 - **No image generation**: `generate_image` raises before any request.
+- **Answers, not reasoning.** A thinking model (Qwen3, DeepSeek-R1) on a server
+  started **without `--reasoning-parser`** returns its reasoning inside the
+  answer — no opening tag, the reasoning closed by `</think>`, then the answer.
+  `core.services.llm.reasoning_text` drops it: `strip_reasoning` for whole
+  answers, `ReasoningStreamFilter` for streams (it holds text back until the
+  `</think>` or the end of the stream, and stops holding back as soon as the
+  server streams a separate `reasoning_content`). The provider applies both; a
+  plugin with its own OpenAI client applies them to its vLLM path. Start the
+  server with `--reasoning-parser <qwen3|deepseek_r1|…>` — that is the real
+  fix, and with it the filter is inert.
 
 #### Anthropic serving backends (`LLM_ANTHROPIC_BACKEND`)
 

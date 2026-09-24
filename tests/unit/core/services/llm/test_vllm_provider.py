@@ -204,7 +204,9 @@ class TestCalls:
                 async for text, _ in provider.generate_stream("p", model="m"):
                     seen.append(text)
 
-        assert seen == ["a"]
+        # Held back: until a ``</think>`` or the end of the stream, a leading
+        # piece may be a thinking model's reasoning (see reasoning_text).
+        assert seen == []
         assert get_circuit_breaker("vllm_provider")._stats.failures == 1
         assert get_circuit_breaker("openai_provider")._stats.failures == 0
 

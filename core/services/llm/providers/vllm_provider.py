@@ -17,6 +17,12 @@ that was wrong about reaching vLLM *as* OpenAI:
   a ``--tool-call-parser``; ``native_tools=False`` sends tool use through the
   prompt-coercion path instead of a request the server rejects.
 
+* **Answers, not reasoning.** A thinking model (Qwen3, DeepSeek-R1) on a
+  server started without ``--reasoning-parser`` returns its reasoning inline,
+  closed by ``</think>``. Every text this provider returns — whole or streamed —
+  goes through :mod:`core.services.llm.reasoning_text`, which drops it; on a
+  server that parses reasoning itself the filter is inert.
+
 vLLM-only sampling parameters (``top_k``, ``min_p``, ``repetition_penalty``,
 ``chat_template_kwargs``) travel in ``extra_body``, which the OpenAI request
 shaper forwards untouched.
@@ -31,11 +37,17 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import SecretStr
 
+from core.observability.logging import get_logger
 from core.resilience.circuit_breaker import get_circuit_breaker
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm._message_types import TextBlock
+from core.services.llm.cost_control import estimate_tokens
+from core.services.llm.errors import map_provider_exception
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.images import GeneratedImage
 from core.services.llm.messages import Message
+from core.services.llm.providers._openai_request import request_kwargs
 from core.services.llm.providers.openai_provider import OpenAIProvider
+from core.services.llm.reasoning_text import ReasoningStreamFilter, strip_reasoning
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -51,13 +63,34 @@ VLLM_NO_KEY = "EMPTY"
 
 _BREAKER = "vllm_provider"
 
+logger = get_logger(__name__)
+
 # The parent's methods are wrapped by the ``openai_provider`` breaker. Calling
 # the unwrapped functions keeps the protocol logic in one place while the
 # overrides below count every outcome against vLLM's own breaker instead.
 _generate = inspect.unwrap(OpenAIProvider.generate)
 _generate_structured = inspect.unwrap(OpenAIProvider.generate_structured)
 _generate_messages = inspect.unwrap(OpenAIProvider.generate_messages)
-_generate_stream = inspect.unwrap(OpenAIProvider.generate_stream)
+
+
+def _clean(result: LLMResult) -> LLMResult:
+    """*result* with inline reasoning dropped from its text and text blocks."""
+    if result.text:
+        result.text = strip_reasoning(result.text)
+    if result.message is not None:
+        for block in result.message.content:
+            if isinstance(block, TextBlock):
+                block.text = strip_reasoning(block.text)
+    return result
+
+
+def _reasoning_of(delta: Any) -> str | None:
+    """The reasoning a parsing server streams in its own delta field."""
+    for name in ("reasoning_content", "reasoning"):
+        value = getattr(delta, name, None)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def normalize_vllm_base_url(url: str) -> str:
@@ -144,10 +177,8 @@ class VLLMProvider(OpenAIProvider):
         Returns:
             tuple[str, int]: Response text and total tokens used.
         """
-        result: tuple[str, int] = await _generate(
-            self, prompt, model, json_mode, **kwargs
-        )
-        return result
+        text, tokens = await _generate(self, prompt, model, json_mode, **kwargs)
+        return strip_reasoning(text), tokens
 
     @get_circuit_breaker(_BREAKER)
     async def generate_structured(
@@ -182,7 +213,7 @@ class VLLMProvider(OpenAIProvider):
             response_format=response_format,
             **kwargs,
         )
-        return result
+        return _clean(result)
 
     @get_circuit_breaker(_BREAKER)
     async def generate_messages(
@@ -210,7 +241,7 @@ class VLLMProvider(OpenAIProvider):
         result: LLMResult = await _generate_messages(
             self, messages, model, tools=tools, system=system, **kwargs
         )
-        return result
+        return _clean(result)
 
     @get_circuit_breaker(_BREAKER)
     async def generate_stream(
@@ -226,8 +257,47 @@ class VLLMProvider(OpenAIProvider):
         Yields:
             tuple[str, int]: Text chunks and the running token count.
         """
-        async for item in _generate_stream(self, prompt, model, **kwargs):
-            yield item
+        client = self._ensure_client()
+        try:
+            system_prompt = kwargs.get("system", "")
+            messages: list[dict[str, str]] = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                **request_kwargs(kwargs),
+            )
+            guard = ReasoningStreamFilter()
+            tokens = estimate_tokens(prompt)
+            billed: int | None = None
+            async for chunk in stream:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # A server that parses reasoning streams it apart: the
+                    # content is clean, so nothing is held back from here on.
+                    held = guard.passthrough() if _reasoning_of(delta) else ""
+                    text = held + guard.feed(str(getattr(delta, "content", "") or ""))
+                    if text:
+                        tokens += estimate_tokens(text)
+                        yield text, tokens
+                total = getattr(getattr(chunk, "usage", None), "total_tokens", None)
+                if isinstance(total, int) and total > 0:
+                    billed = total
+            tail = guard.finish()
+            if tail:
+                tokens += estimate_tokens(tail)
+                yield tail, tokens
+            if billed is not None:
+                yield "", billed
+        except Exception as e:
+            logger.error(f"vLLM streaming error: {describe_exception(e)}")
+            raise map_provider_exception(
+                e, provider=self.provider_label, action="streaming"
+            ) from e
 
     async def generate_image(
         self,
