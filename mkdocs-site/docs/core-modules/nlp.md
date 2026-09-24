@@ -68,7 +68,7 @@ python -m spacy download en_core_web_sm
 from core.nlp.models import get_embedder, get_reranker
 
 # Load sentence-transformers embedder (cached per model name)
-embedder = get_embedder("sentence-transformers/all-MiniLM-L6-v2")
+embedder = get_embedder("BAAI/bge-m3")
 # CachedEmbedder.encode is a coroutine: the blocking model call is
 # offloaded to the dedicated inference pool, so it must be awaited.
 embeddings = await embedder.encode(["text one", "text two"])

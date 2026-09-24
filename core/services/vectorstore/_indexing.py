@@ -33,8 +33,76 @@ logger = get_logger(__name__)
 #: Payload keys the pipeline owns. Retrieval reads all of them and tenant
 #: isolation reads ``tenant_id``, so caller metadata may not set any of them.
 RESERVED_PAYLOAD_KEYS = frozenset(
-    {"text", "source", "document_id", "tenant_id", "chunk_index", "chunk_count"}
+    {
+        "text",
+        "chunk_body",
+        "source",
+        "document_id",
+        "tenant_id",
+        "chunk_index",
+        "chunk_count",
+        "ingestion_chunks",
+    }
 )
+
+
+def _normalise_precomputed_chunks(
+    doc: Document, metadata: dict[str, Any]
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """Return ``(payload_texts, embedding_texts, per_chunk_payloads)``.
+
+    Document readers may attach structured chunks under ``metadata["ingestion_chunks"]``.
+    When absent or malformed we preserve the historical 800/200 character
+    splitter path.
+    """
+    raw_chunks = metadata.get("ingestion_chunks")
+    if not isinstance(raw_chunks, list) or not raw_chunks:
+        chunks = chunk_text(doc.content)
+        return (
+            chunks,
+            [prepare_chunk_text(chunk, metadata) for chunk in chunks],
+            [{} for _ in chunks],
+        )
+
+    payload_texts: list[str] = []
+    embedding_texts: list[str] = []
+    chunk_payloads: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_chunks):
+        if not isinstance(raw, dict):
+            continue
+        payload_text = str(
+            raw.get("text") or raw.get("chunk_body") or raw.get("context_text") or ""
+        ).strip()
+        if not payload_text:
+            continue
+        embedding_text = str(raw.get("embedding_text") or payload_text).strip()
+        payload_texts.append(payload_text)
+        embedding_texts.append(prepare_chunk_text(embedding_text, metadata))
+        chunk_payloads.append(
+            {
+                "chunk_body": str(
+                    raw.get("chunk_body") or raw.get("context_text") or payload_text
+                ),
+                "original_text": raw.get("original_text")
+                or raw.get("text")
+                or payload_text,
+                "pages": raw.get("pages") or [],
+                "headings": raw.get("headings") or [],
+                "provenance": raw.get("provenance") or [],
+                "parser": raw.get("parser"),
+                "source_index": raw.get("source_index", index),
+            }
+        )
+
+    if not payload_texts:
+        chunks = chunk_text(doc.content)
+        return (
+            chunks,
+            [prepare_chunk_text(chunk, metadata) for chunk in chunks],
+            [{} for _ in chunks],
+        )
+
+    return payload_texts, embedding_texts, chunk_payloads
 
 
 async def index_documents(
@@ -64,12 +132,12 @@ async def index_documents(
             logger.warning("Skipping document with missing id or content")
             continue
 
-        chunks = chunk_text(content)
+        chunks, enriched_chunks, chunk_payloads = _normalise_precomputed_chunks(
+            doc, metadata
+        )
         if not chunks:
             logger.warning(f"No chunks generated for document {doc_id}")
             continue
-
-        enriched_chunks = [prepare_chunk_text(chunk, metadata) for chunk in chunks]
 
         doc_plans.append(
             {
@@ -77,6 +145,7 @@ async def index_documents(
                 "doc_id": doc_id,
                 "metadata": metadata,
                 "chunks": chunks,
+                "chunk_payloads": chunk_payloads,
                 "offset": len(all_enriched_chunks),
             }
         )
@@ -108,6 +177,7 @@ async def index_documents(
         doc_id = plan["doc_id"]
         metadata = plan["metadata"]
         chunks = plan["chunks"]
+        chunk_payloads = plan["chunk_payloads"]
         offset = plan["offset"]
         doc_vectors = all_vectors[offset : offset + len(chunks)]
 
@@ -129,9 +199,12 @@ async def index_documents(
         safe_metadata = {k: v for k, v in metadata.items() if k not in shadowed}
 
         doc_points = []
-        for idx, (chunk, vector) in enumerate(zip(chunks, doc_vectors, strict=True)):
+        for idx, (chunk, vector, chunk_payload) in enumerate(
+            zip(chunks, doc_vectors, chunk_payloads, strict=True)
+        ):
             payload = {
                 **safe_metadata,
+                **{k: v for k, v in chunk_payload.items() if v not in (None, [], {})},
                 "text": chunk,
                 "source": getattr(doc, "clean_path", doc.id),
                 "document_id": doc_id,
