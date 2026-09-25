@@ -35,9 +35,10 @@ class ResilienceConfig(BaseSettings):
     )
 
     # === Rate Limiting ===
-    # Deprecated, no effect: these only seed the defaults of the library
-    # helpers get_api_limiter()/get_llm_limiter()/RateLimiter() in
-    # core.resilience, and no framework request or LLM path calls them.
+    # RESILIENCE_API_RATE_*: deprecated, no effect. They only seed the
+    # defaults of the library helpers get_api_limiter()/RateLimiter() in
+    # core.resilience, and no framework request path calls them — HTTP
+    # request limits are the RATE_LIMIT_* settings of the security middleware.
     api_rate_limit: int = Field(
         default=100,
         description=(
@@ -54,17 +55,43 @@ class ResilienceConfig(BaseSettings):
         ),
     )
 
+    # RESILIENCE_LLM_RATE_*: client-side throttle on outgoing LLM calls,
+    # enforced by core.services.llm.rate_limit on every generation path.
+    llm_rate_enabled: bool = Field(
+        default=False,
+        description=(
+            "Opt-in client-side rate limit on outgoing LLM calls (text, "
+            "tool calling, structured, messages, streaming, images, batch "
+            "submission): at most RESILIENCE_LLM_RATE_LIMIT calls per "
+            "RESILIENCE_LLM_RATE_WINDOW seconds. Per worker process unless "
+            "CACHE_BACKEND=redis, which shares the window across workers"
+        ),
+    )
     llm_rate_limit: int = Field(
         default=20,
         description=(
-            "Deprecated, no effect: only the default of get_llm_limiter(), "
-            "which nothing in the framework calls, so LLM calls are not "
-            "throttled by it"
+            "LLM calls allowed per window when RESILIENCE_LLM_RATE_ENABLED is "
+            "true (per provider unless RESILIENCE_LLM_RATE_PER_PROVIDER=false)"
         ),
     )
     llm_rate_window: int = Field(
         default=60,
-        description="Deprecated, no effect: pairs with RESILIENCE_LLM_RATE_LIMIT",
+        description="Window length in seconds for RESILIENCE_LLM_RATE_LIMIT",
+    )
+    llm_rate_max_wait: float = Field(
+        default=30.0,
+        ge=0.0,
+        description=(
+            "Longest a call waits for a free LLM rate-limit slot before "
+            "failing with LocalLLMRateLimitError (0 = fail immediately)"
+        ),
+    )
+    llm_rate_per_provider: bool = Field(
+        default=True,
+        description=(
+            "Keep a separate LLM rate-limit window per provider name; false "
+            "shares one window across every provider"
+        ),
     )
 
     # === Retry ===

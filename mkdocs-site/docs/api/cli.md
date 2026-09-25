@@ -1090,8 +1090,7 @@ baselith config show
 │                            ││                           │
 │ Log Level      info        ││ Provider     ollama       │
 │ Debug          False       ││ Model        llama3.2     │
-│ Plugin Dir     plugins     ││ Cache Enable True         │
-│ Data Dir       data        ││                           │
+│ Data Dir       data        ││ Cache Enable True         │
 ╰────────────────────────────╯╰───────────────────────────╯
 ╭────── Chat Settings ───────╮╭─── VectorStore Settings ──╮
 │                            ││                           │

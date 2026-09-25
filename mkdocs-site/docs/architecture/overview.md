@@ -334,7 +334,7 @@ from core.guardrails import InputGuard
 
 guard = InputGuard()
 
-# Validate user input (async variant available as validate_async)
+# Validate user input (regex over the original, normalised and decoded text)
 result = guard.validate(user_input)
 if not result.is_valid:
     ...  # reject

@@ -47,6 +47,7 @@ from core.services.llm.messages import (
     ToolResultBlock,
     render_as_prompt,
 )
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -254,6 +255,8 @@ async def generate_messages(
         except CostBudgetExceededError:
             span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
             raise
+        # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+        await acquire_llm_call_slot(service.config.provider)
 
         # Estimated from the transcript: the pre-call middleware ledger only
         # needs a size, and the provider's metered split replaces it below.

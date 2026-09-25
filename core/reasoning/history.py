@@ -221,11 +221,44 @@ def _compact_blocks(message: Message) -> tuple[Message, int]:
     return replace(message, content=blocks), saved
 
 
+def _block_size(block: Any) -> int:
+    """Every block's weight, not only the two that are compactable.
+
+    A ``ToolUseBlock``'s arguments and a ``ThinkingBlock``'s payload are
+    sent and billed like any other content. Counting them as zero let a
+    history dominated by either measure as comfortably under budget and
+    never compact at all, which is the case compaction exists for.
+    """
+    for attribute in ("text", "content"):
+        value = getattr(block, attribute, None)
+        if isinstance(value, str):
+            return estimate_tokens(value)
+    for attribute in ("input", "payload"):
+        value = getattr(block, attribute, None)
+        if isinstance(value, dict):
+            return estimate_tokens(json.dumps(value, default=str))
+    data = getattr(block, "data", None) or getattr(block, "url", None)
+    return estimate_tokens(data) if isinstance(data, str) else 0
+
+
+def message_token_size(message: Message) -> int:
+    """Estimated tokens of one message, every block kind counted.
+
+    Args:
+        message: The message to measure.
+
+    Returns:
+        The summed estimate over its blocks.
+    """
+    return sum(_block_size(block) for block in message.content)
+
+
 def compact_message_history(
     history: list[Message],
     max_tokens: int | None = None,
     *,
     keep_recent: int = 4,
+    protect_head: int = 1,
 ) -> list[Message]:
     """Bound a :class:`~core.services.llm.messages.Message` history.
 
@@ -242,6 +275,9 @@ def compact_message_history(
         max_tokens: Token budget; defaults to :func:`history_token_budget`.
             ``0`` (or negative) disables compaction.
         keep_recent: Number of newest messages always kept intact.
+        protect_head: Number of oldest messages never compacted — ``1``
+            keeps the task; the summarised path passes ``2`` so the summary
+            turn after it is not cut down to an excerpt.
 
     Returns:
         A new list; the input and its messages are not mutated.
@@ -250,30 +286,8 @@ def compact_message_history(
     if budget <= 0 or not history:
         return list(history)
 
-    def _block_size(block: Any) -> int:
-        """Every block's weight, not only the two that are compactable.
-
-        A ``ToolUseBlock``'s arguments and a ``ThinkingBlock``'s payload are
-        sent and billed like any other content. Counting them as zero let a
-        history dominated by either measure as comfortably under budget and
-        never compact at all, which is the case compaction exists for.
-        """
-        for attribute in ("text", "content"):
-            value = getattr(block, attribute, None)
-            if isinstance(value, str):
-                return estimate_tokens(value)
-        for attribute in ("input", "payload"):
-            value = getattr(block, attribute, None)
-            if isinstance(value, dict):
-                return estimate_tokens(json.dumps(value, default=str))
-        data = getattr(block, "data", None) or getattr(block, "url", None)
-        return estimate_tokens(data) if isinstance(data, str) else 0
-
-    def _size(message: Message) -> int:
-        return sum(_block_size(block) for block in message.content)
-
     result = list(history)
-    total = sum(_size(message) for message in result)
+    total = sum(message_token_size(message) for message in result)
     if total <= budget:
         return result
 
@@ -281,7 +295,7 @@ def compact_message_history(
     # Index 0 is the task the loop was given; compacting it would leave the
     # model guessing at its own objective.
     cutoff = max(len(result) - keep_recent, 0)
-    for index in range(1, cutoff):
+    for index in range(max(protect_head, 1), cutoff):
         if total <= budget:
             break
         replacement, saved = _compact_blocks(result[index])
@@ -306,4 +320,5 @@ __all__ = [
     "compact_message_history",
     "compact_messages",
     "history_token_budget",
+    "message_token_size",
 ]

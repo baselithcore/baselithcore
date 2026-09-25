@@ -4,17 +4,23 @@ Defensive Input Sanitization and Validation.
 Implements pre-inference security boundaries to protect LLMs from
 malicious payloads. Detects and blocks prompt injection, unauthorized
 code execution attempts, and non-compliant input patterns using
-high-performance regex matching. An optional LLM layer adds a binary
-malicious/safe check (``validate_async``) and a richer intent taxonomy
-(``classify``: in_scope / out_of_scope / jailbreak / harmful) — both
-fail open so an LLM outage never becomes an input outage.
+high-performance regex matching. Patterns run over the original text
+*and* over normalised views of it (NFKC, invisible characters stripped,
+confusables folded, leetspeak and letter-spacing undone) plus any base64 /
+hex / percent-encoded payloads decoded from it — see
+:mod:`core.guardrails.normalize` and :mod:`core.guardrails.decode`. An
+optional LLM intent taxonomy (``classify``: in_scope / out_of_scope /
+jailbreak / harmful) fails open so an LLM outage never becomes an input
+outage.
 """
 
 import json
-from dataclasses import dataclass
-from typing import Literal
+import re
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from core.observability.logging import get_logger
+from core.stability import deprecated
 
 from .config import (
     COMPILED_CODE_PATTERNS,
@@ -22,21 +28,42 @@ from .config import (
     GuardrailsConfig,
     compile_patterns,
 )
+from .decode import scan_views
+from .multilingual import COMPILED_MULTILINGUAL_PATTERNS, NON_LATIN_LANGUAGES
+from .normalize import COMPILED_SQUASHED_PATTERNS
 
 logger = get_logger(__name__)
 
 #: Valid taxonomy labels; anything else from the LLM fails open.
 _TAXONOMY_INTENTS = frozenset({"in_scope", "out_of_scope", "jailbreak", "harmful"})
 
+#: Whole-phrase patterns for letter-only (``squashed``) views.
+_SQUASHED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("injection:squashed", p) for p in COMPILED_SQUASHED_PATTERNS
+]
+
 
 @dataclass
 class InputValidationResult:
-    """Result of input validation."""
+    """Result of input validation.
+
+    Attributes:
+        is_valid: Whether the input passed.
+        blocked_reason: Why it was blocked.
+        detected_patterns: Matched pattern labels (``family:pattern``;
+            multilingual ones read ``injection:<lang>:<pattern>``).
+        sanitized_input: Passed-through (valid) or truncated (too long) text.
+        metadata: ``matched_variants`` maps each detected label to the text
+            view it matched in — ``original``, ``normalized``,
+            ``deobfuscated``, ``squashed``, or a decoded payload such as
+            ``base64`` / ``base64:deobfuscated``.
+    """
 
     is_valid: bool
     blocked_reason: str | None = None
     detected_patterns: list[str] | None = None
     sanitized_input: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,7 +115,7 @@ class InputGuard:
         if not self.config.input_enabled:
             return InputValidationResult(is_valid=True, sanitized_input=text)
 
-        detected = []
+        detected: list[str] = []
 
         # Check input length
         if len(text) > self.config.max_input_length:
@@ -101,29 +128,32 @@ class InputGuard:
                 sanitized_input=text[: self.config.max_input_length],
             )
 
-        # Check for prompt injection
-        if self.config.block_injection_patterns:
-            for pattern in COMPILED_INJECTION_PATTERNS:
-                if pattern.search(text):
-                    detected.append(f"injection:{pattern.pattern}")
-
-        # Check for code execution attempts
-        if self.config.block_code_execution:
-            for pattern in COMPILED_CODE_PATTERNS:
-                if pattern.search(text):
-                    detected.append(f"code:{pattern.pattern}")
-
-        # Check custom patterns
-        for pattern in self._custom_patterns:
-            if pattern.search(text):
-                detected.append(f"custom:{pattern.pattern}")
+        # Original text first, then the normalised and decoded views: a
+        # pattern is reported once, tagged with the first view it matched.
+        matched: dict[str, str] = {}
+        word_patterns = self._word_patterns(latin_only=False)
+        latin_patterns = self._word_patterns(latin_only=True)
+        self._scan(text, "original", word_patterns, matched)
+        for view in scan_views(text):
+            if view.squashed:
+                if self.config.block_injection_patterns:
+                    self._scan(view.text, view.label, _SQUASHED_PATTERNS, matched)
+            elif view.label.endswith("deobfuscated"):
+                self._scan(view.text, view.label, latin_patterns, matched)
+            else:
+                self._scan(view.text, view.label, word_patterns, matched)
+        detected.extend(matched)
 
         if detected:
-            logger.warning(f"Blocked input with patterns: {detected}")
+            logger.warning(
+                f"Blocked input with patterns: {detected}",
+                extra={"matched_variants": matched},
+            )
             return InputValidationResult(
                 is_valid=False,
                 blocked_reason="Potentially harmful content detected",
                 detected_patterns=detected,
+                metadata={"matched_variants": matched},
             )
 
         return InputValidationResult(
@@ -131,10 +161,53 @@ class InputGuard:
             sanitized_input=text,
         )
 
+    def _word_patterns(self, *, latin_only: bool) -> list[tuple[str, re.Pattern[str]]]:
+        """Labelled patterns for word-preserving views, per the config.
+
+        Args:
+            latin_only: Drop non-Latin-script languages — for the
+                ``deobfuscated`` views, where the confusables fold has
+                already rewritten Cyrillic/Greek letters to Latin.
+        """
+        patterns: list[tuple[str, re.Pattern[str]]] = []
+        if self.config.block_injection_patterns:
+            patterns.extend(("injection", p) for p in COMPILED_INJECTION_PATTERNS)
+            patterns.extend(
+                (f"injection:{lang}", p)
+                for lang, p in COMPILED_MULTILINGUAL_PATTERNS
+                if not (latin_only and lang in NON_LATIN_LANGUAGES)
+            )
+        if self.config.block_code_execution:
+            patterns.extend(("code", p) for p in COMPILED_CODE_PATTERNS)
+        patterns.extend(("custom", p) for p in self._custom_patterns)
+        return patterns
+
+    @staticmethod
+    def _scan(
+        text: str,
+        view: str,
+        patterns: list[tuple[str, re.Pattern[str]]],
+        matched: dict[str, str],
+    ) -> None:
+        """Record every not-yet-matched pattern that hits ``text``."""
+        for family, pattern in patterns:
+            label = f"{family}:{pattern.pattern}"
+            if label not in matched and pattern.search(text):
+                matched[label] = view
+
+    @deprecated(
+        since="0.40.0",
+        removed_in="0.41.0",
+        alternative="core.orchestration.guard_pipeline.guard_input_async",
+    )
     async def validate_async(self, text: str) -> InputValidationResult:
         """
         Validate input text asynchronously, applying LLM-based detection,
         after the standard regex-based checks.
+
+        Nothing in the runtime calls this: every request already crosses
+        ``guard_input_async`` in the orchestrator, whose opt-in LLM layers
+        (moderation, the ``classify`` taxonomy) supersede this binary check.
         """
         result = self.validate(text)
         if not result.is_valid:
@@ -156,7 +229,8 @@ class InputGuard:
             )
 
             eval_result = await llm.generate_response(prompt)
-            if "MALICIOUS" in eval_result.upper():
+            # startswith, not `in`: "NOT MALICIOUS" must not block.
+            if eval_result.strip().upper().startswith("MALICIOUS"):
                 logger.warning(f"LLM Guardrail blocked input: {text[:50]}...")
                 return InputValidationResult(
                     is_valid=False,

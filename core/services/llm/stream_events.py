@@ -37,6 +37,7 @@ from core.services.llm._telemetry import (
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import apply_stop_reason
 from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ToolChoice
 from core.services.llm.usage import billed_usage
@@ -142,6 +143,9 @@ async def generate_stream_events(
     from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
     await enforce_tenant_cost_budget(model=model)
+    # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*); the buffered
+    # branch above takes its slot inside ``service.generate``.
+    await acquire_llm_call_slot(service.config.provider)
 
     input_tokens = await estimate_tokens_async(prompt)
     report_tokens_to_middleware(input_tokens, model="input")

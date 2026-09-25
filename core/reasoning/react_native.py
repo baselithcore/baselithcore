@@ -338,7 +338,7 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     executed sequentially in emission order (observations may feed the next
     reasoning turn), each through the agent's guarded executor.
     """
-    from core.reasoning.history import compact_message_history
+    from core.reasoning.history_summary import compact_history_for_loop
     from core.reasoning.react import (
         LLM_ERROR_ANSWER,
         LLM_UNAVAILABLE_ANSWER,
@@ -387,8 +387,8 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
         # Deterministic compaction bounds prompt growth (cost/latency) on long
         # runs. It shortens the *contents* of older blocks and never drops a
         # message: a provider rejects a conversation whose ``tool_use`` has no
-        # answering ``tool_result``.
-        history = compact_message_history(history)
+        # answering ``tool_result``. Opt-in: ORCHESTRATOR_COMPACTION_SUMMARIZE.
+        history = await compact_history_for_loop(history, llm)
 
         try:
             result = await generate_over_messages(

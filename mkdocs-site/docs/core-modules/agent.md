@@ -120,6 +120,25 @@ orchestrated request is subject to exactly the same caps as any other path.
     match and every effectful tool executes again. Without a `run_id` it is
     never consulted at all.
 
+!!! info "A retry may take a different path — it still replays"
+    Ledger keys are content-addressed: tool, canonical arguments, tenant, the
+    `run_id`, and how many identical calls the run already requested
+    (`core/orchestration/call_keys.py`). A retried run whose model asks for
+    `notify` before `charge_card` this time — or adds a lookup in between —
+    replays both instead of charging again, while two deliberately identical
+    calls in one run stay two effects. Rows written under the old positional
+    key are still honoured when the retry takes its original path; see
+    [Orchestration › Cross-process tool idempotency](orchestration.md#cross-process-tool-idempotency-idempotencypy).
+
+!!! tip "Resume from a checkpoint: `agent.run(prompt, checkpoint=manager)`"
+    Hand `run` a
+    [`CheckpointManager`](orchestration.md#durable-resume-of-the-typed-agent)
+    and each approved tool call is recorded through `run_step`; a resumed run
+    replays the recorded observations without calling the tools, even with no
+    durable ledger configured. `run_id` defaults to the checkpoint's. Turns run
+    their calls sequentially in this mode. Without a checkpoint nothing
+    changes.
+
 ## How a tool call runs
 
 Resolution, argument validation and the gates live in
@@ -153,10 +172,11 @@ the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
     later tool in the same turn has already run its side effect. Unknown-tool
     and denial observations are filled in at their own index.
 
-!!! note "Ledger keys are unchanged"
-    Each call's step is still its position in the run — assigned before
-    anything executes rather than as results arrive — so a resumed run
-    produces the same `tool_ledger` keys as the sequential loop this replaced.
+!!! note "Ledger keys do not depend on completion order — or on position"
+    Each call draws its occurrence (how many identical calls the run already
+    requested) in emission order, before anything executes, so overlapping the
+    calls cannot change their keys — and since the key carries no position, a
+    resumed run matches them whatever order it asks in.
 
 !!! warning "A timeout stops the wait, not the thread"
     Cancelling on a deadline stops the *await*. A synchronous tool already

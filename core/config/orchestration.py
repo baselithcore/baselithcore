@@ -191,6 +191,34 @@ class OrchestrationConfig(BaseSettings):
         "simultaneous provider calls (429 storm + unmetered cost spike).",
     )
 
+    # == LLM-summarised history compaction (native agent loop) ==
+    compaction_summarize: bool = Field(
+        default=False,
+        description="When the native agent loop's message history exceeds "
+        "BASELITH_REACT_HISTORY_MAX_TOKENS, condense the older complete turns "
+        "into one labelled, untrusted summary message with a single LLM call "
+        "instead of only truncating block contents. Off by default: it adds "
+        "a call per compaction. Any summariser failure falls back to the "
+        "deterministic truncation.",
+    )
+    compaction_summary_model: str = Field(
+        default="",
+        description="Model for the compaction summary call. Empty uses the "
+        "deployment default (or the 'summarization' tier when LLM_ROUTING_"
+        "ENABLED); a per-plugin policy pin still decides the provider.",
+    )
+    compaction_summary_max_tokens: int = Field(
+        default=1024,
+        ge=64,
+        description="Output token cap for one compaction summary.",
+    )
+    compaction_summary_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Timeout for one compaction summary call; on expiry the "
+        "loop falls back to deterministic truncation.",
+    )
+
 
 _router_config: RouterConfig | None = None
 _orchestration_config: OrchestrationConfig | None = None

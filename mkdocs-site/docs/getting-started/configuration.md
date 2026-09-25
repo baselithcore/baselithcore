@@ -154,7 +154,7 @@ Declared in `core.config.base`.
 | `CORE_LOG_LEVEL` | `str` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | `CORE_LOG_STRUCTURED` | `bool` | `False` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
 | `CORE_MAX_WORKERS` | `int` | `4` | Deprecated, no effect: nothing reads it; the inference thread pool is sized by BASELITH_INFERENCE_THREADS and the per-worker math thread pools by OMP_NUM_THREADS (split across web workers automatically) |
-| `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Directory containing plugins |
+| `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Deprecated, no effect: the plugin loader reads PLUGIN_PLUGINS_PATH |
 | `CORE_RANDOM_SEED` | `int` | `42` | Random seed when deterministic_mode is enabled |
 
 ## Cache configuration settings
@@ -395,6 +395,10 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` | `int` | `1000` | Retained-run cap for the in-memory checkpoint backend (oldest finished runs evicted first). Irrelevant for the Postgres backend. |
 | `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool` | `False` | Start the background recovery sweeps: runs left in the 'running' state by a crash/restart are re-entered, and runs that stopped making progress are marked failed. Sweeps repeat every recovery_sweep_interval_seconds (not just at startup); a run is only re-entered once it has been silent for recovery_resume_after_seconds, so one still executing is left alone. Requires checkpoint_enabled; runs awaiting approval are never auto-resumed. |
 | `ORCHESTRATOR_CHECKPOINT_SQLITE_PATH` | `str` | `data/checkpoints.db` | Database file for the 'sqlite' checkpoint backend (durable runs without a Postgres instance; parent directories are created on first use). |
+| `ORCHESTRATOR_COMPACTION_SUMMARIZE` | `bool` | `False` | When the native agent loop's message history exceeds BASELITH_REACT_HISTORY_MAX_TOKENS, condense the older complete turns into one labelled, untrusted summary message with a single LLM call instead of only truncating block contents. Off by default: it adds a call per compaction. Any summariser failure falls back to the deterministic truncation. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_MAX_TOKENS` | `int` | `1024` | Output token cap for one compaction summary. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_MODEL` | `str` | *empty* | Model for the compaction summary call. Empty uses the deployment default (or the 'summarization' tier when LLM_ROUTING_ENABLED); a per-plugin policy pin still decides the provider. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_TIMEOUT_SECONDS` | `float` | `30.0` | Timeout for one compaction summary call; on expiry the loop falls back to deterministic truncation. |
 | `ORCHESTRATOR_CONFIDENCE_THRESHOLD` | `float` | `0.6` | Minimum confidence for LLM classification |
 | `ORCHESTRATOR_CONTEXT_WINDOW_TOKENS` | `int` | `200000` | Assumed model context window, used as the denominator of LoopBudget.token_pressure() when no token cap is set so context auto-tuning still has a signal. 0 disables that fallback. |
 | `ORCHESTRATOR_CREW_MAX_PARALLEL` | `int` | `8` | Maximum crew tasks executed concurrently under process='parallel'. Each task is a full LLM call, so an unbounded fan-out over a caller-supplied task list would open that many simultaneous provider calls (429 storm + unmetered cost spike). |
@@ -540,8 +544,11 @@ Declared in `core.config.resilience`.
 | `RESILIENCE_CB_FAIL_MAX` | `int` | `5` | Number of failures before opening circuit |
 | `RESILIENCE_CB_HALF_OPEN_MAX` | `int` | `1` | Max requests in half-open state |
 | `RESILIENCE_CB_RESET_TIMEOUT` | `int` | `60` | Seconds before trying half-open state |
-| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | Deprecated, no effect: only the default of get_llm_limiter(), which nothing in the framework calls, so LLM calls are not throttled by it |
-| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | Deprecated, no effect: pairs with RESILIENCE_LLM_RATE_LIMIT |
+| `RESILIENCE_LLM_RATE_ENABLED` | `bool` | `False` | Opt-in client-side rate limit on outgoing LLM calls (text, tool calling, structured, messages, streaming, images, batch submission): at most RESILIENCE_LLM_RATE_LIMIT calls per RESILIENCE_LLM_RATE_WINDOW seconds. Per worker process unless CACHE_BACKEND=redis, which shares the window across workers |
+| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | LLM calls allowed per window when RESILIENCE_LLM_RATE_ENABLED is true (per provider unless RESILIENCE_LLM_RATE_PER_PROVIDER=false) |
+| `RESILIENCE_LLM_RATE_MAX_WAIT` | `float` | `30.0` | Longest a call waits for a free LLM rate-limit slot before failing with LocalLLMRateLimitError (0 = fail immediately) |
+| `RESILIENCE_LLM_RATE_PER_PROVIDER` | `bool` | `True` | Keep a separate LLM rate-limit window per provider name; false shares one window across every provider |
+| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | Window length in seconds for RESILIENCE_LLM_RATE_LIMIT |
 | `RESILIENCE_RETRY_BASE_DELAY` | `float` | `1.0` | Base delay for retries |
 | `RESILIENCE_RETRY_EXPONENTIAL_BASE` | `float` | `2.0` | Base for exponential backoff |
 | `RESILIENCE_RETRY_JITTER` | `bool` | `True` | Add jitter to retries |
@@ -896,4 +903,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-569 settings documented.
+576 settings documented.

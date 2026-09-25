@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 from core.observability.logging import get_logger
 from core.orchestration.idempotency import (
     ToolCallInFlight,
+    claim_call,
+    derive_call_key,
     derive_idempotency_key,
     requires_idempotency,
 )
@@ -208,15 +210,27 @@ async def claim_ledger_entry(
     step: int,
     tool: ToolDefinition,
     args: dict[str, Any],
+    *,
+    occurrence: int,
+    tenant_id: str = "",
 ) -> tuple[str | None, str | None]:
     """Claim the idempotency key for one effectful call.
+
+    The key is content-addressed
+    (:func:`~core.orchestration.idempotency.derive_call_key`), so a resumed run
+    that requests the same effect along a different path still replays it.
+    ``step`` only names the call's positional key from before that scheme, so a
+    row written by a pre-upgrade pass is still honoured.
 
     Args:
         ledger: The :class:`~core.orchestration.idempotency.ToolLedger`.
         run_id: Run the call belongs to.
-        step: Position of the call within the run.
+        step: Position of the call within the run (legacy key only).
         tool: The tool about to run.
         args: Its arguments (part of the derived key; never stored raw).
+        occurrence: How many identical ``(tool, args)`` calls this pass of the
+            run already requested.
+        tenant_id: Owning tenant, mixed into the key.
 
     Returns:
         ``(key, replayed_observation)``. A non-None observation means the call
@@ -229,9 +243,12 @@ async def claim_ledger_entry(
         # missing dependency: the call runs, unrecorded, as it did before the
         # ledger existed.
         return None, None
-    key = derive_idempotency_key(run_id, step, tool.name, args)
+    key = derive_call_key(run_id, tool.name, args, occurrence, tenant_id=tenant_id)
+    legacy_key = derive_idempotency_key(run_id, step, tool.name, args)
     try:
-        held = await ledger.begin(key, run_id=run_id, tool=tool.name)
+        held = await claim_call(
+            ledger, key, run_id=run_id, tool=tool.name, legacy_key=legacy_key
+        )
     except Exception as exc:  # ledger trouble must not block the loop
         logger.warning("tool_ledger_begin_failed tool=%s error=%s", tool.name, exc)
         return None, None

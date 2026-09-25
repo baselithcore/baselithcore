@@ -66,6 +66,7 @@ core/services/llm/
 │   ├── vllm_provider.py        # OpenAI-compatible, self-hosted (subclasses OpenAIProvider)
 │   └── huggingface_provider.py
 ├── cost_control.py     # Cost control
+├── rate_limit.py       # Opt-in client-side call rate limit (RESILIENCE_LLM_RATE_*)
 └── exceptions.py
 ```
 
@@ -1185,6 +1186,27 @@ requests opened that many provider calls at once. Two deliberate properties:
 The streaming path (`generate_response_stream`) holds a slot for the **whole
 stream** — from open to exhaustion — because an open stream occupies the
 provider exactly like a non-streaming call in flight.
+
+### Call Rate Limit (opt-in)
+
+The concurrency cap bounds calls *in flight*; `RESILIENCE_LLM_RATE_ENABLED=true`
+additionally bounds calls *per window*: at most `RESILIENCE_LLM_RATE_LIMIT`
+calls every `RESILIENCE_LLM_RATE_WINDOW` seconds (defaults 20 / 60), keyed by
+the service's configured provider unless `RESILIENCE_LLM_RATE_PER_PROVIDER=false`.
+`acquire_llm_call_slot()` (`core/services/llm/rate_limit.py`) is awaited once
+per logical call on every generation path — text (after the response cache),
+`generate()`, `generate_messages()`, both streaming flavours, `generate_image()`
+and the Anthropic batch submission — after the tenant cost gate and before the
+provider is contacted.
+
+A call over the limit waits (non-blocking `asyncio.sleep`) for up to
+`RESILIENCE_LLM_RATE_MAX_WAIT` seconds (default 30), then raises
+`LocalLLMRateLimitError`, a `LLMRateLimitError` subclass with
+`status_code=None`, so existing `except RateLimitError` handlers catch it. The
+window is **per worker process** unless `CACHE_BACKEND=redis`, which shares it
+across workers through `RedisRateLimiter`. Off by default: when disabled the
+gate is a single cached-config read. Details and the full settings table:
+[Resilience → LLM call rate limit](resilience.md#llm-call-rate-limit).
 
 ### Extended Thinking / Reasoning Effort
 

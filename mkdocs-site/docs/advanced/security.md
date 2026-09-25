@@ -340,9 +340,11 @@ guard = InputGuard()  # GuardrailsConfig from the environment by default
 
 
 async def process_user_input(user_input: str) -> str:
-    # validate() is the synchronous regex layer; validate_async() runs it
-    # first and, when it passes, asks the LLM for a SAFE/MALICIOUS verdict.
-    result = await guard.validate_async(user_input)
+    # validate() is the synchronous regex layer (original, normalised and
+    # decoded views of the text). The LLM layers — moderation and the intent
+    # taxonomy — run in the orchestrator's guard_input_async, or call
+    # guard.classify() yourself.
+    result = guard.validate(user_input)
 
     if not result.is_valid:
         logger.warning(
@@ -358,18 +360,24 @@ async def process_user_input(user_input: str) -> str:
 
 `InputValidationResult` has four fields: `is_valid`, `blocked_reason`,
 `detected_patterns` (each entry is prefixed with the layer that fired —
-`injection:`, `code:`, `custom:`, or `llm_guardrail`) and `sanitized_input`.
+`injection:`, `code:` or `custom:`), `sanitized_input`, and `metadata`
+(`matched_variants`: which view of the text each pattern matched in).
 
 **What the input guard checks** (`GuardrailsConfig`, all on by default):
 
 - **Length**: inputs over `max_input_length` (10 000 chars) are rejected
 - **Prompt injection / jailbreak**: known override and DAN-style patterns
-  (`block_injection_patterns`)
+  in English plus es/fr/de/it/pt/ru/zh/ja/ar/hi (`block_injection_patterns`),
+  matched against the original text and its normalised views (NFKC,
+  invisible characters stripped, homoglyphs folded, leetspeak and
+  letter-spacing undone) and decoded base64/hex/percent-encoded payloads
 - **Code execution attempts**: shell/eval-style payloads
   (`block_code_execution`)
 - **Custom patterns**: operator-supplied regexes
-- **LLM verdict**: `validate_async` only, skipped when `llm_detection` is off;
-  a failed LLM call falls back to the regex result
+- **LLM verdict**: not part of `validate()`; the opt-in intent taxonomy
+  (`classify`, `BASELITH_INPUT_GUARD_TAXONOMY`) runs in the orchestrator's
+  `guard_input_async`. `validate_async` is deprecated (since 0.40.0, removed
+  in 0.41.0)
 
 PII and harmful-content filtering happen on the **output** side
 (`OutputGuard`), and both guards run automatically on every

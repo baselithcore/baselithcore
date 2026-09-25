@@ -35,7 +35,6 @@ def show_config() -> int:
         t_core.add_column("Value", style="cyan bold")
         t_core.add_row("Log Level", core_cfg.log_level)
         t_core.add_row("Debug", str(core_cfg.debug))
-        t_core.add_row("Plugin Dir", str(core_cfg.plugin_dir))
         t_core.add_row("Data Dir", str(core_cfg.data_dir))
 
         layout["core"].update(Panel(t_core, title="Core Settings", border_style="blue"))

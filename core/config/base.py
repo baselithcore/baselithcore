@@ -8,7 +8,6 @@ variable overrides and default values.
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -54,7 +53,10 @@ class CoreConfig(BaseSettings):
 
     # Directories
     plugin_dir: Path = Field(
-        default=Path("plugins"), description="Directory containing plugins"
+        default=Path("plugins"),
+        description=(
+            "Deprecated, no effect: the plugin loader reads PLUGIN_PLUGINS_PATH"
+        ),
     )
 
     data_dir: Path = Field(
@@ -99,23 +101,6 @@ class CoreConfig(BaseSettings):
     random_seed: int = Field(
         default=42, description="Random seed when deterministic_mode is enabled"
     )
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        # Ensure directories exist. ``data/`` is written through relative
-        # paths by several subsystems that do not create it themselves, so it
-        # stays eager; ``documents_dir`` is unused and is no longer created.
-        self.plugin_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-
-        # Configure logging - DISABLED to avoid side effects in backend.py
-        # Logging should be configured explicitly by the entry point (cli, backend, etc)
-        # from core.observability.logging import configure_logging
-        #
-        # configure_logging(
-        #     level=self.log_level,
-        #     json_output=self.log_structured or (self.log_format == "json"),
-        # )
 
 
 # Global instance

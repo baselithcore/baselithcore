@@ -8,8 +8,8 @@ The always-on input check is the synchronous regex path: it runs before any
 budget is spent and adds microseconds, never an LLM call. On top of it sit
 two opt-in async layers — content moderation
 (``BASELITH_MODERATION_PROVIDER``) and the LLM intent taxonomy
-(``BASELITH_INPUT_GUARD_TAXONOMY``); the chat surface's binary LLM check
-(``InputGuard.validate_async``) stays a chat-surface concern. Outbound, the
+(``BASELITH_INPUT_GUARD_TAXONOMY``), which supersede the deprecated, uncalled
+binary LLM check ``InputGuard.validate_async``. Outbound, the
 opt-in groundedness rail (``BASELITH_OUTPUT_GROUNDEDNESS``) and output
 moderation (``BASELITH_MODERATION_OUTPUT``) layer on the same way.
 

@@ -19,7 +19,10 @@ stringify whatever came back. Four things were missing, and each one is here:
    envelope. This is the *single* seam where that happens: ``wrap_untrusted``
    is deliberately not idempotent, so nothing downstream may re-wrap.
 4. **Idempotency** — the ledger claim that keeps an effectful call from
-   running twice across a retry of the same ``run_id``.
+   running twice across a retry of the same ``run_id``. The key is the call's
+   content plus its occurrence in the run
+   (:mod:`core.orchestration.call_keys`), not its position, so a retry whose
+   model takes a different path still replays what already happened.
 
 Split from ``agent.py`` for the file-size cap.
 """
@@ -31,7 +34,13 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
-from core.orchestration.idempotency import ToolCallInFlight
+from core.orchestration.idempotency import (
+    ToolCallInFlight,
+    claim_call,
+    derive_call_key,
+    derive_idempotency_key,
+    requires_idempotency,
+)
 from core.orchestration.tool_output import (
     UNTRUSTED_OUTPUT_SYSTEM_RULE,
     escape_untrusted_markers,
@@ -250,6 +259,7 @@ async def execute_tool(
     context: dict[str, Any],
     run_id: str | None = None,
     step: int = 0,
+    occurrence: int = 0,
 ) -> tuple[str, bool]:
     """Validate, gate, run and render one tool call.
 
@@ -259,9 +269,13 @@ async def execute_tool(
         context: The gate context from :func:`gate_context`.
         run_id: Identifier shared by every attempt at this run; without one the
             idempotency ledger has nothing to deduplicate against.
-        step: Position of the call within the run, so a loop that legitimately
-            calls one tool twice with identical arguments is not collapsed into
-            a single ledger entry.
+        step: Position of the call within the run; names only the legacy
+            positional ledger key, for rows written before the switch.
+        occurrence: How many identical calls this run already requested, so a
+            loop that legitimately calls one tool twice with identical
+            arguments is not collapsed into a single ledger entry. A caller
+            issuing several calls draws it from a
+            :class:`~core.orchestration.call_keys.CallOccurrences`.
 
     Returns:
         tuple[str, bool]: ``(observation, is_error)`` — the text the model
@@ -277,7 +291,9 @@ async def execute_tool(
     if definition is None:
         assert early is not None
         return early
-    return await run_prepared_call(agent, definition, call, run_id=run_id, step=step)
+    return await run_prepared_call(
+        agent, definition, call, run_id=run_id, step=step, occurrence=occurrence
+    )
 
 
 async def prepare_tool_call(
@@ -331,6 +347,8 @@ async def run_prepared_call(
     *,
     run_id: str | None = None,
     step: int = 0,
+    occurrence: int = 0,
+    tenant_id: str | None = None,
 ) -> tuple[str, bool]:
     """Run an already-gated call and render its result.
 
@@ -339,17 +357,51 @@ async def run_prepared_call(
         definition: The tool, as resolved by :func:`prepare_tool_call`.
         call: What the model asked for.
         run_id: Identifier shared by every attempt at this run.
-        step: Position of the call within the run.
+        step: Position of the call within the run (legacy ledger key only).
+        occurrence: Occurrence of this exact call within the run.
+        tenant_id: Tenant mixed into the ledger key; the ambient one when
+            ``None``.
 
     Returns:
         tuple[str, bool]: ``(observation, is_error)``.
     """
     started = time.perf_counter()
-    observation, ok = await _dispatch(agent, definition, call, run_id, step)
+    keys = _ledger_keys(agent, definition, call, run_id, step, occurrence, tenant_id)
+    observation, ok = await _dispatch(agent, definition, call, run_id, keys)
     await dispatch_post_hook(
         agent, definition, ok=ok, elapsed_ms=(time.perf_counter() - started) * 1000
     )
     return observation, not ok
+
+
+def _ledger_keys(
+    agent: Agent,
+    definition: ToolDefinition,
+    call: ToolCall,
+    run_id: str | None,
+    step: int,
+    occurrence: int,
+    tenant_id: str | None,
+) -> tuple[str, str] | None:
+    """``(key, legacy_key)`` for this call, or ``None`` when it needs none.
+
+    Three conditions must hold: a ledger is available, the caller gave a
+    stable ``run_id`` (without one there is nothing to deduplicate against — a
+    fresh id per attempt is a different call by definition), and the tool is
+    not ``read_only``.
+    """
+    if not run_id or not requires_idempotency(definition.category):
+        return None
+    if agent._ledger() is None:
+        return None
+    if tenant_id is None:
+        from core.context import get_tenant_or_default
+
+        tenant_id = get_tenant_or_default()
+    key = derive_call_key(
+        run_id, call.name, call.arguments, occurrence, tenant_id=tenant_id
+    )
+    return key, derive_idempotency_key(run_id, step, call.name, call.arguments)
 
 
 async def _dispatch(
@@ -357,15 +409,21 @@ async def _dispatch(
     definition: ToolDefinition,
     call: ToolCall,
     run_id: str | None,
-    step: int,
+    keys: tuple[str, str] | None,
 ) -> tuple[str, bool]:
     """Run the tool (or replay it from the ledger) and render the result."""
-    key = agent._ledger_key(definition, call, run_id, step)
-    ledger = agent._ledger()
-    if key is not None and ledger is not None:
-        held = await ledger.begin(key, run_id=run_id or "", tool=call.name)
+    key = keys[0] if keys is not None else None
+    ledger = agent._ledger() if keys is not None else None
+    if keys is not None and ledger is not None:
+        held = await claim_call(
+            ledger,
+            keys[0],
+            run_id=run_id or "",
+            tool=call.name,
+            legacy_key=keys[1],
+        )
         if held is not None:
-            return _replayed(call.name, key, held)
+            return _replayed(call.name, keys[0], held)
 
     try:
         from core.agent._tool_runtime import invoke_tool

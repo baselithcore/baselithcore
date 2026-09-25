@@ -38,6 +38,7 @@ from core.observability.logging import get_logger
 from core.services.llm._accounting import record_usage_cost
 from core.services.llm._telemetry import gen_ai_system, record_genai_metrics
 from core.services.llm.model_capabilities import default_max_tokens
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage
 
 if TYPE_CHECKING:
@@ -121,6 +122,9 @@ async def _anthropic_batch(
     from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
     await enforce_tenant_cost_budget(model=model)
+    # One submission is one call for the client-side throttle
+    # (RESILIENCE_LLM_RATE_*); the sequential fallback pays per entry.
+    await acquire_llm_call_slot(service.config.provider)
 
     batch = await client.messages.batches.create(requests=requests)
     logger.info(

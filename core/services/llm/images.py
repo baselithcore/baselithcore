@@ -21,6 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.utils.images import sniff_image_type
 
 logger = get_logger(__name__)
@@ -150,6 +151,10 @@ async def generate_image(
         raise LLMProviderError(
             f"the active LLM provider ({name}) cannot generate images"
         )
+    # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+    await acquire_llm_call_slot(
+        getattr(getattr(service, "config", None), "provider", None)
+    )
     image = await provider.generate_image(
         prompt, model=model, size=size, quality=quality
     )

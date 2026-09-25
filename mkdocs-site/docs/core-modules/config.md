@@ -282,11 +282,11 @@ print(config.app_name)        # "Baselith-Core" (CORE_APP_NAME)
 print(config.deterministic_mode)  # bool      (CORE_DETERMINISTIC_MODE)
 ```
 
-Constructing `CoreConfig` creates `CORE_PLUGIN_DIR` and `CORE_DATA_DIR` in the
-working directory if they are missing (several subsystems write under `data/`
-through relative paths without creating it). `CORE_DOCUMENTS_DIR` and
-`CORE_MAX_WORKERS` bind but are **Deprecated, no effect**: nothing reads them,
-and the documents directory is no longer created. Thread pools are sized by
+Constructing `CoreConfig` creates no directories: every subsystem that writes
+under `data/` (bootstrap state, SQLite stores, checkpoints, fine-tuning exports)
+creates its own parent directory on first write. `CORE_PLUGIN_DIR`,
+`CORE_DOCUMENTS_DIR` and `CORE_MAX_WORKERS` bind but are **Deprecated, no
+effect**: nothing reads them — the plugin loader reads `PLUGIN_PLUGINS_PATH`. Thread pools are sized by
 `BASELITH_INFERENCE_THREADS` (model inference) and `OMP_NUM_THREADS` (math
 libraries, split across web workers automatically — see
 [Runtime tuning](../advanced/runtime-tuning.md)).

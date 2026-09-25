@@ -11,11 +11,16 @@ step with a deterministic-replay idempotency guard, modelled on LangGraph's
 checkpointer / Temporal's event history:
 
 * On a fresh run, each ``run_step`` executes the tool, records its result keyed
-  by ``(cursor, tool, args-hash)``, and persists the checkpoint.
+  by ``(tool, args-hash, occurrence)`` — see :mod:`core.orchestration.call_keys`
+  — and persists the checkpoint.
 * On resume, the manager replays the handler from the top with the loaded
   ``steps`` map: already-recorded steps return their stored result **without
-  re-executing** (no duplicated side effects), and the first not-yet-recorded
-  step runs for real.
+  re-executing** (no duplicated side effects), and a step not recorded yet runs
+  for real. The key is content-addressed, not positional, so a resumed pass
+  that requests the same effects in a different order — the normal case for an
+  LLM-driven loop that regenerates its turns — still replays each of them.
+  Checkpoints written under the old ``(cursor, tool, args-hash)`` keys stay
+  readable: a miss on the new key falls back to the positional one.
 
 The store is pluggable: an in-memory implementation ships here for tests and
 single-process use; a Postgres-backed one lives in ``checkpoint_postgres`` for
@@ -33,6 +38,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from core.observability.agent_spans import tool_span
 from core.observability.logging import get_logger
+from core.orchestration.call_keys import CallOccurrences, call_step_key
 
 if TYPE_CHECKING:  # re-exported below through the module __getattr__ shim
     from core.orchestration.checkpoint_approvals import (
@@ -79,11 +85,13 @@ def _canonical_args_hash(args: Any) -> str:
 
 
 def step_key(cursor: int, tool_name: str, args: Any) -> str:
-    """Deterministic idempotency key for a single tool step.
+    """Legacy positional key for a single tool step.
 
-    Includes the replay cursor position, the tool name, and an args hash so a
-    divergent replay (different tool or args at the same position) gets a fresh
-    key and executes rather than reusing a stale result.
+    Superseded by :func:`core.orchestration.call_keys.call_step_key`: the
+    cursor made the key depend on the path the run took, so a resumed pass
+    that reached a recorded step at a different position re-executed it. Still
+    consulted by :meth:`CheckpointManager.run_step` as a fallback, so a
+    checkpoint written before the switch resumes as it always did.
     """
     return f"{cursor}:{tool_name}:{_canonical_args_hash(args)}"
 
@@ -219,9 +227,12 @@ class CheckpointManager:
     def __init__(self, store: CheckpointStore, checkpoint: Checkpoint) -> None:
         self.store = store
         self.checkpoint = checkpoint
-        # Replay cursor for the *current* pass. Reset to 0 each pass so a resumed
-        # run realigns keys with the persisted ``steps`` map.
+        # Replay cursor for the *current* pass: trajectory order, and the
+        # legacy positional key. Reset to 0 each pass.
         self._cursor = 0
+        # Occurrences of each (tool, args) pair this pass, which is what makes
+        # step keys content-addressed. Per pass for the same reason.
+        self._occurrences = CallOccurrences()
 
     @property
     def run_id(self) -> str:
@@ -232,6 +243,25 @@ class CheckpointManager:
         """True when this run already has recorded steps (i.e. a resume)."""
         return bool(self.checkpoint.steps)
 
+    def next_occurrence(self, tool_name: str, args: Any) -> int:
+        """Claim the occurrence number of the next ``(tool_name, args)`` step.
+
+        For a caller that must derive a second key for the same call — an
+        idempotency-ledger key inside the step — from the same occurrence the
+        step itself uses; pass the result to :meth:`run_step` as
+        ``occurrence``. A step replayed from the checkpoint never reaches the
+        ledger, so two independent counters would drift apart and the next
+        genuine repeat would collide with the replayed call's ledger row.
+
+        Args:
+            tool_name: Tool name.
+            args: Tool arguments, exactly as passed to :meth:`run_step`.
+
+        Returns:
+            The occurrence number (``0`` for the first such call this pass).
+        """
+        return self._occurrences.next(tool_name, args)
+
     async def run_step(
         self,
         tool_name: str,
@@ -239,6 +269,7 @@ class CheckpointManager:
         fn: Callable[[], Awaitable[Any]],
         *,
         category: str = "tool",
+        occurrence: int | None = None,
     ) -> Any:
         """Execute (or replay) one idempotent tool step.
 
@@ -253,6 +284,8 @@ class CheckpointManager:
                 JSON-serializable for the persistent store).
             fn: Zero-arg coroutine that performs the actual call.
             category: Step category for the trajectory record.
+            occurrence: Occurrence number from :meth:`next_occurrence`; drawn
+                here when omitted.
 
         Returns:
             The tool result (freshly computed or replayed).
@@ -260,12 +293,18 @@ class CheckpointManager:
         from core.orchestration.run_events import EventType, publish_run_event
 
         cursor = self._cursor
-        key = step_key(cursor, tool_name, args)
         self._cursor += 1
+        if occurrence is None:
+            occurrence = self._occurrences.next(tool_name, args)
+        key = call_step_key(tool_name, args, occurrence)
 
         step_meta = {"tool_name": tool_name, "category": category, "cursor": cursor}
         publish_run_event(self.run_id, EventType.TOOL_CALL, step_meta)
         recorded = self.checkpoint.steps.get(key)
+        if recorded is None:
+            # A checkpoint written under the positional scheme; matches only
+            # when this pass reached the step at its original position.
+            recorded = self.checkpoint.steps.get(step_key(cursor, tool_name, args))
         if recorded is not None:
             logger.debug(
                 "checkpoint_replay run=%s step=%s tool=%s",

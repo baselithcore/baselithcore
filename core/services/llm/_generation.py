@@ -33,6 +33,7 @@ from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.errors import LLMRefusalError
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
 from core.services.llm.fallback_runtime import maybe_run_with_fallback
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage, billed_usage
 
 if TYPE_CHECKING:
@@ -276,6 +277,8 @@ async def generate_response(
             from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
             await enforce_tenant_cost_budget(model=resolved_model)
+            # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+            await acquire_llm_call_slot(service.config.provider)
 
             # Track input tokens (large prompts encode off the event loop)
             input_tokens = await estimate_tokens_async(prompt)

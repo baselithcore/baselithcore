@@ -327,8 +327,8 @@ class WorkflowExecutor:
                     # Durable mode: the whole attempt sequence (timeout +
                     # retries) is one recorded step, so a resumed run replays
                     # the node's final output without re-executing it. One
-                    # run_step per node visit keeps replay cursors aligned
-                    # regardless of how many retries the original run needed.
+                    # run_step per node visit: the n-th visit of a node is its
+                    # n-th occurrence, however many retries the run needed.
                     output = await checkpoint.run_step(
                         f"workflow:{node.id}",
                         {"node_id": node.id, "node_type": node.type.value},
