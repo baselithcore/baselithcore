@@ -67,6 +67,7 @@ def create_provider(config: Any) -> LLMProviderProtocol:
         from core.services.llm.credentials import resolve_llm_credential
         from core.services.llm.providers.vllm_provider import VLLMProvider
         from core.services.llm.runtime import api_base_for
+        from core.services.llm.vllm_endpoints import vllm_endpoints
 
         # Only vLLM's own key, never ``api_key``: that field also answers to
         # LLM_OPENAI_API_KEY, so falling back to it sent a hosted OpenAI key to
@@ -76,6 +77,8 @@ def create_provider(config: Any) -> LLMProviderProtocol:
         # ``api_key_for`` orders them. The endpoint follows ``api_base_for``.
         return VLLMProvider(
             api_base=api_base_for(config, "vllm"),
+            # Several servers: each call is routed to the one serving its model.
+            endpoints=vllm_endpoints(config),
             api_key=getattr(config, "vllm_api_key", None)
             or resolve_llm_credential("vllm"),
             request_timeout=request_timeout,

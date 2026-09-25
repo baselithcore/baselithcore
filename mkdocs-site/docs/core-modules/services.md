@@ -684,6 +684,22 @@ LLM_VLLM_API_KEY=                         # the server's --api-key; empty = keyl
 LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-choice
 ```
 
+- **Several servers, one per model (`LLM_VLLM_ENDPOINTS`).** A vLLM server
+  serves one model, so a second model is a second server on another port. List
+  them once — `LLM_VLLM_ENDPOINTS=http://gpu:8002/v1,http://gpu:8003/v1` — and
+  name models, never ports: `core.services.llm.vllm_endpoints` reads each
+  server's `GET /v1/models` (cached 60 s; a model missing from the cache forces
+  one refresh, so a newly started model is found on the next call) and routes
+  every call to the server serving its model. The provider keeps one client
+  per server; plugins holding their own SDK receive, through
+  `resolve_governed_client_config`, the `/v1` root of the server that serves
+  their pinned model (per scope). A server that does not answer is skipped
+  (its last good catalog keeps routing), a model on two servers goes to the
+  first listed, and a model no reachable server serves fails with the list of
+  what is served. `LLM_VLLM_API_BASE` is the one-server form and joins the
+  list; with a single server nothing is probed on the request path. The
+  startup check probes every server; a model is *missing* only when every
+  server answered and none serves it (otherwise it is *unverified*).
 - **The endpoint is required.** There is no default: vLLM's `:8000` is also
   where this backend listens, so a guessed `localhost:8000` would call the
   framework itself. `LLM_API_BASE` is honoured only when `vllm` is the default

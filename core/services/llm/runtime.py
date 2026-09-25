@@ -139,12 +139,13 @@ def api_base_for(config: LLMConfig, provider: str) -> str | None:
             return config.api_base
         return os.environ.get("OLLAMA_HOST") or None
     if provider == "vllm":
-        # Same shape as Ollama minus an SDK-level environment variable: vLLM
-        # clients have none, and its default port is this backend's own.
-        dedicated = getattr(config, "vllm_api_base", None)
-        if dedicated:
-            return str(dedicated)
-        return config.api_base if config.provider == "vllm" else None
+        # The first configured server. With several (LLM_VLLM_ENDPOINTS) a
+        # call is routed by model instead — see ``core.services.llm.
+        # vllm_endpoints``; this answers "where is vLLM" for single-URL callers.
+        from core.services.llm.vllm_endpoints import vllm_endpoints
+
+        endpoints = vllm_endpoints(config)
+        return endpoints[0] if endpoints else None
     # The shared ``api_base`` is only meaningful for the provider it was
     # configured for; every other provider must fall back to its SDK default.
     if provider == config.provider:

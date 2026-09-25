@@ -46,6 +46,7 @@ from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.images import GeneratedImage
 from core.services.llm.messages import Message
 from core.services.llm.providers._openai_request import request_kwargs
+from core.services.llm.providers._vllm_routing import VLLMRoutingMixin
 from core.services.llm.providers.openai_provider import OpenAIProvider
 from core.services.llm.reasoning_text import ReasoningStreamFilter, strip_reasoning
 from core.services.llm.tool_calling import (
@@ -113,8 +114,12 @@ def normalize_vllm_base_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
 
 
-class VLLMProvider(OpenAIProvider):
-    """Provider for a self-hosted vLLM OpenAI-compatible server."""
+class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
+    """Provider for self-hosted vLLM OpenAI-compatible servers.
+
+    One server, or several (``LLM_VLLM_ENDPOINTS``) — then each call goes to the
+    server whose ``/v1/models`` serves the requested model.
+    """
 
     provider_label: str = "vLLM"
 
@@ -125,6 +130,7 @@ class VLLMProvider(OpenAIProvider):
         request_timeout: float = 120.0,
         connect_timeout: float = 5.0,
         native_tools: bool = True,
+        endpoints: list[str] | None = None,
     ):
         """
         Initialize the vLLM provider.
@@ -137,16 +143,24 @@ class VLLMProvider(OpenAIProvider):
                 keyless server.
             request_timeout: Total per-request deadline in seconds.
             connect_timeout: TCP connect deadline in seconds.
-            native_tools: Whether the server was started with
+            native_tools: Whether the servers were started with
                 ``--enable-auto-tool-choice``.
+            endpoints: Every server, in priority order (``LLM_VLLM_ENDPOINTS``);
+                calls are routed among them by model. ``api_base`` joins the
+                list when it is not already on it.
 
         Raises:
             LLMProviderError: When no endpoint is configured.
         """
-        if not api_base or not api_base.strip():
+        routed = [normalize_vllm_base_url(e) for e in (endpoints or []) if e.strip()]
+        if api_base and api_base.strip():
+            single = normalize_vllm_base_url(api_base)
+            if single not in routed:
+                routed.append(single)
+        if not routed:
             raise LLMProviderError(
-                "vLLM endpoint is required: set LLM_VLLM_API_BASE "
-                "(e.g. http://gpu-host:8000/v1)"
+                "vLLM endpoint is required: set LLM_VLLM_ENDPOINTS (several "
+                "servers) or LLM_VLLM_API_BASE (e.g. http://gpu-host:8000/v1)"
             )
         key: str | SecretStr = api_key if api_key else VLLM_NO_KEY
         if isinstance(key, SecretStr) and not key.get_secret_value().strip():
@@ -155,11 +169,18 @@ class VLLMProvider(OpenAIProvider):
             api_key=key,
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
-            base_url=normalize_vllm_base_url(api_base),
+            base_url=routed[0],
         )
+        self._endpoints = list(dict.fromkeys(routed))
+        self._clients = {}
         # Instance attribute on purpose: the capability depends on how this
         # particular server was launched, not on the class.
         self.supports_native_tools = native_tools
+
+    def _routing_key(self) -> str | None:
+        """The key catalog probes send; none for a keyless server."""
+        key = self._api_key.get_secret_value()
+        return None if key == VLLM_NO_KEY else key
 
     @get_circuit_breaker(_BREAKER)
     async def generate(
@@ -177,7 +198,8 @@ class VLLMProvider(OpenAIProvider):
         Returns:
             tuple[str, int]: Response text and total tokens used.
         """
-        text, tokens = await _generate(self, prompt, model, json_mode, **kwargs)
+        with self._routed(await self._endpoint_for(model)):
+            text, tokens = await _generate(self, prompt, model, json_mode, **kwargs)
         return strip_reasoning(text), tokens
 
     @get_circuit_breaker(_BREAKER)
@@ -204,15 +226,16 @@ class VLLMProvider(OpenAIProvider):
         Returns:
             LLMResult: text and/or tool calls with token usage.
         """
-        result: LLMResult = await _generate_structured(
-            self,
-            prompt,
-            model,
-            tools=tools,
-            tool_choice=tool_choice,
-            response_format=response_format,
-            **kwargs,
-        )
+        with self._routed(await self._endpoint_for(model)):
+            result: LLMResult = await _generate_structured(
+                self,
+                prompt,
+                model,
+                tools=tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+                **kwargs,
+            )
         return _clean(result)
 
     @get_circuit_breaker(_BREAKER)
@@ -238,9 +261,10 @@ class VLLMProvider(OpenAIProvider):
         Returns:
             LLMResult: text and/or tool calls, plus the replayable assistant turn.
         """
-        result: LLMResult = await _generate_messages(
-            self, messages, model, tools=tools, system=system, **kwargs
-        )
+        with self._routed(await self._endpoint_for(model)):
+            result: LLMResult = await _generate_messages(
+                self, messages, model, tools=tools, system=system, **kwargs
+            )
         return _clean(result)
 
     @get_circuit_breaker(_BREAKER)
@@ -257,7 +281,9 @@ class VLLMProvider(OpenAIProvider):
         Yields:
             tuple[str, int]: Text chunks and the running token count.
         """
-        client = self._ensure_client()
+        # Resolved up front and held as a client, not a context variable: an
+        # async generator may be resumed (or closed) from another context.
+        client = self._client_for(await self._endpoint_for(model))
         try:
             system_prompt = kwargs.get("system", "")
             messages: list[dict[str, str]] = []

@@ -701,6 +701,7 @@ Declared in `core.config.services`.
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
 | `LLM_VLLM_API_BASE` | `str \| None` | *empty* | vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is appended when missing). Falls back to LLM_API_BASE only when LLM_PROVIDER=vllm. Required for vLLM: there is no default. |
 | `LLM_VLLM_API_KEY` :material-key:<br>also accepts `VLLM_API_KEY` | `SecretStr \| None` | *empty* | The key the vLLM server was started with (--api-key / VLLM_API_KEY). Leave empty for a keyless server. |
+| `LLM_VLLM_ENDPOINTS` | `str \| None` | *empty* | Several vLLM servers, one per model: comma-separated OpenAI roots, one per server (e.g. `http://gpu:8002/v1`). Calls name a model and go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is the one-server form of the same setting. |
 | `LLM_VLLM_NATIVE_TOOLS` | `bool` | `True` | Whether the vLLM server supports native tool calling (started with --enable-auto-tool-choice --tool-call-parser &lt;parser>). Set false to use prompt-coerced tool calls instead. |
 | `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
@@ -895,4 +896,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-568 settings documented.
+569 settings documented.

@@ -121,6 +121,16 @@ class LLMConfig(BaseSettings):
             "LLM_PROVIDER=vllm. Required for vLLM: there is no default."
         ),
     )
+    vllm_endpoints: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_VLLM_ENDPOINTS"),
+        description=(
+            "Several vLLM servers, one per model: comma-separated OpenAI roots, "
+            "one per server (e.g. `http://gpu:8002/v1`). Calls name a model and "
+            "go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is "
+            "the one-server form of the same setting."
+        ),
+    )
     vllm_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("LLM_VLLM_API_KEY", "VLLM_API_KEY"),
@@ -390,6 +400,7 @@ class LLMConfig(BaseSettings):
         "huggingface_api_key",
         "gemini_api_key",
         "vllm_api_base",
+        "vllm_endpoints",
         "vllm_api_key",
         mode="before",
     )
