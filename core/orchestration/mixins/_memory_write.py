@@ -33,6 +33,10 @@ def schedule_memory_write(
     memory_manager = owner.memory_manager
     if memory_manager is None:
         return
+    if getattr(owner, "_memory_writes_closed", False):
+        # After aclose() nothing may start a write the drain will never see.
+        logger.debug("memory_write_skipped_after_close")
+        return
     if not hasattr(owner, "_memory_write_tasks"):
         owner._memory_write_tasks = set()
     # Bound concurrent embed+upsert work so a request burst can't spawn an
@@ -73,4 +77,32 @@ def schedule_memory_write(
     task.add_done_callback(_done)
 
 
-__all__ = ["schedule_memory_write"]
+async def drain_memory_writes(owner: Any, timeout: float) -> None:
+    """Wait for in-flight background writes, then cancel the stragglers.
+
+    Idempotent: the first call closes the owner to new writes; later calls
+    find nothing left to wait for.
+
+    Args:
+        owner: The orchestrator whose ``_memory_write_tasks`` to drain.
+        timeout: Seconds to wait for pending writes before cancelling them.
+    """
+    owner._memory_writes_closed = True
+    pending = set(getattr(owner, "_memory_write_tasks", ()))
+    if not pending:
+        return
+    _, still_running = await asyncio.wait(pending, timeout=max(0.0, timeout))
+    if not still_running:
+        return
+    logger.warning(
+        "memory_writes_cancelled_on_shutdown pending=%d timeout_s=%.1f",
+        len(still_running),
+        timeout,
+    )
+    for task in still_running:
+        task.cancel()
+    # Let the cancellations land so no task outlives the pools it writes to.
+    await asyncio.gather(*still_running, return_exceptions=True)
+
+
+__all__ = ["drain_memory_writes", "schedule_memory_write"]

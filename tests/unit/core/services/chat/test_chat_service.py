@@ -269,6 +269,34 @@ async def test_handle_chat_stream_async(chat_service):
         assert chunks == ["chunk1", "chunk2"]
 
 
+@pytest.mark.asyncio
+async def test_stream_latency_recorded_on_success_after_drain(chat_service):
+    """A successful stream records its latency once, when fully consumed."""
+    req = ChatRequest(query="async stream")
+    mock_agent = MagicMock()
+
+    async def fake_stream():
+        yield "chunk1"
+
+    mock_agent.process_stream.return_value = fake_stream()
+    with (
+        patch.object(ChatService, "agent", new=mock_agent),
+        patch.object(chat_service, "_record_metric") as metric,
+    ):
+        stream = await chat_service.handle_chat_stream_async(req)
+        latency = [
+            c for c in metric.call_args_list if c.args[0] == "chat_request_latency"
+        ]
+        assert latency == []  # not yet: the stream has not run
+        assert [chunk async for chunk in stream] == ["chunk1"]
+        latency = [
+            c for c in metric.call_args_list if c.args[0] == "chat_request_latency"
+        ]
+        assert len(latency) == 1
+        assert latency[0].kwargs["route"] == "stream"
+        assert latency[0].kwargs["value"] >= 0
+
+
 def test_record_metric_success(chat_service):
     mock_total = MagicMock()
     mock_err = MagicMock()

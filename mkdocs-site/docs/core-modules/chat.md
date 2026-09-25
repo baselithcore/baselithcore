@@ -409,9 +409,16 @@ await history.append_turn(
 from core.models.chat import ChatRequest
 
 req = ChatRequest(query="...", conversation_id="conv-123")
-async for chunk in chat.handle_chat_stream_async(req):
+# handle_chat_stream_async is a coroutine that *returns* the async stream:
+# await it first, then iterate.
+stream = await chat.handle_chat_stream_async(req)
+async for chunk in stream:
     print(chunk, end="", flush=True)
 ```
+
+The `chat_request_latency{route="stream"}` histogram is observed when the
+stream finishes (drained, failed or closed by the consumer), so it measures the
+whole generation; a pipeline that fails before streaming records it at once.
 
 ---
 
@@ -516,6 +523,15 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 | `precheck_cache_enabled` | Toggle the opt-in pre-retrieval cache (default off — see [Answer caching](#answer-caching-two-layers-two-freshness-contracts)) |
 | `precheck_cache_ttl`     | Staleness window for the pre-retrieval cache, seconds |
 | `summary_enabled`        | Toggle rolling history summarization          |
+
+!!! note "Embedder and reranker are built on first use"
+    `create_default_dependencies()` does not load either model. It stores a
+    `LazyEmbedder` / `LazyReranker` (`core.nlp.lazy`) holding the factory and
+    the model name; the model is built the first time the RAG path embeds a
+    query or reranks candidates, in a worker thread rather than on the event
+    loop. A plain install without the `[rag]` extra therefore boots and serves
+    non-RAG chat; only the first RAG request fails, with the "install
+    `baselith-core[rag]`" error.
 
 !!! note "Candidate / top-k counts"
     `INITIAL_SEARCH_K` (`40`) and `FINAL_TOP_K` (`6`) are class-level

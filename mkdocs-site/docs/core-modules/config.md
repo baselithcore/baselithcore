@@ -279,9 +279,17 @@ config = get_core_config()
 print(config.debug)           # bool          (CORE_DEBUG)
 print(config.log_level)       # "INFO"        (CORE_LOG_LEVEL)
 print(config.app_name)        # "Baselith-Core" (CORE_APP_NAME)
-print(config.max_workers)     # 4             (CORE_MAX_WORKERS)
 print(config.deterministic_mode)  # bool      (CORE_DETERMINISTIC_MODE)
 ```
+
+Constructing `CoreConfig` creates `CORE_PLUGIN_DIR` and `CORE_DATA_DIR` in the
+working directory if they are missing (several subsystems write under `data/`
+through relative paths without creating it). `CORE_DOCUMENTS_DIR` and
+`CORE_MAX_WORKERS` bind but are **Deprecated, no effect**: nothing reads them,
+and the documents directory is no longer created. Thread pools are sized by
+`BASELITH_INFERENCE_THREADS` (model inference) and `OMP_NUM_THREADS` (math
+libraries, split across web workers automatically — see
+[Runtime tuning](../advanced/runtime-tuning.md)).
 
 **`.env` Variables**:
 
@@ -289,7 +297,6 @@ print(config.deterministic_mode)  # bool      (CORE_DETERMINISTIC_MODE)
 CORE_DEBUG=true
 CORE_LOG_LEVEL=INFO
 CORE_APP_NAME=Baselith-Core
-CORE_MAX_WORKERS=4
 CORE_DETERMINISTIC_MODE=false
 ```
 
@@ -414,8 +421,6 @@ VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
 VECTORSTORE_EMBEDDING_DIM=1024
-VECTORSTORE_EMBEDDING_FALLBACK_MODEL=sentence-transformers/all-MiniLM-L6-v2
-VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 
 # Managed/remote Qdrant — both unset for the loopback compose default
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant

@@ -116,7 +116,52 @@ class TestLLMService:
         )
         service = LLMService(enable_semantic_cache=True)
         assert service.semantic_cache is not None
-        mock_semantic.assert_called_once()
+        # Size/TTL come from SEMANTIC_CACHE_*, not the exact-match LLM cache.
+        mock_semantic.assert_called_once_with(threshold=None)
+
+    @patch("core.services.llm.service.get_llm_config")
+    @patch("core.services.llm.service.SemanticLLMCache")
+    def test_semantic_cache_enabled_from_config(self, mock_semantic, mock_config):
+        """SEMANTIC_CACHE_ENABLED turns the cache on without a constructor flag."""
+        from core.config.cache import SemanticCacheConfig
+
+        mock_config.return_value = Mock(
+            provider="ollama",
+            model="m",
+            enable_cache=False,
+            api_base="http://localhost:11434",
+        )
+        on = SemanticCacheConfig(enabled=True, _env_file=None)
+        with patch("core.config.cache.get_semantic_cache_config", return_value=on):
+            service = LLMService()
+            assert service.enable_semantic_cache is True
+            mock_semantic.assert_called_once_with(threshold=None)
+            # An explicit False still opts out.
+            assert LLMService(enable_semantic_cache=False).semantic_cache is None
+
+    @patch("core.services.llm.service.get_llm_config")
+    def test_semantic_cache_off_by_default(self, mock_config):
+        from core.config.cache import SemanticCacheConfig
+
+        mock_config.return_value = Mock(
+            provider="ollama",
+            model="m",
+            enable_cache=False,
+            api_base="http://localhost:11434",
+        )
+        off = SemanticCacheConfig(_env_file=None)
+        with patch("core.config.cache.get_semantic_cache_config", return_value=off):
+            assert LLMService().semantic_cache is None
+
+    def test_semantic_cache_reads_config_values(self, monkeypatch):
+        """maxsize/ttl/threshold default to the SEMANTIC_CACHE_* settings."""
+        from core.cache.semantic_cache import SemanticLLMCache
+        from core.config.cache import SemanticCacheConfig
+
+        cfg = SemanticCacheConfig(maxsize=7, ttl=11.0, threshold=0.6, _env_file=None)
+        monkeypatch.setattr("core.config.cache.get_semantic_cache_config", lambda: cfg)
+        cache = SemanticLLMCache(embedder=Mock())
+        assert (cache._maxsize, cache._ttl, cache._threshold) == (7, 11.0, 0.6)
 
     @pytest.mark.asyncio
     @patch("core.services.llm.service.get_llm_config")

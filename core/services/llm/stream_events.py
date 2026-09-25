@@ -27,6 +27,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.observability.logging import get_logger
 from core.services.llm._accounting import charge_usage_to_budget, record_usage_cost
 from core.services.llm._deadline import stream_within_deadline
@@ -156,6 +157,8 @@ async def generate_stream_events(
         extra["max_tokens"] = max_tokens
     if allow_refusal:
         extra["allow_refusal"] = True
+    # CORE_DETERMINISTIC_MODE pins sampling on the event stream too.
+    extra.update(get_llm_override_kwargs(service.config.provider))
 
     assert provider_stream is not None  # guaranteed by use_native above
     started = time.perf_counter()

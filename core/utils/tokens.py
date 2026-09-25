@@ -11,7 +11,8 @@ The system uses a tiered approach:
 - Level 0 (Exact, Claude-only, ASYNC ONLY): For ``claude*`` models,
   :func:`estimate_tokens_async` calls
   ``anthropic.Anthropic().messages.count_tokens`` (thread-offloaded) when the
-  SDK is installed, ``ANTHROPIC_API_KEY`` is set, AND the opt-in
+  SDK is installed, an Anthropic key is configured (``LLM_ANTHROPIC_API_KEY``
+  or ``ANTHROPIC_API_KEY``), AND the opt-in
   ``BASELITH_EXACT_TOKEN_COUNTING`` setting is enabled — see
   :func:`count_tokens_exact_available`. **The sync** :func:`estimate_tokens`
   **never makes this call**: several call sites invoke it synchronously from
@@ -29,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import re
 import threading
 import time
@@ -160,24 +160,44 @@ def _get_tiktoken_encoder() -> Any:
     return _encoder
 
 
+def _anthropic_api_key() -> str | None:
+    """The Anthropic key from ``LLMConfig``, or ``None`` when unset.
+
+    Resolved through the settings layer rather than a raw ``os.environ`` read
+    so ``LLM_ANTHROPIC_API_KEY`` works as well as the SDK-standard
+    ``ANTHROPIC_API_KEY`` (the field binds both, a blank value counts as
+    unset).
+    """
+    try:
+        from core.config.services import get_llm_config
+
+        secret = get_llm_config().anthropic_api_key
+    except Exception as exc:
+        logger.debug("anthropic_key_unresolved", extra={"error": str(exc)})
+        return None
+    return secret.get_secret_value() if secret is not None else None
+
+
 def _load_anthropic_client() -> Any:
     """Lazily construct (and cache for the process lifetime) the Anthropic
     client used for exact token counting, or ``None`` when unusable.
 
     Constructing the client never makes a network call, so this is cheap
     once memoized; it is only unusable when the SDK is not installed or no
-    ``ANTHROPIC_API_KEY`` is set (the same env var the SDK itself reads).
+    Anthropic key is configured (``LLM_ANTHROPIC_API_KEY`` or
+    ``ANTHROPIC_API_KEY``, see :func:`_anthropic_api_key`).
     """
     global _anthropic_client, _anthropic_client_checked
     if _anthropic_client_checked:
         return _anthropic_client
     _anthropic_client_checked = True
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    api_key = _anthropic_api_key()
+    if not api_key:
         return None
     try:
         from anthropic import Anthropic
 
-        _anthropic_client = Anthropic(timeout=5.0)
+        _anthropic_client = Anthropic(api_key=api_key, timeout=5.0)
     except Exception as exc:
         logger.debug("anthropic_client_unavailable", extra={"error": str(exc)})
         _anthropic_client = None
@@ -188,7 +208,8 @@ def count_tokens_exact_available() -> bool:
     """Whether exact Claude token counting can run in this process.
 
     True only when ``BASELITH_EXACT_TOKEN_COUNTING`` is enabled AND the
-    ``anthropic`` SDK is installed AND ``ANTHROPIC_API_KEY`` is set — the
+    ``anthropic`` SDK is installed AND an Anthropic key is configured
+    (``LLM_ANTHROPIC_API_KEY`` or ``ANTHROPIC_API_KEY``) — the
     setting gates first, and cheaply, so an environment that merely has a key
     (the common production case) does not silently enable a per-call network
     request. Diagnostic helper for operators/dashboards to explain why token

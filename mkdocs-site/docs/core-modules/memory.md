@@ -486,6 +486,13 @@ await provider.delete_many(["id-1", "id-2", "id-3"])
 `VectorStoreService.delete_documents()` — one filtered delete for the whole
 batch instead of one round-trip per ID.
 
+`clear(memory_type=None)` is tenant-scoped: the collection is shared by every
+tenant, so it issues a filtered delete through the vector backend's
+`delete_by_filter` — every point owned by the ambient tenant, or only those whose
+`type` payload matches `memory_type`. It never drops the collection (it used to,
+wiping all tenants and ignoring `memory_type`). On a backend without filtered
+deletion it deletes nothing and logs `vector_memory_clear_unsupported`.
+
 !!! note "A recalled item keeps the id it was stored under"
     Items are written with `Document.id = str(item.id)`, so the identity
     survives the store and comes back on the payload's `document_id`;
@@ -577,7 +584,8 @@ Cloud-native intelligent memory with automatic fact extraction and user profiles
 ```python
 from core.memory import SupermemoryProvider, SupermemoryContextProvider
 
-# Drop-in MemoryProvider replacement
+# Drop-in MemoryProvider replacement — construct and pass it explicitly;
+# SUPERMEMORY_ENABLED does not make build_memory_provider() select it
 provider = SupermemoryProvider(container_tag="user_42")
 await provider.add(MemoryItem(content="User prefers dark mode", memory_type=MemoryType.ENTITY))
 results = await provider.search("UI preferences")

@@ -84,7 +84,6 @@ class VisionService(MediaAnalysisMixin):
     - Ollama (local models with vision)
 
     Features:
-    - Automatic provider failover
     - Structured output (JSON mode)
     - Multi-image support
     - OCR and diagram understanding

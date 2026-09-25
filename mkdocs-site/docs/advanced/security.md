@@ -1038,10 +1038,10 @@ Following security best practices and the CORS specification, **credentials (coo
 
 `CSRFOriginMiddleware` (pure ASGI, `core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
 
-1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS`.
+1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS` — **or** the request must be same-origin: `Sec-Fetch-Site: same-origin`, or an `Origin` whose scheme, host and port equal the request's own (scheme + `Host` header; the fallback for browsers without Fetch metadata). A page served by the deployment itself — the `/admin` dashboard — therefore needs no `ALLOW_ORIGINS` entry. A *sibling* host (`Sec-Fetch-Site: same-site` with a foreign `Origin`) is **not** implicitly trusted: `same-site` also covers subdomains the operator may not control (user-content hosts, third-party-hosted subdomains), so split `api.`/`app.` deployments list the app origin in `ALLOW_ORIGINS`. Pin `TRUSTED_HOSTS` in production so the `Host` the comparison reads is one you serve.
 2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, the origin check is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)) and the Fetch-metadata fallback below still applies.
 3. **Fetch-metadata fallback**: A request with **no** `Origin` but `Sec-Fetch-Site: cross-site` is rejected — **including in wildcard mode**. The header is set by the user agent and cannot be forged from script, so its presence is positive proof that a *browser* initiated the request from another site. This closes the two gaps the `Origin` check alone leaves open: cross-site requests that reach the server without an `Origin` (origin-stripping intermediaries, some legacy form posts) and the wildcard no-op.
-4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted — `same-site` is by definition the operator's own registrable domain (e.g. split `api.`/`app.` subdomains).
+4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. Without an `Origin`, `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted; with an `Origin` present, rule 1 decides.
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
 
@@ -1060,17 +1060,20 @@ authenticated as the victim. This is Cross-Site WebSocket Hijacking, and an
 The same `CSRFOriginMiddleware` therefore also runs on `websocket` scopes,
 applying the **identical** decision function against `ALLOW_ORIGINS`:
 
-- Handshake with an `Origin` that is not allowlisted ⇒ rejected.
+- Handshake with an `Origin` that is not allowlisted and not the deployment's own origin ⇒ rejected.
 - Handshake with no `Origin` but `Sec-Fetch-Site: cross-site` ⇒ rejected.
 - Handshake with no `Origin` at all ⇒ allowed (native/CLI WebSocket clients).
 - Every handshake is checked: a WebSocket has no "safe method" equivalent, it is
   bidirectional from the first frame.
 
-!!! warning "List your own origin"
+!!! note "Same-origin UIs need no entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too. A browser UI
     served from the same deployment (e.g. the `baselithbot` dashboard, which opens
-    `/ws/pair`) therefore needs its own origin in `ALLOW_ORIGINS` — exactly as it
-    already does for state-changing HTTP requests.
+    `/ws/pair`) is admitted when that `Origin` equals the handshake's own origin
+    (`ws`→`http`, `wss`→`https`, host and port from the `Host` header). Behind a
+    TLS-terminating proxy that does not forward the scheme, the server sees
+    `ws`/`http` while the page is `https`: list the public origin in
+    `ALLOW_ORIGINS` (or enable proxy-header handling) in that case.
 
 **How the handshake is denied at the ASGI level.** Returning without answering
 would leave the peer hanging until it times out, so the middleware always emits

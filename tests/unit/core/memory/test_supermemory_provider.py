@@ -117,3 +117,182 @@ async def test_search_runs_off_loop_and_maps_results(monkeypatch):
     (name, _kwargs, thread_ident) = provider._client.calls[0]
     assert name == "search.memories"
     assert thread_ident != threading.get_ident()
+
+
+# ---------------------------------------------------------------------------
+# Round-trip: what add() writes, get()/delete()/search()/clear() can reach.
+# ---------------------------------------------------------------------------
+
+
+class _Store:
+    """In-memory Supermemory stand-in honouring container tags and filters."""
+
+    def __init__(self) -> None:
+        self.rows: list[types.SimpleNamespace] = []
+        self.search_calls: list[dict] = []
+        self.deleted_containers: list[str] = []
+        self._next = 0
+
+    def add(self, *, content, container_tag, metadata):
+        self._next += 1
+        self.rows.append(
+            types.SimpleNamespace(
+                id=f"sm-{self._next}",
+                content=content,
+                tag=container_tag,
+                metadata=dict(metadata),
+                score=0.9,
+                forgotten=False,
+            )
+        )
+
+    def search_memories(self, *, q, container_tag, limit, filters=None):
+        self.search_calls.append(
+            {"q": q, "container_tag": container_tag, "limit": limit, "filters": filters}
+        )
+        conds = (filters or {}).get("AND", [])
+        hits = [
+            r
+            for r in self.rows
+            if r.tag == container_tag
+            and not r.forgotten
+            and all(r.metadata.get(c["key"]) == c["value"] for c in conds)
+        ]
+        # v4 SDK shape: hits under ``results``.
+        return types.SimpleNamespace(results=hits[:limit])
+
+    def forget(self, *, id):
+        for r in self.rows:
+            if r.id == id:
+                r.forgotten = True
+
+    def delete_by_container(self, *, container_tag):
+        self.deleted_containers.append(container_tag)
+        for r in self.rows:
+            if r.tag == container_tag:
+                r.forgotten = True
+
+
+def _install_store_sdk(monkeypatch) -> _Store:
+    store = _Store()
+
+    class _Client:
+        def __init__(self, **kwargs):
+            self.add = store.add
+            self.search = types.SimpleNamespace(memories=store.search_memories)
+            self.memories = types.SimpleNamespace(
+                forget=store.forget, delete_by_container=store.delete_by_container
+            )
+            self.documents = types.SimpleNamespace(
+                delete_by_container=lambda **kw: None
+            )
+
+    module = types.ModuleType("supermemory")
+    module.Supermemory = _Client  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "supermemory", module)
+    return store
+
+
+async def test_add_writes_to_the_tag_reads_use(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="dark mode", memory_type=MemoryType.ENTITY))
+    assert store.rows[0].tag == "t1"
+    assert store.rows[0].metadata["memory_type"] == MemoryType.ENTITY.value
+
+
+async def test_get_finds_a_typed_memory_by_id(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    item = MemoryItem(content="dark mode", memory_type=MemoryType.ENTITY)
+    other = MemoryItem(content="unrelated", memory_type=MemoryType.EPISODIC)
+    await provider.add(other)
+    await provider.add(item)
+
+    found = await provider.get(str(item.id))
+
+    assert found is not None
+    assert found.content == "dark mode"
+    assert found.memory_type == MemoryType.ENTITY
+    assert store.search_calls[-1]["filters"] == {
+        "AND": [{"key": "id", "value": str(item.id)}]
+    }
+
+
+async def test_get_unknown_id_returns_none(monkeypatch):
+    _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="x", memory_type=MemoryType.LONG_TERM))
+    assert await provider.get("missing") is None
+
+
+async def test_delete_forgets_the_matching_memory(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    item = MemoryItem(content="forget me", memory_type=MemoryType.EPISODIC)
+    await provider.add(item)
+
+    assert await provider.delete(str(item.id)) is True
+    assert store.rows[0].forgotten is True
+    assert await provider.get(str(item.id)) is None
+    assert await provider.delete(str(item.id)) is False
+
+
+async def test_untyped_search_spans_every_type(monkeypatch):
+    _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="a", memory_type=MemoryType.ENTITY))
+    await provider.add(MemoryItem(content="b", memory_type=MemoryType.EPISODIC))
+
+    results = await provider.search("anything", limit=10)
+    assert {r.content for r in results} == {"a", "b"}
+
+
+async def test_typed_search_filters_on_memory_type(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="a", memory_type=MemoryType.ENTITY))
+    await provider.add(MemoryItem(content="b", memory_type=MemoryType.EPISODIC))
+
+    results = await provider.search("anything", memory_type=MemoryType.ENTITY)
+    assert [r.content for r in results] == ["a"]
+    assert store.search_calls[-1]["filters"] == {
+        "AND": [{"key": "memory_type", "value": MemoryType.ENTITY.value}]
+    }
+
+
+async def test_caller_metadata_cannot_override_id_or_type(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    item = MemoryItem(
+        content="x",
+        memory_type=MemoryType.ENTITY,
+        metadata={"id": "spoofed", "memory_type": "long_term"},
+    )
+    await provider.add(item)
+    assert store.rows[0].metadata["id"] == str(item.id)
+    assert store.rows[0].metadata["memory_type"] == MemoryType.ENTITY.value
+
+
+async def test_typed_clear_forgets_only_that_type(monkeypatch):
+    _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="a", memory_type=MemoryType.ENTITY))
+    await provider.add(MemoryItem(content="b", memory_type=MemoryType.EPISODIC))
+
+    await provider.clear(MemoryType.ENTITY)
+
+    remaining = await provider.search("anything", limit=10)
+    assert [r.content for r in remaining] == ["b"]
+
+
+async def test_untyped_clear_sweeps_container_and_legacy_subtags(monkeypatch):
+    store = _install_store_sdk(monkeypatch)
+    provider = _make_provider(monkeypatch)
+    await provider.add(MemoryItem(content="a", memory_type=MemoryType.ENTITY))
+
+    await provider.clear()
+
+    assert "t1" in store.deleted_containers
+    assert "t1_entity" in store.deleted_containers
+    assert await provider.search("anything", limit=10) == []

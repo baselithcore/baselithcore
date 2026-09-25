@@ -10,6 +10,7 @@ from __future__ import annotations
 from functools import cache, lru_cache
 from typing import Any
 
+from core.nlp.lazy import LazyEmbedder, LazyReranker, aget_embedder, aget_reranker
 from core.nlp.models import (
     CachedEmbedder,
     get_embedder,
@@ -41,6 +42,10 @@ def get_pipeline(task: str, model_name: str | None = None, **kwargs: Any) -> Any
 
 __all__ = [
     "CachedEmbedder",
+    "LazyEmbedder",
+    "LazyReranker",
+    "aget_embedder",
+    "aget_reranker",
     "get_embedder",
     "get_pipeline",
     "get_reranker",

@@ -31,6 +31,7 @@ from core.services.chat.utils.conversation import (
     recording_stream,
 )
 from core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
+from core.services.chat.utils.streaming import on_stream_end
 from core.utils.concurrency import drain_async_iterator
 
 if TYPE_CHECKING:
@@ -39,12 +40,13 @@ if TYPE_CHECKING:
         SentenceTransformer,
     )
 
-    from core.nlp import CachedEmbedder
+    from core.nlp import CachedEmbedder, LazyEmbedder, LazyReranker
     from core.orchestration.protocols import OrchestratorProtocol
 
     # The service only needs `.encode(...)`: both the raw model and the
     # framework's caching wrapper satisfy that contract.
-    EmbedderLike: TypeAlias = SentenceTransformer | CachedEmbedder
+    EmbedderLike: TypeAlias = SentenceTransformer | CachedEmbedder | LazyEmbedder
+    RerankerLike: TypeAlias = CrossEncoder | LazyReranker
 
 logger = get_logger(__name__)
 
@@ -100,7 +102,7 @@ class ChatService:
         *,
         config: ChatServiceConfig | None = None,
         embedder: EmbedderLike | None = None,
-        reranker: CrossEncoder | None = None,
+        reranker: RerankerLike | None = None,
         response_cache: CacheProtocol | None = None,
         precheck_cache: CacheProtocol | None = None,
         rerank_cache: CacheProtocol | None = None,
@@ -160,7 +162,7 @@ class ChatService:
         return self._embedder
 
     @property
-    def reranker(self) -> CrossEncoder:
+    def reranker(self) -> RerankerLike:
         """
         Access the re-ranking model with lazy initialization.
         """
@@ -434,12 +436,21 @@ class ChatService:
                 HISTORY_TEXT_KEY: history_text,
             }
 
-            return recording_stream(
-                self.agent.process_stream(req.query, context),
-                self.history_manager,
-                history_key,
-                turns,
-                req.query,
+            # Latency on success is the whole generation, observed when the
+            # consumer finishes the stream — not when it was merely built.
+            return on_stream_end(
+                recording_stream(
+                    self.agent.process_stream(req.query, context),
+                    self.history_manager,
+                    history_key,
+                    turns,
+                    req.query,
+                ),
+                lambda: self._record_metric(
+                    "chat_request_latency",
+                    route="stream",
+                    value=time.perf_counter() - start,
+                ),
             )
 
         except Exception:

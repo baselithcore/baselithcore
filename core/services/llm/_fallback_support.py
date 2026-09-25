@@ -252,3 +252,11 @@ def reset_fallback_services() -> None:
     """Clear the fallback-stage clone cache (tests / credential rotation)."""
     with _lock:
         _fallback_services.clear()
+
+
+def take_fallback_services() -> list[LLMService]:
+    """Empty the fallback-stage clone cache and return what it held."""
+    with _lock:
+        services = list(_fallback_services.values())
+        _fallback_services.clear()
+    return services

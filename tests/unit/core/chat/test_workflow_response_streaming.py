@@ -130,3 +130,32 @@ async def test_generated_answer_is_stored_in_response_cache():
     service.response_cache.set.assert_awaited_once_with(
         ("normalized query", "ctxhash"), "the answer"
     )
+
+
+@pytest.mark.asyncio
+async def test_answer_model_is_resolved_per_call(monkeypatch):
+    """A config change after import reaches the next generation."""
+    from types import SimpleNamespace
+
+    seen: list[str | None] = []
+
+    async def gen(prompt, model=None):
+        seen.append(model)
+        return "answer"
+
+    generator = ResponseGenerator(
+        MagicMock(),
+        build_prompt_fn=lambda *a, **k: "prompt",
+        generate_response_fn=gen,
+        generate_response_stream_fn=lambda *a, **k: iter(()),
+    )
+    generator._store_answer_in_cache = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _s: asyncio.sleep(0)
+    )
+    for model in ("model-a", "model-b"):
+        monkeypatch.setattr(
+            "core.chat.workflow_response.get_llm_config",
+            lambda model=model: SimpleNamespace(model=model),
+        )
+        await generator.generate_answer(_State())
+    assert seen == ["model-a", "model-b"]

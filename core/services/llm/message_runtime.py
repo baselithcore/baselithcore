@@ -25,6 +25,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -268,6 +269,9 @@ async def generate_messages(
             extra["max_tokens"] = max_tokens
         if allow_refusal:
             extra["allow_refusal"] = True
+        # CORE_DETERMINISTIC_MODE pins sampling on the agent loop's path too,
+        # not only on plain text generation.
+        extra.update(get_llm_override_kwargs(service.config.provider))
 
         started = time.perf_counter()
         # Overwritten below by whichever stage answers; pre-seeded so the

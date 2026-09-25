@@ -60,7 +60,7 @@ class VoiceService:
 
     def __init__(
         self,
-        default_provider: VoiceProvider = VoiceProvider.OPENAI,
+        default_provider: VoiceProvider | None = None,
         openai_api_key: str | None = None,
         elevenlabs_api_key: str | None = None,
         google_credentials_path: str | None = None,
@@ -69,13 +69,14 @@ class VoiceService:
         Initialize voice service.
 
         Args:
-            default_provider: Default provider for voice operations
+            default_provider: Default provider for voice operations. If None,
+                reads from VoiceConfig.provider (env VOICE_PROVIDER).
             openai_api_key: OpenAI API key (or from env OPENAI_API_KEY)
             elevenlabs_api_key: ElevenLabs API key (or from env ELEVENLABS_API_KEY)
             google_credentials_path: Path to Google credentials JSON
         """
-        self.default_provider = default_provider
         _voice_cfg = get_voice_config()
+        self.default_provider = VoiceProvider(default_provider or _voice_cfg.provider)
         self._openai_key = openai_api_key or (
             _voice_cfg.openai_api_key.get_secret_value()
             if _voice_cfg.openai_api_key
@@ -87,7 +88,7 @@ class VoiceService:
             else None
         )
         self._google_creds = (
-            google_credentials_path or get_voice_config().google_credentials_path
+            google_credentials_path or _voice_cfg.google_credentials_path
         )
         self._http_client: Any = None
         # Shared AsyncOpenAI client (lazy). A fresh client per TTS/STT call
@@ -96,7 +97,7 @@ class VoiceService:
 
         logger.info(
             "voice_service_initialized",
-            default_provider=default_provider.value,
+            default_provider=self.default_provider.value,
             openai_available=bool(self._openai_key),
             elevenlabs_available=bool(self._elevenlabs_key),
             google_available=bool(self._google_creds),

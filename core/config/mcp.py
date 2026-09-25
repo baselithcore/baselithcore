@@ -190,7 +190,7 @@ class MCPConfig(BaseSettings):
     # the value a token's `aud` is checked against — one setting, so the two
     # can never disagree. Unset, it is derived from the request's base URL,
     # which comes from the Host header: behind a proxy that does not pin the
-    # host (ALLOWED_HOSTS unset), a caller controls what the endpoint claims to
+    # host (TRUSTED_HOSTS unset), a caller controls what the endpoint claims to
     # be. Set it to the public URL, e.g. https://api.example.com/mcp.
     mcp_resource_url: str = Field(default="", alias="MCP_RESOURCE_URL")
 

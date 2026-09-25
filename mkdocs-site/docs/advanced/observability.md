@@ -218,6 +218,15 @@ Access UI: `http://localhost:16686`
     supposed to notice the incident. Reload with
     `docker compose kill -s SIGHUP prometheus` instead.
 
+!!! note "Setting telemetry up twice in one process"
+    OpenTelemetry forbids replacing the global `TracerProvider`, so the first
+    `setup_telemetry()` fixes the provider (its resource and sampler) for the
+    life of the process. A later `setup_telemetry()` after `shutdown_telemetry()`
+    — a second app lifespan in the same process, as with `TestClient` — swaps
+    fresh span exporters in behind that provider instead of silently exporting
+    to the one that was shut down. Metric push cannot be re-armed after shutdown:
+    the second setup logs a warning and leaves metrics off.
+
 ### LLM observability backends (OpenInference)
 
 Backends like **Arize Phoenix** read OpenInference attribute names

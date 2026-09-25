@@ -93,6 +93,15 @@ LOG_LEVEL_CONSOLE=DEBUG baselith plugin validate my_plugin   # and the plumbing
 This is separate from `--format`: `--format json` shapes the command's *result*,
 `LOG_JSON` shapes the *log records* around it.
 
+### A command that fails to load
+
+A broken command never takes the whole CLI down: it is left out of the menu and
+the others keep working. It is not left out silently — every invocation prints
+one line to stderr, such as
+`baselith: warning: command 'docs' unavailable (ImportError); set BASELITH_CLI_DEBUG=1 for details`.
+`BASELITH_CLI_DEBUG=1` adds the full exception, and also reports plugin CLIs
+(`plugins/<name>/cli.py`) that failed to register, which stay quiet otherwise.
+
 ---
 
 ## General

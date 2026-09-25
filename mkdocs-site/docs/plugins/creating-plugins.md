@@ -217,6 +217,11 @@ in [Packaging › Vendor extensions](packaging.md#vendor-extensions).
     `baselithbot` with `name: BaselithBot`, or two different words) does not resolve:
     the config entry is never matched and the plugin runs as if it had none.
 
+    Hot reload (`POST /api/plugins/{name}/enable|disable|reload` and the startup
+    auto-activation) resolves the same way: a directory name is mapped to the
+    manifest name before any state lookup, so enabling `weather_agent` and
+    disabling it again address the one plugin registered as `weather-agent`.
+
     What the directory uses *is* the rule: dir `weather_agent` → `name: weather_agent`;
     dir `example-plugin` → `name: example-plugin`. Keep them byte-identical and
     lowercase — static/SPA assets are only mounted for names matching

@@ -148,12 +148,12 @@ Declared in `core.config.base`.
 | `CORE_APP_NAME` | `str` | `Baselith-Core` | Application name |
 | `CORE_DATA_DIR` | `Path` | `Path('data')` | Directory for data storage |
 | `CORE_DEBUG` | `bool` | `False` | Enable debug mode |
-| `CORE_DETERMINISTIC_MODE` | `bool` | `False` | When enabled, ensures reproducible execution by pinning seeds and disabling non-deterministic features (e.g., setting LLM temperature to 0 and bypassing caches). |
-| `CORE_DOCUMENTS_DIR` | `Path` | `Path('documents')` | Directory for document storage |
+| `CORE_DETERMINISTIC_MODE` | `bool` | `False` | When enabled, seeds Python's random (and numpy) at startup and pins LLM sampling on every generation path (temperature 0, plus seed and top_p=1 where the provider supports them). Does not disable caches or hash randomization; set PYTHONHASHSEED before launching the process. |
+| `CORE_DOCUMENTS_DIR` | `Path` | `Path('documents')` | Deprecated, no effect: the framework never reads it; document sources configure their own paths |
 | `CORE_LOG_FORMAT` | `str` | `text` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
 | `CORE_LOG_LEVEL` | `str` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | `CORE_LOG_STRUCTURED` | `bool` | `False` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
-| `CORE_MAX_WORKERS` | `int` | `4` | Maximum number of worker threads for parallel orchestration and background tasks |
+| `CORE_MAX_WORKERS` | `int` | `4` | Deprecated, no effect: nothing reads it; the inference thread pool is sized by BASELITH_INFERENCE_THREADS and the per-worker math thread pools by OMP_NUM_THREADS (split across web workers automatically) |
 | `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Directory containing plugins |
 | `CORE_RANDOM_SEED` | `int` | `42` | Random seed when deterministic_mode is enabled |
 
@@ -173,6 +173,7 @@ Declared in `core.config.cache`.
 | `REDIS_MAX_CONNECTIONS` | `int` | `50` | Maximum connections per shared Redis connection pool |
 | `REDIS_SOCKET_CONNECT_TIMEOUT` | `float` | `2.0` | TCP connect deadline for a new pooled Redis connection |
 | `REDIS_SOCKET_TIMEOUT` | `float` | `5.0` | Per-operation socket read deadline. Without it, a Redis that accepts the connection but stops responding mid-command hangs the caller forever while holding a pooled connection, so enough hung operations exhaust the bounded pool. |
+| `SEMANTIC_CACHE_ENABLED` | `bool` | `False` | Enable the semantic (embedding-similarity) LLM response cache in LLMService; needs the [rag] extra for the embedder |
 | `SEMANTIC_CACHE_FINGERPRINT_ENABLED` | `bool` | `True` | Enable the word n-gram fingerprint lookup tier between the exact-match key and the embedding similarity scan |
 | `SEMANTIC_CACHE_FINGERPRINT_THRESHOLD` | `float` | `0.8` | Minimum Jaccard similarity of word n-gram fingerprints for a fingerprint-tier hit (0.0-1.0) |
 | `SEMANTIC_CACHE_MAXSIZE` | `int` | `1000` | Maximum number of semantic cache entries per tenant |
@@ -315,7 +316,7 @@ Declared in `core.config.mcp`.
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
 | `MCP_REQUIRE_TOKEN_AUDIENCE` | `bool \| None` | *empty* | Whether an OAuth access token must name this MCP endpoint in its `aud` claim (RFC 8707 resource indicators / RFC 9728). When on, a token whose `aud` names a *different* resource is refused — that is a token minted for somebody else, replayed here — and so is a token carrying no `aud` at all. `None` (the default) resolves at request time to the runtime posture: enforced in production, off elsewhere. Setting it to `false` is the operator override that stands the whole check down, which matters because JWT_AUDIENCE is pinned per deployment: if the issued audience is not this endpoint's resource URL, *every* token mismatches and the endpoint is unreachable until the tokens are reissued (or MCP_RESOURCE_URL is set to the audience they already carry). API keys are never subject to the check: they are not OAuth tokens and carry no audience. |
-| `MCP_RESOURCE_URL` | `str` | *empty* | Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728): the value published as `resource` in the protected-resource metadata AND the value a token's `aud` is checked against — one setting, so the two can never disagree. Unset, it is derived from the request's base URL, which comes from the Host header: behind a proxy that does not pin the host (ALLOWED_HOSTS unset), a caller controls what the endpoint claims to be. Set it to the public URL, e.g. `https://api.example.com/mcp`. |
+| `MCP_RESOURCE_URL` | `str` | *empty* | Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728): the value published as `resource` in the protected-resource metadata AND the value a token's `aud` is checked against — one setting, so the two can never disagree. Unset, it is derived from the request's base URL, which comes from the Host header: behind a proxy that does not pin the host (TRUSTED_HOSTS unset), a caller controls what the endpoint claims to be. Set it to the public URL, e.g. `https://api.example.com/mcp`. |
 | `MCP_SERVERS` | `dict[str, MCPServerSpec]` | *computed* | JSON mapping of server name -> MCPServerSpec (command/args/env for stdio, or url for Streamable HTTP, plus an autonomy_category applied to the server's tools). |
 | `MCP_SERVER_INSTRUCTIONS` | `str` | *empty* | Optional natural-language guidance returned by `server/discover`. |
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
@@ -426,7 +427,7 @@ Declared in `core.config.plugins`.
 | `PLUGIN_ENABLED` | `bool` | `True` | Enable plugin system |
 | `PLUGIN_OFFICIAL_MARKETPLACE_URL` | `str` | `https://marketplace.baselithcore.xyz` | Official Marketplace and Registry URLs This is the hardcoded "Source of Truth" for the official marketplace. |
 | `PLUGIN_PLUGINS_PATH` | `Path` | `Path('plugins')` | Plugin root: where marketplace installs write and what the runtime loaders scan |
-| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Per-plugin configuration |
+| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Deprecated, no effect: nothing reads it; per-plugin configuration lives in configs/plugins.yaml (or the file PLUGIN_CONFIG_PATH names) |
 | `PLUGIN_PUBLISH_WORKSPACE_ROOT` | `Path \| None` | *empty* | POST /api/backstage/publish only packages plugin directories inside this root (e.g. the Backstage Scaffolder workspace mount). Fail-closed: while unset the publish endpoint is disabled, so a job/admin caller can never point the publisher at an arbitrary host directory. |
 | `PLUGIN_REGISTRY_CACHE_TTL` | `int` | `3600` | TTL for local registry cache in seconds |
 
@@ -533,14 +534,14 @@ Declared in `core.config.resilience`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `RESILIENCE_API_RATE_LIMIT` | `int` | `100` | Max API requests per window |
-| `RESILIENCE_API_RATE_WINDOW` | `int` | `60` | API rate limit window in seconds |
+| `RESILIENCE_API_RATE_LIMIT` | `int` | `100` | Deprecated, no effect: only the default of get_api_limiter(), which nothing in the framework calls; HTTP request limits are RATE_LIMIT_USER_PER_MINUTE and RATE_LIMIT_ADMIN_PER_MINUTE |
+| `RESILIENCE_API_RATE_WINDOW` | `int` | `60` | Deprecated, no effect: pairs with RESILIENCE_API_RATE_LIMIT; the HTTP rate-limit window is RATE_LIMIT_WINDOW_SECONDS |
 | `RESILIENCE_BULKHEAD_MAX_CONCURRENT` | `int` | `10` | Default max concurrent operations |
 | `RESILIENCE_CB_FAIL_MAX` | `int` | `5` | Number of failures before opening circuit |
 | `RESILIENCE_CB_HALF_OPEN_MAX` | `int` | `1` | Max requests in half-open state |
 | `RESILIENCE_CB_RESET_TIMEOUT` | `int` | `60` | Seconds before trying half-open state |
-| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | Max LLM calls per window |
-| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | LLM rate limit window in seconds |
+| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | Deprecated, no effect: only the default of get_llm_limiter(), which nothing in the framework calls, so LLM calls are not throttled by it |
+| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | Deprecated, no effect: pairs with RESILIENCE_LLM_RATE_LIMIT |
 | `RESILIENCE_RETRY_BASE_DELAY` | `float` | `1.0` | Base delay for retries |
 | `RESILIENCE_RETRY_EXPONENTIAL_BASE` | `float` | `2.0` | Base for exponential backoff |
 | `RESILIENCE_RETRY_JITTER` | `bool` | `True` | Add jitter to retries |
@@ -675,7 +676,7 @@ Declared in `core.config.services`.
 | `LLM_CACHE_MAX_SIZE` | `int` | `1000` | Maximum number of cached items |
 | `LLM_CACHE_TTL` | `int` | `3600` | Cache TTL in seconds (default 1 hour) |
 | `LLM_CONNECT_TIMEOUT` | `float` | `5.0` | TCP connect timeout (seconds) for provider SDK calls |
-| `LLM_ENABLE_CACHE` | `bool` | `True` | Enable semantic caching for LLM responses |
+| `LLM_ENABLE_CACHE` | `bool` | `True` | Enable the exact-match in-process LLM response cache (the semantic tier is SEMANTIC_CACHE_ENABLED) |
 | `LLM_ENABLE_NATIVE_TOOLS` | `bool` | `True` | Use providers' native tool-calling / structured-output APIs in LLMService.generate() (falls back to prompt coercion when off). |
 | `LLM_FALLBACK_CHAIN` | `str` | *empty* | Comma-separated ordered 'provider:model' fallback entries (e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback. |
 | `LLM_FALLBACK_STAGE_TIMEOUT` | `float \| None` | *empty* | Per-stage timeout (seconds) for the fallback chain; unset means each stage may use the full request timeout. |
@@ -811,8 +812,8 @@ Declared in `core.config.vectorstore`.
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
-| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
-| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Operator fallback embedding model. Use it together with VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; switching models requires a matching vector dimension and a fresh or migrated collection. |
+| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Deprecated, no effect: nothing reads it; the vector dimension is VECTORSTORE_EMBEDDING_DIM |
+| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Deprecated, no effect: nothing reads it; to switch embedding model set VECTORSTORE_EMBEDDING_MODEL and VECTORSTORE_EMBEDDING_DIM together, on a fresh or migrated collection |
 | `VECTORSTORE_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model name |
 | `VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED` | `bool` | `False` | Record gen_ai.usage.input_tokens on embedding spans. Costs an extra tokenizer pass per cache miss; off by default. |
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
@@ -894,4 +895,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-567 settings documented.
+568 settings documented.

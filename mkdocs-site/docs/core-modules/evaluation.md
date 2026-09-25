@@ -3,7 +3,7 @@ title: Evaluation
 description: LLM response quality evaluation via RAG metrics
 ---
 
-**Module**: `core/services/evaluation/`
+**Module**: `core/evaluation/`
 
 The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailored for Retrieval-Augmented Generation (RAG) metrics. It integrates with the event system to enable automated continuous optimization of agentic performance.
 
@@ -11,13 +11,7 @@ The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailore
 
 ## Module Structure
 
-The evaluation surface spans **two** packages:
-
 ```text
-core/services/evaluation/      # the service layer
-├── __init__.py                # Service factory
-└── service.py                 # EvaluationService (RAG-metric LLM-as-a-Judge)
-
 core/evaluation/               # the evaluation toolkit
 ├── __init__.py                # Public exports
 ├── base.py                    # BaseLLMEvaluator, JUDGE_UNAVAILABLE, judge_unavailable
@@ -38,14 +32,14 @@ core/evaluation/               # the evaluation toolkit
 └── data/golden_qa.json        # bundled golden QA set
 ```
 
-!!! note "Two classes named `EvaluationService`"
-    `core/services/evaluation/` contains **only** `__init__.py` and
-    `service.py`: its `EvaluationService` is the DeepEval RAG-metric wrapper
-    shown under [Usage](#usage). The **event-driven**
-    `core.evaluation.service.EvaluationService` (re-exported from
-    `core.evaluation`) is a different class — see
-    [Integration with Optimization Loop](#integration-with-optimization-loop).
-    Everything else referenced on this page lives in `core/evaluation/`.
+!!! warning "`core.services.evaluation` is deprecated"
+    The former `core/services/evaluation/` DeepEval wrapper — a second class
+    named `EvaluationService` that nothing in the runtime used — is retired.
+    The package is now a deprecation shim (announced in 0.40.0, removed in
+    0.41.0): its `EvaluationService` subclasses the event-driven
+    `core.evaluation.EvaluationService` and keeps `evaluate_rag_response()`
+    backed by the metric evaluators below. See
+    [Services › Evaluation Service](services.md#evaluation-service).
 
 `metrics.py` holds `FaithfulnessEvaluator` and `AnswerRelevancyEvaluator`,
 thin wrappers around DeepEval's metrics (threshold default `0.7`, judge model
@@ -75,49 +69,36 @@ as an unfaithful answer.
 
 ## Evaluation Metrics
 
-The service evaluates responses using 4 fundamental RAG metrics:
-
-| Metric                 | When Applicable        | Description                                          |
-| ---------------------- | ---------------------- | ---------------------------------------------------- |
-| `faithfulness`         | Always                 | How well the answer is grounded in retrieved context |
-| `answer_relevancy`     | Always                 | How relevant the answer is to the original query     |
-| `contextual_precision` | With `expected_output` | Ranking quality of retrieved documents               |
-| `contextual_recall`    | With `expected_output` | Coverage of ground-truth in retrieved context        |
+The RAG metrics are `FaithfulnessEvaluator` (how well the answer is grounded
+in the retrieved context) and `AnswerRelevancyEvaluator` (how relevant it is to
+the query), in `core/evaluation/metrics.py`. Build a fresh evaluator per
+concurrent measurement: a DeepEval metric stores its score and reason on the
+instance.
 
 ## Usage
 
-### Basic Evaluation Request
-
-The RAG-metric service wraps the `deepeval` package, which is an optional
-extra. Without it the service still constructs (logging a warning) but every
-call returns `{"error": "deepeval not installed", ...}`:
-
 ```bash
-pip install "baselith-core[evaluation]"
+pip install "baselith-core[evaluation]"   # deepeval; also set EVAL_ENABLED=true
 ```
 
 ```python
-from core.services.evaluation.service import EvaluationService
+import asyncio
 
-# use_openai=True (default) exports the configured OpenAI key for DeepEval
-evaluation = EvaluationService()
+from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
-# Evaluate a RAG response
-metrics = await evaluation.evaluate_rag_response(
-    query="How does the caching work?",
-    response="The system uses a Redis-based cache with TTL.",
-    retrieved_context=[
-        "Cache implementation uses Redis Enterprise.",
-        "TTL is set to 3600 seconds by default."
-    ],
-    expected_output="Redis cache with a 1 hour TTL.",  # enables precision/recall
+query = "How does the caching work?"
+answer = "The system uses a Redis-based cache with TTL."
+context = [
+    "Cache implementation uses Redis Enterprise.",
+    "TTL is set to 3600 seconds by default.",
+]
+
+# measure() is synchronous (it calls the judge model): keep it off the loop.
+faithfulness, relevancy = await asyncio.gather(
+    asyncio.to_thread(FaithfulnessEvaluator().measure, query, answer, context),
+    asyncio.to_thread(AnswerRelevancyEvaluator().measure, query, answer),
 )
-
-# Every metric is a dict {"score", "reason", "passed"} — or {"error": ...}
-# when that single metric failed. Pass/fail thresholds are fixed at 0.7.
-print(f"Faithfulness: {metrics['faithfulness']['score']}")
-print(f"Precision:    {metrics['contextual_precision']['passed']}")
-print(f"Recall:       {metrics['contextual_recall']['reason']}")
+print(f"Faithfulness: {faithfulness:.2f}  Relevancy: {relevancy:.2f}")
 ```
 
 ---
@@ -125,8 +106,8 @@ print(f"Recall:       {metrics['contextual_recall']['reason']}")
 ## Integration with Optimization Loop
 
 The class that closes the loop is the **event-driven**
-`core.evaluation.service.EvaluationService` (exported from `core.evaluation`)
-— not the DeepEval wrapper above. It subscribes to `FLOW_COMPLETED`, judges
+`core.evaluation.service.EvaluationService` (exported from `core.evaluation`).
+It subscribes to `FLOW_COMPLETED`, judges
 each successful flow in a background task, and emits the verdict:
 
 ```python

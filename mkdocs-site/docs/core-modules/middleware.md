@@ -290,9 +290,14 @@ strict and docs header lists are cached independently after first use.
 function guard two different attacks.
 
 **HTTP (CSRF).** Only `POST`/`PUT`/`PATCH`/`DELETE` are checked. An `Origin`
-that is present and not allowlisted ⇒ `403`
+that is present, not allowlisted and not same-origin ⇒ `403`
 (`{"detail": "CSRF check failed: origin not allowed."}`). The `*` wildcard
-accepts any explicit `Origin`.
+accepts any explicit `Origin`. **Same-origin** requests always pass without an
+allowlist entry — `Sec-Fetch-Site: same-origin`, or an `Origin` whose scheme,
+host and port equal the request's own (ASGI scheme + `Host`; `ws`/`wss` map to
+`http`/`https`). A page the deployment serves itself (the `/admin` dashboard)
+cannot be a cross-site forgery. `same-site` with a foreign `Origin` is **not**
+admitted: it also covers sibling subdomains the operator may not control.
 
 **WebSocket (CSWSH).** The Same-Origin Policy does not apply to WebSockets, so a
 handshake from any page on the internet would otherwise come up authenticated
@@ -306,8 +311,8 @@ decision function before the handshake reaches the route.
 UA-set and unforgeable from script, so it is positive proof a browser initiated
 the request from another site. Requests with *neither* header keep passing —
 that combination is impossible for a browser and identifies `curl`, server-to-
-server SDKs and native WebSocket clients. `same-origin`, `same-site` and `none`
-also pass.
+server SDKs and native WebSocket clients. Without an `Origin`, `same-origin`,
+`same-site` and `none` also pass.
 
 **How a WebSocket denial is emitted.** A bare `return` would leave the peer
 hanging until timeout, so the middleware consumes the initial
@@ -323,11 +328,13 @@ Rejections increment `security_events_total` with
 log the offending origin plus the configured allowlist — the fix for the classic
 reverse-proxy 403 is then obvious (add the public origin to `ALLOW_ORIGINS`).
 
-!!! warning "Same-origin browser UIs must be allowlisted"
-    Browsers send `Origin` on same-origin WebSocket handshakes too, so a UI
-    served by the deployment itself (e.g. the `baselithbot` dashboard opening
-    `/ws/pair`) needs its own origin in `ALLOW_ORIGINS` — exactly as it already
-    does for state-changing HTTP requests.
+!!! note "Same-origin browser UIs need no allowlist entry"
+    Browsers send `Origin` on same-origin WebSocket handshakes too; a UI served
+    by the deployment itself (e.g. the `baselithbot` dashboard opening
+    `/ws/pair`) passes because that `Origin` equals the handshake's own origin.
+    Behind a TLS-terminating proxy that does not forward the scheme the server
+    sees `http`/`ws` while the page is `https` — list the public origin in
+    `ALLOW_ORIGINS` in that case.
 
 See [WebSocket Origin validation](../advanced/security.md#websocket-origin-validation-cswsh).
 

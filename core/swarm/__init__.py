@@ -1,7 +1,7 @@
 """
 Swarm Intelligence Module
 
-Provides emergent baselith-core coordination through swarm behaviors.
+Provides emergent multi-agent coordination through swarm behaviors.
 Implements auction-based task allocation, pheromone signaling, and
 dynamic team formation without centralized control.
 

@@ -60,12 +60,18 @@ class ReActResult:
         trace: Ordered list of Thought/Action/Observation steps.
         iterations_used: How many loop iterations were consumed.
         hit_limit: True when the run ended because ``max_iterations`` was reached.
+        error: Machine-readable reason when the run ended on an infrastructure
+            failure rather than an answer (``"llm_unavailable"`` when no LLM
+            service could be resolved, ``"llm_error"`` when a call raised);
+            ``None`` otherwise. ``final_answer`` then holds a user-safe
+            message, not a model answer.
     """
 
     final_answer: str
     trace: list[TraceStep] = field(default_factory=list)
     iterations_used: int = 0
     hit_limit: bool = False
+    error: str | None = None
 
 
 @dataclass

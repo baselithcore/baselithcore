@@ -305,10 +305,37 @@ def reset_llm_service() -> None:
         _policy_services.clear()
 
 
+async def close_llm_services() -> None:
+    """Close and drop every cached LLM service (application shutdown).
+
+    Covers the default singleton, the per-plugin policy clones and the
+    fallback-stage clones, each closed once; a failing close is logged and
+    does not stop the others. The next :func:`get_llm_service` builds afresh.
+    """
+    global _default_service
+    from core.services.llm._fallback_support import take_fallback_services
+
+    with _lock:
+        cached = [_default_service, *_policy_services.values()]
+        _default_service = None
+        _policy_services.clear()
+    cached += take_fallback_services()
+    seen: set[int] = set()
+    for service in cached:
+        if service is None or id(service) in seen:
+            continue
+        seen.add(id(service))
+        try:
+            await service.close()
+        except Exception as exc:
+            logger.warning("LLM service close failed: %s", exc)
+
+
 __all__ = [
     "api_base_for",
     "api_key_for",
     "api_key_from_config",
+    "close_llm_services",
     "get_llm_service",
     "provider_configured",
     "provider_setup_hint",

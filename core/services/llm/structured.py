@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -375,6 +376,9 @@ async def generate_structured(
                     extra["temperature"] = temperature
                 if max_tokens is not None:
                     extra["max_tokens"] = max_tokens
+                # CORE_DETERMINISTIC_MODE pins sampling here as well (the
+                # coercion branch gets it from _generate_with_retry).
+                extra.update(get_llm_override_kwargs(service.config.provider))
                 # Cross-provider resilience for the primary structured path:
                 # with LLM_FALLBACK_CHAIN configured, provider failures fall
                 # through to native-capable fallback stages (open breakers

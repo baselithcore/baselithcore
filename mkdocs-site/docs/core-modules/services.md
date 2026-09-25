@@ -894,7 +894,7 @@ issued by `get_llm_service()` — the default singleton or a policy clone, and
 therefore also the one dependency injection hands out — re-resolves the pin on
 every call (`generate_response`, `generate`, `generate_messages`,
 `generate_response_stream`, and the module-level `generate_image`,
-`generate_batch`, `generate_stream_events`) and forwards the call to the
+`generate_batch`, `generate_stream_events`, `generate_typed`) and forwards the call to the
 service that pin selects for whoever is calling. A plugin that keeps the
 service it got at load time — an agent, a flow handler, a DI-injected client —
 therefore follows the console: the pin decides for the plugin bound to the
@@ -1333,6 +1333,22 @@ into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
 instead of 1000. Tenant isolation applies here as everywhere else: the current
 `tenant_id` is injected into the filter automatically.
 
+Both providers also expose `list_collections()` (a Qdrant server's collections;
+the `vs_*` tables for pgvector), which the GDPR tenant purge uses to delete a
+tenant's points from **every** collection with
+`delete_by_filter(key="tenant_id", value=tenant)` — see
+[Multi-tenancy › Tenant data purge](../advanced/multi-tenancy.md#tenant-data-purge-gdpr).
+
+### Shutdown
+
+`await vs.aclose()` closes the provider's client (the Qdrant `AsyncQdrantClient`;
+a pgvector provider borrows the shared database pool and holds nothing).
+`close_vectorstore_service()` closes and drops the process-wide instance that
+`get_vectorstore_service()` hands out; the app's lifespan calls it on shutdown,
+next to `core.services.llm.runtime.close_llm_services()`, which closes the
+default LLM service, every per-plugin policy clone and every fallback-stage
+clone once each.
+
 ### Tenant Isolation
 
 BaselithCore enforces strict multi-tenant isolation at the service level. The `VectorStoreService` automatically extracts the `tenant_id` from the current execution context (via `get_current_tenant_id()`) and injects it into all operations:
@@ -1660,7 +1676,7 @@ Per-provider vision model identifiers are configuration-driven (no hardcoded mod
 | ------- | ------- | -------- |
 | `VISION_OPENAI_MODEL`    | `gpt-4o`                       | OpenAI |
 | `VISION_OPENAI_AUDIO_MODEL` | `gpt-4o-audio-preview`      | OpenAI (native audio — `gpt-4o` cannot take `input_audio`) |
-| `VISION_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022`   | Anthropic |
+| `VISION_ANTHROPIC_MODEL` | `claude-opus-5`                | Anthropic |
 | `VISION_GOOGLE_MODEL`    | `gemini-2.0-flash`             | Google |
 | `VISION_OLLAMA_MODEL`    | `llava`                        | Ollama (local) |
 
@@ -1688,6 +1704,11 @@ Speech synthesis and recognition.
     `register_vision_tools(server)`) are not registered on any server the app
     mounts. Call the service directly, or register the tools on your own
     `MCPServer`.
+
+`VoiceService()` takes its default provider from `VOICE_PROVIDER`
+(`openai` | `elevenlabs` | `google`, default `openai`), the same way
+`VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to override
+it per instance.
 
 ### Voice Structure
 
@@ -1740,35 +1761,39 @@ service.aclose()` closes it together with the shared `httpx` client.
 
 ## Evaluation Service
 
-LLM-as-a-Judge evaluation using DeepEval.
+!!! warning "Deprecated — `core.services.evaluation` is a shim"
+    `core.services.evaluation` used to carry its own DeepEval wrapper, a
+    duplicate of `core/evaluation/` that nothing in the runtime imported. It
+    shared one set of metric objects across concurrent calls (so one call could
+    read another's score) and exported the LLM API key into `os.environ`.
+    `EvaluationService` and `get_evaluation_service` now remain only for one
+    deprecation cycle (announced in 0.40.0, removed in 0.41.0) and warn on use:
+    `EvaluationService` is a subclass of the live, event-driven
+    `core.evaluation.EvaluationService`, and its `evaluate_rag_response()`
+    delegates to `core.evaluation.metrics.FaithfulnessEvaluator` /
+    `AnswerRelevancyEvaluator` with fresh metric objects per call.
+
+Use the live package instead — see [Evaluation](evaluation.md):
 
 ```python
-from core.services.evaluation import get_evaluation_service
+from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
-evaluator = get_evaluation_service()
-
-# Evaluate a RAG response
-result = await evaluator.evaluate_rag_response(
-    query="What is the capital of Italy?",
-    response="The capital of Italy is Rome.",
-    retrieved_context=["Italy is a country in Europe. Its capital is Rome."],
-    expected_output="Rome",  # enables precision/recall metrics
+faithfulness = FaithfulnessEvaluator(threshold=0.7).measure(
+    "What is the capital of Italy?",
+    "The capital of Italy is Rome.",
+    ["Italy is a country in Europe. Its capital is Rome."],
 )
-
-print(result["faithfulness"])          # {"score": 0.95, "reason": "...", "passed": True}
-print(result["answer_relevancy"])      # {"score": 0.92, "reason": "...", "passed": True}
-print(result["contextual_precision"])  # {"score": 0.88, ...} (when expected_output given)
-print(result["contextual_recall"])     # {"score": 0.90, ...} (when expected_output given)
+relevancy = AnswerRelevancyEvaluator().measure(
+    "What is the capital of Italy?", "The capital of Italy is Rome."
+)
 ```
 
-### Available Metrics
-
-| Metric                 | Description                            | Requires `expected_output` |
-| ---------------------- | -------------------------------------- | -------------------------- |
-| `faithfulness`         | Is the answer grounded in context?     | No                         |
-| `answer_relevancy`     | Does it answer the question?           | No                         |
-| `contextual_precision` | Are retrieved docs relevant & ordered? | Yes                        |
-| `contextual_recall`    | Did we retrieve all relevant docs?     | Yes                        |
+Both need `EVAL_ENABLED=true` and the `[evaluation]` extra (`deepeval`);
+otherwise they score `0.0`. The shim's `evaluate_rag_response()` returns
+`{"faithfulness": {...}, "answer_relevancy": {...}}` (each `{"score",
+"reason", "passed"}`, or `{"error": ...}` when evaluation is unavailable); the
+contextual precision/recall metrics of the retired wrapper are not carried
+over.
 
 ---
 
@@ -2188,7 +2213,7 @@ VECTORSTORE_TIMEOUT_SECONDS=30.0
 # Vision — VISION_PROVIDER picks the provider; the model is per provider
 VISION_PROVIDER=openai
 VISION_OPENAI_MODEL=gpt-4o
-VISION_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+VISION_ANTHROPIC_MODEL=claude-opus-5
 VISION_GOOGLE_MODEL=gemini-2.0-flash
 VISION_OLLAMA_MODEL=llava
 

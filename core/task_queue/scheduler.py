@@ -47,6 +47,13 @@ def retry_intervals(
     return [min(base_delay * (2**step), cap) for step in range(max(count, 0))]
 
 
+def _default_queue_name() -> str:
+    """The configured default queue (``TASK_QUEUE_DEFAULT_QUEUE``)."""
+    from core.config import get_task_queue_config
+
+    return get_task_queue_config().default_queue
+
+
 @dataclass
 class ScheduledTask:
     """Configuration for a scheduled task."""
@@ -54,7 +61,7 @@ class ScheduledTask:
     name: str
     func: Callable
     interval_seconds: int
-    queue_name: str = "default"
+    queue_name: str = field(default_factory=_default_queue_name)
     args: tuple = field(default_factory=tuple)
     kwargs: dict[str, Any] = field(default_factory=dict)
     last_run: datetime | None = None
@@ -133,7 +140,7 @@ class TaskScheduler:
         self,
         func: Callable,
         *args: Any,
-        queue_name: str = "default",
+        queue_name: str | None = None,
         job_timeout: int | None = None,
         result_ttl: int | None = None,
         failure_ttl: int | None = None,
@@ -149,7 +156,8 @@ class TaskScheduler:
         Args:
             func: The function to execute
             *args: Positional arguments for the function
-            queue_name: Target queue (default, documents, analysis)
+            queue_name: Target queue (default, documents, analysis). ``None``
+                uses the configured ``default_queue``.
             job_timeout: Max execution time in seconds
             result_ttl: How long to keep results (seconds)
             failure_ttl: How long to keep failed job info (seconds)
@@ -175,6 +183,7 @@ class TaskScheduler:
         fail_ttl = failure_ttl if failure_ttl is not None else config.failure_ttl
         retries = retry_count if retry_count is not None else config.default_retry_count
         delay = retry_delay if retry_delay is not None else config.default_retry_delay
+        queue_name = queue_name or config.default_queue
 
         queue = get_queue(queue_name)
 
@@ -187,6 +196,7 @@ class TaskScheduler:
 
             retry_config = Retry(max=retries, interval=retry_intervals(retries, delay))
 
+        job_meta = _merge_meta(meta)
         job = queue.enqueue(
             func,
             *args,
@@ -194,16 +204,18 @@ class TaskScheduler:
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
             retry=retry_config,
-            meta=_merge_meta(meta),
+            meta=job_meta,
             job_id=job_id,
             **kwargs,
         )
 
-        # Initialize task status
+        # Initialize task status. The owning tenant is recorded with it so a
+        # status read can refuse a caller from another tenant.
         get_task_tracker().set_status(
             job.id,
             TaskStatus.QUEUED,
             message=f"Queued in {queue_name}",
+            tenant_id=job_meta.get("tenant_id"),
         )
 
         logger.info(f"Enqueued task {func.__name__} -> job {job.id}")
@@ -215,7 +227,7 @@ class TaskScheduler:
         func: Callable,
         scheduled_time: datetime,
         *args: Any,
-        queue_name: str = "default",
+        queue_name: str | None = None,
         job_timeout: int | None = None,
         result_ttl: int | None = None,
         failure_ttl: int | None = None,
@@ -237,7 +249,7 @@ class TaskScheduler:
             func: The function to execute
             scheduled_time: When to execute
             *args: Positional arguments
-            queue_name: Target queue
+            queue_name: Target queue (``None``: the configured ``default_queue``)
             job_timeout: Max execution time in seconds (config default)
             result_ttl: How long to keep results (config default)
             failure_ttl: How long to keep failed job info (config default)
@@ -253,9 +265,11 @@ class TaskScheduler:
         timeout = job_timeout if job_timeout is not None else config.job_timeout
         res_ttl = result_ttl if result_ttl is not None else config.result_ttl
         fail_ttl = failure_ttl if failure_ttl is not None else config.failure_ttl
+        queue_name = queue_name or config.default_queue
 
         queue = get_queue(queue_name)
 
+        job_meta = _merge_meta(kwargs.pop("meta", None))
         job = queue.enqueue_at(
             scheduled_time,
             func,
@@ -263,7 +277,7 @@ class TaskScheduler:
             job_timeout=timeout,
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
-            meta=_merge_meta(kwargs.pop("meta", None)),
+            meta=job_meta,
             job_id=job_id,
             **kwargs,
         )
@@ -272,6 +286,7 @@ class TaskScheduler:
             job.id,
             TaskStatus.PENDING,
             message=f"Scheduled for {scheduled_time.isoformat()}",
+            tenant_id=job_meta.get("tenant_id"),
         )
 
         logger.info(f"Scheduled task {func.__name__} for {scheduled_time}")
@@ -283,7 +298,7 @@ class TaskScheduler:
         func: Callable,
         delay_seconds: int,
         *args: Any,
-        queue_name: str = "default",
+        queue_name: str | None = None,
         **kwargs: Any,
     ) -> str:
         """
@@ -297,7 +312,7 @@ class TaskScheduler:
             func: The function to execute
             delay_seconds: Seconds to wait before execution
             *args: Positional arguments
-            queue_name: Target queue
+            queue_name: Target queue (``None``: the configured ``default_queue``)
             **kwargs: Keyword arguments, including the ``enqueue_at``
                 overrides (``job_timeout``, ``result_ttl``, ``failure_ttl``)
 
@@ -382,7 +397,7 @@ def __getattr__(name: str) -> Any:
 def enqueue_task(
     func: Callable,
     *args: Any,
-    queue: str = "default",
+    queue: str | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -407,7 +422,7 @@ def schedule_task(
     func: Callable,
     delay_seconds: int,
     *args: Any,
-    queue: str = "default",
+    queue: str | None = None,
     **kwargs: Any,
 ) -> str:
     """Schedule a task to run after a delay."""

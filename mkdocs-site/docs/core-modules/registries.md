@@ -7,18 +7,25 @@ description: Shared domain-agnostic primitives — generic registry base and the
 
 # Registries & Exceptions
 
-Two small, domain-agnostic primitives that core and every plugin should reuse
-instead of reimplementing: a generic registry base class and a single exception
-hierarchy. Both live in the Sacred Core because they carry no domain logic.
+Two small, domain-agnostic primitives available to core and plugin code: a
+generic registry base class and a single exception hierarchy. Both live in the
+Sacred Core because they carry no domain logic.
 
 ---
 
 ## BaseRegistry
 
-`core.registries.BaseRegistry[T]` is a thread-safe, name-keyed registry. It
-replaces the half-dozen near-identical `register` / `get` / `list` / `remove`
-classes that previously lived inside individual plugins (agent registries, skill
-registries, document-source registries, extractor registries, …).
+`core.registries.BaseRegistry[T]` is a thread-safe, name-keyed registry: a
+ready-made `register` / `get` / `list` / `remove` primitive for new code that
+needs one.
+
+!!! note "Library API — not wired by default"
+    `BaseRegistry` is an available primitive, not the backbone of the existing
+    registries: nothing in `core/` or the official plugins subclasses or
+    instantiates it today. The plugin registry, the agent, skill,
+    document-source and extractor registries keep their own implementations.
+    Reach for it when writing a new registry in host or plugin code instead of
+    hand-rolling another one.
 
 ### Key resolution
 

@@ -117,9 +117,22 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     `LoopBudget`; per-tool autonomy categories come from
     `context["tool_categories"]`, defaulting to `destructive` — fail-safe:
     gated for approval — with a warning
-    when a policy is active), and any other value falls back to Tree of
-    Thoughts. Both engines are reachable through the orchestrator, not only
+    when a policy is active), and `"bfs"` / `"mcts"` (or no value — the
+    `TOT_STRATEGY` default) run Tree of Thoughts. An unknown value is rejected
+    with `error: True` and `metadata["error"] == "unsupported_strategy"`; a
+    tool strategy whose inputs are missing falls back to Tree of Thoughts with
+    a warning. `metadata["strategy"]` always names the strategy that actually
+    ran, and `metadata["requested_strategy"]` records a request that was not
+    honoured. Both engines are reachable through the orchestrator, not only
     standalone.
+
+!!! warning "LLM failures are errors, not answers"
+    When no LLM service can be resolved (the failure is logged) or an LLM call
+    raises, the loop stops and `ReActResult.error` is set to
+    `"llm_unavailable"` or `"llm_error"`; `final_answer` then holds a
+    user-safe message, never text parsed as a `Final Answer`. The reasoning
+    handler turns a set `error` into `error: True` on its result, with the
+    reason in `metadata["error"]`.
 
 ### Basic Usage
 
@@ -435,6 +448,12 @@ for step in result.trace:
 
 BaselithCore includes a **Pattern Registry** and a **Heuristic Selector** to automatically choose the best reasoning pattern for a given task.
 
+!!! note "Library API — not wired by default"
+    The orchestrator does not select patterns on its own: no route, handler or
+    startup hook calls `PatternSelector` in the default app — the
+    `complex_reasoning` handler picks its engine from `context["strategy"]`.
+    Call it from host or plugin code to choose a strategy before dispatch.
+
 ### Registry Definitions
 
 | Pattern | Best For |
@@ -463,6 +482,11 @@ print(f"Chosen Pattern: {result.pattern.value}")
 
 The `ComplexityClassifier` helps you decide whether to use an autonomous agent or a simpler, deterministic pipeline.
 
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook calls `ComplexityClassifier` in the
+    default app (it consults `PatternSelector` internally). Call it from host
+    or plugin code when deciding how to route a request.
+
 ```python
 from core.reasoning import ComplexityClassifier  # lives in core/reasoning/complexity.py
 
@@ -481,6 +505,12 @@ else:
 ## Chain-of-Thought (CoT)
 
 Linear step-by-step reasoning:
+
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook calls `ChainOfThought` in the default
+    app; the `complex_reasoning` handler runs Tree of Thoughts, ReAct or
+    parallel tools. Call it from host or plugin code, for example inside a
+    custom flow handler.
 
 `ChainOfThought(llm_service=None)` lazily resolves the global LLM service if none is
 passed. `reason(question, context=None)` returns a `tuple[str, list[ReasoningStep]]` —
@@ -651,6 +681,11 @@ best = await mcts_search_async(
 
 ## Self-Correction
 
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook runs `SelfCorrector` over responses in
+    the default app. Call it from host or plugin code on a response you want
+    critiqued and repaired.
+
 Response self-correction. `SelfCorrector(llm_service=None, max_corrections=None,
 config=None)` runs an iterative critique/repair loop. `correct(response, context=None)`
 returns a `CorrectionResult`:
@@ -804,7 +839,7 @@ context carrying `k`, `max_steps` or `strategy` still overrides them:
 | ------- | ------- | ---------------- |
 | `TOT_BRANCHING_FACTOR` | `3` | `k` |
 | `TOT_MAX_DEPTH` | `3` | `max_steps` |
-| `TOT_STRATEGY` | `bfs` | `strategy` (`bfs` or `mcts`; the never-implemented `dfs` is read as `bfs` with a warning) |
+| `TOT_STRATEGY` | `bfs` | `strategy` (`bfs` or `mcts`; the never-implemented `dfs` is read as `bfs` with a warning; per request, `"dfs"` also runs `bfs`) |
 
 `TOT_BEAM_WIDTH` is deprecated and ignored: the engine has no beam search.
 Calling `TreeOfThoughts.solve()` directly still takes depth, branching and

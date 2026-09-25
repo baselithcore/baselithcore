@@ -16,6 +16,7 @@ from core.services.vectorstore.chunking_hierarchical import (
 )
 from core.services.vectorstore.service import (
     VectorStoreService,
+    close_vectorstore_service,
     get_vectorstore_service,
 )
 from core.services.vectorstore.splitters import (
@@ -40,6 +41,7 @@ __all__ = [
     "StoredParent",
     "TextChunk",
     "VectorStoreService",
+    "close_vectorstore_service",
     "expand_to_parents",
     "get_vectorstore_service",
     "parent_chunk_id",

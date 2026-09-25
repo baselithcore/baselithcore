@@ -35,8 +35,13 @@ from core.config import (
 from core.context import get_tenant_or_default
 
 # Domain-specific imports removed - now provided by plugins
-# Domain-specific imports removed - now provided by plugins
-from core.nlp import CachedEmbedder, get_embedder, get_reranker
+from core.nlp import (
+    CachedEmbedder,
+    LazyEmbedder,
+    LazyReranker,
+    get_embedder,
+    get_reranker,
+)
 
 _app_config = get_app_config()
 _chat_config = get_chat_config()
@@ -79,8 +84,8 @@ _redis_client = None
 class ChatDependencies:
     """Container for objects and configurations required by ChatService."""
 
-    embedder: SentenceTransformer | CachedEmbedder
-    reranker: CrossEncoder
+    embedder: SentenceTransformer | CachedEmbedder | LazyEmbedder
+    reranker: CrossEncoder | LazyReranker
     response_cache: TTLCache | RedisTTLCache | None
     precheck_cache: TTLCache | RedisTTLCache | None
     rerank_cache: TTLCache | RedisTTLCache | None
@@ -392,11 +397,12 @@ def create_default_dependencies(
     """
     cfg = config or ChatDependencyConfig()
 
-    embedder_factory = cfg.embedder_factory or get_embedder
-    embedder = embedder_factory(cfg.embedder_model)
-
-    reranker_factory = cfg.reranker_factory or get_reranker
-    reranker = reranker_factory(cfg.reranker_model)
+    # Deferred: nothing on the default (non-RAG) path touches either model, and
+    # building them here loaded seconds of weights at boot — or raised on an
+    # install without the ``[rag]`` extra. Each is built on first real use,
+    # off the event loop (see ``core.nlp.lazy``).
+    embedder = LazyEmbedder(cfg.embedder_factory or get_embedder, cfg.embedder_model)
+    reranker = LazyReranker(cfg.reranker_factory or get_reranker, cfg.reranker_model)
 
     response_cache = None
     if cfg.response_cache_enabled:

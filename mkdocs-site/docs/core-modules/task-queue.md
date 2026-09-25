@@ -62,12 +62,24 @@ core/task_queue/
 └── jobs/           # Job definitions (incl. agent_run.py — async agent runs)
 ```
 
+!!! note "Library API — not wired by default"
+    Nothing in the default app enqueues the document and indexing jobs:
+    `ingest_document_task`, `batch_ingest_task` and `reindex_collection_task`
+    (`jobs/documents.py`) and `run_indexing_job` (`jobs/indexing.py`) have no
+    producer in `core/` or the official plugins. Enqueue them from host or
+    plugin code — for example
+    `enqueue_task(run_indexing_job, incremental=True, queue="documents")` —
+    and run a worker on that queue. The indexing job's `JOB_*`
+    [realtime events](realtime.md#event-model-realtimeevent-eventtype) fire only when you do.
+    `run_agent_task` (`jobs/agent_run.py`) *is* wired, through
+    [`/agent/async`](#async-agent-runs-agentasync).
+
 The package `__all__` is intentionally small:
 
 ```python
 from core.task_queue import (
     get_queue_redis_connection,  # -> redis.Redis
-    get_queue,                   # -> rq.Queue (name="default")
+    get_queue,                   # -> rq.Queue (name="default" unless given)
     enqueue_task,                # immediate enqueue (tenant-aware)
     schedule_task,               # delayed enqueue
     CronExpression,              # 5-field cron parser (see below)
@@ -106,7 +118,8 @@ the current tenant id into the job metadata.
 ```python
 from core.task_queue import enqueue_task, schedule_task
 
-# Immediate execution on the "default" queue
+# Immediate execution on the configured default queue
+# (TASK_QUEUE_DEFAULT_QUEUE, "default" out of the box)
 job_id = enqueue_task(document_ingestion, document_id="doc-123")
 
 # Choose a queue (configured queues: default, documents, analysis)
@@ -137,7 +150,7 @@ scheduler = get_task_scheduler()
 job_id = scheduler.enqueue(
     my_task_fn,
     arg1, arg2,
-    queue_name="default",
+    queue_name="default",  # omit to use TASK_QUEUE_DEFAULT_QUEUE
     job_timeout=300,     # seconds
     result_ttl=86400,
     failure_ttl=604800,
@@ -257,6 +270,17 @@ tracker.mark_failed(job_id, error="boom")
 `TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`,
 `FAILED`, `CANCELLED`.
 
+### Tenant ownership
+
+The record is keyed by job id alone, so it also stores its owner:
+`TaskScheduler.enqueue`/`enqueue_at` (and therefore `enqueue_task` /
+`schedule_task`) pass the job's `tenant_id` from its metadata to
+`set_status(..., tenant_id=...)`. Later updates omit it and the hash keeps the
+original value. Anything that serves a record to a caller should read it with
+`get_status_for_tenant(job_id, tenant_id)`, which returns `None` both for an
+unknown id and for another tenant's record — including a record with no owner
+at all (fail closed). `get_status()` stays unscoped for trusted internal use.
+
 ### Reporting progress from inside a job
 
 ```python
@@ -289,7 +313,7 @@ The `api-routers` plugin exposes it over HTTP (authenticated via
 | Method & path | Response |
 | ------------- | -------- |
 | `POST /agent/async` — body `{"query": "...", "conversation_id": null}` | `202` with `{"task_id": ..., "status_url": "/agent/status/{task_id}"}`; `503` when the queue is unavailable |
-| `GET /agent/status/{task_id}` | The TaskTracker record (`status`, `progress`, `result`, ...); `404` for an unknown task id, `503` when the tracker is unreachable |
+| `GET /agent/status/{task_id}` | The TaskTracker record (`status`, `progress`, `result`, `tenant_id`, ...); `404` for an unknown task id **or one enqueued by another tenant** (indistinguishable by design), `503` when the tracker is unreachable |
 
 ```bash
 curl -X POST http://localhost:8000/agent/async \
@@ -309,7 +333,9 @@ Lifecycle on the worker:
    records the failed job and the [dead-letter machinery](#dead-letter-queue-dlq)
    applies). A webhook outage never fails a finished run.
 
-Query length is capped at 8000 characters at the API boundary. See
+Both routes call the synchronous queue/tracker clients through
+`asyncio.to_thread`, so a slow Redis never blocks the event loop. Query length
+is capped at 8000 characters at the API boundary. See
 [Webhooks](webhooks.md) for subscribing to the terminal events.
 
 ---
@@ -495,7 +521,7 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 | `redis_url`                 | `TASK_QUEUE_REDIS_URL` | unset | Broker connection; wins over `QUEUE_REDIS_URL` |
 | `queue_redis_url`           | `QUEUE_REDIS_URL`    | `redis://localhost:6379/2` (effective) | Broker connection |
 | `queues`                    | `TASK_QUEUE_QUEUES`  | `["default", "documents", "analysis"]` | Known queues |
-| `default_queue`             | `TASK_QUEUE_DEFAULT_QUEUE` | `default` | Queue used when none is named |
+| `default_queue`             | `TASK_QUEUE_DEFAULT_QUEUE` | `default` | Queue used when none is named — by `enqueue_task`, `schedule_task`, `TaskScheduler.enqueue`/`enqueue_at`/`enqueue_in` and `ScheduledTask` |
 | `job_timeout`               | `TASK_QUEUE_JOB_TIMEOUT` | `3600` | Max job runtime (s) |
 | `result_ttl`                | `TASK_QUEUE_RESULT_TTL` | `86400` | Result retention (s) |
 | `failure_ttl`               | `TASK_QUEUE_FAILURE_TTL` | `604800` | Failed-job retention (s) |

@@ -119,6 +119,13 @@ IDEs.
       response carries the limiter's own status (`429`, or `503` when the
       backend is down and `RATE_LIMIT_FAIL_MODE=closed`) with JSON-RPC code
       `-32003` and the limiter's own `Retry-After` / `RateLimit-*` headers.
+    - **Failed-credential throttle** — a *presented* credential that fails
+      authentication is charged to the same per-IP `authfail:<ip>` window the
+      REST surface uses (`AUTH_FAILURE_LIMIT_PER_MINUTE` per
+      `RATE_LIMIT_WINDOW_SECONDS`), so the endpoint is not an unmetered 401
+      oracle for credential stuffing. Once spent the answer is `429` (JSON-RPC
+      `-32003`, with `Retry-After`) instead of `401`. A request carrying no
+      `Authorization` header — the spec's discovery step — is not charged.
     - **Protected-resource metadata (RFC 9728)** — while auth is required the
       router also serves an *unauthenticated*
       `GET /.well-known/oauth-protected-resource/mcp` — the metadata path
@@ -195,7 +202,7 @@ anything else — a differing path — is a different resource.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MCP_RESOURCE_URL` | `""` | Pins the canonical resource identifier. Unset, it is derived from `request.base_url`, which comes from the `Host` header — so unless the deployment pins the host (`TRUSTED_HOSTS`), a caller chooses what this endpoint claims to be. |
+| `MCP_RESOURCE_URL` | `""` | Pins the canonical resource identifier. Unset, it is derived from `request.base_url`, which comes from the `Host` header — so unless the deployment pins the host (`TRUSTED_HOSTS`), a caller chooses what this endpoint claims to be. Mounting the HTTP transport with neither this nor `TRUSTED_HOSTS` set logs an **ERROR** (`mcp_http_resource_unpinned`). |
 | `MCP_REQUIRE_TOKEN_AUDIENCE` | unset (`None`) | Resolves **at request time** to the runtime posture: enforced in production, off elsewhere. `false` stands the whole check down. |
 
 `resource_identifier()` is the single source of both the value published as

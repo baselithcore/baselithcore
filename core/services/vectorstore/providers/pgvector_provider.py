@@ -396,6 +396,16 @@ class PgVectorProvider:
         next_offset = points[-1].id if len(points) == int(limit) and points else None
         return points, next_offset
 
+    async def list_collections(self) -> list[str]:
+        """Names of every collection (``vs_*`` table) in the public schema."""
+        async with get_async_cursor() as cur:
+            await cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND left(table_name, 3) = 'vs_'"
+            )
+            rows = await cur.fetchall()
+        return sorted(str(r[0])[3:] for r in rows)
+
     async def delete_by_filter(
         self, collection_name: str, key: str, value: Any, **kwargs: Any
     ) -> None:

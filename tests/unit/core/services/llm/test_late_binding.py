@@ -165,3 +165,33 @@ async def test_module_level_batch_follows_the_pin():
     with _InPlugin("planner"):
         [done] = await generate_batch(kept, [BatchPrompt(custom_id="1", prompt="hi")])
     assert done.text.endswith("|pinned-model")
+
+
+async def test_module_level_typed_generation_follows_the_pin(monkeypatch):
+    from pydantic import BaseModel
+
+    from core.services.llm import structured
+    from core.services.llm.typed import generate_typed
+
+    class Answer(BaseModel):
+        ok: bool
+
+    served_by: list[object] = []
+
+    async def fake_structured(service, prompt, **_kw):
+        served_by.append(service)
+
+        class _R:
+            text = '{"ok": true}'
+
+        return _R()
+
+    monkeypatch.setattr(structured, "generate_structured", fake_structured)
+    kept = get_llm_service()
+    _pin("planner", "pinned-model")
+    with _InPlugin("planner"):
+        pinned = get_llm_service()
+        result = await generate_typed(kept, "hi", Answer)
+    assert result.ok is True
+    assert served_by == [pinned]
+    assert pinned is not kept

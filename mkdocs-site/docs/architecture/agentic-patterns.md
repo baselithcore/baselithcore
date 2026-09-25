@@ -42,7 +42,7 @@ The **agentic patterns** are organized into 7 functional categories:
 | 19  | **Memory Tiering**     | Infrastructure | `core/memory/`      | Multi-level memory system                 |
 | 20  | **Multi-Tenancy**      | Infrastructure | `core/context.py`   | Data isolation between tenants            |
 | 21  | **Task Queue**         | Infrastructure | `core/task_queue/`  | Distributed queues for async jobs         |
-| 22  | **Evaluation**         | Infrastructure | `core/services/evaluation/` | LLM response quality evaluation       |
+| 22  | **Evaluation**         | Infrastructure | `core/evaluation/`          | LLM response quality evaluation       |
 
 !!! note "In the running app versus in the library"
     A pattern having a module does not mean the default app runs it. These are
@@ -843,32 +843,28 @@ thread or an executor if you are inside a hot async path.
 
 ### Evaluation
 
-**Module**: `core/services/evaluation/`
+**Module**: `core/evaluation/`
 
-LLM response quality evaluation using 4 RAG metrics:
+LLM-as-a-Judge quality evaluation: the event-driven `EvaluationService` judges
+completed flows, and the RAG metric evaluators score a single answer:
 
-| Metric                 | When                   | Description                                          |
-| ---------------------- | ---------------------- | ---------------------------------------------------- |
-| `faithfulness`         | Always                 | How well the answer is grounded in retrieved context |
-| `answer_relevancy`     | Always                 | How relevant the answer is to the query              |
-| `contextual_precision` | With `expected_output` | Ranking quality of retrieved documents               |
-| `contextual_recall`    | With `expected_output` | Coverage of ground-truth in retrieved context        |
+| Metric             | Evaluator                  | Description                                          |
+| ------------------ | -------------------------- | ---------------------------------------------------- |
+| `faithfulness`     | `FaithfulnessEvaluator`    | How well the answer is grounded in retrieved context |
+| `answer_relevancy` | `AnswerRelevancyEvaluator` | How relevant the answer is to the query              |
 
 ```python
-from core.services.evaluation.service import EvaluationService
+import asyncio
 
-evaluation = EvaluationService()
+from core.evaluation.metrics import FaithfulnessEvaluator
 
-metrics = await evaluation.evaluate_rag_response(
-    query=user_query,
-    response=agent_response,
-    retrieved_contexts=contexts,
-    expected_output=ground_truth,  # enables precision/recall
+score = await asyncio.to_thread(
+    FaithfulnessEvaluator().measure, user_query, agent_response, contexts
 )
-
-print(f"Faithfulness: {metrics['faithfulness']}")
-print(f"Precision:    {metrics['contextual_precision']}")
 ```
+
+`core.services.evaluation` is a deprecated shim over this package — see
+[Evaluation](../core-modules/evaluation.md).
 
 ---
 
@@ -938,7 +934,7 @@ async def handle_complex_request(query: str, agent) -> str:
 | Infrastructure | Memory Tiering  | `core/memory/`      |
 |                | Multi-Tenancy   | `core/context.py`   |
 |                | Task Queue      | `core/task_queue/`          |
-|                | Evaluation      | `core/services/evaluation/` |
+|                | Evaluation      | `core/evaluation/`          |
 
 ---
 

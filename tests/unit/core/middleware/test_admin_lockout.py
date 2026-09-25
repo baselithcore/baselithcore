@@ -53,12 +53,40 @@ class TestAdminLockoutKeying:
         failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
         manager.rate_limiter._redis = failing_redis
 
-        with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=True
+        with (
+            patch(
+                "core.middleware._admin_lockout._is_production_env", return_value=True
+            ),
+            patch(
+                "core.middleware._admin_lockout._redis_backend_declared",
+                return_value=True,
+            ),
         ):
             with pytest.raises(HTTPException) as exc:
                 await manager.check_admin_lockout("203.0.113.7")
         assert exc.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_redis_failure_without_declared_backend_stays_available(
+        self, mock_security_config
+    ):
+        """The lazily built client exists even where Redis was never declared;
+        its failure there must fall back, not 503 every admin login."""
+        manager = self._manager(mock_security_config)
+        failing_redis = MagicMock()
+        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
+        manager.rate_limiter._redis = failing_redis
+
+        with (
+            patch(
+                "core.middleware._admin_lockout._is_production_env", return_value=True
+            ),
+            patch(
+                "core.middleware._admin_lockout._redis_backend_declared",
+                return_value=False,
+            ),
+        ):
+            await manager.check_admin_lockout("203.0.113.7")
 
     @pytest.mark.asyncio
     async def test_redis_failure_falls_back_outside_production(

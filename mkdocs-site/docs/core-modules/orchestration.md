@@ -65,6 +65,14 @@ Public exports (`from core.orchestration import ...`): `Orchestrator`,
 `ToolCall`, `ToolResult`, `ExecutionPlan`, `AdaptiveController`,
 `ProcessingPath`, `AdaptiveConfig`).
 
+!!! note "Library API — not wired by default"
+    `AdaptiveController` (`adaptive.py`, fast/slow SwiftSage-style path
+    routing, with `ProcessingPath` and `AdaptiveConfig`) is exported but not
+    used by the orchestrator: no route, handler or startup hook consults it in
+    the default app, and intent routing goes through the
+    [Intent Classifier](#intent-classifier) alone. Call it from host or plugin
+    code — for example inside a custom flow handler — to pick a path per query.
+
 ---
 
 ## Orchestrator
@@ -128,6 +136,21 @@ break the tool path. See
     request-start memory reads (`recall` + `get_context_async`) run
     **concurrently**, and post-response memory writes run as a **tracked
     background task** instead of delaying the reply.
+
+!!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
+    Those background writes are awaited by nobody on the request path, so an
+    orchestrator that owns a memory manager must be closed before the database
+    and vector pools are: `await orchestrator.aclose(timeout=5.0)` waits up to
+    `timeout` seconds for pending writes, cancels the stragglers (logging how
+    many), and refuses any write scheduled afterwards. It is idempotent. The
+    application lifespan calls it for the chat service's orchestrator during
+    shutdown; host code that builds its own `Orchestrator` should do the same.
+
+!!! note "`rag_only` requests"
+    `context["rag_only"]` (forwarded from `ChatRequest.rag_only`) pins the
+    intent to `default_intent` and skips classification on both `process()`
+    and `process_stream()`; an explicit `intent=` argument still wins. See
+    [Request Flow](../architecture/request-flow.md).
 
 ### Internal Flow
 

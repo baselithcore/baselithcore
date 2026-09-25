@@ -87,41 +87,17 @@ class VectorStoreService:
         Returns:
             VectorStoreProtocol: The active provider (e.g., QdrantProvider).
         """
-        if self.config.provider == "qdrant":
-            # Lazy import: qdrant-client is an optional extra since pgvector
-            # became an alternative backend.
-            try:
-                from core.services.vectorstore.providers.qdrant_provider import (
-                    QdrantProvider,
-                )
-            except ImportError as exc:
-                raise VectorStoreError(
-                    "The 'qdrant' vector store backend requires qdrant-client: "
-                    "pip install 'baselith-core[qdrant]' — or set "
-                    "VECTORSTORE_PROVIDER=pgvector to use PostgreSQL instead."
-                ) from exc
-            return QdrantProvider(
-                host=self.config.host,
-                port=self.config.port,
-                grpc_port=self.config.grpc_port,
-                mode=self.config.qdrant_mode,
-                path=self.config.qdrant_path,
-                api_key=(
-                    self.config.qdrant_api_key.get_secret_value()
-                    if self.config.qdrant_api_key
-                    else None
-                ),
-                https=self.config.qdrant_https,
-                timeout=self.config.request_timeout_seconds,
-            )
-        elif self.config.provider == "pgvector":
-            from core.services.vectorstore.providers.pgvector_provider import (
-                PgVectorProvider,
-            )
+        from core.services.vectorstore._provider_factory import build_provider
 
-            return PgVectorProvider()
-        else:
-            raise VectorStoreError(f"Unsupported provider: {self.config.provider}")
+        return build_provider(self.config)
+
+    async def aclose(self) -> None:
+        """Close the provider's client (a pgvector provider uses the shared pool)."""
+        closer = getattr(self.provider, "aclose", None) or getattr(
+            getattr(self.provider, "client", None), "close", None
+        )
+        if closer is not None:
+            await closer()
 
     async def create_collection(
         self,
@@ -494,3 +470,11 @@ def get_vectorstore_service() -> VectorStoreService:
     if _vectorstore_service is None:
         _vectorstore_service = VectorStoreService()
     return _vectorstore_service
+
+
+async def close_vectorstore_service() -> None:
+    """Close and drop the global service, if one was built (app shutdown)."""
+    global _vectorstore_service
+    service, _vectorstore_service = _vectorstore_service, None
+    if service is not None:
+        await service.aclose()

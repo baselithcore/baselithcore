@@ -769,6 +769,10 @@
     ],
     "core.nlp": [
       "CachedEmbedder",
+      "LazyEmbedder",
+      "LazyReranker",
+      "aget_embedder",
+      "aget_reranker",
       "get_embedder",
       "get_pipeline",
       "get_reranker"
@@ -1292,9 +1296,11 @@
       "Tenant",
       "TenantPurgeBlockedError",
       "TenantService",
+      "TenantStoresPurge",
       "assert_purge_visible",
       "get_tenant_service",
       "purge_tenant_data",
+      "purge_tenant_stores",
       "tenant_scoped_tables"
     ],
     "core.services.vectorstore": [
@@ -1310,6 +1316,7 @@
       "StoredParent",
       "TextChunk",
       "VectorStoreService",
+      "close_vectorstore_service",
       "expand_to_parents",
       "get_vectorstore_service",
       "parent_chunk_id",

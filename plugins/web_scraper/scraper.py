@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.config.scraper import ScraperConfig, get_scraper_config
+from core.observability.logging import get_logger
 
 from .extractors import (
     CssSelectorExtractor,
@@ -32,6 +33,9 @@ from .models import ExtractedData, ScrapedPage
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+
+logger = get_logger(__name__)
 
 
 class Scraper:
@@ -249,12 +253,31 @@ class Scraper:
             data = self._extract(page, page.url, extractors)
             yield page, data
 
+    async def close_fetchers(self) -> None:
+        """Close the fetchers this scraper opened, keeping shared clients.
+
+        Use this for a short-lived scraper in a long-lived process: unlike
+        :meth:`close` it leaves the process-wide robots.txt client open for
+        every other scraper. Each fetcher is closed even if the other fails.
+        """
+        fetchers = (self._httpx_fetcher, self._playwright_fetcher)
+        self._httpx_fetcher = None
+        self._playwright_fetcher = None
+        for fetcher in fetchers:
+            if fetcher is None:
+                continue
+            try:
+                await fetcher.close()
+            except Exception as exc:
+                logger.warning(
+                    "scraper_fetcher_close_failed",
+                    fetcher=type(fetcher).__name__,
+                    error=type(exc).__name__,
+                )
+
     async def close(self) -> None:
-        """Close all resources."""
-        if self._httpx_fetcher:
-            await self._httpx_fetcher.close()
-        if self._playwright_fetcher:
-            await self._playwright_fetcher.close()
+        """Close all resources, including the shared robots.txt client."""
+        await self.close_fetchers()
         from ._http_pool import close_robots_client
 
         await close_robots_client()

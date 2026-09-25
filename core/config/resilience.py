@@ -35,16 +35,36 @@ class ResilienceConfig(BaseSettings):
     )
 
     # === Rate Limiting ===
-    # General API limits
-    api_rate_limit: int = Field(default=100, description="Max API requests per window")
+    # Deprecated, no effect: these only seed the defaults of the library
+    # helpers get_api_limiter()/get_llm_limiter()/RateLimiter() in
+    # core.resilience, and no framework request or LLM path calls them.
+    api_rate_limit: int = Field(
+        default=100,
+        description=(
+            "Deprecated, no effect: only the default of get_api_limiter(), "
+            "which nothing in the framework calls; HTTP request limits are "
+            "RATE_LIMIT_USER_PER_MINUTE and RATE_LIMIT_ADMIN_PER_MINUTE"
+        ),
+    )
     api_rate_window: int = Field(
-        default=60, description="API rate limit window in seconds"
+        default=60,
+        description=(
+            "Deprecated, no effect: pairs with RESILIENCE_API_RATE_LIMIT; the "
+            "HTTP rate-limit window is RATE_LIMIT_WINDOW_SECONDS"
+        ),
     )
 
-    # LLM specific limits
-    llm_rate_limit: int = Field(default=20, description="Max LLM calls per window")
+    llm_rate_limit: int = Field(
+        default=20,
+        description=(
+            "Deprecated, no effect: only the default of get_llm_limiter(), "
+            "which nothing in the framework calls, so LLM calls are not "
+            "throttled by it"
+        ),
+    )
     llm_rate_window: int = Field(
-        default=60, description="LLM rate limit window in seconds"
+        default=60,
+        description="Deprecated, no effect: pairs with RESILIENCE_LLM_RATE_LIMIT",
     )
 
     # === Retry ===

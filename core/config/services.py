@@ -330,10 +330,15 @@ class LLMConfig(BaseSettings):
         "for providers that support it (off keeps previous behaviour).",
     )
 
-    # == Semantic Caching ==
-    # If enabled, uses a vector-based cache to reuse similar past responses.
+    # == Response Caching ==
+    # Exact-match, in-process response cache. The semantic (similarity) tier
+    # is separate: SEMANTIC_CACHE_ENABLED (core.config.cache).
     enable_cache: bool = Field(
-        default=True, description="Enable semantic caching for LLM responses"
+        default=True,
+        description=(
+            "Enable the exact-match in-process LLM response cache "
+            "(the semantic tier is SEMANTIC_CACHE_ENABLED)"
+        ),
     )
 
     cache_ttl: int = Field(

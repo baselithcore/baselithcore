@@ -8,6 +8,7 @@ automatic fine-tuning and memory refinement.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from core.events import EventNames, get_event_bus
@@ -36,6 +37,9 @@ class EvolutionService:
         self.event_bus = get_event_bus()
         self.memory_manager = memory_manager
         self._running = False
+        # Handle returned by ``event_bus.subscribe`` so :meth:`stop` actually
+        # detaches the handler instead of leaving it on the bus forever.
+        self._unsubscribe: Callable[[], None] | None = None
         self._tasks: set[asyncio.Task] = set()
         self._enable_auto_finetuning = enable_auto_finetuning
         self._auto_ft_service: AutoFineTuningService | None = None
@@ -58,7 +62,7 @@ class EvolutionService:
             return
 
         self._running = True
-        self.event_bus.subscribe(
+        self._unsubscribe = self.event_bus.subscribe(
             EventNames.EVALUATION_COMPLETED, self._on_evaluation_completed
         )
 
@@ -69,7 +73,10 @@ class EvolutionService:
         logger.info("EvolutionService started")
 
     def stop(self) -> None:
-        """Stop evolution monitoring."""
+        """Stop evolution monitoring and drop the EVALUATION_COMPLETED subscription."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
         self._running = False
         if self._auto_ft_service:
             self._auto_ft_service.stop()

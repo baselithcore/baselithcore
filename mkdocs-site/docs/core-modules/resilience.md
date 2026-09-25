@@ -163,6 +163,16 @@ api = get_api_limiter()   # uses api_rate_limit / api_rate_window
 llm = get_llm_limiter()   # uses the more restrictive llm_rate_limit / llm_rate_window
 ```
 
+!!! warning "Library helpers, not a framework-wide limit"
+    Nothing in the framework calls these helpers: no request path and no LLM
+    call goes through them. `RESILIENCE_API_RATE_LIMIT`,
+    `RESILIENCE_API_RATE_WINDOW`, `RESILIENCE_LLM_RATE_LIMIT` and
+    `RESILIENCE_LLM_RATE_WINDOW` therefore only change the defaults of a
+    limiter *your* code builds, and are marked **Deprecated, no effect** in the
+    [configuration reference](../getting-started/configuration.md). HTTP
+    request limits are the `RATE_LIMIT_*` settings enforced by the security
+    middleware.
+
 ### Redis Rate Limiter
 
 Using Redis for multi-instance applications (sliding window). It falls back to
@@ -450,10 +460,6 @@ config = get_resilience_config()
 print(config.cb_fail_max)             # 5
 print(config.cb_reset_timeout)        # 60
 
-# Rate Limiter (API level)
-print(config.api_rate_limit)          # 100
-print(config.api_rate_window)         # 60
-
 # Retry
 print(config.retry_max_attempts)      # 3
 print(config.retry_base_delay)        # 1.0
@@ -467,12 +473,6 @@ All resilience settings share the `RESILIENCE_` env prefix
 RESILIENCE_CB_FAIL_MAX=5
 RESILIENCE_CB_RESET_TIMEOUT=60
 RESILIENCE_CB_HALF_OPEN_MAX=1
-
-# Rate Limiter (API + LLM)
-RESILIENCE_API_RATE_LIMIT=100
-RESILIENCE_API_RATE_WINDOW=60
-RESILIENCE_LLM_RATE_LIMIT=20
-RESILIENCE_LLM_RATE_WINDOW=60
 
 # Retry
 RESILIENCE_RETRY_MAX_ATTEMPTS=3

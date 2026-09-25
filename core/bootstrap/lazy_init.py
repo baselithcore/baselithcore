@@ -237,13 +237,14 @@ async def initialize_hierarchical_memory() -> Any:
         Any: The HierarchicalMemory instance.
     """
     from core.memory.hierarchy import HierarchicalMemory
-    from core.nlp.models import get_embedder
+    from core.nlp import aget_embedder
     from core.services.llm.service import get_llm_service
 
     logger.info("🧠 Lazy initializing HierarchicalMemory...")
 
     llm_service = get_llm_service()
-    embedder = get_embedder()
+    # Model load is seconds of blocking I/O + CPU: keep it off the event loop.
+    embedder = await aget_embedder()
 
     memory = HierarchicalMemory(
         llm_service=llm_service,

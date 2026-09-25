@@ -36,22 +36,48 @@ SUPERMEMORY_ENABLED=true
 SUPERMEMORY_API_KEY=your_api_key_here
 ```
 
+!!! warning "Opt-in by construction — `SUPERMEMORY_ENABLED` does not wire it"
+    Setting `SUPERMEMORY_ENABLED=true` does **not** make the default app use
+    Supermemory: `build_memory_provider()` (the construction site behind
+    `get_memory()` and the lazy `memory` resource) only ever returns the
+    vector-backed provider. The flag is read by `get_supermemory_config()`,
+    which merely warns when it is on without an API key. To use Supermemory,
+    construct `SupermemoryProvider` yourself and pass it as `provider=` (see
+    [Quick Start](#quick-start)). This is deliberate: a provider instance is
+    bound to one container tag, so a process-wide default would put every
+    tenant's memories in the same container.
+
 ---
 
 ## Core Concepts
 
 ### Container Tags & Multi-Tenancy
 
-Supermemory uses **container tags** to isolate data. BaselithCore maps each `(agent/tenant ID, MemoryType)` pair to a scoped sub-tag automatically:
+Supermemory uses **container tags** to isolate data. Every memory a provider
+writes goes under its one `container_tag` — the same tag that `get()`,
+`delete()`, `search()` and the profile API read — and carries its `MemoryType`
+and BaselithCore id in metadata:
 
 ```text
-container_tag="user_42"  +  MemoryType.ENTITY   →  "user_42_entity"
-container_tag="user_42"  +  MemoryType.EPISODIC  →  "user_42_episodic"
-container_tag="user_42"  +  MemoryType.LONG_TERM →  "user_42_long"
-container_tag="user_42"  +  MemoryType.SHORT_TERM →  "user_42_short"
+container_tag="user_42"  +  MemoryType.ENTITY   →  tag "user_42", metadata {"memory_type": "entity", "id": "<uuid>", ...}
 ```
 
-Searches without a `memory_type` filter span the top-level tag, covering all types for that agent.
+- `search(query, memory_type=...)` adds a Supermemory metadata filter on
+  `memory_type` (and re-checks it locally); without a type it spans every
+  memory in the container.
+- `get(id)` / `delete(id)` search with a metadata filter on `id`, so they find
+  the exact memory instead of whatever embeds nearest to a UUID.
+- `clear()` bulk-deletes the container; `clear(memory_type)` forgets the
+  memories a `memory_type`-filtered search returns, in rounds, until none
+  remain.
+- Caller metadata cannot override the `id` / `memory_type` keys.
+
+!!! note "Upgrading from per-type sub-tags"
+    Earlier releases wrote each type under a `{tag}_{type}` sub-tag
+    (`user_42_entity`, …) while every read queried the bare tag, so those
+    memories were never found again. They are not read now either; `clear()`
+    without a type also sweeps the legacy `_short`, `_long`, `_episodic`,
+    `_entity` and `_general` sub-tags so they can be removed.
 
 ### User Profiles
 
@@ -70,11 +96,15 @@ Temporary facts expire naturally. If a memory says "I have a meeting tomorrow", 
 
 ## Quick Start
 
+Supermemory is never selected automatically — build the provider and hand it to
+whatever takes a `provider=` argument.
+
 ```python
 from core.memory import SupermemoryProvider, SupermemoryContextProvider, AgentMemory
 from core.memory.types import MemoryItem, MemoryType
 
-# 1. Create a provider scoped to an agent or user
+# 1. Create a provider scoped to an agent or user (one container tag per
+#    instance — build one per tenant/user, never share one across tenants)
 provider = SupermemoryProvider(container_tag="user_42")
 
 # 2. Store memories
@@ -93,7 +123,14 @@ results = await provider.search("Python preferences", limit=5)
 for item in results:
     print(f"[{item.score:.2f}] {item.content}")
 
-# 4. Use as the provider for AgentMemory (drop-in replacement)
+# 4. Look up / forget one memory by its BaselithCore id
+item = MemoryItem(content="Prefers tabs over spaces", memory_type=MemoryType.ENTITY)
+await provider.add(item)
+assert (await provider.get(str(item.id))) is not None
+await provider.delete(str(item.id))
+
+# 5. Use as the provider for AgentMemory (pass it explicitly — the default
+#    get_memory() singleton stays on the vector-backed provider)
 memory = AgentMemory(provider=provider)
 await memory.remember("User mentioned they are switching to Rust", memory_type=MemoryType.ENTITY)
 ```
@@ -180,7 +217,7 @@ config = get_supermemory_config()
 
 | Field | Env var | Default | Description |
 |---|---|---|---|
-| `enabled` | `SUPERMEMORY_ENABLED` | `false` | Enable the integration |
+| `enabled` | `SUPERMEMORY_ENABLED` | `false` | Declares intent only: triggers the missing-API-key warning; does **not** select the provider (see above) |
 | `api_key` | `SUPERMEMORY_API_KEY` | `None` | API key from console.supermemory.ai |
 | `base_url` | `SUPERMEMORY_BASE_URL` | `None` | Override for self-hosted instances |
 | `default_tag` | `SUPERMEMORY_DEFAULT_TAG` | `baselithcore_default` | Fallback container tag |
@@ -279,7 +316,7 @@ graph LR
     Use a stable, unique identifier per agent or user (e.g., database user UUID). Avoid session IDs — sessions end, but memories should persist across them.
 
 !!! tip "Memory type routing"
-    Store user preferences and facts as `MemoryType.ENTITY`. Store conversation summaries as `MemoryType.EPISODIC`. This keeps scoped searches fast and relevant.
+    Store user preferences and facts as `MemoryType.ENTITY`. Store conversation summaries as `MemoryType.EPISODIC`. Type-scoped searches filter on that metadata, so they stay relevant.
 
 !!! tip "Profile injection"
     Call `SupermemoryContextProvider.get_context()` once per request at the system prompt level, not inside tool calls. The profile API is fast (~50 ms) but avoid redundant calls in tight loops.

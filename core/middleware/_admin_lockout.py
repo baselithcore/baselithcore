@@ -129,24 +129,12 @@ class AdminLockoutMixin:
             except HTTPException:
                 raise
             except Exception:
-                # In production the shared counter IS the control: per-replica
-                # memory is defeated by rotating replicas, so an attacker who
-                # can degrade Redis would otherwise gain unthrottled
-                # brute-force. Fail closed on privileged auth (503) unless the
-                # operator explicitly prefers availability over the control
-                # (BASELITH_LOCKOUT_FAIL_OPEN=true). Outside production the
-                # in-memory fallback keeps local development frictionless.
-                if _is_production_env() and not _lockout_fail_open():
-                    SECURITY_EVENTS.labels(reason="admin_lockout_store_down").inc()
-                    logger.error(
-                        "Redis unavailable for admin lockout in production — "
-                        "refusing privileged auth (fail closed). Set "
-                        "BASELITH_LOCKOUT_FAIL_OPEN=true to prefer availability."
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Authentication temporarily unavailable.",
-                    ) from None
+                # Same rule as a counter that was never built: fail closed in
+                # production only when the deployment declared a Redis
+                # backend. The client connects lazily, so one exists (and
+                # fails here) even where Redis was never configured, and
+                # 503-ing every admin login there is a self-inflicted outage.
+                self._refuse_without_shared_counter()
                 logger.warning(
                     "Redis failure during admin lockout check — using in-memory fallback"
                 )

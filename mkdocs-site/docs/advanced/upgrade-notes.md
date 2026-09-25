@@ -285,6 +285,9 @@ It only ever runs from `estimate_tokens_async`, off the event loop via
 regardless of the setting — several call sites invoke it once per streamed delta.
 `count_tokens_exact_available()` reports whether the setting, the SDK and the key
 are all present.
+The key is resolved through `LLMConfig.anthropic_api_key`, so
+`LLM_ANTHROPIC_API_KEY` works as well as the bare `ANTHROPIC_API_KEY`, and a
+blank value counts as unset.
 
 ### Other new switches worth knowing
 

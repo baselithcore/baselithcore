@@ -44,7 +44,12 @@ async def _preflight():
             headers={
                 "Origin": "https://app.example.com",
                 "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "Content-Type",
+                # Every header a first-party browser client sends: a single
+                # one missing from allow_headers turns the preflight into 400.
+                "Access-Control-Request-Headers": (
+                    "Content-Type, X-API-Key, Mcp-Session-Id, "
+                    "Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
+                ),
             },
         )
     return res.status_code, {k.lower(): v for k, v in res.headers.items()}
@@ -203,6 +208,38 @@ def test_a_preflight_response_carries_the_security_headers():
 def test_request_id_is_exposed_to_browsers():
     """``X-Request-ID`` is useless to a browser client unless CORS exposes it."""
     assert "X-Request-ID" in _app_snapshot()["cors_expose"]
+
+
+def test_client_headers_pass_the_preflight():
+    """The SDK's ``X-API-Key`` and the MCP/SSE headers must be allowed.
+
+    The TypeScript SDK authenticates with ``x-api-key`` and an MCP browser
+    client carries ``Mcp-Session-Id``/``MCP-Protocol-Version``; without them in
+    ``allow_headers`` the preflight fails before authentication even runs.
+    """
+    snapshot = _app_snapshot()
+    allowed = {
+        h.strip().lower()
+        for h in snapshot["preflight_headers"]["access-control-allow-headers"].split(
+            ","
+        )
+    }
+
+    assert snapshot["preflight_status"] == 200, snapshot["preflight_status"]
+    for header in (
+        "x-api-key",
+        "mcp-session-id",
+        "mcp-protocol-version",
+        "mcp-method",
+        "mcp-name",
+        "last-event-id",
+    ):
+        assert header in allowed, (header, sorted(allowed))
+
+
+def test_mcp_session_id_is_exposed_to_browsers():
+    """An MCP browser client reads its session id off the initialize response."""
+    assert "Mcp-Session-Id" in _app_snapshot()["cors_expose"]
 
 
 def test_static_mount_is_anchored_to_the_package(tmp_path):

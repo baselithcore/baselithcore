@@ -33,6 +33,19 @@ from core.services.tenant.purge import TenantPurgeBlockedError
 pytestmark = [pytest.mark.unit]
 
 
+@pytest.fixture(autouse=True)
+def _no_store_purge():
+    """These tests cover the SQL path; the vector/cache purge has its own."""
+    from core.services.tenant import purge_stores
+
+    with patch.object(
+        purge_stores,
+        "purge_tenant_stores",
+        AsyncMock(return_value=purge_stores.TenantStoresPurge()),
+    ):
+        yield
+
+
 @contextmanager
 def no_tenant():
     """Unbind the tenant contextvar (the autouse fixture binds ``default``)."""

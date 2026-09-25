@@ -8,13 +8,18 @@ from typing import Any
 
 from core.observability.logging import get_logger
 
+from ._hotreload_deps import (
+    build_dependency_graph,
+    check_dependencies,
+    find_dependent_plugins,
+    sort_names_by_dependencies,
+)
 from .interface import Plugin
 from .lifecycle import PluginLifecycleManager, PluginState
 from .lifecycle_events import emit_lifecycle_event
 from .loader import PluginLoader
 from .metrics import get_metrics_collector
 from .registry import PluginRegistry
-from .version import check_plugin_dependency
 
 logger = get_logger(__name__)
 
@@ -69,12 +74,43 @@ class HotReloadController:
         """Register an app-specific callback executed after a plugin is enabled."""
         self._runtime_activation_hook = hook
 
+    def resolve_plugin_name(self, plugin_name: str) -> str:
+        """Map a caller-supplied plugin name onto its canonical manifest name.
+
+        Callers (admin routes, config files, the runtime activator) address a
+        plugin by its directory name or by its manifest name, and the two
+        differ for several shipped plugins (``coding_agent`` vs
+        ``coding-agent``). The loader keys lifecycle state, the registry and
+        its module cache by the *manifest* name, so every lookup made with a
+        directory name missed — a disable reported "state None" and a second
+        enable loaded a duplicate instance.
+
+        Args:
+            plugin_name: Directory or manifest name of the plugin.
+
+        Returns:
+            The manifest name when it can be resolved, otherwise
+            ``plugin_name`` unchanged.
+        """
+        if self.lifecycle.get_state(plugin_name) is not None:
+            return plugin_name
+        for manifest_name, package in self.loader._module_packages.items():
+            if package == plugin_name:
+                return manifest_name
+        try:
+            plugin_dir = self.loader.resolve_plugin_dir(plugin_name)
+        except FileNotFoundError:
+            return plugin_name
+        discovery = self.loader.resource_analyzer.discover_plugin(plugin_dir)
+        return discovery.name if discovery else plugin_name
+
     async def _do_enable(
         self, plugin_name: str, config: dict[str, Any] | None = None
     ) -> bool:
         """
         Inner enable logic — must be called with ``_reload_lock`` already held.
         """
+        plugin_name = self.resolve_plugin_name(plugin_name)
         state = self.lifecycle.get_state(plugin_name)
 
         if state == PluginState.ACTIVE:
@@ -92,6 +128,7 @@ class HotReloadController:
             return False
 
         start_time = self._metrics.record_load_start(plugin_name)
+        lifecycle_name = plugin_name
 
         try:
             existing_instance = self.lifecycle.get_plugin_instance(plugin_name)
@@ -164,7 +201,7 @@ class HotReloadController:
 
         except Exception as e:
             logger.error(f"Failed to enable plugin {plugin_name}: {e}", exc_info=True)
-            await self.lifecycle.transition_to_failed(plugin_name, e)
+            await self.lifecycle.transition_to_failed(lifecycle_name, e)
             self._metrics.record_load_complete(plugin_name, start_time, success=False)
             self._metrics.record_error(plugin_name, e)
             return False
@@ -173,6 +210,7 @@ class HotReloadController:
         """
         Inner disable logic — must be called with ``_reload_lock`` already held.
         """
+        plugin_name = self.resolve_plugin_name(plugin_name)
         state = self.lifecycle.get_state(plugin_name)
 
         if state == PluginState.DISABLED:
@@ -254,6 +292,7 @@ class HotReloadController:
             True if successfully reloaded
         """
         async with self._reload_lock:
+            plugin_name = self.resolve_plugin_name(plugin_name)
             state = self.lifecycle.get_state(plugin_name)
 
             if state not in (
@@ -321,53 +360,8 @@ class HotReloadController:
                 return False
 
     async def _check_dependencies(self, plugin: Plugin) -> bool:
-        """
-        Check if plugin dependencies are satisfied.
-
-        Args:
-            plugin: Plugin instance to check
-
-        Returns:
-            True if all dependencies satisfied
-        """
-        # Check plugin dependencies (new system)
-        for dep_name, version_constraint in plugin.metadata.plugin_dependencies.items():
-            dep_plugin = self.registry.get(dep_name)
-
-            if not dep_plugin:
-                logger.error(
-                    f"Plugin {plugin.metadata.name} requires {dep_name} which is not loaded"
-                )
-                return False
-
-            if not self.lifecycle.is_active(dep_name):
-                logger.error(
-                    f"Plugin {plugin.metadata.name} requires {dep_name} which is not active"
-                )
-                return False
-
-            # Check version constraint
-            if not check_plugin_dependency(
-                dep_plugin.metadata.version, version_constraint
-            ):
-                logger.error(
-                    f"Plugin {plugin.metadata.name} requires {dep_name} {version_constraint}, "
-                    f"but found {dep_plugin.metadata.version}"
-                )
-                return False
-
-        # Legacy dependencies support
-        for dep_name in plugin.metadata.dependencies:
-            if dep_name == "core":
-                continue
-
-            if not self.registry.get(dep_name):
-                logger.error(
-                    f"Plugin {plugin.metadata.name} requires {dep_name} (legacy dependency)"
-                )
-                return False
-
-        return True
+        """Whether every dependency of ``plugin`` is registered and active."""
+        return check_dependencies(plugin, self.registry, self.lifecycle)
 
     def find_dependent_plugins(self, plugin_name: str) -> list[str]:
         """Public: the **active** plugins that depend on ``plugin_name``.
@@ -386,33 +380,8 @@ class HotReloadController:
         return self._find_dependent_plugins(plugin_name)
 
     def _find_dependent_plugins(self, plugin_name: str) -> list[str]:
-        """
-        Find plugins that depend on the given plugin.
-
-        Args:
-            plugin_name: Name of plugin to check
-
-        Returns:
-            List of plugin names that depend on this plugin
-        """
-        dependents = []
-
-        for name, state in self.lifecycle.get_all_states().items():
-            if state != PluginState.ACTIVE:
-                continue
-
-            plugin = self.registry.get(name)
-            if not plugin:
-                continue
-
-            # Check new dependency system
-            if (
-                plugin_name in plugin.metadata.plugin_dependencies
-                or plugin_name in plugin.metadata.dependencies
-            ):
-                dependents.append(name)
-
-        return dependents
+        """Active plugins that declare ``plugin_name`` as a dependency."""
+        return find_dependent_plugins(plugin_name, self.registry, self.lifecycle)
 
     async def reload_all_plugins(
         self, configs: dict[str, dict[str, Any]] | None = None
@@ -442,33 +411,8 @@ class HotReloadController:
         return results
 
     def _sort_by_dependencies(self, plugin_names: list[str]) -> list[str]:
-        """
-        Sort plugin names by dependencies (topological sort).
-
-        Args:
-            plugin_names: List of plugin names to sort
-
-        Returns:
-            Sorted list with dependencies first
-        """
-        import graphlib
-
-        graph = {}
-        for name in plugin_names:
-            plugin = self.registry.get(name)
-            if not plugin:
-                continue
-
-            # Get all dependencies (new + legacy)
-            deps = set(plugin.metadata.plugin_dependencies.keys())
-            deps.update(plugin.metadata.dependencies)
-
-            # Filter to only dependencies in our list
-            deps = {d for d in deps if d in plugin_names and d != "core"}
-            graph[name] = deps
-
-        ts = graphlib.TopologicalSorter(graph)
-        return list(ts.static_order())
+        """Order ``plugin_names`` so dependencies come first."""
+        return sort_names_by_dependencies(plugin_names, self.registry)
 
     def get_reload_status(self) -> dict[str, Any]:
         """
@@ -484,11 +428,4 @@ class HotReloadController:
 
     def _build_dependency_graph(self) -> dict[str, list[str]]:
         """Build dependency graph for visualization."""
-        graph = {}
-
-        for plugin in self.registry.get_all():
-            deps = list(plugin.metadata.plugin_dependencies.keys())
-            deps.extend([d for d in plugin.metadata.dependencies if d != "core"])
-            graph[plugin.metadata.name] = deps
-
-        return graph
+        return build_dependency_graph(self.registry)

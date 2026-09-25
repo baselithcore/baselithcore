@@ -87,7 +87,7 @@ await pubsub.close()
 ```
 
 A short-lived manager — the indexing job in `core/task_queue/jobs/indexing.py`
-builds one per invocation — does not have to close: the client hands its
+builds one per invocation, whenever a caller enqueues it — does not have to close: the client hands its
 connections back to the process-wide pool, so an unclosed manager leaks neither
 a pool nor a socket. Call `close()` when you own the lifecycle explicitly.
 
@@ -184,11 +184,18 @@ is the pydantic model every publisher sends; `publish()` serialises it with
 
 | Member            | Wire value      | Emitted by                                                                                        |
 | ----------------- | --------------- | ------------------------------------------------------------------------------------------------- |
-| `JOB_STARTED`     | `job_started`   | The indexing job (`core/task_queue/jobs/indexing.py`) when a run begins — `payload={"type": "indexing", "incremental": …}` |
+| `JOB_STARTED`     | `job_started`   | The indexing job (`core/task_queue/jobs/indexing.py`) when a run begins — `payload={"type": "indexing", "incremental": …}`. Fires only when a caller enqueues that job (see note below) |
 | `JOB_PROGRESS`    | `job_progress`  | No core producer today; use it for incremental updates from your own jobs                         |
 | `JOB_COMPLETED`   | `job_completed` | The indexing job — `payload={"processed_docs": n}`                                                |
 | `JOB_FAILED`      | `job_failed`    | The indexing job — `payload={"error": str}` before the exception is re-raised                     |
 | `GENERIC_MESSAGE` | `message`       | Free-form notifications                                                                           |
+
+!!! note "The `JOB_*` events need a producer"
+    Nothing in the default app enqueues `run_indexing_job` — it is a
+    [library job](task-queue.md#structure), not wired by default. The
+    `JOB_STARTED` / `JOB_COMPLETED` / `JOB_FAILED` events above fire only when
+    host or plugin code enqueues that job and a worker runs it; out of the box
+    no `JOB_*` event is published.
 
 ---
 

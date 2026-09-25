@@ -103,10 +103,12 @@ class StandardRagHandler(BaseFlowHandler):
         """Lazy load the embedder used for query encoding."""
         if self._embedder is None:
             try:
-                from core.nlp import get_embedder
+                from core.nlp import LazyEmbedder, get_embedder
 
                 model_name = getattr(self.config, "embedder_model", "all-MiniLM-L6-v2")
-                self._embedder = get_embedder(model_name)
+                # Lazy: the model loads on the first ``await encode()``, in a
+                # worker thread, instead of blocking the event loop here.
+                self._embedder = LazyEmbedder(get_embedder, model_name)
             except Exception as exc:
                 logger.warning(
                     "Embedder initialization failed for StandardRagHandler: %s", exc

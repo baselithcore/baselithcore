@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import contextvars
 from collections import OrderedDict
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from core.observability.logging import get_logger
 
@@ -111,6 +111,25 @@ class ColonyScopeMixin:
     def new_colony(self) -> Colony:
         """Mint a colony for one request (virtual agents already registered)."""
         return self._colony_factory()
+
+    def new_request_colony(self, context: Mapping[str, Any] | None = None) -> Colony:
+        """Mint a request colony wired to the request's memory manager.
+
+        The orchestrator exposes its ``AgentMemory`` as
+        ``context["memory_manager"]``. A colony minted without one leaves
+        memory recall and simulation write-back silently disabled, so it is
+        attached here unless the factory already supplied a manager.
+
+        Args:
+            context: The orchestration context of the request, if any.
+
+        Returns:
+            A freshly minted colony.
+        """
+        colony = self.new_colony()
+        if colony.memory_manager is None and context:
+            colony.memory_manager = context.get("memory_manager")
+        return colony
 
     def _tenant_colony(self) -> Colony:
         """The fallback colony for the current tenant, built on first use."""

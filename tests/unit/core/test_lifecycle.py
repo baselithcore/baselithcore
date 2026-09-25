@@ -1,5 +1,4 @@
 import asyncio
-import os
 from unittest.mock import patch
 
 import pytest
@@ -200,12 +199,18 @@ def test_deterministic_mode_logic():
         with patch("random.seed") as mock_seed:
             apply_deterministic_mode()
             mock_seed.assert_called_with(999)
-            assert os.environ["PYTHONHASHSEED"] == "999"
 
         overrides = get_llm_override_kwargs()
         assert overrides["temperature"] == 0.0
         assert overrides["seed"] == 999
         assert overrides["top_p"] == 1.0
+
+        # No seed on Anthropic: forwarding an unknown kwarg fails the request.
+        assert get_llm_override_kwargs("anthropic") == {"temperature": 0.0}
+        assert get_llm_override_kwargs("openai")["seed"] == 999
+
+        config.deterministic_mode = False
+        assert get_llm_override_kwargs() == {}
 
     finally:
         config.deterministic_mode = original_mode

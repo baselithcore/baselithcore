@@ -3,7 +3,7 @@
 The historical `core/agents/` entrypoints are now **compatibility shims**. The canonical implementations of **BrowserAgent** and **CodingAgent** live in the official plugins `plugins/browser_agent/` and `plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
 
 !!! info "Current State"
-    Existing imports from `core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly.
+    Existing imports from `core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly. Importing `core.agents` (like `core.goals`, the shim over `plugins.goals`) emits a `DeprecationWarning`: deprecated since 0.39, removed in 1.0.
 
 ## Module Structure
 

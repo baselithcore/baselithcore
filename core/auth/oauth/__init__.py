@@ -1,8 +1,8 @@
 """OAuth 2.1 authorization-server protocol layer.
 
 Pure protocol: no database, no HTTP framework, no user interface. The stateful
-half — client registry, code storage, key management, routes — lives in the
-``auth`` plugin. Note the direction of this package: ``core.auth.oidc`` is the
+half — client registry, code storage, key management, routes — belongs to the
+consuming application or plugin. Note the direction of this package: ``core.auth.oidc`` is the
 *relying party* side and verifies tokens minted elsewhere, while this package is
 the *authorization server* side and mints tokens others verify.
 """

@@ -7,7 +7,8 @@ The `core/nlp/` module provides Natural Language Processing utilities built on *
 ```yaml
 core/nlp/
 ├── spacy_utils.py   # Lazy-loaded spaCy pipeline with fallback
-└── models.py        # Embedding model loader (sentence-transformers)
+├── models.py        # Embedding model loader (sentence-transformers)
+└── lazy.py          # Async accessors + LazyEmbedder / LazyReranker
 ```
 
 ---
@@ -81,6 +82,29 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 
 !!! tip "Performance"
     `get_embedder()` and `get_reranker()` are wrapped in `@functools.cache` (unbounded, one entry per `model_name`), so each model is loaded once and reused across all requests; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
+
+### Loading models off the event loop
+
+`get_embedder()` / `get_reranker()` build the model synchronously — seconds of
+disk and CPU work on first call, and a `RuntimeError` when the `[rag]` extra is
+not installed. From async code use the accessors in `core/nlp/lazy.py`, which
+run the same cached factory in a worker thread (first loads are serialized, so
+two concurrent callers never build the model twice):
+
+```python
+from core.nlp import aget_embedder, aget_reranker
+
+embedder = await aget_embedder()          # VECTORSTORE_EMBEDDING_MODEL
+reranker = await aget_reranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
+```
+
+To hold a model you may never need — a dependency container built at boot —
+store a stand-in instead: `LazyEmbedder(factory, model_name)` builds the model
+on its first `await encode(...)` (off the loop), and
+`LazyReranker(factory, model_name)` on its first `predict(...)`, which the
+rerank path already runs on the inference pool. `loaded` reports whether the
+model exists yet. The chat dependencies, the semantic LLM cache and the
+hierarchical-memory bootstrap all load this way.
 
 ### Embedding cache & miss coalescing
 

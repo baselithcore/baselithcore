@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
@@ -95,6 +96,8 @@ async def stream_response(
                 stream_kwargs["temperature"] = temperature
             if max_tokens is not None:
                 stream_kwargs["max_tokens"] = max_tokens
+            # CORE_DETERMINISTIC_MODE pins sampling on streams as well.
+            stream_kwargs.update(get_llm_override_kwargs(service.config.provider))
             # Providers that read the stream's usage events publish the metered
             # record here (inert for the ones that ignore the kwarg). Without
             # it the output side is only ever ``cumulative - estimate(prompt)``

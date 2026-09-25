@@ -212,9 +212,32 @@ def inject_capabilities(
             logger.warning(f"Skill catalog rendering failed: {e}")
 
 
+def rag_only_intent(orchestrator: Any, context: dict[str, Any]) -> str | None:
+    """The intent a ``rag_only`` request is pinned to, or ``None``.
+
+    ``ChatRequest.rag_only`` asks for a retrieval-only answer. The chat
+    service forwards it as ``context["rag_only"]``; honouring it means never
+    letting the classifier route the query to reasoning, vision or swarm
+    handlers, so the request goes straight to the default (retrieval) intent.
+
+    Args:
+        orchestrator: The orchestrator (reads its ``default_intent``).
+        context: The request context.
+
+    Returns:
+        ``orchestrator.default_intent`` when ``context["rag_only"]`` is truthy,
+        otherwise ``None`` (classify as usual).
+    """
+    if not context.get("rag_only"):
+        return None
+    default_intent = getattr(orchestrator, "default_intent", None)
+    return default_intent if isinstance(default_intent, str) else None
+
+
 __all__ = [
     "annotate_modality",
     "enforce_tenant_isolation",
     "inject_capabilities",
     "inject_memory_context",
+    "rag_only_intent",
 ]

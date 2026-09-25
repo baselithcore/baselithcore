@@ -24,7 +24,11 @@ from core.services.feedback_service import get_feedback_service
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
 
-BASE_DIR = Path(__file__).resolve().parent.parent / "static"
+#: Dashboard asset root. The admin page ships with the core static bundle
+#: (``core/static``, also mounted at ``/static`` by the app factory), not with
+#: this plugin: ``parents[2]`` is the repo/package root
+#: (plugins/api_routers/admin.py -> plugins/api_routers -> plugins -> <root>).
+BASE_DIR = Path(__file__).resolve().parents[2] / "core" / "static"
 
 
 def _get_admin_user() -> str:
@@ -108,6 +112,37 @@ async def admin_data(
         top_limit=top_limit,
     )
     return JSONResponse(analytics)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard companions of the API-key control plane
+# ---------------------------------------------------------------------------
+#
+# The dashboard authenticates with HTTP Basic, which ``require_admin`` /
+# ``require_admin_or_job`` (X-API-Key / Bearer only) deliberately do not
+# accept: browser-ambient Basic credentials are replayed on cross-site
+# requests, so they stay confined to this ``/admin/*`` surface. The routes
+# below reuse the API handlers so the payloads cannot drift; the unsafe one
+# (``POST /admin/reindex``) is covered by ``CSRFOriginMiddleware`` like every
+# other state-changing request.
+
+
+@router.get("/admin/status")
+def admin_status(_user: str = Depends(verify_credentials)) -> dict[str, object]:
+    """Return the ``/status`` payload for the dashboard (Basic Auth)."""
+    from plugins.api_routers.status import status as system_status
+
+    return system_status(_user)
+
+
+@router.post("/admin/reindex")
+async def admin_reindex(
+    _user: str = Depends(verify_credentials),
+) -> dict[str, object]:
+    """Run the incremental ``/reindex`` for the dashboard (Basic Auth)."""
+    from plugins.api_routers.index import reindex
+
+    return await reindex()
 
 
 # ---------------------------------------------------------------------------

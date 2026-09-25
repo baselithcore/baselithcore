@@ -14,6 +14,7 @@ core/observability/
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
 ├── otel_exporters.py        # OTLP protocol selection (gRPC / HTTP) + endpoint shaping
 ├── otel_logs.py             # LoggerProvider — log records exported over OTLP
+├── otel_swap.py             # Swappable span pipeline: re-setup after shutdown
 ├── otel_instrumentation.py  # what gets instrumented, and the propagators
 ├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
 ├── agent_spans.py    # Agent-attributed spans (OTel GenAI: invoke_agent / execute_tool)
@@ -154,12 +155,25 @@ that made it.
   still traced): probes and scrapes hit every pod every 10–30 s and carry no
   user work, so tracing them was pure exporter/collector cost. Setting the
   SDK's own `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` (or `OTEL_PYTHON_EXCLUDED_URLS`)
-  replaces that default rather than adding to it.
+  replaces that default rather than adding to it. The per-message ASGI
+  `receive`/`send` sub-spans are dropped too — they triple span volume and
+  carry nothing a reader wants; set `BASELITH_OTEL_ASGI_SUB_SPANS=true` to
+  keep them when debugging ASGI streaming itself.
 - The **W3C TraceContext + Baggage** composite propagator for cross-service
   context propagation.
 
 `shutdown_telemetry()` (called on lifespan shutdown, plus an `atexit` safety
-net) flushes the batch processors so no spans/metrics are lost on exit.
+net registered once per process) flushes the batch processors so no
+spans/metrics are lost on exit.
+
+Setting telemetry up again after a shutdown in the same process (an app whose
+lifespan runs twice, a test suite) works for traces. OpenTelemetry lets the
+global `TracerProvider` be set only once per process and refuses to replace it,
+so the provider built by the first setup is kept and each later setup swaps
+fresh exporters in behind it (`otel_swap.py`). The **resource and sampler of
+the first setup stay in force**. OTLP metric push cannot be re-armed that way —
+a `MeterProvider`'s readers are fixed at construction — so a second setup logs
+a warning and leaves OTel metrics off (the Prometheus scrape is unaffected).
 
 !!! warning "Instrumentation is wired in `create_app()`, not in the lifespan"
     The FastAPI instrumentation works by wrapping `build_middleware_stack`, and
@@ -519,6 +533,9 @@ LOG_LEVEL_CONSOLE=INFO          # Console log level: DEBUG, INFO, WARNING, ERROR
 LOG_LEVEL_FILE=INFO             # File log level
 LOG_JSON=true                   # Emit JSON (production) or human-readable (dev)
 LOG_MASKING_ENABLED=true        # Redact PII/credentials from log messages
+BASELITH_LOG_DIR=logs           # File-sink directory (plain env var); pin an
+                                # absolute path so the sink does not depend on
+                                # the working directory
 
 # OpenTelemetry
 TELEMETRY_ENABLED=false         # Master switch for OTel traces/metrics/logs
@@ -535,6 +552,10 @@ SERVICE_VERSION=                                 # service.version (defaults to 
 # pydantic-settings — see "OpenInference enrichment" above)
 BASELITH_OPENINFERENCE_ENABLED=false             # OpenInference attrs on LLM spans
 BASELITH_OPENINFERENCE_CAPTURE_CONTENT=false     # + prompt/completion text (PII!)
+
+# ASGI receive/send sub-spans under every request (plain env var, off by
+# default; see "The OTel backbone" above)
+BASELITH_OTEL_ASGI_SUB_SPANS=false
 ```
 
 !!! info "Telemetry is opt-in; Prometheus is always on"

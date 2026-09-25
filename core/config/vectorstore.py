@@ -60,15 +60,17 @@ class VectorStoreConfig(BaseSettings):
     embedding_fallback_model: str = Field(
         default="sentence-transformers/all-MiniLM-L6-v2",
         description=(
-            "Operator fallback embedding model. Use it together with "
-            "VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; "
-            "switching models requires a matching vector dimension and a fresh "
-            "or migrated collection."
+            "Deprecated, no effect: nothing reads it; to switch embedding "
+            "model set VECTORSTORE_EMBEDDING_MODEL and VECTORSTORE_EMBEDDING_DIM "
+            "together, on a fresh or migrated collection"
         ),
     )
     embedding_fallback_dim: int = Field(
         default=384,
-        description="Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL.",
+        description=(
+            "Deprecated, no effect: nothing reads it; the vector dimension is "
+            "VECTORSTORE_EMBEDDING_DIM"
+        ),
     )
 
     # Embeddings are deterministic per model, so a long TTL is safe; the TTL

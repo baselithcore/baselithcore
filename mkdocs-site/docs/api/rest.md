@@ -77,9 +77,16 @@ posture for an API with no browser front end. Credentials are allowed for a
 concrete origin list and disabled under the `*` wildcard, which is the
 standard rule (a wildcard and credentials cannot be combined).
 
-Three response headers are **exposed** to the calling script, since a browser
+Allowed request headers (anything else fails the preflight): `Content-Type`,
+`Authorization`, `X-API-Key` (the TypeScript SDK's API-key header),
+`X-Requested-With`, `X-Request-ID`, `Idempotency-Key`, `Accept`, `Origin`, the
+MCP Streamable HTTP headers `Mcp-Session-Id`, `Mcp-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name`, and `Last-Event-ID` (SSE resumption).
+
+Four response headers are **exposed** to the calling script, since a browser
 cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
-report), `Idempotency-Replayed` and `Retry-After`.
+report), `Idempotency-Replayed`, `Retry-After`, and `Mcp-Session-Id` (how an
+MCP browser client learns its session id from the `initialize` response).
 
 A preflight answer stays cacheable in the browser for **7200 seconds**. The
 framework default is Starlette's 600s, at which a dashboard making
@@ -223,7 +230,7 @@ The framework uses two distinct schemes depending on the surface:
 | Chat (REST + WebSocket), async agent runs, `POST /feedback`, frontend manifest, webhooks / privacy / compliance (plus a capability scope) | API key or Bearer token | `require_user` |
 | Plugin management, `GET /status`, `GET /feedbacks` | API key or Bearer token (`admin` role) | `require_admin` |
 | Indexing, Backstage | API key or Bearer token (`admin` or `job` role) | `require_admin_or_job` |
-| Admin HTML/analytics/DLQ, tenant admin, prompt catalog, `/runs`, `/approvals`, `/metrics` (while `METRICS_AUTH_REQUIRED=true`, the default) | HTTP Basic Auth | `verify_credentials` |
+| Admin HTML/analytics/DLQ, `/admin/status`, `/admin/reindex`, tenant admin, prompt catalog, `/runs`, `/approvals`, `/metrics` (while `METRICS_AUTH_REQUIRED=true`, the default) | HTTP Basic Auth | `verify_credentials` |
 
 ### API Key / Bearer token
 
@@ -506,7 +513,10 @@ Readiness probe (no auth). Verifies critical dependencies and returns **503**
 when the database is unreachable, so Kubernetes drains traffic from the pod
 until it recovers. Redis and the vector store are reported but advisory
 (Redis falls back to in-memory; recall degrades to keyword search), so
-neither gates readiness. Results are cached (~30s).
+neither gates readiness. `vectorstore` is `false` both when the store is
+unreachable and when it answers but the configured collection does not exist
+(the server log says which); a provider without a cheap probe (pgvector)
+reports `true`. Results are cached (~30s).
 
 **Response** (200 OK / 503 Service Unavailable):
 
@@ -571,10 +581,35 @@ endpoints under `/admin/dlq` are listed with the other
 
 ### `GET /admin` - Admin Dashboard
 
-Serves the admin HTML page (`static/admin.html`).
+Serves the admin HTML page (`core/static/admin.html`). The page and every
+call it makes use the same Basic credentials: it reads `/admin/data` and
+`/admin/status` and triggers `/admin/reindex` — never the API-key routes
+(`/status`, `/reindex`), which reject Basic credentials. The page's `POST` is
+same-origin, which the [CSRF guard](../advanced/security.md#csrf-protection)
+admits without an `ALLOW_ORIGINS` entry.
 
 ```bash
 curl -u admin:password http://localhost:8000/admin
+```
+
+### `GET /admin/status` - Status for the dashboard
+
+The [`GET /status`](#get-status---system-status) payload behind Basic Auth, so the
+dashboard can read it with the credentials it already holds.
+
+```bash
+curl -u admin:password http://localhost:8000/admin/status
+```
+
+### `POST /admin/reindex` - Reindex from the dashboard
+
+Runs the same incremental reindex as [`POST /reindex`](#post-reindex) (same
+`409` while a job runs, same response) behind Basic Auth. It is a
+state-changing request, so a browser `POST` from another site is refused by
+the CSRF guard (`403`); a same-origin `POST` from the dashboard passes.
+
+```bash
+curl -u admin:password -X POST http://localhost:8000/admin/reindex
 ```
 
 ### `GET /admin/data` - Analytics JSON

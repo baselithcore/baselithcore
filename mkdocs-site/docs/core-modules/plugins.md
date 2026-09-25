@@ -43,7 +43,8 @@ core/plugins/
 ├── result.py             # SkillResult envelope (ok/fail/partial)
 ├── load_gates.py         # Compatibility/config gates before init (fail-closed)
 ├── lifecycle.py          # Lifecycle management
-├── hotreload.py          # Hot reload support
+├── hotreload.py          # Hot reload support (names resolved to manifest names)
+├── _hotreload_deps.py    # Dependency checks/ordering used by hot reload
 ├── metrics.py            # Plugin metrics collection
 ├── health.py             # Health checking + PluginHealth
 ├── version.py            # Version management
@@ -755,6 +756,15 @@ await controller.reload_plugin("weather-agent")
 ```
 
 All three methods are coroutines and return a `bool` indicating success.
+
+A plugin can be named by its **manifest name or its directory name** — they
+differ for several shipped plugins (`coding_agent` vs `coding-agent`). The
+loader keys lifecycle state and the registry by the manifest name, so each
+method first maps the name it was given onto that key with
+`controller.resolve_plugin_name(name)`; the `/api/plugins/{name}/…` admin
+routes do the same before reporting the resulting state. An unknown name is
+returned unchanged, so the call fails on the unknown name rather than on a
+directory that happened to match.
 
 ### Lifecycle events
 

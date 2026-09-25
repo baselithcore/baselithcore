@@ -72,8 +72,8 @@ context-manager support — call `startup()`/`shutdown()` explicitly.
 ## Deterministic Mode
 
 `core/lifecycle/deterministic.py` provides reproducibility helpers, gated on
-`deterministic_mode` in the core config. They are plain module functions —
-there is no startup-ordering manager here.
+`deterministic_mode` (`CORE_DETERMINISTIC_MODE`) in the core config. They are
+plain module functions — there is no startup-ordering manager here.
 
 ```python
 from core.lifecycle.deterministic import (
@@ -81,17 +81,35 @@ from core.lifecycle.deterministic import (
     get_llm_override_kwargs,
 )
 
-# Seed random / numpy / PYTHONHASHSEED (no-op unless deterministic_mode is on)
+# Seed random / numpy (no-op unless deterministic_mode is on).
+# Called once by the application lifespan at startup.
 apply_deterministic_mode(seed=42)
 
 # LLM kwargs that pin sampling when deterministic_mode is on, else {}
-overrides = get_llm_override_kwargs()
+overrides = get_llm_override_kwargs("openai")
 # -> {"temperature": 0.0, "seed": <random_seed>, "top_p": 1.0} when enabled
-llm_response = await llm.complete(prompt, **overrides)
+# -> {"temperature": 0.0} for "anthropic" (no seed parameter in its API)
 ```
+
+`LLMService` merges `get_llm_override_kwargs(<configured provider>)` into
+every generation path — plain text (`generate_response`), structured / native
+tool calling (`generate`), the message API the agent loop runs on
+(`generate_messages`), token streaming (`generate_response_stream`) and event
+streaming (`generate_stream_events`). The override wins over a
+caller-supplied `temperature`.
 
 When `deterministic_mode` is disabled, `apply_deterministic_mode()` returns
 without changing anything and `get_llm_override_kwargs()` returns `{}`.
+
+!!! note "What deterministic mode does not cover"
+    - **Hash randomization.** `PYTHONHASHSEED` is read once when the
+      interpreter starts; set it in the process environment before launch
+      if set/dict iteration order must be reproducible.
+    - **Caches.** Response, semantic and retrieval caches stay as configured;
+      disable them explicitly for a clean replay.
+    - **Provider-side nondeterminism.** `seed` is best-effort on the providers
+      that accept it, and a fallback-chain stage receives the pin computed for
+      the primary provider.
 
 ---
 

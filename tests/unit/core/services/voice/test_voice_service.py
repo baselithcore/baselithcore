@@ -17,6 +17,7 @@ def voice_service():
         mock_config.return_value.openai_api_key = SecretStr("fake-key")
         mock_config.return_value.elevenlabs_api_key = SecretStr("fake-key")
         mock_config.return_value.google_api_key = SecretStr("fake-google-key")
+        mock_config.return_value.provider = "openai"
 
         service = VoiceService(
             openai_api_key="fake-key",
@@ -31,6 +32,17 @@ async def test_init(voice_service):
     assert voice_service.default_provider == VoiceProvider.OPENAI
     assert voice_service._openai_key == "fake-key"
     assert voice_service._elevenlabs_key == "fake-key"
+
+
+def test_default_provider_comes_from_voice_provider_setting():
+    """VOICE_PROVIDER is honoured when no provider is passed explicitly."""
+    with patch("core.services.voice.service.get_voice_config") as mock_config:
+        mock_config.return_value.openai_api_key = None
+        mock_config.return_value.elevenlabs_api_key = SecretStr("k")
+        mock_config.return_value.provider = "elevenlabs"
+        assert VoiceService().default_provider == VoiceProvider.ELEVENLABS
+        explicit = VoiceService(default_provider=VoiceProvider.GOOGLE)
+        assert explicit.default_provider == VoiceProvider.GOOGLE
 
 
 @pytest.mark.asyncio
@@ -210,6 +222,7 @@ async def test_missing_api_keys():
         mock_config.return_value.elevenlabs_api_key = None
         mock_config.return_value.google_api_key = None
         mock_config.return_value.google_credentials_path = None
+        mock_config.return_value.provider = "openai"
 
         # Initialize service AFTER patching config
         empty_service = VoiceService(

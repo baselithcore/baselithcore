@@ -60,6 +60,17 @@ class TestCoreConfig:
             assert config.debug is True
             assert config.max_workers == 8
 
+    def test_documents_dir_is_not_created(self, tmp_path, monkeypatch):
+        """``documents_dir`` is unused, so constructing the config must not
+        litter the working directory with it; plugins/ and data/ stay eager."""
+        monkeypatch.chdir(tmp_path)
+        with patch.dict(os.environ, {}, clear=True):
+            CoreConfig(_env_file=None)
+
+        assert not (tmp_path / "documents").exists()
+        assert (tmp_path / "plugins").is_dir()
+        assert (tmp_path / "data").is_dir()
+
 
 class TestLLMConfig:
     """Tests for LLMConfig."""

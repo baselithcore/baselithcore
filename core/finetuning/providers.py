@@ -6,7 +6,7 @@ Contains provider-specific training, status, and job management logic.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.config import get_finetuning_config
 from core.observability.logging import get_logger
@@ -19,7 +19,60 @@ from .models import (
     TrainingStatus,
 )
 
+if TYPE_CHECKING:
+    import httpx
+    from openai import AsyncOpenAI
+
 logger = get_logger(__name__)
+
+#: Explicit request timeout for the provider APIs (seconds). File uploads can
+#: be large, so it is generous — but finite: the SDK/httpx defaults are 600 s
+#: and "none" respectively.
+PROVIDER_TIMEOUT_S = 300.0
+
+# Provider vocabularies differ from ``TrainingStatus``; mapping them explicitly
+# keeps a new or renamed upstream status from raising ``ValueError`` mid-poll.
+_OPENAI_STATUS: dict[str, TrainingStatus] = {
+    "validating_files": TrainingStatus.VALIDATING,
+    "queued": TrainingStatus.QUEUED,
+    "running": TrainingStatus.RUNNING,
+    "succeeded": TrainingStatus.SUCCEEDED,
+    "failed": TrainingStatus.FAILED,
+    "cancelled": TrainingStatus.CANCELLED,
+}
+_TOGETHER_STATUS: dict[str, TrainingStatus] = {
+    "pending": TrainingStatus.PENDING,
+    "queued": TrainingStatus.QUEUED,
+    "running": TrainingStatus.RUNNING,
+    "compressing": TrainingStatus.RUNNING,
+    "uploading": TrainingStatus.RUNNING,
+    "completed": TrainingStatus.SUCCEEDED,
+    "error": TrainingStatus.FAILED,
+    "user_error": TrainingStatus.FAILED,
+    "cancel_requested": TrainingStatus.CANCELLED,
+    "cancelled": TrainingStatus.CANCELLED,
+}
+
+
+def map_status(provider: str, raw: str | None) -> TrainingStatus:
+    """Translate a provider's job status into a :class:`TrainingStatus`.
+
+    Args:
+        provider: ``"openai"`` or ``"together"``.
+        raw: The status string the provider returned.
+
+    Returns:
+        The mapped status; an unknown value maps to ``PENDING`` with a warning
+        rather than failing the status poll.
+    """
+    table = _OPENAI_STATUS if provider == "openai" else _TOGETHER_STATUS
+    status = table.get(str(raw or "").lower())
+    if status is None:
+        logger.warning(
+            "Unknown %s fine-tuning status %r; treating as pending", provider, raw
+        )
+        return TrainingStatus.PENDING
+    return status
 
 
 class OpenAIProvider:
@@ -36,11 +89,34 @@ class OpenAIProvider:
         """Initialize OpenAI provider."""
         _cfg_key = get_finetuning_config().openai_api_key
         self.api_key = api_key or (_cfg_key.get_secret_value() if _cfg_key else None)
+        self._client: AsyncOpenAI | None = None
 
     @property
     def is_available(self) -> bool:
         """Check if provider is configured."""
         return bool(self.api_key)
+
+    def client(self) -> AsyncOpenAI:
+        """Return the provider's shared SDK client, creating it on first use.
+
+        Raises:
+            ImportError: If the ``openai`` package is not installed.
+        """
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError(
+                    "openai package required: pip install openai"
+                ) from None
+            self._client = AsyncOpenAI(api_key=self.api_key, timeout=PROVIDER_TIMEOUT_S)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the shared SDK client, if one was created."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.close()
 
     async def train(
         self,
@@ -52,12 +128,7 @@ class OpenAIProvider:
         if not self.api_key:
             raise ValueError("OpenAI API key not configured")
 
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("openai package required: pip install openai") from None
-
-        client = AsyncOpenAI(api_key=self.api_key)
+        client = self.client()
 
         # Upload training file
         with open(train_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
@@ -94,7 +165,7 @@ class OpenAIProvider:
             id=job.id,
             provider="openai",
             base_model=config.base_model,
-            status=TrainingStatus(job.status),
+            status=map_status("openai", job.status),
             training_file_id=train_file.id,
             validation_file_id=val_file_id,
         )
@@ -104,16 +175,13 @@ class OpenAIProvider:
 
     async def get_status(self, job_id: str) -> FineTuneJob:
         """Get OpenAI job status."""
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=self.api_key)
-        job = await client.fine_tuning.jobs.retrieve(job_id)
+        job = await self.client().fine_tuning.jobs.retrieve(job_id)
 
         return FineTuneJob(
             id=job.id,
             provider="openai",
             base_model=job.model,
-            status=TrainingStatus(job.status),
+            status=map_status("openai", job.status),
             fine_tuned_model=job.fine_tuned_model,
             trained_tokens=job.trained_tokens or 0,
             error=job.error.message if job.error else None,
@@ -122,10 +190,7 @@ class OpenAIProvider:
     async def cancel(self, job_id: str) -> bool:
         """Cancel an OpenAI fine-tuning job."""
         try:
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=self.api_key)
-            await client.fine_tuning.jobs.cancel(job_id)
+            await self.client().fine_tuning.jobs.cancel(job_id)
             return True
         except Exception as e:
             logger.error(f"Failed to cancel OpenAI job {job_id}: {e}")
@@ -134,17 +199,14 @@ class OpenAIProvider:
     async def list_jobs(self, limit: int = 10) -> list[FineTuneJob]:
         """List OpenAI fine-tuning jobs."""
         try:
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=self.api_key)
-            openai_jobs = await client.fine_tuning.jobs.list(limit=limit)
+            openai_jobs = await self.client().fine_tuning.jobs.list(limit=limit)
 
             return [
                 FineTuneJob(
                     id=job.id,
                     provider="openai",
                     base_model=job.model,
-                    status=TrainingStatus(job.status),
+                    status=map_status("openai", job.status),
                     fine_tuned_model=job.fine_tuned_model,
                 )
                 for job in openai_jobs.data
@@ -167,11 +229,24 @@ class TogetherProvider:
         """Initialize together.ai provider."""
         _cfg_key = get_finetuning_config().together_api_key
         self.api_key = api_key or (_cfg_key.get_secret_value() if _cfg_key else None)
+        self._http: httpx.AsyncClient | None = None
 
     @property
     def is_available(self) -> bool:
         """Check if provider is configured."""
         return bool(self.api_key)
+
+    def client(self) -> httpx.AsyncClient:
+        """Return the provider's shared SSRF-hardened client (created lazily)."""
+        if self._http is None:
+            self._http = create_hardened_async_client(timeout=PROVIDER_TIMEOUT_S)
+        return self._http
+
+    async def aclose(self) -> None:
+        """Close the shared HTTP client, if one was created."""
+        client, self._http = self._http, None
+        if client is not None:
+            await client.aclose()
 
     async def train(
         self,
@@ -183,36 +258,36 @@ class TogetherProvider:
         if not self.api_key:
             raise ValueError("together.ai API key not configured")
 
-        async with create_hardened_async_client() as client:
-            # Upload file
-            with open(train_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
-                file_response = await client.post(
-                    "https://api.together.xyz/v1/files",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    files={"file": f},
-                    data={"purpose": "fine-tune"},
-                    timeout=300.0,
-                )
-                file_response.raise_for_status()
-                file_data = file_response.json()
-
-            # Create fine-tuning job
-            job_response = await client.post(
-                "https://api.together.xyz/v1/fine-tunes",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "training_file": file_data["id"],
-                    "model": config.base_model,
-                    "n_epochs": config.n_epochs if config.n_epochs != "auto" else 3,
-                    "suffix": config.suffix,
-                },
-                timeout=60.0,
+        client = self.client()
+        # Upload file
+        with open(train_path, "rb") as f:  # noqa: ASYNC230 - the SDK streams this handle; the upload itself is awaited
+            file_response = await client.post(
+                "https://api.together.xyz/v1/files",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                files={"file": f},
+                data={"purpose": "fine-tune"},
+                timeout=300.0,
             )
-            job_response.raise_for_status()
-            job_data = job_response.json()
+            file_response.raise_for_status()
+            file_data = file_response.json()
+
+        # Create fine-tuning job
+        job_response = await client.post(
+            "https://api.together.xyz/v1/fine-tunes",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "training_file": file_data["id"],
+                "model": config.base_model,
+                "n_epochs": config.n_epochs if config.n_epochs != "auto" else 3,
+                "suffix": config.suffix,
+            },
+            timeout=60.0,
+        )
+        job_response.raise_for_status()
+        job_data = job_response.json()
 
         ft_job = FineTuneJob(
             id=job_data["id"],
@@ -226,19 +301,18 @@ class TogetherProvider:
 
     async def get_status(self, job_id: str) -> FineTuneJob:
         """Get together.ai job status."""
-        async with create_hardened_async_client() as client:
-            response = await client.get(
-                f"https://api.together.xyz/v1/fine-tunes/{job_id}",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self.client().get(
+            f"https://api.together.xyz/v1/fine-tunes/{job_id}",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return FineTuneJob(
             id=data["id"],
             provider="together",
             base_model=data["model"],
-            status=TrainingStatus(data["status"]),
+            status=map_status("together", data.get("status")),
             fine_tuned_model=data.get("output_name"),
         )
 
@@ -249,15 +323,14 @@ class TogetherProvider:
             return False
 
         try:
-            async with create_hardened_async_client() as client:
-                response = await client.post(
-                    f"https://api.together.xyz/v1/fine-tunes/{job_id}/cancel",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                logger.info(f"together.ai fine-tuning job cancelled: {job_id}")
-                return True
+            response = await self.client().post(
+                f"https://api.together.xyz/v1/fine-tunes/{job_id}/cancel",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            logger.info(f"together.ai fine-tuning job cancelled: {job_id}")
+            return True
         except Exception as e:
             logger.error(f"Failed to cancel together.ai job {job_id}: {e}")
             return False
@@ -268,14 +341,13 @@ class TogetherProvider:
             return []
 
         try:
-            async with create_hardened_async_client() as client:
-                response = await client.get(
-                    "https://api.together.xyz/v1/fine-tunes",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await self.client().get(
+                "https://api.together.xyz/v1/fine-tunes",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
             jobs_data = data.get("data", data) if isinstance(data, dict) else data
             if not isinstance(jobs_data, list):
@@ -286,7 +358,7 @@ class TogetherProvider:
                     id=job["id"],
                     provider="together",
                     base_model=job.get("model", "unknown"),
-                    status=TrainingStatus(job.get("status", "unknown")),
+                    status=map_status("together", job.get("status")),
                     fine_tuned_model=job.get("output_name"),
                 )
                 for job in jobs_data[:limit]
@@ -296,4 +368,4 @@ class TogetherProvider:
             return []
 
 
-__all__ = ["OpenAIProvider", "TogetherProvider"]
+__all__ = ["PROVIDER_TIMEOUT_S", "OpenAIProvider", "TogetherProvider", "map_status"]

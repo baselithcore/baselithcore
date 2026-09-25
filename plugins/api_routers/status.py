@@ -50,11 +50,12 @@ async def _check_database() -> bool:
 
 
 async def _check_vectorstore() -> bool:
-    """Return ``True`` if the vector store answers (advisory, not required).
+    """Return ``True`` if the vector store answers and holds the collection.
 
     Advisory like Redis: recall degrades to keyword search without it, so it
     must not gate readiness — but an operator watching ``/health/ready``
-    should see it down.
+    should see it down. Both an unreachable store and a missing collection
+    report ``False``; the log line says which.
     """
     try:
         from core.services.vectorstore.service import get_vectorstore_service
@@ -63,10 +64,17 @@ async def _check_vectorstore() -> bool:
         exists_check = getattr(service.provider, "collection_exists", None)
         if exists_check is None:
             return True  # provider without a cheap probe: report nothing worse
-        await exists_check(service.config.collection_name)
+        collection = service.config.collection_name
+        if not await exists_check(collection):
+            logger.info(
+                "Readiness vector store check (advisory): reachable, but "
+                "collection %r does not exist",
+                collection,
+            )
+            return False
         return True
     except Exception as exc:
-        logger.info("Readiness vector store check (advisory) failed: %s", exc)
+        logger.info("Readiness vector store check (advisory) unreachable: %s", exc)
         return False
 
 
