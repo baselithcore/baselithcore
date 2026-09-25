@@ -975,6 +975,11 @@ Variables defined in the plugin's `.env` file are automatically:
    namespace** (see below).
 2. Merged into the plugin's `config` dictionary that is passed to the
    `initialize(config)` method.
+3. Registered as owned by the plugin (`register_owned_env`), so the startup
+   [environment drift check](config.md#environment-drift) never reports a
+   plugin key as a misspelled core setting — even one a letter away from it.
+   A plugin that writes a variable into `os.environ` from its own code should
+   call `core.config.register_owned_env(name)` the same way.
 
 #### Two gates: namespace allowlist, then protected-key denylist
 

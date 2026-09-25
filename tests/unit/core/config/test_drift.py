@@ -10,13 +10,23 @@ worth reading.
 import logging
 import os
 
+import pytest
+
 import core.config  # noqa: F401  — binds every settings class for the name table
+from core.config import drift
 from core.config.drift import (
     EnvSuspect,
     known_setting_names,
+    register_owned_env,
     suspected_typos,
     warn_on_suspected_typos,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_owned_env(monkeypatch):
+    """Registrations are process-wide; keep each test's own."""
+    monkeypatch.setattr(drift, "_OWNED_ENV", set())
 
 
 class TestKnownSettingNames:
@@ -57,6 +67,28 @@ class TestSuspectedTypos:
             "BASELITH_FLAG_NEW_ROUTER": "true",
             "BASELITH_PROMPT_VARIANTS_REACT_SYSTEM": "1:50,2:50",
         }
+
+        assert suspected_typos(environ) == []
+
+    def test_owned_names_are_not_suspects(self):
+        """A plugin's own variable is not a misspelled core setting.
+
+        ``ACME_PROJECT_PLANNER_ENABLE_TEST_CASES`` comes from the plugin's
+        ``.env`` and ``SECRETS_KEY`` is written by the plugin itself; both sit a
+        prefix away from a core setting and were reported as
+        typos the operator could not fix.
+        """
+        environ = {
+            "ACME_PROJECT_PLANNER_ENABLE_TEST_CASES": "false",
+            "SECRETS_KEY": "derived",
+        }
+        assert [s.name for s in suspected_typos(environ)] == [
+            "ACME_PROJECT_PLANNER_ENABLE_TEST_CASES",
+            "SECRETS_KEY",
+        ]
+
+        register_owned_env("acme_project_planner_enable_test_cases")
+        register_owned_env("SECRETS_KEY", "")
 
         assert suspected_typos(environ) == []
 

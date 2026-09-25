@@ -9,6 +9,12 @@ what makes it usable: plenty of legitimate variables are read through
 ``os.getenv`` instead of a settings field, and flagging those would train
 everyone to ignore the warning. A name close to a real setting — but not equal
 to one — is almost always a mistake.
+
+Names another component owns are exempt: a plugin's ``.env`` exports keys in its
+own namespace, and a plugin may write engine keys into the environment itself.
+Those are one prefix away from a core setting by construction, and reporting
+them asks the operator to fix something that is not broken. Whoever writes such
+a name declares it with :func:`register_owned_env`.
 """
 
 from __future__ import annotations
@@ -30,6 +36,22 @@ DYNAMIC_PREFIXES: tuple[str, ...] = ("BASELITH_FLAG_", "BASELITH_PROMPT_VARIANTS
 #: catches a dropped or transposed character in a realistic name while leaving
 #: genuinely different names (``CORE_DATA_DIR`` vs ``CORE_DOCUMENTS_DIR``) apart.
 SIMILARITY_CUTOFF = 0.86
+
+#: Upper-case names declared through :func:`register_owned_env`.
+_OWNED_ENV: set[str] = set()
+
+
+def register_owned_env(*names: str) -> None:
+    """Declare environment variables that belong to a component, not the core.
+
+    Call it for every name a plugin ``.env`` exports or a plugin writes into
+    ``os.environ`` itself. :func:`suspected_typos` then never reports them,
+    however close they are to a core setting.
+
+    Args:
+        *names: Variable names, any case; empty names are ignored.
+    """
+    _OWNED_ENV.update(name.upper() for name in names if name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +114,7 @@ def suspected_typos(
     suspects: list[EnvSuspect] = []
     for name in sorted(environ if environ is not None else os.environ):
         upper = name.upper()
-        if upper in known or upper.startswith(DYNAMIC_PREFIXES):
+        if upper in known or upper in _OWNED_ENV or upper.startswith(DYNAMIC_PREFIXES):
             continue
         matches = difflib.get_close_matches(upper, candidates, n=1, cutoff=cutoff)
         if matches:
@@ -124,6 +146,7 @@ __all__ = [
     "SIMILARITY_CUTOFF",
     "EnvSuspect",
     "known_setting_names",
+    "register_owned_env",
     "suspected_typos",
     "warn_on_suspected_typos",
 ]
