@@ -97,6 +97,14 @@ class FakeRedis:
     def zrem(self, key, member):
         return 1 if self.zsets.get(key, {}).pop(member, None) is not None else 0
 
+    def zrangebyscore(self, key, low, high):
+        bucket = self.zsets.get(key, {})
+        return [
+            k
+            for k, score in sorted(bucket.items(), key=lambda kv: kv[1])
+            if low <= score <= high
+        ]
+
     def zremrangebyscore(self, key, low, high):
         bucket = self.zsets.get(key, {})
         stale = [k for k, score in bucket.items() if low <= score <= high]

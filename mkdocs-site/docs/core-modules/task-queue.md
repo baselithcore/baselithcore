@@ -458,9 +458,11 @@ can still be replayed after the RQ `failure_ttl` window.
       arguments), always before the queue is touched.
 
 Records also expire: `dlq_retention_seconds` (default 7 days, matching
-`failure_ttl`) bounds the Redis hash's TTL, and the sorted-set index is pruned
-of anything past that horizon on every write, so it cannot outlive the hashes
-it points at. `0` disables expiry for a deployment that prunes the DLQ by hand.
+`failure_ttl`) bounds the Redis hash's TTL, and every read (`count()`,
+`list()`) and write prunes anything past that horizon from the sorted-set
+index, deleting the hash too. A quiet DLQ therefore still sheds old records,
+including ones dead-lettered before retention existed, which carry no TTL.
+`0` disables expiry for a deployment that prunes the DLQ by hand.
 
 Admin HTTP endpoints (Basic Auth) expose the same operations:
 
