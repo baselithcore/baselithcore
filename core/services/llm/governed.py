@@ -106,6 +106,27 @@ class GovernedClientConfig:
         return key
 
 
+def _vllm_base_for(
+    config: object, model: str | None, api_key: SecretStr | None
+) -> str | None:
+    """The ``/v1`` root of the vLLM server that serves *model*.
+
+    With several servers (``LLM_VLLM_ENDPOINTS``) a plugin's own client must be
+    pointed at the one serving the pinned model; with one it is that server.
+    ``None`` when no server is configured or none serves *model* — the caller
+    then keeps the first configured server, and the call reports the gap.
+    """
+    from core.services.llm.vllm_endpoints import get_vllm_registry, vllm_endpoints
+
+    endpoints = vllm_endpoints(config)  # type: ignore[arg-type]
+    if not endpoints:
+        return None
+    if not model:
+        return endpoints[0]
+    key = api_key.get_secret_value() if api_key is not None else None
+    return get_vllm_registry().endpoint_for_sync(model, endpoints, key) or endpoints[0]
+
+
 def resolve_governed_client_config(
     plugin_name: str, scope: str | None = None
 ) -> GovernedClientConfig | None:
@@ -147,19 +168,14 @@ def resolve_governed_client_config(
             )
             return None
         model = policy.model or (config.model if provider == config.provider else None)
+        api_key = api_key_for(config, provider)
         api_base = api_base_for(config, provider)
-        if provider == "vllm" and api_base:
-            # Hand every consumer the OpenAI root it would otherwise have to
-            # derive itself: a missing ``/v1`` is a 404 on every call.
-            from core.services.llm.providers.vllm_provider import (
-                normalize_vllm_base_url,
-            )
-
-            api_base = normalize_vllm_base_url(api_base)
+        if provider == "vllm":
+            api_base = _vllm_base_for(config, model, api_key) or api_base
         return GovernedClientConfig(
             provider=provider,
             model=model,
-            api_key=api_key_for(config, provider),
+            api_key=api_key,
             # Per-provider, never the default provider's URL — see
             # ``core.services.llm.runtime.api_base_for``.
             api_base=api_base,

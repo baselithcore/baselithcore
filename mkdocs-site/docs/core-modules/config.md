@@ -393,6 +393,7 @@ LLM_MODEL=llama3.2
 LLM_API_BASE=http://localhost:11434
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_VLLM_API_BASE=                   # vLLM server (http://gpu-host:8000/v1); no default
+LLM_VLLM_ENDPOINTS=                  # several vLLM servers, comma-separated; routed by model
 LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
 LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY

@@ -27,7 +27,13 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-__all__ = ["VLLMProbe", "check_vllm_endpoints", "probe_vllm", "vllm_targets"]
+__all__ = [
+    "VLLMProbe",
+    "check_vllm_endpoints",
+    "probe_vllm",
+    "probe_vllm_sync",
+    "vllm_targets",
+]
 
 ProbeStatus = Literal["ok", "unauthorized", "unreachable"]
 
@@ -67,18 +73,52 @@ async def probe_vllm(
     """
     import httpx
 
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             response = await client.get(
-                f"{base_url.rstrip('/')}/models", headers=headers
+                f"{base_url.rstrip('/')}/models", headers=_auth_headers(api_key)
             )
-            if response.status_code in (401, 403):
-                return VLLMProbe("unauthorized")
-            response.raise_for_status()
-            payload: Any = response.json()
+            return _read_catalog(response)
     except Exception:  # silent-ok: an unanswered probe is the finding itself
         return VLLMProbe("unreachable")
+
+
+def probe_vllm_sync(
+    base_url: str,
+    api_key: str | None,
+    timeout: float = 2.0,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> VLLMProbe:
+    """Synchronous :func:`probe_vllm`, for code that resolves in sync paths.
+
+    Plugins that hold their own SDK client (docheck, agent_jira, wikigen,
+    dbview) resolve their endpoint synchronously; this lets them route by model
+    across several vLLM servers too. Never raises.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=timeout, transport=transport) as client:
+            response = client.get(
+                f"{base_url.rstrip('/')}/models", headers=_auth_headers(api_key)
+            )
+            return _read_catalog(response)
+    except Exception:  # silent-ok: an unanswered probe is the finding itself
+        return VLLMProbe("unreachable")
+
+
+def _auth_headers(api_key: str | None) -> dict[str, str]:
+    """A bearer header when a key is set — never ``Bearer None``."""
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def _read_catalog(response: httpx.Response) -> VLLMProbe:
+    """The probe outcome for a ``GET /v1/models`` response."""
+    if response.status_code in (401, 403):
+        return VLLMProbe("unauthorized")
+    response.raise_for_status()
+    payload: Any = response.json()
     entries = payload.get("data", []) if isinstance(payload, dict) else []
     return VLLMProbe(
         "ok",
@@ -90,15 +130,9 @@ async def probe_vllm(
     )
 
 
-def vllm_targets(config: LLMConfig) -> dict[str, set[str]]:
-    """Every ``endpoint -> models`` the primary and fallback chain send to vLLM.
-
-    A stage whose endpoint is unset is skipped here: configuration findings
-    already report it, and probing nothing would only repeat them.
-    """
+def _required_models(config: LLMConfig) -> list[str]:
+    """The vLLM models the primary and the fallback chain ask for."""
     from core.services.llm._fallback_support import parse_fallback_chain
-    from core.services.llm.providers.vllm_provider import normalize_vllm_base_url
-    from core.services.llm.runtime import api_base_for
 
     models: list[str] = []
     if config.provider == "vllm":
@@ -108,11 +142,24 @@ def vllm_targets(config: LLMConfig) -> dict[str, set[str]]:
     except ValueError:
         stages = []  # already reported as chain_malformed
     models.extend(model for provider, model in stages if provider == "vllm")
+    return models
 
-    endpoint = api_base_for(config, "vllm")
-    if not models or not endpoint:
+
+def vllm_targets(config: LLMConfig) -> dict[str, set[str]]:
+    """Every ``endpoint -> models`` the deployment needs from vLLM.
+
+    With several servers (``LLM_VLLM_ENDPOINTS``) each is probed and a model
+    only has to be served by one of them. A deployment that asks vLLM for
+    nothing, or configures no server, has nothing to probe — configuration
+    findings already report a missing endpoint.
+    """
+    from core.services.llm.vllm_endpoints import vllm_endpoints
+
+    models = set(_required_models(config))
+    endpoints = vllm_endpoints(config)
+    if not models or not endpoints:
         return {}
-    return {normalize_vllm_base_url(endpoint): set(models)}
+    return {endpoint: set(models) for endpoint in endpoints}
 
 
 async def check_vllm_endpoints(
@@ -120,64 +167,98 @@ async def check_vllm_endpoints(
 ) -> list[PreflightFinding]:
     """Findings about the vLLM servers this deployment routes to.
 
+    Every server is probed; each required model must be served by at least one
+    reachable server (calls are routed by model across them).
+
     Args:
         config: The deployment's LLM configuration.
         timeout: Per-endpoint probe timeout.
 
     Returns:
-        list: One finding per unreachable server, rejected key or unserved model.
+        list: One finding per unreachable server, rejected key, and model no
+        reachable server serves.
     """
     from core.services.llm.preflight import PreflightFinding
     from core.services.llm.runtime import api_key_for
 
+    targets = vllm_targets(config)
+    if not targets:
+        return []
+    models = next(iter(targets.values()))
     # ``api_key_for``: the dedicated key, else one stored from the console —
     # the same key the provider will send, so the probe answers for it.
     secret = api_key_for(config, "vllm")
     api_key = secret.get_secret_value() if secret is not None else None
     findings: list[PreflightFinding] = []
-    for target, models in vllm_targets(config).items():
+    served: dict[str, set[str]] = {}
+    silent: list[str] = []
+    for target in targets:
         probe = await probe_vllm(target, api_key, timeout)
         # Findings are logged and folded into a raised error; basic-auth
         # userinfo in the configured URL must reach neither.
         endpoint = redact_url_credentials(target)
         if probe.status == "unreachable":
+            silent.append(endpoint)
             findings.append(
                 PreflightFinding(
                     severity="error",
                     code="vllm_unreachable",
-                    message=(
-                        f"vLLM is configured for {sorted(models)} but "
-                        f"{endpoint}/models did not answer"
+                    message=f"vLLM server {endpoint}/models did not answer",
+                    remedy=(
+                        "Start the vLLM server, or fix LLM_VLLM_ENDPOINTS / "
+                        "LLM_VLLM_API_BASE."
                     ),
-                    remedy="Start the vLLM server, or fix LLM_VLLM_API_BASE.",
                 )
             )
-            continue
-        if probe.status == "unauthorized":
+        elif probe.status == "unauthorized":
+            silent.append(endpoint)
             findings.append(
                 PreflightFinding(
                     severity="error",
                     code="vllm_unauthorized",
                     message=f"vLLM at {endpoint} rejected the configured key",
                     remedy=(
-                        "Set LLM_VLLM_API_KEY to the server's --api-key "
+                        "Set LLM_VLLM_API_KEY to the servers' --api-key "
                         "(or leave both unset)."
                     ),
                 )
             )
-            continue
-        served = ", ".join(sorted(probe.models)) or "nothing"
-        for model in sorted(models - probe.models):
+        else:
+            served[endpoint] = set(probe.models)
+    available = sorted({m for names in served.values() for m in names})
+    unaccounted = sorted(models - set(available))
+    if silent:
+        # A server that did not answer may be the one serving these: say so
+        # on its finding instead of calling them missing.
+        if unaccounted and len(targets) > 1:
             findings.append(
                 PreflightFinding(
                     severity="error",
-                    code="vllm_model_missing",
-                    message=f"model {model!r} is not served at {endpoint}",
-                    remedy=(
-                        f"The server serves: {served}. Set LLM_MODEL (or the "
-                        f"chain stage) to one of them, or restart vLLM with "
-                        f"--served-model-name {model}."
+                    code="vllm_models_unverified",
+                    message=(
+                        f"cannot confirm {unaccounted} are served: "
+                        f"{', '.join(silent)} did not answer"
                     ),
+                    remedy="Bring the server up, then re-run the check.",
                 )
             )
+        return findings
+    listing = ", ".join(available) or "nothing"
+    for model in unaccounted:
+        findings.append(
+            PreflightFinding(
+                severity="error",
+                code="vllm_model_missing",
+                message=(
+                    f"model {model!r} is not served by any reachable vLLM "
+                    f"server ({', '.join(served) or 'none reachable'})"
+                ),
+                remedy=(
+                    f"The servers serve: {listing}. Set LLM_MODEL (or the chain "
+                    f"stage) to one of them, or start a server with "
+                    f"--served-model-name {model} and add it to "
+                    "LLM_VLLM_ENDPOINTS."
+                ),
+            )
+        )
     return findings
