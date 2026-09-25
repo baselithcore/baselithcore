@@ -1030,6 +1030,19 @@ declares its own settings is covered as soon as it is imported. Two families are
 skipped because their suffix is chosen at runtime and no declared name exists to
 compare against: `BASELITH_FLAG_<FLAG>` and `BASELITH_PROMPT_VARIANTS_<PROMPT>`.
 
+Names another component owns are skipped too. A plugin `.env` exports keys in
+its own namespace, and a plugin may write engine keys into the environment
+itself; both can sit one prefix or one letter away from a core setting
+(`ACME_PROJECT_PLANNER_ENABLE_TEST_CASES`, `SECRETS_KEY`) without being a
+mistake. The plugin loader declares every key it exports, and a plugin that
+writes a name itself declares it the same way:
+
+```python
+from core.config import register_owned_env
+
+register_owned_env("SECRETS_KEY")
+```
+
 The application logs one warning per suspect at startup — never an exception, so
 a false positive cannot stop a deployment — and the same report is available on
 demand:

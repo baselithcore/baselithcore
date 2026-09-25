@@ -557,6 +557,11 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     for the full policy and the deprecated `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`
     opt-out.
 
+    Every key the `.env` exports is recorded as yours, so the startup
+    environment drift check never flags it as a misspelled core setting. If
+    your code writes a variable into `os.environ` directly instead, declare it
+    with `core.config.register_owned_env(name)` to get the same exemption.
+
 ---
 
 ## 6b. Create Your Database Schema (Optional)

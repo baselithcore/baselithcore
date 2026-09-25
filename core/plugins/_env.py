@@ -35,6 +35,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from core.config.drift import register_owned_env
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -312,6 +313,8 @@ def apply_plugin_env(
                 continue
         # override=False: never clobber a variable already in the environment.
         os.environ.setdefault(k, v)
+        # The plugin's own name, not a misspelled core setting.
+        register_owned_env(k)
         _merge_config(config, config_keys_lower, k, v)
 
     if blocked:
