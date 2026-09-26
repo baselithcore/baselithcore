@@ -1,0 +1,464 @@
+<!doctype html>
+<!--
+  Edge error page for 502/503/504: what the reverse proxy serves when the
+  BaselithCore backend is down, restarting or overloaded.
+
+  It must work with the backend gone, so it is ONE self-contained file: no
+  external CSS, fonts, scripts or images. The in-app error states (e.g.
+  baselithcontrol's ErrorState) only help once the SPA has loaded; a full
+  page load during an outage never reaches them and lands here instead.
+
+  With `ssi on` in the serving location, nginx/openresty fills in the real
+  status below; without it the page falls back to a generic "5xx".
+  Wiring: see deploy/nginx/nginx.conf (`error_page 502 503 504`).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Service temporarily unavailable</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --card: #ffffff;
+        --text: #0f1c2e;
+        --dim: #56677e;
+        --faint: #62758d;
+        --border: rgba(15, 28, 46, 0.1);
+        --border-strong: rgba(15, 28, 46, 0.19);
+        --inset: rgba(15, 28, 46, 0.035);
+        --accent: #2161d1;
+        --warn: #a35a05;
+        --danger: #c02637;
+        --ok: #0b7a4f;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0a1120;
+          --card: #0f1829;
+          --text: #e9f0fa;
+          --dim: #93a5bd;
+          --faint: #7f92aa;
+          --border: rgba(148, 170, 200, 0.16);
+          --border-strong: rgba(148, 170, 200, 0.28);
+          --inset: rgba(255, 255, 255, 0.04);
+          --accent: #79a7ff;
+          --warn: #f0b155;
+          --danger: #ff7a8c;
+          --ok: #4fd39a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+      body {
+        background:
+          radial-gradient(
+            60rem 30rem at 85% -10%,
+            color-mix(in srgb, var(--accent) 16%, transparent),
+            transparent
+          ),
+          var(--bg);
+        color: var(--text);
+        font:
+          15px/1.55 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 24px 16px;
+      }
+      main {
+        width: 100%;
+        max-width: 960px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: clamp(20px, 4vw, 36px);
+        box-shadow: 0 16px 40px -20px rgba(15, 28, 46, 0.3);
+        display: grid;
+        gap: 32px;
+        align-items: center;
+      }
+      @media (min-width: 760px) {
+        main {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+        }
+      }
+      .art {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        background-color: var(--inset);
+        background-image:
+          linear-gradient(var(--border) 1px, transparent 1px),
+          linear-gradient(90deg, var(--border) 1px, transparent 1px);
+        background-size: 16px 16px;
+        background-position: -1px -1px;
+        color: var(--faint);
+      }
+      svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        font-family: var(--mono);
+      }
+      .ln {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .box {
+        fill: var(--inset);
+        stroke: var(--border-strong);
+        stroke-width: 1.25;
+      }
+      .dash {
+        stroke-dasharray: 3 4;
+      }
+      .red {
+        color: var(--danger);
+      }
+      .blue {
+        color: var(--accent);
+      }
+      .green {
+        color: var(--ok);
+      }
+      .fill {
+        fill: currentColor;
+        stroke: none;
+      }
+      .lbl {
+        fill: var(--faint);
+        font-size: 7px;
+        letter-spacing: 0.04em;
+      }
+      .red .lbl,
+      .lbl.red {
+        fill: var(--danger);
+      }
+      .pkt {
+        animation: travel 1.4s cubic-bezier(0.4, 0, 0.2, 1) 2 both;
+      }
+      .pkt.late {
+        animation-delay: 0.35s;
+      }
+      @keyframes travel {
+        from {
+          transform: translateX(0);
+          opacity: 0;
+        }
+        15% {
+          opacity: 1;
+        }
+        to {
+          transform: translateX(26px);
+          opacity: 1;
+        }
+      }
+      .pop {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both;
+      }
+      @keyframes pop {
+        from {
+          transform: scale(0.2);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pkt,
+        .pop {
+          animation: none;
+        }
+      }
+      .badge {
+        display: inline-block;
+        font: 600 11px/1.6 var(--mono);
+        letter-spacing: 0.04em;
+        color: var(--warn);
+        border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+        background: color-mix(in srgb, var(--warn) 10%, transparent);
+        border-radius: 6px;
+        padding: 1px 8px;
+      }
+      .code {
+        margin: 12px 0 0;
+        font: 700 52px/1 var(--mono);
+        letter-spacing: -0.04em;
+        color: var(--text);
+        text-shadow:
+          -2px 0 color-mix(in srgb, var(--danger) 55%, transparent),
+          2px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+      }
+      h1 {
+        margin: 12px 0 0;
+        font-size: 20px;
+        line-height: 1.3;
+      }
+      p {
+        margin: 6px 0 0;
+        color: var(--dim);
+      }
+      .eyebrow {
+        margin-top: 18px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      ul {
+        list-style: none;
+        margin: 6px 0 0;
+        padding: 0;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      li {
+        display: flex;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      li::before {
+        content: '>';
+        font-family: var(--mono);
+        color: var(--accent);
+      }
+      .actions {
+        margin-top: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      @media (prefers-color-scheme: dark) {
+        button {
+          color: #0a1120;
+        }
+      }
+      .status {
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .term {
+        margin-top: 18px;
+        font: 12px/1.7 var(--mono);
+        color: var(--dim);
+        background: var(--inset);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        overflow-wrap: anywhere;
+      }
+      .term div {
+        display: grid;
+        grid-template-columns: 3.5rem minmax(0, 1fr);
+        gap: 8px;
+      }
+      .term b {
+        color: var(--faint);
+        font-weight: 400;
+      }
+    </style>
+  </head>
+  <body>
+    <main role="alert" aria-labelledby="title">
+      <div class="art" aria-hidden="true">
+        <svg viewBox="0 0 240 132" focusable="false">
+          <path d="M58 54h40" class="ln" />
+          <path d="M142 54h40" class="ln dash red" />
+          <g>
+            <rect x="14" y="36" width="44" height="36" rx="7" class="box" />
+            <g class="ln" transform="translate(14 36)">
+              <rect x="8" y="8" width="28" height="20" rx="2.5" />
+              <path d="M8 13h28" />
+            </g>
+            <text x="36" y="86" text-anchor="middle" class="lbl">browser</text>
+          </g>
+          <g>
+            <rect x="98" y="36" width="44" height="36" rx="7" class="box" />
+            <path class="ln" transform="translate(98 36)" d="M11 14h22l-4-4M33 22H11l4 4" />
+            <text x="120" y="86" text-anchor="middle" class="lbl">proxy</text>
+          </g>
+          <g class="red">
+            <rect x="182" y="36" width="44" height="36" rx="7" class="box" />
+            <g transform="translate(182 36)">
+              <g class="ln">
+                <rect x="10" y="7" width="24" height="9" rx="1.5" />
+                <rect x="10" y="20" width="24" height="9" rx="1.5" />
+                <path d="M14 11.5h8M14 24.5h8" />
+              </g>
+              <circle cx="29" cy="11.5" r="1.4" class="fill" />
+              <circle cx="29" cy="24.5" r="1.4" class="fill" />
+            </g>
+            <text x="204" y="86" text-anchor="middle" class="lbl">upstream</text>
+          </g>
+          <g class="blue">
+            <rect x="62" y="52" width="5" height="4" rx="1" class="fill pkt" />
+            <rect x="54" y="52" width="5" height="4" rx="1" class="fill pkt late" />
+          </g>
+          <g class="red pop">
+            <circle cx="162" cy="54" r="7" class="fill" opacity="0.14" />
+            <path d="M159 51l6 6M165 51l-6 6" class="ln" />
+          </g>
+          <text x="120" y="124" text-anchor="middle" class="lbl">
+            $ proxy_pass upstream → no healthy response
+          </text>
+        </svg>
+      </div>
+
+      <div>
+        <span class="badge"
+          >HTTP <span data-status><!--# echo var="status" default="" --></span> · EPIPE</span
+        >
+        <p class="code" aria-hidden="true" data-code></p>
+        <h1 id="title" data-i18n="title">The platform isn't answering right now</h1>
+        <p data-i18n="body">
+          The edge proxy is up, but the service behind it returned no valid response. It is most
+          likely restarting after an update, or briefly overloaded.
+        </p>
+        <p class="eyebrow" data-i18n="try">What you can try</p>
+        <ul>
+          <li data-i18n="hint1">
+            Wait a moment: this page checks again on its own and reloads when the service is back.
+          </li>
+          <li data-i18n="hint2">
+            If it lasts more than a few minutes, tell your administrator — the backend process needs
+            a look.
+          </li>
+        </ul>
+        <div class="actions">
+          <button type="button" data-retry data-i18n="retry">Try again now</button>
+          <span class="status" data-watch aria-live="polite"></span>
+        </div>
+        <div class="term">
+          <div><b>status</b> <span data-status-line></span></div>
+          <div><b>url</b> <span data-url></span></div>
+          <div><b>time</b> <span data-time></span></div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        var REASON = { 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout' };
+        var IT = {
+          title: 'La piattaforma al momento non risponde',
+          body: 'Il proxy è attivo, ma il servizio dietro non ha restituito una risposta valida. Molto probabilmente si sta riavviando dopo un aggiornamento, oppure è sovraccarico per qualche istante.',
+          try: 'Cosa puoi provare',
+          hint1:
+            'Attendi un momento: questa pagina ricontrolla da sola e si ricarica appena il servizio torna disponibile.',
+          hint2:
+            "Se dura più di qualche minuto, avvisa l'amministratore: il processo del backend va controllato.",
+          retry: 'Riprova ora',
+          next: 'Nuovo controllo tra {s} s',
+          checking: 'Controllo in corso…',
+          back: 'Il servizio è tornato, ricarico…',
+          docTitle: 'Servizio temporaneamente non disponibile',
+        };
+        var EN = {
+          next: 'Checking again in {s} s',
+          checking: 'Checking…',
+          back: 'Service is back, reloading…',
+        };
+        var it = /^it\b/i.test(navigator.language || '');
+        var L = it ? IT : EN;
+        if (it) {
+          document.documentElement.lang = 'it';
+          document.title = IT.docTitle;
+          document.querySelectorAll('[data-i18n]').forEach(function (el) {
+            var v = IT[el.getAttribute('data-i18n')];
+            if (v) el.textContent = v;
+          });
+        }
+
+        var raw = (document.querySelector('[data-status]').textContent || '').trim();
+        var status = /^\d{3}$/.test(raw) ? raw : '';
+        document.querySelector('[data-status]').textContent = status || '5xx';
+        document.querySelector('[data-code]').textContent = status || '5xx';
+        document.querySelector('[data-status-line]').textContent = status
+          ? 'HTTP ' + status + ' ' + (REASON[status] || '')
+          : 'HTTP 5xx';
+        document.querySelector('[data-url]').textContent = location.href;
+        document.querySelector('[data-time]').textContent = new Date().toISOString();
+
+        // Watch for recovery: re-request this same URL through the proxy with
+        // exponential backoff (3 s → 30 s), paused while the tab is hidden,
+        // and reload as soon as it stops answering 5xx.
+        var watch = document.querySelector('[data-watch]');
+        var delay = 3;
+        var left = delay;
+        var timer = null;
+
+        function tick() {
+          if (document.hidden) return;
+          left -= 1;
+          if (left <= 0) return probe();
+          watch.textContent = L.next.replace('{s}', left);
+        }
+
+        function probe() {
+          clearInterval(timer);
+          watch.textContent = L.checking;
+          fetch(location.href, { method: 'GET', cache: 'no-store', credentials: 'same-origin' })
+            .then(function (res) {
+              if (res.status < 500) {
+                watch.textContent = L.back;
+                location.reload();
+                return;
+              }
+              schedule();
+            })
+            .catch(schedule);
+        }
+
+        function schedule() {
+          delay = Math.min(delay * 2, 30);
+          left = delay;
+          watch.textContent = L.next.replace('{s}', left);
+          timer = setInterval(tick, 1000);
+        }
+
+        document.querySelector('[data-retry]').addEventListener('click', probe);
+        left = delay;
+        watch.textContent = L.next.replace('{s}', left);
+        timer = setInterval(tick, 1000);
+      })();
+    </script>
+  </body>
+</html>
