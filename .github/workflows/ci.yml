@@ -1438,7 +1438,11 @@ jobs:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
     needs: [release]
-    if: needs.release.outputs.new_release_published == 'true'
+    # `!cancelled() && !failure()` is not decoration. Without a status
+    # function GitHub prepends `success()`, which fails when ANY ancestor was
+    # skipped — and in `release` mode python_test is skipped by design, so
+    # v0.40.0 was tagged and never reached PyPI.
+    if: ${{ !cancelled() && !failure() && needs.release.outputs.new_release_published == 'true' }}
     environment:
       name: pypi
       url: https://pypi.org/p/baselith-core # Package name
@@ -1496,9 +1500,12 @@ jobs:
     # RELEASE_IMAGE_DISABLED (Settings -> Secrets and variables -> Actions ->
     # Variables) set to "true" turns it off again without a commit. Unset
     # evaluates to the empty string, so the default is on.
+    # `!cancelled() && !failure()`: see publish_pypi — an implicit
+    # `success()` here skipped the v0.40.0 image.
     if: >-
-      needs.release.outputs.new_release_published == 'true'
-      && vars.RELEASE_IMAGE_DISABLED != 'true'
+      ${{ !cancelled() && !failure()
+      && needs.release.outputs.new_release_published == 'true'
+      && vars.RELEASE_IMAGE_DISABLED != 'true' }}
     uses: ./.github/workflows/release-image.yml
     # A called workflow's GITHUB_TOKEN is scoped by the CALLER, so the grants
     # the image job needs are declared here. GITHUB_TOKEN itself is passed
