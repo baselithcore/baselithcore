@@ -73,7 +73,12 @@ from core.config import get_mcp_config
 from core.mcp.dispatch import RequestDispatcher
 from core.mcp.errors import MCPProtocolError
 from core.mcp.handlers import SUPPORTED_PROTOCOL_VERSIONS
-from core.mcp.http_authz import METADATA_PATH, build_gate, resource_identifier
+from core.mcp.http_authz import (
+    METADATA_PATH,
+    build_gate,
+    log_unpinned_resource,
+    resource_identifier,
+)
 from core.mcp.http_headers import validate_modern_headers, validate_param_headers
 from core.mcp.http_sessions import (
     RedisSessionStore,
@@ -284,6 +289,7 @@ def create_mcp_http_router(
     sessions: SessionStore | RedisSessionStore = build_session_store(cfg)
     allowed_origins = cfg.http_allowed_origin_set
     router = APIRouter(tags=["mcp"])
+    log_unpinned_resource(cfg)
 
     _gate = build_gate(cfg, path, allowed_origins)
 

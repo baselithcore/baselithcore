@@ -55,6 +55,46 @@ class DMPairingPolicy:
             max_events=rate_limit_max_events,
         )
 
+    def configure_from_mapping(self, mapping: Any) -> int:
+        """Apply the ``baselithbot.dm_policy`` section of ``plugins.yaml``.
+
+        ``mapping`` is ``{channel: {allowed_senders, blocked_senders, dm_only,
+        rate_limit_window_s, rate_limit_max_events}}`` — the shape written by
+        ``baselith baselithbot pairing approve``. Without this call the
+        documented allowlist was persisted but never enforced: ``evaluate``
+        answered "no policy configured" and every sender got through.
+
+        Returns:
+            Number of channels configured.
+
+        Raises:
+            ValueError: On a malformed section — fail loudly at startup rather
+                than silently run without the allowlist the operator wrote.
+        """
+        if mapping is None:
+            return 0
+        if not isinstance(mapping, dict):
+            raise ValueError("baselithbot.dm_policy must be a mapping of channel -> policy")
+        for channel, raw in mapping.items():
+            if raw is not None and not isinstance(raw, dict):
+                raise ValueError(f"baselithbot.dm_policy.{channel} must be a mapping")
+            data = dict(raw or {})
+            # YAML reads numeric ids (Telegram, Discord) as ints; senders are
+            # compared as strings, so normalise before validation.
+            for key in ("allowed_senders", "blocked_senders"):
+                if isinstance(data.get(key), list):
+                    data[key] = [str(s) for s in data[key]]
+            policy = _ChannelPolicy.model_validate(data)
+            self.configure(
+                str(channel).strip().lower(),
+                dm_only=policy.dm_only,
+                allowed_senders=policy.allowed_senders,
+                blocked_senders=policy.blocked_senders,
+                rate_limit_window_s=policy.rate_limit_window_s,
+                rate_limit_max_events=policy.rate_limit_max_events,
+            )
+        return len(mapping)
+
     def evaluate(
         self,
         channel: str,

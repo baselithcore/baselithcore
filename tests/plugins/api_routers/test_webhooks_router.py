@@ -128,6 +128,27 @@ def test_deliveries_list_read_scope(service):
     assert r.json()["deliveries"] == []
 
 
+def test_deliveries_serialises_only_the_requested_page(service, monkeypatch):
+    """Only the returned page is dumped, and the cursor still walks the window."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    records = []
+    for i in range(5):
+        rec = MagicMock()
+        rec.model_dump.return_value = {"id": f"d{i}"}
+        records.append(rec)
+    monkeypatch.setattr(
+        service.store, "list_deliveries", AsyncMock(return_value=records)
+    )
+    c = _client(READER, service)
+    first = c.get("/webhooks/deliveries?limit=2").json()
+    assert [d["id"] for d in first["deliveries"]] == ["d0", "d1"]
+    assert first["has_more"] is True
+    assert sum(r.model_dump.call_count for r in records) == 2
+    second = c.get(f"/webhooks/deliveries?limit=2&cursor={first['next_cursor']}")
+    assert [d["id"] for d in second.json()["deliveries"]] == ["d2", "d3"]
+
+
 def test_replay_unknown_404(service):
     c = _client(WRITER, service)
     resp = c.post("/webhooks/deliveries/whd_x/replay")

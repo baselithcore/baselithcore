@@ -36,7 +36,9 @@ from plugins.baselithbot.inbound.verify import verify_hmac_signature
 logger = get_logger(__name__)
 
 _ENV_INSECURE = "BASELITHBOT_INBOUND_INSECURE"
-_SLACK_TIMESTAMP_SKEW_SECONDS = 5 * 60  # mirrors Slack's recommendation
+# Replay window for signed timestamps (Slack's recommendation; applied to
+# Discord interactions too, whose signatures otherwise never expire).
+_TIMESTAMP_SKEW_SECONDS = 5 * 60
 
 _warned_channels: set[str] = set()
 
@@ -85,6 +87,16 @@ def _unauthorized(reason: str) -> InboundAuthError:
     return InboundAuthError(status_code=401, reason=reason)
 
 
+def _check_timestamp_fresh(timestamp: str, provider: str) -> None:
+    """Reject a signed-timestamp header outside the replay window."""
+    try:
+        ts_int = int(timestamp)
+    except ValueError as exc:
+        raise _unauthorized(f"invalid {provider} timestamp") from exc
+    if abs(time.time() - ts_int) > _TIMESTAMP_SKEW_SECONDS:
+        raise _unauthorized(f"{provider} timestamp outside skew window")
+
+
 def _verify_slack(headers: dict[str, str], body: bytes) -> None:
     secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
     if not secret:
@@ -94,12 +106,7 @@ def _verify_slack(headers: dict[str, str], body: bytes) -> None:
     signature = headers.get("x-slack-signature", "").strip()
     if not timestamp or not signature:
         raise _unauthorized("missing Slack signature headers")
-    try:
-        ts_int = int(timestamp)
-    except ValueError as exc:
-        raise _unauthorized("invalid Slack timestamp") from exc
-    if abs(time.time() - ts_int) > _SLACK_TIMESTAMP_SKEW_SECONDS:
-        raise _unauthorized("Slack timestamp outside skew window")
+    _check_timestamp_fresh(timestamp, "Slack")
     if not verify_slack_signature(secret, timestamp, body, signature):
         raise _unauthorized("invalid Slack signature")
 
@@ -123,6 +130,9 @@ def _verify_discord(headers: dict[str, str], body: bytes) -> None:
     timestamp = headers.get("x-signature-timestamp", "").strip()
     if not signature or not timestamp:
         raise _unauthorized("missing Discord signature headers")
+    # The Ed25519 signature covers the timestamp but nothing forces it to be
+    # recent: without this window a captured interaction replays forever.
+    _check_timestamp_fresh(timestamp, "Discord")
     if not verify_discord_signature(public_key, timestamp, body, signature):
         raise _unauthorized("invalid Discord signature")
 

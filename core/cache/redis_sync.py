@@ -10,7 +10,7 @@ forever, and every such caller was a thread that never came back.
 
 This module is the sync twin: same bounds, same deadlines, one pool per
 ``(url, decode_responses, socket_timeout)``. It lives apart from
-``redis_cache`` on purpose — that module binds ``Redis``/``ConnectionPool`` to
+``redis_cache`` on purpose — that module binds ``Redis`` and the pool class to
 the *asyncio* classes, and holding both meanings of those two names in one
 namespace is exactly the kind of ambiguity that produces a coroutine where a
 value was expected.
@@ -29,9 +29,9 @@ from typing import Any
 from core.observability.logging import get_logger
 
 try:  # pragma: no cover - exercised via the import fallback in tests
-    from redis import ConnectionPool, Redis
+    from redis import BlockingConnectionPool, Redis
 except ImportError:  # pragma: no cover - redis is an optional dependency
-    ConnectionPool = None  # type: ignore[assignment,misc]
+    BlockingConnectionPool = None  # type: ignore[assignment,misc]
     Redis = None  # type: ignore[assignment,misc]
 
 logger = get_logger(__name__)
@@ -66,7 +66,7 @@ def create_sync_redis_client(
     Raises:
         RuntimeError: If the ``redis`` package is not installed.
     """
-    if Redis is None or ConnectionPool is None:
+    if Redis is None or BlockingConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
 
     from core.config.cache import get_redis_cache_config
@@ -78,9 +78,13 @@ def create_sync_redis_client(
     with _sync_pools_lock:
         pool = _sync_pools.get(pool_key)
         if pool is None:
-            pool = ConnectionPool.from_url(
+            # Blocking pool, as in ``redis_cache``: at the cap a caller waits
+            # up to the connect deadline for a free connection instead of
+            # failing at once with "Too many connections".
+            pool = BlockingConnectionPool.from_url(
                 url,
                 max_connections=config.max_connections,
+                timeout=config.socket_connect_timeout,
                 health_check_interval=config.health_check_interval,
                 socket_timeout=timeout,
                 socket_connect_timeout=config.socket_connect_timeout,
@@ -98,7 +102,7 @@ def close_sync_redis_pools() -> None:
     connections promptly instead of leaving them for Redis to time out. Safe to
     call when redis is not installed or nothing was ever created.
     """
-    if ConnectionPool is None:
+    if BlockingConnectionPool is None:
         return
 
     with _sync_pools_lock:

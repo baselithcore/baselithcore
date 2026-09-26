@@ -47,21 +47,36 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-# MemoryType → Supermemory sub-tag suffix for scoped isolation within a container
-_TYPE_SUFFIX: dict[MemoryType, str] = {
-    MemoryType.SHORT_TERM: "short",
-    MemoryType.LONG_TERM: "long",
-    MemoryType.EPISODIC: "episodic",
-    MemoryType.ENTITY: "entity",
-}
+# Pre-fix releases wrote each MemoryType under its own ``{tag}_{suffix}``
+# sub-tag while every read queried the bare tag, so nothing written was ever
+# found again. Writes now go to the bare tag; these suffixes survive only so
+# ``clear()`` can sweep what older releases left behind.
+_LEGACY_TYPE_SUFFIXES: tuple[str, ...] = (
+    "short",
+    "long",
+    "episodic",
+    "entity",
+    "general",
+)
+
+#: Upper bound the Supermemory search API accepts for ``limit``.
+_MAX_SEARCH_LIMIT = 100
+
+#: Rounds of search-and-forget a typed ``clear()`` runs before giving up.
+_MAX_CLEAR_ROUNDS = 50
 
 
-def _build_tag(container_tag: str, memory_type: MemoryType | None) -> str:
-    """Compose a scoped container tag from a base tag and optional memory type."""
-    if memory_type is None:
-        return container_tag
-    suffix = _TYPE_SUFFIX.get(memory_type, "general")
-    return f"{container_tag}_{suffix}"
+def _field_filter(key: str, value: str) -> dict[str, Any]:
+    """Supermemory metadata filter matching ``metadata[key] == value``."""
+    return {"AND": [{"key": key, "value": value}]}
+
+
+def _hits(results: Any) -> list[Any]:
+    """Memory hits from a search response (``memories`` or v4 ``results``)."""
+    hits = getattr(results, "memories", None)
+    if hits is None:
+        hits = getattr(results, "results", None)
+    return list(hits or [])
 
 
 class SupermemoryProvider(MemoryProvider):
@@ -72,9 +87,11 @@ class SupermemoryProvider(MemoryProvider):
     used as a drop-in replacement for VectorMemoryProvider or InMemoryProvider
     anywhere an agent accepts a `provider` argument.
 
-    Multi-tenancy is handled via Supermemory's containerTag mechanism.
-    Each (container_tag, MemoryType) pair maps to a distinct scoped tag,
-    mirroring the isolation semantics of the framework's vector collections.
+    Multi-tenancy is handled via Supermemory's containerTag mechanism: every
+    memory of a tenant/agent lives under one container tag, so reads, deletes
+    and the profile API all see what ``add()`` wrote. The ``MemoryType`` and
+    the BaselithCore id travel in the memory's metadata and are matched with
+    Supermemory metadata filters.
 
     Args:
         container_tag: Identifies the tenant/agent owning these memories.
@@ -122,6 +139,37 @@ class SupermemoryProvider(MemoryProvider):
             )
             return Supermemory(**kwargs)
 
+    async def _search_raw(
+        self, query: str, limit: int, filters: dict[str, Any] | None = None
+    ) -> list[Any]:
+        """One ``search.memories`` call on this container tag, off the loop."""
+        kwargs: dict[str, Any] = {
+            "q": query,
+            "container_tag": self._container_tag,
+            "limit": min(limit, _MAX_SEARCH_LIMIT),
+        }
+        if filters is not None:
+            kwargs["filters"] = filters
+        results = await asyncio.to_thread(self._client.search.memories, **kwargs)
+        return _hits(results)
+
+    async def _find(self, item_id: str) -> Any | None:
+        """The raw Supermemory memory whose metadata ``id`` is ``item_id``.
+
+        Filtered on the stored id rather than ranked by similarity: a
+        semantic search for a UUID with ``limit=1`` returned whichever memory
+        happened to embed nearest, which was almost never the one asked for.
+        The metadata id is re-checked in case a backend ignores the filter.
+        """
+        hits = await self._search_raw(
+            item_id, self._config.search_limit, _field_filter("id", item_id)
+        )
+        for mem in hits:
+            meta = getattr(mem, "metadata", {}) or {}
+            if meta.get("id") == item_id:
+                return mem
+        return None
+
     # ------------------------------------------------------------------
     # MemoryProvider protocol
     # ------------------------------------------------------------------
@@ -130,20 +178,22 @@ class SupermemoryProvider(MemoryProvider):
         """
         Store a MemoryItem in Supermemory.
 
-        The item is scoped to its MemoryType sub-tag so that type-filtered
-        searches remain efficient. Metadata is forwarded as-is.
+        The item goes under this provider's container tag — the same tag
+        every read and the profile API use — with its ``MemoryType`` and id
+        in metadata so type-scoped searches and id lookups can filter on them.
+        Caller metadata is forwarded but cannot override those keys.
         """
-        tag = _build_tag(self._container_tag, item.memory_type)
+        tag = self._container_tag
         try:
             await asyncio.to_thread(
                 self._client.add,
                 content=item.content,
                 container_tag=tag,
                 metadata={
+                    **item.metadata,
                     "id": str(item.id),
                     "memory_type": item.memory_type.value,
                     "created_at": item.created_at.isoformat(),
-                    **item.metadata,
                 },
             )
             logger.debug(
@@ -158,22 +208,12 @@ class SupermemoryProvider(MemoryProvider):
         """
         Retrieve a memory by its BaselithCore UUID.
 
-        Supermemory does not expose direct ID lookup across the SDK today,
-        so we fall back to a metadata-filtered search on the stored `id` field.
+        Supermemory has no lookup by caller-assigned id, so this is a search
+        filtered on the ``id`` metadata field written by :meth:`add`.
         """
         try:
-            results = await asyncio.to_thread(
-                self._client.search.memories,
-                q=item_id,
-                container_tag=self._container_tag,
-                limit=1,
-            )
-            memories = getattr(results, "memories", []) or []
-            for mem in memories:
-                meta = getattr(mem, "metadata", {}) or {}
-                if meta.get("id") == item_id:
-                    return self._to_memory_item(mem)
-            return None
+            mem = await self._find(item_id)
+            return self._to_memory_item(mem) if mem is not None else None
         except Exception as exc:
             logger.error(f"SupermemoryProvider.get failed for {item_id}: {exc}")
             return None
@@ -186,25 +226,15 @@ class SupermemoryProvider(MemoryProvider):
         preserving audit history.
         """
         try:
-            # Search for the memory to obtain its Supermemory-internal ID
-            results = await asyncio.to_thread(
-                self._client.search.memories,
-                q=item_id,
-                container_tag=self._container_tag,
-                limit=1,
+            mem = await self._find(item_id)
+            sm_id = getattr(mem, "id", None) if mem is not None else None
+            if not sm_id:
+                return False
+            await asyncio.to_thread(self._client.memories.forget, id=sm_id)
+            logger.debug(
+                f"SupermemoryProvider: forgot memory {item_id} (sm_id={sm_id})"
             )
-            memories = getattr(results, "memories", []) or []
-            for mem in memories:
-                meta = getattr(mem, "metadata", {}) or {}
-                if meta.get("id") == item_id:
-                    sm_id = getattr(mem, "id", None)
-                    if sm_id:
-                        await asyncio.to_thread(self._client.memories.forget, id=sm_id)
-                        logger.debug(
-                            f"SupermemoryProvider: forgot memory {item_id} (sm_id={sm_id})"
-                        )
-                        return True
-            return False
+            return True
         except Exception as exc:
             logger.error(f"SupermemoryProvider.delete failed for {item_id}: {exc}")
             return False
@@ -223,29 +253,29 @@ class SupermemoryProvider(MemoryProvider):
         ``query_vector`` is accepted for interface parity but ignored: the
         Supermemory backend embeds server-side from the raw ``query`` text.
 
-        When `memory_type` is provided the search is scoped to the sub-tag
-        for that type, mirroring the type-filtering semantics of the vector
-        store backend. Otherwise the top-level container tag is used so the
-        query spans all memory types for that agent/tenant.
+        When `memory_type` is provided the search is filtered on the
+        ``memory_type`` metadata field (and re-checked locally), mirroring the
+        type-filtering semantics of the vector store backend. Otherwise it
+        spans every memory type in the container.
         """
-        tag = _build_tag(self._container_tag, memory_type)
         effective_limit = limit or self._config.search_limit
         effective_min_score = min_score if min_score > 0.0 else self._config.min_score
+        filters = (
+            _field_filter("memory_type", memory_type.value)
+            if memory_type is not None
+            else None
+        )
 
         try:
-            results = await asyncio.to_thread(
-                self._client.search.memories,
-                q=query,
-                container_tag=tag,
-                limit=effective_limit,
-            )
-            memories = getattr(results, "memories", []) or []
+            memories = await self._search_raw(query, effective_limit, filters)
             items: list[MemoryItem] = []
             for mem in memories:
                 score = float(getattr(mem, "score", 1.0) or 1.0)
                 if score < effective_min_score:
                     continue
                 item = self._to_memory_item(mem, fallback_type=memory_type)
+                if memory_type is not None and item.memory_type != memory_type:
+                    continue
                 items.append(item)
             return items
         except Exception as exc:
@@ -254,20 +284,49 @@ class SupermemoryProvider(MemoryProvider):
 
     async def clear(self, memory_type: MemoryType | None = None) -> None:
         """
-        Delete all memories within this container (optionally scoped to a type).
+        Delete memories within this container (optionally scoped to a type).
 
-        Uses Supermemory's bulk delete on the container tag so only the
-        targeted agent/type partition is affected.
+        Without a type this is Supermemory's bulk delete on the container tag,
+        plus a sweep of the per-type sub-tags older releases wrote to. With a
+        type there is no bulk delete by metadata, so memories are found with
+        a ``memory_type``-filtered search and forgotten one by one, in rounds,
+        until a round finds nothing.
         """
-        tag = _build_tag(self._container_tag, memory_type)
         try:
-            await asyncio.to_thread(
-                self._client.documents.delete_by_container, container_tag=tag
+            if memory_type is None:
+                tags = [self._container_tag] + [
+                    f"{self._container_tag}_{suffix}"
+                    for suffix in _LEGACY_TYPE_SUFFIXES
+                ]
+                for tag in tags:
+                    await asyncio.to_thread(
+                        self._client.documents.delete_by_container, container_tag=tag
+                    )
+                    await asyncio.to_thread(
+                        self._client.memories.delete_by_container, container_tag=tag
+                    )
+                logger.info(
+                    f"SupermemoryProvider: cleared container '{self._container_tag}'"
+                )
+                return
+
+            forgotten = 0
+            filters = _field_filter("memory_type", memory_type.value)
+            for _ in range(_MAX_CLEAR_ROUNDS):
+                hits = await self._search_raw(
+                    memory_type.value, _MAX_SEARCH_LIMIT, filters
+                )
+                ids = [getattr(m, "id", None) for m in hits]
+                ids = [i for i in ids if i]
+                if not ids:
+                    break
+                for sm_id in ids:
+                    await asyncio.to_thread(self._client.memories.forget, id=sm_id)
+                forgotten += len(ids)
+            logger.info(
+                f"SupermemoryProvider: forgot {forgotten} '{memory_type.value}' "
+                f"memories in container '{self._container_tag}'"
             )
-            await asyncio.to_thread(
-                self._client.memories.delete_by_container, container_tag=tag
-            )
-            logger.info(f"SupermemoryProvider: cleared container '{tag}'")
         except Exception as exc:
             logger.error(f"SupermemoryProvider.clear failed: {exc}")
 

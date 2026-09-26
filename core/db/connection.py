@@ -146,6 +146,21 @@ async def _async_apply_tenant(connection: AsyncConnection[object]) -> None:
     setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
 
 
+def _connection_kwargs(cursor_factory: type[Any]) -> dict[str, Any]:
+    """Per-connection settings shared by every pool (primary and replica).
+
+    ``prepare_threshold`` follows ``DB_PREPARED_STATEMENTS``: ``None`` keeps
+    psycopg from preparing server-side statements, which a transaction-mode
+    PgBouncer would route to a backend that never saw the ``PREPARE``.
+    """
+    return {
+        "autocommit": True,
+        "options": _storage_config.session_options,
+        "cursor_factory": cursor_factory,
+        "prepare_threshold": _storage_config.prepare_threshold,
+    }
+
+
 def _get_pool() -> ConnectionPool:
     """Get or initialize the synchronous connection pool."""
     global _POOL
@@ -163,11 +178,7 @@ def _get_pool() -> ConnectionPool:
             # fails on first use with AdminShutdown, so a maintenance window
             # turns into a burst of 500s that nothing retries.
             check=ConnectionPool.check_connection if DB_POOL_CHECK else None,
-            kwargs={
-                "autocommit": True,
-                "options": _storage_config.session_options,
-                "cursor_factory": TrackingCursor,
-            },
+            kwargs=_connection_kwargs(TrackingCursor),
             open=False,
         )
     return _POOL
@@ -185,11 +196,7 @@ def _get_async_pool() -> AsyncConnectionPool:
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
             check=AsyncConnectionPool.check_connection if DB_POOL_CHECK else None,
-            kwargs={
-                "autocommit": True,
-                "options": _storage_config.session_options,
-                "cursor_factory": TrackingAsyncCursor,
-            },
+            kwargs=_connection_kwargs(TrackingAsyncCursor),
             open=False,
         )
     return _ASYNC_POOL
@@ -318,11 +325,7 @@ def _get_replica_pool() -> ConnectionPool:
             # fails on first use with AdminShutdown, so a maintenance window
             # turns into a burst of 500s that nothing retries.
             check=ConnectionPool.check_connection if DB_POOL_CHECK else None,
-            kwargs={
-                "autocommit": True,
-                "options": _storage_config.session_options,
-                "cursor_factory": TrackingCursor,
-            },
+            kwargs=_connection_kwargs(TrackingCursor),
             open=False,
         )
     return _REPLICA_POOL
@@ -340,11 +343,7 @@ def _get_async_replica_pool() -> AsyncConnectionPool:
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
             check=AsyncConnectionPool.check_connection if DB_POOL_CHECK else None,
-            kwargs={
-                "autocommit": True,
-                "options": _storage_config.session_options,
-                "cursor_factory": TrackingAsyncCursor,
-            },
+            kwargs=_connection_kwargs(TrackingAsyncCursor),
             open=False,
         )
     return _ASYNC_REPLICA_POOL

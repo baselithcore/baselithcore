@@ -85,6 +85,14 @@ class FakeRedis:
     def zrem(self, key, member):
         return 1 if self.zsets.get(key, {}).pop(member, None) is not None else 0
 
+    def zrangebyscore(self, key, low, high):
+        zset = self.zsets.get(key, {})
+        return [
+            m
+            for m, score in sorted(zset.items(), key=lambda kv: kv[1])
+            if low <= score <= high
+        ]
+
     def zremrangebyscore(self, key, low, high):
         bucket = self.zsets.get(key, {})
         stale = [k for k, score in bucket.items() if low <= score <= high]
@@ -156,6 +164,17 @@ class TestRetention:
             redis.zsets["baselithcore:dlq:index"]["old"] = time.time() - 1000
             dlq.record(_job("fresh"), "boom")
         assert [r.job_id for r in dlq.list()] == ["fresh"]
+
+    def test_reads_expire_a_record_that_has_no_ttl(self, dlq, redis):
+        # Dead-lettered before retention shipped: no TTL on the hash, and a
+        # quiet DLQ never writes again, so only a read can retire it.
+        with _config(dlq_retention_seconds=0):
+            dlq.record(_job("legacy"), "boom")
+        redis.zsets["baselithcore:dlq:index"]["legacy"] = time.time() - 1000
+        with _config(dlq_retention_seconds=100):
+            assert dlq.count() == 0
+            assert dlq.list() == []
+        assert "baselithcore:dlq:job:legacy" not in redis.hashes
 
     def test_zero_retention_keeps_records_forever(self, dlq, redis):
         with _config(dlq_retention_seconds=0):

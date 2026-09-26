@@ -117,9 +117,22 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     `LoopBudget`; per-tool autonomy categories come from
     `context["tool_categories"]`, defaulting to `destructive` — fail-safe:
     gated for approval — with a warning
-    when a policy is active), and any other value falls back to Tree of
-    Thoughts. Both engines are reachable through the orchestrator, not only
+    when a policy is active), and `"bfs"` / `"mcts"` (or no value — the
+    `TOT_STRATEGY` default) run Tree of Thoughts. An unknown value is rejected
+    with `error: True` and `metadata["error"] == "unsupported_strategy"`; a
+    tool strategy whose inputs are missing falls back to Tree of Thoughts with
+    a warning. `metadata["strategy"]` always names the strategy that actually
+    ran, and `metadata["requested_strategy"]` records a request that was not
+    honoured. Both engines are reachable through the orchestrator, not only
     standalone.
+
+!!! warning "LLM failures are errors, not answers"
+    When no LLM service can be resolved (the failure is logged) or an LLM call
+    raises, the loop stops and `ReActResult.error` is set to
+    `"llm_unavailable"` or `"llm_error"`; `final_answer` then holds a
+    user-safe message, never text parsed as a `Final Answer`. The reasoning
+    handler turns a set `error` into `error: True` on its result, with the
+    reason in `metadata["error"]`.
 
 ### Basic Usage
 
@@ -269,10 +282,10 @@ slots at once. Text-parsed turns are unaffected — the legacy loop emits one
 
 !!! note "Durable runs execute the turn sequentially"
     With a checkpoint attached, `_execute_tool_calls` runs the approved calls
-    of a turn **sequentially** instead of concurrently: the checkpoint's
-    replay cursor must assign the same `(cursor, tool, args)` key to the same
-    call on every pass, and concurrent per-step saves would interleave version
-    bumps in the store. Correctness of resume beats intra-turn latency.
+    of a turn **sequentially** instead of concurrently: concurrent per-step
+    saves would interleave version bumps in the store. (Step keys no longer
+    depend on order — they are content-addressed — so this is about the
+    store, not about matching keys.) Correctness of resume beats intra-turn latency.
     Without a checkpoint the concurrent path is unchanged. See
     [Durable tool execution](#durable-tool-execution-checkpoint-replay).
 
@@ -344,9 +357,10 @@ With a [`CheckpointManager`](orchestration.md#durable-checkpointing-resume)
 attached (constructor argument `checkpoint=`; the orchestrated path wires
 `context["checkpoint"]` automatically), every tool invocation — text-parsed
 and native alike — runs through `CheckpointManager.run_step`: the observation
-is recorded under a deterministic `(cursor, tool, args)` idempotency key, and
-a resumed run replays the recorded observation **without re-executing the
-side effect**. Without a checkpoint, invocation behavior is unchanged.
+is recorded under a content-addressed `(tool, args, occurrence)` key, and a
+resumed run replays the recorded observation **without re-executing the side
+effect** — in whatever order the regenerated turns ask for it. Without a
+checkpoint, invocation behavior is unchanged.
 
 ```python
 from core.reasoning.react import ReActAgent
@@ -357,10 +371,15 @@ result = await agent.run(task)
 # store — same observations, no duplicated side effects — then continues live.
 ```
 
-A divergent replay (a different tool or different arguments at the same
-cursor position) executes fresh rather than reusing a stale result. In
-durable mode a multi-tool turn executes sequentially so the replay cursors
-stay deterministic — see the note under
+A call with different arguments is a different effect and executes fresh; a
+deliberate second identical call in the same pass (occurrence 1) executes too.
+The step key and the ledger key inside it draw on one occurrence
+(`CheckpointManager.next_occurrence`), so the two layers agree on which call
+is which; the wrapper lives in `core/reasoning/react_ledger.py`, shared by
+the text loop and `run_native_loop`. Checkpoints written under the old
+positional `(cursor, tool, args)` key still replay along their original path.
+In durable mode a multi-tool turn executes sequentially so per-step saves do
+not interleave — see the note under
 [Concurrent multi-tool turns](#concurrent-multi-tool-turns).
 
 **Across processes, not just across a resume.** Checkpoint replay covers one
@@ -392,8 +411,8 @@ Both loop variants bound their resource use on long runs:
 - **History compaction** — before each LLM turn the conversation is
   deterministically compacted (`core/reasoning/history.py`) against
   `BASELITH_REACT_HISTORY_MAX_TOKENS` (default `8000`; `0` disables compaction
-  entirely). No extra LLM call — predictable cost, no added prompt-injection
-  surface. The trace keeps full fidelity; only what is sent to the model
+  entirely). By default no extra LLM call — predictable cost, no added
+  prompt-injection surface (the LLM summary below is opt-in). The trace keeps full fidelity; only what is sent to the model
   shrinks. The text loop calls `compact_history()`, which collapses the oldest
   transcript lines to head excerpts; the native loop calls
   `compact_message_history()`, its structural counterpart. Both keep the newest
@@ -407,6 +426,36 @@ Both loop variants bound their resource use on long runs:
   its result is paired by), any message holding a `ThinkingBlock` (editing the
   text beside it can invalidate the signature that travels with it), and index
   `0` — the task itself, which the model would otherwise be left guessing at.
+- **Optional LLM-summarised compaction** — with
+  `ORCHESTRATOR_COMPACTION_SUMMARIZE=true` (default `false`) the native loop
+  calls `compact_history_for_loop()` (`core/reasoning/history_summary.py`),
+  which, once the history is over budget, replaces the older *complete* turns
+  with a single summary written by one LLM call, then runs the deterministic
+  pass above over the result. The contract:
+    - **Pairing is kept.** Only whole turns go, and the retained tail always
+      opens on an assistant turn, so no `tool_result` loses its `tool_use`.
+      The newest `keep_recent` messages stay verbatim; index `0` (the task) is
+      never summarised and the system prompt is not in the history at all.
+    - **The summary is untrusted data.** The dropped span contains tool
+      output, so the summary goes back as a *user* turn labelled
+      `[conversation summary]` and wrapped in the `<untrusted_tool_output>`
+      envelope — never in the system role. It sits right after the task (the
+      Anthropic API combines consecutive user turns).
+    - **One summary, never a stack.** A summary already at the head is folded
+      into the next summary call; the deterministic pass never cuts the
+      summary turn down to an excerpt.
+    - **Never fails the run.** A timeout
+      (`ORCHESTRATOR_COMPACTION_SUMMARY_TIMEOUT_SECONDS`, default `30`), a
+      provider error or an empty answer logs `history_summary_failed` /
+      `history_summary_empty` and falls back to the deterministic truncation.
+    - **Governed and costed like any call.** The call goes through the loop's
+      `LLMService`, resolved per call with `governed_target` so a per-plugin
+      policy pin applies. It is tagged `task_category="summarization"` (the
+      cheap tier when `LLM_ROUTING_ENABLED`), capped at
+      `ORCHESTRATOR_COMPACTION_SUMMARY_MAX_TOKENS` (default `1024`), and can be
+      pointed at a specific model with `ORCHESTRATOR_COMPACTION_SUMMARY_MODEL`.
+  Disabled, the loop's behaviour is byte-identical to the deterministic path.
+  The text-parsed loop does not summarise.
 - **Budget-aware tool timeout** — inside an orchestrated request the
   effective per-tool timeout is `min(tool_timeout, LoopBudget remaining
   seconds)`, so a single tool call can never outlive the request's
@@ -434,6 +483,12 @@ for step in result.trace:
 ## Pattern Selection Registry
 
 BaselithCore includes a **Pattern Registry** and a **Heuristic Selector** to automatically choose the best reasoning pattern for a given task.
+
+!!! note "Library API — not wired by default"
+    The orchestrator does not select patterns on its own: no route, handler or
+    startup hook calls `PatternSelector` in the default app — the
+    `complex_reasoning` handler picks its engine from `context["strategy"]`.
+    Call it from host or plugin code to choose a strategy before dispatch.
 
 ### Registry Definitions
 
@@ -463,6 +518,11 @@ print(f"Chosen Pattern: {result.pattern.value}")
 
 The `ComplexityClassifier` helps you decide whether to use an autonomous agent or a simpler, deterministic pipeline.
 
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook calls `ComplexityClassifier` in the
+    default app (it consults `PatternSelector` internally). Call it from host
+    or plugin code when deciding how to route a request.
+
 ```python
 from core.reasoning import ComplexityClassifier  # lives in core/reasoning/complexity.py
 
@@ -481,6 +541,12 @@ else:
 ## Chain-of-Thought (CoT)
 
 Linear step-by-step reasoning:
+
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook calls `ChainOfThought` in the default
+    app; the `complex_reasoning` handler runs Tree of Thoughts, ReAct or
+    parallel tools. Call it from host or plugin code, for example inside a
+    custom flow handler.
 
 `ChainOfThought(llm_service=None)` lazily resolves the global LLM service if none is
 passed. `reason(question, context=None)` returns a `tuple[str, list[ReasoningStep]]` —
@@ -651,6 +717,11 @@ best = await mcts_search_async(
 
 ## Self-Correction
 
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook runs `SelfCorrector` over responses in
+    the default app. Call it from host or plugin code on a response you want
+    critiqued and repaired.
+
 Response self-correction. `SelfCorrector(llm_service=None, max_corrections=None,
 config=None)` runs an iterative critique/repair loop. `correct(response, context=None)`
 returns a `CorrectionResult`:
@@ -804,7 +875,7 @@ context carrying `k`, `max_steps` or `strategy` still overrides them:
 | ------- | ------- | ---------------- |
 | `TOT_BRANCHING_FACTOR` | `3` | `k` |
 | `TOT_MAX_DEPTH` | `3` | `max_steps` |
-| `TOT_STRATEGY` | `bfs` | `strategy` (`bfs` or `mcts`; the never-implemented `dfs` is read as `bfs` with a warning) |
+| `TOT_STRATEGY` | `bfs` | `strategy` (`bfs` or `mcts`; the never-implemented `dfs` is read as `bfs` with a warning; per request, `"dfs"` also runs `bfs`) |
 
 `TOT_BEAM_WIDTH` is deprecated and ignored: the engine has no beam search.
 Calling `TreeOfThoughts.solve()` directly still takes depth, branching and

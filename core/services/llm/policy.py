@@ -40,6 +40,7 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = (
     "huggingface",
     "anthropic",
     "gemini",
+    "vllm",
 )
 
 

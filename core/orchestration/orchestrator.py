@@ -213,15 +213,32 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
             lambda: __import__(
                 "core.orchestration.handlers.swarm_handler",
                 fromlist=["SwarmHandler"],
-            ).SwarmHandler(),
+            ).SwarmHandler(memory_manager=memory_manager),
         )
         self._register_builtin_handler(
             "scenario_simulation",
             lambda: __import__(
                 "core.orchestration.handlers.simulation_handler",
                 fromlist=["SimulationHandler"],
-            ).SimulationHandler(),
+            ).SimulationHandler(memory_manager=memory_manager),
         )
 
         # Synchronize classifiers with the registered handlers.
         self._register_core_intent_patterns()
+
+    async def aclose(self, timeout: float = 5.0) -> None:
+        """Drain background memory writes before shutdown.
+
+        Each successful request schedules its memory write as a background
+        task. Closing the process without waiting for them drops the last
+        interactions — or fails them mid-write once the database and vector
+        pools close. Call this before those pools shut down. Idempotent: new
+        writes are refused once it has run.
+
+        Args:
+            timeout: Seconds to wait for pending writes before cancelling
+                whatever is still running.
+        """
+        from core.orchestration.mixins._memory_write import drain_memory_writes
+
+        await drain_memory_writes(self, timeout)

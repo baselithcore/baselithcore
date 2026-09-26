@@ -14,8 +14,26 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from core.config._collections import csv_list
+from core.config.environment import is_production_env
 
 logger = logging.getLogger(__name__)
+
+
+#: Head-sampling ratio when ``TELEMETRY_TRACES_SAMPLE_RATE`` is unset in a
+#: production environment. Matches ``SENTRY_TRACES_SAMPLE_RATE``'s default.
+PRODUCTION_TRACES_SAMPLE_RATE = 0.1
+
+
+def _default_traces_sample_rate() -> float:
+    """Every trace outside production, one in ten in production.
+
+    1.0 is right on a laptop (every request is worth a trace) and wrong under
+    real traffic: each sampled request exports its full span tree, so the
+    collector's ingest bill, the exporter's CPU and the batch queue all scale
+    1:1 with request rate. Resolved by :func:`is_production_env`, so an
+    unrecognised ``APP_ENV`` also gets the conservative value.
+    """
+    return PRODUCTION_TRACES_SAMPLE_RATE if is_production_env() else 1.0
 
 
 def _resolve_service_version() -> str:
@@ -93,9 +111,15 @@ class AppConfig(BaseSettings):
         ),
     )
     # Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all
-    # traces, 0.0 = none. Lower in high-traffic production to cap cost.
+    # traces, 0.0 = none. Unset: 1.0 outside production, 0.1 in production
+    # (APP_ENV/ENVIRONMENT) — a full-rate default shipped every span tree of
+    # every request to the collector. Parent-based, so an upstream caller's
+    # sampled trace is always continued whatever this ratio is.
     telemetry_traces_sample_rate: float = Field(
-        default=1.0, alias="TELEMETRY_TRACES_SAMPLE_RATE", ge=0.0, le=1.0
+        default_factory=_default_traces_sample_rate,
+        alias="TELEMETRY_TRACES_SAMPLE_RATE",
+        ge=0.0,
+        le=1.0,
     )
     # Push OTel-native metrics (e.g. HTTP server/client histograms from
     # auto-instrumentation) to the collector via OTLP. Independent of the

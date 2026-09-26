@@ -402,6 +402,7 @@ class AuthManager:
                 logger.warning(
                     "AUDIT | AUTH | API Key Authentication failed: Invalid key"
                 )
+                return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
 
         # Never echo the raw scheme: a client that puts its token in the first
         # header field would have it logged verbatim. Only a plausible scheme

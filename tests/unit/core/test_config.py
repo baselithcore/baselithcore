@@ -60,6 +60,16 @@ class TestCoreConfig:
             assert config.debug is True
             assert config.max_workers == 8
 
+    def test_construction_creates_no_directories(self, tmp_path, monkeypatch):
+        """Reading settings must not touch the filesystem: every writer under
+        ``data/`` creates its own parent directory, and ``plugin_dir`` and
+        ``documents_dir`` are unused."""
+        monkeypatch.chdir(tmp_path)
+        with patch.dict(os.environ, {}, clear=True):
+            CoreConfig(_env_file=None)
+
+        assert list(tmp_path.iterdir()) == []
+
 
 class TestLLMConfig:
     """Tests for LLMConfig."""

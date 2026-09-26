@@ -3,6 +3,7 @@ Reranker service for Advanced RAG.
 """
 
 import asyncio
+import threading
 from typing import TYPE_CHECKING, Any, cast
 
 from core.observability.logging import get_logger
@@ -41,6 +42,9 @@ class Reranker:
         )
         self._model = None
         self._enabled = False
+        # Serializes the first load: concurrent cold callers each wait in a
+        # worker thread instead of each constructing a CrossEncoder.
+        self._load_lock = threading.Lock()
 
         if CrossEncoder:
             try:
@@ -64,13 +68,30 @@ class Reranker:
             Optional[CrossEncoder]: The loaded model or None if initialization failed.
         """
         if self._model is None and self._enabled and CrossEncoder:
-            try:
-                logger.info(f"Loading CrossEncoder model: {self.model_name}")
-                self._model = CrossEncoder(self.model_name)
-            except Exception as e:
-                logger.error(f"Failed to load CrossEncoder model: {e}")
-                self._enabled = False
+            with self._load_lock:
+                # Re-checked under the lock: a racing loader may have won.
+                if self._model is None and self._enabled:
+                    try:
+                        logger.info(f"Loading CrossEncoder model: {self.model_name}")
+                        self._model = CrossEncoder(self.model_name)
+                    except Exception as e:
+                        logger.error(f"Failed to load CrossEncoder model: {e}")
+                        self._enabled = False
         return self._model
+
+    async def aload_model(self) -> "CrossEncoder | None":
+        """Return the model, loading it in a worker thread on first use.
+
+        Building a CrossEncoder is seconds of disk and CPU work; the ``model``
+        property does it synchronously, which would stall the event loop for
+        every in-flight request on the first rerank.
+
+        Returns:
+            The loaded model, or None if loading is disabled or failed.
+        """
+        if self._model is not None or not self._enabled:
+            return self._model
+        return await asyncio.to_thread(lambda: self.model)
 
     async def rerank(
         self, query: str, results: list[SearchResult], top_k: int = 5
@@ -89,9 +110,9 @@ class Reranker:
         Returns:
             Reranked list of SearchResult objects (top_k).
         """
-        # Bind the property ONCE: each access can lazily construct the model,
-        # and mypy cannot narrow a property across two reads anyway.
-        model = self.model
+        # Bound ONCE, loaded off the loop: mypy cannot narrow a property
+        # across two reads anyway.
+        model = await self.aload_model()
         if not self._enabled or model is None or not results:
             return results[:top_k]
 

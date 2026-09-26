@@ -218,7 +218,7 @@ class TestQueueInit:
         """Test getting Redis connection as a singleton."""
         from core.task_queue import get_queue_redis_connection
 
-        with patch("core.task_queue.Redis.from_url") as mock_from_url:
+        with patch("core.task_queue.BlockingConnectionPool.from_url") as mock_from_url:
             mock_from_url.return_value = MagicMock()
 
             # Use a fresh module state for isolation if possible, or just mock the cache
@@ -349,3 +349,18 @@ class TestWorkerInfo:
 
         assert data["name"] == "worker-1"
         assert data["state"] == "busy"
+
+
+def test_queue_pool_blocks_instead_of_failing_when_exhausted():
+    """At the queue pool cap an enqueue waits rather than raising at once."""
+    from redis import BlockingConnectionPool
+
+    import core.task_queue as tq
+
+    with patch("core.task_queue._redis_conn", None):
+        conn = tq.get_queue_redis_connection()
+        try:
+            assert isinstance(conn.connection_pool, BlockingConnectionPool)
+            assert conn.connection_pool.timeout > 0
+        finally:
+            conn.close()

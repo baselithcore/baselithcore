@@ -46,6 +46,7 @@ __all__ = [
     "capabilities_for",
     "clamp_effort",
     "clamp_max_tokens",
+    "configured_max_tokens",
     "default_max_tokens",
     "listed_capabilities_for",
     "rejects_forced_tool_choice",
@@ -316,6 +317,30 @@ def default_max_tokens(model: str, *, streaming: bool = False) -> int:
     """
     caps = capabilities_for(model)
     return caps.default_stream_max_tokens if streaming else caps.default_max_tokens
+
+
+def configured_max_tokens(explicit: int | None, config: object) -> int | None:
+    """The output cap to request: the caller's, else ``LLM_MAX_TOKENS``.
+
+    ``LLMConfig.max_tokens`` was bound from the environment and advertised in
+    the templates, yet no call path read it — so setting ``LLM_MAX_TOKENS``
+    capped nothing, and providers without a per-family default (OpenAI,
+    Gemini, Ollama) generated up to the model's own ceiling on every call.
+    ``None`` keeps the provider's default (the family table for Anthropic).
+
+    Args:
+        explicit: The caller's ``max_tokens``; always wins when given.
+        config: The service's ``LLMConfig`` (anything with ``max_tokens``).
+
+    Returns:
+        int | None: The cap to forward, or ``None`` for the provider default.
+    """
+    if explicit is not None:
+        return explicit
+    value = getattr(config, "max_tokens", None)
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def clamp_max_tokens(model: str, max_tokens: int) -> int:

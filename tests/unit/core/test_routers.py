@@ -128,6 +128,19 @@ def test_list_feedbacks(client, mock_feedback_service, mock_require_admin):
     assert len(response.json()) == 1
 
 
+def test_list_feedbacks_is_bounded_without_a_limit(
+    client, mock_feedback_service, mock_require_admin
+):
+    """An omitted ``limit`` must not become an unbounded SELECT."""
+    mock_feedback_service.get_feedbacks.return_value = []
+
+    client.get("/feedbacks")
+
+    _args, kwargs = mock_feedback_service.get_feedbacks.call_args
+    assert kwargs["limit"] == 50
+    assert client.get("/feedbacks?limit=201").status_code == 422
+
+
 def test_list_tenants(client, mock_verify_credentials, mock_tenant_service):
     """Test listing tenants."""
     mock_tenant_service.list_tenants.return_value = [

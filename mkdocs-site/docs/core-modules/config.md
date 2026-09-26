@@ -279,9 +279,17 @@ config = get_core_config()
 print(config.debug)           # bool          (CORE_DEBUG)
 print(config.log_level)       # "INFO"        (CORE_LOG_LEVEL)
 print(config.app_name)        # "Baselith-Core" (CORE_APP_NAME)
-print(config.max_workers)     # 4             (CORE_MAX_WORKERS)
 print(config.deterministic_mode)  # bool      (CORE_DETERMINISTIC_MODE)
 ```
+
+Constructing `CoreConfig` creates no directories: every subsystem that writes
+under `data/` (bootstrap state, SQLite stores, checkpoints, fine-tuning exports)
+creates its own parent directory on first write. `CORE_PLUGIN_DIR`,
+`CORE_DOCUMENTS_DIR` and `CORE_MAX_WORKERS` bind but are **Deprecated, no
+effect**: nothing reads them — the plugin loader reads `PLUGIN_PLUGINS_PATH`. Thread pools are sized by
+`BASELITH_INFERENCE_THREADS` (model inference) and `OMP_NUM_THREADS` (math
+libraries, split across web workers automatically — see
+[Runtime tuning](../advanced/runtime-tuning.md)).
 
 **`.env` Variables**:
 
@@ -289,7 +297,6 @@ print(config.deterministic_mode)  # bool      (CORE_DETERMINISTIC_MODE)
 CORE_DEBUG=true
 CORE_LOG_LEVEL=INFO
 CORE_APP_NAME=Baselith-Core
-CORE_MAX_WORKERS=4
 CORE_DETERMINISTIC_MODE=false
 ```
 
@@ -312,6 +319,7 @@ print(config.host)                      # "0.0.0.0"  (HOST)
 print(config.port)                      # 8000       (PORT)
 print(config.strict_tenant_isolation)   # True       (STRICT_TENANT_ISOLATION)
 print(config.telemetry_enabled)         # False      (TELEMETRY_ENABLED)
+print(config.telemetry_traces_sample_rate)  # 1.0 dev / 0.1 production (TELEMETRY_TRACES_SAMPLE_RATE)
 print(config.cost_control_enabled)      # True       (COST_CONTROL_ENABLED)
 print(config.agent_max_tokens)          # 10000      (AGENT_MAX_TOKENS)
 print(config.timezone)                  # ZoneInfo (derived from APP_TIMEZONE)
@@ -335,6 +343,9 @@ TELEMETRY_ENABLED=false
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 TELEMETRY_OTEL_PROTOCOL=grpc        # or http/protobuf (endpoint port becomes 4318)
 TELEMETRY_LOGS_ENABLED=false        # OTLP log-record export, alongside stdout
+# Head sampling ratio. Unset: 1.0 outside production, 0.1 when APP_ENV /
+# ENVIRONMENT resolves to production (unknown names count as production).
+# TELEMETRY_TRACES_SAMPLE_RATE=
 SENTRY_DSN=
 
 # Cost control
@@ -369,6 +380,7 @@ print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
 print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
 print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
+print(llm.vllm_api_base)       # None         (LLM_VLLM_API_BASE — required for vllm)
 print(llm.preflight)           # "auto"       (LLM_PREFLIGHT — startup posture check)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
@@ -386,10 +398,15 @@ print(vs.embedding_dim)        # 1024         (VECTORSTORE_EMBEDDING_DIM)
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
 # LLM_API_BASE is the endpoint of LLM_PROVIDER, not a global base URL. With
-# LLM_PROVIDER=openai it reaches any OpenAI-compatible server (Azure OpenAI
-# gateway, vLLM, LiteLLM, OpenRouter); empty keeps the SDK default.
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible gateway (Azure OpenAI,
+# LiteLLM, OpenRouter); empty keeps the SDK default. Self-hosted vLLM has its
+# own provider (LLM_PROVIDER=vllm) and its own endpoint below.
 LLM_API_BASE=http://localhost:11434
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
+LLM_VLLM_API_BASE=                   # vLLM server (http://gpu-host:8000/v1); no default
+LLM_VLLM_ENDPOINTS=                  # several vLLM servers, comma-separated; routed by model
+LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
+LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
@@ -409,8 +426,6 @@ VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
 VECTORSTORE_EMBEDDING_DIM=1024
-VECTORSTORE_EMBEDDING_FALLBACK_MODEL=sentence-transformers/all-MiniLM-L6-v2
-VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 
 # Managed/remote Qdrant — both unset for the loopback compose default
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
@@ -806,9 +821,11 @@ See [SecurityHeadersMiddleware](middleware.md#securityheadersmiddleware).
     Two further checks run later, in the app lifespan
     (`core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
     **refuses to start** when `AUTH_REQUIRED=true` (opt out with
-    `BASELITH_ALLOW_UNBOUND_JWT=true`), while production with an empty
-    `TRUSTED_HOSTS` only logs an ERROR — there is no hostname the framework can
-    infer, so that one stays advisory. See
+    `BASELITH_ALLOW_UNBOUND_JWT=true`), and production with an empty
+    `TRUSTED_HOSTS` **refuses to start** too (`UnvalidatedHostConfigError`) —
+    there is no hostname the framework can infer, so the operator must name
+    them, or set `BASELITH_ALLOW_UNVALIDATED_HOST=true` to accept the risk,
+    which downgrades the abort to an ERROR log. See
     [Host header validation](../advanced/security.md#host-header-validation).
 
 ---
@@ -1018,6 +1035,19 @@ The known names come from the live `BaseSettings` class tree, so a plugin that
 declares its own settings is covered as soon as it is imported. Two families are
 skipped because their suffix is chosen at runtime and no declared name exists to
 compare against: `BASELITH_FLAG_<FLAG>` and `BASELITH_PROMPT_VARIANTS_<PROMPT>`.
+
+Names another component owns are skipped too. A plugin `.env` exports keys in
+its own namespace, and a plugin may write engine keys into the environment
+itself; both can sit one prefix or one letter away from a core setting
+(`ACME_PROJECT_PLANNER_ENABLE_TEST_CASES`, `SECRETS_KEY`) without being a
+mistake. The plugin loader declares every key it exports, and a plugin that
+writes a name itself declares it the same way:
+
+```python
+from core.config import register_owned_env
+
+register_owned_env("SECRETS_KEY")
+```
 
 The application logs one warning per suspect at startup — never an exception, so
 a false positive cannot stop a deployment — and the same report is available on

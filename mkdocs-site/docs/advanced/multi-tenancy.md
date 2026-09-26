@@ -930,6 +930,33 @@ deleted = await purge_tenant_data("tenant-123")  # {table: rows_deleted}
 It is idempotent and covers tenant-scoped data only — the tenant entity row
 itself is owned by `TenantService` (`core/services/tenant/service.py`).
 
+After the tables, the same call erases the two stores that hold tenant data
+without a `tenant_id` column (`purge_tenant_stores`,
+`core/services/tenant/purge_stores.py`):
+
+- **Vector store** — every chunk's payload carries `tenant_id` (the JSONB
+  column of a pgvector `vs_*` table, or a Qdrant point payload). The purge
+  deletes by that key, via `delete_by_filter(key="tenant_id")`, in every
+  collection the provider's `list_collections()` returns.
+- **Redis caches** — every tenant-scoped cache (chat response, pre-check,
+  rerank and history caches, the vector-search cache, the embedding and
+  learner caches) writes under `{CACHE_REDIS_PREFIX}:{tenant}:…`; that whole
+  keyspace is scanned and deleted.
+
+A vector store that cannot be purged (unreachable, or a provider without
+`delete_by_filter`) makes the call raise `TenantPurgeBlockedError` with
+`pending=[..., "vectorstore"]` — the database rows are already gone, the
+vectors may not be; re-run once the store is back. A Redis failure is only
+logged, since every cached entry expires on its TTL. Pass
+`include_stores=False` to erase the tables only.
+
+!!! warning "In-process caches are not purged"
+    Caches held in worker memory — the `local` `CACHE_BACKEND`, the semantic
+    LLM cache, the exact-match LLM cache — cannot be reached from the process
+    running the purge. Their entries for the erased tenant expire on their TTLs
+    (`CHAT_*_TTL`, `SEMANTIC_CACHE_TTL`, `LLM_CACHE_TTL`); restart the workers
+    for an immediate guarantee.
+
 ---
 
 ## Testing Multi-Tenancy

@@ -23,6 +23,7 @@ from core.orchestration.mixins._context_assembly import (
     enforce_tenant_isolation,
     inject_capabilities,
     inject_memory_context,
+    rag_only_intent,
 )
 from core.orchestration.mixins._failure_paths import (
     handle_budget_exceeded,
@@ -235,6 +236,10 @@ class ExecutionMixin:
             if checkpoint_mgr.checkpoint.intent:
                 intent = checkpoint_mgr.checkpoint.intent
 
+        # 0c. rag_only pins the default (retrieval) intent and skips the
+        #     classifier; an explicitly passed intent still wins.
+        intent = intent or rag_only_intent(self, context)
+
         # 1. Retrieve Context from Memory + classify intent.
         #    Memory recall (embedding + vector search) and intent classification
         #    (which consumes only `query`) are independent, so overlap them
@@ -421,7 +426,8 @@ class ExecutionMixin:
 
         context = context or {}
 
-        # Classify intent if not provided
+        # Classify intent if not provided (rag_only pins the default intent)
+        intent = intent or rag_only_intent(self, context)
         if not intent:
             intent = await self.classify_intent_async(query)
         context["intent"] = intent

@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
@@ -31,6 +32,8 @@ from core.services.llm._telemetry import (
 )
 from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
+from core.services.llm.model_capabilities import configured_max_tokens
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage, billed_usage
 
 if TYPE_CHECKING:
@@ -57,6 +60,7 @@ async def stream_response(
     )
 
     model = service._resolve_model(model)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     tracer = get_tracer("llm-service")
 
     with tracer.start_span(
@@ -74,6 +78,9 @@ async def stream_response(
         from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
         await enforce_tenant_cost_budget(model=model)
+        # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*): an open
+        # stream is one call, the slot is taken once before it opens.
+        await acquire_llm_call_slot(service.config.provider)
 
         # Track input tokens (large prompts encode off the event loop)
         stream_input_tokens = await estimate_tokens_async(prompt)
@@ -95,6 +102,8 @@ async def stream_response(
                 stream_kwargs["temperature"] = temperature
             if max_tokens is not None:
                 stream_kwargs["max_tokens"] = max_tokens
+            # CORE_DETERMINISTIC_MODE pins sampling on streams as well.
+            stream_kwargs.update(get_llm_override_kwargs(service.config.provider))
             # Providers that read the stream's usage events publish the metered
             # record here (inert for the ones that ignore the kwarg). Without
             # it the output side is only ever ``cumulative - estimate(prompt)``

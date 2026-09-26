@@ -16,7 +16,10 @@ import { Timeline } from './sections/Timeline';
 export function RunTask() {
   const queryClient = useQueryClient();
   const { push } = useToasts();
-  const { events } = useDashboardEvents(400);
+  const { events, state: eventState } = useDashboardEvents(400);
+  // run.* SSE events invalidate the run queries below; tight polling is
+  // only the fallback for when the stream is down.
+  const live = eventState === 'open';
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [goal, setGoal] = useState('');
@@ -30,20 +33,21 @@ export function RunTask() {
   const latestRun = useQuery({
     queryKey: ['runTaskLatest'],
     queryFn: api.runTaskLatest,
-    refetchInterval: 5_000,
+    refetchInterval: live ? 30_000 : 5_000,
   });
 
   const recentRuns = useQuery({
     queryKey: ['runTaskRecent', 8],
     queryFn: () => api.runTaskRecent(8),
-    refetchInterval: 8_000,
+    refetchInterval: live ? 30_000 : 8_000,
   });
 
   const runDetail = useQuery({
     queryKey: ['runTaskById', selectedRunId],
     queryFn: () => api.runTaskById(selectedRunId!),
     enabled: !!selectedRunId,
-    refetchInterval: (query) => (query.state.data?.run.status === 'running' ? 1_500 : 5_000),
+    refetchInterval: (query) =>
+      query.state.data?.run.status === 'running' ? (live ? 5_000 : 1_500) : live ? 30_000 : 5_000,
   });
 
   useEffect(() => {

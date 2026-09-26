@@ -13,6 +13,7 @@ This helps in:
 """
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -23,6 +24,10 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+#: Teardown hooks tried by :meth:`LazyServiceRegistry.shutdown_all`, in order
+#: of preference; the first one an instance exposes is the only one called.
+_TEARDOWN_HOOKS: tuple[str, ...] = ("shutdown", "close", "stop")
 
 
 class ResourceType(str, Enum):
@@ -149,22 +154,28 @@ class LazyServiceRegistry:
         """
         Shut down and clean up all initialized services.
 
-        Attempts to call `shutdown()` or `close()` on each instance
-        if the methods exist.
+        Calls the first teardown hook each instance exposes, in order of
+        preference: ``shutdown()``, ``close()``, ``stop()``. Hooks may be sync
+        or async — the result is awaited only when it is awaitable, so a sync
+        ``shutdown()`` (e.g. ``PostgresStorage``) no longer raises
+        ``TypeError`` on every teardown. ``stop()`` covers event-driven
+        services (``EvaluationService``, ``EvolutionService``) that would
+        otherwise stay subscribed to the event bus after shutdown.
         """
         logger.info("🔻 Shutting down lazy-initialized services...")
         for interface, instance in list(self._instances.items()):
             if self._initialized.get(interface, False):
                 try:
-                    if hasattr(instance, "shutdown"):
-                        await instance.shutdown()
-                        logger.debug(f"Shutdown service: {self._get_name(interface)}")
-                    elif hasattr(instance, "close"):
-                        if asyncio.iscoroutinefunction(instance.close):
-                            await instance.close()
-                        else:
-                            instance.close()
-                        logger.debug(f"Closed service: {self._get_name(interface)}")
+                    for hook_name in _TEARDOWN_HOOKS:
+                        hook = getattr(instance, hook_name, None)
+                        if callable(hook):
+                            outcome = hook()
+                            if inspect.isawaitable(outcome):
+                                await outcome
+                            logger.debug(
+                                f"{hook_name}() service: {self._get_name(interface)}"
+                            )
+                            break
                 except Exception as e:
                     logger.error(
                         f"Error shutting down {self._get_name(interface)}: {e}"

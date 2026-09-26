@@ -162,7 +162,7 @@ class TestADeadLedgerDoesNotStallTheLoop:
         )
 
         key, replayed = await claim_ledger_entry(
-            BoundedLedger(Hangs(), timeout=0.05), "run-1", 0, tool, {}
+            BoundedLedger(Hangs(), timeout=0.05), "run-1", 0, tool, {}, occurrence=0
         )
 
         assert key is None and replayed is None

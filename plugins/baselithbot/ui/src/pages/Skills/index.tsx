@@ -162,7 +162,7 @@ export function Skills() {
     if (ok) removeMutation.mutate(skill.name);
   };
 
-  const allSkills = data?.skills ?? [];
+  const allSkills = useMemo(() => data?.skills ?? [], [data?.skills]);
   const installedNames = useMemo(() => new Set(allSkills.map((skill) => skill.name)), [allSkills]);
   const installedSlugs = useMemo(() => {
     const slugs = new Set<string>();

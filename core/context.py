@@ -319,8 +319,8 @@ def resolve_plugin_tenant(mode: str) -> str:
 # Optional runtime override of a plugin's *declared* tenancy mode. A plugin may
 # ship ``tenancy: shared`` in its manifest, yet an operator may need to flip it
 # to ``personal`` (or back) at runtime without re-packaging. The override source
-# is domain-specific (it lives in the ``auth`` plugin's admin store), so core
-# only exposes a registration seam and never imports the plugin — keeping the
+# is domain-specific (it lives in the consuming application or plugin, e.g. an
+# admin store), so core only exposes a registration seam and never imports the plugin — keeping the
 # Sacred-Core boundary intact. When no resolver is registered the declared mode
 # is used verbatim, so behaviour is identical to a deployment without overrides.
 _PluginTenancyResolver = Callable[[str], str | None]
@@ -330,7 +330,8 @@ _plugin_tenancy_resolver: _PluginTenancyResolver | None = None
 def set_plugin_tenancy_resolver(resolver: _PluginTenancyResolver | None) -> None:
     """Register (or clear, with ``None``) the per-plugin tenancy-mode override.
 
-    The ``auth`` plugin installs this at activation. ``resolver(plugin_name)``
+    The consuming application or plugin installs this (typically at
+    activation). ``resolver(plugin_name)``
     returns ``"shared"`` / ``"personal"`` to override that plugin's declared
     mode, or ``None`` to inherit the manifest. It must be cheap and total
     (cached, never raising) — it is consulted on every storage scope resolution.

@@ -60,10 +60,20 @@ CREATE TABLE steps (
 [`router.py`](../router.py) `POST /baselithbot/run` handler wires the
 recorder automatically:
 
-- `plugin.replay.start_run(...)` at task launch
-- `plugin.replay.add_step(...)` inside the existing `_on_progress`
+- `plugin.replay.astart_run(...)` at task launch
+- `plugin.replay.aadd_step(...)` inside the existing `_on_progress`
   callback fired by `BaselithbotAgent.execute`
-- `plugin.replay.finish_run(...)` on success, failure, or exception
+- `plugin.replay.afinish_run(...)` on success, failure, or exception
+
+Every request-path call uses the `a*` wrappers (`asyncio.to_thread`), so
+SQLite commits and reads never block the event loop; the dashboard routes use
+`alist_runs` / `aget_run`, and the retention cron `aprune_older_than`.
+
+`run_id` may be client-supplied, so `start_run` guards it: reusing an id that
+belongs to **another tenant** raises `RunIdConflictError` (HTTP 409 on
+`POST /run`) instead of re-filing that tenant's run — and its steps and
+screenshots — under the caller. Reusing an id within the same tenant starts a
+clean timeline (stale steps are deleted).
 
 No additional instrumentation required in agent code — the callback
 already carries `steps_taken`, `action`, `reasoning`, `current_url`,

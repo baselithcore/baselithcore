@@ -70,6 +70,11 @@ class FineTuningPipeline:
             together_available=self._together.is_available,
         )
 
+    async def aclose(self) -> None:
+        """Close the providers' shared HTTP clients."""
+        await self._openai.aclose()
+        await self._together.aclose()
+
     # -------------------------------------------------------------------------
     # Training
     # -------------------------------------------------------------------------
@@ -266,12 +271,7 @@ class FineTuningPipeline:
         Returns:
             Model response
         """
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("openai package required") from None
-
-        client = AsyncOpenAI(api_key=self._openai.api_key)
+        client = self._openai.client()
 
         messages: list[dict[str, str]] = []
         if system_prompt:

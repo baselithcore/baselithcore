@@ -20,6 +20,12 @@ class _Tracker:
     def get_status(self, task_id):
         return self.statuses.get(task_id)
 
+    def get_status_for_tenant(self, task_id, tenant_id):
+        status = self.get_status(task_id)
+        if status is None or status.get("tenant_id") != tenant_id:
+            return None
+        return status
+
 
 @pytest.fixture
 def tracker():
@@ -64,6 +70,7 @@ class TestSubmit:
 class TestStatus:
     def test_status_found(self, client, tracker):
         tracker.statuses["job-123"] = {
+            "tenant_id": "default",
             "status": "completed",
             "result": {"answer": "ok"},
         }
@@ -73,3 +80,27 @@ class TestStatus:
 
     def test_status_unknown_404(self, client):
         assert client.get("/agent/status/nope").status_code == 404
+
+    def test_status_of_another_tenant_is_404(self, client, tracker):
+        tracker.statuses["job-123"] = {"tenant_id": "tenant-b", "status": "completed"}
+        assert client.get("/agent/status/job-123").status_code == 404
+
+    def test_status_uses_request_tenant(self, client, tracker, monkeypatch):
+        tracker.statuses["job-123"] = {"tenant_id": "tenant-b", "status": "running"}
+        monkeypatch.setattr(
+            async_runs_module, "get_current_tenant_id", lambda: "tenant-b"
+        )
+        resp = client.get("/agent/status/job-123")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "running"
+
+    def test_ownerless_record_is_404(self, client, tracker):
+        tracker.statuses["job-123"] = {"status": "completed"}
+        assert client.get("/agent/status/job-123").status_code == 404
+
+    def test_tracker_unavailable_returns_503(self, client, monkeypatch):
+        def broken():
+            raise ConnectionError("redis down")
+
+        monkeypatch.setattr(async_runs_module, "_tracker", broken)
+        assert client.get("/agent/status/job-123").status_code == 503

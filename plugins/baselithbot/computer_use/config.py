@@ -11,6 +11,7 @@ Implements the Anthropic Computer Use safety model:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import threading
 import time
@@ -154,8 +155,45 @@ class AuditLogger:
         await asyncio.to_thread(self.flush)
 
 
+_SHARED_AUDIT: dict[str | None, AuditLogger] = {}
+_SHARED_AUDIT_LOCK = threading.Lock()
+
+
+def shared_audit_logger(path: str | None) -> AuditLogger:
+    """Return the process-wide :class:`AuditLogger` for ``path``.
+
+    The tool builders run per request (the dashboard desktop panel rebuilds
+    the tool map on every call). A fresh buffered logger each time recorded
+    one entry into a buffer nobody ever flushed, so privileged actions
+    vanished from the JSONL audit trail. One logger per path keeps a single
+    buffer that fills, ages out, and is flushed at shutdown.
+    """
+    with _SHARED_AUDIT_LOCK:
+        audit = _SHARED_AUDIT.get(path)
+        if audit is None:
+            audit = AuditLogger(path)
+            _SHARED_AUDIT[path] = audit
+        return audit
+
+
+def flush_audit_loggers() -> None:
+    """Flush every shared audit logger (plugin shutdown / interpreter exit)."""
+    with _SHARED_AUDIT_LOCK:
+        loggers = list(_SHARED_AUDIT.values())
+    for audit in loggers:
+        try:
+            audit.flush()
+        except OSError as exc:
+            logger.warning("baselithbot_audit_flush_failed", error=str(exc))
+
+
+atexit.register(flush_audit_loggers)
+
+
 __all__ = [
     "ComputerUseConfig",
     "ComputerUseError",
     "AuditLogger",
+    "flush_audit_loggers",
+    "shared_audit_logger",
 ]

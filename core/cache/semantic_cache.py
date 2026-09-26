@@ -19,6 +19,7 @@ Entries are bucketed per tenant, and the bucket is resolved leniently
 it is not an access boundary, so an out-of-request caller (a background task, a
 scheduler, a script) lands in the shared ``"default"`` bucket instead of raising
 under ``strict_tenant_isolation`` and failing the generation it was caching for.
+A ``namespace=`` kwarg narrows the bucket further (see :meth:`_bucket`).
 """
 
 from __future__ import annotations
@@ -189,6 +190,18 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
         hash_input = canonicalize(prompt) + str(sorted(kwargs.items()))
         return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:16]
 
+    @staticmethod
+    def _bucket(kwargs: dict[str, Any]) -> str:
+        """Tenant bucket, narrowed by an optional ``namespace`` kwarg.
+
+        The similarity tiers ignore kwargs, so a caller whose answers depend on
+        more than the prompt (system prompt, model, sampling) must pass a
+        ``namespace`` or it is served another configuration's answer.
+        """
+        namespace = kwargs.get("namespace")
+        tenant_id = get_tenant_or_default()
+        return f"{tenant_id}\x1f{namespace}" if namespace else tenant_id
+
     async def set(self, prompt: str, response: str, **kwargs: Any) -> None:
         """
         Cache a prompt-response pair.
@@ -197,7 +210,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             prompt: The input prompt
             response: The LLM response
         """
-        tenant_id = get_tenant_or_default()
+        tenant_id = self._bucket(kwargs)
         # Compute embedding first (outside lock)
         try:
             embedding = await self._compute_embedding(prompt)
@@ -237,7 +250,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
         Returns:
             Cached response or None
         """
-        tenant_id = get_tenant_or_default()
+        tenant_id = self._bucket(kwargs)
         async with self._lock:
             if tenant_id not in self._entries:
                 return None
@@ -388,7 +401,7 @@ class SemanticLLMCache(PromptEmbeddingMixin, EntryMaintenanceMixin):
             Tuple of (response or None, similarity score)
         """
         threshold = threshold or self._threshold
-        tenant_id = get_tenant_or_default()
+        tenant_id = self._bucket(kwargs)
 
         # Check exact match first
         exact = await self.get_exact(prompt, **kwargs)

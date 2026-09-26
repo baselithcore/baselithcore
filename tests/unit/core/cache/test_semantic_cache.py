@@ -10,7 +10,7 @@ from core.cache.semantic_cache import SemanticLLMCache
 class TestSemanticLLMCache:
     @pytest.fixture
     def mock_embedder(self):
-        with patch("core.nlp.get_embedder") as mock_get:
+        with patch("core.nlp.models.get_embedder") as mock_get:
             embedder = MagicMock()
             # Default behavior: return a normalized vector
             embedder.encode.return_value = np.array([1.0, 0.0, 0.0])

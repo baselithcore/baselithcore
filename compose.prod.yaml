@@ -24,9 +24,11 @@ services:
       # image default (127.0.0.1) never matches the nginx gateway, whose
       # address on app_net is dynamic — so every request looked like it came
       # from the proxy and the per-IP rate limits, the failed-auth throttle
-      # and the admin lockout all shared ONE bucket. app_net is pinned to a
-      # known subnet below so the whole gateway network can be named here.
-      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
+      # and the admin lockout all shared ONE bucket. The gateway gets a fixed
+      # address (GATEWAY_IP, on the pinned app_net subnet below) and ONLY that
+      # address is trusted: trusting the whole subnet let any other container
+      # on app_net forge a client address or claim https.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -76,14 +78,21 @@ services:
     # Pinned: a `latest` re-pull silently changes the data plane.
     image: falkordb/falkordb:v4.20.4
     container_name: baselith-falkordb
-    # REDIS_PASSWORD is optional but strongly recommended: without it any
+    # REDIS_PASSWORD is REQUIRED here, like DB_PASSWORD: without it any
     # container on app_net (and any host process via the loopback publish)
-    # has full RW access to cache, queues, and rate-limit counters. When set,
-    # point CACHE_REDIS_URL etc. at redis://:<password>@falkordb:6379.
+    # had full RW access to the cache, the job queue (pickled RQ jobs — code
+    # execution in the worker), the graph and the rate-limit counters.
+    # configs/.env.production builds CACHE_REDIS_URL / QUEUE_REDIS_URL /
+    # GRAPH_DB_URL from the same variable, so the app and the server cannot
+    # disagree. It is embedded in a URL: use a URL-safe value
+    # (`openssl rand -hex 32`), or percent-encode it.
     # Passed via REDIS_ARGS (not a command override) so the image's default
     # entrypoint keeps loading the FalkorDB graph module.
     environment:
-      - REDIS_ARGS=${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      - REDIS_ARGS=--requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      # redis-cli reads REDISCLI_AUTH, so the healthcheck authenticates
+      # without putting the password on its command line (visible in `ps`).
+      - REDISCLI_AUTH=${REDIS_PASSWORD}
     # Publish to host loopback so a natively-deployed app (running on the host,
     # not in a container) can reach the cache/graph at 127.0.0.1. Bound to
     # 127.0.0.1 only — not exposed on any external interface. Harmless for the
@@ -105,7 +114,7 @@ services:
           cpus: '0.8'
           memory: 1G
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
+      test: ['CMD-SHELL', 'redis-cli ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -185,6 +194,14 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.12.1
     container_name: baselith-qdrant
+    # REQUIRED API key: Qdrant ships with no authentication, so any container
+    # on app_net could read, overwrite or drop every collection (the RAG
+    # corpus and long-term memory). The app sends the same value as
+    # QDRANT_API_KEY (configs/.env.production). Without TLS the key crosses
+    # app_net in clear — acceptable on this private bridge; set QDRANT_HTTPS
+    # and a TLS-enabled instance for anything that leaves the host.
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
     # Loopback only, like the other stores: reachable from app_net by service
     # name, published on the host purely for operator tooling.
     ports:
@@ -266,7 +283,11 @@ services:
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
-      - app_net
+      app_net:
+        # Fixed so the api service can trust exactly this peer
+        # (FORWARDED_ALLOW_IPS). Must lie inside APP_NET_SUBNET — change the
+        # two together.
+        ipv4_address: ${GATEWAY_IP:-172.28.0.10}
     depends_on:
       - api
     read_only: true
@@ -336,9 +357,10 @@ volumes:
 
 networks:
   app_net:
-    # Fixed subnet so FORWARDED_ALLOW_IPS (api service above) can trust the
-    # gateway by network. Override APP_NET_SUBNET if it collides with an
-    # existing network on the host; keep the two values in step.
+    # Fixed subnet so the gateway can hold a fixed address (GATEWAY_IP) that
+    # FORWARDED_ALLOW_IPS (api service above) trusts. Override APP_NET_SUBNET
+    # if it collides with an existing network on the host, and move
+    # GATEWAY_IP into the new subnet with it.
     ipam:
       config:
         - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}

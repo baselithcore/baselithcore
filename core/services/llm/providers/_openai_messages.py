@@ -109,5 +109,6 @@ async def generate_messages(
         return result
 
     except Exception as e:
-        logger.error(f"OpenAI message generation error: {describe_exception(e)}")
-        raise map_provider_exception(e, provider="OpenAI") from e
+        label = getattr(provider, "provider_label", "OpenAI")
+        logger.error(f"{label} message generation error: {describe_exception(e)}")
+        raise map_provider_exception(e, provider=label) from e

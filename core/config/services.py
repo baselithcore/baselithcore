@@ -52,9 +52,13 @@ class LLMConfig(BaseSettings):
     )
 
     # The backend provider to route LLM requests to.
-    provider: Literal["openai", "ollama", "huggingface", "anthropic", "gemini"] = Field(
+    provider: Literal[
+        "openai", "ollama", "huggingface", "anthropic", "gemini", "vllm"
+    ] = Field(
         default="ollama",
-        description="LLM provider (openai, ollama, huggingface, anthropic, or gemini)",
+        description=(
+            "LLM provider (openai, ollama, huggingface, anthropic, gemini, or vllm)"
+        ),
     )
 
     # The specific model family/version (e.g., 'gpt-4o', 'llama3.2', 'claude-3-opus').
@@ -100,6 +104,48 @@ class LLMConfig(BaseSettings):
             "Ollama would aim those calls at the wrong server. Falls back to "
             "LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, "
             "then http://localhost:11434."
+        ),
+    )
+
+    # == vLLM (self-hosted, OpenAI-compatible server) ==
+    # Same per-provider rule as Ollama: the endpoint is vLLM's own, so a
+    # deployment defaulting to a hosted provider can still pin a plugin (or a
+    # fallback stage) to its GPU box. There is no default: vLLM listens on
+    # :8000 out of the box, which is also this backend's port.
+    vllm_api_base: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_VLLM_API_BASE"),
+        description=(
+            "vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is "
+            "appended when missing). Falls back to LLM_API_BASE only when "
+            "LLM_PROVIDER=vllm. Required for vLLM: there is no default."
+        ),
+    )
+    vllm_endpoints: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_VLLM_ENDPOINTS"),
+        description=(
+            "Several vLLM servers, one per model: comma-separated OpenAI roots, "
+            "one per server (e.g. `http://gpu:8002/v1`). Calls name a model and "
+            "go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is "
+            "the one-server form of the same setting."
+        ),
+    )
+    vllm_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_VLLM_API_KEY", "VLLM_API_KEY"),
+        description=(
+            "The key the vLLM server was started with (--api-key / "
+            "VLLM_API_KEY). Leave empty for a keyless server."
+        ),
+    )
+    vllm_native_tools: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("LLM_VLLM_NATIVE_TOOLS"),
+        description=(
+            "Whether the vLLM server supports native tool calling (started "
+            "with --enable-auto-tool-choice --tool-call-parser <parser>). Set "
+            "false to use prompt-coerced tool calls instead."
         ),
     )
 
@@ -294,10 +340,15 @@ class LLMConfig(BaseSettings):
         "for providers that support it (off keeps previous behaviour).",
     )
 
-    # == Semantic Caching ==
-    # If enabled, uses a vector-based cache to reuse similar past responses.
+    # == Response Caching ==
+    # Exact-match, in-process response cache. The semantic (similarity) tier
+    # is separate: SEMANTIC_CACHE_ENABLED (core.config.cache).
     enable_cache: bool = Field(
-        default=True, description="Enable semantic caching for LLM responses"
+        default=True,
+        description=(
+            "Enable the exact-match in-process LLM response cache "
+            "(the semantic tier is SEMANTIC_CACHE_ENABLED)"
+        ),
     )
 
     cache_ttl: int = Field(
@@ -334,7 +385,7 @@ class LLMConfig(BaseSettings):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         """Ensure the requested provider is supported by the framework."""
-        if v not in ["openai", "ollama", "huggingface", "anthropic", "gemini"]:
+        if v not in ["openai", "ollama", "huggingface", "anthropic", "gemini", "vllm"]:
             raise ValueError(f"Unsupported provider: {v}")
         return v
 
@@ -348,6 +399,9 @@ class LLMConfig(BaseSettings):
         "openai_api_key",
         "huggingface_api_key",
         "gemini_api_key",
+        "vllm_api_base",
+        "vllm_endpoints",
+        "vllm_api_key",
         mode="before",
     )
     @classmethod

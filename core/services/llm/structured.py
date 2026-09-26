@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -41,6 +42,8 @@ from core.services.llm.errors import (
     retry_after_from_exception,
 )
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
+from core.services.llm.model_capabilities import configured_max_tokens
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -322,6 +325,7 @@ async def generate_structured(
     from core.quotas.manager import CostBudgetExceededError
 
     model = service._resolve_model(model, task_category)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
     use_native = native_enabled and bool(
         getattr(service.provider, "supports_native_tools", False)
@@ -349,6 +353,8 @@ async def generate_structured(
         except CostBudgetExceededError:
             span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
             raise
+        # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+        await acquire_llm_call_slot(service.config.provider)
 
         input_tokens = await estimate_tokens_async(prompt)
         report_tokens_to_middleware(input_tokens, model="input")
@@ -375,6 +381,9 @@ async def generate_structured(
                     extra["temperature"] = temperature
                 if max_tokens is not None:
                     extra["max_tokens"] = max_tokens
+                # CORE_DETERMINISTIC_MODE pins sampling here as well (the
+                # coercion branch gets it from _generate_with_retry).
+                extra.update(get_llm_override_kwargs(service.config.provider))
                 # Cross-provider resilience for the primary structured path:
                 # with LLM_FALLBACK_CHAIN configured, provider failures fall
                 # through to native-capable fallback stages (open breakers

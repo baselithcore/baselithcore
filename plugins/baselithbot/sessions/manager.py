@@ -42,8 +42,18 @@ class SessionManager:
         self._sessions[sid] = session
         self._history[sid] = deque(maxlen=self._history_limit)
         if len(self._sessions) > self._max_sessions:
-            oldest, _ = self._sessions.popitem(last=False)
-            self._history.pop(oldest, None)
+            # Evict the oldest *non-primary* session. Popping blindly let any
+            # burst of new inbound senders (one session each) push the
+            # operator's primary session and its history out of memory.
+            victim = next(
+                (k for k, s in self._sessions.items() if not s.primary and k != sid),
+                None,
+            )
+            if victim is None:
+                # Only primaries left: still honour the cap (oldest first).
+                victim = next(k for k in self._sessions if k != sid)
+            self._sessions.pop(victim, None)
+            self._history.pop(victim, None)
         return session
 
     def list(self) -> builtins.list[Session]:

@@ -91,10 +91,11 @@ class TTLCache(Generic[K, V]):
             if key in self._store:
                 self._store.pop(key)
             elif len(self._store) >= self._maxsize:
-                self._purge_expired()
-                if len(self._store) >= self._maxsize:
-                    self._store.popitem(last=False)
-                    evicted = True
+                # Evict the LRU entry. A full-store expiry scan here made every
+                # insert into a full cache O(n); expired entries are swept on
+                # the purge interval above instead.
+                self._store.popitem(last=False)
+                evicted = True
 
             expiry = time.time() + self._ttl
             self._store[key] = (value, expiry)
@@ -149,10 +150,9 @@ class TTLCache(Generic[K, V]):
                 if key in self._store:
                     self._store.pop(key)
                 elif len(self._store) >= self._maxsize:
-                    self._purge_expired()
-                    if len(self._store) >= self._maxsize:
-                        self._store.popitem(last=False)
-                        evicted = True
+                    # LRU eviction, no per-insert expiry scan (see ``set``).
+                    self._store.popitem(last=False)
+                    evicted = True
 
                 expiry = time.time() + self._ttl
                 self._store[key] = (value, expiry)

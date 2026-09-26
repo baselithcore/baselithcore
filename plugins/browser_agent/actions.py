@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
 from .types import BrowserAction, BrowserActionType
+
+#: Upper bound on one ``wait`` action. The duration is model output, and the
+#: model reads attacker-controllable page content: an unbounded value let a
+#: single prompt-injected ``{"action": "wait", "value": 1e9}`` park the task
+#: (and the browser it holds) indefinitely.
+MAX_WAIT_SECONDS = 10.0
 
 _JQUERY_CONTAINS = re.compile(r":contains\(\s*['\"]([^'\"]+)['\"]\s*\)")
 
@@ -24,6 +31,25 @@ def normalize_selector(selector: str) -> str:
         The selector with jQuery-only pseudo-classes rewritten.
     """
     return _JQUERY_CONTAINS.sub(lambda m: f':has-text("{m.group(1)}")', selector)
+
+
+def clamp_wait_seconds(raw: str | None) -> float:
+    """Parse a ``wait`` action's duration and clamp it to ``[0, MAX_WAIT_SECONDS]``.
+
+    Args:
+        raw: The action's ``value`` as emitted by the vision model.
+
+    Returns:
+        A finite duration in seconds; unparseable or non-finite input falls
+        back to one second.
+    """
+    try:
+        seconds = float(raw) if raw is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(seconds):
+        return 1.0
+    return min(max(seconds, 0.0), MAX_WAIT_SECONDS)
 
 
 def build_action(
@@ -72,4 +98,9 @@ def build_action(
     )
 
 
-__all__ = ["build_action", "normalize_selector"]
+__all__ = [
+    "MAX_WAIT_SECONDS",
+    "build_action",
+    "clamp_wait_seconds",
+    "normalize_selector",
+]

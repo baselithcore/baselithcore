@@ -322,12 +322,29 @@ def get_api_limiter(limit: int | None = None, window: int | None = None) -> Rate
     )
 
 
-def get_llm_limiter(limit: int | None = None, window: int | None = None) -> RateLimiter:
-    """Get rate limiter for LLM calls (more restrictive)."""
+def get_llm_limiter(
+    limit: int | None = None,
+    window: int | None = None,
+    backend: RateLimiterBackend | None = None,
+) -> RateLimiter:
+    """Get rate limiter for LLM calls (more restrictive).
+
+    Backs the opt-in LLM call throttle (``RESILIENCE_LLM_RATE_ENABLED``) in
+    :mod:`core.services.llm.rate_limit`.
+
+    Args:
+        limit: Calls per window; ``RESILIENCE_LLM_RATE_LIMIT`` when omitted.
+        window: Window in seconds; ``RESILIENCE_LLM_RATE_WINDOW`` when omitted.
+        backend: Storage backend; in-memory when omitted.
+
+    Returns:
+        A configured :class:`RateLimiter`.
+    """
     from core.config import get_resilience_config
 
     config = get_resilience_config()
     return RateLimiter(
         limit=limit if limit is not None else config.llm_rate_limit,
         window=window if window is not None else config.llm_rate_window,
+        backend=backend,
     )

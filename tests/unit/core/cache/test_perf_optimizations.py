@@ -127,3 +127,25 @@ class TestVectorizedSimilarityScan:
         response, score = await cache.get_similar_with_score("beta")
         assert response is None
         assert score == 0.0
+
+
+class TestTTLCacheFullInsert:
+    """An insert into a full TTLCache is O(1): no per-set expiry scan."""
+
+    @pytest.mark.asyncio
+    async def test_full_cache_set_does_not_scan_for_expired(self) -> None:
+        from core.cache.local_cache import TTLCache
+
+        cache: TTLCache[int, int] = TTLCache(maxsize=3, ttl=60)
+        cache._last_purge_time = float("inf")  # hold off the interval sweep
+        for i in range(3):
+            await cache.set(i, i)
+
+        scans = MagicMock(wraps=cache._purge_expired)
+        cache._purge_expired = scans  # type: ignore[method-assign]
+        await cache.set(3, 3)
+        await cache.set_many([(4, 4), (5, 5)])
+
+        scans.assert_not_called()
+        # Oldest entries were evicted in LRU order.
+        assert list(cache._store) == [3, 4, 5]

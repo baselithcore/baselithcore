@@ -25,7 +25,7 @@ def _clean_registry():
 @pytest.fixture
 def fake_redis():
     with (
-        patch.object(redis_sync, "ConnectionPool") as pool_cls,
+        patch.object(redis_sync, "BlockingConnectionPool") as pool_cls,
         patch.object(redis_sync, "Redis") as client_cls,
     ):
         pool_cls.from_url.side_effect = lambda *a, **kw: MagicMock(name="pool")
@@ -109,5 +109,17 @@ def test_missing_redis_package_is_a_clear_error():
 
 
 def test_close_is_a_noop_without_the_redis_package():
-    with patch.object(redis_sync, "ConnectionPool", None):
+    with patch.object(redis_sync, "BlockingConnectionPool", None):
         redis_sync.close_sync_redis_pools()
+
+
+def test_sync_pool_blocks_instead_of_failing_when_exhausted():
+    """The sync twin waits for a free connection at the cap, too."""
+    from redis import BlockingConnectionPool
+
+    client = redis_sync.create_sync_redis_client("redis://localhost:6399/0")
+    try:
+        assert isinstance(client.connection_pool, BlockingConnectionPool)
+        assert client.connection_pool.timeout > 0
+    finally:
+        client.close()

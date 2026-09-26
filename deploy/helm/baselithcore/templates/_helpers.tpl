@@ -454,6 +454,10 @@ starts) when `backup.offsite` is on — same container either way.
       # never reach the trap, so their partials are swept here.
       find "${BACKUP_DIR}" -name '.backup_*.sql.gz.partial' -mmin +60 -delete
       echo "Backup complete."
+  {{- with .Values.backup.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   env:
     {{- include "baselithcore.backupEnv" . | nindent 4 }}
   volumeMounts:

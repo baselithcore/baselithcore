@@ -41,7 +41,7 @@ export function Sessions() {
     refetchInterval: eventState === 'open' ? false : 10_000,
   });
 
-  const sessions = list.data?.sessions ?? [];
+  const sessions = useMemo(() => list.data?.sessions ?? [], [list.data?.sessions]);
 
   useEffect(() => {
     const requestedSessionId = searchParams.get('session');

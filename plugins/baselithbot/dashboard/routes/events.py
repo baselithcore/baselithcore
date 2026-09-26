@@ -4,18 +4,72 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-
 from plugins.baselithbot.dashboard.bus import _BUS
 from plugins.baselithbot.policies import DashboardAuth
 
+# A comment frame goes out after this many idle seconds. Proxies and load
+# balancers drop a connection that says nothing for their read timeout
+# (nginx's default is 60s), and a dashboard left open on a quiet agent is
+# exactly that — the EventSource would then reconnect in a loop, replaying
+# the history buffer each time. Same cadence as core/mcp/sse.py.
+_KEEPALIVE_SECONDS = 15.0
+_KEEPALIVE_FRAME = b": keepalive\n\n"
 
-def register_events_routes(
-    router: APIRouter, auth: DashboardAuth | None = None
-) -> None:
+
+def _frame(event: dict[str, Any]) -> bytes:
+    payload = json.dumps(event)
+    # Dual-emit: named frame for type-specific consumers + default "message"
+    # frame so wildcard listeners (Live Logs UI) see every event regardless
+    # of type.
+    chunk = f"event: {event['type']}\ndata: {payload}\n\n"
+    chunk += f"data: {payload}\n\n"
+    return chunk.encode("utf-8")
+
+
+async def _stream_frames() -> AsyncIterator[bytes]:
+    """Yield SSE frames from the bus, with a keepalive during quiet periods.
+
+    The subscription is advanced through a pending task that survives a
+    timeout: ``asyncio.wait_for`` on the generator itself would cancel it
+    — and so unsubscribe — on the first idle interval.
+    """
+    yield b": connected\n\n"
+    events = _BUS.subscribe()
+    pending: asyncio.Future[dict[str, Any]] | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(anext(events))
+            done, _ = await asyncio.wait({pending}, timeout=_KEEPALIVE_SECONDS)
+            if not done:
+                yield _KEEPALIVE_FRAME
+                continue
+            try:
+                event = pending.result()
+            except StopAsyncIteration:
+                return
+            pending = None
+            yield _frame(event)
+    except asyncio.CancelledError:
+        return
+    finally:
+        # Either path runs the bus generator's own ``finally``, which drops
+        # this subscriber's queue: cancel the step in flight, or close the
+        # generator where it sits suspended between events.
+        if pending is not None:
+            pending.cancel()
+        else:
+            aclose = getattr(events, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+
+def register_events_routes(router: APIRouter, auth: DashboardAuth | None = None) -> None:
     if auth is not None:
 
         @router.post("/events/ticket")
@@ -38,22 +92,8 @@ def register_events_routes(
 
     @router.get("/events/stream")
     async def events_stream() -> StreamingResponse:
-        async def _gen() -> AsyncIterator[bytes]:
-            yield b": connected\n\n"
-            try:
-                async for event in _BUS.subscribe():
-                    payload = json.dumps(event)
-                    # Dual-emit: named frame for type-specific consumers
-                    # + default "message" frame so wildcard listeners (Live
-                    # Logs UI) see every event regardless of type.
-                    chunk = f"event: {event['type']}\ndata: {payload}\n\n"
-                    chunk += f"data: {payload}\n\n"
-                    yield chunk.encode("utf-8")
-            except asyncio.CancelledError:
-                return
-
         return StreamingResponse(
-            _gen(),
+            _stream_frames(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",

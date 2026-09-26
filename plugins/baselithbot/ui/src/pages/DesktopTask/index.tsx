@@ -40,7 +40,7 @@ export function DesktopTask() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const policy = catalog.data?.policy;
-  const tools = catalog.data?.tools ?? [];
+  const tools = useMemo(() => catalog.data?.tools ?? [], [catalog.data?.tools]);
 
   const toolMap = useMemo(() => new Map(tools.map((tool) => [tool.name, tool])), [tools]);
   const toolNames = useMemo(() => exportedToolNames(tools), [tools]);

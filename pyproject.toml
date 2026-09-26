@@ -201,9 +201,8 @@ gemini = [
 tokenizer = [
   "tiktoken>=0.7.0",
 ]
-# LLM-as-judge metrics in `core/evaluation/metrics.py` and
-# `core/services/evaluation/service.py` (guarded import, gated on
-# `evaluation_config.is_enabled`).
+# LLM-as-judge metrics in `core/evaluation/metrics.py` (guarded import, gated
+# on `evaluation_config.is_enabled`).
 evaluation = [
   "deepeval>=2.0.0",
 ]

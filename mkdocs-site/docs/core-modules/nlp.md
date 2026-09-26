@@ -7,7 +7,8 @@ The `core/nlp/` module provides Natural Language Processing utilities built on *
 ```yaml
 core/nlp/
 ├── spacy_utils.py   # Lazy-loaded spaCy pipeline with fallback
-└── models.py        # Embedding model loader (sentence-transformers)
+├── models.py        # Embedding model loader (sentence-transformers)
+└── lazy.py          # Async accessors + LazyEmbedder / LazyReranker
 ```
 
 ---
@@ -81,6 +82,45 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 
 !!! tip "Performance"
     `get_embedder()` and `get_reranker()` are wrapped in `@functools.cache` (unbounded, one entry per `model_name`), so each model is loaded once and reused across all requests; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
+
+!!! note "Importing `core.nlp` loads no ML stack"
+    `sentence_transformers` (and with it transformers, torch, scipy and
+    scikit-learn) is imported on the first `get_embedder()` / `get_reranker()`
+    call, not when `core/nlp/models.py` is imported. The module sits on the
+    application's import path (`core.api.lifespan` → `core.services.indexing`
+    → `core.nlp`), and the former module-scope import was ~2.2 s and ~3 000
+    modules of every process start: importing `core.api.factory` dropped from
+    ~3.0 s / 4 618 modules to ~0.45 s / 1 373, and the same import inside the
+    container image from ~2.9 s to ~0.6 s. `SentenceTransformer` and
+    `CrossEncoder` stay reachable as module attributes (PEP 562), so
+    `mock.patch("core.nlp.models.SentenceTransformer")` keeps working; with the
+    `[rag]` extra absent they resolve to `None`.
+
+### Loading models off the event loop
+
+`get_embedder()` / `get_reranker()` build the model synchronously — seconds of
+disk and CPU work on first call, and a `RuntimeError` when the `[rag]` extra is
+not installed. From async code use the accessors in `core/nlp/lazy.py`, which
+run the same cached factory in a worker thread (first loads are serialized, so
+two concurrent callers never build the model twice):
+
+```python
+from core.nlp import aget_embedder, aget_reranker
+
+embedder = await aget_embedder()          # VECTORSTORE_EMBEDDING_MODEL
+reranker = await aget_reranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
+```
+
+To hold a model you may never need — a dependency container built at boot —
+store a stand-in instead: `LazyEmbedder(factory, model_name)` builds the model
+on its first `await encode(...)` (off the loop), and
+`LazyReranker(factory, model_name)` on its first `predict(...)`, which the
+rerank path already runs on the inference pool. `loaded` reports whether the
+model exists yet. The chat dependencies, the semantic LLM cache and the
+hierarchical-memory bootstrap all load this way. The vector-store rerank
+service (`core.services.retrieval.reranker.Reranker`) does too: `rerank()`
+awaits `aload_model()`, which builds its CrossEncoder in a worker thread under
+a lock, so the first rerank neither stalls the loop nor builds the model twice.
 
 ### Embedding cache & miss coalescing
 

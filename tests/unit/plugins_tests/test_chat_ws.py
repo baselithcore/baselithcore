@@ -260,3 +260,65 @@ def test_multiple_turns_on_one_connection(monkeypatch):
             assert websocket.receive_json()["type"] == "final"
 
     assert [r.query for r in service.requests] == ["first", "second"]
+
+
+class _StallingChatService:
+    """Yields one chunk, then stalls like a hung provider."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def handle_chat_stream_async(self, req: Any):
+        import asyncio
+
+        async def _stream():
+            try:
+                yield "partial"
+                await asyncio.sleep(3600)
+                yield "never"
+            finally:
+                self.closed = True
+
+        return _stream()
+
+
+def test_stalled_stream_hits_the_sse_deadline_and_is_closed(monkeypatch):
+    client, _, _, _ = _client(monkeypatch, authenticated=True)
+    service = _StallingChatService()
+    monkeypatch.setattr(chat_ws_module, "_get_chat_service", lambda: service)
+    monkeypatch.setattr(chat_ws_module, "_stream_timeout_seconds", lambda: 0.2)
+
+    with client.websocket_connect(
+        "/chat/ws", headers={"x-api-key": "k-123"}
+    ) as websocket:
+        websocket.send_json({"query": "hi"})
+        assert websocket.receive_json() == {"type": "chunk", "content": "partial"}
+        assert websocket.receive_json() == {
+            "type": "error",
+            "detail": "stream timed out",
+        }
+        assert websocket.receive_json()["type"] == "final"
+
+    assert service.closed
+
+
+@pytest.mark.asyncio
+async def test_disconnect_mid_turn_closes_the_source():
+    from fastapi import WebSocketDisconnect
+
+    closed = False
+
+    async def _source():
+        nonlocal closed
+        try:
+            yield "a"
+            yield "b"
+        finally:
+            closed = True
+
+    websocket = MagicMock()
+    websocket.send_json = AsyncMock(side_effect=WebSocketDisconnect())
+
+    with pytest.raises(WebSocketDisconnect):
+        await chat_ws_module._relay_turn(websocket, _source(), 30.0)
+    assert closed

@@ -439,6 +439,7 @@
       "get_webhook_config",
       "get_world_model_config",
       "is_production_env",
+      "register_owned_env",
       "set_web_concurrency",
       "suspected_typos",
       "warn_on_suspected_typos"
@@ -746,6 +747,7 @@
       "RequestSizeLimitMiddleware",
       "SecurityHeadersMiddleware",
       "TenantMiddleware",
+      "authenticate_admin_basic",
       "check_admin_lockout",
       "clear_admin_failures",
       "clear_request_size_overrides",
@@ -769,6 +771,10 @@
     ],
     "core.nlp": [
       "CachedEmbedder",
+      "LazyEmbedder",
+      "LazyReranker",
+      "aget_embedder",
+      "aget_reranker",
       "get_embedder",
       "get_pipeline",
       "get_reranker"
@@ -1292,9 +1298,11 @@
       "Tenant",
       "TenantPurgeBlockedError",
       "TenantService",
+      "TenantStoresPurge",
       "assert_purge_visible",
       "get_tenant_service",
       "purge_tenant_data",
+      "purge_tenant_stores",
       "tenant_scoped_tables"
     ],
     "core.services.vectorstore": [
@@ -1310,6 +1318,7 @@
       "StoredParent",
       "TextChunk",
       "VectorStoreService",
+      "close_vectorstore_service",
       "expand_to_parents",
       "get_vectorstore_service",
       "parent_chunk_id",

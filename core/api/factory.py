@@ -264,18 +264,36 @@ def create_app() -> FastAPI:
     cors_params: dict[str, Any] = {
         "allow_credentials": not use_wildcard,
         "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        # Every request header a first-party browser client sends: X-API-Key
+        # (the TypeScript SDK's API-key auth), the MCP Streamable HTTP session,
+        # protocol-version and routing headers, and Last-Event-ID (SSE
+        # resumption).
+        # A header missing here fails the preflight before auth ever runs.
         "allow_headers": [
             "Content-Type",
             "Authorization",
+            "X-API-Key",
             "X-Requested-With",
             "X-Request-ID",
             "Idempotency-Key",
             "Accept",
             "Origin",
+            "Mcp-Session-Id",
+            "Mcp-Protocol-Version",
+            "Mcp-Method",
+            "Mcp-Name",
+            "Last-Event-ID",
         ],
         # X-Request-ID is the correlation id an operator asks a reporter for;
         # a browser client cannot read it off the response unless it is exposed.
-        "expose_headers": ["Idempotency-Replayed", "Retry-After", "X-Request-ID"],
+        # Mcp-Session-Id is how an MCP browser client learns its session id
+        # from the initialize response.
+        "expose_headers": [
+            "Idempotency-Replayed",
+            "Retry-After",
+            "X-Request-ID",
+            "Mcp-Session-Id",
+        ],
         # How long a browser may cache a preflight answer. Starlette's default
         # is 600s, so a dashboard doing credentialed JSON calls re-asks OPTIONS
         # for every distinct URL every ten minutes — a full round trip that

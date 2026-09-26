@@ -59,6 +59,7 @@ async def test_validate_survives_redis_outage_when_opened():
 async def test_no_redis_falls_back_to_local_only():
     validator = APIKeyValidator(config=SecurityConfig())
     validator._redis = None
+    validator._denylist_declared = False  # CACHE_BACKEND != redis
     validator.register_key("k-456", "svc2", {AuthRole.SERVICE})
     assert (await validator.validate_key("k-456")).user_id == "svc2"
     assert await validator.revoke_key("k-456") is True

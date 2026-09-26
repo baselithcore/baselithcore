@@ -124,8 +124,7 @@ async def initialize_redis() -> Any:
     Returns:
         Any: The asynchronous Redis client instance.
     """
-    import redis.asyncio as redis
-
+    from core.cache.redis_cache import create_redis_client
     from core.config import get_storage_config
 
     storage_config = get_storage_config()
@@ -134,8 +133,11 @@ async def initialize_redis() -> Any:
         f"🔴 Lazy initializing Redis at "
         f"{redact_url_credentials(storage_config.cache_redis_url)}..."
     )
-    redis_client = redis.from_url(
-        storage_config.cache_redis_url, encoding="utf-8", decode_responses=True
+    # The shared, bounded pool (REDIS_MAX_CONNECTIONS, socket deadlines):
+    # ``redis.from_url`` built a private pool with no connection cap, so a
+    # burst could open connections until Redis hit ``maxclients``.
+    redis_client = create_redis_client(
+        storage_config.cache_redis_url, decode_responses=True
     )
     # Test connection
     await redis_client.ping()
@@ -237,13 +239,14 @@ async def initialize_hierarchical_memory() -> Any:
         Any: The HierarchicalMemory instance.
     """
     from core.memory.hierarchy import HierarchicalMemory
-    from core.nlp.models import get_embedder
+    from core.nlp import aget_embedder
     from core.services.llm.service import get_llm_service
 
     logger.info("🧠 Lazy initializing HierarchicalMemory...")
 
     llm_service = get_llm_service()
-    embedder = get_embedder()
+    # Model load is seconds of blocking I/O + CPU: keep it off the event loop.
+    embedder = await aget_embedder()
 
     memory = HierarchicalMemory(
         llm_service=llm_service,

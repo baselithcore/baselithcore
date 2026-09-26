@@ -11,6 +11,17 @@ import hashlib
 import hmac
 
 
+def _digest_equal(expected: str, received: str) -> bool:
+    """Constant-time compare that never raises on attacker-chosen input.
+
+    ``hmac.compare_digest`` raises ``TypeError`` for a ``str`` holding
+    non-ASCII characters, and Starlette decodes headers as latin-1 — so a
+    header like ``v0=é`` turned the 401 into an unhandled 500. Comparing the
+    UTF-8 bytes keeps the constant-time property and the right answer.
+    """
+    return hmac.compare_digest(expected.encode("utf-8"), received.encode("utf-8"))
+
+
 def verify_slack_signature(
     signing_secret: str,
     timestamp: str,
@@ -23,7 +34,7 @@ def verify_slack_signature(
     base = f"v0:{timestamp}:".encode() + body
     digest = hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
     expected = f"v0={digest}"
-    return hmac.compare_digest(expected, signature)
+    return _digest_equal(expected, signature)
 
 
 def verify_github_signature(
@@ -36,7 +47,7 @@ def verify_github_signature(
         return False
     digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     expected = f"sha256={digest}"
-    return hmac.compare_digest(expected, signature)
+    return _digest_equal(expected, signature)
 
 
 def verify_telegram_secret_token(
@@ -46,7 +57,7 @@ def verify_telegram_secret_token(
     """Verify the ``X-Telegram-Bot-Api-Secret-Token`` header."""
     if not received_token:
         return False
-    return hmac.compare_digest(expected_token, received_token)
+    return _digest_equal(expected_token, received_token)
 
 
 def verify_stripe_signature(
@@ -76,7 +87,7 @@ def verify_stripe_signature(
         return False
     payload = f"{timestamp}.".encode() + body
     expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, sig)
+    return _digest_equal(expected, sig)
 
 
 def verify_discord_signature(

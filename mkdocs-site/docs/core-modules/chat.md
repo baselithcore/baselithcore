@@ -100,6 +100,14 @@ take a single `ChatRequest`:
     already inside a loop, always use the `_async` variants: the synchronous
     ones would block that loop for the whole request, and cannot run at all.
 
+The non-streaming methods run the regex input guard before orchestration and
+raise `ChatServiceError("Blocked by InputGuard: …")` on a block. They use the
+same compiled `InputGuard` instance the orchestrator's guard pipeline caches
+(`core.orchestration.guard_pipeline.get_input_guard`) instead of building one
+per request; the orchestrator still runs its own `guard_input_async` (regex,
+then the opt-in moderation and taxonomy layers), which is the only input
+guard on the streaming path.
+
 `handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
 through `core.utils.concurrency.drain_async_iterator`, so the guardrails, the
 metrics, the streaming-disabled fallback and the error stream have one
@@ -400,6 +408,15 @@ await history.append_turn(
 )
 ```
 
+`append_turn` re-reads the stored turns and writes them back with the new one
+appended. That read-modify-write runs under a per-conversation lock shared by
+every manager in the process, so two concurrent requests on one conversation (a
+double submit, two open tabs) both keep their turn — before, the second write
+silently dropped the first. The cache protocol has no compare-and-set, so
+writers on *different* workers are not serialised; a client that must never
+lose a turn under that race should not fire two turns of one conversation in
+parallel.
+
 ---
 
 ## Streaming Responses
@@ -409,9 +426,16 @@ await history.append_turn(
 from core.models.chat import ChatRequest
 
 req = ChatRequest(query="...", conversation_id="conv-123")
-async for chunk in chat.handle_chat_stream_async(req):
+# handle_chat_stream_async is a coroutine that *returns* the async stream:
+# await it first, then iterate.
+stream = await chat.handle_chat_stream_async(req)
+async for chunk in stream:
     print(chunk, end="", flush=True)
 ```
+
+The `chat_request_latency{route="stream"}` histogram is observed when the
+stream finishes (drained, failed or closed by the consumer), so it measures the
+whole generation; a pipeline that fails before streaming records it at once.
 
 ---
 
@@ -488,6 +512,13 @@ to a prompt version. Deployments override it by shipping a catalog via
 default; the embedded constant remains only as a registry-unavailable
 fallback.
 
+Version 3 moves the only per-request value, `{{ current_date }}`, from the
+opening sentence to the last line. Everything above it is now byte-identical
+from one request (and one day) to the next, which is what provider prefix
+caching keys on — OpenAI caches automatically once the shared prefix passes
+1 024 tokens, so a deployment catalog that lengthens this prompt benefits
+directly. Keep per-request values at the end when overriding it.
+
 ### Versioning & Audit
 
 Every prompt managed by `PromptEngine` carries a version and a changelog. This allows for rigorous audit trails in production as prompts evolve.
@@ -516,6 +547,15 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 | `precheck_cache_enabled` | Toggle the opt-in pre-retrieval cache (default off — see [Answer caching](#answer-caching-two-layers-two-freshness-contracts)) |
 | `precheck_cache_ttl`     | Staleness window for the pre-retrieval cache, seconds |
 | `summary_enabled`        | Toggle rolling history summarization          |
+
+!!! note "Embedder and reranker are built on first use"
+    `create_default_dependencies()` does not load either model. It stores a
+    `LazyEmbedder` / `LazyReranker` (`core.nlp.lazy`) holding the factory and
+    the model name; the model is built the first time the RAG path embeds a
+    query or reranks candidates, in a worker thread rather than on the event
+    loop. A plain install without the `[rag]` extra therefore boots and serves
+    non-RAG chat; only the first RAG request fails, with the "install
+    `baselith-core[rag]`" error.
 
 !!! note "Candidate / top-k counts"
     `INITIAL_SEARCH_K` (`40`) and `FINAL_TOP_K` (`6`) are class-level

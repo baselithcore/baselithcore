@@ -1,1 +1,5 @@
-export { useDashboardEvents, type SseState } from '../components/DashboardProvider';
+export {
+  useDashboardEvents,
+  useDashboardEventState,
+  type SseState,
+} from '../components/DashboardProvider';

@@ -169,3 +169,33 @@ def test_long_term_memory_has_its_own_setting(monkeypatch):
     assert ChatConfig().long_term_memory_enabled is True
     assert ChatServiceConfig(memory_enabled=True).memory_enabled is True
     assert ChatServiceConfig().memory_enabled is False
+
+
+class TestConcurrentAppend:
+    """Two concurrent turns on one conversation must both survive."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_appends_do_not_lose_turns(self):
+        import asyncio
+
+        from core.services.chat.utils.history import ChatHistoryManager
+
+        class SlowCache:
+            def __init__(self):
+                self.data = {}
+
+            async def get(self, key):
+                await asyncio.sleep(0.01)  # widen the read-modify-write gap
+                return self.data.get(key)
+
+            async def set(self, key, value, *args, **kwargs):
+                await asyncio.sleep(0.01)
+                self.data[key] = value
+
+        cache = SlowCache()
+        manager = ChatHistoryManager(cache, max_turns=50)
+        await asyncio.gather(
+            *(manager.append_turn("conv-1", [], f"q{i}", f"a{i}") for i in range(10))
+        )
+        turns = cache.data["conv-1"]["turns"]
+        assert sorted(t["query"] for t in turns) == sorted(f"q{i}" for i in range(10))

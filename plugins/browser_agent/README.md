@@ -27,3 +27,11 @@ export BASELITH_BROWSER_ALLOW_INTERNAL=true
 
 Do not enable this flag in production — combined with prompt-injected URLs it
 turns the headless browser into an internal-network scanner.
+
+## Resource bounds
+
+A `wait` action's duration comes from the vision model, which reads
+attacker-controllable page content, so it is clamped to `0..10` seconds
+(`MAX_WAIT_SECONDS`); a non-numeric or non-finite value waits one second.
+`execute_task` keeps only the last three screenshots in memory — the ones the
+result returns.

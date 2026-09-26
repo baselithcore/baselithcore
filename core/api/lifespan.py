@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     warn_on_suspected_typos()
 
+    # CORE_DETERMINISTIC_MODE: seed the RNGs once, before anything samples.
+    from core.lifecycle.deterministic import apply_deterministic_mode
+
+    apply_deterministic_mode()
+
     # Audit trail, compliance-profile check and the Art. 72 review sweep — each
     # individually opt-in (see core.api.startup_checks). The audit trail comes
     # up first so every later startup step is already covered by it.
@@ -333,7 +338,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         initialize_chat_service_with_plugins(plugin_registry)
         logger.info("✅ Chat service initialized with plugin registry")
-    except ImportError as exc:
+    except Exception as exc:
         logger.warning("Chat service unavailable (init skipped): %s", exc)
 
     if "evaluation" in required_resources:
@@ -386,6 +391,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Opt-in runtime services (run-events bridge, prompt sync): each is
     # env-gated and fail-open — see core.api._runtime_services.
     from core.api._runtime_services import (
+        close_shared_clients,
+        drain_orchestrator,
         start_runtime_services,
         stop_runtime_services,
     )
@@ -398,6 +405,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
 
         await stop_runtime_services(app)
+        await drain_orchestrator()
 
         # Cancel fire-and-forget startup tasks (bootstrap, recovery sweep):
         # a hung sweep would otherwise live until SIGKILL.
@@ -427,6 +435,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await lazy_registry.shutdown_all()
         except ImportError:
             pass
+
+        await close_shared_clients()
 
         try:
             from core.middleware.security import get_security_manager

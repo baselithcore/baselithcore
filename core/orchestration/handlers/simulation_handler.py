@@ -13,6 +13,27 @@ from core.orchestration.handlers.swarm_handler import SwarmHandler
 
 logger = get_logger(__name__)
 
+#: Rounds run when the request context does not ask for a specific count.
+DEFAULT_SIMULATION_ROUNDS = 3
+#: Upper bound on ``context["rounds"]``: every round is a full decompose +
+#: fan-out + synthesis cycle, so an unbounded caller value is a cost bomb.
+MAX_SIMULATION_ROUNDS = 10
+
+
+def resolve_rounds(context: dict[str, Any]) -> int:
+    """Read ``context["rounds"]`` as an int clamped to ``[1, MAX_SIMULATION_ROUNDS]``.
+
+    A missing, non-integer or boolean value falls back to
+    :data:`DEFAULT_SIMULATION_ROUNDS`.
+    """
+    raw = context.get("rounds", DEFAULT_SIMULATION_ROUNDS)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        try:
+            raw = int(str(raw))
+        except ValueError:
+            return DEFAULT_SIMULATION_ROUNDS
+    return max(1, min(raw, MAX_SIMULATION_ROUNDS))
+
 
 class SimulationHandler(SwarmHandler):
     """
@@ -22,6 +43,25 @@ class SimulationHandler(SwarmHandler):
     outcomes from round N affect the world state and memory context
     for round N+1.
     """
+
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        """Run the multi-round simulation for a ``scenario_simulation`` request.
+
+        The orchestrator dispatches through ``handle``; without this override
+        the inherited single-pass :meth:`SwarmHandler.handle` ran instead and
+        the simulation never happened on the served path.
+
+        Args:
+            query: The scenario to simulate.
+            context: Orchestration context. ``context["rounds"]`` selects the
+                round count (default 3, clamped to 1-10).
+
+        Returns:
+            The final report, the per-round history and run metadata.
+        """
+        return await self.handle_simulation(
+            query, context, rounds=resolve_rounds(context)
+        )
 
     async def handle_simulation(
         self, query: str, context: dict[str, Any], rounds: int = 3
@@ -56,7 +96,7 @@ class SimulationHandler(SwarmHandler):
         Returns:
             The final report, the per-round history and run metadata.
         """
-        with request_colony_scope(self.new_colony()):
+        with request_colony_scope(self.new_request_colony(context)):
             return await self._simulate_in_colony(query, context, rounds)
 
     async def _simulate_in_colony(
@@ -135,7 +175,12 @@ class SimulationHandler(SwarmHandler):
             return {
                 "response": final_report,
                 "rounds": all_round_results,
-                "metadata": {"total_rounds": rounds, "approach": "swarm_simulation"},
+                "metadata": {
+                    # Rounds actually run: an empty decomposition ends early.
+                    "total_rounds": len(all_round_results),
+                    "requested_rounds": rounds,
+                    "approach": "swarm_simulation",
+                },
             }
         finally:
             for agent_id in dynamic_agent_ids:

@@ -93,7 +93,9 @@ class HttpxFetcher(BaseFetcher):
                 # Resolve DNS now and pin the connection to the verified IP.
                 # This prevents DNS rebinding: the IP we check is the IP we
                 # connect to, with no second resolution by the HTTP client.
-                pinned = get_pinned_url_for_host(current_url)
+                # The pin resolves DNS synchronously; run it in a worker
+                # thread so a slow resolver cannot stall the event loop.
+                pinned = await asyncio.to_thread(get_pinned_url_for_host, current_url)
                 if pinned is None:
                     raise FetchError(
                         url=url,
@@ -113,7 +115,9 @@ class HttpxFetcher(BaseFetcher):
                     headers={"Host": original_host},
                     extensions={"sni_hostname": original_host},
                 ) as response:
-                    final_url = str(response.url)
+                    # ``response.url`` names the pinned IP literal; report the
+                    # hostname-bearing URL the caller can actually use.
+                    final_url = current_url
                     status_code = response.status_code
                     headers = dict(response.headers)
 
@@ -122,12 +126,11 @@ class HttpxFetcher(BaseFetcher):
                         if not location:
                             break
 
-                        # Handle relative redirects
-                        if location.startswith("/"):
-                            parsed = httpx.URL(current_url)
-                            current_url = str(parsed.join(location))
-                        else:
-                            current_url = location
+                        # Resolve every relative form ("/a", "a", "../a",
+                        # "//host/a") against the current URL; only absolute
+                        # "/"-paths were joined before, so "page2" or a
+                        # protocol-relative hop failed the SSRF parse.
+                        current_url = str(httpx.URL(current_url).join(location))
 
                         redirects += 1
                         continue

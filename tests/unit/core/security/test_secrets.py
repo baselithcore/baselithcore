@@ -14,7 +14,10 @@ from core.security.secrets import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_provider():
+def _reset_provider(monkeypatch):
+    # The backend comes from the cached SecurityConfig: drop the cache so each
+    # test's environment is read afresh.
+    monkeypatch.setattr("core.config.security._security_config", None)
     reset_secrets_provider()
     yield
     reset_secrets_provider()
@@ -80,6 +83,18 @@ class TestFactoryAndRegistry:
         monkeypatch.setenv("SECRETS_BACKEND", "file")
         monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
         assert isinstance(get_secrets_provider(), FileSecretsProvider)
+
+    def test_backend_comes_from_security_config(self, monkeypatch, tmp_path):
+        """SecurityConfig is the source, not a second raw os.environ read."""
+        from types import SimpleNamespace
+
+        monkeypatch.delenv("SECRETS_BACKEND", raising=False)
+        monkeypatch.setattr(
+            "core.config.security._security_config",
+            SimpleNamespace(secrets_backend="file", secrets_dir=str(tmp_path)),
+        )
+        provider = get_secrets_provider()
+        assert isinstance(provider, FileSecretsProvider)
 
     def test_provider_is_cached(self, monkeypatch):
         monkeypatch.delenv("SECRETS_BACKEND", raising=False)

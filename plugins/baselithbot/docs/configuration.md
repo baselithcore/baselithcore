@@ -167,6 +167,14 @@ baselithbot:
       allowed_senders: ["99887766"]
 ```
 
+The section is applied when the plugin initialises (restart after an
+`approve`). Per channel it accepts `allowed_senders`, `blocked_senders`,
+`dm_only`, `rate_limit_window_s` (default 60) and `rate_limit_max_events`
+(default 30); channel names are matched case-insensitively and numeric sender
+ids are compared as strings. A channel with a non-empty `allowed_senders`
+list rejects every other sender with `{"status": "denied"}`; a malformed
+section fails plugin startup instead of silently running open.
+
 `pairing list` emits the current map as JSON; `pairing token` issues a
 one-shot `NodePairing` token for the `WS /api/baselithbot/ws/pair`
 handshake (in-process — for dev handshake testing).

@@ -288,9 +288,9 @@ class TestToolLedger:
 
         first = await agent._execute_tool("w", "")
         assert "side effect" in first
-        # Rewind the step counter so the next call derives the same key: this
-        # is the replay a resumed run performs.
-        agent._ledger_step = 0
+        # Start a new pass of the same run: occurrences count from zero again,
+        # so the same call derives the same key. This is what a resumed run is.
+        agent._ledger_occurrences = None
         second = await agent._execute_tool("w", "")
         assert second == first
         assert calls == [1]  # the effect landed exactly once
@@ -308,7 +308,7 @@ class TestToolLedger:
         first = await agent._execute_tool("w", "")
         assert first.startswith("Error")
         # Same key on the next attempt: a failed row must not hold the claim.
-        agent._ledger_step = 0
+        agent._ledger_occurrences = None
         second = await agent._execute_tool("w", "")
         assert second.startswith("Error")
         assert len(attempts) == 2

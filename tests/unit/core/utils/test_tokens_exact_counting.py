@@ -40,7 +40,10 @@ def _reset_exact_token_globals(monkeypatch):
     monkeypatch.setattr(tokens_module, "_anthropic_client_checked", False)
     monkeypatch.setattr(tokens_module, "_exact_token_counting_config", None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("BASELITH_EXACT_TOKEN_COUNTING", raising=False)
+    # The key is resolved through the cached LLMConfig: rebuild it per test.
+    monkeypatch.setattr("core.config.services._llm_config", None)
     tokens_module._exact_token_cache.clear()
     tokens_module._exact_count_failed_at.clear()
     yield
@@ -74,6 +77,19 @@ class TestAvailabilityGating:
     def test_available_with_sdk_key_and_setting_enabled(self, monkeypatch):
         _enable_exact_counting(monkeypatch)
         assert count_tokens_exact_available() is True
+
+    def test_llm_prefixed_key_is_honoured(self, monkeypatch):
+        """``LLM_ANTHROPIC_API_KEY`` binds the same field as the bare name."""
+        monkeypatch.setenv("LLM_ANTHROPIC_API_KEY", "sk-test-not-real")
+        monkeypatch.setenv("BASELITH_EXACT_TOKEN_COUNTING", "true")
+        client = count_tokens_exact_available() and tokens_module._anthropic_client
+        assert client
+        assert client.api_key == "sk-test-not-real"
+
+    def test_blank_key_counts_as_unset(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
+        monkeypatch.setenv("BASELITH_EXACT_TOKEN_COUNTING", "true")
+        assert count_tokens_exact_available() is False
 
     def test_unavailable_when_sdk_not_importable(self, monkeypatch):
         _enable_exact_counting(monkeypatch)

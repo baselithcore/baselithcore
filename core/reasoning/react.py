@@ -53,6 +53,23 @@ from core.reasoning.react_types import (
 
 logger = get_logger(__name__)
 
+#: User-safe answers for runs that ended on an LLM failure (see ReActResult.error).
+LLM_UNAVAILABLE_ANSWER = "LLM service unavailable."
+LLM_ERROR_ANSWER = "An error occurred while processing your request."
+
+
+class ReActLLMError(RuntimeError):
+    """The LLM could not be reached or failed; ends the loop with an error.
+
+    Attributes:
+        reason: ``"llm_unavailable"`` or ``"llm_error"`` (see
+            :attr:`ReActResult.error`).
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
 
 # Embedded fallback for the registry-served ``react_system`` catalog prompt
 # (core/prompts/catalog/react_system.md). ``{{ var }}`` placeholders — the
@@ -227,7 +244,16 @@ class ReActAgent(ToolExecutionMixin):
             if budget is not None:
                 budget.tick()
 
-            llm_output = await self._call_llm(messages)
+            try:
+                llm_output = await self._call_llm(messages)
+            except ReActLLMError as exc:
+                return ReActResult(
+                    final_answer=str(exc),
+                    trace=trace,
+                    iterations_used=iteration,
+                    hit_limit=False,
+                    error=exc.reason,
+                )
             logger.debug(
                 "ReAct iteration %d/%d — LLM output length=%d",
                 iteration,
@@ -368,9 +394,16 @@ class ReActAgent(ToolExecutionMixin):
         ]
 
     async def _call_llm(self, messages: list) -> str:
+        """Send the conversation to the LLM and return its raw output.
+
+        Raises:
+            ReActLLMError: No LLM service is available, or the call failed.
+                Surfaced as ``ReActResult.error`` rather than disguised as a
+                ``Final Answer`` the caller cannot tell from a real one.
+        """
         llm = self._get_llm_service()
         if llm is None:
-            return "Final Answer: LLM service unavailable."
+            raise ReActLLMError("llm_unavailable", LLM_UNAVAILABLE_ANSWER)
 
         # Deterministic compaction bounds prompt growth on long runs.
         from core.reasoning.history import compact_messages
@@ -392,7 +425,7 @@ class ReActAgent(ToolExecutionMixin):
             return response
         except Exception as exc:
             logger.error("ReAct LLM call failed: %s", exc)
-            return "Final Answer: An error occurred while processing your request."
+            raise ReActLLMError("llm_error", LLM_ERROR_ANSWER) from exc
 
     @staticmethod
     def _messages_to_prompt(messages: list) -> str:
@@ -413,7 +446,12 @@ class ReActAgent(ToolExecutionMixin):
             from core.services.llm import get_llm_service
 
             return get_llm_service()
-        except Exception:
+        except Exception as exc:
+            # Logged, not swallowed: the run then ends with
+            # ``error="llm_unavailable"`` and this line is the only record of why.
+            logger.error(
+                "ReAct could not resolve an LLM service: %s", exc, exc_info=True
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -435,7 +473,10 @@ class ReActAgent(ToolExecutionMixin):
 
 
 __all__ = [
+    "LLM_ERROR_ANSWER",
+    "LLM_UNAVAILABLE_ANSWER",
     "ReActAgent",
+    "ReActLLMError",
     "ReActResult",
     "StepType",
     "ToolDefinition",

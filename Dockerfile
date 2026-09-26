@@ -124,18 +124,30 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # `cuda-bindings` on linux, which pulls `cuda-pathfinder`, and neither matches
 # `^nvidia-` or `^triton`. 27MB of CUDA bindings shipped in every "CPU-only"
 # image while the guard below reported success — see the note there.
+#
+# WITH hashes. Pinned versions alone say which release to fetch, not which
+# bytes: a re-uploaded or tampered artifact on the index (or a compromised
+# mirror/proxy in between) would install silently. The export carries every
+# sha256 uv.lock recorded, and the install below runs `--require-hashes`, so a
+# single mismatching byte fails the build. Because each requirement is now a
+# multi-line block (`name==v \` followed by `--hash=...` continuation lines),
+# the CUDA strip is block-aware: a plain `grep -v` on the name line would leave
+# its hash lines behind, glued onto the previous requirement.
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
     pip install uv==0.12.0 \
-    && uv export --frozen --no-default-groups --no-emit-project --no-hashes --no-annotate \
+    && uv export --frozen --no-default-groups --no-emit-project --no-annotate \
         --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
         --extra web --extra browser --extra documents \
         --format requirements-txt -o /tmp/requirements.lock.txt \
-    && grep -vE '^(nvidia-|triton|cuda-)' /tmp/requirements.lock.txt \
-        > /tmp/requirements.image.txt \
-    && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages"
+    && awk '/^[^ #]/ { skip = ($0 ~ /^(nvidia-|triton|cuda-)/) } !skip' \
+        /tmp/requirements.lock.txt > /tmp/requirements.image.txt \
+    && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages" \
+    && if grep -qE '^(nvidia-|triton|cuda-)' /tmp/requirements.image.txt; then \
+         echo "ERROR: CUDA requirement survived the strip" >&2; exit 1; \
+       fi
 
 # Torch CPU-only, pinned for reproducible builds and kept in step with
 # uv.lock. >=2.6 closes CVE-2025-32434 (torch.load RCE). torchaudio is not
@@ -174,6 +186,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # re-downloads only what changed) and the cache still never lands in a layer,
 # which is the only thing --no-cache-dir was buying.
 #
+# The locked set installs with `--require-hashes --no-deps`: every artifact is
+# checked against uv.lock's sha256, and nothing outside the lock can be pulled
+# in by a dependency's own metadata (the lock IS the resolved closure; the
+# `pip check` in the next stage proves it is consistent). torch/torchvision
+# above are satisfied by the CPU builds already in the prefix, which pip does
+# not re-download, so their PyPI hashes in the lock are never consulted; the
+# CPU wheels themselves are version-pinned from the PyTorch index (per-arch
+# wheel hashes are not in uv.lock, which resolved the PyPI build).
+#
 # The final `if` is the guard for the CUDA strip in the export step above: if an
 # nvidia-* package ever makes it into the prefix, the "CPU-only" image has
 # quietly grown by gigabytes, and the build fails instead of pushing it.
@@ -194,7 +215,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         torchvision==0.28.0 \
         --index-url https://download.pytorch.org/whl/cpu \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --prefix /install -r /tmp/requirements.image.txt \
+       pip install --prefix /install --require-hashes --no-deps \
+        -r /tmp/requirements.image.txt \
     && if ls /install/lib/python3.12/site-packages | grep -qE '^(nvidia|cuda)'; then \
          echo "ERROR: CUDA packages installed into a CPU-only image" >&2; \
          ls /install/lib/python3.12/site-packages | grep -E '^(nvidia|cuda)' >&2; \

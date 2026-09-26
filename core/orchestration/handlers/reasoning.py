@@ -15,6 +15,13 @@ from core.services.llm import get_llm_service
 
 logger = get_logger(__name__)
 
+#: Tree-of-Thoughts search strategies the engine implements.
+TOT_STRATEGIES: frozenset[str] = frozenset({"bfs", "mcts"})
+#: Tool-driven strategies; each needs its inputs on the context.
+TOOL_STRATEGIES: frozenset[str] = frozenset({"react", "parallel_tools"})
+#: Every value ``context["strategy"]`` may take (``"dfs"`` reads as ``"bfs"``).
+SUPPORTED_STRATEGIES: frozenset[str] = TOT_STRATEGIES | TOOL_STRATEGIES | {"dfs"}
+
 
 class ReasoningHandler(BaseFlowHandler):
     """
@@ -52,7 +59,14 @@ class ReasoningHandler(BaseFlowHandler):
         * ``"parallel_tools"`` — concurrent execution of independent tool calls
           (:class:`~core.orchestration.parallel.ParallelToolExecutor`), from
           ``context["tool_calls"]`` + ``context["tool_registry"]``.
-        * anything else (default ``"bfs"`` / ``"dfs"``) — Tree of Thoughts.
+        * ``"bfs"`` / ``"mcts"`` — Tree of Thoughts (default: ``TOT_STRATEGY``).
+          The retired ``"dfs"`` reads as ``"bfs"``.
+
+        An unknown strategy is rejected with an error result. A tool strategy
+        whose inputs are missing falls back to Tree of Thoughts with the
+        configured default; ``metadata["strategy"]`` always names the strategy
+        that actually ran, and ``metadata["requested_strategy"]`` records a
+        request that was not honoured.
 
         Args:
             query: The complex logical problem description.
@@ -72,12 +86,28 @@ class ReasoningHandler(BaseFlowHandler):
             # is reached, caught below as a graceful error response.
             enforce_iteration(context)
 
-            strategy = context.get("strategy", "bfs")
-            if strategy == "react" and context.get("react_tools"):
+            requested = context.get("strategy")
+            if requested is not None and requested not in SUPPORTED_STRATEGIES:
+                logger.warning("reasoning_strategy_unsupported strategy=%r", requested)
+                return {
+                    "response": f"Unsupported reasoning strategy: {requested!r}.",
+                    "error": True,
+                    "metadata": {
+                        "error": "unsupported_strategy",
+                        "requested_strategy": requested,
+                        "supported_strategies": sorted(SUPPORTED_STRATEGIES),
+                    },
+                }
+            if requested == "react" and context.get("react_tools"):
                 return await self._run_react(query, context)
-            if strategy == "parallel_tools" and context.get("tool_calls"):
+            if requested == "parallel_tools" and context.get("tool_calls"):
                 return await self._run_parallel_tools(query, context)
-            return await self._run_tot(query, context)
+            if requested in TOOL_STRATEGIES:
+                logger.warning(
+                    "reasoning_strategy_inputs_missing strategy=%s; running ToT",
+                    requested,
+                )
+            return await self._run_tot(query, context, requested)
 
         except ApprovalPendingError:
             # Durable HITL pause — not an error. Propagate so the execution
@@ -91,8 +121,15 @@ class ReasoningHandler(BaseFlowHandler):
                 "metadata": {"error": str(e)},
             }
 
-    async def _run_tot(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
-        """Tree-of-Thoughts search (the default strategy)."""
+    async def _run_tot(
+        self, query: str, context: dict[str, Any], requested: str | None = None
+    ) -> dict[str, Any]:
+        """Tree-of-Thoughts search (the default strategy).
+
+        ``requested`` is the validated ``context["strategy"]``: a ToT strategy
+        is used as-is (``"dfs"`` as ``"bfs"``); ``None`` or an unmet tool
+        strategy runs the configured default.
+        """
         # The engine is tuned only through arguments; the handler is where the
         # TOT_* settings become the defaults a request can still override.
         from core.config.reasoning import get_reasoning_config
@@ -100,7 +137,12 @@ class ReasoningHandler(BaseFlowHandler):
         tot_config = get_reasoning_config()
         k = context.get("k", tot_config.branching_factor)
         max_steps = context.get("max_steps", tot_config.max_depth)
-        strategy = context.get("strategy", tot_config.strategy)
+        if requested == "dfs":
+            strategy = "bfs"
+        elif requested in TOT_STRATEGIES:
+            strategy = str(requested)
+        else:
+            strategy = tot_config.strategy
 
         result = await self.tot_engine.solve(
             problem=query, k=k, max_steps=max_steps, strategy=strategy
@@ -108,11 +150,14 @@ class ReasoningHandler(BaseFlowHandler):
 
         solution = result.get("solution", "No solution found.")
         steps = result.get("steps", [])
+        metadata: dict[str, Any] = {"reasoning_steps": len(steps), "strategy": strategy}
+        if requested is not None and requested != strategy:
+            metadata["requested_strategy"] = requested
         return {
             "response": solution,
             "steps": steps,
             "tree_data": result.get("tree_data"),
-            "metadata": {"reasoning_steps": len(steps), "strategy": strategy},
+            "metadata": metadata,
         }
 
     async def _run_react(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -162,7 +207,7 @@ class ReasoningHandler(BaseFlowHandler):
             ),
         )
         result = await agent.run(query)
-        return {
+        response: dict[str, Any] = {
             "response": result.final_answer,
             "steps": [str(step) for step in result.trace],
             "metadata": {
@@ -171,6 +216,12 @@ class ReasoningHandler(BaseFlowHandler):
                 "hit_limit": result.hit_limit,
             },
         }
+        if result.error is not None:
+            # An LLM outage is a failed request, not an answer: flag it so the
+            # orchestrator and callers do not record it as a successful turn.
+            response["error"] = True
+            response["metadata"]["error"] = result.error
+        return response
 
     def _build_skill_tool(self, tools: list[Any], context: dict[str, Any]) -> Any:
         """Build the ``activate_skill`` ToolDefinition for the ReAct loop.

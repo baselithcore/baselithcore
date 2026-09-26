@@ -17,6 +17,7 @@ from core.config import SecurityConfig, get_security_config
 from core.context import ReservedTenantError
 from core.context import bind_principal_tenant as _bind_principal_tenant
 from core.context import set_user_context as _set_user_ctx
+from core.middleware._admin_auth import client_bucket
 from core.middleware._admin_credentials import (
     VerifiedCredentialCache,
     verify_pbkdf2_sha256,
@@ -146,7 +147,7 @@ class SecurityManager(AdminLockoutMixin):
                 # before the 401 so the 429 (with Retry-After) wins.
                 failure_ip = request.client.host if request.client else "unknown"
                 await self.rate_limiter.check(
-                    f"authfail:{failure_ip}",
+                    f"authfail:{client_bucket(failure_ip)}",
                     self.config.auth_failure_limit_per_minute,
                     self.config.rate_limit_window_seconds,
                 )
@@ -191,6 +192,20 @@ class SecurityManager(AdminLockoutMixin):
                     self.config.rate_limit_window_seconds,
                 )
                 return "anonymous"
+            if auth_header:
+                # A *presented* credential that resolved to anonymous is a
+                # failed guess. AuthManager.authenticate() reports a bad
+                # bearer token or API key by returning the anonymous identity,
+                # not by raising, so the AuthError branch above never sees it:
+                # charge the same per-IP authfail window here, before the
+                # audit write, or credential stuffing gets unmetered 401s.
+                # A request with no credential at all is not a guess and is
+                # not charged (same rule as core.mcp.http_authz).
+                await self.rate_limiter.check(
+                    f"authfail:{client_bucket(client_ip)}",
+                    self.config.auth_failure_limit_per_minute,
+                    self.config.rate_limit_window_seconds,
+                )
             SECURITY_EVENTS.labels(reason="unauthorized").inc()
             logger.warning(
                 "AUDIT | AUTH | unauthorized | ip=%s ua=%s path=%s",
@@ -371,9 +386,16 @@ class SecurityManager(AdminLockoutMixin):
             return ok
         if self.config.admin_pass:
             return secrets.compare_digest(
-                candidate, self.config.admin_pass.get_secret_value()
+                candidate.encode("utf-8"),
+                self.config.admin_pass.get_secret_value().encode("utf-8"),
             )
         return False
+
+    def admin_credential_cached(self, candidate: str) -> bool:
+        """Whether ``candidate`` passed PBKDF2 verification within the cache TTL."""
+        return bool(self.config.admin_pass_hashed) and self._cred_cache.is_fresh(
+            candidate
+        )
 
 
 _security_manager: SecurityManager | None = None
@@ -451,9 +473,15 @@ async def verify_admin_password_async(candidate: str) -> bool:
     """
     import asyncio
 
-    return await asyncio.to_thread(
-        get_security_manager().verify_admin_password, candidate
-    )
+    from core.middleware._admin_auth import kdf_slot
+
+    manager = get_security_manager()
+    if manager.admin_credential_cached(candidate):
+        return True
+    # Bounded: an unthrottled caller must not be able to queue one derivation
+    # per request onto the default executor.
+    async with kdf_slot():
+        return await asyncio.to_thread(manager.verify_admin_password, candidate)
 
 
 async def check_admin_lockout(identifier: str) -> None:

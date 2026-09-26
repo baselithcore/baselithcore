@@ -28,15 +28,15 @@ class PromptEmbeddingMixin:
     _embedder: Any
     _embedding_memo: OrderedDict[str, np.ndarray]
 
-    def _get_embedder(self) -> Any:
-        """Lazy load the embedder model using config for model selection."""
+    async def _get_embedder(self) -> Any:
+        """Lazy load the embedder model (off the event loop) on first use."""
         if self._embedder is None:
             try:
                 from core.config import get_voice_config
-                from core.nlp import get_embedder
+                from core.nlp import aget_embedder
 
                 model_name = get_voice_config().embedding_model
-                self._embedder = get_embedder(model_name)
+                self._embedder = await aget_embedder(model_name)
             except Exception as e:
                 logger.warning(f"Failed to load embedder: {e}")
                 raise
@@ -54,7 +54,7 @@ class PromptEmbeddingMixin:
             memo.move_to_end(text)
             return cached
 
-        embedder = self._get_embedder()
+        embedder = await self._get_embedder()
         # The production embedder (core.nlp.CachedEmbedder) exposes an async
         # encode; awaiting it here is what keeps the cache alive. A sync
         # embedder is offloaded to the dedicated inference pool rather than the

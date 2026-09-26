@@ -68,6 +68,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterator
 from enum import IntEnum
 from pathlib import Path
 from typing import Any
@@ -262,12 +263,16 @@ def _is_excluded(parts: tuple[str, ...], surface: HashSurface) -> bool:
         return True
     # Everything under ``ui/`` except the compiled, shipped bundle is build
     # input that never leaves the developer's machine.
-    shipped = (
+    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] not in _shipped(surface))
+
+
+def _shipped(surface: HashSurface) -> frozenset[str]:
+    """The ``ui/`` subdirectories hashed at ``surface`` (V3 and later)."""
+    return (
         _UI_SHIPPED_SUBDIRS
         if surface >= HashSurface.V4_UI_EXPORT
         else _UI_SHIPPED_SUBDIRS_V3
     )
-    return parts[0] == _UI_DIR and (len(parts) < 2 or parts[1] not in shipped)
 
 
 def _json_safe(value: Any) -> Any:
@@ -359,15 +364,35 @@ def read_declared_surface(plugin_dir: Path) -> int | None:
         return None
 
 
+def _iter_candidate_files(base: Path, surface: HashSurface) -> Iterator[Path]:
+    """Yield every non-excluded file under ``base``.
+
+    A directory is pruned only when :func:`_is_excluded` would reject every
+    path beneath it, so the result matches a full walk. Walking into a local
+    ``node_modules`` (tens of thousands of entries) just to discard each one
+    made hashing a plugin with a dev UI build take seconds.
+    """
+    legacy = surface < HashSurface.V3_SHIPPED
+    excluded = _LEGACY_EXCLUDED_DIRS if legacy else _EXCLUDED_DIRS
+    for root, dirnames, filenames in base.walk():
+        rel = root.relative_to(base).parts
+        in_ui = not legacy and rel == (_UI_DIR,)
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in excluded and not (in_ui and d not in _shipped(surface))
+        ]
+        for name in filenames:
+            path = root / name
+            if path.is_file() and not _is_excluded((*rel, name), surface):
+                yield path
+
+
 def _compute_hash(plugin_dir: Path, *, surface: HashSurface) -> str:
     digest = hashlib.sha256()
     base = plugin_dir.resolve()
     files: list[Path] = []
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        if _is_excluded(path.relative_to(base).parts, surface):
-            continue
+    for path in _iter_candidate_files(base, surface):
         # The manifest never contributes its bytes: at V5+ it contributes its
         # canonical form below, and before V5 it contributed nothing at all.
         if is_manifest_path(path):

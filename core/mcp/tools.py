@@ -200,6 +200,7 @@ class MCPToolAdapter:
             url: str, extract_links: bool = False, wait_for_js: bool = False
         ) -> dict[str, Any]:
             """Scrape a URL and return content."""
+            scraper: Any = None
             try:
                 from core.scraper.scraper import Scraper
 
@@ -229,6 +230,13 @@ class MCPToolAdapter:
                     "status": "error",
                     "error": str(e),
                 }
+            finally:
+                # A fresh Scraper per call: without this every call leaked an
+                # httpx.AsyncClient (and a browser when wait_for_js was set).
+                if scraper is not None:
+                    # Not ``close()``: that also shuts the process-wide
+                    # robots.txt client every other scraper shares.
+                    await scraper.close_fetchers()
 
         logger.info("mcp_scraper_tools_registered")
 

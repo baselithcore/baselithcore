@@ -20,9 +20,9 @@ import orjson
 from core.observability.logging import get_logger
 
 try:
-    from redis.asyncio import ConnectionPool, Redis
+    from redis.asyncio import BlockingConnectionPool, Redis
 except ImportError:
-    ConnectionPool = None  # type: ignore[assignment,misc]
+    BlockingConnectionPool = None  # type: ignore[assignment,misc]
     Redis = None  # type: ignore[assignment,misc]
 
 K = TypeVar("K")
@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 # on the next request. The loop object is kept alongside so its ``id`` cannot
 # be recycled for a new loop while the entry exists.
 _PoolKey = tuple[int | None, str, bool]
-_shared_pools: dict[_PoolKey, ConnectionPool] = {}
+_shared_pools: dict[_PoolKey, BlockingConnectionPool] = {}
 _pool_loops: dict[_PoolKey, Any] = {}
 _shared_pools_lock = Lock()
 
@@ -292,7 +292,7 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
             str-decoding caller and a bytes caller on the same URL each get their
             own bounded pool rather than clobbering one another.
     """
-    if Redis is None or ConnectionPool is None:
+    if Redis is None or BlockingConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
 
     from core.config.cache import get_redis_cache_config
@@ -311,9 +311,14 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
             # that accepts the connection but stops responding mid-command
             # hangs the caller indefinitely while holding a pooled connection,
             # so enough hung operations exhaust the bounded pool.
-            pool = ConnectionPool.from_url(
+            # Blocking pool: at the cap a caller waits for a released
+            # connection (up to the connect deadline) instead of failing at
+            # once with "Too many connections", which turned a short burst
+            # into a wave of cache errors.
+            pool = BlockingConnectionPool.from_url(
                 url,
                 max_connections=config.max_connections,
+                timeout=config.socket_connect_timeout,
                 health_check_interval=config.health_check_interval,
                 socket_timeout=config.socket_timeout,
                 socket_connect_timeout=config.socket_connect_timeout,
@@ -327,7 +332,7 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
 
 async def close_redis_pools() -> None:
     """Close all shared Redis connection pools."""
-    if ConnectionPool is None:
+    if BlockingConnectionPool is None:
         return
 
     with _shared_pools_lock:

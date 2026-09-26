@@ -187,6 +187,9 @@ def test_oidc_jwks_refetch_on_unknown_kid_uses_pinned_path(monkeypatch):
     # running since before the IdP rotated its signing key).
     verifier._fetch_jwk_set()
     assert len(calls) == 1
+    # Age the cache past the forced-refresh cooldown: inside it an unknown
+    # kid is answered from the cache (forged kids must not buy IdP calls).
+    verifier._last_fetch_at -= oidc._JWKS_REFRESH_COOLDOWN_S + 1
 
     token = pyjwt.encode(
         {"sub": "u"}, new_key, algorithm="RS256", headers={"kid": "new-kid"}

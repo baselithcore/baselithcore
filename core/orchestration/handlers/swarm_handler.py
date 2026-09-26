@@ -1,7 +1,7 @@
 """
 Swarm Handler for Orchestrator.
 
-Enables decentralized baselith-core coordination for complex tasks
+Enables decentralized multi-agent coordination for complex tasks
 using the Swarm Colony infrastructure.
 
 Use cases:
@@ -65,7 +65,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
     """
     Handler for 'collaborative_task' intent.
 
-    Uses Swarm Colony for decentralized baselith-core coordination
+    Uses Swarm Colony for decentralized multi-agent coordination
     on complex tasks that benefit from parallel processing and
     diverse perspectives.
 
@@ -93,6 +93,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
         virtual_agents: list[VirtualAgentSpec] | None = None,
         llm_service: Any | None = None,
         colony_factory: Callable[[], Colony] | None = None,
+        memory_manager: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -107,6 +108,8 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
                 virtual-agent roster. The handler is process-wide, so the
                 colony must never be — see
                 :mod:`core.orchestration.handlers.swarm_colony`.
+            memory_manager: Optional ``AgentMemory`` attached to every colony
+                the default factory mints (recall + simulation write-back).
             *args, **kwargs: Passed to BaseFlowHandler.
         """
         super().__init__(*args, **kwargs)
@@ -119,6 +122,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
             self.colony_config = get_swarm_config()
 
         self._virtual_agents = virtual_agents or DEFAULT_VIRTUAL_AGENTS
+        self._memory_manager = memory_manager
         self._init_colony_scope(colony_factory or self._build_colony)
 
         if llm_service:
@@ -129,7 +133,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
 
     def _build_colony(self) -> Colony:
         """Mint a colony carrying the handler's virtual-agent roster."""
-        colony = Colony(config=self.colony_config)
+        colony = Colony(config=self.colony_config, memory_manager=self._memory_manager)
         self._register_virtual_agents(colony)
         return colony
 
@@ -179,7 +183,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
                 - sub_results: Results from individual agents
                 - coordination_stats: Colony statistics
         """
-        with request_colony_scope(self.new_colony()):
+        with request_colony_scope(self.new_request_colony(context)):
             return await self._handle_in_colony(query, context)
 
     async def _handle_in_colony(
@@ -460,15 +464,7 @@ Create a final response that:
             return results_text if results_text else "Synthesis not available."
 
     def _fallback_response(self, query: str) -> dict[str, Any]:
-        """
-        Generate fallback when decomposition fails.
-
-        Args:
-            query: The problematic input.
-
-        Returns:
-            Dict[str, Any]: A generic but helpful failure message.
-        """
+        """Generate the fallback result used when decomposition fails."""
         return {
             "response": f"I couldn't decompose the request into sub-tasks. "
             f"Trying with a direct approach: {query}",
@@ -478,15 +474,7 @@ Create a final response that:
         }
 
     def _error_response(self, error_message: str) -> dict[str, Any]:
-        """
-        Create standardized error response for the swarm handler.
-
-        Args:
-            error_message: Details of the failure.
-
-        Returns:
-            Dict[str, Any]: Error-formatted handler result.
-        """
+        """Create the standardized error result for the swarm handler."""
         return {
             "response": f"Error in task coordination: {error_message}",
             "error": True,

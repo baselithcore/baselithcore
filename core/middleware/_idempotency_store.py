@@ -1,16 +1,26 @@
 """Redis primitives behind :class:`core.middleware.idempotency.IdempotencyMiddleware`.
 
 Extracted to keep the middleware module under the 500-line cap. Holds the
-atomic replay-or-lock step and the unverified ``exp`` reader the replay TTL
-is capped with; the middleware itself owns key derivation, capture and store.
+atomic replay-or-lock step, the in-flight lock keep-alive, and the unverified
+``exp`` reader the replay TTL is capped with; the middleware itself owns key derivation, capture and store.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from typing import Any
 
 import orjson
+
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
+#: Upper bound of the in-flight lock TTL (seconds). Short so a crashed worker
+#: cannot block a key for long; :func:`keep_lock_alive` re-arms it every third
+#: of that while the handler runs.
+MAX_LOCK_TTL = 300
 
 # Atomic replay-or-lock step, ONE round trip: hand back the stored response if
 # there is one, otherwise claim the in-flight lock (SET NX EX). This used to be
@@ -69,6 +79,23 @@ async def replay_or_lock(
     return None, bool(acquired)
 
 
+async def keep_lock_alive(redis: Any, lock_key: str, lock_ttl: int) -> None:
+    """Re-arm the in-flight lock's TTL every third of it until cancelled.
+
+    Without a refresh, a handler running longer than the capped lock TTL lost
+    its lock and a duplicate retry executed concurrently. EXPIRE on a released
+    (deleted) lock is a no-op, so a tick racing the release is harmless; a
+    failed refresh is logged and retried on the next tick.
+    """
+    interval = max(lock_ttl / 3, 0.05)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await redis.expire(lock_key, lock_ttl)
+        except Exception as exc:
+            logger.debug("idempotency_lock_refresh_failed: %s", type(exc).__name__)
+
+
 def jwt_exp(token: str) -> float | None:
     """Read the ``exp`` claim of a compact JWS without verifying it.
 
@@ -91,4 +118,10 @@ def jwt_exp(token: str) -> float | None:
         return None
 
 
-__all__ = ["REPLAY_OR_LOCK_LUA", "jwt_exp", "replay_or_lock"]
+__all__ = [
+    "MAX_LOCK_TTL",
+    "REPLAY_OR_LOCK_LUA",
+    "jwt_exp",
+    "keep_lock_alive",
+    "replay_or_lock",
+]

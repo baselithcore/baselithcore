@@ -144,7 +144,8 @@ Other `FineTuningPipeline` methods: `get_job_status(job_id)`,
 `wait_for_completion(job_id, poll_interval=60, timeout=7200)`,
 `cancel_job(job_id)`, `list_jobs(limit=10, provider=None)`,
 `test_model(model_id, prompt, system_prompt="")`,
-`evaluate_model(model_id, test_dataset)`, and the `supported_models` property.
+`evaluate_model(model_id, test_dataset)`, `aclose()` (closes both
+providers' HTTP clients), and the `supported_models` property.
 
 `wait_for_completion`'s elapsed-time check and the temp filename generated
 when `start_training` is handed a `DatasetBuilder` both timestamp with
@@ -163,4 +164,29 @@ Providers live in `core/finetuning/providers.py`:
 
 Both read their API keys from `core.config.get_finetuning_config()`
 (`openai_api_key` / `together_api_key`, stored as `SecretStr`). Each exposes
-`is_available`, `train()`, `get_status()`, `cancel()`, and `list_jobs()`.
+`is_available`, `train()`, `get_status()`, `cancel()`, `list_jobs()`, and
+`client()` / `aclose()`.
+
+**One client per provider.** Each provider builds its HTTP client lazily, once,
+with an explicit `PROVIDER_TIMEOUT_S` (300 s) timeout, and reuses it across
+calls — an `AsyncOpenAI` for OpenAI, an SSRF-hardened `httpx.AsyncClient` for
+together.ai. `await provider.aclose()` (or `pipeline.aclose()`) releases it;
+the next call builds a fresh one.
+
+**Status mapping.** Provider job states are translated explicitly by
+`map_status(provider, raw)` rather than cast into `TrainingStatus`, which
+raised `ValueError` on real states such as OpenAI's `validating_files` or
+together.ai's `completed`:
+
+| `TrainingStatus` | OpenAI | together.ai |
+| --- | --- | --- |
+| `VALIDATING` | `validating_files` | — |
+| `PENDING` | — | `pending` |
+| `QUEUED` | `queued` | `queued` |
+| `RUNNING` | `running` | `running`, `compressing`, `uploading` |
+| `SUCCEEDED` | `succeeded` | `completed` |
+| `FAILED` | `failed` | `error`, `user_error` |
+| `CANCELLED` | `cancelled` | `cancel_requested`, `cancelled` |
+
+An unknown state maps to `PENDING` with a warning, so a new upstream state
+never breaks a status poll.

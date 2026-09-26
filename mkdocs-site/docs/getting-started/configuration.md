@@ -121,7 +121,7 @@ Declared in `core.config.app`.
 | `TELEMETRY_METRICS_ENABLED` | `bool` | `False` | Push OTel-native metrics (e.g. HTTP server/client histograms from auto-instrumentation) to the collector via OTLP. Independent of the Prometheus `/metrics` scrape endpoint, which is always available. |
 | `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces, metrics and logs. The default is the OTLP/gRPC port; switch to :4318 when selecting `http/protobuf` below (the per-signal `/v1/...` path is appended for you). |
 | `TELEMETRY_OTEL_PROTOCOL`<br>also accepts `OTEL_EXPORTER_OTLP_PROTOCOL` | `str` | `grpc` | OTLP wire protocol: `grpc` (default) or `http/protobuf`. HTTP is what a collector's `otlphttp` receiver speaks, what most vendor ingest endpoints expose, and the only option behind an L7 proxy that will not forward HTTP/2 trailers. `OTEL_EXPORTER_OTLP_PROTOCOL` is the specification's own name for this knob, so it is accepted as an alias — a sidecar or chart that already sets it is honoured without a Baselith-specific variable. |
-| `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | `1.0` | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Lower in high-traffic production to cap cost. |
+| `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | *computed* | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Unset: 1.0 outside production, 0.1 in production (APP_ENV/ENVIRONMENT) — a full-rate default shipped every span tree of every request to the collector. Parent-based, so an upstream caller's sampled trace is always continued whatever this ratio is. |
 
 ## Audit-trail configuration
 
@@ -148,13 +148,13 @@ Declared in `core.config.base`.
 | `CORE_APP_NAME` | `str` | `Baselith-Core` | Application name |
 | `CORE_DATA_DIR` | `Path` | `Path('data')` | Directory for data storage |
 | `CORE_DEBUG` | `bool` | `False` | Enable debug mode |
-| `CORE_DETERMINISTIC_MODE` | `bool` | `False` | When enabled, ensures reproducible execution by pinning seeds and disabling non-deterministic features (e.g., setting LLM temperature to 0 and bypassing caches). |
-| `CORE_DOCUMENTS_DIR` | `Path` | `Path('documents')` | Directory for document storage |
+| `CORE_DETERMINISTIC_MODE` | `bool` | `False` | When enabled, seeds Python's random (and numpy) at startup and pins LLM sampling on every generation path (temperature 0, plus seed and top_p=1 where the provider supports them). Does not disable caches or hash randomization; set PYTHONHASHSEED before launching the process. |
+| `CORE_DOCUMENTS_DIR` | `Path` | `Path('documents')` | Deprecated, no effect: the framework never reads it; document sources configure their own paths |
 | `CORE_LOG_FORMAT` | `str` | `text` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
 | `CORE_LOG_LEVEL` | `str` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | `CORE_LOG_STRUCTURED` | `bool` | `False` | Deprecated, no effect: nothing reads it; JSON logs are selected by LOG_JSON |
-| `CORE_MAX_WORKERS` | `int` | `4` | Maximum number of worker threads for parallel orchestration and background tasks |
-| `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Directory containing plugins |
+| `CORE_MAX_WORKERS` | `int` | `4` | Deprecated, no effect: nothing reads it; the inference thread pool is sized by BASELITH_INFERENCE_THREADS and the per-worker math thread pools by OMP_NUM_THREADS (split across web workers automatically) |
+| `CORE_PLUGIN_DIR` | `Path` | `Path('plugins')` | Deprecated, no effect: the plugin loader reads PLUGIN_PLUGINS_PATH |
 | `CORE_RANDOM_SEED` | `int` | `42` | Random seed when deterministic_mode is enabled |
 
 ## Cache configuration settings
@@ -173,6 +173,7 @@ Declared in `core.config.cache`.
 | `REDIS_MAX_CONNECTIONS` | `int` | `50` | Maximum connections per shared Redis connection pool |
 | `REDIS_SOCKET_CONNECT_TIMEOUT` | `float` | `2.0` | TCP connect deadline for a new pooled Redis connection |
 | `REDIS_SOCKET_TIMEOUT` | `float` | `5.0` | Per-operation socket read deadline. Without it, a Redis that accepts the connection but stops responding mid-command hangs the caller forever while holding a pooled connection, so enough hung operations exhaust the bounded pool. |
+| `SEMANTIC_CACHE_ENABLED` | `bool` | `False` | Enable the semantic (embedding-similarity) LLM response cache in LLMService; needs the [rag] extra for the embedder |
 | `SEMANTIC_CACHE_FINGERPRINT_ENABLED` | `bool` | `True` | Enable the word n-gram fingerprint lookup tier between the exact-match key and the embedding similarity scan |
 | `SEMANTIC_CACHE_FINGERPRINT_THRESHOLD` | `float` | `0.8` | Minimum Jaccard similarity of word n-gram fingerprints for a fingerprint-tier hit (0.0-1.0) |
 | `SEMANTIC_CACHE_MAXSIZE` | `int` | `1000` | Maximum number of semantic cache entries per tenant |
@@ -315,7 +316,7 @@ Declared in `core.config.mcp`.
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
 | `MCP_REQUIRE_TOKEN_AUDIENCE` | `bool \| None` | *empty* | Whether an OAuth access token must name this MCP endpoint in its `aud` claim (RFC 8707 resource indicators / RFC 9728). When on, a token whose `aud` names a *different* resource is refused — that is a token minted for somebody else, replayed here — and so is a token carrying no `aud` at all. `None` (the default) resolves at request time to the runtime posture: enforced in production, off elsewhere. Setting it to `false` is the operator override that stands the whole check down, which matters because JWT_AUDIENCE is pinned per deployment: if the issued audience is not this endpoint's resource URL, *every* token mismatches and the endpoint is unreachable until the tokens are reissued (or MCP_RESOURCE_URL is set to the audience they already carry). API keys are never subject to the check: they are not OAuth tokens and carry no audience. |
-| `MCP_RESOURCE_URL` | `str` | *empty* | Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728): the value published as `resource` in the protected-resource metadata AND the value a token's `aud` is checked against — one setting, so the two can never disagree. Unset, it is derived from the request's base URL, which comes from the Host header: behind a proxy that does not pin the host (ALLOWED_HOSTS unset), a caller controls what the endpoint claims to be. Set it to the public URL, e.g. `https://api.example.com/mcp`. |
+| `MCP_RESOURCE_URL` | `str` | *empty* | Canonical resource identifier for this MCP endpoint (RFC 8707 / RFC 9728): the value published as `resource` in the protected-resource metadata AND the value a token's `aud` is checked against — one setting, so the two can never disagree. Unset, it is derived from the request's base URL, which comes from the Host header: behind a proxy that does not pin the host (TRUSTED_HOSTS unset), a caller controls what the endpoint claims to be. Set it to the public URL, e.g. `https://api.example.com/mcp`. |
 | `MCP_SERVERS` | `dict[str, MCPServerSpec]` | *computed* | JSON mapping of server name -> MCPServerSpec (command/args/env for stdio, or url for Streamable HTTP, plus an autonomy_category applied to the server's tools). |
 | `MCP_SERVER_INSTRUCTIONS` | `str` | *empty* | Optional natural-language guidance returned by `server/discover`. |
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
@@ -394,6 +395,10 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` | `int` | `1000` | Retained-run cap for the in-memory checkpoint backend (oldest finished runs evicted first). Irrelevant for the Postgres backend. |
 | `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool` | `False` | Start the background recovery sweeps: runs left in the 'running' state by a crash/restart are re-entered, and runs that stopped making progress are marked failed. Sweeps repeat every recovery_sweep_interval_seconds (not just at startup); a run is only re-entered once it has been silent for recovery_resume_after_seconds, so one still executing is left alone. Requires checkpoint_enabled; runs awaiting approval are never auto-resumed. |
 | `ORCHESTRATOR_CHECKPOINT_SQLITE_PATH` | `str` | `data/checkpoints.db` | Database file for the 'sqlite' checkpoint backend (durable runs without a Postgres instance; parent directories are created on first use). |
+| `ORCHESTRATOR_COMPACTION_SUMMARIZE` | `bool` | `False` | When the native agent loop's message history exceeds BASELITH_REACT_HISTORY_MAX_TOKENS, condense the older complete turns into one labelled, untrusted summary message with a single LLM call instead of only truncating block contents. Off by default: it adds a call per compaction. Any summariser failure falls back to the deterministic truncation. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_MAX_TOKENS` | `int` | `1024` | Output token cap for one compaction summary. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_MODEL` | `str` | *empty* | Model for the compaction summary call. Empty uses the deployment default (or the 'summarization' tier when LLM_ROUTING_ENABLED); a per-plugin policy pin still decides the provider. |
+| `ORCHESTRATOR_COMPACTION_SUMMARY_TIMEOUT_SECONDS` | `float` | `30.0` | Timeout for one compaction summary call; on expiry the loop falls back to deterministic truncation. |
 | `ORCHESTRATOR_CONFIDENCE_THRESHOLD` | `float` | `0.6` | Minimum confidence for LLM classification |
 | `ORCHESTRATOR_CONTEXT_WINDOW_TOKENS` | `int` | `200000` | Assumed model context window, used as the denominator of LoopBudget.token_pressure() when no token cap is set so context auto-tuning still has a signal. 0 disables that fallback. |
 | `ORCHESTRATOR_CREW_MAX_PARALLEL` | `int` | `8` | Maximum crew tasks executed concurrently under process='parallel'. Each task is a full LLM call, so an unbounded fan-out over a caller-supplied task list would open that many simultaneous provider calls (429 storm + unmetered cost spike). |
@@ -426,7 +431,7 @@ Declared in `core.config.plugins`.
 | `PLUGIN_ENABLED` | `bool` | `True` | Enable plugin system |
 | `PLUGIN_OFFICIAL_MARKETPLACE_URL` | `str` | `https://marketplace.baselithcore.xyz` | Official Marketplace and Registry URLs This is the hardcoded "Source of Truth" for the official marketplace. |
 | `PLUGIN_PLUGINS_PATH` | `Path` | `Path('plugins')` | Plugin root: where marketplace installs write and what the runtime loaders scan |
-| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Per-plugin configuration |
+| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | *computed* | Deprecated, no effect: nothing reads it; per-plugin configuration lives in configs/plugins.yaml (or the file PLUGIN_CONFIG_PATH names) |
 | `PLUGIN_PUBLISH_WORKSPACE_ROOT` | `Path \| None` | *empty* | POST /api/backstage/publish only packages plugin directories inside this root (e.g. the Backstage Scaffolder workspace mount). Fail-closed: while unset the publish endpoint is disabled, so a job/admin caller can never point the publisher at an arbitrary host directory. |
 | `PLUGIN_REGISTRY_CACHE_TTL` | `int` | `3600` | TTL for local registry cache in seconds |
 
@@ -533,14 +538,17 @@ Declared in `core.config.resilience`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `RESILIENCE_API_RATE_LIMIT` | `int` | `100` | Max API requests per window |
-| `RESILIENCE_API_RATE_WINDOW` | `int` | `60` | API rate limit window in seconds |
+| `RESILIENCE_API_RATE_LIMIT` | `int` | `100` | Deprecated, no effect: only the default of get_api_limiter(), which nothing in the framework calls; HTTP request limits are RATE_LIMIT_USER_PER_MINUTE and RATE_LIMIT_ADMIN_PER_MINUTE |
+| `RESILIENCE_API_RATE_WINDOW` | `int` | `60` | Deprecated, no effect: pairs with RESILIENCE_API_RATE_LIMIT; the HTTP rate-limit window is RATE_LIMIT_WINDOW_SECONDS |
 | `RESILIENCE_BULKHEAD_MAX_CONCURRENT` | `int` | `10` | Default max concurrent operations |
 | `RESILIENCE_CB_FAIL_MAX` | `int` | `5` | Number of failures before opening circuit |
 | `RESILIENCE_CB_HALF_OPEN_MAX` | `int` | `1` | Max requests in half-open state |
 | `RESILIENCE_CB_RESET_TIMEOUT` | `int` | `60` | Seconds before trying half-open state |
-| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | Max LLM calls per window |
-| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | LLM rate limit window in seconds |
+| `RESILIENCE_LLM_RATE_ENABLED` | `bool` | `False` | Opt-in client-side rate limit on outgoing LLM calls (text, tool calling, structured, messages, streaming, images, batch submission): at most RESILIENCE_LLM_RATE_LIMIT calls per RESILIENCE_LLM_RATE_WINDOW seconds. Per worker process unless CACHE_BACKEND=redis, which shares the window across workers |
+| `RESILIENCE_LLM_RATE_LIMIT` | `int` | `20` | LLM calls allowed per window when RESILIENCE_LLM_RATE_ENABLED is true (per provider unless RESILIENCE_LLM_RATE_PER_PROVIDER=false) |
+| `RESILIENCE_LLM_RATE_MAX_WAIT` | `float` | `30.0` | Longest a call waits for a free LLM rate-limit slot before failing with LocalLLMRateLimitError (0 = fail immediately) |
+| `RESILIENCE_LLM_RATE_PER_PROVIDER` | `bool` | `True` | Keep a separate LLM rate-limit window per provider name; false shares one window across every provider |
+| `RESILIENCE_LLM_RATE_WINDOW` | `int` | `60` | Window length in seconds for RESILIENCE_LLM_RATE_LIMIT |
 | `RESILIENCE_RETRY_BASE_DELAY` | `float` | `1.0` | Base delay for retries |
 | `RESILIENCE_RETRY_EXPONENTIAL_BASE` | `float` | `2.0` | Base for exponential backoff |
 | `RESILIENCE_RETRY_JITTER` | `bool` | `True` | Add jitter to retries |
@@ -656,7 +664,7 @@ Declared in `core.config.security`.
 | `SECRETS_DIR` | `str \| None` | *empty* |  |
 | `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |
-| `TRUSTED_HOSTS` | `Annotated[list[str], NoDecode]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production logs an ERROR at startup while this is empty. |
+| `TRUSTED_HOSTS` | `Annotated[list[str], NoDecode]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production refuses to start while this is empty, unless BASELITH_ALLOW_UNVALIDATED_HOST=true downgrades the check to an ERROR log. |
 | `X_FRAME_OPTIONS` | `str` | `DENY` |  |
 
 ## Service-level configuration internal engines
@@ -675,7 +683,7 @@ Declared in `core.config.services`.
 | `LLM_CACHE_MAX_SIZE` | `int` | `1000` | Maximum number of cached items |
 | `LLM_CACHE_TTL` | `int` | `3600` | Cache TTL in seconds (default 1 hour) |
 | `LLM_CONNECT_TIMEOUT` | `float` | `5.0` | TCP connect timeout (seconds) for provider SDK calls |
-| `LLM_ENABLE_CACHE` | `bool` | `True` | Enable semantic caching for LLM responses |
+| `LLM_ENABLE_CACHE` | `bool` | `True` | Enable the exact-match in-process LLM response cache (the semantic tier is SEMANTIC_CACHE_ENABLED) |
 | `LLM_ENABLE_NATIVE_TOOLS` | `bool` | `True` | Use providers' native tool-calling / structured-output APIs in LLMService.generate() (falls back to prompt coercion when off). |
 | `LLM_FALLBACK_CHAIN` | `str` | *empty* | Comma-separated ordered 'provider:model' fallback entries (e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback. |
 | `LLM_FALLBACK_STAGE_TIMEOUT` | `float \| None` | *empty* | Per-stage timeout (seconds) for the fallback chain; unset means each stage may use the full request timeout. |
@@ -691,13 +699,17 @@ Declared in `core.config.services`.
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
 | `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
 | `LLM_PREFLIGHT` | `Literal['auto', 'off', 'warn', 'strict']` | `auto` | Startup LLM posture check: 'auto' (default) fails startup in a production environment and warns elsewhere, 'warn' always logs, 'strict' always fails, 'off' skips. Never calls a hosted provider. |
-| `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, or gemini) |
+| `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini', 'vllm']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, gemini, or vllm) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
 | `LLM_ROUTING_MAX_COST_PER_1K_USD` | `float \| None` | *empty* | Budget cap for routed calls: when the routed model's approximate cost per 1K tokens exceeds it, the priciest model in the policy pool that fits is used instead (cheapest if none fits). Empty disables the cap. |
 | `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
+| `LLM_VLLM_API_BASE` | `str \| None` | *empty* | vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is appended when missing). Falls back to LLM_API_BASE only when LLM_PROVIDER=vllm. Required for vLLM: there is no default. |
+| `LLM_VLLM_API_KEY` :material-key:<br>also accepts `VLLM_API_KEY` | `SecretStr \| None` | *empty* | The key the vLLM server was started with (--api-key / VLLM_API_KEY). Leave empty for a keyless server. |
+| `LLM_VLLM_ENDPOINTS` | `str \| None` | *empty* | Several vLLM servers, one per model: comma-separated OpenAI roots, one per server (e.g. `http://gpu:8002/v1`). Calls name a model and go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is the one-server form of the same setting. |
+| `LLM_VLLM_NATIVE_TOOLS` | `bool` | `True` | Whether the vLLM server supports native tool calling (started with --enable-auto-tool-choice --tool-call-parser &lt;parser>). Set false to use prompt-coerced tool calls instead. |
 | `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
 ## Storage configuration
@@ -720,6 +732,7 @@ Declared in `core.config.storage`.
 | `DB_POOL_MIN_SIZE` | `int` | `2` | min_size=2 keeps warm connections through cold start / traffic ramp so early requests skip the TCP+TLS+auth handshake on the hot path; still small enough that idle deployments hold a negligible connection budget. |
 | `DB_POOL_TIMEOUT` | `float` | `30.0` |  |
 | `DB_PORT` | `int` | `5432` |  |
+| `DB_PREPARED_STATEMENTS` | `bool` | `True` | Let psycopg promote a query to a server-side prepared statement after it has run 5 times on a connection (its default prepare_threshold). Set false behind PgBouncer in transaction pooling mode older than 1.21 (or without max_prepared_statements): a statement prepared on one backend is then executed on another and fails with 'prepared statement "_pg3_0" does not exist'. |
 | `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
 | `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
@@ -808,13 +821,14 @@ Declared in `core.config.vectorstore`.
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
-| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
-| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Operator fallback embedding model. Use it together with VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; switching models requires a matching vector dimension and a fresh or migrated collection. |
+| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Deprecated, no effect: nothing reads it; the vector dimension is VECTORSTORE_EMBEDDING_DIM |
+| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Deprecated, no effect: nothing reads it; to switch embedding model set VECTORSTORE_EMBEDDING_MODEL and VECTORSTORE_EMBEDDING_DIM together, on a fresh or migrated collection |
 | `VECTORSTORE_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model name |
 | `VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED` | `bool` | `False` | Record gen_ai.usage.input_tokens on embedding spans. Costs an extra tokenizer pass per cache miss; off by default. |
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
 | `VECTORSTORE_HNSW_EF_CONSTRUCTION` | `int` | `64` | HNSW build-time candidate list size (pgvector 'ef_construction'); must be >= 2 * hnsw_m. |
 | `VECTORSTORE_HNSW_EF_SEARCH` | `int` | `40` | HNSW query-time candidate list size, applied as SET LOCAL hnsw.ef_search per search. 0 leaves the server default alone and skips the enclosing transaction. |
+| `VECTORSTORE_HNSW_ITERATIVE_SCAN` | `Literal['off', 'strict_order', 'relaxed_order']` | `strict_order` | pgvector >= 0.8 'hnsw.iterative_scan' for filtered searches (tenant/payload filters, score threshold): keep walking the graph until LIMIT matching rows are found. 'strict_order' keeps exact distance order; 'relaxed_order' trades order for speed; 'off' restores post-filtering, which can return far fewer than LIMIT hits. Ignored on pgvector &lt; 0.8. |
 | `VECTORSTORE_HNSW_M` | `int` | `16` | HNSW graph connectivity (pgvector 'm'); build-time. |
 | `VECTORSTORE_HOST`<br>also accepts `VECTORSTORE_QDRANT_HOST` | `str` | `localhost` | Vector store server host |
 | `VECTORSTORE_PORT` | `int` | `6333` | Vector store HTTP/REST port |
@@ -891,4 +905,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-564 settings documented.
+578 settings documented.

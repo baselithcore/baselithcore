@@ -9,9 +9,11 @@ of specialized extractors for structured data.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from core.config.scraper import ScraperConfig, get_scraper_config
+from core.observability.logging import get_logger
 
 from .extractors import (
     CssSelectorExtractor,
@@ -32,6 +34,9 @@ from .models import ExtractedData, ScrapedPage
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+
+logger = get_logger(__name__)
 
 
 class Scraper:
@@ -148,7 +153,7 @@ class Scraper:
             cached = self._cache_middleware.get_cached(url)
             if cached:
                 # Re-extract data from cached page
-                data = self._extract(cached, url, extractors)
+                data = await self._extract_async(cached, url, extractors)
                 return cached, data
 
         # Fetch the page
@@ -174,9 +179,24 @@ class Scraper:
         page = await self.middleware.process_response(url, page)
 
         # Extract data
-        data = self._extract(page, url, extractors)
+        data = await self._extract_async(page, url, extractors)
 
         return page, data
+
+    async def _extract_async(
+        self,
+        page: ScrapedPage,
+        base_url: str,
+        extractor_names: list[str],
+    ) -> ExtractedData:
+        """Run :meth:`_extract` in a worker thread.
+
+        Extraction is synchronous BeautifulSoup parsing, once per extractor,
+        of a body the fetcher allows up to 10 MB: on the event loop that is
+        hundreds of milliseconds to seconds of CPU during which every other
+        request in the process waits.
+        """
+        return await asyncio.to_thread(self._extract, page, base_url, extractor_names)
 
     def _extract(
         self,
@@ -246,15 +266,34 @@ class Scraper:
         async for page in fetcher.fetch_many(urls, concurrency):
             # Process through middleware
             page = await self.middleware.process_response(page.url, page)
-            data = self._extract(page, page.url, extractors)
+            data = await self._extract_async(page, page.url, extractors)
             yield page, data
 
+    async def close_fetchers(self) -> None:
+        """Close the fetchers this scraper opened, keeping shared clients.
+
+        Use this for a short-lived scraper in a long-lived process: unlike
+        :meth:`close` it leaves the process-wide robots.txt client open for
+        every other scraper. Each fetcher is closed even if the other fails.
+        """
+        fetchers = (self._httpx_fetcher, self._playwright_fetcher)
+        self._httpx_fetcher = None
+        self._playwright_fetcher = None
+        for fetcher in fetchers:
+            if fetcher is None:
+                continue
+            try:
+                await fetcher.close()
+            except Exception as exc:
+                logger.warning(
+                    "scraper_fetcher_close_failed",
+                    fetcher=type(fetcher).__name__,
+                    error=type(exc).__name__,
+                )
+
     async def close(self) -> None:
-        """Close all resources."""
-        if self._httpx_fetcher:
-            await self._httpx_fetcher.close()
-        if self._playwright_fetcher:
-            await self._playwright_fetcher.close()
+        """Close all resources, including the shared robots.txt client."""
+        await self.close_fetchers()
         from ._http_pool import close_robots_client
 
         await close_robots_client()
@@ -264,5 +303,13 @@ class Scraper:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
-        await self.close()
+        """Async context manager exit: release this scraper's own fetchers.
+
+        Deliberately *not* :meth:`close`: that also closes the process-wide
+        robots.txt client, and a ``with Scraper()`` block ending (every
+        ``web_scrape`` tool call, every crawl) used to close it under any
+        concurrent crawl still reading robots.txt through it — the fetch then
+        failed and the crawl silently proceeded with *no* robots rules. The
+        shared client is closed by the plugin's ``shutdown`` instead.
+        """
+        await self.close_fetchers()

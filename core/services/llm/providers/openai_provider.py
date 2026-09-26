@@ -86,6 +86,11 @@ class OpenAIProvider:
     # prefix stable for OpenAI's automatic prompt caching.
     supports_messages: bool = True
 
+    #: Name used in error messages and logs. Subclasses speaking the same
+    #: protocol to another server (``VLLMProvider``) override it, so an outage
+    #: there is never reported as OpenAI's.
+    provider_label: str = "OpenAI"
+
     def __init__(
         self,
         api_key: str | SecretStr,
@@ -247,8 +252,10 @@ class OpenAIProvider:
             # both double-report it and misclassify it.
             raise
         except Exception as e:
-            logger.error(f"OpenAI generation error: {describe_exception(e)}")
-            raise map_provider_exception(e, provider="OpenAI") from e
+            logger.error(
+                f"{self.provider_label} generation error: {describe_exception(e)}"
+            )
+            raise map_provider_exception(e, provider=self.provider_label) from e
 
     @staticmethod
     def _record_usage(kwargs: dict[str, Any], usage: Usage) -> None:
@@ -434,7 +441,9 @@ class OpenAIProvider:
                     yield "", tokens
 
         except Exception as e:
-            logger.error(f"OpenAI streaming error: {describe_exception(e)}")
+            logger.error(
+                f"{self.provider_label} streaming error: {describe_exception(e)}"
+            )
             raise map_provider_exception(
-                e, provider="OpenAI", action="streaming"
+                e, provider=self.provider_label, action="streaming"
             ) from e

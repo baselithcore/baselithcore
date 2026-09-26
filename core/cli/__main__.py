@@ -330,13 +330,20 @@ def main() -> int:
     )
 
     # Register all commands from their modules. A single broken command must
-    # not take down the whole CLI; failures are surfaced via BASELITH_CLI_DEBUG.
+    # not take down the whole CLI, but it must not vanish silently either: a
+    # core command missing from --help reads as "no such feature". One line
+    # always; the full repr under BASELITH_CLI_DEBUG.
     for cmd_name in COMMANDS:
         try:
             module = importlib.import_module(f"core.cli.commands.{cmd_name}")
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, formatter_class)
         except Exception as e:
+            print(
+                f"baselith: warning: command '{cmd_name}' unavailable "
+                f"({type(e).__name__}); set BASELITH_CLI_DEBUG=1 for details",
+                file=sys.stderr,
+            )
             _debug_log(f"failed to register command '{cmd_name}': {e!r}")
 
     # Dynamic Plugin CLI registration

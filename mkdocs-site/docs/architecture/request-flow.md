@@ -104,7 +104,7 @@ The body is `ChatRequest` (`core/models/chat.py`):
 | `query`               | `str`          | —       | Required, 1–8000 characters                         |
 | `conversation_id`     | `str \| None`  | `None`  | Keys the conversation history; echoed back          |
 | `stream`              | `bool \| None` | `False` | Accepted for compatibility; use `/chat/stream`      |
-| `rag_only`            | `bool`         | `False` | Forwarded into the orchestrator context             |
+| `rag_only`            | `bool`         | `False` | Pins the orchestrator to its default (retrieval) intent and skips intent classification, on `process()` and `process_stream()`; an explicitly passed `intent=` still wins |
 | `kb_label`            | `str \| None`  | `None`  | Knowledge-base selector, forwarded into the context |
 | `tenant_id`           | `str \| None`  | `None`  | Optional tenant hint                                |
 | `max_response_tokens` | `int \| None`  | `None`  | 1–16000                                             |
@@ -231,6 +231,10 @@ durable checkpointing when a `checkpoint_store` is configured
    tenant mismatch) and `annotate_modality(context)` (`context["modality"]`).
 5. Creates or resumes the checkpoint (`context["checkpoint"]`); a resumed run
    restores its previously classified intent.
+6. When no intent is known yet and `context["rag_only"]` is truthy, pins the
+   intent to `default_intent` (`rag_only_intent`, in `_context_assembly.py`),
+   so classification is skipped and the request cannot be routed to the
+   reasoning, vision or swarm handlers. `process_stream()` applies the same rule.
 
 ---
 

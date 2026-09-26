@@ -15,6 +15,7 @@ from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
+from core.services.llm._late_binding import follows_policy
 from core.services.llm._telemetry import (
     gen_ai_system,
     report_tokens_to_middleware,
@@ -70,8 +71,8 @@ class LLMService:
         config: Any | None = None,
         cost_tracker: CostTracker | None = None,
         enable_cache: bool = True,
-        enable_semantic_cache: bool = False,
-        semantic_threshold: float = 0.85,
+        enable_semantic_cache: bool | None = None,
+        semantic_threshold: float | None = None,
     ):
         """
         Initialize LLM service.
@@ -80,12 +81,19 @@ class LLMService:
             config: LLM configuration (uses get_llm_config() if None)
             cost_tracker: Optional cost tracker for token limits
             enable_cache: Whether to enable exact-match response caching
-            enable_semantic_cache: Whether to enable semantic similarity cache
-            semantic_threshold: Similarity threshold for semantic cache (0.0-1.0)
+            enable_semantic_cache: Whether to enable the semantic similarity
+                cache; None reads ``SEMANTIC_CACHE_ENABLED`` (default off)
+            semantic_threshold: Similarity threshold (0.0-1.0); None reads
+                ``SEMANTIC_CACHE_THRESHOLD``. Size and TTL always come from
+                ``SEMANTIC_CACHE_MAXSIZE`` / ``SEMANTIC_CACHE_TTL``.
         """
         self.config = config or get_llm_config()
         self.cost_tracker = cost_tracker
         self.enable_cache = enable_cache and self.config.enable_cache
+        if enable_semantic_cache is None:
+            from core.config.cache import get_semantic_cache_config
+
+            enable_semantic_cache = get_semantic_cache_config().enabled
         self.enable_semantic_cache = enable_semantic_cache
 
         # Initialize exact-match cache if enabled
@@ -98,11 +106,8 @@ class LLMService:
         # Initialize semantic cache if enabled
         self.semantic_cache: Any | None = None
         if self.enable_semantic_cache:
-            self.semantic_cache = SemanticLLMCache(
-                maxsize=self.config.cache_max_size,
-                ttl=self.config.cache_ttl,
-                threshold=semantic_threshold,
-            )
+            # maxsize/ttl/threshold default to the SEMANTIC_CACHE_* settings.
+            self.semantic_cache = SemanticLLMCache(threshold=semantic_threshold)
 
         # Initialize provider
         self.provider = self._create_provider()
@@ -199,7 +204,7 @@ class LLMService:
         """
         try:
             # Apply deterministic overrides (temperature=0 etc)
-            overrides = get_llm_override_kwargs()
+            overrides = get_llm_override_kwargs(self.config.provider)
             merged = {**kwargs, **overrides}
 
             # Bounded by the ambient LoopBudget's remaining wall-clock time
@@ -241,6 +246,7 @@ class LLMService:
             )
             raise RateLimitError(str(e), retry_after=retry_after) from e
 
+    @follows_policy
     async def generate_response(
         self,
         prompt: str,
@@ -301,6 +307,7 @@ class LLMService:
             usage_sink=usage_sink,
         )
 
+    @follows_policy
     async def generate(
         self,
         prompt: str,
@@ -360,6 +367,7 @@ class LLMService:
             allow_refusal=allow_refusal,
         )
 
+    @follows_policy
     async def generate_messages(
         self,
         messages: "list[Any]",
@@ -421,6 +429,7 @@ class LLMService:
             allow_refusal=allow_refusal,
         )
 
+    @follows_policy
     async def generate_response_stream(
         self,
         prompt: str,

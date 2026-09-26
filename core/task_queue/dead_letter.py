@@ -33,8 +33,8 @@ Three properties are deliberate and easy to regress:
   values, so a job whose argument really was a secret must be re-enqueued by
   its owner, not replayed.
 * **Records expire.** ``TASK_QUEUE_DLQ_RETENTION_SECONDS`` (7 days by default)
-  bounds the keyspace; the index is pruned of anything past the horizon on
-  every write, so it cannot outlive the hashes it points at.
+  bounds the keyspace; reads and writes prune anything past the horizon, so
+  the index cannot outlive the hashes it points at.
 
 Storage (Redis):
   ``baselithcore:dlq:index``       sorted set  member=job_id, score=failed_at
@@ -293,12 +293,31 @@ class DeadLetterQueue:
             logger.debug("DLQ retention unavailable, keeping record: %s", exc)
             return 0
 
+    def _prune_expired(self) -> None:
+        """Retire records past the horizon on read too: a quiet DLQ never writes,
+        and a record dead-lettered before retention existed has no TTL."""
+        retention = self._retention_seconds()
+        if retention <= 0:
+            return
+        cutoff = time.time() - retention
+        if not (stale := self._conn.zrangebyscore(_INDEX_KEY, 0, cutoff)):
+            return
+        pipe = self._conn.pipeline()
+        for raw_id in stale:
+            pipe.delete(
+                _job_key(raw_id.decode() if isinstance(raw_id, bytes) else raw_id)
+            )
+        pipe.zremrangebyscore(_INDEX_KEY, 0, cutoff)
+        pipe.execute()
+
     def count(self) -> int:
         """Number of jobs currently in the DLQ."""
+        self._prune_expired()
         return int(self._conn.zcard(_INDEX_KEY))
 
     def list(self, limit: int = 50, offset: int = 0) -> list[DeadLetterRecord]:
         """Return DLQ records, most-recently-failed first."""
+        self._prune_expired()
         start = offset
         end = offset + limit - 1
         ids = self._conn.zrevrange(_INDEX_KEY, start, end)

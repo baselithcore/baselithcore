@@ -161,8 +161,14 @@ print(evolution.get_evolution_stats())
 # Manually drive fine-tuning through the embedded service
 job_id = await evolution.trigger_manual_finetuning()
 
-evolution.stop()
+evolution.stop()     # unsubscribes from the bus; stops AutoFineTuningService too
 ```
+
+`stop()` detaches the `EVALUATION_COMPLETED` handler (using the handle
+`subscribe()` returned) rather than only flipping a flag, and the same holds for
+`AutoFineTuningService.stop()`. Both are idempotent. When the service was built
+by the lazy registry, `shutdown_all()` calls `stop()` for you (see
+[DI](di.md)).
 
 Behavior on each `EVALUATION_COMPLETED` event (when a `memory_manager` is set):
 

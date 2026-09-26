@@ -153,6 +153,8 @@ async def get_plugin_info(plugin_name: str) -> dict[str, Any]:
     """
     controller = get_controller()
     lifecycle = controller.lifecycle
+    # Accept the directory name as well as the manifest name.
+    plugin_name = controller.resolve_plugin_name(plugin_name)
 
     state = lifecycle.get_state(plugin_name)
     if not state:
@@ -216,7 +218,7 @@ async def enable_plugin(
 
     success = await controller.enable_plugin(plugin_name, request.config)
 
-    state = controller.lifecycle.get_state(plugin_name)
+    state = controller.lifecycle.get_state(controller.resolve_plugin_name(plugin_name))
     logger.info(
         "AUDIT | PLUGIN | enable result plugin=%r success=%s from=%s",
         safe_name,
@@ -251,7 +253,7 @@ async def disable_plugin(
 
     success = await controller.disable_plugin(plugin_name)
 
-    state = controller.lifecycle.get_state(plugin_name)
+    state = controller.lifecycle.get_state(controller.resolve_plugin_name(plugin_name))
     logger.info(
         "AUDIT | PLUGIN | disable result plugin=%r success=%s from=%s",
         safe_name,
@@ -287,7 +289,7 @@ async def reload_plugin(
 
     success = await controller.reload_plugin(plugin_name, request.config)
 
-    state = controller.lifecycle.get_state(plugin_name)
+    state = controller.lifecycle.get_state(controller.resolve_plugin_name(plugin_name))
     logger.info(
         "AUDIT | PLUGIN | reload result plugin=%r success=%s from=%s",
         safe_name,
@@ -364,6 +366,7 @@ async def get_plugin_dependents(plugin_name: str) -> dict[str, Any]:
         List of dependent plugin names
     """
     controller = get_controller()
+    plugin_name = controller.resolve_plugin_name(plugin_name)
 
     state = controller.lifecycle.get_state(plugin_name)
     if not state:

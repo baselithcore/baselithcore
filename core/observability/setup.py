@@ -123,7 +123,10 @@ def ensure_logging_configured(stream: Any = sys.stdout) -> None:
     # the file sink does not depend on the process working directory and can be
     # placed on a writable, log-shipper-mounted volume (e.g. a Promtail scrape
     # path, or a systemd ReadWritePaths dir under ProtectSystem=strict).
-    log_dir = os.environ.get("BASELITH_LOG_DIR", "logs")
+    # A blank value (the shipped template leaves ``BASELITH_LOG_DIR=``) means
+    # the default, not "the empty path": os.makedirs("") raises and the sink
+    # would silently land in the CWD as a bare ``app.log``.
+    log_dir = os.environ.get("BASELITH_LOG_DIR", "").strip() or "logs"
     try:
         os.makedirs(log_dir, exist_ok=True)
     except Exception as exc:

@@ -137,11 +137,7 @@ async def test_robots_txt_blocking(mock_config):
     # The robots fetch now goes through the shared pooled client
     # (plugins.web_scraper._http_pool.get_robots_client) instead of building a
     # new httpx.AsyncClient per call.
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "User-agent: *\nDisallow: /private"
-    mock_client = AsyncMock()
-    mock_client.get.return_value = mock_response
+    mock_client = _StreamingClient([b"User-agent: *\nDisallow: /private"])
 
     with (
         patch(
@@ -162,4 +158,118 @@ async def test_robots_txt_blocking(mock_config):
 
         assert count == 0
         # Verify robots.txt was fetched via the shared client.
-        mock_client.get.assert_called()
+        assert mock_client.calls
+
+
+class _StreamingResponse:
+    def __init__(self, chunks: list[bytes], status_code: int = 200) -> None:
+        self.status_code = status_code
+        self._chunks = chunks
+        self.bytes_served = 0
+
+    async def aiter_bytes(self):
+        for chunk in self._chunks:
+            self.bytes_served += len(chunk)
+            yield chunk
+
+
+class _StreamingClient:
+    """Stand-in for the shared robots client's ``stream`` context manager."""
+
+    def __init__(self, chunks: list[bytes], status_code: int = 200) -> None:
+        self.response = _StreamingResponse(chunks, status_code)
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def stream(self, method: str, url: str, **kwargs):
+        from contextlib import asynccontextmanager
+
+        self.calls.append((method, url, kwargs))
+
+        @asynccontextmanager
+        async def _cm():
+            yield self.response
+
+        return _cm()
+
+
+@pytest.mark.asyncio
+async def test_robots_fetch_is_pinned_to_the_verified_ip(mock_config):
+    """robots.txt must go to the validated IP with Host/SNI restored, not be
+    re-resolved by the client (DNS rebinding)."""
+    client = _StreamingClient([b"User-agent: *\nDisallow: /x"])
+    with patch(
+        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+    ):
+        rules = await CrawlEngine(config=mock_config)._fetch_robots(
+            "http://example.com/start"
+        )
+
+    method, url, kwargs = client.calls[0]
+    assert url == "http://93.184.216.34/robots.txt"
+    assert kwargs["headers"] == {"Host": "example.com"}
+    assert kwargs["extensions"] == {"sni_hostname": "example.com"}
+    assert rules["disallow"] == ["/x"]
+
+
+@pytest.mark.asyncio
+async def test_robots_fetch_refuses_internal_targets(mock_config, mock_dns_resolution):
+    mock_dns_resolution.return_value = [(2, 1, 6, "", ("10.0.0.5", 0))]
+    client = _StreamingClient([b""])
+    with patch(
+        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+    ):
+        rules = await CrawlEngine(config=mock_config)._fetch_robots(
+            "http://intranet.example/"
+        )
+    assert client.calls == []
+    assert rules == {"allow": [], "disallow": []}
+
+
+@pytest.mark.asyncio
+async def test_robots_body_is_capped(mock_config):
+    from plugins.web_scraper.crawler import ROBOTS_MAX_BYTES
+
+    chunk = b"#" * 65536
+    client = _StreamingClient([chunk] * 1000)  # ~64 MB offered
+    with patch(
+        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+    ):
+        await CrawlEngine(config=mock_config)._fetch_robots("http://example.com/")
+    assert client.response.bytes_served <= ROBOTS_MAX_BYTES + len(chunk)
+
+
+@pytest.mark.asyncio
+async def test_repeated_links_are_enqueued_once(mock_config, mock_scraper_cls):
+    """A nav link present on every page must not be re-queued per page."""
+    mock_config.max_pages = 3
+    mock_config.max_depth = 3
+    pages = {
+        "http://example.com/": ["http://example.com/a", "http://example.com/b"],
+        "http://example.com/a": ["http://example.com/b", "http://example.com/"],
+        "http://example.com/b": ["http://example.com/a", "http://example.com/"],
+    }
+    scraped: list[str] = []
+
+    async def scrape(url, **_kwargs):
+        scraped.append(url)
+        data = ExtractedData()
+        data.links = [MagicMock(url=u, nofollow=False) for u in pages.get(url, [])]
+        return (
+            ScrapedPage(url=url, final_url=url, status_code=200, html="<html/>"),
+            data,
+        )
+
+    mock_scraper_cls.return_value.scrape.side_effect = scrape
+    from plugins.web_scraper import crawler as crawler_module
+
+    crawler = CrawlEngine(config=mock_config, max_pages=10, max_depth=3)
+    with patch.object(
+        crawler_module, "is_valid_url", wraps=crawler_module.is_valid_url
+    ) as valid:
+        async for _ in crawler.crawl("http://example.com/"):
+            pass
+    # Only the two never-seen links are considered for enqueueing; before the
+    # fix every not-yet-*visited* repeat was re-checked and re-appended.
+    assert valid.call_count == 2
+    assert sorted(scraped) == sorted(pages)
+    assert len(scraped) == len(set(scraped))

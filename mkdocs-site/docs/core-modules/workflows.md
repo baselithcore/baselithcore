@@ -316,13 +316,14 @@ Semantics to know:
 
 - **One step per node visit.** The whole timeout + retry sequence of a node
   is a single recorded step: replay returns the node's *final* output
-  regardless of how many retries the original run needed, keeping replay
-  cursors aligned.
+  regardless of how many retries the original run needed. Steps are keyed
+  by node and occurrence (`v2:workflow:<node>:<hash>:<n>`), not by position,
+  so a loop that visits a node twice records two steps and a resumed run
+  matches them in visit order of that node alone.
 - **JSON-serializable outputs.** Durable runs require node outputs to be
   JSON-serializable — that is the persistent checkpoint store's contract.
 - **Sequential `PARALLEL` branches.** In durable mode fan-out branches
-  execute sequentially in edge order: replay cursors must assign the same
-  key to the same node on every pass, and concurrent per-step saves would
+  execute sequentially in edge order: concurrent per-step saves would
   interleave version bumps in the store. Without a checkpoint, branches run
   concurrently via `asyncio.gather` as before.
 

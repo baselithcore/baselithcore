@@ -165,15 +165,21 @@ def _build_provider(backend: str, secrets_dir: str | None) -> SecretsProvider:
 def get_secrets_provider() -> SecretsProvider:
     """Return the process-wide secrets provider, building it on first use.
 
-    Backend selection reads ``SECRETS_BACKEND`` (default ``env``) and, for the
-    file backend, ``SECRETS_DIR``. The result is cached; call
-    :func:`reset_secrets_provider` in tests to force a rebuild.
+    Backend selection reads ``SecurityConfig.secrets_backend``
+    (``SECRETS_BACKEND``, default ``env``) and, for the file backend,
+    ``SecurityConfig.secrets_dir`` (``SECRETS_DIR``). The result is cached;
+    call :func:`reset_secrets_provider` in tests to force a rebuild (the
+    security config is cached too, so a test changing the environment must
+    reset both).
     """
     global _provider
     if _provider is None:
-        backend = os.environ.get("SECRETS_BACKEND", "env")
-        secrets_dir = os.environ.get("SECRETS_DIR")
-        _provider = _build_provider(backend, secrets_dir)
+        # Imported here: core.config must stay importable without
+        # core.security, and this runs only on the first secret read.
+        from core.config.security import get_security_config
+
+        config = get_security_config()
+        _provider = _build_provider(config.secrets_backend, config.secrets_dir)
         # Log the resolved provider class, not the raw SECRETS_BACKEND value:
         # same information, no environment-derived string in the log line.
         logger.info("Initialized provider: %s", type(_provider).__name__)

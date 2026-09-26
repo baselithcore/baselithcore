@@ -5,6 +5,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { api, type RunTaskState, type Session, type SessionMessage } from '../../lib/api';
 import { formatAbsolute, formatRelative, truncate } from '../../lib/format';
 import { Icon, paths } from '../../lib/icons';
+import { useDashboardEventState } from '../../lib/sse';
 import { badgeTone, roleTone, type SessionRunHint } from './helpers';
 
 export function ConnectionPill({ state }: { state: 'connecting' | 'open' | 'closed' | 'error' }) {
@@ -126,6 +127,8 @@ export function SessionRunCard({
 }
 
 export function MessageList({ messages }: { messages: SessionMessage[] }) {
+  // run.* SSE events invalidate ['runTaskById', id]; poll fast only as fallback.
+  const live = useDashboardEventState() === 'open';
   const runStatusById = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const message of messages) {
@@ -149,7 +152,7 @@ export function MessageList({ messages }: { messages: SessionMessage[] }) {
     queries: runningRunIds.map((rid) => ({
       queryKey: ['runTaskById', rid],
       queryFn: () => api.runTaskById(rid),
-      refetchInterval: 2_500,
+      refetchInterval: live ? 10_000 : 2_500,
       retry: false,
     })),
   });

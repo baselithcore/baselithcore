@@ -112,7 +112,7 @@ def register_default_cron_jobs(plugin: BaselithbotPlugin) -> None:
         logger.info("baselithbot_cron_usage_heartbeat", **summary)
 
     async def prune_replay_history() -> None:
-        dropped = plugin._replay.prune_older_than(retention_seconds=14 * 24 * 3600.0)
+        dropped = await plugin._replay.aprune_older_than(retention_seconds=14 * 24 * 3600.0)
         if dropped:
             logger.info("baselithbot_cron_replay_pruned", dropped=dropped)
 

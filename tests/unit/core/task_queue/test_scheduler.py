@@ -99,7 +99,10 @@ class TestTaskScheduler:
 
         # Verify tracker updated
         mock_task_tracker.set_status.assert_called_with(
-            "test-job-id", TaskStatus.QUEUED, message="Queued in default"
+            "test-job-id",
+            TaskStatus.QUEUED,
+            message="Queued in default",
+            tenant_id="default",
         )
 
     def test_enqueue_custom_params(

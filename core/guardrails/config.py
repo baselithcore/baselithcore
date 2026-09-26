@@ -104,7 +104,16 @@ CODE_EXECUTION_PATTERNS = [
 # for context-dependent PII (names, addresses) see the optional NER engine
 # in core.guardrails.pii.
 PII_PATTERNS = {
-    "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+    # Every unbounded run below is anchored so a match can only START where
+    # the run starts (negative lookbehind on the run's own class) and is
+    # possessive. A plain ``\b`` anchor lets the engine restart inside the
+    # run at every word boundary and rescan it to the end — quadratic on
+    # ``"a." * 25000`` (~1s per call, on the event loop). Side effect: a
+    # local part that begins with punctuation (``.john@x.com``) is redacted
+    # including that punctuation.
+    "email": (
+        r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    ),
     "phone": r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
     "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
     "credit_card": r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
@@ -122,10 +131,17 @@ PII_PATTERNS = {
     "aws_access_key": r"\bAKIA[0-9A-Z]{16}\b",
     "api_key_prefixed": r"\bsk-[A-Za-z0-9_-]{20,}\b",
     "github_token": r"\bgh[pousr]_[A-Za-z0-9]{36,}\b",
-    "jwt": r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+    # Same run anchoring as ``email`` (``"-eyJ" * n`` was quadratic): a token
+    # glued to a preceding ``-`` is part of a larger identifier.
+    "jwt": (
+        r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\."
+        r"[A-Za-z0-9_-]{10,}\b"
+    ),
     "private_key_block": (
         r"-----BEGIN[^-]*PRIVATE KEY-----"
-        r"(?:[\s\S]*?-----END[^-]*PRIVATE KEY-----)?"
+        # The body may not run past the next BEGIN: headers without an END
+        # otherwise each rescan the rest of the text (quadratic).
+        r"(?:(?:(?!-----BEGIN)[\s\S])*?-----END[^-]*PRIVATE KEY-----)?"
     ),
 }
 

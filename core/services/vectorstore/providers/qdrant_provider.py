@@ -413,14 +413,17 @@ class QdrantProvider:
             logger.error(f"Failed to delete points from '{collection_name}': {e}")
             raise VectorStoreError(f"Delete failed: {e}") from e
 
+    async def list_collections(self) -> list[str]:
+        """Names of every collection on the server."""
+        return [c.name for c in (await self.client.get_collections()).collections]
+
     async def collection_exists(self, collection_name: str) -> bool:
-        """Check if collection exists."""
+        """Check if collection exists; raise VectorStoreError if unreachable."""
         try:
             collections = await self.client.get_collections()
-            return any(c.name == collection_name for c in collections.collections)
-        except Exception as e:
-            logger.error(f"Failed to check collection existence: {e}")
-            return False
+        except Exception as e:  # unreachable != missing: never answer False
+            raise VectorStoreError(f"Collection check failed: {e}") from e
+        return any(c.name == collection_name for c in collections.collections)
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)

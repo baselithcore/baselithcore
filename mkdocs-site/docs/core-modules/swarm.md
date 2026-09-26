@@ -176,7 +176,15 @@ passes it to `llm_service.generate_response(prompt, model=model_override)`.
 
 ### Scenario Simulation Mode
 
-The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory and used to update the "World State" for Round N+1.
+The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory (when the colony has a memory manager) and used to update the "World State" for Round N+1.
+
+On the orchestrator path the handler is reached through `handle(query, context)`,
+which delegates to `handle_simulation()`. The round count comes from
+`context["rounds"]`: default `3`, clamped to `1`–`10` (`MAX_SIMULATION_ROUNDS`)
+because every round is a full decompose + fan-out + synthesis cycle; a
+non-integer value falls back to the default. The result metadata reports
+`total_rounds` (rounds actually run — an empty decomposition ends the
+simulation early) and `requested_rounds`.
 
 ```python
 from core.orchestration.handlers.simulation_handler import SimulationHandler
@@ -223,10 +231,11 @@ result = await orchestrator.process(
     context={}
 )
 
-# Intent: "scenario_simulation" → triggers SimulationHandler
+# Intent: "scenario_simulation" → triggers SimulationHandler.handle(),
+# which runs the multi-round simulation (context["rounds"], default 3)
 simulation = await orchestrator.process(
     query="Simulate the social impact of universal basic income over 3 policy cycles",
-    context={}
+    context={"rounds": 3}
 )
 ```
 
@@ -236,6 +245,13 @@ The orchestrator automatically:
 2. **Routes to appropriate handler** (SwarmHandler or SimulationHandler)
 3. **Injects memory context** (semantic + graph) into agent prompts
 4. **Persists outcomes** back to episodic memory
+
+Memory reaches the swarm through the colony: the orchestrator builds both
+handlers with `memory_manager=` its own `AgentMemory`, and every per-request
+colony is minted by `new_request_colony(context)`, which also attaches
+`context["memory_manager"]` when the factory supplied none. A colony without a
+memory manager skips recall and write-back silently — that is the degraded,
+not the default, mode.
 
 ### Colony ownership: one per request, never per process
 
@@ -255,7 +271,7 @@ request competed in every later request's auctions.
 |---|---|---|
 | 1 | The colony bound by `request_colony_scope(...)` (a `ContextVar`) | Inside `SwarmHandler.handle()` — concurrent requests and the tasks they spawn each see their own. |
 | 2 | An explicitly pinned colony (`handler._colony = colony`) | Test harnesses and direct injection. It deliberately **loses** to a request scope, so pinning one can never put a shared colony back on the served path. |
-| 3 | A **tenant-keyed** colony | Entry points that open no scope — the multi-round `SimulationHandler` path, a handler subclass with its own entry point. Pheromone and agent state still never crosses a tenant boundary. |
+| 3 | A **tenant-keyed** colony | Entry points that open no scope — a handler subclass with its own entry point. (`SimulationHandler.handle_simulation()` opens its own request scope, so one colony serves every round.) Pheromone and agent state still never crosses a tenant boundary. |
 
 The tenant registry is a bounded LRU (`MAX_TENANT_COLONIES = 64`): colonies are
 cheap to rebuild (the virtual-agent roster is re-registered on creation), and an

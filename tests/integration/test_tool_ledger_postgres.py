@@ -30,7 +30,11 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.idempotency import derive_idempotency_key
+from core.orchestration.idempotency import (
+    claim_call,
+    derive_call_key,
+    derive_idempotency_key,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -250,6 +254,31 @@ class TestRoundTrip:
         assert recorded.status == "failed"
         assert recorded.error == "boom"
         assert not recorded.is_replayable
+
+
+class TestKeySchemes:
+    async def test_a_legacy_row_is_replayed_through_the_content_key(
+        self, ledger, ledger_table
+    ):
+        """A run in flight across the upgrade still replays its recorded effect."""
+        legacy = derive_idempotency_key(ledger_table, 12, "charge_card", {"amount": 3})
+        await ledger.begin(legacy, run_id=ledger_table, tool="charge_card")
+        await ledger.complete(legacy, {"receipt": "r-old"})
+        key = derive_call_key(ledger_table, "charge_card", {"amount": 3}, 0)
+
+        held = await claim_call(
+            ledger, key, run_id=ledger_table, tool="charge_card", legacy_key=legacy
+        )
+
+        assert held is not None and held.result == {"receipt": "r-old"}
+        migrated = await ledger.lookup(key)
+        assert migrated is not None and migrated.is_replayable
+
+    async def test_occurrences_are_distinct_rows(self, ledger, ledger_table):
+        first = derive_call_key(ledger_table, "notify", {"to": "ops"}, 0)
+        second = derive_call_key(ledger_table, "notify", {"to": "ops"}, 1)
+        assert await ledger.begin(first, run_id=ledger_table, tool="notify") is None
+        assert await ledger.begin(second, run_id=ledger_table, tool="notify") is None
 
 
 class TestPurge:

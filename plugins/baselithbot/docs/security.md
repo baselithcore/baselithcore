@@ -46,7 +46,10 @@ Per-client token-bucket limiters ([`policies/rate_limit.py`](../policies/rate_li
 | `DELETE /dash/nodes/{node_id}` | 60s | 20 |
 | `PUT /dash/models` | 60s | 5 |
 
-Keying: `"<route-prefix>:<client-ip>"`. Reverse proxy must set
+Keying: `"<route-prefix>:<client-ip>"`. Idle buckets (no event inside the
+window) are swept once the table reaches 4096 keys, with the next sweep
+scheduled at twice the surviving size — rotating source addresses cannot grow
+the limiter without bound. Reverse proxy must set
 `X-Forwarded-For` and FastAPI must trust it via `ProxyHeadersMiddleware`
 for the limiter to key on the real client.
 
@@ -54,10 +57,22 @@ Over-limit response: `HTTPException(429, "rate limit exceeded")`.
 
 ## 3. Inbound hardening
 
-- Body cap: 1 MiB (`_MAX_INBOUND_BODY_BYTES`). 413 on overflow.
+- Body cap: 1 MiB (`_MAX_INBOUND_BODY_BYTES`), enforced while streaming
+  ([`inbound/body.py`](../inbound/body.py)) — 413 on a declared or streamed
+  overflow, before any byte past the cap is buffered.
+- Channel names are canonicalised to lower case; unknown channels → 404
+  before the body is read (no policy bypass via `Slack` vs `slack`, no
+  unbounded metric labels).
+- Replay window: Slack and Discord signed timestamps must be within ±5 min.
+  The generic `X-Baselithbot-Signature` HMAC has **no** timestamp — put a
+  nonce/timestamp in the payload and deduplicate if replays matter to you.
+- Signature and bearer comparisons run on bytes, so non-ASCII header text is
+  a clean 401/403, never a 500.
 - Malformed JSON tolerated: becomes `{"raw": "<decoded-utf8>"}`.
-- `DMPairingPolicy.evaluate()` gates DMs from unpaired senders — emits
-  `{"status": "denied", "reason": ...}`.
+- `DMPairingPolicy.evaluate()` enforces the `dm_policy` section of
+  `plugins.yaml` (sender allow/block lists, per-sender rate limit) — emits
+  `{"status": "denied", "reason": ...}`. The section is applied at plugin
+  initialisation; a malformed section fails startup.
 - Redacted structured log on every accepted event.
 - Host allowlist available via [`policies/host_acl.py`](../policies/host_acl.py).
 
@@ -90,7 +105,11 @@ Summary only — full detail in [computer-use.md](./computer-use.md):
 - Per-capability flags.
 - Shell allowlist + `shell=False` + timeout.
 - Filesystem scoping + byte cap + `..` blocked.
-- JSON-Lines audit log with secret redaction.
+- JSON-Lines audit log with secret redaction. One buffered logger per
+  audit path is shared by every tool builder (the dashboard rebuilds the
+  tool map per call) and flushed at plugin shutdown and interpreter exit.
+- `tailscale_up/down/logout` require Computer Use + `allow_shell`, like the
+  shell tool; `process_kill` refuses pid ≤ 1 and the server's own pid.
 - **Human-in-the-loop approval gate** via
   `ComputerUseConfig.require_approval_for`; privileged actions suspend
   until a dashboard operator approves/denies (timeout → auto-deny,
@@ -107,6 +126,15 @@ Fernet. Master key from `BASELITHBOT_SECRET_KEY` env, or auto-generated
 once under `<state>/.secret_key` (mode `0600`). Plaintext is never
 returned by the API — reads surface only `***<last4>` previews. State
 files are excluded from git via `plugins/*/.state/` in `.gitignore`.
+
+Channel credentials follow the same rule
+([`channels/config_store.py`](../channels/config_store.py),
+`<state>/channel_configs.enc.json`, written `0600` from creation): fields
+ending in `token`, `key`, `password`, `secret`, `private_key_hex` **and
+`webhook_url`** (incoming-webhook URLs carry their credential in the path)
+come back as `***<last4>`. `PUT /dash/channels/{name}/config` treats a value
+equal to the stored field's mask as "unchanged", so saving a form seeded from
+the masked snapshot never overwrites a credential with its own mask.
 
 ## 7. Secret redaction
 

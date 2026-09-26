@@ -164,6 +164,11 @@ services:
     # applied) and only appends REDIS_ARGS to its own redis-server launch.
     environment:
       - REDIS_ARGS=--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      # For the healthcheck: redis-cli authenticates from REDISCLI_AUTH. The
+      # probe used to pass `-a $$REDIS_PASSWORD`, a variable that never
+      # existed inside this container — with a password set, `-a` swallowed
+      # `ping` as its argument and the service could never turn healthy.
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     # Compose resolves a service by its SERVICE name, not its container_name —
     # so this instance answers to `redis`. configs/.env.production, however,
     # points CACHE_REDIS_URL / QUEUE_REDIS_URL / GRAPH_DB_URL at `falkordb`
@@ -181,7 +186,9 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
+      # An empty REDISCLI_AUTH would still send AUTH "" (noisy error on a
+      # password-less server), so drop it when no password is configured.
+      test: ['CMD-SHELL', '[ -n "$$REDISCLI_AUTH" ] || unset REDISCLI_AUTH; redis-cli ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5

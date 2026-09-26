@@ -12,10 +12,13 @@ complete, and a heap-backed `PriorityQueue` hands out the highest-scoring
 decomposer output; moving jobs between processes is the
 [Task Queue](task-queue.md)'s job.
 
-Nothing in the runtime enqueues into it implicitly: the orchestrator does not
-consult a `PriorityQueue` on its own. You build one around the steps a
-[planner](planning.md) produced (or any other list of `Task` objects) and
-drive the loop yourself.
+!!! note "Library API — not wired by default"
+    Nothing in the runtime enqueues into it implicitly: no route, handler or
+    startup hook builds a `TaskPrioritizer`, `DependencyGraph` or
+    `PriorityQueue` in the default app, and the orchestrator does not consult
+    one on its own. Build one from host or plugin code around the steps a
+    [planner](planning.md) produced (or any other list of `Task` objects) and
+    drive the loop yourself.
 
 !!! note "Not to be confused with intent priority"
     Intent routing has its own, unrelated `priority`: an integer on each intent

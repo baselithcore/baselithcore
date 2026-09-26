@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import threading
 import time
 from pathlib import Path
@@ -21,7 +20,11 @@ from typing import Any
 
 from core.observability.logging import get_logger
 from cryptography.fernet import Fernet, InvalidToken
-from plugins.baselithbot.security.secret_store import SecretStoreError, _load_or_create_master_key
+from plugins.baselithbot.security.secret_store import (
+    SecretStoreError,
+    _load_or_create_master_key,
+    _write_private,
+)
 
 logger = get_logger(__name__)
 
@@ -32,6 +35,9 @@ _SENSITIVE_SUFFIXES: tuple[str, ...] = (
     "password",
     "secret",
     "private_key_hex",
+    # Incoming-webhook URLs (Slack, Discord, Teams, Google Chat, ...) embed
+    # their credential in the path: whoever holds the URL can post as the bot.
+    "webhook_url",
 )
 
 
@@ -45,6 +51,33 @@ def _mask(value: str) -> str:
     if len(value) <= 4:
         return "***"
     return "***" + value[-4:]
+
+
+def merge_config_update(
+    stored: dict[str, Any], update: dict[str, Any], unset: list[str]
+) -> dict[str, Any]:
+    """Merge a dashboard edit into the stored config without masked echoes.
+
+    The editor form is seeded from the masked snapshot, so saving it posts
+    ``"***abcd"`` back for every sensitive field the operator did not touch.
+    Storing that verbatim replaced the real credential with its own mask.
+    A value equal to the mask of the stored one is treated as "unchanged".
+    """
+    merged = dict(stored)
+    for field, value in update.items():
+        current = stored.get(field)
+        if (
+            _is_sensitive(field)
+            and isinstance(value, str)
+            and isinstance(current, str)
+            and current
+            and value.strip() == _mask(current)
+        ):
+            continue
+        merged[field] = value
+    for field in unset:
+        merged.pop(field, None)
+    return merged
 
 
 class ChannelConfigStore:
@@ -186,9 +219,9 @@ class ChannelConfigStore:
     def _persist_locked(self) -> None:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         payload = json.dumps(self._entries, indent=2)
-        tmp.write_text(payload, encoding="utf-8")
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        # 0600 from creation: write-then-chmod left a umask-wide window.
+        _write_private(tmp, payload.encode("utf-8"))
         os.replace(tmp, self._path)
 
 
-__all__ = ["ChannelConfigStore"]
+__all__ = ["ChannelConfigStore", "merge_config_update"]

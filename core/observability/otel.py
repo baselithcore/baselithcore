@@ -14,7 +14,13 @@ auto-instrumentation spans.
 Design rules:
 - **Idempotent.** ``setup_telemetry`` may be called multiple times; only the
   first call installs providers. ``shutdown_telemetry`` flushes and tears them
-  down (registered with ``atexit`` as a safety net).
+  down (registered with ``atexit`` once, as a safety net).
+- **Re-setup after shutdown works for traces.** OpenTelemetry lets the global
+  ``TracerProvider`` be set only once per process, so the provider built by the
+  first setup is kept for the life of the process and later setups swap new
+  exporters in behind it (:mod:`core.observability.otel_swap`); its resource
+  and sampler are the first setup's. OTLP metric push cannot be re-armed the
+  same way — a second setup logs a warning and leaves metrics off.
 - **Graceful degradation.** Every OTel import is guarded. A missing SDK or
   instrumentation package downgrades to a warning, never an exception — the
   framework keeps running with tracing disabled.
@@ -57,6 +63,7 @@ from core.observability.otel_instrumentation import (
     setup_propagators,
 )
 from core.observability.otel_logs import setup_log_export, shutdown_log_export
+from core.observability.otel_swap import build_swappable_processor
 
 logger = get_logger(__name__)
 
@@ -72,6 +79,12 @@ _lock = threading.Lock()
 _initialized = False
 _tracer_provider: Any = None
 _meter_provider: Any = None
+# Process-lifetime state: OTel refuses to replace a global provider, so these
+# survive shutdown_telemetry() and are re-used by the next setup.
+_global_tracer_provider: Any = None
+_span_pipeline: Any = None
+_meter_provider_was_installed = False
+_atexit_registered = False
 
 
 def is_initialized() -> bool:
@@ -222,17 +235,13 @@ def _setup_tracing(
     are sampled, instrumented and handed to in-process sinks, but nothing is
     shipped off-box.
     """
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
+    global _global_tracer_provider, _span_pipeline
 
-    provider = TracerProvider(resource=resource, sampler=sampler)
-
+    processors: list[Any] = []
     if endpoint is not None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        provider.add_span_processor(
-            BatchSpanProcessor(build_span_exporter(endpoint, protocol))
-        )
+        processors.append(BatchSpanProcessor(build_span_exporter(endpoint, protocol)))
 
     if console_export:
         from opentelemetry.sdk.trace.export import (
@@ -240,21 +249,38 @@ def _setup_tracing(
             SimpleSpanProcessor,
         )
 
-        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        processors.append(SimpleSpanProcessor(ConsoleSpanExporter()))
 
-    # In-process mirror: hand every finished span to locally registered sinks
-    # (dashboards, debug readers) alongside the OTLP export. No-op when nobody
-    # is listening; never fails setup.
-    from core.observability.span_bridge import install_span_sink_bridge
+    if _global_tracer_provider is None:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
 
-    install_span_sink_bridge(provider)
+        provider = TracerProvider(resource=resource, sampler=sampler)
+        pipeline = build_swappable_processor()
+        provider.add_span_processor(pipeline)
 
-    trace.set_tracer_provider(provider)
+        # In-process mirror: hand every finished span to locally registered
+        # sinks (dashboards, debug readers) alongside the OTLP export. No-op
+        # when nobody is listening; never fails setup.
+        from core.observability.span_bridge import install_span_sink_bridge
+
+        install_span_sink_bridge(provider)
+
+        trace.set_tracer_provider(provider)
+        _global_tracer_provider = provider
+        _span_pipeline = pipeline
+    else:
+        logger.info(
+            "[OTEL] Re-using the process TracerProvider "
+            "(resource and sampler of the first setup are kept)"
+        )
+
+    _span_pipeline.replace(processors)
     logger.info(
         "[OTEL] TracerProvider installed (export=%s)",
         endpoint if endpoint is not None else "in-process only",
     )
-    return provider
+    return _global_tracer_provider
 
 
 def _setup_metrics(
@@ -288,8 +314,21 @@ def _setup_metrics(
         logger.info("[OTEL] MeterProvider skipped (no OTLP endpoint, no console)")
         return None
 
+    global _meter_provider_was_installed
+    if _meter_provider_was_installed:
+        # The global MeterProvider can be set once per process and its readers
+        # are fixed at construction, so a shut-down one cannot be re-armed.
+        for reader in readers:
+            reader.shutdown()
+        logger.warning(
+            "[OTEL] OTLP metric export cannot be re-enabled after "
+            "shutdown_telemetry() in the same process; metrics stay off"
+        )
+        return None
+
     provider = MeterProvider(resource=resource, metric_readers=readers)
     metrics.set_meter_provider(provider)
+    _meter_provider_was_installed = True
     logger.info(
         "[OTEL] MeterProvider installed (export=%s)",
         endpoint if endpoint is not None else "console only",
@@ -331,7 +370,7 @@ def setup_telemetry(
         ``True`` if telemetry is active after the call, ``False`` otherwise
         (disabled by config or SDK unavailable).
     """
-    global _initialized, _tracer_provider, _meter_provider
+    global _initialized, _tracer_provider, _meter_provider, _atexit_registered
 
     config = get_app_config()
     if not getattr(config, "telemetry_enabled", False):
@@ -371,7 +410,9 @@ def setup_telemetry(
             instrument_libraries(enable_fastapi, enable_redis, enable_httpx, app)
 
             _initialized = True
-            atexit.register(shutdown_telemetry)
+            if not _atexit_registered:
+                atexit.register(shutdown_telemetry)
+                _atexit_registered = True
             logger.info(
                 "[OTEL] Telemetry initialized "
                 "(service=%s, env=%s, sample_rate=%.2f, protocol=%s, export=%s)",

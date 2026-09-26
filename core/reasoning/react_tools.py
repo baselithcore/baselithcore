@@ -4,7 +4,9 @@ Holds everything between "the model asked for a tool" and "here is the
 observation": the enforcement chokepoint, argument validation, the idempotency
 ledger, the timeout and retry policy, and the consecutive-failure circuit
 breaker. The pieces that surround the call itself live in
-:mod:`core.reasoning.react_tool_gate` (module size cap).
+:mod:`core.reasoning.react_tool_gate`, and the checkpoint/ledger wrapper that
+decides between executing and replaying in :mod:`core.reasoning.react_ledger`
+(module size cap).
 
 Mixed into :class:`core.reasoning.react.ReActAgent`; not useful standalone.
 """
@@ -18,14 +20,12 @@ from typing import Any
 
 from core.observability.logging import get_logger
 from core.orchestration.tool_output import escape_untrusted_markers
+from core.reasoning.react_ledger import ToolLedgerMixin, observation_is_error
 from core.reasoning.react_tool_gate import (
     build_gate_context,
-    claim_ledger_entry,
     dispatch_post_hook,
     gate_denial,
     invalid_arguments_message,
-    new_ledger,
-    new_run_id,
     note_tool_outcome,
     render_observation,
 )
@@ -37,27 +37,6 @@ logger = get_logger(__name__)
 #: Models emit a handful per turn; the bound is there so a pathological fan-out
 #: cannot open an unbounded number of sockets or thread-pool slots at once.
 MAX_PARALLEL_TOOL_CALLS = 8
-
-
-def observation_is_error(observation: str) -> bool:
-    """Whether an observation describes a failure rather than a result.
-
-    The loop's own narration is the only part of an observation outside the
-    untrusted envelope, and it is the part that carries the ``Error`` prefix.
-    Tool-controlled text is sealed inside the envelope and has its markers
-    escaped, so it cannot forge one — which is what makes reading the prefix
-    sound rather than a guess. The ledger already decided success this way;
-    naming it keeps the one convention in one place, so the flag the model
-    sees on a ``tool_result`` block and the outcome the ledger records cannot
-    disagree.
-
-    Args:
-        observation: The rendered observation.
-
-    Returns:
-        True when the observation is a runtime-authored failure.
-    """
-    return observation.startswith("Error")
 
 
 def _unknown_tool_message(name: str, tools: dict[str, ToolDefinition]) -> str:
@@ -74,7 +53,7 @@ def _unknown_tool_message(name: str, tools: dict[str, ToolDefinition]) -> str:
     )
 
 
-class ToolExecutionMixin:
+class ToolExecutionMixin(ToolLedgerMixin):
     """Tool dispatch, gating and failure accounting for :class:`ReActAgent`.
 
     Expects the host class to provide ``_tools``, ``_tool_timeout``,
@@ -256,54 +235,6 @@ class ToolExecutionMixin:
             return gate_denial(tool.name, exc)
         return None
 
-    # ------------------------------------------------------------------
-    # Idempotency ledger (non-read_only categories only)
-    # ------------------------------------------------------------------
-
-    #: Sentinel distinguishing "not resolved yet" from "resolved to nothing".
-    _LEDGER_UNSET = object()
-
-    def _ledger(self) -> Any:
-        """The agent's tool ledger, resolved once on first use.
-
-        ``None`` is a real answer (``ORCHESTRATOR_TOOL_LEDGER=off``), so it is
-        cached like any other: testing the ledger itself for ``None`` would
-        re-resolve — and re-log — on every effectful call.
-        """
-        ledger = getattr(self, "_tool_ledger", self._LEDGER_UNSET)
-        if ledger is self._LEDGER_UNSET or (
-            ledger is None and not getattr(self, "_tool_ledger_resolved", False)
-        ):
-            ledger = new_ledger()
-            self._tool_ledger = ledger
-            self._tool_ledger_resolved = True
-        return ledger
-
-    def _ledger_entries(self) -> int:
-        """How many calls this agent's ledger holds (diagnostics / tests)."""
-        ledger = getattr(self, "_tool_ledger", None)
-        entries = getattr(ledger, "_entries", None)
-        return len(entries) if entries is not None else 0
-
-    def _ledger_identity(self) -> tuple[str, int]:
-        """``(run_id, step)`` identifying the next effectful call.
-
-        Under a checkpoint the step is the replay cursor, so the same call gets
-        the same key on every pass. Without one it is a per-agent counter: keys
-        stay stable within an attempt, which is as much as an in-process ledger
-        can honestly promise.
-        """
-        run_id = getattr(self, "_ledger_run_id", None)
-        if run_id is None:
-            run_id = getattr(self._checkpoint, "run_id", None) or new_run_id()
-            self._ledger_run_id = run_id
-        cursor = getattr(self._checkpoint, "_cursor", None)
-        if isinstance(cursor, int):
-            return run_id, cursor
-        step = getattr(self, "_ledger_step", 0)
-        self._ledger_step = step + 1
-        return run_id, step
-
     def _note_tool_outcome(self, observation: str) -> str | None:
         """Track the consecutive-failure streak; return an escalation message
         when the configured cap is crossed, else None.
@@ -346,61 +277,6 @@ class ToolExecutionMixin:
             return denial
 
         return await self._invoke_tool(tool, args, kwargs)
-
-    async def _invoke_tool(
-        self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> str:
-        """Run an already-gated tool, durably when a checkpoint is attached.
-
-        With a :class:`~core.orchestration.checkpoint.CheckpointManager`, the
-        invocation goes through ``run_step``: the observation is recorded
-        under a deterministic ``(cursor, tool, args)`` key, and a resumed run
-        replays the stored observation instead of re-executing the side
-        effect. Without a checkpoint, behavior is unchanged.
-        """
-        if self._checkpoint is not None:
-            payload = {"args": list(args), "kwargs": kwargs}
-            result = await self._checkpoint.run_step(
-                tool.name,
-                payload,
-                lambda: self._invoke_tool_ledgered(tool, args, kwargs),
-                category=tool.category,
-            )
-            return str(result)
-        return await self._invoke_tool_ledgered(tool, args, kwargs)
-
-    async def _invoke_tool_ledgered(
-        self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> str:
-        """Wrap an effectful invocation in an idempotency-ledger claim.
-
-        ``read_only`` tools pass straight through — repeating a read costs a
-        round trip, not a defect. Everything else (including an unrecognised
-        category, which is treated as effectful) records its intent before the
-        call and its outcome after, so a replay returns the recorded result
-        instead of sending the payment / email / webhook twice.
-        """
-        if tool.is_read_only:
-            return await self._invoke_tool_uncheckpointed(tool, args, kwargs)
-        ledger_args = dict(kwargs) if kwargs else {"__args__": list(args)}
-        run_id, step = self._ledger_identity()
-        key, replayed = await claim_ledger_entry(
-            self._ledger(), run_id, step, tool, ledger_args
-        )
-        if replayed is not None:
-            return replayed
-        observation = await self._invoke_tool_uncheckpointed(tool, args, kwargs)
-        if key is not None:
-            try:
-                if observation_is_error(observation):
-                    await self._ledger().fail(key, observation)
-                else:
-                    await self._ledger().complete(key, observation)
-            except Exception as exc:  # the ledger must not break the loop
-                logger.warning(
-                    "tool_ledger_record_failed tool=%s error=%s", tool.name, exc
-                )
-        return observation
 
     async def _invoke_tool_uncheckpointed(
         self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]

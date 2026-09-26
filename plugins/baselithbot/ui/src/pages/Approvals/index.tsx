@@ -4,6 +4,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { Skeleton } from '../../components/Skeleton';
 import { useToasts } from '../../components/ToastProvider';
 import { api } from '../../lib/api';
+import { useDashboardEventState } from '../../lib/sse';
 import { Icon, paths } from '../../lib/icons';
 import type { DecisionInput } from './helpers';
 import { topEntries } from './helpers';
@@ -21,16 +22,20 @@ export function Approvals() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
   const [now, setNow] = useState(() => Date.now() / 1000);
+  const eventState = useDashboardEventState();
 
+  // Countdowns render whole seconds, so a 1s tick is enough; 500ms re-rendered
+  // the entire page twice per second for no visible change.
   useEffect(() => {
-    const intervalId = window.setInterval(() => setNow(Date.now() / 1000), 500);
+    const intervalId = window.setInterval(() => setNow(Date.now() / 1000), 1_000);
     return () => window.clearInterval(intervalId);
   }, []);
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['approvals'],
     queryFn: api.approvals,
-    refetchInterval: 2_500,
+    // approval.* SSE events invalidate this query; poll fast only without them.
+    refetchInterval: eventState === 'open' ? 15_000 : 2_500,
   });
 
   const decisionMutation = useMutation({
@@ -59,7 +64,7 @@ export function Approvals() {
       }),
   });
 
-  const pending = data?.pending ?? [];
+  const pending = useMemo(() => data?.pending ?? [], [data?.pending]);
   const history = useMemo(() => (data?.history ?? []).slice().reverse(), [data]);
   const allRequests = useMemo(() => [...pending, ...(data?.history ?? [])], [data, pending]);
   const selectedRequest = allRequests.find((request) => request.id === selectedRequestId) ?? null;

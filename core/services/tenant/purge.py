@@ -180,12 +180,21 @@ async def tenant_scoped_tables() -> list[str]:
     return [r[0] for r in rows]
 
 
-async def purge_tenant_data(tenant_id: str) -> dict[str, int]:
+async def purge_tenant_data(
+    tenant_id: str, *, include_stores: bool = True
+) -> dict[str, int]:
     """Delete all rows scoped to ``tenant_id`` across every tenant-scoped table.
 
     Returns a ``{table: rows_deleted}`` map. Idempotent (a second call deletes
     nothing). Tenant-scoped data only — the tenant entity row (``auth_tenants``)
-    and membership are owned by the auth plugin's ``delete_tenant``.
+    and membership are owned by the consuming application's tenant lifecycle.
+
+    With ``include_stores`` (the default) the tenant's vector points and Redis
+    cache keyspace are erased too, after the tables — see
+    :func:`core.services.tenant.purge_stores.purge_tenant_stores`. A vector
+    store that could not be purged blocks the erasure (raised as
+    :class:`TenantPurgeBlockedError` with ``pending=["vectorstore"]``); a cache
+    failure is only logged, since every cached entry expires on its TTL.
 
     Runs inside :func:`core.db.connection.system_tenant_scope`. A purge is
     cross-tenant by construction — it deletes *another* tenant's rows — so it
@@ -254,4 +263,30 @@ async def purge_tenant_data(tenant_id: str) -> dict[str, int]:
             tenant_id,
             sorted(pending),
         )
+    if include_stores:
+        await _purge_stores(tenant_id, deleted, sorted(pending))
     return deleted
+
+
+async def _purge_stores(
+    tenant_id: str, deleted: dict[str, int], pending: list[str]
+) -> None:
+    """Erase the non-relational stores; a vector failure blocks the purge."""
+    from core.services.tenant import purge_stores
+
+    outcome = await purge_stores.purge_tenant_stores(tenant_id)
+    logger.info(
+        "Tenant %s store purge: vectors=%s cache_keys=%d errors=%s",
+        tenant_id,
+        outcome.vector_collections,
+        outcome.cache_keys_deleted,
+        sorted(outcome.errors),
+    )
+    if "vectorstore" in outcome.errors:
+        raise TenantPurgeBlockedError(
+            f"Purging tenant '{tenant_id}': database rows erased, but the "
+            f"vector store could not be purged ({outcome.errors['vectorstore']}). "
+            "Tenant vectors may remain; re-run once the store is reachable.",
+            purged=deleted,
+            pending=[*pending, "vectorstore"],
+        )

@@ -80,9 +80,15 @@ class PluginConfig(BaseSettings):
         ),
     )
 
-    # Plugin-specific configs (loaded from config file or env)
+    # Deprecated, no effect: per-plugin configuration is read from the plugin
+    # config file (core.plugins.config_file), never from this field.
     plugin_configs: dict[str, dict[str, Any]] = Field(
-        default_factory=dict, description="Per-plugin configuration"
+        default_factory=dict,
+        description=(
+            "Deprecated, no effect: nothing reads it; per-plugin configuration "
+            "lives in configs/plugins.yaml (or the file PLUGIN_CONFIG_PATH "
+            "names)"
+        ),
     )
 
     @property

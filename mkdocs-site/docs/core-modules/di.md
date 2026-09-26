@@ -273,7 +273,7 @@ class LazyServiceRegistry:
     def get_initialized_services(self) -> Dict[str, bool]: ...
 
     async def shutdown_all(self) -> None:
-        """Call shutdown()/close() on every initialized instance."""
+        """Call shutdown()/close()/stop() on every initialized instance."""
 
     def clear(self) -> None: ...
 ```
@@ -291,8 +291,13 @@ await registry.shutdown_all()
 reset_lazy_registry()                # clear + drop the global (test isolation)
 ```
 
-`shutdown_all()` calls `shutdown()` (awaited) or `close()` (awaited if a
-coroutine, else sync) on each initialized instance, then clears them.
+`shutdown_all()` calls the first teardown hook each initialized instance
+exposes — `shutdown()`, then `close()`, then `stop()` — awaiting the result only
+when it is awaitable, then clears them. Sync hooks are therefore fine (e.g.
+`PostgresStorage.shutdown()`), and `stop()`-only services such as
+`EvaluationService` and `EvolutionService` are stopped too, which drops their
+event-bus subscriptions. A hook that raises is logged and does not stop the
+remaining teardowns.
 
 ---
 

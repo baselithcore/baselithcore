@@ -422,6 +422,64 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
 
     Set either to `0` to hand the decision back to the server defaults.
 
+!!! warning "Pool size is per worker"
+    Every uvicorn worker is its own process with its own pool, so peak demand
+    is `DB_POOL_MAX_SIZE × WEB_CONCURRENCY`, not `DB_POOL_MAX_SIZE`. With the
+    default of 20 per pool, four workers already claim 80 of PostgreSQL's
+    default 100 `max_connections` before the migrations job, the RQ worker or
+    a second replica connect. After warming the pool at startup,
+    `core.db.pool_budget.check_connection_budget()` reads `max_connections`
+    and `superuser_reserved_connections` from the server and logs
+    `db_pool_budget_exceeds_max_connections` (with the per-worker size that
+    would fit) when the budget overflows. It is informational: it never
+    blocks startup and returns `None` when the settings cannot be read.
+
+### PgBouncer
+
+psycopg promotes a statement to a server-side prepared statement after it has
+run five times on a connection. Behind PgBouncer in **transaction** pooling
+mode (older than 1.21, or without `max_prepared_statements`) the next execution
+can land on a backend that never saw the `PREPARE` and fails with
+`prepared statement "_pg3_0" does not exist`. Set `DB_PREPARED_STATEMENTS=false`
+to pass `prepare_threshold=None` to every pool. Two more things to know in
+that mode:
+
+- the libpq `options` startup parameter that carries `statement_timeout` /
+  `idle_in_transaction_session_timeout` is rejected by PgBouncer unless listed
+  in `ignore_startup_parameters` — and then silently dropped, so set the
+  budgets on the role instead (`ALTER ROLE app SET statement_timeout = '30s'`);
+- the timezone and the RLS `app.tenant_id` binding are session-scoped
+  `set_config` calls memoized per client connection, which a transaction-mode
+  pooler does not pin to one backend. Use session pooling when
+  `DB_RLS_ENABLED=true`.
+
+### Indexes behind the hot queries
+
+Checked with `EXPLAIN (ANALYZE, BUFFERS)` against a seeded
+`pgvector/pgvector:pg17` (300k rows per table):
+
+| Query | Index |
+| ----- | ----- |
+| Feedback list / analytics (`tenant_id = ? [AND timestamp >= ?] ORDER BY timestamp DESC LIMIT`) | `idx_chat_feedback_tenant_timestamp` |
+| Document rollup (`… AND sources IS NOT NULL`) | `idx_chat_feedback_tenant_sources` (partial) |
+| Interactions by session | `idx_interactions_tenant_session_ts` |
+| Webhook deliveries per tenant | `ix_webhook_deliveries_tenant_created` |
+| Webhook retention sweep (`created_at < ?`, all tenants) | `ix_webhook_deliveries_created_at` (migration 012; before it the sweep read the whole composite index) |
+| Tool-ledger retention sweep | `ix_tool_invocations_created_at`, via a redundant `created_at` bound (see below) |
+| Checkpoint run listing (`tenant_id = ?`) | `idx_agent_checkpoints_resumable` |
+
+`updated_at` is deliberately **not** indexed on `tool_invocations` or
+`agent_checkpoints`: it is rewritten on every tool completion and every
+checkpoint step, and an index on it would turn each of those updates non-HOT.
+The ledger sweep therefore bounds `created_at` as well — `created_at` is never
+later than `updated_at`, so the extra predicate removes nothing and turns a
+full-table seq scan (3 354 buffers) into an index range scan (3 buffers). The
+checkpoint run listing appends its filters only when given instead of the
+`(%s IS NULL OR col = %s)` catch-all, which a prepared statement's generic plan
+could only answer with a seq scan, and strips `steps`, `trajectory`,
+`plugin_data` and `answer` server-side (a 500-run page went from 427 kB to
+94 kB on the wire).
+
 To override the limit for specific long-running operations (e.g. migrations), run the following inside that transaction:
 
 ```sql

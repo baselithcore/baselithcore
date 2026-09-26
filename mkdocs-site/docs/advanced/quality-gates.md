@@ -97,11 +97,46 @@ clean `git push` accepted.
 | `Package Smoke Test` | a built wheel and sdist | the distribution contains what it claims |
 | `BaselithBot UI Build` | `npm ci` | the committed `ui/dist/` equals a clean rebuild |
 | `Container Image Build` | Docker, multi-arch | the image builds on amd64 and arm64 |
-| `Python Tests` | Postgres, Redis, Qdrant | the suite, on every supported Python, with the coverage gate |
+| `Python Tests` | Postgres, Redis, Qdrant | the suite, on every supported Python (3.12 only on pull requests into `develop`), with the coverage gate |
 | `Frontend JS Tests` | node | the shipped SSE client |
 | `Helm Chart` | kubeconform | the chart renders to valid Kubernetes objects |
 | `Workflow Lint (zizmor)` | — | the workflow definitions themselves |
 | `Docs sync` (pull requests only) | the merge base | a changed `core/` module touched its docs page. Its commit-time half is the `docs-sync` **commit-msg** hook, which is also where the `[docs-sync: skip]` opt-out is read |
+
+## When each job runs
+
+Changes flow feature branch → pull request into `develop` → pull request into
+`main` → release. The first job of every run, `Plan`
+([`scripts/ci_plan.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/ci_plan.py)),
+decides which of the jobs above that run needs:
+
+| Event | Mode | What runs |
+| --- | --- | --- |
+| Pull request into `develop` | `scoped` | the jobs whose inputs changed, and the suite on Python 3.12 only |
+| Pull request into `main`, merge queue | `full` | every job, the suite on every supported Python |
+| Push to `main` whose tree a green `full` pull-request run already tested | `release` | the release path only: semantic-release, PyPI, the image |
+| Any other push to `main` (a bypass push, or one the API cannot vouch for) | `full` | every job, then the release |
+| Push to `develop` | — | nothing: the pull request that produced it was just checked |
+
+In `scoped` mode, the gates, the docs checks and the secret scan always run.
+The other jobs run only when their inputs changed:
+
+- **The suite, evals, OpenAPI and package checks** are skipped only when every
+  changed file is prose: `mkdocs-site/`, root-level Markdown, plugin `docs/`,
+  READMEs and changelogs. Prompt templates under `core/` are Markdown, but they
+  count as code.
+- **The Helm chart, BaselithBot UI, frontend JS, client SDK and workflow lint
+  jobs** run when their own tree changed.
+- **pip-audit, Trivy and the lockfile check** run when a manifest, a lock, a
+  Dockerfile or `.trivyignore.yaml` changed.
+- **The SBOM** runs in `full` mode only.
+- **A change to `ci.yml` or `ci_plan.py`** runs `full`, so the new plan is
+  tested in the run that introduces it.
+
+A skip in `scoped` mode is never final, because the promotion to `main` always
+runs `full`. Whenever the plan is uncertain (no diff, an API error, a push that
+no pull request produced), it falls back to `full`. The worst a wrong plan can
+do is cost time; it can never skip a gate.
 
 ## Version pins
 

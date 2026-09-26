@@ -27,6 +27,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.observability.logging import get_logger
 from core.services.llm._accounting import charge_usage_to_budget, record_usage_cost
 from core.services.llm._deadline import stream_within_deadline
@@ -36,6 +37,7 @@ from core.services.llm._telemetry import (
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import apply_stop_reason
 from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ToolChoice
 from core.services.llm.usage import billed_usage
@@ -101,6 +103,10 @@ async def generate_stream_events(
     """
     import time
 
+    from core.services.llm._late_binding import governed_target
+
+    # A funnel-issued service answers for whoever is calling now.
+    service = governed_target(service)
     model = service._resolve_model(model)
     native_enabled = getattr(service.config, "enable_native_tools", False) is True
     provider_stream = getattr(service.provider, "generate_structured_stream", None)
@@ -137,6 +143,9 @@ async def generate_stream_events(
     from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
     await enforce_tenant_cost_budget(model=model)
+    # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*); the buffered
+    # branch above takes its slot inside ``service.generate``.
+    await acquire_llm_call_slot(service.config.provider)
 
     input_tokens = await estimate_tokens_async(prompt)
     report_tokens_to_middleware(input_tokens, model="input")
@@ -152,6 +161,8 @@ async def generate_stream_events(
         extra["max_tokens"] = max_tokens
     if allow_refusal:
         extra["allow_refusal"] = True
+    # CORE_DETERMINISTIC_MODE pins sampling on the event stream too.
+    extra.update(get_llm_override_kwargs(service.config.provider))
 
     assert provider_stream is not None  # guaranteed by use_native above
     started = time.perf_counter()

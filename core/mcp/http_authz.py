@@ -92,7 +92,7 @@ def resource_identifier(request: Request, path: str, cfg: Any | None = None) -> 
 
     ``MCP_RESOURCE_URL`` wins when set. The fallback derives the identifier
     from ``request.base_url``, which is built from the ``Host`` header: unless
-    the deployment pins the host (``ALLOWED_HOSTS`` / TrustedHost), a caller
+    the deployment pins the host (``TRUSTED_HOSTS`` / TrustedHost), a caller
     chooses what this endpoint claims to be, and both the advertised resource
     and the audience it is compared against move with it.
 
@@ -110,6 +110,48 @@ def resource_identifier(request: Request, path: str, cfg: Any | None = None) -> 
         return configured.rstrip("/")
     base = str(request.base_url).rstrip("/")
     return f"{base}{path}"
+
+
+def resource_unpinned(cfg: Any, trusted_hosts: list[str] | None = None) -> bool:
+    """Whether the resource identifier is derived from a caller-chosen Host.
+
+    True when neither ``MCP_RESOURCE_URL`` nor ``TRUSTED_HOSTS`` is set: the
+    fallback in :func:`resource_identifier` then builds the identifier — and
+    so the audience an access token is checked against — from whatever
+    ``Host`` the caller sends.
+
+    Args:
+        cfg: MCP config (reads ``mcp_resource_url``).
+        trusted_hosts: The host allowlist; ``None`` reads ``TRUSTED_HOSTS``
+            from the security config.
+    """
+    if str(getattr(cfg, "mcp_resource_url", "") or "").strip():
+        return False
+    if trusted_hosts is None:
+        from core.config import get_security_config
+
+        trusted_hosts = list(getattr(get_security_config(), "trusted_hosts", []))
+    return not trusted_hosts
+
+
+def log_unpinned_resource(cfg: Any, trusted_hosts: list[str] | None = None) -> bool:
+    """Log an ERROR at mount time when the resource identifier is unpinned.
+
+    Returns:
+        Whether the ERROR was emitted (see :func:`resource_unpinned`).
+    """
+    if not resource_unpinned(cfg, trusted_hosts):
+        return False
+    logger.error(
+        "mcp_http_resource_unpinned",
+        note=(
+            "neither MCP_RESOURCE_URL nor TRUSTED_HOSTS is set: the MCP "
+            "resource identifier and the token audience it is checked against "
+            "are derived from the caller-controlled Host header"
+        ),
+        fix="set MCP_RESOURCE_URL to the public endpoint URL, or TRUSTED_HOSTS",
+    )
+    return True
 
 
 def _canonical_resource(value: str) -> str:
@@ -205,6 +247,42 @@ def is_bearer_credential(request: Request) -> bool:
     return header.split(" ", 1)[0].lower() == "bearer"
 
 
+async def throttle_auth_failure(request: Request) -> JSONResponse | None:
+    """Meter one failed credential against the caller's per-IP authfail window.
+
+    The same ``authfail:<ip>`` bucket and budget
+    (``AUTH_FAILURE_LIMIT_PER_MINUTE`` per ``RATE_LIMIT_WINDOW_SECONDS``) that
+    :meth:`core.middleware.security.SecurityManager.enforce_auth` charges, so
+    a credential-stuffing client cannot get an unmetered stream of 401s by
+    switching from the REST surface to the MCP endpoint.
+
+    Returns:
+        A JSON-RPC ``429`` (``503`` when the limiter backend is down and
+        ``RATE_LIMIT_FAIL_MODE=closed``) once the budget is spent, else
+        ``None``.
+    """
+    from core.middleware._admin_auth import client_bucket
+    from core.middleware.security import get_security_manager
+
+    manager = get_security_manager()
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        await manager.rate_limiter.check(
+            f"authfail:{client_bucket(client_ip)}",
+            manager.config.auth_failure_limit_per_minute,
+            manager.config.rate_limit_window_seconds,
+        )
+    except HTTPException as exc:
+        logger.warning("mcp_http_auth_failures_throttled", ip=client_ip)
+        return _jsonrpc_error(
+            RATE_LIMITED,
+            "Too many failed authentication attempts",
+            exc.status_code,
+            headers=dict(exc.headers or {}),
+        )
+    return None
+
+
 async def authenticate(
     request: Request, resource_metadata_url: str
 ) -> tuple[Any | None, Response | None]:
@@ -214,11 +292,21 @@ async def authenticate(
     credentials are missing or resolve to the anonymous identity. The challenge
     carries ``resource_metadata`` (RFC 9728) so a client that has no token yet
     can discover which authorization server to obtain one from.
+
+    A *presented* credential that fails is charged to the per-IP authfail
+    window (:func:`throttle_auth_failure`), which answers ``429`` once spent.
+    A request carrying no ``Authorization`` header is not charged: that is
+    the spec's discovery step, not a guess.
     """
     from core.auth.manager import get_auth_manager
 
-    user = await get_auth_manager().authenticate(request.headers.get("authorization"))
+    header = request.headers.get("authorization")
+    user = await get_auth_manager().authenticate(header)
     if user is None or not getattr(user, "is_authenticated", False):
+        if header:
+            throttled = await throttle_auth_failure(request)
+            if throttled is not None:
+                return None, throttled
         return None, _jsonrpc_error(
             UNAUTHORIZED,
             "Unauthorized",
@@ -354,10 +442,13 @@ __all__ = [
     "get_rate_limiter",
     "has_required_scope",
     "is_bearer_credential",
+    "log_unpinned_resource",
     "metadata_url",
     "origin_rejected",
     "reset_rate_limiter",
     "resource_identifier",
+    "resource_unpinned",
+    "throttle_auth_failure",
     "token_audience_rejected",
     "token_audiences",
 ]

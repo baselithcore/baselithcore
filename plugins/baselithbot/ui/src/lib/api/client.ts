@@ -31,15 +31,19 @@ export class ApiError extends Error {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getDashboardToken();
+  // `headers` is merged, not spread last: `...init` after the merged object
+  // replaced it wholesale whenever a caller passed its own headers, silently
+  // dropping the Authorization header. `credentials` is pinned for the same
+  // reason — no caller may widen it to 'include'.
+  const { headers: extraHeaders, ...rest } = init;
+  const headers = new Headers(extraHeaders);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   const res = await fetch(path, {
+    ...rest,
+    headers,
     credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-    ...init,
   });
   const raw = await res.text();
   let body: unknown = raw;

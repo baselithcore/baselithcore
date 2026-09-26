@@ -19,6 +19,14 @@ executor already had and the typed loop did not:
 The gates stay strictly sequential ahead of execution: approval and budget
 refusals are fail-closed and abort the turn, so a tool later in the turn must
 not already have run when an earlier one is denied.
+
+**Durable runs.** Given a
+:class:`~core.orchestration.checkpoint.CheckpointManager`, each approved call
+is recorded through ``run_step`` — the same step wrapper the ReAct loop uses —
+so a resumed ``Agent.run`` replays the recorded observation instead of calling
+the tool again, in whatever order the regenerated turn asks for it. Those turns
+run their calls one at a time, as the ReAct loop does under a checkpoint:
+per-step saves must not interleave.
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 from core.agent._tool_dispatch import prepare_tool_call, run_prepared_call
+from core.orchestration.call_keys import CallOccurrences
 from core.reasoning.react_tools import MAX_PARALLEL_TOOL_CALLS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -113,19 +122,28 @@ async def execute_tool_calls(
     context: dict[str, Any],
     run_id: str | None,
     step_offset: int,
+    occurrences: CallOccurrences | None = None,
+    checkpoint: Any | None = None,
 ) -> list[tuple[str, bool]]:
     """Run one turn's calls and return ``(observation, is_error)`` in order.
 
-    Ledger keys stay identical to the sequential numbering they replaced: each
-    call's step is its position in the run, assigned before anything executes
-    rather than as results arrive, so a resumed run matches the same keys.
+    Each approved call draws its occurrence — how many identical calls the run
+    already requested — before anything executes, from the checkpoint when
+    there is one (so its step key and the ledger key inside it agree) and from
+    ``occurrences`` otherwise. That, not the call's position, is what the
+    ledger and the checkpoint key it by.
 
     Args:
         agent: The owning agent.
         calls: The calls the model emitted this turn.
         context: The gate context from ``gate_context``.
         run_id: Identifier shared by every attempt at this run.
-        step_offset: Number of calls already made in this run.
+        step_offset: Number of calls already made in this run; names only the
+            legacy positional ledger key.
+        occurrences: The run's occurrence counter; a fresh one when omitted.
+        checkpoint: Optional
+            :class:`~core.orchestration.checkpoint.CheckpointManager` that
+            records each call as a replayable step.
 
     Returns:
         One ``(observation, is_error)`` pair per call, in the order asked.
@@ -149,20 +167,44 @@ async def execute_tool_calls(
             continue
         runnable.append((position, definition, call))
 
-    if runnable:
+    if runnable and checkpoint is not None:
+        tenant_id = _checkpoint_tenant(checkpoint)
+        for position, definition, call in runnable:
+            outcomes[position] = await _run_checkpointed(
+                agent,
+                checkpoint,
+                definition,
+                call,
+                run_id=run_id,
+                step=step_offset + position,
+                tenant_id=tenant_id,
+            )
+    elif runnable:
+        counter = occurrences if occurrences is not None else CallOccurrences()
         gate = asyncio.Semaphore(MAX_PARALLEL_TOOL_CALLS)
 
         async def _one(
-            definition: ToolDefinition, call: ToolCall, step: int
+            definition: ToolDefinition, call: ToolCall, step: int, occurrence: int
         ) -> tuple[str, bool]:
             async with gate:
                 return await run_prepared_call(
-                    agent, definition, call, run_id=run_id, step=step
+                    agent,
+                    definition,
+                    call,
+                    run_id=run_id,
+                    step=step,
+                    occurrence=occurrence,
                 )
 
+        # Occurrences are drawn here, in emission order, before any call runs.
         results = await asyncio.gather(
             *(
-                _one(definition, call, step_offset + position)
+                _one(
+                    definition,
+                    call,
+                    step_offset + position,
+                    counter.next(call.name, call.arguments),
+                )
                 for position, definition, call in runnable
             )
         )
@@ -170,3 +212,57 @@ async def execute_tool_calls(
             outcomes[position] = outcome
 
     return [outcome if outcome is not None else ("", True) for outcome in outcomes]
+
+
+def _checkpoint_tenant(checkpoint: Any) -> str | None:
+    """The tenant recorded on the checkpoint, for the ledger key.
+
+    Preferred over the ambient tenant because a crash-recovery sweep may resume
+    the run with none bound, and a key that moved with the ambient context
+    would miss every row the original pass wrote.
+    """
+    recorded = getattr(getattr(checkpoint, "checkpoint", None), "tenant_id", None)
+    return recorded if isinstance(recorded, str) and recorded else None
+
+
+async def _run_checkpointed(
+    agent: Agent[Any],
+    checkpoint: Any,
+    definition: ToolDefinition,
+    call: ToolCall,
+    *,
+    run_id: str | None,
+    step: int,
+    tenant_id: str | None,
+) -> tuple[str, bool]:
+    """Run one approved call as a checkpoint step, or replay its record.
+
+    The step stores ``{"observation", "is_error"}`` — JSON, so the Postgres
+    store round-trips it — and the ledger claim runs inside the step under the
+    same occurrence, so the two layers agree on which call this is.
+    """
+    arguments = dict(call.arguments or {})
+    occurrence = checkpoint.next_occurrence(call.name, arguments)
+
+    async def _execute() -> dict[str, Any]:
+        observation, is_error = await run_prepared_call(
+            agent,
+            definition,
+            call,
+            run_id=run_id,
+            step=step,
+            occurrence=occurrence,
+            tenant_id=tenant_id,
+        )
+        return {"observation": observation, "is_error": is_error}
+
+    recorded = await checkpoint.run_step(
+        call.name,
+        arguments,
+        _execute,
+        category=definition.category,
+        occurrence=occurrence,
+    )
+    if isinstance(recorded, dict):
+        return str(recorded.get("observation", "")), bool(recorded.get("is_error"))
+    return str(recorded), False

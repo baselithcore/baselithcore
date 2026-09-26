@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 
 from core.middleware.idempotency import IdempotencyMiddleware
 
+# Replay/storage require a credential that verifies; see the conftest fixture.
+pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
+
 # Idempotency is credential-scoped and inert for credential-less callers, so
 # every test exercising replay must present a credential — which is also the
 # real use case (an authenticated client retrying its own request).
