@@ -327,7 +327,7 @@ cannot: *will this deployment serve from what it thinks it will?* It reports
   vision provider asks for is reported as a warning and the deployment starts.
   A model no request routes to must not cost a deployment everything it serves,
   which under `Restart=always` is what a fatal check amounts to. vLLM targets
-  (primary or chain stage) are probed with `GET /v1/models`: an unreachable
+  (primary or chain stage) are probed with `GET {LLM_VLLM_API_BASE}/models`: an unreachable
   server (`vllm_unreachable`), a rejected key (`vllm_unauthorized`) and a model
   the server does not serve under that name (`vllm_model_missing`, listing
   what it does serve) are all inference-path errors.
@@ -678,7 +678,7 @@ streaming with an exact terminal usage chunk — and fixes what reaching vLLM
 | Circuit breaker | `openai_provider` — a GPU outage opened the hosted OpenAI stage too | `vllm_provider`, its own |
 | Cost | unpriced → `UNKNOWN_PRICE` (100 $/M) | `vllm/<model>` priced at zero, tokens still metered |
 | Errors | reported as OpenAI's | reported as vLLM's |
-| Startup check | none | `GET /v1/models`: server up, key accepted, model served |
+| Startup check | none | `GET {LLM_VLLM_API_BASE}/models`: server up, key accepted, model served |
 
 ```bash
 # Server side
@@ -697,7 +697,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
   serves one model, so a second model is a second server on another port. List
   them once — `LLM_VLLM_ENDPOINTS=http://gpu:8002/v1,http://gpu:8003/v1` — and
   name models, never ports: `core.services.llm.vllm_endpoints` reads each
-  server's `GET /v1/models` (cached 60 s; a model missing from the cache forces
+  server's `GET {LLM_VLLM_API_BASE}/models` (cached 60 s; a model missing from the cache forces
   one refresh, so a newly started model is found on the next call) and routes
   every call to the server serving its model. The provider keeps one client
   per server; plugins holding their own SDK receive, through
