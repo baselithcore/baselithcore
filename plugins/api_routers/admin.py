@@ -5,31 +5,23 @@ Provides secure endpoints for administrative tasks, including analytics
 dashboards and system monitoring. Protected by HTTP Basic Authentication.
 """
 
-import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core.config import get_security_config
-from core.middleware import (
-    check_admin_lockout,
-    clear_admin_failures,
-    record_admin_failure,
-    verify_admin_password_async,
-)
+from core.middleware import authenticate_admin_basic
 from core.services.feedback_service import get_feedback_service
 
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
 
-BASE_DIR = Path(__file__).resolve().parent.parent / "static"
-
-
-def _get_admin_user() -> str:
-    """Read the admin username lazily from the active security config."""
-    return get_security_config().admin_user
+#: Dashboard asset root. The admin page ships with the core static bundle
+#: (``core/static``, also mounted at ``/static`` by the app factory), not with
+#: this plugin: ``parents[2]`` is the repo/package root
+#: (plugins/api_routers/admin.py -> plugins/api_routers -> plugins -> <root>).
+BASE_DIR = Path(__file__).resolve().parents[2] / "core" / "static"
 
 
 async def verify_credentials(
@@ -45,22 +37,18 @@ async def verify_credentials(
     so an attacker cannot lock the legitimate admin out by hammering the login.
     """
     client_ip = request.client.host if request.client else "unknown"
-    await check_admin_lockout(client_ip)
-
-    correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
-    # PBKDF2 verification is CPU-bound (100k+ iterations): the async variant
-    # offloads it to a thread so it cannot stall other in-flight requests.
-    correct_password = await verify_admin_password_async(credentials.password)
-
-    if not (correct_username and correct_password):
-        await record_admin_failure(client_ip)
+    # Lockout check, PBKDF2 verification (off-loop, bounded concurrency) and
+    # failure accounting run as one sequence in core, so a concurrent burst
+    # cannot race past the lockout threshold.
+    if not await authenticate_admin_basic(
+        client_ip, credentials.username, credentials.password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali non valide",
             headers={"WWW-Authenticate": "Basic"},
         )
 
-    await clear_admin_failures(client_ip)
     return credentials.username
 
 
@@ -108,6 +96,37 @@ async def admin_data(
         top_limit=top_limit,
     )
     return JSONResponse(analytics)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard companions of the API-key control plane
+# ---------------------------------------------------------------------------
+#
+# The dashboard authenticates with HTTP Basic, which ``require_admin`` /
+# ``require_admin_or_job`` (X-API-Key / Bearer only) deliberately do not
+# accept: browser-ambient Basic credentials are replayed on cross-site
+# requests, so they stay confined to this ``/admin/*`` surface. The routes
+# below reuse the API handlers so the payloads cannot drift; the unsafe one
+# (``POST /admin/reindex``) is covered by ``CSRFOriginMiddleware`` like every
+# other state-changing request.
+
+
+@router.get("/admin/status")
+def admin_status(_user: str = Depends(verify_credentials)) -> dict[str, object]:
+    """Return the ``/status`` payload for the dashboard (Basic Auth)."""
+    from plugins.api_routers.status import status as system_status
+
+    return system_status(_user)
+
+
+@router.post("/admin/reindex")
+async def admin_reindex(
+    _user: str = Depends(verify_credentials),
+) -> dict[str, object]:
+    """Run the incremental ``/reindex`` for the dashboard (Basic Auth)."""
+    from plugins.api_routers.index import reindex
+
+    return await reindex()
 
 
 # ---------------------------------------------------------------------------

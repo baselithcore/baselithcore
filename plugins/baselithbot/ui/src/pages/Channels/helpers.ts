@@ -23,7 +23,10 @@ export function isSensitiveField(name: string): boolean {
     lower.endsWith('key') ||
     lower.endsWith('password') ||
     lower.endsWith('secret') ||
-    lower === 'private_key_hex'
+    lower === 'private_key_hex' ||
+    // Incoming-webhook URLs (Slack, Discord, Teams) carry their credential
+    // in the path; the backend masks them the same way.
+    lower === 'webhook_url'
   );
 }
 

@@ -101,8 +101,10 @@ through the normal audit path (`shell_run`, `fs_write`, `mouse_click`).
 
 ## 8. Dashboard UI
 
-The **Approvals** page polls `/dash/approvals` every second. The
-pending table shows:
+The **Approvals** page refreshes `/dash/approvals` whenever an
+`approval.*` event arrives on the dashboard SSE stream, with a 15 s
+safety poll; while the stream is down it falls back to polling every
+2.5 s. Countdowns tick once per second. The pending table shows:
 
 - Submitted timestamp (relative)
 - Action + capability

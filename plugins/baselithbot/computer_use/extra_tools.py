@@ -19,7 +19,11 @@ from plugins.baselithbot.code_edit import (
     apply_search_replace,
     apply_unified_diff,
 )
-from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig, ComputerUseError
+from plugins.baselithbot.computer_use.config import (
+    ComputerUseConfig,
+    ComputerUseError,
+    shared_audit_logger,
+)
 from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 from plugins.baselithbot.computer_use.process_manager import ProcessManager
 from plugins.baselithbot.control.approvals import ApprovalGate, ApprovalStatus
@@ -48,7 +52,7 @@ def build_extra_tool_definitions(
     approvals: ApprovalGate | None = None,
 ) -> list[dict[str, Any]]:
     """Return code-edit + usage + process + tailscale + workspace MCP tools."""
-    audit = AuditLogger(config.audit_log_path)
+    audit = shared_audit_logger(config.audit_log_path)
     fs = ScopedFileSystem(config, audit, approvals=approvals)
     process_mgr = ProcessManager(config, audit)
     usage_ledger: UsageLedger = usage if usage is not None else UsageLedger()
@@ -175,7 +179,14 @@ def build_extra_tool_definitions(
         Returns ``None`` on approval (caller proceeds). Returns a status dict
         when the operator denies, times out, or the gate refuses the action
         (the caller must return that dict to the orchestrator).
+
+        Tailscale spawns a privileged subprocess (``--ssh`` exposes the host),
+        so it shares the shell tool's gate: Computer Use + ``allow_shell``.
         """
+        try:
+            config.require_enabled("shell")
+        except ComputerUseError as exc:
+            return _denied(exc)
         if approvals is None or "network" not in config.require_approval_for:
             return None
         # Never surface the auth key to the dashboard operator.
@@ -274,6 +285,15 @@ def build_extra_tool_definitions(
         }
 
     async def workspace_remove(name: str) -> dict[str, Any]:
+        # Same invariant as the dashboard route: never the primary/last one.
+        existing = {w.config.name: w for w in workspace_mgr.list()}
+        target = existing.get(name)
+        if target is not None and (target.config.primary or len(existing) <= 1):
+            return {
+                "status": "denied",
+                "error": "cannot remove the primary or last workspace",
+                "name": name,
+            }
         existed = workspace_mgr.remove(name)
         return {"status": "success" if existed else "not_found", "name": name}
 

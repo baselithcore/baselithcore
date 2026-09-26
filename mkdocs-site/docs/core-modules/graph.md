@@ -140,6 +140,19 @@ graph_db.upsert_code_relation(
   `"positive"` / `"negative"`), `last_feedback_at`, and
   `last_feedback_comment` (truncated to 500 characters).
 
+### Graph-RAG service (`core.services.graph`)
+
+`core.services.graph.GraphService` wraps a `GraphDb` client with Graph-RAG
+document operations: `upsert_document`, `transition_document_to_kb`,
+`link_entities`, `register_rag_usage` and `reason(intent, entities)`.
+
+!!! note "Library API — not wired by default"
+    Nothing in the default app constructs `GraphService`: no route, handler,
+    chat workflow or startup hook calls it. Build it from host or plugin code
+    around the shared client — `GraphService(graph_db)` with
+    `from core.graph import graph_db` — when a plugin needs Graph-RAG
+    bookkeeping on top of the raw `GraphDb` operations above.
+
 ---
 
 ## Multi-Tier Integration

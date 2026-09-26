@@ -131,15 +131,19 @@ async def test_multi_tool_turn_records_deterministic_cursors_and_replays():
 
     stored = await store.load("run-4")
     assert stored is not None
-    cursors = sorted(key.split(":")[0] for key in stored.steps)
-    assert cursors == ["0", "1"]
+    # Trajectory order is still the replay cursor; the step keys themselves
+    # are content-addressed and carry no position.
+    assert [entry["cursor"] for entry in stored.trajectory] == [0, 1]
+    assert all(key.startswith("v2:lookup:") for key in stored.steps)
 
     loaded = await store.load("run-4")
     resumed = CheckpointManager(store, loaded)
+    # The resumed pass asks for the same effects in the opposite order, which
+    # is what a regenerated turn does; neither may run again.
     replayed = await _agent(tool_fn, resumed)._execute_tool_calls(
-        [("lookup", {"x": "a"}), ("lookup", {"x": "b"})]
+        [("lookup", {"x": "b"}), ("lookup", {"x": "a"})]
     )
-    assert "result-a" in replayed[0] and "result-b" in replayed[1]
+    assert "result-b" in replayed[0] and "result-a" in replayed[1]
     assert calls["n"] == 2  # nothing re-executed
 
 

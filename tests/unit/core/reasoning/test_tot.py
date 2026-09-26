@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.reasoning.search import breadth_first_search, depth_first_search
 from core.reasoning.tot import ThoughtNode, TreeOfThoughts
 from core.reasoning.tot.cache import get_thought_cache
 
@@ -21,55 +20,6 @@ def test_thought_node_path():
     child2 = ThoughtNode(content="child2", parent=child1)
 
     assert child2.get_path() == ["root", "child1", "child2"]
-
-
-def test_breadth_first_search_logic():
-    # Mock generator: creates 2 children with deterministic names
-    def generator(node):
-        if node.depth >= 2:
-            return []
-        return [
-            ThoughtNode(content=f"{node.content}_a", depth=node.depth + 1),
-            ThoughtNode(content=f"{node.content}_b", depth=node.depth + 1),
-        ]
-
-    # Mock evaluator: prefers 'a' branch
-    def evaluator(nodes):
-        return [0.9 if "_a" in n.content else 0.1 for n in nodes]
-
-    root = ThoughtNode(content="root", score=1.0)
-    best = breadth_first_search(
-        root, max_depth=2, beam_width=1, generator=generator, evaluator=evaluator
-    )
-
-    # BFS with beam_width=1 and preference for 'a' should follow: root -> root_a -> root_a_a
-    assert best.content == "root_a_a"
-
-
-def test_depth_first_search_logic():
-    # Mock generator
-    def generator(node):
-        if node.depth >= 2:
-            return []
-        return [
-            ThoughtNode(content=f"{node.content}_1", depth=node.depth + 1),
-            ThoughtNode(content=f"{node.content}_2", depth=node.depth + 1),
-        ]
-
-    # Mock evaluator: Prefer paths with more '2's to test optimization
-    # root_2_2 has two '2's -> score 0.9
-    # root_1_2 has one '2' -> score 0.5
-    # root_2_1 has one '2' -> score 0.5
-    def evaluator(nodes):
-        return [0.1 + 0.4 * n.content.count("2") for n in nodes]
-
-    root = ThoughtNode(content="root", score=0.1)
-    best = depth_first_search(
-        root, max_depth=2, generator=generator, evaluator=evaluator, threshold=0.0
-    )
-
-    # Should find valid path to depth 2. With prioritizing 2: root -> root_2 -> root_2_2
-    assert best.content == "root_2_2"
 
 
 @pytest.mark.asyncio

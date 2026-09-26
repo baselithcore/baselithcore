@@ -3,7 +3,7 @@
 
 async function reindexDocs() {
   try {
-    const res = await fetch('/reindex', { method: 'POST' });
+    const res = await fetch('/admin/reindex', { method: 'POST' });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }

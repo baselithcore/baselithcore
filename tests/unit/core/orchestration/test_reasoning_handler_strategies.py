@@ -47,7 +47,52 @@ class TestReActStrategy:
         # strategy=react but no react_tools → default ToT path.
         result = await handler.handle("q", {"strategy": "react"})
         assert result["response"] == "tot-answer"
-        assert result["metadata"]["strategy"] == "react"  # echoes requested
+        # Reports what actually ran (the ToT default), not what was asked for.
+        ran = handler._tot_engine.solve.await_args.kwargs["strategy"]
+        assert ran in {"bfs", "mcts"}
+        assert result["metadata"]["strategy"] == ran
+        assert result["metadata"]["requested_strategy"] == "react"
+
+    async def test_unknown_strategy_is_rejected(self):
+        handler = ReasoningHandler()
+        handler._tot_engine = AsyncMock()
+        result = await handler.handle("q", {"strategy": "telepathy"})
+        assert result["error"] is True
+        assert result["metadata"]["error"] == "unsupported_strategy"
+        handler._tot_engine.solve.assert_not_called()
+
+    @pytest.mark.parametrize(("requested", "ran"), [("mcts", "mcts"), ("dfs", "bfs")])
+    async def test_tot_strategy_is_honoured(self, requested, ran):
+        handler = ReasoningHandler()
+        handler._tot_engine = AsyncMock()
+        handler._tot_engine.solve = AsyncMock(return_value={"solution": "s"})
+        result = await handler.handle("q", {"strategy": requested})
+        assert handler._tot_engine.solve.await_args.kwargs["strategy"] == ran
+        assert result["metadata"]["strategy"] == ran
+
+    async def test_react_llm_outage_is_an_error(self):
+        handler = ReasoningHandler()
+        handler._llm_service = AsyncMock()
+        handler._llm_service.generate_response = AsyncMock(
+            side_effect=RuntimeError("provider down")
+        )
+
+        async def search(q: str) -> str:
+            return "hit"
+
+        result = await handler.handle(
+            "q",
+            {
+                "strategy": "react",
+                "native_tools": False,
+                "react_tools": [
+                    ToolDefinition(name="search", fn=search, description="search")
+                ],
+            },
+        )
+        assert result["error"] is True
+        assert result["metadata"]["error"] == "llm_error"
+        assert not result["response"].startswith("Final Answer")
 
 
 @pytest.mark.asyncio

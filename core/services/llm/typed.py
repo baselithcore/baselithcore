@@ -81,6 +81,10 @@ async def generate_typed(
     # patch target (``structured.generate_structured``) keeps working and
     # the two modules can reference each other.
     from core.services.llm import structured
+    from core.services.llm._late_binding import governed_target
+
+    # A funnel-issued service answers for whoever is calling now.
+    service = governed_target(service)
 
     response_format = ResponseFormat(
         schema=response_model.model_json_schema(),

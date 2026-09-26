@@ -109,6 +109,10 @@ def _load_fernet(key: str | bytes | None) -> Any | None:
         return None
 
 
+class RunIdConflictError(ValueError):
+    """Raised when ``start_run`` reuses a run id owned by another tenant."""
+
+
 class TaskReplayStore:
     """SQLite-backed recorder for agent run steps."""
 
@@ -219,7 +223,25 @@ class TaskReplayStore:
         max_steps: int,
         tenant_id: str = "default",
     ) -> None:
+        """Record a new run, replacing a previous run of the same tenant.
+
+        ``run_id`` may be client-supplied, and ``steps`` rows are keyed by
+        ``run_id`` alone. A blind ``INSERT OR REPLACE`` let one tenant re-file
+        another tenant's run under its own ``tenant_id`` and then read the
+        victim's steps and screenshots back through the tenant-scoped reads.
+
+        Raises:
+            RunIdConflictError: ``run_id`` already belongs to another tenant.
+        """
         with self._lock:
+            row = self._conn.execute(
+                "SELECT tenant_id FROM runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is not None and row["tenant_id"] != tenant_id:
+                raise RunIdConflictError(f"run_id {run_id!r} belongs to another tenant")
+            # Same-tenant reuse starts from a clean timeline: stale steps of
+            # the replaced run must not be replayed as part of the new one.
+            self._conn.execute("DELETE FROM steps WHERE run_id=?", (run_id,))
             self._conn.execute(
                 "INSERT OR REPLACE INTO runs "
                 "(run_id, tenant_id, goal, start_url, max_steps, status, started_at) "
@@ -447,6 +469,25 @@ class TaskReplayStore:
     async def afinish_run(self, **kwargs: Any) -> None:
         await asyncio.to_thread(self.finish_run, **kwargs)
 
+    async def alist_runs(
+        self, *, limit: int = 50, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.list_runs, limit=limit, tenant_id=tenant_id)
+
+    async def aget_run(
+        self,
+        run_id: str,
+        *,
+        include_screenshots: bool = True,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            self.get_run, run_id, include_screenshots=include_screenshots, tenant_id=tenant_id
+        )
+
+    async def aprune_older_than(self, *, retention_seconds: float) -> int:
+        return await asyncio.to_thread(self.prune_older_than, retention_seconds=retention_seconds)
+
     async def aget_run_step_screenshot(
         self, run_id: str, step_index: int, *, tenant_id: str = "default"
     ) -> str | None:
@@ -455,4 +496,4 @@ class TaskReplayStore:
         )
 
 
-__all__ = ["TaskReplayStore"]
+__all__ = ["RunIdConflictError", "TaskReplayStore"]

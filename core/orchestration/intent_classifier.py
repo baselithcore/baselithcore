@@ -14,6 +14,7 @@ the system to expand its behavioral repertoire at runtime.
 from __future__ import annotations
 
 import json
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,21 @@ if TYPE_CHECKING:
     from core.plugins import PluginRegistry
 
 logger = get_logger(__name__)
+
+
+def _compile_patterns(patterns: list[str]) -> re.Pattern[str] | None:
+    """Compile keyword patterns into one whole-word alternation.
+
+    Word-character lookarounds rather than ``\\b`` so patterns that start or end
+    with punctuation (``"l'immagine"``, ``"c++"``) still anchor correctly.
+    """
+    cleaned = [p for p in patterns if p]
+    if not cleaned:
+        return None
+    # Longest first so a phrase wins over a word it contains.
+    body = "|".join(re.escape(p) for p in sorted(cleaned, key=len, reverse=True))
+    return re.compile(rf"(?<!\w)(?:{body})(?!\w)")
+
 
 # Upper bound on the per-classifier LLM-result LRU (text -> result).
 _LLM_CACHE_MAXSIZE = 512
@@ -168,6 +184,9 @@ class IntentClassifier:
                     "patterns_lower",
                     [p.lower() for p in merged.get("patterns", [])],
                 )
+                merged.setdefault(
+                    "patterns_regex", _compile_patterns(merged["patterns_lower"])
+                )
                 self._plugin_intent_patterns[intent_name] = merged
 
             if all_patterns:
@@ -200,6 +219,7 @@ class IntentClassifier:
         self._plugin_intent_patterns[intent_name] = {
             "patterns": patterns,
             "patterns_lower": [p.lower() for p in patterns],
+            "patterns_regex": _compile_patterns([p.lower() for p in patterns]),
             "priority": priority,
             "description": description or f"Handle {intent_name} requests",
         }
@@ -277,13 +297,19 @@ class IntentClassifier:
         intent set (invalidated together with the other intent caches), so a
         repeated identical input can skip the LLM round-trip entirely. The
         caller still applies the confidence threshold to the returned value, so
-        caching the raw result changes nothing about the decision.
+        caching the raw result changes nothing about the decision. A ``None``
+        result is never cached.
         """
         cache = self._llm_result_cache
         if text in cache:
             cache.move_to_end(text)
             return cache[text]
         result = await self._classify_with_llm(text)
+        if result is None:
+            # None is a failed or unusable LLM call (timeout, provider error,
+            # unparseable reply), not an answer: caching it would pin the
+            # input to the default intent until eviction.
+            return None
         cache[text] = result
         cache.move_to_end(text)
         if len(cache) > _LLM_CACHE_MAXSIZE:
@@ -363,10 +389,12 @@ class IntentClassifier:
 
     def _classify_with_keywords(self, text: str) -> ClassificationResult | None:
         """
-        Search for exact or substring matches in user input.
+        Search for whole-word keyword matches in user input.
 
-        Iterates through all registered intent patterns to find a match
-        based on simple keyword identification.
+        A pattern matches only when it is not glued to other word characters,
+        so ``"photo"`` does not fire on "photosynthesis" nor ``"reason"`` on
+        "reasonable". Substring matching routed ordinary questions to vision,
+        swarm or simulation handlers ahead of the LLM and the default intent.
 
         Args:
             text: Raw user input text.
@@ -384,10 +412,14 @@ class IntentClassifier:
             )
 
         for intent_name, pattern_def in self._sorted_intents_cache:
-            patterns_lower = pattern_def.get("patterns_lower") or [
-                p.lower() for p in pattern_def.get("patterns", [])
-            ]
-            if any(pattern in text_lower for pattern in patterns_lower):
+            regex = pattern_def.get("patterns_regex")
+            if regex is None:
+                regex = _compile_patterns(
+                    pattern_def.get("patterns_lower")
+                    or [p.lower() for p in pattern_def.get("patterns", [])]
+                )
+                pattern_def["patterns_regex"] = regex
+            if regex is not None and regex.search(text_lower):
                 return ClassificationResult(
                     intent=intent_name,
                     confidence=0.8,  # Hardcoded confidence for pattern match.

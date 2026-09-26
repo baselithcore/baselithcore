@@ -24,6 +24,7 @@ import pytest
 import yaml
 
 from core._version import __version__
+from scripts.ci_plan import FULL_PYTHONS, SCOPED_PYTHONS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -168,7 +169,13 @@ def test_classifiers_cover_every_python_the_matrix_tests() -> None:
     """A trove list that stops early under-reports what is actually supported."""
     classifiers = _pyproject()["project"]["classifiers"]
     matrix = _workflow(CI_WORKFLOW)["jobs"]["python_test"]["strategy"]["matrix"]
-    tested = set(matrix["python-version"]) | {
+    # The matrix is the plan's output; FULL_PYTHONS is what a promotion to
+    # main runs, and the develop subset is drawn from it.
+    assert matrix["python-version"] == (
+        "${{ fromJSON(needs.changes.outputs.python_versions) }}"
+    ), "python_test no longer takes its versions from the plan"
+    assert set(SCOPED_PYTHONS) <= set(FULL_PYTHONS)
+    tested = set(FULL_PYTHONS) | {
         entry["python-version"] for entry in matrix.get("include", [])
     }
     for version in tested:

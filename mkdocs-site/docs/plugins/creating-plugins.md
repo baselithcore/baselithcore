@@ -217,6 +217,11 @@ in [Packaging › Vendor extensions](packaging.md#vendor-extensions).
     `baselithbot` with `name: BaselithBot`, or two different words) does not resolve:
     the config entry is never matched and the plugin runs as if it had none.
 
+    Hot reload (`POST /api/plugins/{name}/enable|disable|reload` and the startup
+    auto-activation) resolves the same way: a directory name is mapped to the
+    manifest name before any state lookup, so enabling `weather_agent` and
+    disabling it again address the one plugin registered as `weather-agent`.
+
     What the directory uses *is* the rule: dir `weather_agent` → `name: weather_agent`;
     dir `example-plugin` → `name: example-plugin`. Keep them byte-identical and
     lowercase — static/SPA assets are only mounted for names matching
@@ -551,6 +556,11 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     [Plugin-Specific Environment Variables](../core-modules/plugins.md#plugin-specific-environment-variables-env)
     for the full policy and the deprecated `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`
     opt-out.
+
+    Every key the `.env` exports is recorded as yours, so the startup
+    environment drift check never flags it as a misspelled core setting. If
+    your code writes a variable into `os.environ` directly instead, declare it
+    with `core.config.register_owned_env(name)` to get the same exemption.
 
 ---
 
@@ -970,6 +980,21 @@ After creating your plugin:
 
     **Solution**: Verify plugin inherits `RouterPlugin`, returns the router, and
     leaves the router prefix empty
+
+??? failure "Plugin endpoint answers `503` with `Retry-After` after a failed activation"
+    **Symptom**: requests to a lazy plugin's router prefix return `503` with a
+    `Retry-After` header, without the plugin being re-imported
+
+    **Cause**: a lazy activation that fails (returns `False` or raises) is
+    remembered for 60 s (`core/plugins/_activation_backoff.py`). Within that
+    window request traffic does not retry it — the activator raises
+    `PluginActivationBackoffError` and the middleware answers `503` — so an
+    anonymous client looping on a broken plugin cannot keep the global
+    activation lock busy.
+
+    **Solution**: fix the error logged by the first failed activation, then
+    enable or reload the plugin through the plugin-management API (which
+    bypasses and, on success, clears the backoff) or wait out the window
 
 ??? failure "New SKILL.md not visible to the catalog"
     **Symptom**: A freshly added `skills/<name>/SKILL.md` is not returned by

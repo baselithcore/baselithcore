@@ -74,15 +74,19 @@ where relevant.
 ### 4.2 Usage / workspace / agents
 
 - `baselithbot_usage_record` / `_summary` — Ledger read/write.
-- `baselithbot_workspace_create` / `_list` / `_activate` / `_destroy`.
+- `baselithbot_workspace_create` / `_list` / `_remove` — `_remove` refuses the
+  primary and the last workspace (`{"status": "denied"}`), same as the
+  dashboard route.
 - `baselithbot_agent_route` — Dispatch to sub-agent in `AgentRegistry`.
 
 ### 4.3 Process / gateway
 
 - `baselithbot_process_list` / `_kill` — `psutil`-backed process control
-  (`allow_shell` gate).
-- `baselithbot_tailscale_up` / `_provision` — Auth-key provisioning via
-  `TAILSCALE_AUTHKEY`.
+  (`allow_shell` gate). `_kill` refuses pid ≤ 1 (`os.kill` treats 0 / negative
+  pids as process-group or every-process targets) and the server's own pid.
+- `baselithbot_tailscale_up` / `_down` / `_logout` — `tailscale` CLI wrappers.
+  Gated like the shell tool: Computer Use `enabled` + `allow_shell`, plus the
+  `network` approval capability when listed in `require_approval_for`.
 
 ## 4bis. Set-of-Mark — [`som.py`](../som.py)
 

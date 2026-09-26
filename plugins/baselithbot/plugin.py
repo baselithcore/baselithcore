@@ -26,7 +26,7 @@ from plugins.baselithbot.canvas import CanvasSurface
 from plugins.baselithbot.channels import ChannelRegistry, build_default_registry
 from plugins.baselithbot.channels.config_store import ChannelConfigStore
 from plugins.baselithbot.chat.commands import ChatCommandRouter
-from plugins.baselithbot.computer_use.config import ComputerUseConfig
+from plugins.baselithbot.computer_use.config import ComputerUseConfig, flush_audit_loggers
 from plugins.baselithbot.computer_use.desktop_lane import DesktopLaneState
 from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
 from plugins.baselithbot.config.models import ModelPreferenceStore
@@ -140,6 +140,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             self._agent_config["computer_use"] = ComputerUseConfig(
                 **self._agent_config["computer_use"]
             )
+        self._dm_policy.configure_from_mapping(self._agent_config.get("dm_policy"))
         await _bootstrap.autostart_enabled_channels(self)
         _bootstrap.register_default_cron_jobs(self)
         loaded_custom = self._custom_crons.bootstrap()
@@ -201,6 +202,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             await self._channels.shutdown_all()
         except Exception as exc:
             logger.warning("baselithbot_channels_shutdown_failed", error=str(exc))
+        await asyncio.to_thread(flush_audit_loggers)
         await super().shutdown()
 
     def _resolve_provider_key(self, provider: str) -> str | None:

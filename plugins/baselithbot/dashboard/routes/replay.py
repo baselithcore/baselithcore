@@ -39,7 +39,7 @@ def register_replay_routes(
                 "path": str(Path(plugin._state_dir) / "replay.sqlite"),
                 "retention_days": REPLAY_RETENTION_DAYS,
             }
-        runs = plugin.replay.list_runs(limit=limit, tenant_id=tenant_id)
+        runs = await plugin.replay.alist_runs(limit=limit, tenant_id=tenant_id)
         status_counts = Counter(str(run.get("status") or "unknown") for run in runs)
         latest_started_ts = max(
             (
@@ -85,7 +85,7 @@ def register_replay_routes(
         tenant_id = await tenant_from_request(request)
         if tenant_id is None:
             raise HTTPException(status_code=404, detail="run not found")
-        run = plugin.replay.get_run(
+        run = await plugin.replay.aget_run(
             run_id, include_screenshots=include_screenshots, tenant_id=tenant_id
         )
         if run is None:

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from core.models.fallback import FallbackOutcome, ProviderAttempt
 from core.observability.logging import get_logger
 from core.resilience.circuit_breaker import CircuitState, get_circuit_breaker
+from core.services.llm.policy import SUPPORTED_PROVIDERS
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-_SUPPORTED_PROVIDERS = ("openai", "ollama", "huggingface", "anthropic", "gemini")
+# One list: the chain accepts exactly what the per-plugin policy can pin. A
+# provider added to one and not the other was pinnable but not a fallback.
+_SUPPORTED_PROVIDERS = SUPPORTED_PROVIDERS
 
 # Fallback-stage service clones, shared process-wide and keyed by
 # (provider, model) — mirrors the policy-clone cache in ``runtime``.
@@ -249,3 +252,11 @@ def reset_fallback_services() -> None:
     """Clear the fallback-stage clone cache (tests / credential rotation)."""
     with _lock:
         _fallback_services.clear()
+
+
+def take_fallback_services() -> list[LLMService]:
+    """Empty the fallback-stage clone cache and return what it held."""
+    with _lock:
+        services = list(_fallback_services.values())
+        _fallback_services.clear()
+    return services

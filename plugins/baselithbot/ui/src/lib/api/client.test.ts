@@ -38,8 +38,8 @@ describe('api client request()', () => {
     expect(calledUrl).toBe('/baselithbot/dash/overview');
     expect(String(calledUrl)).not.toContain('token=');
 
-    const headers = init?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer super-secret');
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer super-secret');
   });
 
   it('omits the Authorization header, and never adds a token param, when no token is stored', async () => {
@@ -52,8 +52,30 @@ describe('api client request()', () => {
 
     const [calledUrl, init] = fetchMock.mock.calls[0]!;
     expect(calledUrl).toBe('/baselithbot/dash/overview?existing=1');
-    const headers = init?.headers as Record<string, string>;
-    expect(headers.Authorization).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBeNull();
+  });
+
+  it('keeps the Authorization header when the caller passes its own headers', async () => {
+    window.sessionStorage.setItem(DASHBOARD_TOKEN_STORAGE_KEY, 'super-secret');
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({ ok: true })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request('/baselithbot/dash/overview', {
+      method: 'POST',
+      headers: { 'X-Extra': '1' },
+      credentials: 'include',
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer super-secret');
+    expect(headers.get('X-Extra')).toBe('1');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(init?.method).toBe('POST');
+    expect(init?.credentials).toBe('same-origin');
   });
 
   it('throws ApiError carrying the response detail on a non-2xx status', async () => {

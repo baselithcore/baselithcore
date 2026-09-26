@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from plugins.baselithbot.channels.base import ChannelMessage
+from plugins.baselithbot.channels.config_store import merge_config_update
 from plugins.baselithbot.policies import RateLimiter
 from plugins.baselithbot.security.secret_store import SecretStoreError
 from plugins.baselithbot.dashboard.bus import _BUS
@@ -55,10 +56,11 @@ def register_channels_routes(
         enforce(token_rate_limit, request, "channel_config_set")
         _require_known(name)
         try:
-            merged = dict(plugin.channel_configs.get_config(name) or {})
-            merged.update(body.config)
-            for field in body.unset_fields:
-                merged.pop(field, None)
+            merged = merge_config_update(
+                plugin.channel_configs.get_config(name) or {},
+                body.config,
+                body.unset_fields,
+            )
             plugin.channel_configs.set(name, merged)
         except SecretStoreError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -20,7 +20,15 @@ from core.services.llm import get_llm_service
 
 logger = get_logger(__name__)
 
-OLLAMA_MODEL = get_llm_config().model
+
+def _answer_model() -> str:
+    """The configured answer model, read per call so a config reload applies.
+
+    Frozen at import it ignored every later change of ``LLM_MODEL`` (a
+    ``reset_llm_config`` in tests, a hot reload) for the life of the process.
+    """
+    return get_llm_config().model
+
 
 if TYPE_CHECKING:
     from core.chat.service import ChatService
@@ -116,12 +124,14 @@ class ResponseGenerator:
         if hasattr(
             self.generate_response_fn, "__await__"
         ) or inspect.iscoroutinefunction(self.generate_response_fn):
-            state.answer = await self.generate_response_fn(prompt, model=OLLAMA_MODEL)  # type: ignore[misc]
+            state.answer = await self.generate_response_fn(
+                prompt, model=_answer_model()
+            )  # type: ignore[misc]
         else:
             import asyncio
 
             state.answer = await asyncio.to_thread(
-                self.generate_response_fn, prompt, model=OLLAMA_MODEL
+                self.generate_response_fn, prompt, model=_answer_model()
             )
         await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
@@ -140,7 +150,7 @@ class ResponseGenerator:
 
         if inspect.isasyncgenfunction(self.generate_response_stream_fn):
             async for chunk in self.generate_response_stream_fn(
-                prompt, model=OLLAMA_MODEL
+                prompt, model=_answer_model()
             ):
                 full_answer.append(chunk)
                 yield chunk
@@ -163,7 +173,7 @@ class ResponseGenerator:
                     # Guarded by the isasyncgenfunction check above: on this
                     # branch the callable returns a plain sync iterator.
                     for chunk in self.generate_response_stream_fn(  # type: ignore[union-attr]
-                        prompt, model=OLLAMA_MODEL
+                        prompt, model=_answer_model()
                     ):
                         loop.call_soon_threadsafe(queue.put_nowait, chunk)
                 except BaseException as exc:  # forwarded to the consumer

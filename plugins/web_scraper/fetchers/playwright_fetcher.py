@@ -124,8 +124,9 @@ class PlaywrightFetcher(BaseFetcher):
         Raises:
             FetchError: If the fetch fails.
         """
-        # SSRF protection
-        if not check_ssrf_safe(url):
+        # SSRF protection. The check resolves DNS, so it runs in a worker
+        # thread rather than stalling the event loop on a slow resolver.
+        if not await asyncio.to_thread(check_ssrf_safe, url):
             raise FetchError(
                 url=url,
                 message="URL blocked by SSRF protection (private/internal IP)",

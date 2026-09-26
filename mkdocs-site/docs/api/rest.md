@@ -77,9 +77,26 @@ posture for an API with no browser front end. Credentials are allowed for a
 concrete origin list and disabled under the `*` wildcard, which is the
 standard rule (a wildcard and credentials cannot be combined).
 
-Three response headers are **exposed** to the calling script, since a browser
+Allowed request headers (anything else fails the preflight): `Content-Type`,
+`Authorization`, `X-API-Key` (the TypeScript SDK's API-key header),
+`X-Requested-With`, `X-Request-ID`, `Idempotency-Key`, `Accept`, `Origin`, the
+MCP Streamable HTTP headers `Mcp-Session-Id`, `Mcp-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name`, and `Last-Event-ID` (SSE resumption).
+
+**`Idempotency-Key` on mutating requests.** An authenticated `POST`/`PUT`/
+`PATCH`/`DELETE` carrying `Idempotency-Key` has its response stored and replayed
+(with `Idempotency-Replayed: true`) for a retry with the same key and
+credential. The key is bound to the request body: reusing it with a
+**different body** returns `422` rather than the first request's response, and
+a retry while the original is still running returns `409`. Only requests with a
+credential that authenticates and that match a route are stored; `404`, `405`,
+`5xx` and retryable statuses never are. See
+[IdempotencyMiddleware](../core-modules/middleware.md#idempotencymiddleware).
+
+Four response headers are **exposed** to the calling script, since a browser
 cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
-report), `Idempotency-Replayed` and `Retry-After`.
+report), `Idempotency-Replayed`, `Retry-After`, and `Mcp-Session-Id` (how an
+MCP browser client learns its session id from the `initialize` response).
 
 A preflight answer stays cacheable in the browser for **7200 seconds**. The
 framework default is Starlette's 600s, at which a dashboard making
@@ -189,7 +206,7 @@ Pagination is per endpoint — there is no global scheme:
 | `GET /webhooks/deliveries` | Opaque cursor: `limit` (default 50, clamped to 200) + `cursor`; the page carries `deliveries`, `next_cursor` and `has_more` |
 | `GET /admin/tenants` | `limit` (default 100, max 500) + `offset` |
 | `GET /admin/dlq` | `limit` (default 50, max 500) + `offset` |
-| `GET /feedbacks` | `limit` only (1–200) |
+| `GET /feedbacks` | `limit` only (default 50, max 200), newest first |
 
 ```bash
 GET /webhooks/deliveries?limit=50
@@ -209,7 +226,9 @@ Beyond per-minute [rate limiting](../core-modules/auth.md#api-key-hashing),
 identities can carry **persistent usage budgets** per calendar window (daily /
 monthly), enabled with `QUOTAS_ENABLED=true`. When an identity exhausts a
 window, requests return `429` with code `quota_exceeded` until the window resets.
-Limits default per identity and can be raised per key. See
+Limits default per identity and can be raised per key. A request that is
+admitted but then answered `401`/`403`/`404`/`405`/`429`/`503` does not spend
+a unit. See
 [Usage Quotas](../core-modules/quotas.md).
 
 ---
@@ -223,7 +242,7 @@ The framework uses two distinct schemes depending on the surface:
 | Chat (REST + WebSocket), async agent runs, `POST /feedback`, frontend manifest, webhooks / privacy / compliance (plus a capability scope) | API key or Bearer token | `require_user` |
 | Plugin management, `GET /status`, `GET /feedbacks` | API key or Bearer token (`admin` role) | `require_admin` |
 | Indexing, Backstage | API key or Bearer token (`admin` or `job` role) | `require_admin_or_job` |
-| Admin HTML/analytics/DLQ, tenant admin, prompt catalog, `/runs`, `/approvals`, `/metrics` (while `METRICS_AUTH_REQUIRED=true`, the default) | HTTP Basic Auth | `verify_credentials` |
+| Admin HTML/analytics/DLQ, `/admin/status`, `/admin/reindex`, tenant admin, prompt catalog, `/runs`, `/approvals`, `/metrics` (while `METRICS_AUTH_REQUIRED=true`, the default) | HTTP Basic Auth | `verify_credentials` |
 
 ### API Key / Bearer token
 
@@ -429,11 +448,14 @@ and receives typed JSON frames back:
 | ------------ | ------- |
 | `{"type": "chunk", "content": "..."}` | One streamed answer fragment |
 | `{"type": "final"}` | The turn is complete — send the next query |
-| `{"type": "error", "detail": "..."}` | The frame was rejected (missing `query`, over-long query, rate-limited turn — then with `retry_after`); the connection stays open |
+| `{"type": "error", "detail": "..."}` | The frame was rejected (missing `query`, over-long query, rate-limited turn — then with `retry_after`), or the turn hit its deadline (`"stream timed out"`, followed by `final`); the connection stays open |
 
 Each turn's stream runs through the **same size guards as SSE** (4 MB total /
-64 KB per chunk), and the query is bound by the same `ChatRequest` limits as
-the REST chat surface.
+64 KB per chunk) and the **same wall-clock budget**
+(`CHAT_STREAM_TIMEOUT_SECONDS`, default 300 s), and the query is bound by the
+same `ChatRequest` limits as the REST chat surface. The upstream stream is
+closed on every exit — deadline, error or client disconnect — so the LLM call
+behind an abandoned turn is released instead of running on.
 
 ```python
 import asyncio
@@ -506,7 +528,10 @@ Readiness probe (no auth). Verifies critical dependencies and returns **503**
 when the database is unreachable, so Kubernetes drains traffic from the pod
 until it recovers. Redis and the vector store are reported but advisory
 (Redis falls back to in-memory; recall degrades to keyword search), so
-neither gates readiness. Results are cached (~30s).
+neither gates readiness. `vectorstore` is `false` both when the store is
+unreachable and when it answers but the configured collection does not exist
+(the server log says which); a provider without a cheap probe (pgvector)
+reports `true`. Results are cached (~30s).
 
 **Response** (200 OK / 503 Service Unavailable):
 
@@ -571,10 +596,35 @@ endpoints under `/admin/dlq` are listed with the other
 
 ### `GET /admin` - Admin Dashboard
 
-Serves the admin HTML page (`static/admin.html`).
+Serves the admin HTML page (`core/static/admin.html`). The page and every
+call it makes use the same Basic credentials: it reads `/admin/data` and
+`/admin/status` and triggers `/admin/reindex` — never the API-key routes
+(`/status`, `/reindex`), which reject Basic credentials. The page's `POST` is
+same-origin, which the [CSRF guard](../advanced/security.md#csrf-protection)
+admits without an `ALLOW_ORIGINS` entry.
 
 ```bash
 curl -u admin:password http://localhost:8000/admin
+```
+
+### `GET /admin/status` - Status for the dashboard
+
+The [`GET /status`](#get-status---system-status) payload behind Basic Auth, so the
+dashboard can read it with the credentials it already holds.
+
+```bash
+curl -u admin:password http://localhost:8000/admin/status
+```
+
+### `POST /admin/reindex` - Reindex from the dashboard
+
+Runs the same incremental reindex as [`POST /reindex`](#post-reindex) (same
+`409` while a job runs, same response) behind Basic Auth. It is a
+state-changing request, so a browser `POST` from another site is refused by
+the CSRF guard (`403`); a same-origin `POST` from the dashboard passes.
+
+```bash
+curl -u admin:password -X POST http://localhost:8000/admin/reindex
 ```
 
 ### `GET /admin/data` - Analytics JSON
@@ -634,8 +684,10 @@ token (`require_user`). Accepts a `FeedbackRequest` body (`query`, `answer`,
 
 ### `GET /feedbacks`
 
-List recorded feedback entries. Requires admin (`require_admin`). Optional
-`feedback` filter (`positive`|`negative`) and `limit` (1–200).
+List recorded feedback entries for the caller's tenant, newest first.
+Requires admin (`require_admin`). Optional `feedback` filter
+(`positive`|`negative`) and `limit` (default 50, max 200) — the listing is
+always bounded, an omitted `limit` returns the default page.
 
 ---
 

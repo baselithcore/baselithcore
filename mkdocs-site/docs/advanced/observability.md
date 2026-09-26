@@ -147,8 +147,9 @@ TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 # OTEL_EXPORTER_OTLP_PROTOCOL is accepted as an alias.
 TELEMETRY_OTEL_PROTOCOL=grpc
 
-# Head sampling ratio — ParentBased(TraceIdRatio), 0.0–1.0 (lower in prod)
-TELEMETRY_TRACES_SAMPLE_RATE=1.0
+# Head sampling ratio — ParentBased(TraceIdRatio), 0.0–1.0.
+# Unset: 1.0 outside production, 0.1 when APP_ENV/ENVIRONMENT is production.
+# TELEMETRY_TRACES_SAMPLE_RATE=1.0
 
 # Push OTel-native metrics over OTLP (independent of Prometheus /metrics)
 TELEMETRY_METRICS_ENABLED=false
@@ -217,6 +218,15 @@ Access UI: `http://localhost:16686`
     `POST /-/reload` and `/-/quit`, a remote shutdown of the monitoring that is
     supposed to notice the incident. Reload with
     `docker compose kill -s SIGHUP prometheus` instead.
+
+!!! note "Setting telemetry up twice in one process"
+    OpenTelemetry forbids replacing the global `TracerProvider`, so the first
+    `setup_telemetry()` fixes the provider (its resource and sampler) for the
+    life of the process. A later `setup_telemetry()` after `shutdown_telemetry()`
+    — a second app lifespan in the same process, as with `TestClient` — swaps
+    fresh span exporters in behind that provider instead of silently exporting
+    to the one that was shut down. Metric push cannot be re-armed after shutdown:
+    the second setup logs a warning and leaves metrics off.
 
 ### LLM observability backends (OpenInference)
 
@@ -688,7 +698,7 @@ LOG_MASKING_ENABLED=true
 # Tracing / Telemetry (OpenTelemetry → OTLP: traces, metrics, logs)
 TELEMETRY_ENABLED=true
 TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
-TELEMETRY_TRACES_SAMPLE_RATE=1.0   # 0.0–1.0 head sampling
+TELEMETRY_TRACES_SAMPLE_RATE=0.1   # 0.0–1.0 head sampling (the production default when unset)
 TELEMETRY_METRICS_ENABLED=false    # OTLP metric push (Prometheus /metrics always on)
 TELEMETRY_LOGS_ENABLED=false       # OTLP log push (stdout logging always on)
 TELEMETRY_OTEL_PROTOCOL=grpc       # or http/protobuf (endpoint port becomes 4318)

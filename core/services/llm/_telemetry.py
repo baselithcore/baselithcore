@@ -24,6 +24,8 @@ _GEN_AI_SYSTEM = {
     "huggingface": "huggingface",
     # semconv value for the Gemini API is "gcp.gemini".
     "gemini": "gcp.gemini",
+    # No semconv well-known value; the spec allows the lowercase product name.
+    "vllm": "vllm",
 }
 
 

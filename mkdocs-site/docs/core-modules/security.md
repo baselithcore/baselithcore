@@ -245,6 +245,14 @@ With `SECRETS_BACKEND=file` and `SECRETS_DIR=/run/secrets`, a lookup for
 
 This keeps plaintext secrets out of environment variables and image layers.
 
+Both settings are fields of `SecurityConfig` (`secrets_backend`,
+`secrets_dir`), and `get_secrets_provider()` reads them from
+`get_security_config()` rather than straight from `os.environ`, so a value
+supplied through any settings source applies. The provider and the security
+config are both cached for the process: a test that changes `SECRETS_BACKEND`
+must reset both (`reset_secrets_provider()` and
+`core.config.security._security_config = None`).
+
 ### Registering an external backend (Vault, cloud KMS)
 
 Heavy or environment-specific providers stay **out of `core`** (Sacred Core

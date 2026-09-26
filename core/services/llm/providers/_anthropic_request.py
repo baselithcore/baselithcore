@@ -60,6 +60,10 @@ RESERVED_KWARGS = frozenset(
         "extra_body",
         "allow_refusal",
         "usage_sink",
+        # OpenAI-style ``seed`` (deterministic mode) has no Messages API
+        # counterpart; forwarding it fails the call with a TypeError, which on
+        # a fallback chain whose primary is not Anthropic would sink the step.
+        "seed",
         *SAMPLING_PARAMS,
     }
 )

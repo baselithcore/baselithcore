@@ -197,3 +197,59 @@ class TestAuthManagerFallback:
         ):
             user = await mgr.authenticate("Bearer not-a-real-token")
         assert not user.is_authenticated
+
+
+class TestJwksFetchThrottle:
+    """An unknown ``kid`` is caller-controlled: forged tokens must not turn
+    into one outbound IdP call each."""
+
+    @staticmethod
+    def _jwks_response(rsa_key, kid="k1"):
+        from unittest.mock import MagicMock
+
+        jwk = pyjwt.algorithms.RSAAlgorithm.to_jwk(rsa_key.public_key(), as_dict=True)
+        jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})
+        resp = MagicMock()
+        resp.json.return_value = {"keys": [jwk]}
+        resp.raise_for_status.return_value = None
+        return resp
+
+    @staticmethod
+    def _forged(kid):
+        return pyjwt.encode(
+            {"sub": "x"}, "k" * 32, algorithm="HS256", headers={"kid": kid}
+        )
+
+    def test_unknown_kids_refresh_at_most_once_per_cooldown(self, oidc_config, rsa_key):
+        v = OIDCVerifier(config=oidc_config)
+        with patch(
+            "core.auth.oidc._pinned_get", return_value=self._jwks_response(rsa_key)
+        ) as get:
+            assert v._resolve_signing_key(self._forged("k1")) is not None
+            # Initial fetch just happened: a forged kid inside the cooldown
+            # is answered from the cache, not the network.
+            for i in range(20):
+                with pytest.raises(KeyError):
+                    v._resolve_signing_key(self._forged(f"bogus-{i}"))
+            assert get.call_count == 1
+
+    def test_refresh_allowed_after_cooldown(self, oidc_config, rsa_key):
+        v = OIDCVerifier(config=oidc_config)
+        with patch(
+            "core.auth.oidc._pinned_get", return_value=self._jwks_response(rsa_key)
+        ) as get:
+            v._fetch_jwk_set()
+            v._last_fetch_at -= 61
+            v._fetch_jwk_set(refresh=True)
+            assert get.call_count == 2
+
+    def test_failed_fetch_backs_off(self, oidc_config):
+        v = OIDCVerifier(config=oidc_config)
+        with patch(
+            "core.auth.oidc._pinned_get", side_effect=RuntimeError("idp down")
+        ) as get:
+            with pytest.raises(RuntimeError):
+                v._fetch_jwk_set()
+            with pytest.raises(InvalidTokenError, match="temporarily unavailable"):
+                v._fetch_jwk_set()
+            assert get.call_count == 1

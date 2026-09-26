@@ -57,7 +57,10 @@ service: `memory` (the default) keeps the in-memory store, `postgres` selects
   after they are.
 - **Retention.** `PostgresWebhookStore.purge_deliveries_before(cutoff)` deletes
   delivery records created before `cutoff` (unix seconds) and returns the count.
-  Nothing in the app schedules it — call it from your own job.
+  Nothing in the app schedules it — call it from your own job. Migration
+  `012_webhook_retention_idx` adds `ix_webhook_deliveries_created_at`, so the
+  sweep is an index range scan over the expired rows instead of a read of the
+  whole `(tenant_id, created_at)` index.
 
 ```python
 import time

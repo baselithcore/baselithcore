@@ -25,7 +25,7 @@ def test_create_redis_client_reuses_shared_pool():
     client_two = MagicMock()
 
     with (
-        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "BlockingConnectionPool") as mock_connection_pool,
         patch.object(redis_cache, "Redis") as mock_redis,
     ):
         mock_connection_pool.from_url.return_value = pool
@@ -48,7 +48,7 @@ def test_pool_carries_socket_deadlines():
     while holding a pooled connection, so hung operations exhaust the pool.
     """
     with (
-        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "BlockingConnectionPool") as mock_connection_pool,
         patch.object(redis_cache, "Redis"),
     ):
         mock_connection_pool.from_url.return_value = MagicMock()
@@ -83,7 +83,7 @@ def test_pools_are_not_shared_across_event_loops():
     every command then failed with ``RuntimeError: Event loop is closed``.
     """
     with (
-        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "BlockingConnectionPool") as mock_connection_pool,
         patch.object(redis_cache, "Redis") as mock_redis,
     ):
         mock_connection_pool.from_url.side_effect = lambda *a, **k: MagicMock()
@@ -104,7 +104,7 @@ def test_pools_are_not_shared_across_event_loops():
 def test_same_loop_reuses_one_pool():
     """Within one loop the pool stays shared (bounded connections, no churn)."""
     with (
-        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "BlockingConnectionPool") as mock_connection_pool,
         patch.object(redis_cache, "Redis"),
     ):
         mock_connection_pool.from_url.return_value = MagicMock()
@@ -116,3 +116,21 @@ def test_same_loop_reuses_one_pool():
         asyncio.run(make_two())
 
     assert mock_connection_pool.from_url.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_pool_blocks_instead_of_failing_when_exhausted():
+    """At ``max_connections`` a caller must wait for a free connection.
+
+    A plain ``ConnectionPool`` raises "Too many connections" the instant it is
+    exhausted, turning a short burst into a wave of cache errors.
+    """
+    from redis.asyncio import BlockingConnectionPool
+
+    client = redis_cache.create_redis_client("redis://localhost:6399/0")
+    pool = client.connection_pool
+    try:
+        assert isinstance(pool, BlockingConnectionPool)
+        assert pool.timeout is not None and pool.timeout > 0
+    finally:
+        await client.aclose()

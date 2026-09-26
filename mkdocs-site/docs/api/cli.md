@@ -93,6 +93,15 @@ LOG_LEVEL_CONSOLE=DEBUG baselith plugin validate my_plugin   # and the plumbing
 This is separate from `--format`: `--format json` shapes the command's *result*,
 `LOG_JSON` shapes the *log records* around it.
 
+### A command that fails to load
+
+A broken command never takes the whole CLI down: it is left out of the menu and
+the others keep working. It is not left out silently — every invocation prints
+one line to stderr, such as
+`baselith: warning: command 'docs' unavailable (ImportError); set BASELITH_CLI_DEBUG=1 for details`.
+`BASELITH_CLI_DEBUG=1` adds the full exception, and also reports plugin CLIs
+(`plugins/<name>/cli.py`) that failed to register, which stay quiet otherwise.
+
 ---
 
 ## General
@@ -195,7 +204,10 @@ does not: where a failure sends inference, and whether what it would land on
 actually exists. Both read configuration and probe **local** endpoints only —
 a diagnostic must not spend money or depend on a vendor being reachable. The
 same checks run once at startup (`LLM_PREFLIGHT`, see
-[LLM service](../core-modules/services.md)).
+[LLM service](../core-modules/services.md)). A vLLM primary or chain stage is
+probed with `GET {LLM_VLLM_API_BASE}/models`, which names a model the server does not serve
+under that id; an unconfigured vLLM provider is reported as *not configured*
+and points at `LLM_VLLM_API_BASE` rather than at an API key it does not need.
 
 **JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 
@@ -1078,8 +1090,7 @@ baselith config show
 │                            ││                           │
 │ Log Level      info        ││ Provider     ollama       │
 │ Debug          False       ││ Model        llama3.2     │
-│ Plugin Dir     plugins     ││ Cache Enable True         │
-│ Data Dir       data        ││                           │
+│ Data Dir       data        ││ Cache Enable True         │
 ╰────────────────────────────╯╰───────────────────────────╯
 ╭────── Chat Settings ───────╮╭─── VectorStore Settings ──╮
 │                            ││                           │

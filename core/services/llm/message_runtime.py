@@ -25,6 +25,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -46,6 +47,8 @@ from core.services.llm.messages import (
     ToolResultBlock,
     render_as_prompt,
 )
+from core.services.llm.model_capabilities import configured_max_tokens
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -214,6 +217,7 @@ async def generate_messages(
     from core.quotas.manager import CostBudgetExceededError
 
     resolved_model = service._resolve_model(model, task_category)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     if not supports_message_api(service):
         return await _degrade_to_prompt(
             service,
@@ -253,6 +257,8 @@ async def generate_messages(
         except CostBudgetExceededError:
             span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
             raise
+        # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+        await acquire_llm_call_slot(service.config.provider)
 
         # Estimated from the transcript: the pre-call middleware ledger only
         # needs a size, and the provider's metered split replaces it below.
@@ -268,6 +274,9 @@ async def generate_messages(
             extra["max_tokens"] = max_tokens
         if allow_refusal:
             extra["allow_refusal"] = True
+        # CORE_DETERMINISTIC_MODE pins sampling on the agent loop's path too,
+        # not only on plain text generation.
+        extra.update(get_llm_override_kwargs(service.config.provider))
 
         started = time.perf_counter()
         # Overwritten below by whichever stage answers; pre-seeded so the

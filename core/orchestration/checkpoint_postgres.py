@@ -94,13 +94,42 @@ FROM agent_checkpoint_history WHERE run_id = %s ORDER BY version ASC
 
 # Run listing for operator/read surfaces: any status, newest first. The live
 # row is the source (history rows are per-version copies of the same run).
-_RUN_LIST = """
-SELECT data FROM agent_checkpoints
-WHERE (%(tenant_id)s::text IS NULL OR tenant_id = %(tenant_id)s::text)
-  AND (%(status)s::text IS NULL OR status = %(status)s::text)
-ORDER BY updated_at DESC
-LIMIT %(limit)s
-"""
+#
+# Two costs are designed out here. The heavy keys ``summarize_run`` discards
+# anyway (``steps``, ``trajectory``, ``plugin_data``, ``answer``) are stripped
+# server-side, so a 500-run page no longer ships every tool output of every run
+# to be parsed and thrown away (seeded runs: 427 kB -> 94 kB per page); only
+# the trajectory's length crosses the wire. And the filters are appended only
+# when given, instead of the ``(%s IS NULL OR col = %s)`` catch-all: once
+# psycopg prepares the statement (5th execution) Postgres may switch to a
+# generic plan, and a generic plan cannot use an index for a predicate that
+# might be ``NULL`` — EXPLAIN showed a seq scan over every tenant's runs.
+_RUN_LIST_SELECT = (
+    "SELECT data - 'steps' - 'trajectory' - 'plugin_data' - 'answer' AS data, "
+    "CASE WHEN jsonb_typeof(data->'trajectory') = 'array' "
+    "THEN jsonb_array_length(data->'trajectory') ELSE 0 END AS trajectory_length "
+    "FROM agent_checkpoints"
+)
+
+
+def _run_list_query(
+    tenant_id: str | None, status: str | None, limit: int
+) -> tuple[str, list[Any]]:
+    """Build the run-listing statement with only the filters actually given."""
+    where: list[str] = []
+    params: list[Any] = []
+    if tenant_id is not None:
+        where.append("tenant_id = %s")
+        params.append(tenant_id)
+    if status is not None:
+        where.append("status = %s")
+        params.append(status)
+    sql = _RUN_LIST_SELECT
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    params.append(limit)
+    return sql + " ORDER BY updated_at DESC LIMIT %s", params
+
 
 _HISTORY_LOAD = """
 SELECT data FROM agent_checkpoint_history WHERE run_id = %s AND version = %s
@@ -363,15 +392,9 @@ class PostgresCheckpointStore:
         recovery pick up") with the operator read path: completed and failed
         runs stay inspectable after the fact.
         """
+        sql, params = _run_list_query(tenant_id, status, max(1, min(limit, 500)))
         async with get_async_cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                _RUN_LIST,
-                {
-                    "tenant_id": tenant_id,
-                    "status": status,
-                    "limit": max(1, min(limit, 500)),
-                },
-            )
+            await cur.execute(sql, params)
             rows = await cur.fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -380,7 +403,10 @@ class PostgresCheckpointStore:
             data = row["data"]
             if isinstance(data, str):
                 data = orjson.loads(data)
-            out.append(summarize_run(data))
+            summary = summarize_run(data)
+            # The trajectory itself was stripped server-side; its length wasn't.
+            summary["trajectory_length"] = int(row.get("trajectory_length") or 0)
+            out.append(summary)
         return out
 
     async def list_resumable(

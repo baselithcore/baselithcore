@@ -15,6 +15,14 @@ the Art. 29 risk assessment, and renders the whole register in the ESA template
 layout. The framework holds and validates the records; the financial entity
 remains responsible for completeness and for the regulatory submission.
 
+!!! note "Library API — not wired by default"
+    No route, handler or startup hook reads or writes the register in the
+    default app: nothing records providers, functions or arrangements on its
+    own, and nothing exports the ESA templates. Call `get_register()` and
+    `build_register` from host or plugin code — for example, an admin router
+    or a scheduled job that populates the register and renders it for the
+    regulatory submission (see [Usage](#usage)).
+
 ## Records
 
 | Record                  | Template  | Captures                                                            |

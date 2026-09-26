@@ -141,8 +141,53 @@ class TestResume:
         assert resp.status_code == 200
         assert resp.json()["result"]["response"] == "done"
         fake_agent.process.assert_awaited_once_with(
-            "wipe the table", run_id="run-1", resume=True
+            "wipe the table", context={}, run_id="run-1", resume=True
         )
+
+    def test_resume_runs_under_the_checkpoint_owner_tenant(
+        self, client, store, monkeypatch
+    ):
+        """The admin's ambient tenant must not leak into another tenant's run."""
+        import anyio
+
+        from core.context import get_current_tenant_id
+
+        anyio.run(lambda: _paused_run(store, tenant="tenant-a"))
+        seen: dict[str, object] = {}
+
+        async def _process(query, *, context, run_id, resume):
+            seen["ambient"] = get_current_tenant_id()
+            seen["context"] = dict(context)
+            return {"response": "done"}
+
+        class _FakeChatService:
+            agent = AsyncMock()
+
+        _FakeChatService.agent.process = _process
+        import core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
+        resp = client.post("/approvals/run-1/resume")
+        assert resp.status_code == 200
+        assert seen["ambient"] == "tenant-a"
+        assert seen["context"] == {"tenant_id": "tenant-a"}
+
+    def test_resume_failure_does_not_echo_internals(self, client, store, monkeypatch):
+        import anyio
+
+        anyio.run(lambda: _paused_run(store))
+        fake_agent = AsyncMock()
+        fake_agent.process = AsyncMock(side_effect=RuntimeError("dsn=postgres://x"))
+
+        class _FakeChatService:
+            agent = fake_agent
+
+        import core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
+        resp = client.post("/approvals/run-1/resume")
+        assert resp.status_code == 500
+        assert "postgres" not in resp.text
 
     def test_resume_404_for_unknown_run(self, client):
         resp = client.post("/approvals/nope/resume")

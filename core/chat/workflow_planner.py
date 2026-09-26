@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.chat.agent_state import AgentState
-from core.config import get_app_config, get_storage_config
+from core.config import get_app_config
 from core.observability import telemetry
 from core.observability.logging import get_logger
 
@@ -67,41 +67,6 @@ class BacklogPlanner:
         else:
             telemetry.increment("planner.generated")
             state.plugin_data["project_plan"] = plan
-
-            # --- Duplicate Detection via Graph DB ---
-            storage_config = get_storage_config()
-            if storage_config.graph_db_enabled:
-                try:
-                    # Lazy import to avoid circular dependency and abstraction leak
-                    from core.graph import graph_db
-                    from core.services.graph.agent import GraphService
-
-                    if graph_db.is_enabled():
-                        ga = GraphService(graph_db)
-                        for story in plan.user_stories:
-                            # Note: find_similar_stories is part of GraphService but might be dynamically added or missing type hint
-                            if hasattr(ga, "find_similar_stories"):
-                                similar = ga.find_similar_stories(  # type: ignore[attr-defined]
-                                    story.title, threshold=0.80, limit=3
-                                )
-                                if similar:
-                                    state.log(
-                                        f"planner:duplicate_detected:{story.title[:30]}"
-                                    )
-                                    warning_lines = [
-                                        "\n\n> [!WARNING] Possible Duplicate",
-                                        "> This story appears similar to existing stories:",
-                                    ]
-                                    for s in similar:
-                                        warning_lines.append(
-                                            f"> - **{s['summary']}** ({s['status']}) - Score: {s['score']:.2f}"
-                                        )
-                                    current_desc = story.description
-                                    story._description = (
-                                        current_desc + "\n" + "\n".join(warning_lines)
-                                    )
-                except Exception as e:
-                    logger.warning(f"Duplicate detection failed: {e}", exc_info=True)
 
         state.next_action = "generate_answer"
 

@@ -89,5 +89,74 @@ async def test_healthy_redis_is_unaffected_by_the_fail_mode():
 async def test_no_redis_configured_still_serves_local_keys():
     """No denylist backend at all is a deployment choice, not an outage."""
     validator = _validator(None)
+    validator._denylist_declared = False  # CACHE_BACKEND != redis
 
     assert (await validator.validate_key("k-123")).user_id == "svc"
+
+
+# ---------------------------------------------------------------------------
+# Backend selection: the denylist exists only when Redis is *declared*
+# ---------------------------------------------------------------------------
+
+
+def _storage(backend: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(cache_backend=backend)
+
+
+async def test_no_declared_redis_uses_process_local_revocation(monkeypatch):
+    """CACHE_BACKEND != redis: keys work although no Redis is reachable.
+
+    ``create_redis_client`` is lazy, so building a client never failed and the
+    first denylist read against an unreachable server rejected *every* key.
+    """
+    import core.config as config_mod
+
+    monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("local"))
+    created = []
+    monkeypatch.setattr(
+        "core.cache.redis_cache.create_redis_client",
+        lambda url: created.append(url) or _down_redis(),
+    )
+    validator = APIKeyValidator(config=SecurityConfig())
+    validator.register_key("k-123", "svc", {AuthRole.SERVICE})
+
+    assert created == []
+    assert validator._redis is None
+    assert await validator.validate_key("k-123") is not None
+    # Revocation still takes effect in this process.
+    assert await validator.revoke_key("k-123") is True
+    assert await validator.validate_key("k-123") is None
+
+
+async def test_declared_redis_down_still_fails_closed(monkeypatch):
+    import core.config as config_mod
+
+    monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("redis"))
+    monkeypatch.setattr(
+        "core.cache.redis_cache.create_redis_client", lambda url: _down_redis()
+    )
+    validator = APIKeyValidator(config=SecurityConfig())
+    validator.register_key("k-123", "svc", {AuthRole.SERVICE})
+
+    assert validator._redis is not None
+    assert await validator.validate_key("k-123") is None
+
+
+async def test_declared_redis_client_build_failure_fails_closed(monkeypatch):
+    import core.config as config_mod
+
+    def _boom(url):
+        raise ValueError("bad redis url")
+
+    monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("redis"))
+    monkeypatch.setattr("core.cache.redis_cache.create_redis_client", _boom)
+    validator = APIKeyValidator(config=SecurityConfig())
+    validator.register_key("k-123", "svc", {AuthRole.SERVICE})
+
+    assert validator._redis is None
+    assert await validator.validate_key("k-123") is None
+    opened = APIKeyValidator(config=SecurityConfig(API_KEY_REVOCATION_FAIL_MODE="open"))
+    opened.register_key("k-123", "svc", {AuthRole.SERVICE})
+    assert await opened.validate_key("k-123") is not None

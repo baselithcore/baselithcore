@@ -74,6 +74,10 @@ spec:
                     sleep 5
                   done
                   echo "database ${PGHOST}:${PGPORT} is accepting connections"
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               env:
                 - name: WAIT_SECONDS
                   value: {{ .Values.backup.waitForDatabaseSeconds | quote }}
@@ -126,6 +130,10 @@ spec:
                 - name: RCLONE_CONFIG
                   value: /dev/null
                 {{- include "baselithcore.backupOffsiteRemoteEnv" . | trim | nindent 16 }}
+              {{- with $offsite.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               {{- with $offsite.credentialsSecret }}
               envFrom:
                 - secretRef:

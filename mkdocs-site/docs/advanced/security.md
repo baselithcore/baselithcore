@@ -340,9 +340,11 @@ guard = InputGuard()  # GuardrailsConfig from the environment by default
 
 
 async def process_user_input(user_input: str) -> str:
-    # validate() is the synchronous regex layer; validate_async() runs it
-    # first and, when it passes, asks the LLM for a SAFE/MALICIOUS verdict.
-    result = await guard.validate_async(user_input)
+    # validate() is the synchronous regex layer (original, normalised and
+    # decoded views of the text). The LLM layers — moderation and the intent
+    # taxonomy — run in the orchestrator's guard_input_async, or call
+    # guard.classify() yourself.
+    result = guard.validate(user_input)
 
     if not result.is_valid:
         logger.warning(
@@ -358,18 +360,24 @@ async def process_user_input(user_input: str) -> str:
 
 `InputValidationResult` has four fields: `is_valid`, `blocked_reason`,
 `detected_patterns` (each entry is prefixed with the layer that fired —
-`injection:`, `code:`, `custom:`, or `llm_guardrail`) and `sanitized_input`.
+`injection:`, `code:` or `custom:`), `sanitized_input`, and `metadata`
+(`matched_variants`: which view of the text each pattern matched in).
 
 **What the input guard checks** (`GuardrailsConfig`, all on by default):
 
 - **Length**: inputs over `max_input_length` (10 000 chars) are rejected
 - **Prompt injection / jailbreak**: known override and DAN-style patterns
-  (`block_injection_patterns`)
+  in English plus es/fr/de/it/pt/ru/zh/ja/ar/hi (`block_injection_patterns`),
+  matched against the original text and its normalised views (NFKC,
+  invisible characters stripped, homoglyphs folded, leetspeak and
+  letter-spacing undone) and decoded base64/hex/percent-encoded payloads
 - **Code execution attempts**: shell/eval-style payloads
   (`block_code_execution`)
 - **Custom patterns**: operator-supplied regexes
-- **LLM verdict**: `validate_async` only, skipped when `llm_detection` is off;
-  a failed LLM call falls back to the regex result
+- **LLM verdict**: not part of `validate()`; the opt-in intent taxonomy
+  (`classify`, `BASELITH_INPUT_GUARD_TAXONOMY`) runs in the orchestrator's
+  `guard_input_async`. `validate_async` is deprecated (since 0.40.0, removed
+  in 0.41.0)
 
 PII and harmful-content filtering happen on the **output** side
 (`OutputGuard`), and both guards run automatically on every
@@ -480,18 +488,36 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — production **refuses to boot** that way unless `BASELITH_ALLOW_UNVALIDATED_HOST=true`. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
+| `API_KEY_ENABLED`          | `true`       | Master switch for API-key authentication (legacy alias `SECURITY_API_KEY_ENABLED`). `false` rejects every API key. |
+| `API_KEY_REVOCATION_FAIL_MODE` | `closed` | When the shared revocation denylist (Redis) is unreadable: `closed` rejects the key, `open` accepts it on process-local state — which un-revokes keys revoked elsewhere for the outage. |
+| `ADMIN_USER`               | `admin`      | Username for the Basic-auth admin console and `/metrics` (paired with `ADMIN_PASS` / `ADMIN_PASS_HASHED`). |
+| `METRICS_AUTH_REQUIRED`    | `true`       | Require admin Basic auth on `GET /metrics` (and `/v1/metrics`). Disable only when the endpoint is reachable solely from the scrape network or the scraper sends credentials. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
 | `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
 | `JWT_SIGNING_KEY`          | `None`       | Private key for asymmetric signing; omit on verify-only services so they cannot mint. |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
 | `JWT_STRICT_VALIDATION`    | auto         | Rejects any JWT missing `aud` or `iss`. Enabled automatically once `AUTH_REQUIRED=true` and both claims resolve; set explicitly to override. |
+| `JWT_ALGORITHM`            | `HS256`      | JWS algorithm for access/refresh tokens. `HS256` signs with `SECRET_KEY`; an asymmetric choice (`EdDSA`/`RS256`/`ES256`) also needs `JWT_SIGNING_KEY` and `JWT_KEYS`. |
+| `AUTH_ACCESS_TOKEN_LIFETIME` | `3600`     | Access-token lifetime in seconds, minimum `60` (legacy alias `AUTH_SESSION_LIFETIME`). Refresh tokens keep 7 days. |
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
 | `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
+| `HSTS_MAX_AGE`             | `31536000`   | `max-age` of the `Strict-Transport-Security` header, in seconds (one year). |
+| `X_FRAME_OPTIONS`          | `DENY`       | `X-Frame-Options` value. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
 | `CROSS_ORIGIN_OPENER_POLICY` | `same-origin-allow-popups` | `Cross-Origin-Opener-Policy` value; severs `window.opener` with cross-origin windows while keeping OAuth/SSO popups opened by the console working. Empty omits the header. |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | `same-origin` | `Cross-Origin-Resource-Policy` value; blocks no-cors subresource loads of API responses from foreign origins (CORS-approved fetches are exempt). Use `same-site` for split api/app subdomains; empty omits the header. |
 | `MAX_REQUEST_SIZE_BYTES`   | `10485760` (10 MiB) | Hard cap on inbound request body size. Bodies that advertise or stream beyond the cap are rejected with HTTP 413. Set to `0` to disable. |
+| `MFA_ENABLED`              | `false`      | Opt-in TOTP second factor (RFC 6238); additive, no effect on existing auth paths until enabled. |
+| `MFA_ISSUER`               | `BaselithCore` | Issuer label shown in the user's authenticator app. |
+| `OIDC_ENABLED`             | `false`      | Verify non-local bearer tokens against an external OpenID Connect provider's JWKS. Opt-in; local JWT/API-key auth is unaffected. |
+| `OIDC_ISSUER` / `OIDC_AUDIENCE` | `None`  | Expected `iss` / `aud` of the provider's tokens. |
+| `OIDC_JWKS_URL`            | `None`       | Explicit JWKS endpoint; unset, it is discovered from `{issuer}/.well-known/openid-configuration`. |
+| `OIDC_ALGORITHMS`          | `RS256`      | Comma-separated list of accepted signature algorithms. |
+| `OIDC_USERNAME_CLAIM` / `OIDC_ROLES_CLAIM` / `OIDC_SCOPES_CLAIM` | `sub` / `roles` / `scope` | Claims identity, roles and scopes are read from. |
+| `OIDC_TENANT_CLAIM`        | `None`       | Claim carrying the tenant id, when the IdP issues one. |
+| `OIDC_DEFAULT_ROLE`        | `user`       | Role assigned when no mapped role is present. |
+| `OIDC_ROLE_MAP`            | `{}` (empty) | IdP role → BaselithCore role, as `idp-admins:admin,idp-users:user`. |
 
 Generate a secure secret key:
 
@@ -571,7 +597,9 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 - Internal services are segmented across dedicated Docker networks.
 - TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
 - The observability profile ships **no default Grafana credential**: `compose.yaml` requires `GRAFANA_ADMIN_PASSWORD` (compose aborts when unset) instead of falling back to `admin`/`admin` — a reachable Grafana on the default credential is an instant takeover of every dashboard and datasource.
-- `REDIS_PASSWORD` (optional, strongly recommended) arms `--requirepass` on the FalkorDB/Redis service in both compose files through the image's `REDIS_ARGS` environment variable — never a `command:` override, which would bypass the FalkorDB entrypoint and stop the graph module from loading. The healthcheck picks the password up the same way. When set, point `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL` at `redis://:<password>@…`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues, and rate-limit counters.
+- `REDIS_PASSWORD` arms `--requirepass` on the FalkorDB/Redis service through the image's `REDIS_ARGS` environment variable — never a `command:` override, which would bypass the FalkorDB entrypoint and stop the graph module from loading. It is **required** in `compose.prod.yaml` (like `DB_PASSWORD`) and optional in the single-host `compose.yaml`; `configs/.env.production` embeds it in `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL`, and the healthcheck authenticates through `REDISCLI_AUTH`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues (pickled RQ jobs), and rate-limit counters.
+- `QDRANT_API_KEY` is **required** in `compose.prod.yaml`: it becomes the Qdrant server's `QDRANT__SERVICE__API_KEY` and the key the app sends. Qdrant has no authentication otherwise, so anything on `app_net` could read, overwrite or drop the RAG corpus and long-term memory. Set `QDRANT_HTTPS=true` against any instance reached over a network you do not control.
+- The nginx gateway applies per-client `limit_req` / `limit_conn` zones (generous for the API, 30 r/min on `/admin` and `/api/auth/*`, concurrency-only on streams) and answers `429` — see [Deployment → Nginx Configuration](deployment.md#nginx-configuration).
 
 The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment. The default single-host `compose.yaml` applies the same rule — the Docker-in-Docker daemon needs `privileged: true` (root-equivalent on the compose host), so it lives in the opt-in `compose.sandbox.yaml` overlay and joins the stack only via `docker compose -f compose.yaml -f compose.sandbox.yaml up -d`. See [Deployment › Opt-in sandbox overlay](deployment.md#opt-in-sandbox-overlay-single-host).
 
@@ -981,6 +1009,14 @@ auth never touches this counter, so a mistyped token or a NAT'd client is not
 penalised. Set it to a blank value to disable the throttle (not recommended —
 it leaves every authenticated route brute-forceable).
 
+A failure is any *presented* credential that does not authenticate — whether
+the auth layer raises or, as it does for an unknown bearer token or API key,
+resolves the caller to the anonymous identity. A request that carries no
+credential at all is not charged. IPv6 clients are bucketed by their **/64**
+(one subscriber usually holds a whole /64, so keying on the full address
+would hand an attacker 2^64 fresh budgets); IPv4-mapped IPv6 addresses count
+as the embedded IPv4 address. The MCP endpoint charges the same bucket.
+
 A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
 SQL-query limits) is rendered as a `429` RFC 9457 problem document
 (`urn:baselith:error:budget_exceeded`) wherever it is raised: a dedicated
@@ -993,6 +1029,20 @@ before the cost-control middleware could see them.
 ## Admin Account Lockout
 
 After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login. Each failure is recorded by a single atomic Lua script (increment, arm the window, extend to the lockout TTL at the threshold), so a crash mid-update can never leave a counter without an expiry — which used to mean a permanent lockout for that IP.
+
+**A concurrent burst cannot race past the threshold.** Lockout check, PBKDF2
+verification and failure accounting run as one sequence
+(`authenticate_admin_basic`): each derivation takes one of a small per-process
+pool of slots (`KDF_MAX_CONCURRENCY`, **2**), and the lockout is re-checked and
+the failure recorded *inside* the slot. Before, 500 parallel requests from one
+source all passed the up-front check while the counter was still below 5 —
+500 guesses and 500 PBKDF2 derivations at 600k iterations, enough to saturate
+every core. Now at most the threshold plus the slot count get a derivation. A
+credential verified within the cache TTL skips the slot entirely, so a
+legitimate burst (dashboard polls, metrics scrapes) never waits. Clients are
+keyed by IPv4 address or IPv6 /64, as above. The in-memory fallback applies
+the same 60-second failure window as the Redis key, restarts counting once a
+lock has expired, and is bounded to 10 000 entries.
 
 !!! warning "Behind a reverse proxy: run uvicorn with `--proxy-headers`"
     IP-keyed protections (this lockout, anonymous rate limiting) key on
@@ -1038,10 +1088,10 @@ Following security best practices and the CORS specification, **credentials (coo
 
 `CSRFOriginMiddleware` (pure ASGI, `core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
 
-1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS`.
+1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS` — **or** the request must be same-origin: `Sec-Fetch-Site: same-origin`, or an `Origin` whose scheme, host and port equal the request's own (scheme + `Host` header; the fallback for browsers without Fetch metadata). A page served by the deployment itself — the `/admin` dashboard — therefore needs no `ALLOW_ORIGINS` entry. A *sibling* host (`Sec-Fetch-Site: same-site` with a foreign `Origin`) is **not** implicitly trusted: `same-site` also covers subdomains the operator may not control (user-content hosts, third-party-hosted subdomains), so split `api.`/`app.` deployments list the app origin in `ALLOW_ORIGINS`. Pin `TRUSTED_HOSTS` in production so the `Host` the comparison reads is one you serve.
 2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, the origin check is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)) and the Fetch-metadata fallback below still applies.
 3. **Fetch-metadata fallback**: A request with **no** `Origin` but `Sec-Fetch-Site: cross-site` is rejected — **including in wildcard mode**. The header is set by the user agent and cannot be forged from script, so its presence is positive proof that a *browser* initiated the request from another site. This closes the two gaps the `Origin` check alone leaves open: cross-site requests that reach the server without an `Origin` (origin-stripping intermediaries, some legacy form posts) and the wildcard no-op.
-4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted — `same-site` is by definition the operator's own registrable domain (e.g. split `api.`/`app.` subdomains).
+4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. Without an `Origin`, `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted; with an `Origin` present, rule 1 decides.
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
 
@@ -1060,17 +1110,20 @@ authenticated as the victim. This is Cross-Site WebSocket Hijacking, and an
 The same `CSRFOriginMiddleware` therefore also runs on `websocket` scopes,
 applying the **identical** decision function against `ALLOW_ORIGINS`:
 
-- Handshake with an `Origin` that is not allowlisted ⇒ rejected.
+- Handshake with an `Origin` that is not allowlisted and not the deployment's own origin ⇒ rejected.
 - Handshake with no `Origin` but `Sec-Fetch-Site: cross-site` ⇒ rejected.
 - Handshake with no `Origin` at all ⇒ allowed (native/CLI WebSocket clients).
 - Every handshake is checked: a WebSocket has no "safe method" equivalent, it is
   bidirectional from the first frame.
 
-!!! warning "List your own origin"
+!!! note "Same-origin UIs need no entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too. A browser UI
     served from the same deployment (e.g. the `baselithbot` dashboard, which opens
-    `/ws/pair`) therefore needs its own origin in `ALLOW_ORIGINS` — exactly as it
-    already does for state-changing HTTP requests.
+    `/ws/pair`) is admitted when that `Origin` equals the handshake's own origin
+    (`ws`→`http`, `wss`→`https`, host and port from the `Host` header). Behind a
+    TLS-terminating proxy that does not forward the scheme, the server sees
+    `ws`/`http` while the page is `https`: list the public origin in
+    `ALLOW_ORIGINS` (or enable proxy-header handling) in that case.
 
 **How the handshake is denied at the ASGI level.** Returning without answering
 would leave the peer hanging until it times out, so the middleware always emits
@@ -1420,6 +1473,11 @@ outbound call sites build on — full API reference in [Security & Encryption
   PyJWT's own `PyJWKClient` (which fetches via `urllib.request.urlopen`,
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
+  The token's `kid` is read from an *unverified* header, so a re-fetch on an
+  unknown `kid` is rate-limited: at most one forced refresh per **60 s**,
+  single-flight across concurrent verifications, and a failed fetch is not
+  retried for **5 s**. A forged token therefore cannot turn into an outbound
+  IdP call; a genuine key rotation is picked up at most 60 s late.
 - **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
   gated by `A2AClientConfig.allow_internal_endpoints` (env
   `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:

@@ -37,6 +37,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from core.observability.logging import get_logger
+from core.services.llm._vllm_preflight import (
+    VLLMProbe,
+    check_vllm_endpoints,
+    probe_vllm,
+)
 
 if TYPE_CHECKING:
     from core.config.services import LLMConfig
@@ -45,7 +50,7 @@ logger = get_logger(__name__)
 
 #: Providers served from a host the deployment itself runs, and therefore the
 #: only ones this module may probe over the network.
-_LOCAL_PROVIDERS = ("ollama",)
+_LOCAL_PROVIDERS = ("ollama", "vllm")
 
 #: The endpoint an Ollama client reaches when nothing is configured.
 DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434"
@@ -109,7 +114,7 @@ def check_configuration(config: LLMConfig) -> list[PreflightFinding]:
     Returns:
         list: Every problem found, most structural first.
     """
-    from core.services.llm.runtime import provider_configured
+    from core.services.llm.runtime import provider_configured, provider_setup_hint
 
     findings: list[PreflightFinding] = []
 
@@ -143,7 +148,7 @@ def check_configuration(config: LLMConfig) -> list[PreflightFinding]:
                     f"primary provider {config.provider!r} has no usable "
                     f"credentials, so every request will fail at call time"
                 ),
-                remedy=f"Set the API key for {config.provider!r}.",
+                remedy=provider_setup_hint(config.provider),
             )
         )
 
@@ -154,7 +159,7 @@ def check_configuration(config: LLMConfig) -> list[PreflightFinding]:
 def _check_chain(config: LLMConfig) -> list[PreflightFinding]:
     """Findings about ``LLM_FALLBACK_CHAIN``."""
     from core.services.llm._fallback_support import parse_fallback_chain
-    from core.services.llm.runtime import provider_configured
+    from core.services.llm.runtime import provider_configured, provider_setup_hint
 
     findings: list[PreflightFinding] = []
     spec = getattr(config, "fallback_chain", "") or ""
@@ -186,7 +191,7 @@ def _check_chain(config: LLMConfig) -> list[PreflightFinding]:
                         f"credentials: the chain is decorative and the primary's "
                         f"first outage is an outage"
                     ),
-                    remedy=f"Set the API key for {provider!r}, or drop the stage.",
+                    remedy=f"{provider_setup_hint(provider)} Or drop the stage.",
                 )
             )
         if provider in _LOCAL_PROVIDERS:
@@ -286,6 +291,7 @@ async def check_local_endpoints(
     operator rather than by a process booting.
     """
     findings: list[PreflightFinding] = []
+    findings.extend(await check_vllm_endpoints(config, timeout=timeout))
     for endpoint, models in _ollama_targets(config).items():
         installed = await probe_ollama(endpoint, timeout=timeout)
         if installed is None:
@@ -424,8 +430,10 @@ async def run_llm_preflight(
 __all__ = [
     "LLMPreflightError",
     "PreflightFinding",
+    "VLLMProbe",
     "check_configuration",
     "check_local_endpoints",
     "probe_ollama",
+    "probe_vllm",
     "run_llm_preflight",
 ]

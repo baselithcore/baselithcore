@@ -475,6 +475,16 @@ secrets:
     # DATA_ENCRYPTION_KEYS: "v1:..."
     # DB_PASSWORD: "..."
     # ANTHROPIC_API_KEY: "..."
+    # The chart deploys no Redis/FalkorDB or Qdrant; it points at yours. Run
+    # both with authentication and hand the credentials over here — an
+    # unauthenticated Redis exposes the job queue (pickled RQ jobs) and every
+    # rate-limit counter to anything that can reach it, an unauthenticated
+    # Qdrant the whole RAG corpus. The app logs a warning in production for a
+    # plain redis:// URL without a password.
+    # CACHE_REDIS_URL: "rediss://:<password>@redis.example:6380/1"
+    # QUEUE_REDIS_URL: "rediss://:<password>@redis.example:6380/2"
+    # GRAPH_DB_URL: "rediss://:<password>@redis.example:6380"
+    # QDRANT_API_KEY: "..."
 
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []
@@ -870,6 +880,23 @@ backup:
     retentionDays: 0
     credentialsSecret: ""
     extraArgs: []
+    # The rclone upload container. Streams files, so memory stays small.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  # The wait-for-db and pg_dump containers. Without requests the pod is
+  # BestEffort — first to be evicted under node pressure, mid-dump — and a
+  # namespace ResourceQuota rejects it outright. pg_dump | gzip is CPU-bound
+  # and streams; raise the limit for a very large database.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30

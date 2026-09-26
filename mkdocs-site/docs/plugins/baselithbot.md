@@ -123,7 +123,17 @@ Provider secrets are written **at runtime** — nothing is shipped — to
 Fernet-encrypted with the master key from `BASELITHBOT_SECRET_KEY`; when
 that variable is unset a key is generated once and persisted next to it as
 `.state/.secret_key` (mode `0600`). The dashboard never echoes plaintext —
-only `***<last4>` previews.
+only `***<last4>` previews. Channel credentials get the same treatment,
+including incoming-webhook URLs (`webhook_url`), whose path is the credential.
+
+Inbound channel webhooks (`POST /api/baselithbot/inbound/{channel}`) are
+signature-verified and fail closed. The `dm_policy` section of the plugin
+config (per-channel `allowed_senders` / `blocked_senders` / rate limit, as
+written by the plugin CLI's `pairing approve`) is enforced from plugin
+initialisation. The body is capped at 1 MiB while streaming, and Slack and
+Discord signed timestamps must fall inside a ±5-minute replay window. The
+full model is in the plugin's
+[security guide](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/security.md).
 
 ### Post-write verification (computer-use)
 

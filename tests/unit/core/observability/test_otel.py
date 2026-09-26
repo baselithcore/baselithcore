@@ -165,11 +165,26 @@ class TestOptionalExport:
     forever, so it must not be attached at all.
     """
 
+    @pytest.fixture(autouse=True)
+    def _fresh_process_provider(self, monkeypatch):
+        """Each test builds its own provider, as a fresh process would."""
+        monkeypatch.setattr(otel, "_global_tracer_provider", None)
+        monkeypatch.setattr(otel, "_span_pipeline", None)
+
     @staticmethod
     def _span_processor_types(provider) -> list[str]:
-        """Names of the processor classes registered on *provider*."""
-        multi = provider._active_span_processor
-        return [type(p).__name__ for p in multi._span_processors]
+        """Names of the processor classes registered on *provider*.
+
+        The exporters sit behind the swappable pipeline processor, so its
+        current generation is flattened into the list.
+        """
+        names: list[str] = []
+        for proc in provider._active_span_processor._span_processors:
+            names.append(type(proc).__name__)
+            inner = getattr(proc, "_inner", None)
+            if inner is not None:
+                names.extend(type(p).__name__ for p in inner._span_processors)
+        return names
 
     @pytest.mark.parametrize("endpoint", ["", "   ", None])
     def test_blank_endpoint_means_no_collector(self, endpoint):

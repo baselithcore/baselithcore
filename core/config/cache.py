@@ -152,6 +152,14 @@ class SemanticCacheConfig(BaseSettings):
         extra="ignore",
     )
 
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the semantic (embedding-similarity) LLM response cache in "
+            "LLMService; needs the [rag] extra for the embedder"
+        ),
+    )
+
     maxsize: int = Field(
         default=1000, description="Maximum number of semantic cache entries per tenant"
     )

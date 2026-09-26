@@ -11,6 +11,7 @@ import inspect
 from typing import Any, cast
 from uuid import UUID
 
+from core.context import get_current_tenant_id
 from core.models.domain import Document
 from core.observability.logging import get_logger
 from core.services.vectorstore.service import get_vectorstore_service
@@ -393,10 +394,45 @@ class VectorMemoryProvider(MemoryProvider):
         return items, next_offset
 
     async def clear(self, memory_type: MemoryType | None = None) -> None:
-        """Clear memories from the vector store."""
+        """Clear the current tenant's memories (optionally of one type).
+
+        The collection is shared by every tenant, so this is a tenant-scoped
+        filtered delete — never ``delete_collection``, which used to wipe all
+        tenants' memories and ignored ``memory_type``. With a type, only
+        points whose ``type`` payload matches are removed; without one, every
+        point owned by the ambient tenant is.
+
+        A backend without filtered deletion leaves the memories in place and
+        logs a warning: refusing is the only safe answer on a shared
+        collection.
+
+        Args:
+            memory_type: Restrict the delete to this memory type.
+        """
+        tenant_id = get_current_tenant_id()
+        backend = getattr(self.vector_service, "provider", None)
+        delete_by_filter = getattr(backend, "delete_by_filter", None)
+        if delete_by_filter is None:
+            logger.warning(
+                "vector_memory_clear_unsupported",
+                extra={"collection": self.collection_name, "tenant_id": tenant_id},
+            )
+            return
+        if memory_type is not None:
+            key, value = "type", memory_type.value
+        else:
+            key, value = "tenant_id", tenant_id
         try:
-            await self.vector_service.delete_collection(self.collection_name)
-            logger.info(f"Cleared vector memory collection: {self.collection_name}")
+            await delete_by_filter(
+                collection_name=self.collection_name,
+                key=key,
+                value=value,
+                tenant_id=tenant_id,
+            )
+            logger.info(
+                f"Cleared vector memory in {self.collection_name} "
+                f"(tenant={tenant_id}, type={memory_type.value if memory_type else '*'})"
+            )
         except Exception as e:
             logger.error(f"Failed to clear vector memory: {e}")
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -128,6 +129,9 @@ class AutoFineTuningService:
         # and eviction so the average is O(1) instead of O(n) per event.
         self._score_sum = 0.0
         self._running = False
+        # Handle returned by ``event_bus.subscribe`` so :meth:`stop` actually
+        # detaches the handler instead of leaving it on the bus forever.
+        self._unsubscribe: Callable[[], None] | None = None
         self._lock = asyncio.Lock()
         self._total_samples_collected = 0
         # Samples rejected by the scrub gate because they carried an
@@ -157,7 +161,7 @@ class AutoFineTuningService:
             logger.info("AutoFineTuningService disabled by config")
             return
 
-        self.event_bus.subscribe(
+        self._unsubscribe = self.event_bus.subscribe(
             EventNames.EVALUATION_COMPLETED, self._on_evaluation_completed
         )
         self._running = True
@@ -167,7 +171,10 @@ class AutoFineTuningService:
         )
 
     def stop(self) -> None:
-        """Stop listening to events."""
+        """Stop listening to events and drop the EVALUATION_COMPLETED subscription."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
         self._running = False
         logger.info("AutoFineTuningService stopped")
 

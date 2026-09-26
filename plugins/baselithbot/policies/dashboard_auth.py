@@ -37,6 +37,7 @@ import time
 
 from core.observability.logging import get_logger
 from fastapi import HTTPException, Request, status
+from pydantic import SecretStr
 
 logger = get_logger(__name__)
 
@@ -60,7 +61,9 @@ class DashboardAuth:
         *,
         allow_insecure: bool | None = None,
     ) -> None:
-        self._token = token or os.environ.get(_ENV_TOKEN, "").strip() or None
+        raw_token = token or os.environ.get(_ENV_TOKEN, "").strip() or None
+        # SecretStr keeps the bearer out of repr()/Sentry frames.
+        self._token: SecretStr | None = SecretStr(raw_token) if raw_token else None
         self._allow_insecure = (
             allow_insecure if allow_insecure is not None else _insecure_bypass_enabled()
         )
@@ -137,7 +140,11 @@ class DashboardAuth:
                 detail="missing dashboard bearer token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        if not hmac.compare_digest(presented, self._token):
+        # Compare bytes: ``compare_digest`` raises TypeError on a non-ASCII
+        # ``str``, which turned a garbage header into a 500 instead of a 403.
+        if not hmac.compare_digest(
+            presented.encode("utf-8"), self._token.get_secret_value().encode("utf-8")
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="invalid dashboard bearer token",

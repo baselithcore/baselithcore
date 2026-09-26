@@ -13,25 +13,43 @@ Verification goes through the shared per-request memo in
 :mod:`core.middleware._auth_memo`, so the tenant middleware and the route's auth
 dependency reuse this one result instead of re-verifying the same token.
 
-Identity and tenant windows are enforced through one batched
-check-then-consume (``check_and_consume_pair``): all four counters are read
-in a single round trip and consumed only if every window has room, so a
-rejected request burns no budget on either subject.
+Identity and tenant windows are enforced through one atomic
+check-then-consume (``check_and_consume_pair``): all four counters are checked
+and consumed only if every window has room, so a rejected request burns no
+budget on either subject.
+
+The unit is taken *before* the request reaches the route (the check must
+precede the work), and given back when the request turns out to have done
+none: a response whose status is in :data:`REFUNDED_STATUSES` — an inner
+guard's ``401``/``403``/``429``, an unmatched ``404``/``405``, a ``503`` from a
+plugin that failed to activate — triggers ``refund_pair``. The status is read
+from ``http.response.start``, so streaming responses are handled the same way
+and nothing is buffered.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.auth import AuthManager, AuthUser
 from core.config.quotas import get_quota_config
 from core.middleware._auth_memo import EXEMPT_PATHS, auth_manager, resolve_user
 from core.observability.logging import get_logger
-from core.quotas.manager import QuotaExceededError, get_quota_manager
+from core.quotas.manager import (
+    QuotaExceededError,
+    QuotaManager,
+    get_quota_manager,
+)
 
 logger = get_logger(__name__)
+
+#: Statuses that mean "admitted, but no work was done": the quota unit spent on
+#: admission is refunded. 5xx other than 503 are *not* refunded — the handler
+#: may well have done (and billed) the work before failing.
+REFUNDED_STATUSES: frozenset[int] = frozenset({401, 403, 404, 405, 429, 503})
 
 
 class QuotaMiddleware:
@@ -74,13 +92,35 @@ class QuotaMiddleware:
             return
 
         quotas = get_quota_manager()
+        # One timestamp for consume and refund, so a refund near midnight hits
+        # the same period keys the consumption did.
+        when = datetime.now(UTC)
         try:
-            await quotas.check_and_consume_pair(user.user_id, user.tenant_id)
+            await quotas.check_and_consume_pair(user.user_id, user.tenant_id, now=when)
         except QuotaExceededError as exc:
             await self._too_many(send, exc)
             return
 
-        await self.app(scope, receive, send)
+        status: list[int] = []
+
+        async def send_watching_status(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                status.append(int(message["status"]))
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_watching_status)
+        finally:
+            if status and status[0] in REFUNDED_STATUSES:
+                await self._refund(quotas, user, when)
+
+    @staticmethod
+    async def _refund(quotas: QuotaManager, user: AuthUser, when: datetime) -> None:
+        """Best-effort give-back; a failure leaves the unit spent."""
+        try:
+            await quotas.refund_pair(user.user_id, user.tenant_id, now=when)
+        except Exception as exc:
+            logger.warning("quota_refund_failed: %s", type(exc).__name__)
 
     @staticmethod
     async def _too_many(send: Send, exc: QuotaExceededError) -> None:

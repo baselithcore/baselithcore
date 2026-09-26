@@ -31,3 +31,26 @@ def mock_security_config():
     config.enable_hsts = False
     config.hsts_max_age = 31536000
     return config
+
+
+@pytest.fixture
+def idem_verified_credentials(monkeypatch):
+    """Treat every credential as valid for the idempotency layer, except ones
+    containing ``invalid`` (which resolve to the anonymous user, exactly as
+    ``AuthManager.authenticate`` answers a bad credential).
+
+    Idempotency only replays/stores for a credential that verifies; its unit
+    tests exercise the replay machinery, not token verification."""
+    from core.auth import AuthRole, AuthUser
+    from core.middleware import _idempotency_replay
+    from core.middleware._auth_memo import effective_auth_header
+
+    async def _resolve(scope):
+        header = effective_auth_header(scope)
+        if not header:
+            return None
+        if "invalid" in header:
+            return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
+        return AuthUser(user_id=f"u-{header}", roles={AuthRole.USER})
+
+    monkeypatch.setattr(_idempotency_replay, "resolve_user", _resolve)

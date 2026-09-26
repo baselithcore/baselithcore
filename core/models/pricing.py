@@ -127,7 +127,7 @@ LOCAL_PRICE: Final[ModelPrice] = ModelPrice(0.0, 0.0)
 #: visible. Applied to a local model it invents spend that never happened, and
 #: a per-run or per-tenant budget aborts on it. Local models are priced at zero
 #: instead, and their real cost is watched as tokens, not dollars.
-LOCAL_PROVIDERS: Final[frozenset[str]] = frozenset({"ollama"})
+LOCAL_PROVIDERS: Final[frozenset[str]] = frozenset({"ollama", "vllm"})
 
 
 def is_local_model_id(model_id: str) -> bool:

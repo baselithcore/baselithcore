@@ -5,13 +5,22 @@ returns a ``task_id`` immediately; ``GET /agent/status/{task_id}`` polls
 the TaskTracker. Terminal webhooks (``agent.completed`` / ``agent.failed``)
 are emitted by the job itself, so subscribers need not poll at all. Queue
 infrastructure being down surfaces as 503, never a hang.
+
+The status record is tenant-scoped: it stores the tenant that enqueued the
+run, and a poll from any other tenant gets the same 404 as an unknown id.
+The queue and tracker are synchronous Redis clients, so both calls run in a
+worker thread (``asyncio.to_thread`` copies the request's context, tenant
+included) instead of blocking the event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core.context import get_current_tenant_id
 from core.middleware import require_user
 from core.observability.logging import get_logger
 
@@ -44,7 +53,7 @@ def _tracker():
 async def submit_async_run(req: AsyncRunRequest) -> dict:
     """Enqueue an agent run; returns the task id to poll (or subscribe)."""
     try:
-        task_id = _enqueue(req.query, req.conversation_id)
+        task_id = await asyncio.to_thread(_enqueue, req.query, req.conversation_id)
     except Exception as exc:
         logger.warning("async_run_enqueue_failed error=%s", exc)
         raise HTTPException(status_code=503, detail="task queue unavailable") from exc
@@ -53,9 +62,18 @@ async def submit_async_run(req: AsyncRunRequest) -> dict:
 
 @router.get("/status/{task_id}")
 async def async_run_status(task_id: str) -> dict:
-    """Current TaskTracker record for the run (404 when unknown)."""
+    """Current TaskTracker record for the run.
+
+    404 when the id is unknown *or* belongs to another tenant — the two are
+    deliberately indistinguishable.
+    """
+    tenant_id = get_current_tenant_id()
+
+    def _read() -> dict | None:
+        return _tracker().get_status_for_tenant(task_id, tenant_id)
+
     try:
-        status = _tracker().get_status(task_id)
+        status = await asyncio.to_thread(_read)
     except Exception as exc:
         logger.warning("async_run_status_failed error=%s", exc)
         raise HTTPException(status_code=503, detail="task tracker unavailable") from exc

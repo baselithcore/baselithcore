@@ -1,76 +1,32 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getEventsStreamUrl, type DashboardEvent, type OverviewResponse } from '../lib/api';
+import { collectInvalidations } from './dashboardEventRouting';
 
 export type SseState = 'connecting' | 'open' | 'closed' | 'error';
 
-interface DashboardContextValue {
+interface OverviewContextValue {
   overview: OverviewResponse | undefined;
   overviewLoading: boolean;
   overviewFetching: boolean;
-  events: DashboardEvent[];
-  eventState: SseState;
 }
 
-const DashboardContext = createContext<DashboardContextValue | null>(null);
+// Three contexts rather than one: a single value object holding events,
+// connection state and the overview re-rendered every consumer (the TopBar
+// on every page included) once per SSE frame. Now a component re-renders
+// only when the slice it reads changes.
+const OverviewContext = createContext<OverviewContextValue | null>(null);
+const EventsContext = createContext<DashboardEvent[] | null>(null);
+const EventStateContext = createContext<SseState | null>(null);
 
-const OVERVIEW_REFRESH_TYPES = new Set<string>([
-  'session.created',
-  'session.reset',
-  'session.deleted',
-  'skill.clawhub_synced',
-  'skill.installed',
-  'skill.rescanned',
-  'skill.removed',
-  'cron.removed',
-  'cron.custom_registered',
-  'cron.custom_updated',
-  'node.token_issued',
-  'node.revoked',
-  'workspace.created',
-  'workspace.updated',
-  'workspace.deleted',
-  'agent.custom_registered',
-  'agent.custom_updated',
-  'agent.custom_deleted',
-  'channel.started',
-  'channel.stopped',
-  'channel.config_updated',
-  'channel.config_deleted',
-  'channel.inbound',
-  'canvas.rendered',
-  'canvas.cleared',
-  'provider_keys.updated',
-  'provider_keys.deleted',
-]);
-
-const SKILL_REFRESH_TYPES = new Set<string>([
-  'skill.clawhub_configured',
-  'skill.clawhub_synced',
-  'skill.installed',
-  'skill.rescanned',
-  'skill.removed',
-]);
-
-const RUNTIME_REFRESH_TYPES = new Set<string>(['computer_use.updated', 'stealth.updated']);
-const APPROVAL_REFRESH_TYPES = new Set<string>([
-  'approval.pending',
-  'approval.resolved',
-  'approval.approved',
-  'approval.denied',
-]);
-
-function readSessionId(parsed: DashboardEvent): string | null {
-  const payload = parsed.payload;
-  if (!payload || typeof payload !== 'object') return null;
-  if ('session_id' in payload && payload.session_id != null) {
-    return String(payload.session_id);
-  }
-  if (parsed.type === 'session.created' && 'id' in payload && payload.id != null) {
-    return String(payload.id);
-  }
-  return null;
-}
+/** Hard cap on the in-memory event ring; the Logs page reads at most this many. */
+export const MAX_BUFFERED_EVENTS = 500;
+/** Frames arriving inside this window are committed as one render. */
+const FLUSH_INTERVAL_MS = 150;
+/** Overview poll while the SSE stream is live (events already invalidate it). */
+const OVERVIEW_POLL_LIVE_MS = 30_000;
+/** Overview poll while the stream is down — the only freshness source left. */
+const OVERVIEW_POLL_FALLBACK_MS = 7_000;
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -80,60 +36,47 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const overviewQuery = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 7_000,
+    refetchInterval: eventState === 'open' ? OVERVIEW_POLL_LIVE_MS : OVERVIEW_POLL_FALLBACK_MS,
   });
 
   useEffect(() => {
     let cancelled = false;
     let source: EventSource | null = null;
     let retryTimer: number | undefined;
+    let flushTimer: number | undefined;
     let attempt = 0;
+    let pending: DashboardEvent[] = [];
+
+    const flush = () => {
+      flushTimer = undefined;
+      if (cancelled || pending.length === 0) return;
+      const batch = pending;
+      pending = [];
+      setEvents((prev) => {
+        const next = prev.concat(batch);
+        return next.length > MAX_BUFFERED_EVENTS
+          ? next.slice(next.length - MAX_BUFFERED_EVENTS)
+          : next;
+      });
+      for (const queryKey of collectInvalidations(batch)) {
+        queryClient.invalidateQueries({ queryKey });
+      }
+    };
 
     const onMessage = (e: MessageEvent<string>) => {
+      let parsed: DashboardEvent;
       try {
-        const parsed = JSON.parse(e.data) as DashboardEvent;
-        setEvents((prev) => {
-          const next = [...prev, parsed];
-          return next.length > 500 ? next.slice(next.length - 500) : next;
-        });
-        if (OVERVIEW_REFRESH_TYPES.has(parsed.type)) {
-          queryClient.invalidateQueries({ queryKey: ['overview'] });
-        }
-        if (SKILL_REFRESH_TYPES.has(parsed.type)) {
-          queryClient.invalidateQueries({ queryKey: ['skills'] });
-        }
-        if (RUNTIME_REFRESH_TYPES.has(parsed.type)) {
-          queryClient.invalidateQueries({ queryKey: ['overview'] });
-          queryClient.invalidateQueries({ queryKey: ['computer-use'] });
-          queryClient.invalidateQueries({ queryKey: ['stealth'] });
-          queryClient.invalidateQueries({ queryKey: ['audit-log'] });
-          queryClient.invalidateQueries({ queryKey: ['approvals'] });
-        }
-        if (APPROVAL_REFRESH_TYPES.has(parsed.type)) {
-          queryClient.invalidateQueries({ queryKey: ['approvals'] });
-        }
-        if (parsed.type.startsWith('session.')) {
-          queryClient.invalidateQueries({ queryKey: ['sessions'] });
-          const sessionId = readSessionId(parsed);
-          if (sessionId) {
-            queryClient.invalidateQueries({ queryKey: ['sessionHistory', sessionId] });
-          }
-        }
-        if (parsed.type.startsWith('run.')) {
-          queryClient.invalidateQueries({ queryKey: ['runTaskLatest'] });
-          queryClient.invalidateQueries({ queryKey: ['runTaskRecent'] });
-          queryClient.invalidateQueries({ queryKey: ['replay-runs'] });
-          queryClient.invalidateQueries({ queryKey: ['replay-run'] });
-          const runId =
-            parsed.payload && typeof parsed.payload === 'object' && 'run_id' in parsed.payload
-              ? String(parsed.payload.run_id)
-              : '';
-          if (runId) {
-            queryClient.invalidateQueries({ queryKey: ['runTaskById', runId] });
-          }
-        }
+        parsed = JSON.parse(e.data) as DashboardEvent;
       } catch {
-        /* ignore malformed frames */
+        return; // ignore malformed frames
+      }
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') return;
+      pending.push(parsed);
+      if (pending.length > MAX_BUFFERED_EVENTS) {
+        pending = pending.slice(pending.length - MAX_BUFFERED_EVENTS);
+      }
+      if (flushTimer === undefined) {
+        flushTimer = window.setTimeout(flush, FLUSH_INTERVAL_MS);
       }
     };
 
@@ -156,6 +99,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         src.close();
         if (source === src) source = null;
         // Exponential backoff capped at 30s (1s, 2s, 4s, 8s, 16s, 30s…).
+        // A fresh ticket is minted on every reconnect: the old one is
+        // single-use and already consumed.
         const delay = Math.min(30_000, 1000 * 2 ** attempt);
         attempt += 1;
         retryTimer = window.setTimeout(connect, delay);
@@ -166,11 +111,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       src.onmessage = onMessage;
     };
 
-    connect();
+    void connect();
 
     return () => {
       cancelled = true;
       window.clearTimeout(retryTimer);
+      window.clearTimeout(flushTimer);
+      pending = [];
       if (source) {
         source.onmessage = null;
         source.close();
@@ -180,30 +127,33 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     };
   }, [queryClient]);
 
-  const value = useMemo(
+  const overviewValue = useMemo(
     () => ({
       overview: overviewQuery.data,
       overviewLoading: overviewQuery.isLoading,
       overviewFetching: overviewQuery.isFetching,
-      events,
-      eventState,
     }),
-    [eventState, events, overviewQuery.data, overviewQuery.isFetching, overviewQuery.isLoading]
+    [overviewQuery.data, overviewQuery.isFetching, overviewQuery.isLoading]
   );
 
-  return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;
+  return (
+    <OverviewContext.Provider value={overviewValue}>
+      <EventStateContext.Provider value={eventState}>
+        <EventsContext.Provider value={events}>{children}</EventsContext.Provider>
+      </EventStateContext.Provider>
+    </OverviewContext.Provider>
+  );
 }
 
-function useDashboardContext() {
-  const ctx = useContext(DashboardContext);
-  if (!ctx) {
+function required<T>(value: T | null): T {
+  if (value === null) {
     throw new Error('Dashboard hooks must be used inside DashboardProvider');
   }
-  return ctx;
+  return value;
 }
 
 export function useDashboardOverview() {
-  const ctx = useDashboardContext();
+  const ctx = required(useContext(OverviewContext));
   return {
     data: ctx.overview,
     isLoading: ctx.overviewLoading,
@@ -211,12 +161,18 @@ export function useDashboardOverview() {
   } as const;
 }
 
-export function useDashboardEvents(max = 200) {
-  const ctx = useDashboardContext();
-  const events = useMemo(() => {
-    if (max <= 0 || ctx.events.length <= max) return ctx.events;
-    return ctx.events.slice(ctx.events.length - max);
-  }, [ctx.events, max]);
+/** Connection state only — does not re-render when events arrive. */
+export function useDashboardEventState(): SseState {
+  return required(useContext(EventStateContext));
+}
 
-  return { events, state: ctx.eventState } as const;
+export function useDashboardEvents(max = 200) {
+  const all = required(useContext(EventsContext));
+  const state = useDashboardEventState();
+  const events = useMemo(() => {
+    if (max <= 0 || all.length <= max) return all;
+    return all.slice(all.length - max);
+  }, [all, max]);
+
+  return { events, state } as const;
 }

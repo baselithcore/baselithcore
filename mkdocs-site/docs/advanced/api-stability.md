@@ -102,6 +102,12 @@ It works on classes too, warning at construction, and appends a
 `.. deprecated::` note to the docstring so `help()` shows it. The warning
 points at the caller, not at the framework.
 
+A whole deprecated package announces itself at import time instead, with the
+same wording: `core.agents` and `core.goals` emit a `DeprecationWarning` when
+imported (deprecated since 0.39, removed in 1.0; use the `browser_agent` /
+`coding_agent` and `goals` plugins). Decorating their re-exported classes would
+patch the plugin classes themselves and warn every plugin user.
+
 ## What the gate reports
 
 `scripts/check_public_api.py` states the release type a removal implies,

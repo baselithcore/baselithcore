@@ -42,7 +42,7 @@ The **agentic patterns** are organized into 7 functional categories:
 | 19  | **Memory Tiering**     | Infrastructure | `core/memory/`      | Multi-level memory system                 |
 | 20  | **Multi-Tenancy**      | Infrastructure | `core/context.py`   | Data isolation between tenants            |
 | 21  | **Task Queue**         | Infrastructure | `core/task_queue/`  | Distributed queues for async jobs         |
-| 22  | **Evaluation**         | Infrastructure | `core/services/evaluation/` | LLM response quality evaluation       |
+| 22  | **Evaluation**         | Infrastructure | `core/evaluation/`          | LLM response quality evaluation       |
 
 !!! note "In the running app versus in the library"
     A pattern having a module does not mean the default app runs it. These are
@@ -126,7 +126,8 @@ from core.guardrails import InputGuard, OutputGuard
 input_guard = InputGuard()
 output_guard = OutputGuard()
 
-# Validate user input (validate_async is available for async pipelines)
+# Validate user input; the orchestrator's guard_input_async adds the
+# opt-in moderation and LLM-taxonomy layers on top of this regex layer
 result = input_guard.validate(user_input)
 if not result.is_valid:
     return "Invalid input: " + (result.blocked_reason or "blocked")
@@ -163,7 +164,10 @@ safe_output = output.filtered_output
     redaction patterns split across chunk boundaries are still caught. The
     inbound gate (`guard_input_async`) also layers **content moderation**
     (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
-    when `BASELITH_MODERATION_PROVIDER` names a provider. Moderation of the
+    when `BASELITH_MODERATION_PROVIDER` names a provider; a surface that
+    validates before handing off (the chat service) reuses the same compiled
+    `InputGuard` through `get_input_guard()` rather than building one per
+    request. Moderation of the
     **output** side is a second opt-in (`BASELITH_MODERATION_OUTPUT=true` —
     one extra moderation call per response): `guard_output_async` replaces a
     flagged final response, and `moderate_stream` re-checks the accumulated
@@ -780,6 +784,13 @@ context = await memory.get_context_async(max_tokens=2000)
 related = await memory.recall(query, limit=5)
 ```
 
+!!! note "Post-response memory writes are bounded"
+    The orchestrator writes each turn to memory as a tracked background task
+    (`core/orchestration/mixins/_memory_write.py`): at most 32 run at once and
+    the backlog (running plus queued) is capped at 1024. Past the cap a new
+    write is dropped with a debug log and counted on
+    `_memory_writes_dropped` — memory is best-effort, the request path is not.
+
 ---
 
 ### Multi-Tenancy
@@ -843,32 +854,28 @@ thread or an executor if you are inside a hot async path.
 
 ### Evaluation
 
-**Module**: `core/services/evaluation/`
+**Module**: `core/evaluation/`
 
-LLM response quality evaluation using 4 RAG metrics:
+LLM-as-a-Judge quality evaluation: the event-driven `EvaluationService` judges
+completed flows, and the RAG metric evaluators score a single answer:
 
-| Metric                 | When                   | Description                                          |
-| ---------------------- | ---------------------- | ---------------------------------------------------- |
-| `faithfulness`         | Always                 | How well the answer is grounded in retrieved context |
-| `answer_relevancy`     | Always                 | How relevant the answer is to the query              |
-| `contextual_precision` | With `expected_output` | Ranking quality of retrieved documents               |
-| `contextual_recall`    | With `expected_output` | Coverage of ground-truth in retrieved context        |
+| Metric             | Evaluator                  | Description                                          |
+| ------------------ | -------------------------- | ---------------------------------------------------- |
+| `faithfulness`     | `FaithfulnessEvaluator`    | How well the answer is grounded in retrieved context |
+| `answer_relevancy` | `AnswerRelevancyEvaluator` | How relevant the answer is to the query              |
 
 ```python
-from core.services.evaluation.service import EvaluationService
+import asyncio
 
-evaluation = EvaluationService()
+from core.evaluation.metrics import FaithfulnessEvaluator
 
-metrics = await evaluation.evaluate_rag_response(
-    query=user_query,
-    response=agent_response,
-    retrieved_contexts=contexts,
-    expected_output=ground_truth,  # enables precision/recall
+score = await asyncio.to_thread(
+    FaithfulnessEvaluator().measure, user_query, agent_response, contexts
 )
-
-print(f"Faithfulness: {metrics['faithfulness']}")
-print(f"Precision:    {metrics['contextual_precision']}")
 ```
+
+`core.services.evaluation` is a deprecated shim over this package — see
+[Evaluation](../core-modules/evaluation.md).
 
 ---
 
@@ -938,7 +945,7 @@ async def handle_complex_request(query: str, agent) -> str:
 | Infrastructure | Memory Tiering  | `core/memory/`      |
 |                | Multi-Tenancy   | `core/context.py`   |
 |                | Task Queue      | `core/task_queue/`          |
-|                | Evaluation      | `core/services/evaluation/` |
+|                | Evaluation      | `core/evaluation/`          |
 
 ---
 
@@ -962,10 +969,10 @@ live under `core/` and stay out of the way of plugin code.
 | Untrusted-output envelope (provenance boundary the model is told to distrust; **not idempotent** — one seam only) | `core/orchestration/tool_output.py` | `wrap_untrusted`, `unwrap_untrusted`, `escape_untrusted_markers`, `UNTRUSTED_OUTPUT_SYSTEM_RULE` | [Orchestration](../core-modules/orchestration.md#untrusted-output-envelope) |
 | Neutral message history (tool-call correlation, `is_error`, verbatim thinking, stable cache prefix) | `core/services/llm/messages.py`, `message_runtime.py` | `Message`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock`, `to_anthropic`, `to_openai`, `message_from_result`, `render_as_prompt`, `MessageCapableProvider` | [Neutral Message API](../core-modules/messages.md) |
 | One message round trip shared by both agent loops (typed `Agent` **and** the orchestrated ReAct loop; degrades to a rendered transcript + `CONVERGENCE_NUDGE`) | `core/services/llm/message_transport.py` | `generate_over_messages`, `service_supports_messages` | [Services](../core-modules/services.md#one-round-trip-for-a-message-history) |
-| ReAct native loop over an append-only message history (compaction that shortens block contents instead of dropping a turn) | `core/reasoning/react_native.py`, `core/reasoning/history.py`, `core/reasoning/react_tools.py` | `run_native_loop`, `compact_message_history`, `observation_is_error` | [Reasoning](../core-modules/reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) |
+| ReAct native loop over an append-only message history (compaction that shortens block contents instead of dropping a turn; opt-in LLM summary of older complete turns via `ORCHESTRATOR_COMPACTION_SUMMARIZE`) | `core/reasoning/react_native.py`, `core/reasoning/history.py`, `core/reasoning/history_summary.py`, `core/reasoning/react_tools.py` | `run_native_loop`, `compact_message_history`, `compact_history_for_loop`, `observation_is_error` | [Reasoning](../core-modules/reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) |
 | Agentic-vs-deterministic router (library API — not wired by default) | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
-| Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
-| Cross-process tool idempotency (process-wide ledger chosen by `ORCHESTRATOR_TOOL_LEDGER`: `auto`/`postgres`/`memory`/`off`; a ledger error fails open, the call runs unrecorded) | `core/orchestration/idempotency.py`, `idempotency_postgres.py`, `ledger_factory.py`, `core/reasoning/react_tool_gate.py` | `derive_idempotency_key`, `ToolLedger`, `InMemoryToolLedger`, `PostgresToolLedger`, `get_tool_ledger`, `reset_tool_ledger`, `DurableLedgerUnavailable`, `claim_ledger_entry` | [Orchestration](../core-modules/orchestration.md#choosing-the-ledger-orchestrator_tool_ledger) |
+| Durable checkpoint + idempotent replay (on by default; content-addressed step keys; used by both ReAct loops and by `Agent.run(checkpoint=...)`; the Postgres run listing strips heavy keys server-side and adds only the filters given, so it stays index-served) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `CheckpointManager.next_occurrence`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Cross-process tool idempotency (process-wide ledger chosen by `ORCHESTRATOR_TOOL_LEDGER`: `auto`/`postgres`/`memory`/`off`; a ledger error fails open, the call runs unrecorded; keys are content-addressed — tool + args + occurrence, never position — so a resumed run on a different path replays; legacy positional rows still honoured; the completed-row purge is bounded on the indexed `created_at` as well) | `core/orchestration/idempotency.py`, `call_keys.py`, `idempotency_postgres.py`, `ledger_factory.py`, `core/reasoning/react_tool_gate.py`, `core/reasoning/react_ledger.py` | `derive_call_key`, `CallOccurrences`, `claim_call`, `derive_idempotency_key` (legacy), `ToolLedger`, `InMemoryToolLedger`, `PostgresToolLedger`, `get_tool_ledger`, `reset_tool_ledger`, `DurableLedgerUnavailable`, `claim_ledger_entry` | [Orchestration](../core-modules/orchestration.md#choosing-the-ledger-orchestrator_tool_ledger) |
 | Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
 | Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
 | Crash-recovery sweep (one per fleet, cross-replica locked) + stale-run sweep (heartbeat-aware, `awaiting_approval` never swept) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `sweep_stale_runs`, `StaleSweepReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md#stale-run-sweep-sweep_stale_runs) |

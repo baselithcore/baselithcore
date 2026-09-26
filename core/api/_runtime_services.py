@@ -60,4 +60,45 @@ async def stop_runtime_services(app: Any) -> None:
             logger.warning("prompt_sync_stop_failed: %s", exc)
 
 
-__all__ = ["start_runtime_services", "stop_runtime_services"]
+async def drain_orchestrator() -> None:
+    """Let the chat orchestrator finish its background memory writes.
+
+    Runs before the storage pools close: a write still in flight when the
+    Postgres/Redis pools go away fails with a closed-pool error and the turn's
+    memory is lost. Reads the module global rather than ``get_chat_service()``
+    so a process that never served a chat does not build one just to close it.
+    """
+    try:
+        from core.chat import service as chat_service_module
+
+        chat_service = chat_service_module._chat_service
+        orchestrator = getattr(chat_service, "_agent", None)
+        aclose = getattr(orchestrator, "aclose", None)
+        if aclose is not None:
+            await aclose()
+    except Exception as exc:
+        logger.warning("orchestrator_drain_failed: %s", exc)
+
+
+async def close_shared_clients() -> None:
+    """Close the cached LLM services and the vector-store client (idempotent)."""
+    try:
+        from core.services.llm.runtime import close_llm_services
+
+        await close_llm_services()
+    except Exception as exc:
+        logger.warning("llm_services_close_failed: %s", exc)
+    try:
+        from core.services.vectorstore.service import close_vectorstore_service
+
+        await close_vectorstore_service()
+    except Exception as exc:
+        logger.warning("vectorstore_close_failed: %s", exc)
+
+
+__all__ = [
+    "close_shared_clients",
+    "drain_orchestrator",
+    "start_runtime_services",
+    "stop_runtime_services",
+]

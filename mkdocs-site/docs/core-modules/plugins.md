@@ -43,7 +43,8 @@ core/plugins/
 ├── result.py             # SkillResult envelope (ok/fail/partial)
 ├── load_gates.py         # Compatibility/config gates before init (fail-closed)
 ├── lifecycle.py          # Lifecycle management
-├── hotreload.py          # Hot reload support
+├── hotreload.py          # Hot reload support (names resolved to manifest names)
+├── _hotreload_deps.py    # Dependency checks/ordering used by hot reload
 ├── metrics.py            # Plugin metrics collection
 ├── health.py             # Health checking + PluginHealth
 ├── version.py            # Version management
@@ -664,6 +665,18 @@ sequenceDiagram
     Plugin-->>Loader: Instance Ready
 ```
 
+**Failed activations back off.** "First use" is often an HTTP request to the
+plugin's prefix, which `PluginActivationMiddleware` serves before any
+authentication. A lazy activation that fails (returns `False` or raises) is
+remembered for **60 s** (`core/plugins/_activation_backoff.py`): during that
+window the runtime activator raises `PluginActivationBackoffError` (a
+`RuntimeError`) instead of re-hashing and re-importing the plugin under the
+global activation lock, and the middleware answers `503` with a `Retry-After`
+of the seconds left. Requests that queued behind the failing attempt see the
+backoff too. An operator enable or reload through the plugin-management API
+goes straight to the hot-reload controller, never consults the backoff, and on
+success clears it.
+
 ### Resource analysis
 
 The loader uses AST-based static analysis to extract plugin metadata without executing
@@ -755,6 +768,15 @@ await controller.reload_plugin("weather-agent")
 ```
 
 All three methods are coroutines and return a `bool` indicating success.
+
+A plugin can be named by its **manifest name or its directory name** — they
+differ for several shipped plugins (`coding_agent` vs `coding-agent`). The
+loader keys lifecycle state and the registry by the manifest name, so each
+method first maps the name it was given onto that key with
+`controller.resolve_plugin_name(name)`; the `/api/plugins/{name}/…` admin
+routes do the same before reporting the resulting state. An unknown name is
+returned unchanged, so the call fails on the unknown name rather than on a
+directory that happened to match.
 
 ### Lifecycle events
 
@@ -965,6 +987,11 @@ Variables defined in the plugin's `.env` file are automatically:
    namespace** (see below).
 2. Merged into the plugin's `config` dictionary that is passed to the
    `initialize(config)` method.
+3. Registered as owned by the plugin (`register_owned_env`), so the startup
+   [environment drift check](config.md#environment-drift) never reports a
+   plugin key as a misspelled core setting — even one a letter away from it.
+   A plugin that writes a variable into `os.environ` from its own code should
+   call `core.config.register_owned_env(name)` the same way.
 
 #### Two gates: namespace allowlist, then protected-key denylist
 

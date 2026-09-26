@@ -5,8 +5,10 @@
 name: Semgrep
 
 on:
+  # main only: a push to develop merges a pull request this workflow just
+  # analysed. main keeps its push run — it feeds the default branch's alerts.
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
   schedule:

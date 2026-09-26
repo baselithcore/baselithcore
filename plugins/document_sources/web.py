@@ -17,6 +17,7 @@ import httpx
 
 from core.config import get_processing_config
 from core.observability.logging import get_logger
+from core.security.http import create_hardened_async_client
 from core.security.ssrf import SsrfError, assert_url_safe_async
 
 from .models import DocumentItem, DocumentSourceError
@@ -27,6 +28,7 @@ from .web_constants import (
     MIN_DOCUMENT_CHARS,
     PRIVATE_IP_PREFIXES,
 )
+from .web_guard import ssrf_route_guard
 from .web_parser import parse_page
 
 logger = get_logger(__name__)
@@ -40,6 +42,10 @@ WEB_DOCUMENTS_URLS = _proc_config.web_documents_urls
 WEB_DOCUMENTS_USER_AGENT = _proc_config.web_documents_user_agent
 WEB_DOCUMENTS_WAIT_SELECTOR = _proc_config.web_documents_wait_selector
 WEB_DOCUMENTS_ALLOWLIST = _proc_config.web_documents_allowlist
+
+#: Largest HTML body read from one page. The body used to be buffered whole
+#: (``response.text``), so one crawled URL could stream any amount into memory.
+WEB_DOCUMENTS_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 _PLAYWRIGHT_FACTORY = None
 _PLAYWRIGHT_TIMEOUT = None
@@ -120,11 +126,17 @@ class WebDocumentSource:
         self._playwright_timeout = None
 
         timeout_config = httpx.Timeout(self._render_timeout, connect=10.0)
-        limits = httpx.Limits(max_connections=4, max_keepalive_connections=2)
+        # Keep-alive stays off: the hardened transport pins each request to a
+        # verified IP, and a pooled connection keyed by that IP could be
+        # reused for a different hostname sharing it.
+        limits = httpx.Limits(max_connections=4, max_keepalive_connections=0)
         # Redirects are followed manually in _fetch_with_httpx so every hop —
         # a server-chosen URL, hence attacker-influenced — passes the SSRF
-        # screen before a connection is made.
-        self._client = httpx.AsyncClient(
+        # screen before a connection is made. The hardened client then pins
+        # the connection to the address that screen verified: validating a
+        # name and letting httpx resolve it again left a DNS-rebinding window
+        # (a zero-TTL record answering "public", then "internal").
+        self._client = create_hardened_async_client(
             headers={
                 "User-Agent": self._user_agent,
                 "Accept": "text/html,application/xhtml+xml;q=0.9",
@@ -171,7 +183,10 @@ class WebDocumentSource:
             if doc_id in visited:
                 continue
 
-            parsed = parse_page(
+            # BeautifulSoup parsing of a multi-megabyte page is CPU-bound:
+            # off the event loop, or it stalls every other request.
+            parsed = await asyncio.to_thread(
+                parse_page,
                 html,
                 final_url,
                 domain,
@@ -284,23 +299,42 @@ class WebDocumentSource:
             for _ in range(self._MAX_REDIRECT_HOPS):
                 if not await self._url_allowed(current):
                     return None
-                response = await self._client.get(current)
-                # `next_request` is typed Optional even when
-                # has_redirect_location is True, so bind it before use.
-                next_request = response.next_request
-                if (
-                    response.is_redirect
-                    and response.has_redirect_location
-                    and next_request is not None
-                ):
-                    current = str(next_request.url)
-                    continue
-                response.raise_for_status()
-                return response.text, str(response.url)
+                async with self._client.stream("GET", current) as response:
+                    # `next_request` is typed Optional even when
+                    # has_redirect_location is True, so bind it before use.
+                    next_request = response.next_request
+                    if (
+                        response.is_redirect
+                        and response.has_redirect_location
+                        and next_request is not None
+                    ):
+                        current = str(next_request.url)
+                        continue
+                    response.raise_for_status()
+                    body = await self._read_capped(response, url)
+                    if body is None:
+                        return None
+                    encoding = response.encoding or "utf-8"
+                    return body.decode(encoding, errors="replace"), current
             logger.warning(f"[web-source] Too many redirects on {url}")
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, SsrfError, LookupError) as exc:
             logger.warning(f"[web-source] HTTP failed on {url}: {exc}")
         return None
+
+    @staticmethod
+    async def _read_capped(response: httpx.Response, url: str) -> bytes | None:
+        """Read a streamed body, refusing it past the size cap."""
+        declared = response.headers.get("Content-Length", "")
+        if declared.isdigit() and int(declared) > WEB_DOCUMENTS_MAX_BODY_BYTES:
+            logger.warning(f"[web-source] Body too large on {url}: {declared}")
+            return None
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > WEB_DOCUMENTS_MAX_BODY_BYTES:
+                logger.warning(f"[web-source] Body too large on {url}")
+                return None
+        return bytes(body)
 
     def _playwright_page(self):
         """Context manager for Playwright page."""
@@ -319,6 +353,9 @@ class WebDocumentSource:
             try:
                 browser = await playwright.chromium.launch(headless=True)
                 context = await browser.new_context(user_agent=self._user_agent)
+                # Screen every request the page makes (redirect hops and
+                # sub-resources), not only the navigations checked around goto.
+                await context.route("**/*", ssrf_route_guard)
                 page = await context.new_page()
                 yield page
             except Exception as exc:  # pragma: no cover

@@ -60,15 +60,17 @@ class VectorStoreConfig(BaseSettings):
     embedding_fallback_model: str = Field(
         default="sentence-transformers/all-MiniLM-L6-v2",
         description=(
-            "Operator fallback embedding model. Use it together with "
-            "VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; "
-            "switching models requires a matching vector dimension and a fresh "
-            "or migrated collection."
+            "Deprecated, no effect: nothing reads it; to switch embedding "
+            "model set VECTORSTORE_EMBEDDING_MODEL and VECTORSTORE_EMBEDDING_DIM "
+            "together, on a fresh or migrated collection"
         ),
     )
     embedding_fallback_dim: int = Field(
         default=384,
-        description="Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL.",
+        description=(
+            "Deprecated, no effect: nothing reads it; the vector dimension is "
+            "VECTORSTORE_EMBEDDING_DIM"
+        ),
     )
 
     # Embeddings are deterministic per model, so a long TTL is safe; the TTL
@@ -158,6 +160,20 @@ class VectorStoreConfig(BaseSettings):
         description="HNSW query-time candidate list size, applied as "
         "SET LOCAL hnsw.ef_search per search. 0 leaves the server default "
         "alone and skips the enclosing transaction.",
+    )
+    # A filtered HNSW search (every tenant-scoped one: ``payload @> tenant``)
+    # walks only ``ef_search`` candidates and filters *afterwards*, so a tenant
+    # holding 0.5% of the rows got 1 hit for LIMIT 10 in EXPLAIN. pgvector
+    # >= 0.8 can keep scanning until LIMIT is met; the provider applies it to
+    # filtered searches only, and only when the server's pgvector supports it.
+    hnsw_iterative_scan: Literal["off", "strict_order", "relaxed_order"] = Field(
+        default="strict_order",
+        description="pgvector >= 0.8 'hnsw.iterative_scan' for filtered "
+        "searches (tenant/payload filters, score threshold): keep walking the "
+        "graph until LIMIT matching rows are found. 'strict_order' keeps exact "
+        "distance order; 'relaxed_order' trades order for speed; 'off' restores "
+        "post-filtering, which can return far fewer than LIMIT hits. Ignored "
+        "on pgvector < 0.8.",
     )
 
     # Span token usage costs a second tokenizer pass over the texts that miss

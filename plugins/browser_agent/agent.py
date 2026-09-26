@@ -23,6 +23,7 @@ from core.services.vision.models import ImageContent, VisionCapability, VisionRe
 from core.services.vision.service import VisionService
 
 from .actions import build_action as _build_action
+from .actions import clamp_wait_seconds as _clamp_wait_seconds
 from .actions import normalize_selector as _normalize_selector
 from .prompts import BROWSER_SYSTEM_PROMPT as _BROWSER_SYSTEM_PROMPT
 from .ssrf import (  # noqa: F401
@@ -268,8 +269,7 @@ class BrowserAgent:
                         "window.scrollTo(0, document.body.scrollHeight)"
                     )
             elif action.action_type == BrowserActionType.WAIT:
-                wait_time = float(action.value or 1)
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(_clamp_wait_seconds(action.value))
 
             logger.info(
                 "browser_action_executed",
@@ -390,7 +390,9 @@ Respond ONLY with valid JSON matching one of the schemas above."""
             while steps < self.max_steps:
                 steps += 1
                 state = await self.get_page_state()
-                screenshots.append(state.screenshot_base64)
+                # Only the last three reach the result; keeping every step's
+                # base64 PNG held max_steps screenshots in memory at once.
+                screenshots = [*screenshots[-2:], state.screenshot_base64]
 
                 action = await self.decide_next_action(task, state, history)
                 history.append(f"{action.action_type.value}: {action.reasoning}")

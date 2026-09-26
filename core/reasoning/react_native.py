@@ -338,8 +338,14 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     executed sequentially in emission order (observations may feed the next
     reasoning turn), each through the agent's guarded executor.
     """
-    from core.reasoning.history import compact_message_history
-    from core.reasoning.react import ReActResult, StepType, TraceStep
+    from core.reasoning.history_summary import compact_history_for_loop
+    from core.reasoning.react import (
+        LLM_ERROR_ANSWER,
+        LLM_UNAVAILABLE_ANSWER,
+        ReActResult,
+        StepType,
+        TraceStep,
+    )
     from core.reasoning.react_tools import observation_is_error
     from core.services.llm.message_transport import generate_over_messages
     from core.services.llm.messages import (
@@ -352,10 +358,11 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     llm = agent._get_llm_service()
     if llm is None:
         return ReActResult(
-            final_answer="LLM service unavailable.",
+            final_answer=LLM_UNAVAILABLE_ANSWER,
             trace=trace,
             iterations_used=0,
             hit_limit=False,
+            error="llm_unavailable",
         )
 
     specs = build_tool_specs(agent._tools.values())
@@ -380,8 +387,8 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
         # Deterministic compaction bounds prompt growth (cost/latency) on long
         # runs. It shortens the *contents* of older blocks and never drops a
         # message: a provider rejects a conversation whose ``tool_use`` has no
-        # answering ``tool_result``.
-        history = compact_message_history(history)
+        # answering ``tool_result``. Opt-in: ORCHESTRATOR_COMPACTION_SUMMARIZE.
+        history = await compact_history_for_loop(history, llm)
 
         try:
             result = await generate_over_messages(
@@ -393,10 +400,11 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
         except Exception as exc:
             logger.error("ReAct native LLM call failed: %s", exc)
             return ReActResult(
-                final_answer="An error occurred while processing your request.",
+                final_answer=LLM_ERROR_ANSWER,
                 trace=trace,
                 iterations_used=iteration,
                 hit_limit=False,
+                error="llm_error",
             )
 
         text = (result.text or "").strip()

@@ -47,8 +47,19 @@ EXEMPT_PATHS: frozenset[str] = frozenset(
         "/redoc",
         "/openapi.json",
         "/metrics",
+        # The same probes and scrape are also mounted under the versioned
+        # prefix (``core.api.factory`` includes status/metrics at ``/v1``).
+        "/v1/health",
+        "/v1/health/ready",
+        "/v1/metrics",
     }
 )
+
+#: Credential schemes the ``AuthManager`` can verify. Anything else — ``Basic``
+#: on ``/admin`` and ``/metrics`` above all, which the route verifies itself —
+#: used to go through ``AuthManager.authenticate`` on every call just to be
+#: refused, logging an "unsupported scheme" WARNING per request.
+_VERIFIABLE_SCHEMES: frozenset[str] = frozenset({"bearer", "apikey"})
 
 
 def effective_auth_header(scope: Scope) -> str | None:
@@ -78,17 +89,28 @@ def effective_auth_header(scope: Scope) -> str | None:
 
 
 def auth_manager() -> AuthManager | None:
-    """The app-configured ``AuthManager``, or the core global as a fallback."""
-    try:
-        from core.di.container import ServiceRegistry
+    """The app-configured ``AuthManager``, or the core global as a fallback.
 
-        return ServiceRegistry.get(AuthManager)
-    except Exception:
+    Probes the registry with ``has`` rather than letting ``get`` raise: the
+    ``AuthManager`` is normally *not* registered, and the old
+    ``get``-and-catch raised and swallowed a ``ServiceNotFoundError`` on every
+    call — twice per request (quota and tenant layers). Nothing is cached
+    here on purpose: both sources are already process singletons, and reading
+    them each time keeps a re-registration or a test reset effective at once.
+    """
+    from core.di.container import ServiceNotFoundError, ServiceRegistry
+
+    if ServiceRegistry.has(AuthManager):
         try:
-            return get_auth_manager()
-        except Exception:
-            logger.debug("auth_manager_unavailable", exc_info=True)
-            return None
+            return ServiceRegistry.get(AuthManager)
+        except ServiceNotFoundError:
+            # Cleared between has() and get(): fall back to the global.
+            logger.debug("auth_manager_registry_race")
+    try:
+        return get_auth_manager()
+    except Exception:
+        logger.debug("auth_manager_unavailable", exc_info=True)
+        return None
 
 
 async def resolve_user(scope: Scope) -> AuthUser | None:
@@ -112,6 +134,10 @@ async def resolve_user(scope: Scope) -> AuthUser | None:
 
     header = effective_auth_header(scope)
     if not header:
+        return None
+    if header.split(" ", 1)[0].lower() not in _VERIFIABLE_SCHEMES:
+        # Basic (admin, metrics) or an unknown scheme: the AuthManager can only
+        # refuse it, so don't pay for — or log — that refusal on every call.
         return None
     manager = auth_manager()
     if manager is None:

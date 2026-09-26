@@ -195,9 +195,12 @@ async def warm_db_pool() -> None:
     first use still covers requests. No-op when PostgreSQL is disabled.
     """
     from core.db.connection import warm_async_pool
+    from core.db.pool_budget import check_connection_budget
 
     if await warm_async_pool():
         logger.info("🔌 DB pool warmed (min_size connections ready).")
+        # Pool size x workers vs the server's max_connections; warns only.
+        await check_connection_budget()
 
 
 async def run_startup_health_checks() -> None:

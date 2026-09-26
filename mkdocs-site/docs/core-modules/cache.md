@@ -1,6 +1,6 @@
 # Caching System
 
-The `core/cache/` module provides a **tiered, pluggable caching system** with four implementations: in-memory TTL, Redis, Semantic (vector-similarity), and a local file cache.
+The `core/cache/` module provides a **pluggable caching system** with three implementations behind one protocol: an in-memory TTL + LRU cache (`local_cache.py`), a Redis-backed cache, and a semantic (vector-similarity) LLM response cache. There is no on-disk file cache.
 
 ## Module Structure
 
@@ -44,6 +44,10 @@ values = await cache.get_many(["a", "b"])
 omitted; both must be positive. The TTL is fixed at construction —
 `set()` takes only `(key, value)`. The interface is fully async.
 
+Inserting into a full cache evicts the least recently used entry in O(1);
+expired entries are swept on a 60-second interval (and dropped on read), not
+by a full-store scan on every insert.
+
 ---
 
 ## Redis Cache (FalkorDB Compatible)
@@ -82,7 +86,10 @@ CACHE_REDIS_URL=redis://localhost:6379/1
 `RedisCacheConfig` (`core/config/cache.py`, `get_redis_cache_config()`):
 `url` ← `CACHE_REDIS_URL` (default `redis://localhost:6379/1`, shared with `StorageConfig`), `cache_prefix`
 (default `baselithcore:cache`), `cache_ttl` (default `3600.0` s) and the pool
-bounds (`max_connections` default `50`). `StorageConfig.cache_redis_url`
+bounds (`max_connections` default `50`). The async and sync shared pools are
+`BlockingConnectionPool`s: at `max_connections` a caller waits up to
+`socket_connect_timeout` (default `2.0` s) for a released connection rather
+than failing at once with "Too many connections". `StorageConfig.cache_redis_url`
 (`core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with the
 same default and is what
 `core/bootstrap/lazy_init.py` and `core/chat/dependencies.py` use for the
@@ -173,9 +180,28 @@ cache = SemanticLLMCache(
 ```
 
 Config defaults come from `SemanticCacheConfig`
-(`SEMANTIC_CACHE_FINGERPRINT_ENABLED=true`,
+(`SEMANTIC_CACHE_MAXSIZE=1000`, `SEMANTIC_CACHE_TTL=3600`,
+`SEMANTIC_CACHE_THRESHOLD=0.85`, `SEMANTIC_CACHE_FINGERPRINT_ENABLED=true`,
 `SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8`); constructor arguments override
 them per instance.
+
+### Enabling it in `LLMService`
+
+`LLMService` builds a `SemanticLLMCache` when `SEMANTIC_CACHE_ENABLED=true`
+(default `false`) or when constructed with `enable_semantic_cache=True`; an
+explicit `enable_semantic_cache=False` opts a service out. Size, TTL and
+threshold come from the `SEMANTIC_CACHE_*` settings above (the
+`semantic_threshold=` argument overrides the threshold only). It needs the
+`[rag]` extra for the embedder, which is loaded off the event loop on the first
+lookup. The cache is in-process: each worker holds its own entries.
+
+The similarity tiers match on the prompt alone, so `LLMService` passes a
+`namespace=` kwarg: a hash of the model, system prompt, JSON mode,
+temperature, `max_tokens` and effort — the same inputs as the exact-cache key,
+minus the prompt. Entries are bucketed per tenant *and* namespace, so the same
+prompt under a different system prompt or model never hits another
+configuration's answer. Direct callers can pass their own `namespace=` to
+`set` / `get_similar` / `get_similar_with_score` the same way.
 
 !!! tip "Multi-Tenant Isolation"
     All LLM caching mechanisms (both exact-match `TTLCache` and `SemanticLLMCache`) automatically namespace their keys with the current `tenant_id` to prevent cross-tenant data leakage.
@@ -385,5 +411,11 @@ cache: CacheProtocol = (
 )
 ```
 
-!!! tip "Tiered Caching"
-    The framework uses a two-tier pattern internally: **Semantic Cache** (first hit) → **Redis** (persistent) → **LLM inference** (last resort). This dramatically reduces token costs.
+!!! tip "LLM response caching order"
+    `LLMService` checks its caches in this order: the **exact-match** in-process
+    `TTLCache` (`LLM_ENABLE_CACHE`) → the **semantic** in-process
+    `SemanticLLMCache` (opt-in, `SEMANTIC_CACHE_ENABLED`) → **LLM inference**.
+    Both LLM tiers live in worker memory; there is no Redis tier for LLM
+    responses. Redis backs other layers — the chat response/pre-check/rerank
+    caches under `CACHE_BACKEND=redis`, the embedding and vector-search
+    caches.

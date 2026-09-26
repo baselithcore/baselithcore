@@ -114,8 +114,44 @@ class TestVectorMemoryProvider:
             "id123", collection_name="test_collection"
         )
 
+    @pytest.mark.asyncio
+    async def test_clear_is_tenant_scoped_never_drops_collection(
+        self, provider, mock_vector_service
+    ):
+        backend = MagicMock()
+        backend.delete_by_filter = AsyncMock()
+        mock_vector_service.provider = backend
+        with patch("core.memory.providers.get_current_tenant_id", return_value="acme"):
+            await provider.clear()
+        backend.delete_by_filter.assert_awaited_once_with(
+            collection_name="test_collection",
+            key="tenant_id",
+            value="acme",
+            tenant_id="acme",
+        )
+        mock_vector_service.delete_collection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_clear_honours_memory_type(self, provider, mock_vector_service):
+        backend = MagicMock()
+        backend.delete_by_filter = AsyncMock()
+        mock_vector_service.provider = backend
+        with patch("core.memory.providers.get_current_tenant_id", return_value="acme"):
+            await provider.clear(MemoryType.EPISODIC)
+        backend.delete_by_filter.assert_awaited_once_with(
+            collection_name="test_collection",
+            key="type",
+            value="episodic",
+            tenant_id="acme",
+        )
+
+    @pytest.mark.asyncio
+    async def test_clear_without_filtered_delete_is_a_noop(
+        self, provider, mock_vector_service
+    ):
+        mock_vector_service.provider = object()
         await provider.clear()
-        mock_vector_service.delete_collection.assert_called_with("test_collection")
+        mock_vector_service.delete_collection.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_many_is_one_service_call(self, provider, mock_vector_service):

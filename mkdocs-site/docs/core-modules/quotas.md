@@ -49,8 +49,12 @@ except QuotaExceededError as e:
     ...
 ```
 
-Tenant budgets use a parallel API keyed under a `tenant:` namespace, so identity
-and tenant counters never collide:
+Tenant budgets use a parallel API keyed under a `tenant:` namespace, and
+identity counters live under `id:` (`id:{identity}:{window}:{period}`), so no
+identity can alias a tenant aggregate — the identity key used to be the bare
+identity, which let a subject named `tenant:acme` share counters with tenant
+`acme`. The rename needs no migration: counters are windowed, so each identity
+simply starts the current period from zero once, at deploy.
 
 ```python
 await manager.check_and_consume_tenant(tenant_id, cost=1)
@@ -60,11 +64,17 @@ status = await manager.peek_tenant(tenant_id)   # report without consuming
 ### Batched identity + tenant enforcement
 
 `check_and_consume_pair(identity, tenant_id, cost=1)` enforces the identity **and**
-tenant windows together with a single batched read (`get_many` / Redis `MGET`)
-followed by a single batched consume (`incr_many` / pipeline). This collapses up
-to **8 sequential Redis round trips** per request down to **2**, and consumption
-is all-or-nothing: a request rejected on either subject burns **no** budget on
-the other. `QuotaMiddleware` calls this method on every authenticated request.
+tenant windows together in **one atomic step**: the store's
+`check_and_incr_many` checks every window and, only if all have room,
+increments them — on Redis a single Lua script (one round trip, down from up
+to 8 sequential ones). Consumption is all-or-nothing, and because the check and
+the increments are indivisible, concurrent requests can no longer all pass a
+read and then overshoot the limit together (the previous `MGET` → `INCRBY`
+sequence could, by up to the concurrency). The script also sets a TTL on any
+counter that lacks one, so a crash can no longer leave a counter without
+expiry. `QuotaMiddleware` calls this method on every authenticated request, and
+`refund_pair(identity, tenant_id, now=...)` gives the unit back when the
+request did no work (see [QuotaMiddleware](middleware.md#quotamiddleware)).
 
 ```python
 status_pair = await manager.check_and_consume_pair(api_key_id, tenant_id, cost=1)
@@ -268,5 +278,9 @@ tenant budget, and its real cost is booked against both. Without a bound user
 shares counters across workers and bounds stale keys with a TTL anchored to the
 window's first request; `InMemoryQuotaStore` is the single-process default and
 the fallback when Redis is unavailable. The protocol also exposes batched
-`get_many` (Redis `MGET`) and `incr_many` (pipeline) operations — implemented by
-both stores — which power `check_and_consume_pair`.
+`get_many` (Redis `MGET`) and `incr_many` (pipeline) operations. Both built-in
+stores additionally implement `check_and_incr_many` — the atomic
+check-all-then-increment-all (`CHECK_AND_INCR_LUA` on Redis) that
+`check_and_consume` and `check_and_consume_pair` use; a third-party store
+without it falls back to read-then-increment, which is not atomic across
+workers.

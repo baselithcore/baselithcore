@@ -6,6 +6,8 @@ Provides conversation history management with caching and summarization.
 
 from __future__ import annotations
 
+import asyncio
+import weakref
 from typing import Any
 
 from core.cache.protocols import AnyCache as CacheProtocol
@@ -14,6 +16,25 @@ HistoryTurns = list[dict[str, str]]
 HistorySummary = str
 SUMMARY_HEADER = "Conversation summary:"
 SUMMARY_DIVIDER = "\n\n---\n\n"
+
+#: One lock per live conversation, shared by every manager in the process.
+#: ``append_turn`` is a read-modify-write of one cache entry: two requests on
+#: the same conversation (a double-submit, two open tabs) each read the old
+#: turns and the second ``set`` silently dropped the first request's turn.
+#: Weak values: a conversation nobody is appending to holds no lock. This
+#: serialises writers within one process; the cache protocol has no
+#: compare-and-set, so writers on different workers can still interleave.
+_append_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _append_lock(conversation_id: str) -> asyncio.Lock:
+    lock = _append_locks.get(conversation_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _append_locks[conversation_id] = lock
+    return lock
 
 
 class ChatHistoryManager:
@@ -107,6 +128,21 @@ class ChatHistoryManager:
         if not sanitized_query or not sanitized_answer:
             return
 
+        async with _append_lock(conversation_id):
+            await self._append_locked(
+                conversation_id, sanitized_query, sanitized_answer, metadata
+            )
+
+    async def _append_locked(
+        self,
+        conversation_id: str,
+        sanitized_query: str,
+        sanitized_answer: str,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        """Read-modify-write of one conversation; caller holds its lock."""
+        if self._cache is None:
+            return
         existing_turns, existing_summary = await self._load_payload(conversation_id)
         combined_turns = list(existing_turns)
 

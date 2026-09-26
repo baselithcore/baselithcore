@@ -7,6 +7,14 @@ description: Configurable personalities and traits for agents
 
 The Personas module allows you to decouple identity definition from execution logic. By applying a dynamically configurable `Persona` to an agent, you can drastically alter its tone, expertise, and operational boundaries without rewriting its base prompt.
 
+!!! note "Library API — not wired by default"
+    The default app never applies a persona: no route, handler or startup hook
+    builds a `PersonaManager` or injects a `Persona` into a prompt. Use them
+    from host or plugin code — pass `Persona` objects to
+    `core.meta.MultiPersonaAgent` / `PersonaEnsemble`, or prepend
+    `Persona.get_prompt_prefix()` (and examples from a `FewShotLibrary`) to
+    your own agent's system prompt.
+
 ---
 
 ## Module Structure

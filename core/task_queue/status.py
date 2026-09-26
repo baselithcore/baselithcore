@@ -88,8 +88,21 @@ class TaskTracker:
         message: str = "",
         result: Any | None = None,
         error: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
-        """Update task status."""
+        """Update task status.
+
+        Args:
+            task_id: Job id the record belongs to.
+            status: New lifecycle status.
+            progress: Completion percentage.
+            message: Human-readable status line.
+            result: JSON-serialisable job result, stored when given.
+            error: Failure description, stored when given.
+            tenant_id: Owning tenant. Written once at enqueue time; later
+                updates omit it and the hash keeps the original value, so
+                :meth:`get_status_for_tenant` can refuse other tenants.
+        """
         import json
 
         data: dict[str | bytes, bytes | float | int | str] = {
@@ -102,6 +115,8 @@ class TaskTracker:
             data["result"] = json.dumps(result)
         if error is not None:
             data["error"] = error
+        if tenant_id is not None:
+            data["tenant_id"] = tenant_id
 
         # One round-trip instead of two: this fires on every enqueue and on
         # every progress tick, and Redis has no atomic hset-with-TTL, so
@@ -134,6 +149,29 @@ class TaskTracker:
             else:
                 result[key] = val
         return result
+
+    def get_status_for_tenant(
+        self, task_id: str, tenant_id: str
+    ) -> dict[str, Any] | None:
+        """Get task status only if the record belongs to ``tenant_id``.
+
+        The record is keyed by task id alone, so a bare :meth:`get_status`
+        lets anyone who learns an id read another tenant's run. A record with
+        no owner (written before tenants were recorded, or by a caller that
+        never passed one) is refused too: fail closed, not open.
+
+        Args:
+            task_id: Job id to look up.
+            tenant_id: Tenant of the caller asking.
+
+        Returns:
+            The status record, or ``None`` when it is unknown or owned by a
+            different tenant — callers cannot tell the two apart.
+        """
+        status = self.get_status(task_id)
+        if status is None or status.get("tenant_id") != tenant_id:
+            return None
+        return status
 
     def mark_started(self, task_id: str, message: str = "Task started") -> None:
         """Mark task as started."""

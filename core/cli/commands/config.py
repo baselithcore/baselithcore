@@ -35,7 +35,6 @@ def show_config() -> int:
         t_core.add_column("Value", style="cyan bold")
         t_core.add_row("Log Level", core_cfg.log_level)
         t_core.add_row("Debug", str(core_cfg.debug))
-        t_core.add_row("Plugin Dir", str(core_cfg.plugin_dir))
         t_core.add_row("Data Dir", str(core_cfg.data_dir))
 
         layout["core"].update(Panel(t_core, title="Core Settings", border_style="blue"))
@@ -160,7 +159,9 @@ def validate_config() -> int:
             from core.config import get_llm_config
 
             _llm = get_llm_config()
-            if _llm.provider not in ["ollama", "openai", "anthropic", "huggingface"]:
+            from core.services.llm.policy import SUPPORTED_PROVIDERS
+
+            if _llm.provider not in SUPPORTED_PROVIDERS:
                 warnings.append(f"Unknown LLM provider: {_llm.provider}")
                 table.add_row(
                     "[yellow]⚠️[/yellow]", "LLM", f"Unknown provider: {_llm.provider}"

@@ -157,11 +157,56 @@ async def handle_request(request):
 Two module-level helpers return limiters pre-bound to config values:
 
 ```python
-from core.resilience import get_api_limiter, get_llm_limiter
+from core.resilience import RedisRateLimiter, get_api_limiter, get_llm_limiter
 
 api = get_api_limiter()   # uses api_rate_limit / api_rate_window
 llm = get_llm_limiter()   # uses the more restrictive llm_rate_limit / llm_rate_window
+llm = get_llm_limiter(backend=RedisRateLimiter())  # any backend
 ```
+
+!!! warning "Which settings govern what"
+    - **HTTP requests** are limited by the security middleware's `RATE_LIMIT_*`
+      settings (`RATE_LIMIT_USER_PER_MINUTE`, `RATE_LIMIT_ADMIN_PER_MINUTE`,
+      `RATE_LIMIT_WINDOW_SECONDS`, …). `RESILIENCE_API_RATE_LIMIT` and
+      `RESILIENCE_API_RATE_WINDOW` only seed `get_api_limiter()`, which no
+      framework path calls: they are **Deprecated, no effect**.
+    - **Outgoing LLM calls** are limited by `RESILIENCE_LLM_RATE_*`, opt-in
+      with `RESILIENCE_LLM_RATE_ENABLED=true` — see
+      [LLM call rate limit](#llm-call-rate-limit).
+
+### LLM call rate limit
+
+`core.services.llm.rate_limit.acquire_llm_call_slot` is awaited on every LLM
+generation path, right after the tenant cost gate and before the provider is
+contacted: `generate_response()` (after the response cache, so hits are free),
+`generate()` (structured / native tool calling), `generate_messages()`,
+`generate_response_stream()`, `generate_stream_events()`, `generate_image()`
+and the Anthropic batch submission (one slot per job; the sequential fallback
+pays one per entry). It is built on `get_llm_limiter()`.
+
+| Setting | Default | Meaning |
+| ------- | ------- | ------- |
+| `RESILIENCE_LLM_RATE_ENABLED` | `false` | Off = one config read per call, nothing else |
+| `RESILIENCE_LLM_RATE_LIMIT` | `20` | Calls per window |
+| `RESILIENCE_LLM_RATE_WINDOW` | `60` | Window, seconds |
+| `RESILIENCE_LLM_RATE_MAX_WAIT` | `30` | Longest a call waits for a slot; `0` fails immediately |
+| `RESILIENCE_LLM_RATE_PER_PROVIDER` | `true` | One window per provider name (`llm:openai`, …); `false` shares `llm:*` |
+
+- **Waits, then fails.** Over the limit the call `asyncio.sleep`s until the
+  window frees a slot; past `RESILIENCE_LLM_RATE_MAX_WAIT` it raises
+  `LocalLLMRateLimitError` — a subclass of `LLMRateLimitError` (and so of
+  `RateLimitError`) with `status_code=None`, `retry_after`, `key`, `limit` and
+  `window`. Nothing was sent, so nothing was spent.
+- **One slot per logical call.** Transport retries and fallback-chain stages
+  do not take extra slots. The key is the calling service's configured
+  provider, not a fallback stage that ends up serving the call.
+- **Scope: per worker process** with the default local cache. Under
+  `WEB_CONCURRENCY=4` a limit of 20/min is 80/min for the deployment. With
+  `CACHE_BACKEND=redis` the limiter uses `RedisRateLimiter` (its sync client
+  runs in a worker thread), so every worker and replica shares one window; it
+  falls back to the in-process window when Redis is unreachable.
+- The limiter is built on first use; `reset_llm_rate_limiter()` rebuilds it
+  after a runtime settings change.
 
 ### Redis Rate Limiter
 
@@ -450,10 +495,6 @@ config = get_resilience_config()
 print(config.cb_fail_max)             # 5
 print(config.cb_reset_timeout)        # 60
 
-# Rate Limiter (API level)
-print(config.api_rate_limit)          # 100
-print(config.api_rate_window)         # 60
-
 # Retry
 print(config.retry_max_attempts)      # 3
 print(config.retry_base_delay)        # 1.0
@@ -467,12 +508,6 @@ All resilience settings share the `RESILIENCE_` env prefix
 RESILIENCE_CB_FAIL_MAX=5
 RESILIENCE_CB_RESET_TIMEOUT=60
 RESILIENCE_CB_HALF_OPEN_MAX=1
-
-# Rate Limiter (API + LLM)
-RESILIENCE_API_RATE_LIMIT=100
-RESILIENCE_API_RATE_WINDOW=60
-RESILIENCE_LLM_RATE_LIMIT=20
-RESILIENCE_LLM_RATE_WINDOW=60
 
 # Retry
 RESILIENCE_RETRY_MAX_ATTEMPTS=3

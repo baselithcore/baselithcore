@@ -43,6 +43,7 @@ core/orchestration/
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
 ├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── call_keys.py             # Content-addressed call keys: tool + args + occurrence
 ├── idempotency.py           # Cross-process tool ledger: derive key, claim, replay
 ├── idempotency_postgres.py  # Postgres-backed ToolLedger (tool_invocations)
 ├── ledger_factory.py        # Ledger resolution (ORCHESTRATOR_TOOL_LEDGER)
@@ -64,6 +65,14 @@ Public exports (`from core.orchestration import ...`): `Orchestrator`,
 `OrchestratorProtocol`), and the efficiency modules (`ParallelToolExecutor`,
 `ToolCall`, `ToolResult`, `ExecutionPlan`, `AdaptiveController`,
 `ProcessingPath`, `AdaptiveConfig`).
+
+!!! note "Library API — not wired by default"
+    `AdaptiveController` (`adaptive.py`, fast/slow SwiftSage-style path
+    routing, with `ProcessingPath` and `AdaptiveConfig`) is exported but not
+    used by the orchestrator: no route, handler or startup hook consults it in
+    the default app, and intent routing goes through the
+    [Intent Classifier](#intent-classifier) alone. Call it from host or plugin
+    code — for example inside a custom flow handler — to pick a path per query.
 
 ---
 
@@ -127,7 +136,26 @@ break the tool path. See
     `ExecutionMixin.process` overlaps I/O at the request boundaries. The
     request-start memory reads (`recall` + `get_context_async`) run
     **concurrently**, and post-response memory writes run as a **tracked
-    background task** instead of delaying the reply.
+    background task** instead of delaying the reply. At most 32 run at once,
+    and the backlog (running plus queued) is capped at 1024: past it a new
+    write is dropped with a debug log and counted on the orchestrator's
+    `_memory_writes_dropped`, since memory is best-effort and the request
+    path is not.
+
+!!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
+    Those background writes are awaited by nobody on the request path, so an
+    orchestrator that owns a memory manager must be closed before the database
+    and vector pools are: `await orchestrator.aclose(timeout=5.0)` waits up to
+    `timeout` seconds for pending writes, cancels the stragglers (logging how
+    many), and refuses any write scheduled afterwards. It is idempotent. The
+    application lifespan calls it for the chat service's orchestrator during
+    shutdown; host code that builds its own `Orchestrator` should do the same.
+
+!!! note "`rag_only` requests"
+    `context["rag_only"]` (forwarded from `ChatRequest.rag_only`) pins the
+    intent to `default_intent` and skips classification on both `process()`
+    and `process_stream()`; an explicit `intent=` argument still wins. See
+    [Request Flow](../architecture/request-flow.md).
 
 ### Internal Flow
 
@@ -317,6 +345,10 @@ The LLM strategy's classification prompt is a registry-served catalog prompt
 embedded template as fallback), so deployments can version/override it through
 the prompt registry — see
 [Prompt Registry › Packaged catalog prompts](prompts.md#packaged-catalog-prompts).
+Raw LLM classifications are memoized per input text in a small LRU (cleared
+whenever an intent is registered or unregistered); a failed or unparseable
+call (`None`) is never cached, so a provider blip does not pin that input to
+the default intent.
 The swarm task-decomposition prompt
 (`core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
 is catalog-served the same way.
@@ -499,9 +531,9 @@ Every `Orchestrator.process` call passes through
 (`intent="blocked_by_guardrails"`, `error=True`) instead of entering the loop
 — and the final `response` text is filtered by `OutputGuard` (PII redaction,
 harmful-content patterns) with redaction counts surfaced under
-`result["guardrails"]`. The chat surface's binary LLM check
-(`InputGuard.validate_async`) stays a chat-surface concern; the always-on
-loop path is deterministic and adds microseconds.
+`result["guardrails"]`. The always-on loop path is deterministic and adds
+well under a millisecond at the default input cap; the opt-in LLM layers
+below supersede the deprecated `InputGuard.validate_async`.
 
 The inbound gate is `guard_input_async` — a three-layer pipeline, cheapest
 first, each layer running only on what the previous one passed:
@@ -761,12 +793,28 @@ async def handle(self, query, context):
 
 `ReActAgent` applies `run_step` automatically: with a checkpoint attached
 (orchestrated runs pass it via `context["checkpoint"]`), every tool invocation
-of both ReAct loops records its observation durably and replays it on resume —
+of both ReAct loops — the text loop and the native structured loop
+(`run_native_loop`) — records its observation durably and replays it on resume;
 see [Reasoning › Durable tool execution](reasoning.md#durable-tool-execution-checkpoint-replay).
+The typed `Agent` does the same when handed one:
+`await agent.run(prompt, checkpoint=manager)` records each approved tool call
+through `run_step` (see [Durable resume of the typed `Agent`](#durable-resume-of-the-typed-agent)).
 
-The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
-replay (different tool/args at the same position) executes fresh rather than
-reusing a stale result. A bare `Orchestrator()` constructed without a store
+**Step keys are content-addressed, not positional.** A step is keyed
+`v2:<tool>:<args-hash>:<occurrence>`, where *occurrence* counts how many
+identical `(tool, args)` steps the current pass already requested
+(`core/orchestration/call_keys.py`). An LLM-driven loop does not replay
+deterministically — a resumed run regenerates its turns, and the model may ask
+for the same effects in another order or with an extra read in between. The
+old `(replay-cursor, tool, args-hash)` key re-executed every recorded step the
+new path reached at a different position; the content key replays it wherever
+it appears, while a deliberate second identical call in the same pass
+(occurrence 1) still runs. Checkpoints recorded under the positional key stay
+readable: a miss on the content key falls back to it, which replays exactly
+what it always did. A caller that also derives a ledger key inside the step
+takes the occurrence from `CheckpointManager.next_occurrence(tool, args)` and
+passes it to `run_step(..., occurrence=n)`, so the two layers can never
+disagree about which call this is. A bare `Orchestrator()` constructed without a store
 runs without checkpointing — `context["checkpoint"]` is absent and the loop
 stays in-memory — but the app wiring resolves a store **by default** (see
 [below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)).
@@ -819,7 +867,10 @@ rows = await list_runs(store, tenant_id="acme", status=None, limit=50)
 
 Summaries deliberately omit the heavy fields (`trajectory`, `steps`,
 `plugin_data`, `answer`) so a list stays cheap to serve; load the run to get
-them. Both shipped stores implement it natively (Postgres orders by
+them. The Postgres store strips them in SQL (`data - 'steps' - …`), shipping
+only the trajectory's length, and appends its `tenant_id` / `status` filters
+only when given so a prepared statement's generic plan can still use the
+tenant index. Both shipped stores implement it natively (Postgres orders by
 `updated_at` and filters server-side); a store without the method degrades to
 its resumable ids loaded individually, so protocol-only stores still answer.
 An unset `tenant_id` on a row is treated as the `default` tenant, matching the
@@ -837,9 +888,11 @@ webhook or an email-sending skill it is a defect the end user sees.
 outcome after it, keyed by a value derived from the call itself:
 
 ```python
-from core.orchestration.idempotency import derive_idempotency_key
+from core.orchestration.idempotency import CallOccurrences, derive_call_key
 
-key = derive_idempotency_key(run_id, step, tool, args)
+occurrences = CallOccurrences()                     # one per pass of the run
+n = occurrences.next(tool, args)                    # 0, then 1 for a repeat
+key = derive_call_key(run_id, tool, args, n, tenant_id=tenant)
 held = await ledger.begin(key, run_id=run_id, tool=tool)
 if held is not None:
     if held.is_replayable:
@@ -851,7 +904,10 @@ await ledger.complete(key, result)
 
 | Component | Role |
 |-----------|------|
-| `derive_idempotency_key` | SHA-256 over `(run_id, step, tool, canonical args)` — derived, never generated, and carrying no payload |
+| `derive_call_key` | SHA-256 over `(v2, tenant, run_id, tool, canonical args, occurrence)` — derived from content, never generated or positional, and carrying no payload |
+| `CallOccurrences` | Per-pass counter of identical `(tool, args)` requests; a resumed pass starts at zero again |
+| `claim_call` | `begin` plus the compatibility read of a row written under the legacy key |
+| `derive_idempotency_key` | **Legacy** positional key over `(run_id, step, tool, canonical args)`; read-only, kept so pre-upgrade rows stay derivable |
 | `ToolLedger` | Protocol: `lookup` / `begin` / `complete` / `fail` |
 | `InMemoryToolLedger` | Bounded in-process ledger; dedupes a retry inside one worker only |
 | `PostgresToolLedger` | Durable `tool_invocations` table shared by every replica (`idempotency_postgres.py`) |
@@ -868,10 +924,35 @@ effect did not land, so the retry must be allowed. `in_flight` is **not**
 happened", and re-running an effectful call on a maybe is the defect the ledger
 exists to prevent.
 
+**Why content, and why an occurrence.** The legacy key embedded the call's
+ordinal in the run, so a retry whose model took a different path — the normal
+case, since a resumed run regenerates its turns — derived fresh keys for every
+call after the divergence and re-executed effects that had already landed. The
+content key maps "the same effect, requested again" to the same row wherever
+it appears; the occurrence keeps a deliberate second identical call (two equal
+notifications) a separate row. The tenant is mixed in because run ids are
+often caller-chosen and the table's primary key is global. The provider's
+`tool_use` id is **not** used: it is minted per generated turn, so the
+regenerated turn of a resumed run carries new ids for the very same calls.
+
+**Upgrading with runs in flight.** `derive_call_key` digests are
+domain-separated from the legacy scheme, and nothing new is written under a
+legacy key. When a content key is fresh, `claim_call` also looks up the call's
+legacy positional key: a `completed` legacy row is replayed (and copied onto
+the new key), an `in_flight` one is reported as in flight. So a run that
+crashed before the upgrade and resumes along its **original** path replays as
+before; one that resumes along a **different** path can re-execute a
+pre-upgrade effect once — the positional key is the thing that cannot match
+it. The extra lookup costs one round trip per first-time effectful call and
+only matters until the ledger's retention window has passed.
+
 The table is created by `migrations/versions/009_tool_invocations.py`, is
 tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
-window, not an audit log.
+window, not an audit log. The sweep bounds `created_at` as well as
+`updated_at` (equivalent, since a row is completed after it is created) so it
+range-scans `ix_tool_invocations_created_at` rather than the whole ledger;
+`updated_at` itself stays unindexed to keep completions HOT updates.
 
 The typed `Agent` consumes it **by default** — it no longer has to be handed
 one:
@@ -886,10 +967,34 @@ agent = Agent(tools=[charge_card], tool_ledger=PostgresToolLedger(tenant_id="acm
 
 **A stable `run_id` across attempts is what makes deduplication possible at
 all** — a fresh id per attempt is a different run by definition, and every
-effectful tool executes again. Without a `run_id` the ledger stays inert, and
+effectful tool executes again. Given one, a retry replays each completed
+effect even when its model asks for them in a different order. Without a `run_id` the ledger stays inert, and
 `ORCHESTRATOR_TOOL_LEDGER=off` turns it off deployment-wide. A plain callable
 is `destructive` by default (see `ToolDefinition`), so tools opt *out* of the
 ledger by declaring `read_only`, never by omission.
+
+#### Durable resume of the typed `Agent`
+
+The ledger needs a durable backend to dedupe across a restart. A run that
+already has a checkpoint can resume through it instead — or as well:
+
+```python
+from core.orchestration.checkpoint import init_checkpoint
+
+manager = await init_checkpoint(store, prompt, {"tenant_id": "acme"}, None,
+                                budget, run_id="order-7", resume=True)
+result = await agent.run(prompt, checkpoint=manager)
+```
+
+Each approved call is recorded through `CheckpointManager.run_step` as
+`{"observation", "is_error"}`, and the ledger claim runs inside the step under
+the same occurrence. A resumed `Agent.run` regenerates its turns and replays
+every recorded call it asks for again, in any order. `run_id` defaults to the
+checkpoint's, and the ledger key uses the tenant recorded on the checkpoint
+rather than the ambient one, because a recovery sweep may resume with none
+bound. With a checkpoint, a multi-tool turn runs its calls one after another,
+as the ReAct loop does: per-step saves must not interleave. Without a
+checkpoint nothing changes.
 
 #### Choosing the ledger (`ORCHESTRATOR_TOOL_LEDGER`)
 

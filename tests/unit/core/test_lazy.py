@@ -13,11 +13,12 @@ import importlib
 
 import pytest
 
+import core.cli
 import core.orchestration
 import core.plugins
 from core._lazy import lazy_exports
 
-LAZY_PACKAGES = (core.plugins, core.orchestration)
+LAZY_PACKAGES = (core.plugins, core.orchestration, core.cli)
 
 
 class TestLazyExports:

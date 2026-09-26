@@ -307,3 +307,13 @@ core/scraper/
     ├── memory.py        # MemoryStorage
     └── filesystem.py    # FilesystemStorage
 ```
+
+## Lifecycle and safety notes
+
+- Leaving `async with Scraper()` closes that scraper's fetchers only. The
+  process-wide robots.txt client is closed by the plugin's `shutdown()`;
+  closing it per block used to break concurrent crawls, whose robots fetch
+  then failed and ran with no rules at all.
+- `robots.txt` is fetched pinned to the SSRF-verified IP (Host/SNI restored)
+  and read up to 500 KiB.
+- DNS-resolving SSRF checks and HTML extraction run off the event loop.

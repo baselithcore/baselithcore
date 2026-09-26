@@ -19,7 +19,7 @@ async function loadData(overrides = {}) {
   const url = queryString.length > 0 ? `/admin/data?${queryString}` : '/admin/data';
 
   updateClarificationMetrics();
-  const statusPromise = fetch('/status')
+  const statusPromise = fetch('/admin/status')
     .then((res) => (res.ok ? res.json() : null))
     .catch((err) => {
       console.error('[admin] Failed to load status:', err);

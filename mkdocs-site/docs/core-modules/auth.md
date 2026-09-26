@@ -238,9 +238,11 @@ When a token is revoked (e.g., during logout):
 ### API key revocation on a denylist outage
 
 The API-key path (`core/auth/api_keys.py`) has its own shared **Redis
-denylist**, separate from the JWT blacklist above, and its own policy for what
-to do when that denylist cannot be read: `SecurityConfig.api_key_revocation_fail_mode`
-(env `API_KEY_REVOCATION_FAIL_MODE`, default `closed`).
+denylist**, separate from the JWT blacklist above — used only when the
+deployment declares a Redis cache backend (`CACHE_BACKEND=redis`) — and its own
+policy for what to do when that denylist cannot be read:
+`SecurityConfig.api_key_revocation_fail_mode` (env
+`API_KEY_REVOCATION_FAIL_MODE`, default `closed`).
 
 - **`closed`** (the default) treats the key as revoked on a Redis read
   failure — the same rejection the validator already returns for an unknown
@@ -250,10 +252,16 @@ to do when that denylist cannot be read: `SecurityConfig.api_key_revocation_fail
   to make Redis unreachable un-revokes every key revoked elsewhere for the
   duration.
 
-No denylist backend at all (Redis unreachable at `APIKeyValidator`
-construction, so `self._redis is None`) is a different case — single-node,
-process-local revocation by deployment choice — and is unaffected by the fail
-mode; it always behaves as if a key were not denylisted.
+No denylist backend at all — `CACHE_BACKEND` is anything other than `redis`
+(the default is `local`) — is a different case: single-node, process-local
+revocation by deployment choice. No Redis client is built, `revoke_key` drops
+the key from this process only, and the fail mode does not apply, so every
+configured key keeps working without a reachable Redis. The decision follows
+the declaration, not reachability: the Redis client connects lazily, so "could
+not reach Redis" is only ever observed on the first denylist read. With
+`CACHE_BACKEND=redis` declared, a Redis that is down (or a client that cannot
+even be built) is an outage and resolves per the fail mode above — `closed`
+rejects every key until Redis is back.
 
 ### Refresh-token family revocation
 
@@ -660,8 +668,12 @@ graph LR
 
 1. The IdP's JWKS endpoint is resolved — either the explicit `OIDC_JWKS_URL`, or
    discovered from `{OIDC_ISSUER}/.well-known/openid-configuration`.
-2. The signing key for the token's `kid` is fetched (cached by `PyJWKClient`;
-   the network call runs in a worker thread so the event loop never blocks).
+2. The signing key for the token's `kid` is looked up in the cached JWKS
+   (fetched through the SSRF-pinned path, in a worker thread so the event
+   loop never blocks). An unknown `kid` forces a re-fetch at most once per
+   60 s, single-flight across concurrent requests, and a failed fetch backs
+   off for 5 s — the `kid` comes from an unverified header, so without the
+   limit every forged token would cost one outbound call to the IdP.
 3. The signature (`RS256`/`ES256`), `iss`, `aud`, and `exp` are validated.
 4. Claims are mapped to an `AuthUser` (see below).
 

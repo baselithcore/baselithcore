@@ -148,8 +148,64 @@ def _filter_where(
     return where
 
 
+#: First pgvector release with ``hnsw.iterative_scan``. On older servers the
+#: GUC prefix is reserved by the extension, so setting it is an error.
+_ITERATIVE_SCAN_MIN_VERSION = (0, 8)
+
+_EXTVERSION_SQL = "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+
+
+def _version_tuple(raw: str) -> tuple[int, ...]:
+    """``"0.8.1"`` -> ``(0, 8, 1)``; non-numeric parts end the tuple."""
+    parts: list[int] = []
+    for piece in raw.split("."):
+        if not piece.isdigit():
+            break
+        parts.append(int(piece))
+    return tuple(parts)
+
+
 class PgVectorProvider:
     """Vector store provider backed by PostgreSQL + pgvector."""
+
+    #: Whether the server's pgvector supports ``hnsw.iterative_scan``; probed
+    #: once per provider on the first filtered search (``None`` = not yet).
+    _iterative_scan_ok: bool | None = None
+
+    async def _iterative_scan_supported(self) -> bool:
+        """Probe (once) whether the installed pgvector has iterative scans.
+
+        A failed probe is not cached: it answers False for this call only, so
+        a transient error cannot disable the feature for the process lifetime.
+        """
+        if self._iterative_scan_ok is not None:
+            return self._iterative_scan_ok
+        try:
+            async with get_async_cursor() as cur:
+                await cur.execute(_EXTVERSION_SQL)
+                row = await cur.fetchone()
+        except Exception as exc:
+            logger.debug("pgvector_version_probe_failed", extra={"error": str(exc)})
+            return False
+        version = _version_tuple(str(row[0])) if row else ()
+        self._iterative_scan_ok = version >= _ITERATIVE_SCAN_MIN_VERSION
+        return self._iterative_scan_ok
+
+    async def _search_settings(self, filtered: bool) -> list[str]:
+        """``SET LOCAL`` statements to run ahead of one search.
+
+        Every value is an int from a range-validated setting or a member of a
+        ``Literal``, so nothing caller-controlled reaches the statement text.
+        """
+        config = get_vectorstore_config()
+        settings: list[str] = []
+        ef_search = int(config.hnsw_ef_search)
+        if ef_search > 0:
+            settings.append(f"SET LOCAL hnsw.ef_search = {ef_search}")
+        mode = config.hnsw_iterative_scan
+        if filtered and mode != "off" and await self._iterative_scan_supported():
+            settings.append(f"SET LOCAL hnsw.iterative_scan = {mode}")
+        return settings
 
     async def _existing_dimension(self, table: str) -> int | None:
         """Declared width of ``table``'s vector column, or ``None``.
@@ -278,9 +334,11 @@ class PgVectorProvider:
 
         ``VECTORSTORE_HNSW_EF_SEARCH`` is applied per query so recall is a
         property of this deployment rather than of whatever the DBA left in
-        ``postgresql.conf``. ``SET LOCAL`` only takes effect inside a
-        transaction and the pool runs in autocommit, so the search opens one;
-        set the value to 0 to skip both and use the server default.
+        ``postgresql.conf``. A filtered search also gets
+        ``VECTORSTORE_HNSW_ITERATIVE_SCAN`` (pgvector >= 0.8), so a selective
+        tenant filter still fills ``limit``. ``SET LOCAL`` only takes effect
+        inside a transaction and the pool runs in autocommit, so the search
+        opens one; with neither setting in play it runs without one.
         """
         table = _table(collection_name)
         encoded = _encode_vector(query_vector)
@@ -301,16 +359,18 @@ class PgVectorProvider:
             "ORDER BY embedding <=> %s::vector LIMIT %s"
         )
         params.extend([encoded, int(limit)])
-        ef_search = int(get_vectorstore_config().hnsw_ef_search)
+        # Any WHERE turns the HNSW walk into post-filtering: only ef_search
+        # candidates are visited, then filtered, so a selective tenant filter
+        # returns a fraction of LIMIT. Iterative scan (pgvector >= 0.8) keeps
+        # walking until LIMIT matching rows are found.
+        settings = await self._search_settings(filtered=bool(where))
         async with get_async_cursor(row_factory=dict_row) as cur:
-            if ef_search > 0:
+            if settings:
                 async with cur.connection.transaction():
-                    # SET takes no bind parameters; the value is an int coerced
-                    # from a range-validated setting, so nothing else can reach
-                    # the statement text.
-                    await cur.execute(
-                        f"SET LOCAL hnsw.ef_search = {ef_search}"  # nosec B608
-                    )
+                    # SET takes no bind parameters; see _search_settings for
+                    # why the statement text is safe.
+                    for statement in settings:
+                        await cur.execute(statement)  # nosec B608
                     await cur.execute(sql, params)
                     rows = await cur.fetchall()
             else:
@@ -395,6 +455,16 @@ class PgVectorProvider:
         ]
         next_offset = points[-1].id if len(points) == int(limit) and points else None
         return points, next_offset
+
+    async def list_collections(self) -> list[str]:
+        """Names of every collection (``vs_*`` table) in the public schema."""
+        async with get_async_cursor() as cur:
+            await cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND left(table_name, 3) = 'vs_'"
+            )
+            rows = await cur.fetchall()
+        return sorted(str(r[0])[3:] for r in rows)
 
     async def delete_by_filter(
         self, collection_name: str, key: str, value: Any, **kwargs: Any

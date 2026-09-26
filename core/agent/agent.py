@@ -43,7 +43,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -54,11 +54,8 @@ from core.agent._tool_dispatch import (
 )
 from core.agent._tool_runtime import execute_tool_calls
 from core.observability.logging import get_logger
-from core.orchestration.idempotency import (
-    ToolLedger,
-    derive_idempotency_key,
-    requires_idempotency,
-)
+from core.orchestration.call_keys import CallOccurrences
+from core.orchestration.idempotency import ToolLedger
 from core.reasoning.react import ToolDefinition
 from core.services.llm.message_transport import generate_over_messages
 from core.services.llm.messages import (
@@ -70,8 +67,10 @@ from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
     ResponseFormat,
-    ToolCall,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from core.orchestration.checkpoint import CheckpointManager
 
 logger = get_logger(__name__)
 
@@ -235,22 +234,6 @@ class Agent[OutputT]:
             strict=True,
         )
 
-    def _ledger_key(
-        self, definition: ToolDefinition, call: ToolCall, run_id: str | None, step: int
-    ) -> str | None:
-        """The idempotency key for this call, or ``None`` when it needs none.
-
-        Three conditions must hold: a ledger was supplied, the caller gave a
-        stable ``run_id`` (without one there is nothing to deduplicate against
-        — a fresh id per attempt is a different call by definition), and the
-        tool is not ``read_only``.
-        """
-        if not run_id or self._ledger() is None:
-            return None
-        if not requires_idempotency(definition.category):
-            return None
-        return derive_idempotency_key(run_id, step, call.name, call.arguments)
-
     def _ledger(self) -> ToolLedger | None:
         """The ledger for this agent: the injected one, or the shared default.
 
@@ -294,7 +277,11 @@ class Agent[OutputT]:
     # -- public API --------------------------------------------------------
 
     async def run(
-        self, prompt: str, *, run_id: str | None = None
+        self,
+        prompt: str,
+        *,
+        run_id: str | None = None,
+        checkpoint: CheckpointManager | None = None,
     ) -> AgentResult[OutputT]:
         """Run the agent to completion and return the validated result.
 
@@ -314,8 +301,17 @@ class Agent[OutputT]:
                 **Supplying a stable id across retries is what makes
                 deduplication possible at all** — a fresh id per attempt is a
                 different run by definition, so the ledger has nothing to match
-                and every effectful tool executes again. Ignored unless a
-                ``tool_ledger`` was supplied.
+                and every effectful tool executes again. Calls are keyed by
+                their content and occurrence in the run, not their position,
+                so a retry whose model asks in a different order still
+                replays them. Defaults to ``checkpoint.run_id``.
+            checkpoint: Optional
+                :class:`~core.orchestration.checkpoint.CheckpointManager`
+                (e.g. from ``init_checkpoint(..., resume=True)``). Each
+                approved tool call is recorded through its ``run_step``, so a
+                resumed run replays recorded observations instead of calling
+                the tools again, even without a durable ledger. Turns then run
+                their calls sequentially. ``None`` changes nothing.
 
         Raises:
             AgentOutputValidationError: ``output_type`` never satisfied.
@@ -334,6 +330,9 @@ class Agent[OutputT]:
         system = system_prompt_for(self.system_prompt, bool(self._tools))
         context = gate_context(self)
 
+        if checkpoint is not None and not run_id:
+            run_id = checkpoint.run_id
+        occurrences = CallOccurrences()
         history: list[Message] = [Message.user(prompt)]
         tool_calls_made: list[str] = []
         retries_left = self.max_retries
@@ -359,15 +358,17 @@ class Agent[OutputT]:
                 # Gated in order, then overlapped: the provider emitted every
                 # call of this turn before seeing any result, so they are
                 # independent and running them serially paid the sum of their
-                # latencies. The step of each call is its position in the run,
-                # so a loop that legitimately calls one tool twice with
-                # identical arguments is not collapsed into one ledger entry.
+                # latencies. Each call's occurrence in the run keeps a loop
+                # that legitimately calls one tool twice with identical
+                # arguments from collapsing into one ledger entry.
                 outcomes = await execute_tool_calls(
                     self,
                     list(result.tool_calls),
                     context=context,
                     run_id=run_id,
                     step_offset=len(tool_calls_made),
+                    occurrences=occurrences,
+                    checkpoint=checkpoint,
                 )
                 results: list[ToolResultBlock] = []
                 for call, (observation, is_error) in zip(

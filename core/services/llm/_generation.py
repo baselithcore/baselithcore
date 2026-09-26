@@ -33,6 +33,8 @@ from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.errors import LLMRefusalError
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
 from core.services.llm.fallback_runtime import maybe_run_with_fallback
+from core.services.llm.model_capabilities import configured_max_tokens
+from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage, billed_usage
 
 if TYPE_CHECKING:
@@ -185,6 +187,35 @@ def _build_cache_key(
     return f"{tenant_id}:{model}:{json_mode}:{prompt_hash}", prompt_hash
 
 
+def _semantic_namespace(
+    *,
+    model: str,
+    json_mode: bool,
+    system_prompt: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
+    effort: str | None,
+) -> str:
+    """Hash of every non-prompt input that changes the completion.
+
+    The semantic cache matches on prompt similarity alone, so without this
+    namespace two callers with the same prompt but a different system prompt,
+    model or sampling config were served each other's answers. Mirrors the
+    inputs of :func:`_build_cache_key`, minus the prompt itself.
+    """
+    material = "\x1f".join(
+        (
+            model,
+            repr(json_mode),
+            system_prompt or "",
+            repr(temperature),
+            repr(max_tokens),
+            effort or "",
+        )
+    )
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
 async def generate_response(
     service: LLMService,
     prompt: str,
@@ -216,6 +247,9 @@ async def generate_response(
     # nested function — it would still see the parameter's `str | None`.
     resolved_model: str = service._resolve_model(model, task_category)
     effort = _resolve_effort(service, effort, task_category)
+    # Before the cache key: a capped answer must not be served to an uncapped
+    # caller, nor the reverse.
+    max_tokens = configured_max_tokens(max_tokens, service.config)
 
     tracer = get_tracer("llm-service")
     span_attributes = _build_span_attributes(
@@ -243,6 +277,14 @@ async def generate_response(
             max_tokens=max_tokens,
             effort=effort,
         )
+        semantic_ns = _semantic_namespace(
+            model=resolved_model,
+            json_mode=json,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            effort=effort,
+        )
         if service.cache is not None:
             cached = await service.cache.get(cache_key)
             if cached:
@@ -252,7 +294,9 @@ async def generate_response(
 
         # Semantic cache (approximate match) only on exact miss.
         if service.semantic_cache is not None:
-            semantic_cached = await service.semantic_cache.get_similar(prompt)
+            semantic_cached = await service.semantic_cache.get_similar(
+                prompt, namespace=semantic_ns
+            )
             if semantic_cached:
                 span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
                 return str(semantic_cached)
@@ -276,6 +320,8 @@ async def generate_response(
             from core.quotas.cost_enforcement import enforce_tenant_cost_budget
 
             await enforce_tenant_cost_budget(model=resolved_model)
+            # Opt-in client-side call throttle (RESILIENCE_LLM_RATE_*).
+            await acquire_llm_call_slot(service.config.provider)
 
             # Track input tokens (large prompts encode off the event loop)
             input_tokens = await estimate_tokens_async(prompt)
@@ -408,7 +454,7 @@ async def generate_response(
 
             # Cache response (semantic)
             if service.semantic_cache is not None:
-                await service.semantic_cache.set(prompt, content)
+                await service.semantic_cache.set(prompt, content, namespace=semantic_ns)
 
             return content
 

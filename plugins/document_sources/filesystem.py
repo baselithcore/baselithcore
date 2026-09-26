@@ -262,10 +262,13 @@ class FilesystemDocumentSource:
 
     async def read_item(self, path: Path) -> DocumentItem | None:
         """Reads and parses a single file item given its path."""
-        # Security check: ensure path is within root
+        # Security check: ensure path is within root. A path-component check,
+        # not a string prefix: ``str(path).startswith(str(root))`` accepted
+        # ``/data/docs-private/x`` for root ``/data/docs``, and resolving first
+        # means a symlink inside the root cannot point the reader outside it.
         try:
             path = path.resolve()
-            if not str(path).startswith(str(self._root.resolve())):
+            if not path.is_relative_to(self._root.resolve()):
                 return None
         except Exception:
             return None

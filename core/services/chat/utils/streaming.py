@@ -6,7 +6,7 @@ Provides functions for building and managing streaming response generators.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 
 StreamFunction = Callable[[str], Iterable[str]]
 FinalizeFunction = Callable[[str], str]
@@ -96,11 +96,36 @@ def _compute_suffix(final_answer: str, normalized_answer: str) -> str:
     return final_answer[normalized_len:]
 
 
+def on_stream_end(
+    stream: AsyncIterator[str], callback: Callable[[], None]
+) -> AsyncIterator[str]:
+    """Wrap ``stream`` so ``callback`` runs once it is drained, fails or closes.
+
+    Args:
+        stream: The async chunk stream to pass through unchanged.
+        callback: Invoked exactly once when the wrapper finishes, for any
+            reason (exhaustion, an exception, or the consumer closing it).
+
+    Returns:
+        An async iterator yielding the same chunks as ``stream``.
+    """
+
+    async def wrapped() -> AsyncIterator[str]:
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            callback()
+
+    return wrapped()
+
+
 __all__ = [
     "FinalizeCallback",
     "FinalizeFunction",
     "StreamFunction",
     "build_cached_stream",
     "build_fallback_stream",
+    "on_stream_end",
     "stream_answer",
 ]

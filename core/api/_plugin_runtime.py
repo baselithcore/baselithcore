@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from core.api.spa import SPAStaticFiles
 from core.observability.logging import get_logger
 from core.plugins import PluginState
+from core.plugins._activation_backoff import ActivationBackoff
 from core.plugins.config_file import plugin_enabled
 
 logger = get_logger(__name__)
@@ -53,6 +54,9 @@ class PluginRuntimeHooks:
         self._mounted_static: set[str] = set()
         self._mcp_tools: dict[str, list[str]] = {}
         self._mcp_disable_hooked: set[str] = set()
+        # Remembers failed lazy activations so request traffic does not retry
+        # them (re-hash + re-import under the global locks) on every call.
+        self.activation_backoff = ActivationBackoff()
 
     def mount_plugin_routes(self, plugin: Any) -> None:
         plugin_name = plugin.metadata.name
@@ -104,6 +108,9 @@ class PluginRuntimeHooks:
         logger.info("🔌 Plugin static mounted: %s", mount_path)
 
     async def on_plugin_activated(self, plugin: Any) -> None:
+        # Runs after every successful enable — lazy or operator-driven — so an
+        # operator re-enable also lifts any backoff left by an earlier failure.
+        self.activation_backoff.clear(plugin.metadata.name)
         self.mount_plugin_routes(plugin)
         static_path = self._registry.get_all_static_paths().get(plugin.metadata.name)
         if static_path:
@@ -190,8 +197,27 @@ class PluginRuntimeHooks:
                 logger.warning("❌ Plugin auto-activation failed: %s", canonical_name)
 
     async def activate_plugin_for_runtime(self, plugin_name: str) -> bool:
+        """Lazily activate ``plugin_name`` (and its dependencies).
+
+        Raises:
+            PluginActivationBackoffError: A previous attempt failed less than
+                ``ACTIVATION_BACKOFF_SECONDS`` ago; nothing is re-attempted.
+                Checked again once the lock is held, so requests that queued
+                behind a failing attempt do not each repeat it.
+        """
+        self.activation_backoff.check(plugin_name)
         async with self._activation_lock:
-            return await self._activate_locked(plugin_name, set())
+            if self._lifecycle.get_state(plugin_name) == PluginState.ACTIVE:
+                return True
+            self.activation_backoff.check(plugin_name)
+            try:
+                activated = await self._activate_locked(plugin_name, set())
+            except Exception:
+                self.activation_backoff.record_failure(plugin_name)
+                raise
+            if not activated:
+                self.activation_backoff.record_failure(plugin_name)
+            return activated
 
     async def _activate_locked(self, plugin_name: str, _in_progress: set[str]) -> bool:
         """Activate ``plugin_name`` after its dependencies — **transitively**.

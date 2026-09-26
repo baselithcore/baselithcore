@@ -25,10 +25,11 @@ graph TB
         OpenAI[OpenAI]
         Ollama[Ollama]
         HF[HuggingFace]
+        VLLM[vLLM]
         Qdrant[Qdrant]
     end
 
-    LLM --> OpenAI & Ollama & HF
+    LLM --> OpenAI & Ollama & HF & VLLM
     VS --> Qdrant
 ```
 
@@ -62,8 +63,10 @@ core/services/llm/
 │   ├── _anthropic_client.py    # api|bedrock|vertex SDK client construction
 │   ├── openai_provider.py
 │   ├── ollama_provider.py
+│   ├── vllm_provider.py        # OpenAI-compatible, self-hosted (subclasses OpenAIProvider)
 │   └── huggingface_provider.py
 ├── cost_control.py     # Cost control
+├── rate_limit.py       # Opt-in client-side call rate limit (RESILIENCE_LLM_RATE_*)
 └── exceptions.py
 ```
 
@@ -97,6 +100,14 @@ Both `generate_response` and `generate_response_stream` accept optional
 `prompt + system_prompt + temperature + max_tokens`, so calls that differ only in
 their system prompt or sampling parameters no longer collide on a stale cached
 answer.
+
+When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
+fills it on every path — text, streaming, structured and the message API —
+via `core.services.llm.model_capabilities.configured_max_tokens`. The setting
+used to be bound and advertised but read by nothing, so it capped nothing and
+OpenAI/Gemini/Ollama calls ran to the model's own ceiling. Unset (the default)
+keeps each provider's default: Anthropic's per-family table, the model limit
+elsewhere. The resolved cap is part of the response-cache key.
 
 ### Native Tool-Calling & Structured Outputs
 
@@ -232,6 +243,7 @@ within a 1:3–3:1 ratio; earlier models only their fixed sizes).
 | Anthropic (`tools` + `output_config.format`) | ✅ |
 | OpenAI (`tools` + `response_format` json_schema) | ✅ |
 | Ollama (`tools` + `format` schema) | ✅ |
+| vLLM (`tools` + `response_format` json_schema, guided decoding) | ✅ when the server runs `--enable-auto-tool-choice` (`LLM_VLLM_NATIVE_TOOLS`) |
 | Gemini (`function_declarations` + `response_schema`) | ✅ (optional extra `[gemini]`) |
 | HuggingFace | ❌ (fallback only) |
 
@@ -282,7 +294,7 @@ bugs closed at once: a fallback answer used to be priced at the *primary's*
 rate, and a self-hosted model, having no pricing row, was priced through the
 unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — spend that never
 happened, large enough to abort a budgeted run. Any `ollama/<model>` id now
-prices at zero without needing a table row, while tokens are still metered, so
+(and `vllm/<model>`) prices at zero without needing a table row, while tokens are still metered, so
 a run cannot escape its token cap by moving to a local model. A local endpoint
 that fronts a paid model can still be priced by adding an explicit row for its
 qualified id.
@@ -314,7 +326,11 @@ cannot: *will this deployment serve from what it thinks it will?* It reports
   path — the primary, a chain stage — blocks the boot, while one only the
   vision provider asks for is reported as a warning and the deployment starts.
   A model no request routes to must not cost a deployment everything it serves,
-  which under `Restart=always` is what a fatal check amounts to.
+  which under `Restart=always` is what a fatal check amounts to. vLLM targets
+  (primary or chain stage) are probed with `GET {LLM_VLLM_API_BASE}/models`: an unreachable
+  server (`vllm_unreachable`), a rejected key (`vllm_unauthorized`) and a model
+  the server does not serve under that name (`vllm_model_missing`, listing
+  what it does serve) are all inference-path errors.
 
 `auto` (the default) raises in a production environment and warns elsewhere;
 `warn`, `strict` and `off` force the behaviour. It **never calls a hosted
@@ -403,7 +419,7 @@ vendor family from its id prefix and checks it against the configured provider:
 | Google | `gemini-` | `gemini`, `vertex`, `google` |
 
 `LLM_PROVIDER` itself accepts only `openai`, `ollama`, `huggingface`,
-`anthropic` and `gemini`; the extra names in the table exist for configs that
+`anthropic`, `gemini` and `vllm`; the extra names in the table exist for configs that
 carry a provider string of their own. Anthropic-on-Bedrock/Vertex is
 `LLM_PROVIDER=anthropic` plus `LLM_ANTHROPIC_BACKEND` (below), which already
 resolves to the Anthropic family.
@@ -621,7 +637,7 @@ llm = LLMService(
 )
 ```
 
-Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
+Switch providers (OpenAI, Anthropic, Gemini, Ollama, vLLM, HuggingFace) via `LLM_PROVIDER` /
 `LLM_MODEL` in the environment. All providers implement an async interface that
 `LLMService` invokes via `await`.
 
@@ -629,16 +645,17 @@ Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
 
 `OpenAIProvider` accepts an optional `base_url`, and the provider factory
 forwards `LLMConfig.api_base` (env `LLM_API_BASE`) when `LLM_PROVIDER=openai`
-— so the default provider can be any OpenAI-compatible server: an Azure
-OpenAI gateway, vLLM, LiteLLM, OpenRouter. Left unset (`None`), the SDK
-default (`api.openai.com`) applies.
+— so the default provider can be any OpenAI-compatible *hosted* gateway: an
+Azure OpenAI gateway, LiteLLM, OpenRouter. Left unset (`None`), the SDK
+default (`api.openai.com`) applies. A self-hosted vLLM server has its own
+provider (below).
 
 ```python
 from core.services.llm.providers.openai_provider import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="sk-...",
-    base_url="http://localhost:8000/v1",   # vLLM / LiteLLM / gateway
+    base_url="https://litellm.internal/v1",   # LiteLLM / gateway
 )
 ```
 
@@ -646,6 +663,79 @@ provider = OpenAIProvider(
 or fallback stage that switches provider resolves the endpoint that belongs to
 the provider actually called, via `api_base_for` (see
 [Central Per-Plugin LLM Policy](#central-per-plugin-llm-policy)).
+
+#### vLLM (`LLM_PROVIDER=vllm`)
+
+`VLLMProvider` talks to a self-hosted `vllm serve` over its OpenAI-compatible
+API. It reuses the OpenAI request path — native tool calling, structured output
+via `response_format` json_schema (enforced server-side by guided decoding),
+streaming with an exact terminal usage chunk — and fixes what reaching vLLM
+*as* `openai` got wrong:
+
+| Concern | As `openai` + `LLM_API_BASE` | As `vllm` |
+| ------- | ---------------------------- | --------- |
+| API key | mandatory (a fake one) | optional; `EMPTY` is sent for a keyless server |
+| Circuit breaker | `openai_provider` — a GPU outage opened the hosted OpenAI stage too | `vllm_provider`, its own |
+| Cost | unpriced → `UNKNOWN_PRICE` (100 $/M) | `vllm/<model>` priced at zero, tokens still metered |
+| Errors | reported as OpenAI's | reported as vLLM's |
+| Startup check | none | `GET {LLM_VLLM_API_BASE}/models`: server up, key accepted, model served |
+
+```bash
+# Server side
+vllm serve Qwen/Qwen3-8B --served-model-name qwen3-8b \
+    --enable-auto-tool-choice --tool-call-parser hermes --api-key "$VLLM_API_KEY"
+
+# Framework side
+LLM_PROVIDER=vllm
+LLM_MODEL=qwen3-8b                        # must match --served-model-name
+LLM_VLLM_API_BASE=http://gpu-host:8000/v1 # /v1 is appended when missing
+LLM_VLLM_API_KEY=                         # the server's --api-key; empty = keyless
+LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-choice
+```
+
+- **Several servers, one per model (`LLM_VLLM_ENDPOINTS`).** A vLLM server
+  serves one model, so a second model is a second server on another port. List
+  them once — `LLM_VLLM_ENDPOINTS=http://gpu:8002/v1,http://gpu:8003/v1` — and
+  name models, never ports: `core.services.llm.vllm_endpoints` reads each
+  server's `GET {LLM_VLLM_API_BASE}/models` (cached 60 s; a model missing from the cache forces
+  one refresh, so a newly started model is found on the next call) and routes
+  every call to the server serving its model. The provider keeps one client
+  per server; plugins holding their own SDK receive, through
+  `resolve_governed_client_config`, the `/v1` root of the server that serves
+  their pinned model (per scope). A server that does not answer is skipped
+  (its last good catalog keeps routing), a model on two servers goes to the
+  first listed, and a model no reachable server serves fails with the list of
+  what is served. `LLM_VLLM_API_BASE` is the one-server form and joins the
+  list; with a single server nothing is probed on the request path. The
+  startup check probes every server; a model is *missing* only when every
+  server answered and none serves it (otherwise it is *unverified*).
+- **The endpoint is required.** There is no default: vLLM's `:8000` is also
+  where this backend listens, so a guessed `localhost:8000` would call the
+  framework itself. `LLM_API_BASE` is honoured only when `vllm` is the default
+  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,vllm:qwen3-8b`)
+  reads `LLM_VLLM_API_BASE`.
+- **Only the dedicated key is ever sent.** `LLM_VLLM_API_KEY` (or
+  `VLLM_API_KEY`, the variable the server itself reads); `LLM_API_KEY` is
+  ignored for vLLM even when it is the default provider, because that field
+  also answers to `LLM_OPENAI_API_KEY` and a hosted OpenAI key must never
+  reach a self-hosted box. No dedicated key means a keyless request.
+- **Tool calling is a server flag.** Without `--enable-auto-tool-choice` and a
+  `--tool-call-parser` matching the model, set `LLM_VLLM_NATIVE_TOOLS=false`:
+  tool use then goes through prompt coercion instead of a rejected request.
+- **vLLM-only sampling parameters** (`top_k`, `min_p`, `repetition_penalty`,
+  `chat_template_kwargs` — e.g. `{"enable_thinking": false}` for Qwen3) travel
+  in `extra_body`, forwarded untouched.
+- **No image generation**: `generate_image` raises before any request.
+- **Answers, not reasoning.** A thinking model (Qwen3, DeepSeek-R1) on a server
+  started **without `--reasoning-parser`** returns its reasoning inside the
+  answer — no opening tag, the reasoning closed by `</think>`, then the answer.
+  `core.services.llm.reasoning_text` drops it: `strip_reasoning` for whole
+  answers, `ReasoningStreamFilter` for streams (it holds text back until the
+  `</think>` or the end of the stream, and stops holding back as soon as the
+  server streams a separate `reasoning_content`). The provider applies both; a
+  plugin with its own OpenAI client applies them to its vLLM path. Start the
+  server with `--reasoning-parser <qwen3|deepseek_r1|…>` — that is the real
+  fix, and with it the filter is inert.
 
 #### Anthropic serving backends (`LLM_ANTHROPIC_BACKEND`)
 
@@ -767,9 +857,14 @@ started until it is restarted.
 Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
 to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
-resolves the lookup; `provider_configured` reports which providers a policy may
-pin). Ollama stays keyless.
+`LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN`, `LLM_VLLM_API_KEY`/`VLLM_API_KEY`
+(`core.services.llm.runtime.api_key_for` resolves the lookup;
+`provider_configured` reports which providers a policy may pin). Ollama stays
+keyless; vLLM is keyless-capable and counts as configured once
+`LLM_VLLM_API_BASE` names its server. A vLLM key may also arrive through the
+credential seam (an operator storing it from an admin console): the provider
+sends `LLM_VLLM_API_KEY` first, else that stored key, and the startup probe
+and governed clients use the same one.
 
 **Endpoints are per-provider too.** `LLM_API_BASE` is the endpoint of the
 *default* `LLM_PROVIDER` — it is not a global base URL. A policy (or a fallback
@@ -819,6 +914,20 @@ Gemini is pinnable too, but its SDK is an optional extra
 `provider_configured` additionally requires `google-genai` to be importable —
 a key alone would otherwise advertise a pin that fails on the first call.
 
+**The pin is read at call time, not when the service is fetched.** A service
+issued by `get_llm_service()` — the default singleton or a policy clone, and
+therefore also the one dependency injection hands out — re-resolves the pin on
+every call (`generate_response`, `generate`, `generate_messages`,
+`generate_response_stream`, and the module-level `generate_image`,
+`generate_batch`, `generate_stream_events`, `generate_typed`) and forwards the call to the
+service that pin selects for whoever is calling. A plugin that keeps the
+service it got at load time — an agent, a flow handler, a DI-injected client —
+therefore follows the console: the pin decides for the plugin bound to the
+call, and a re-pin applies to the next call with no restart. Before this, such a
+plugin ran on whatever was in force when it fetched the service (usually the
+deployment default, since nothing is bound while plugins load). Services built
+from an explicit `LLMService(config=...)` are not re-routed (see below).
+
 !!! warning "Scope: the shared funnel only"
     A policy governs LLM calls that reach a provider through
     `get_llm_service()`. Code constructing its own `LLMService(config=...)`,
@@ -838,11 +947,20 @@ plugin and point their own client at that governed target:
 from core.services.llm import resolve_governed_client_config
 
 gov = resolve_governed_client_config("my-plugin")   # None ⇒ keep your own defaults
-if gov is not None and gov.provider in ("openai", "ollama"):
-    base_url, api_key, model = gov.api_base, gov.key(), gov.model
-    # build the plugin's own SDK client pointed at (provider, base_url, api_key)
+if gov is not None and gov.speaks_openai:            # openai or vllm
+    base_url, api_key, model = gov.api_base, gov.openai_key(), gov.model
+    # build the plugin's own OpenAI client pointed at (base_url, api_key)
     # and use `model` as the default model.
 ```
+
+**vLLM through a plugin's own SDK.** vLLM speaks the OpenAI protocol, so an
+engine that bundles an OpenAI client can serve a vLLM pin — and must, or the pin
+is dropped while the console reports the plugin as pinned.
+`GovernedClientConfig.speaks_openai` is true for `openai` and `vllm`
+(`OPENAI_WIRE_PROVIDERS`); for `vllm`, `api_base` already arrives as the `/v1`
+root, and `openai_key()` returns vLLM's own key or the `EMPTY` placeholder the
+OpenAI SDKs require for a keyless server. Never substitute the engine's own
+OpenAI key: it belongs to api.openai.com.
 
 `resolve_governed_client_config(plugin_name)` returns a `GovernedClientConfig`
 (`provider`, `model`, `api_key: SecretStr | None`, `api_base`) — exactly the pin
@@ -906,7 +1024,7 @@ print(tracker.get_usage())
 # {"tokens_used": 150, "max_tokens": 10000, "remaining": 9850}
 ```
 
-Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`.
+Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`. The tiktoken encoder is never loaded on a running event loop (its first load reads, or downloads, the BPE file): a sync `estimate_tokens` call there starts a one-shot background load and uses the heuristic until it lands, while `estimate_tokens_async` awaits the load in a worker thread and returns the exact count.
 
 !!! note "Enforced per-request budget"
     Beyond token tracking, each `generate_response` call charges its **real USD
@@ -1077,6 +1195,27 @@ The streaming path (`generate_response_stream`) holds a slot for the **whole
 stream** — from open to exhaustion — because an open stream occupies the
 provider exactly like a non-streaming call in flight.
 
+### Call Rate Limit (opt-in)
+
+The concurrency cap bounds calls *in flight*; `RESILIENCE_LLM_RATE_ENABLED=true`
+additionally bounds calls *per window*: at most `RESILIENCE_LLM_RATE_LIMIT`
+calls every `RESILIENCE_LLM_RATE_WINDOW` seconds (defaults 20 / 60), keyed by
+the service's configured provider unless `RESILIENCE_LLM_RATE_PER_PROVIDER=false`.
+`acquire_llm_call_slot()` (`core/services/llm/rate_limit.py`) is awaited once
+per logical call on every generation path — text (after the response cache),
+`generate()`, `generate_messages()`, both streaming flavours, `generate_image()`
+and the Anthropic batch submission — after the tenant cost gate and before the
+provider is contacted.
+
+A call over the limit waits (non-blocking `asyncio.sleep`) for up to
+`RESILIENCE_LLM_RATE_MAX_WAIT` seconds (default 30), then raises
+`LocalLLMRateLimitError`, a `LLMRateLimitError` subclass with
+`status_code=None`, so existing `except RateLimitError` handlers catch it. The
+window is **per worker process** unless `CACHE_BACKEND=redis`, which shares it
+across workers through `RedisRateLimiter`. Off by default: when disabled the
+gate is a single cached-config read. Details and the full settings table:
+[Resilience → LLM call rate limit](resilience.md#llm-call-rate-limit).
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).
@@ -1157,6 +1296,23 @@ core/services/vectorstore/
     change. `pgvector` creates its tables (`vs_<collection>`, HNSW index)
     at `create_collection`; the extension must be installable in the target
     database (`CREATE EXTENSION vector`).
+
+!!! warning "pgvector: filtered searches and `hnsw.iterative_scan`"
+    An HNSW index scan visits `ef_search` candidates and applies the `WHERE`
+    clause *afterwards*. Every tenant-scoped search carries one
+    (`payload @> {"tenant_id": …}`), so a tenant owning a small share of a
+    collection gets a fraction of `limit`: on 60k vectors with a tenant at
+    0.5% of the rows, `LIMIT 10` returned **1** hit. pgvector ≥ 0.8 can keep
+    walking the graph until `limit` matches are found; the provider applies
+    `SET LOCAL hnsw.iterative_scan = <VECTORSTORE_HNSW_ITERATIVE_SCAN>`
+    (default `strict_order`, which keeps exact distance order) to every
+    filtered search — tenant, payload filter or `score_threshold` — and the
+    same query then returned 10 hits (~20 ms instead of ~4 ms). The server's
+    pgvector version is probed once per provider (`pg_extension.extversion`);
+    below 0.8 nothing is set, since the `hnsw.` GUC prefix is reserved there
+    and an unknown parameter would fail the search. Unfiltered searches are
+    untouched. `relaxed_order` is faster but may return hits slightly out of
+    order; `off` restores post-filtering.
 
 !!! info "Managed/remote Qdrant: auth, TLS, request deadline"
     Three `VectorStoreConfig` fields make a non-loopback Qdrant usable:
@@ -1239,6 +1395,22 @@ Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnel
 into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
 instead of 1000. Tenant isolation applies here as everywhere else: the current
 `tenant_id` is injected into the filter automatically.
+
+Both providers also expose `list_collections()` (a Qdrant server's collections;
+the `vs_*` tables for pgvector), which the GDPR tenant purge uses to delete a
+tenant's points from **every** collection with
+`delete_by_filter(key="tenant_id", value=tenant)` — see
+[Multi-tenancy › Tenant data purge](../advanced/multi-tenancy.md#tenant-data-purge-gdpr).
+
+### Shutdown
+
+`await vs.aclose()` closes the provider's client (the Qdrant `AsyncQdrantClient`;
+a pgvector provider borrows the shared database pool and holds nothing).
+`close_vectorstore_service()` closes and drops the process-wide instance that
+`get_vectorstore_service()` hands out; the app's lifespan calls it on shutdown,
+next to `core.services.llm.runtime.close_llm_services()`, which closes the
+default LLM service, every per-plugin policy clone and every fallback-stage
+clone once each.
 
 ### Tenant Isolation
 
@@ -1567,7 +1739,7 @@ Per-provider vision model identifiers are configuration-driven (no hardcoded mod
 | ------- | ------- | -------- |
 | `VISION_OPENAI_MODEL`    | `gpt-4o`                       | OpenAI |
 | `VISION_OPENAI_AUDIO_MODEL` | `gpt-4o-audio-preview`      | OpenAI (native audio — `gpt-4o` cannot take `input_audio`) |
-| `VISION_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022`   | Anthropic |
+| `VISION_ANTHROPIC_MODEL` | `claude-opus-5`                | Anthropic |
 | `VISION_GOOGLE_MODEL`    | `gemini-2.0-flash`             | Google |
 | `VISION_OLLAMA_MODEL`    | `llava`                        | Ollama (local) |
 
@@ -1595,6 +1767,11 @@ Speech synthesis and recognition.
     `register_vision_tools(server)`) are not registered on any server the app
     mounts. Call the service directly, or register the tools on your own
     `MCPServer`.
+
+`VoiceService()` takes its default provider from `VOICE_PROVIDER`
+(`openai` | `elevenlabs` | `google`, default `openai`), the same way
+`VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to override
+it per instance.
 
 ### Voice Structure
 
@@ -1647,35 +1824,39 @@ service.aclose()` closes it together with the shared `httpx` client.
 
 ## Evaluation Service
 
-LLM-as-a-Judge evaluation using DeepEval.
+!!! warning "Deprecated — `core.services.evaluation` is a shim"
+    `core.services.evaluation` used to carry its own DeepEval wrapper, a
+    duplicate of `core/evaluation/` that nothing in the runtime imported. It
+    shared one set of metric objects across concurrent calls (so one call could
+    read another's score) and exported the LLM API key into `os.environ`.
+    `EvaluationService` and `get_evaluation_service` now remain only for one
+    deprecation cycle (announced in 0.40.0, removed in 0.41.0) and warn on use:
+    `EvaluationService` is a subclass of the live, event-driven
+    `core.evaluation.EvaluationService`, and its `evaluate_rag_response()`
+    delegates to `core.evaluation.metrics.FaithfulnessEvaluator` /
+    `AnswerRelevancyEvaluator` with fresh metric objects per call.
+
+Use the live package instead — see [Evaluation](evaluation.md):
 
 ```python
-from core.services.evaluation import get_evaluation_service
+from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
-evaluator = get_evaluation_service()
-
-# Evaluate a RAG response
-result = await evaluator.evaluate_rag_response(
-    query="What is the capital of Italy?",
-    response="The capital of Italy is Rome.",
-    retrieved_context=["Italy is a country in Europe. Its capital is Rome."],
-    expected_output="Rome",  # enables precision/recall metrics
+faithfulness = FaithfulnessEvaluator(threshold=0.7).measure(
+    "What is the capital of Italy?",
+    "The capital of Italy is Rome.",
+    ["Italy is a country in Europe. Its capital is Rome."],
 )
-
-print(result["faithfulness"])          # {"score": 0.95, "reason": "...", "passed": True}
-print(result["answer_relevancy"])      # {"score": 0.92, "reason": "...", "passed": True}
-print(result["contextual_precision"])  # {"score": 0.88, ...} (when expected_output given)
-print(result["contextual_recall"])     # {"score": 0.90, ...} (when expected_output given)
+relevancy = AnswerRelevancyEvaluator().measure(
+    "What is the capital of Italy?", "The capital of Italy is Rome."
+)
 ```
 
-### Available Metrics
-
-| Metric                 | Description                            | Requires `expected_output` |
-| ---------------------- | -------------------------------------- | -------------------------- |
-| `faithfulness`         | Is the answer grounded in context?     | No                         |
-| `answer_relevancy`     | Does it answer the question?           | No                         |
-| `contextual_precision` | Are retrieved docs relevant & ordered? | Yes                        |
-| `contextual_recall`    | Did we retrieve all relevant docs?     | Yes                        |
+Both need `EVAL_ENABLED=true` and the `[evaluation]` extra (`deepeval`);
+otherwise they score `0.0`. The shim's `evaluate_rag_response()` returns
+`{"faithfulness": {...}, "answer_relevancy": {...}}` (each `{"score",
+"reason", "passed"}`, or `{"error": ...}` when evaluation is unavailable); the
+contextual precision/recall metrics of the retired wrapper are not carried
+over.
 
 ---
 
@@ -2095,7 +2276,7 @@ VECTORSTORE_TIMEOUT_SECONDS=30.0
 # Vision — VISION_PROVIDER picks the provider; the model is per provider
 VISION_PROVIDER=openai
 VISION_OPENAI_MODEL=gpt-4o
-VISION_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+VISION_ANTHROPIC_MODEL=claude-opus-5
 VISION_GOOGLE_MODEL=gemini-2.0-flash
 VISION_OLLAMA_MODEL=llava
 

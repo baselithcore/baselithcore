@@ -58,7 +58,6 @@
     "core/privacy/automated_decisions.py": 1,
     "core/privacy/consent.py": 1,
     "core/reasoning/patterns.py": 1,
-    "core/reasoning/react.py": 1,
     "core/reasoning/react_native.py": 1,
     "core/reasoning/react_tools.py": 2,
     "core/reasoning/tot/engine.py": 2,

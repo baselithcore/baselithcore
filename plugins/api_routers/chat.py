@@ -117,35 +117,51 @@ async def bounded_stream(
     max_bytes: int,
     max_chunk_bytes: int,
 ) -> AsyncIterator[str]:
-    """Wrap a chat stream with total and per-chunk size guards."""
-    total = 0
-    async for chunk in source:
-        if not isinstance(chunk, (str, bytes)):
-            continue
-        data = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
-        if len(data) > max_chunk_bytes:
-            # Split oversized chunk to cap worst-case memory per emission.
-            for i in range(0, len(data), max_chunk_bytes):
-                slice_bytes = data[i : i + max_chunk_bytes]
-                total += len(slice_bytes)
-                if total > max_bytes:
-                    logger.warning(
-                        "chat_stream_truncated",
-                        extra={"limit_bytes": max_bytes, "total_bytes": total},
-                    )
-                    return
-                yield slice_bytes.decode("utf-8", errors="replace")
-            continue
-        total += len(data)
-        if total > max_bytes:
-            logger.warning(
-                "chat_stream_truncated",
-                extra={"limit_bytes": max_bytes, "total_bytes": total},
+    """Wrap a chat stream with total and per-chunk size guards.
+
+    Closes ``source`` on every exit — normal end, truncation, or its own
+    ``aclose()`` from the SSE/WebSocket framer — so the upstream generator
+    and the LLM call behind it stop instead of running on until garbage
+    collection. Closing an async generator does not close the one it iterates.
+    """
+    try:
+        total = 0
+        async for chunk in source:
+            if not isinstance(chunk, (str, bytes)):
+                continue
+            data = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+            if len(data) > max_chunk_bytes:
+                # Split oversized chunk to cap worst-case memory per emission.
+                for i in range(0, len(data), max_chunk_bytes):
+                    slice_bytes = data[i : i + max_chunk_bytes]
+                    total += len(slice_bytes)
+                    if total > max_bytes:
+                        logger.warning(
+                            "chat_stream_truncated",
+                            extra={"limit_bytes": max_bytes, "total_bytes": total},
+                        )
+                        return
+                    yield slice_bytes.decode("utf-8", errors="replace")
+                continue
+            total += len(data)
+            if total > max_bytes:
+                logger.warning(
+                    "chat_stream_truncated",
+                    extra={"limit_bytes": max_bytes, "total_bytes": total},
+                )
+                return
+            yield (
+                chunk
+                if isinstance(chunk, str)
+                else data.decode("utf-8", errors="replace")
             )
-            return
-        yield (
-            chunk if isinstance(chunk, str) else data.decode("utf-8", errors="replace")
-        )
+    finally:
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                logger.debug("chat_stream_source_close_failed", exc_info=True)
 
 
 def sse_frame(chunk: str) -> str:

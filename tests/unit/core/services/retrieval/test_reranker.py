@@ -121,3 +121,32 @@ def test_get_reranker_global():
         assert isinstance(inst, Reranker)
         inst2 = get_reranker()
         assert inst is inst2
+
+
+@pytest.mark.asyncio
+async def test_rerank_loads_model_off_the_event_loop(mock_cross_encoder):
+    """The first rerank builds the CrossEncoder in a worker thread, once."""
+    import asyncio
+    import threading
+    import time
+
+    loop_thread = threading.get_ident()
+    load_threads: list[int] = []
+
+    def slow_load(_name):
+        load_threads.append(threading.get_ident())
+        time.sleep(0.05)
+        inst = MagicMock()
+        inst.predict.return_value = [0.5]
+        return inst
+
+    mock_cross_encoder.side_effect = slow_load
+    r = Reranker()
+
+    def results():
+        return [SearchResult(document=Document(id="0", content="c0"), score=0.1)]
+
+    await asyncio.gather(*(r.rerank("q", results()) for _ in range(5)))
+
+    assert len(load_threads) == 1
+    assert load_threads[0] != loop_thread

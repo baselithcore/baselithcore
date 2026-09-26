@@ -34,7 +34,7 @@ export function Crons() {
     staleTime: 60_000,
   });
 
-  const jobs = data?.jobs ?? [];
+  const jobs = useMemo(() => data?.jobs ?? [], [data?.jobs]);
   const selected = useMemo(
     () => jobs.find((job) => job.name === selectedName) ?? null,
     [jobs, selectedName]

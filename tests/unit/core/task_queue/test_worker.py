@@ -158,7 +158,7 @@ class TestQueueUrlResolution:
             captured["url"] = url
             return MagicMock()
 
-        monkeypatch.setattr(tq.Redis, "from_url", fake_from_url)
+        monkeypatch.setattr(tq.BlockingConnectionPool, "from_url", fake_from_url)
         tq.get_queue_redis_connection()
 
         # The consumer side (core.task_queue.worker) resolves via get_redis_url().

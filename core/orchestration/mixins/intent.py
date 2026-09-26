@@ -102,7 +102,7 @@ class IntentMixin:
                 # Italian patterns (backward compatibility)
                 "collabora",
                 "team di agenti",
-                "baselith-coree",
+                "multi-agente",
                 "ricerca approfondita",
                 "analisi complessa",
                 "molteplici prospettive",
@@ -112,7 +112,7 @@ class IntentMixin:
                 "swarm",
                 "collaborate",
                 "agent team",
-                "baselith-core",
+                "multi-agent",
                 "deep research",
                 "complex analysis",
                 "multiple perspectives",
@@ -120,7 +120,7 @@ class IntentMixin:
                 "complex task",
             ],
             priority=12,
-            description="Complex tasks requiring baselith-core collaboration and parallel execution",
+            description="Complex tasks requiring multi-agent collaboration and parallel execution",
         )
 
         # Scenario Simulation patterns

@@ -25,6 +25,8 @@ Claim → identity mapping is configurable per IdP:
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,6 +45,16 @@ logger = get_logger(__name__)
 _DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 # Bound the discovery/JWKS HTTP calls so a slow IdP cannot hang a request.
 _DISCOVERY_TIMEOUT_S = 5.0
+# Minimum spacing between two forced JWKS re-fetches. An unknown ``kid`` is
+# caller-controlled (the token header is unverified), so without this every
+# forged token would cost one outbound call to the IdP — a free amplifier
+# that can exhaust the worker-thread pool and get the server rate-limited by
+# the IdP, breaking real logins. A genuine key rotation is picked up at most
+# this many seconds late.
+_JWKS_REFRESH_COOLDOWN_S = 60.0
+# After a failed fetch, fail fast for this long instead of letting every
+# request queue up behind another full ``_DISCOVERY_TIMEOUT_S`` wait.
+_JWKS_FAILURE_BACKOFF_S = 5.0
 
 
 def _assert_issuer_safe(issuer: str) -> None:
@@ -94,12 +106,20 @@ class OIDCVerifier:
     cannot see). The first verification — or a verification after key
     rotation — incurs one network round-trip to the JWKS endpoint; it is run
     in a worker thread so the event loop is never blocked.
+
+    Fetches are single-flight (one lock, so concurrent verifications share
+    one round-trip), a forced refresh happens at most once per
+    ``_JWKS_REFRESH_COOLDOWN_S``, and a failed fetch is not retried for
+    ``_JWKS_FAILURE_BACKOFF_S``.
     """
 
     def __init__(self, config: SecurityConfig | None = None) -> None:
         self._config = config or get_security_config()
         self._jwk_set: jwt.PyJWKSet | None = None
         self._resolved_jwks_uri: str | None = None
+        self._fetch_lock = threading.Lock()
+        self._last_fetch_at = 0.0
+        self._last_failure_at: float | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -132,16 +152,40 @@ class OIDCVerifier:
         """Fetch and parse the JWKS document through the SSRF-pinned path.
 
         Cached for the verifier's lifetime; call with ``refresh=True`` to
-        force a re-fetch (e.g. an unknown ``kid`` on key rotation). Every
-        re-fetch goes through the same pinned path — there is no fallback to
-        an unguarded HTTP call.
+        request a re-fetch (e.g. an unknown ``kid`` on key rotation). A
+        refresh inside the cooldown returns the cached set unchanged — the
+        caller's lookup then fails as it would have after a fetch that did
+        not contain the ``kid``. Every re-fetch goes through the same pinned
+        path — there is no fallback to an unguarded HTTP call.
+
+        Raises:
+            InvalidTokenError: If a fetch failed within the backoff window.
         """
         if self._jwk_set is not None and not refresh:
             return self._jwk_set
-        resp = _pinned_get(self._jwks_uri(), timeout=_DISCOVERY_TIMEOUT_S)
-        resp.raise_for_status()
-        self._jwk_set = jwt.PyJWKSet.from_dict(resp.json())
-        return self._jwk_set
+        with self._fetch_lock:
+            now = time.monotonic()
+            if self._jwk_set is not None and (
+                not refresh or now - self._last_fetch_at < _JWKS_REFRESH_COOLDOWN_S
+            ):
+                # Cached, or a concurrent caller refreshed while we waited.
+                return self._jwk_set
+            if (
+                self._last_failure_at is not None
+                and now - self._last_failure_at < _JWKS_FAILURE_BACKOFF_S
+            ):
+                raise InvalidTokenError("OIDC JWKS temporarily unavailable")
+            try:
+                resp = _pinned_get(self._jwks_uri(), timeout=_DISCOVERY_TIMEOUT_S)
+                resp.raise_for_status()
+                jwk_set = jwt.PyJWKSet.from_dict(resp.json())
+            except Exception:
+                self._last_failure_at = time.monotonic()
+                raise
+            self._jwk_set = jwk_set
+            self._last_fetch_at = time.monotonic()
+            self._last_failure_at = None
+            return jwk_set
 
     def _resolve_signing_key(self, token: str) -> Any:
         """Fetch the signing key for ``token`` (sync; offloaded by callers)."""

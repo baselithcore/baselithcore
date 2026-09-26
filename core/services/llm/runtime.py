@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from core.config import get_llm_config
 from core.observability.logging import get_logger
+from core.services.llm._late_binding import mark_funnel_issued
 from core.services.llm.credentials import resolve_llm_credential
 from core.services.llm.policy import (
     PluginLLMPolicy,
@@ -71,9 +72,15 @@ def api_key_from_config(config: LLMConfig, provider: str) -> SecretStr | None:
         "openai": config.openai_api_key,
         "huggingface": config.huggingface_api_key,
         "gemini": getattr(config, "gemini_api_key", None),
+        "vllm": getattr(config, "vllm_api_key", None),
     }.get(provider)
     if _nonblank(dedicated) is not None:
         return dedicated
+    if provider == "vllm":
+        # Never the primary key: ``LLM_API_KEY`` also answers to
+        # ``LLM_OPENAI_API_KEY``, and a hosted key must not reach a self-hosted
+        # server. vLLM authenticates with its own key or none at all.
+        return None
     if provider == config.provider:
         return _nonblank(config.api_key)
     return None
@@ -131,6 +138,14 @@ def api_base_for(config: LLMConfig, provider: str) -> str | None:
         if config.provider == "ollama" and config.api_base:
             return config.api_base
         return os.environ.get("OLLAMA_HOST") or None
+    if provider == "vllm":
+        # The first configured server. With several (LLM_VLLM_ENDPOINTS) a
+        # call is routed by model instead — see ``core.services.llm.
+        # vllm_endpoints``; this answers "where is vLLM" for single-URL callers.
+        from core.services.llm.vllm_endpoints import vllm_endpoints
+
+        endpoints = vllm_endpoints(config)
+        return endpoints[0] if endpoints else None
     # The shared ``api_base`` is only meaningful for the provider it was
     # configured for; every other provider must fall back to its SDK default.
     if provider == config.provider:
@@ -159,11 +174,32 @@ def provider_configured(config: LLMConfig, provider: str) -> bool:
     """
     if provider == "ollama":
         return True
+    if provider == "vllm":
+        # Keyless is the common case; what a vLLM stage cannot do without is
+        # an endpoint, since none is ever guessed.
+        return api_base_for(config, provider) is not None
     if provider == "huggingface":
         return config.huggingface_local or api_key_for(config, provider) is not None
     if provider == "gemini" and not _gemini_sdk_available():
         return False
     return api_key_for(config, provider) is not None
+
+
+def provider_setup_hint(provider: str) -> str:
+    """The setting an operator changes to make *provider* usable.
+
+    Most providers lack a key; vLLM lacks an endpoint, and telling its
+    operator to "set the API key" sends them after the wrong setting.
+
+    Args:
+        provider: The provider a diagnostic found unconfigured.
+
+    Returns:
+        str: One sentence naming the setting.
+    """
+    if provider == "vllm":
+        return "Set LLM_VLLM_API_BASE to the vLLM server (http://gpu-host:8000/v1)."
+    return f"Set the API key for {provider!r}."
 
 
 def _get_default_service() -> LLMService:
@@ -172,7 +208,9 @@ def _get_default_service() -> LLMService:
     if _default_service is None:
         from core.services.llm.service import LLMService
 
-        _default_service = LLMService()
+        # Funnel-issued: a caller that keeps it still follows the pin of
+        # whoever calls through it (see ``_late_binding``).
+        _default_service = mark_funnel_issued(LLMService())
     return _default_service
 
 
@@ -231,7 +269,7 @@ def _service_for_policy(policy: PluginLLMPolicy) -> LLMService | None:
             # A pinned model is governance, not a hint: it also wins over the
             # plugin's own per-call ``model=`` overrides.
             service._pinned_model = policy.model
-        _policy_services[key] = service
+        _policy_services[key] = mark_funnel_issued(service)
         return service
 
 
@@ -268,11 +306,39 @@ def reset_llm_service() -> None:
         _policy_services.clear()
 
 
+async def close_llm_services() -> None:
+    """Close and drop every cached LLM service (application shutdown).
+
+    Covers the default singleton, the per-plugin policy clones and the
+    fallback-stage clones, each closed once; a failing close is logged and
+    does not stop the others. The next :func:`get_llm_service` builds afresh.
+    """
+    global _default_service
+    from core.services.llm._fallback_support import take_fallback_services
+
+    with _lock:
+        cached = [_default_service, *_policy_services.values()]
+        _default_service = None
+        _policy_services.clear()
+    cached += take_fallback_services()
+    seen: set[int] = set()
+    for service in cached:
+        if service is None or id(service) in seen:
+            continue
+        seen.add(id(service))
+        try:
+            await service.close()
+        except Exception as exc:
+            logger.warning("LLM service close failed: %s", exc)
+
+
 __all__ = [
     "api_base_for",
     "api_key_for",
     "api_key_from_config",
+    "close_llm_services",
     "get_llm_service",
     "provider_configured",
+    "provider_setup_hint",
     "reset_llm_service",
 ]

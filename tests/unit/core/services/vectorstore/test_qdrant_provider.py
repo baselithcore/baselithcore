@@ -385,18 +385,18 @@ class TestQdrantProviderCollectionExists:
         assert result is False
 
     @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
-    async def test_collection_exists_returns_false_on_error(self, mock_qdrant_client):
-        """Verify collection_exists returns False on error."""
+    async def test_collection_exists_raises_when_unreachable(self, mock_qdrant_client):
+        """An unreachable store must not be reported as a missing collection."""
         mock_client = AsyncMock()
-        mock_client.get_collections.side_effect = Exception("Error")
+        mock_client.get_collections.side_effect = Exception("connection refused")
         mock_qdrant_client.return_value = mock_client
 
+        from core.services.vectorstore.exceptions import VectorStoreError
         from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
-        result = await provider.collection_exists("test_collection")
-
-        assert result is False
+        with pytest.raises(VectorStoreError, match="connection refused"):
+            await provider.collection_exists("test_collection")
 
 
 @pytest.mark.asyncio

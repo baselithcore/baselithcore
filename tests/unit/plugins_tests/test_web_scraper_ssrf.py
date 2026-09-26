@@ -250,3 +250,22 @@ class TestPlaywrightRouteGuard:
 
         route.abort.assert_awaited_once_with("blockedbyclient")
         route.continue_.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_playwright_fetch_ssrf_precheck_runs_off_the_event_loop(monkeypatch):
+    """The DNS-resolving pre-check must not block the loop thread."""
+    import threading
+
+    loop_thread = threading.get_ident()
+    threads: list[int] = []
+
+    def fake_check(url: str) -> bool:
+        threads.append(threading.get_ident())
+        return False
+
+    monkeypatch.setattr(_PLAYWRIGHT_FETCHER_MODULE, "check_ssrf_safe", fake_check)
+    fetcher = PlaywrightFetcher.__new__(PlaywrightFetcher)
+    with pytest.raises(Exception, match="SSRF"):
+        await fetcher.fetch("http://example.com/")
+    assert threads and threads[0] != loop_thread

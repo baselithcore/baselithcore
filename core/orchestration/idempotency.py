@@ -11,7 +11,7 @@ intent before the call and the outcome after it, keyed by a value derived from
 the call itself. A replay finds the recorded outcome and returns it instead of
 executing again.
 
-    key = derive_idempotency_key(run_id, step, tool, args)
+    key = derive_call_key(run_id, tool, args, occurrence, tenant_id=tenant)
     held = await ledger.begin(key, run_id=run_id, tool=tool)
     if held is not None:
         if held.is_replayable:
@@ -28,9 +28,12 @@ do?"), not for the loop.
 
 Four properties are load-bearing:
 
-* **The key is derived, not generated.** Two spellings of the same call — an
-  argument dict in a different order — must produce one key, or the ledger
-  dedupes nothing.
+* **The key is derived, not generated — and from content, not position.** Two
+  spellings of the same call — an argument dict in a different order — must
+  produce one key, or the ledger dedupes nothing. And a resumed run that
+  reaches the same effect by a different path must land on the same key, so
+  the key hashes the call and its *occurrence* within the run, never its
+  ordinal (:mod:`core.orchestration.call_keys`).
 * **The key carries no payload.** It lands in logs and a database column, so it
   is a SHA-256 digest, never the arguments.
 * **``in_flight`` is not ``completed``.** A crash between ``begin`` and
@@ -39,6 +42,18 @@ Four properties are load-bearing:
 * **A ``failed`` row is re-claimable.** The effect did not land, so the retry
   that follows must be allowed to run — only ``in_flight`` and ``completed``
   hold the key.
+
+**Key schemes.** :func:`derive_call_key` (content-addressed, ``v2``) is what
+every writer uses. :func:`derive_idempotency_key` is the positional scheme it
+replaced, kept so rows written before the upgrade stay derivable:
+:func:`claim_call` accepts the legacy key of the call and, when the ``v2`` key
+is fresh, consults the legacy row before executing — a run that was in flight
+across the upgrade and resumes along its original path still replays. One that
+resumes along a *different* path re-executes a pre-upgrade effect at most once
+(the positional key cannot match it); rows written after the upgrade no longer
+have that failure mode. The legacy read is one extra lookup per first-time
+effectful call and can be retired once the ledger's retention window has
+passed.
 
 Only ``read_only`` tools skip the ledger; every other autonomy category —
 including an unrecognised one — is treated as effectful, matching the
@@ -54,16 +69,23 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from core.observability.logging import get_logger
 from core.orchestration.autonomy import READ_ONLY
+from core.orchestration.call_keys import CallOccurrences, derive_call_key
 
 __all__ = [
+    "CallOccurrences",
     "InMemoryToolLedger",
     "ToolCallInFlight",
     "ToolLedger",
     "ToolOutcome",
+    "claim_call",
+    "derive_call_key",
     "derive_idempotency_key",
     "requires_idempotency",
 ]
+
+logger = get_logger(__name__)
 
 OutcomeStatus = Literal["in_flight", "completed", "failed"]
 
@@ -106,7 +128,13 @@ def requires_idempotency(category: str) -> bool:
 def derive_idempotency_key(
     run_id: str, step: int, tool: str, args: dict[str, Any] | None
 ) -> str:
-    """Derive the stable key identifying one tool call.
+    """Derive the **legacy, positional** key identifying one tool call.
+
+    Superseded by :func:`derive_call_key`: ``step`` is a position in the run,
+    so a resumed run that reached the same effect by a different path derived
+    a fresh key and executed it again. Kept so rows written under this scheme
+    stay derivable (see :func:`claim_call`) and the operator surface can still
+    look them up. New writers must not use it.
 
     Args:
         run_id: The run this call belongs to. Supplying a stable ``run_id``
@@ -221,3 +249,62 @@ class InMemoryToolLedger:
         self._entries.move_to_end(key)
         while len(self._entries) > self._maxsize:
             self._entries.popitem(last=False)
+
+
+async def claim_call(
+    ledger: ToolLedger,
+    key: str,
+    *,
+    run_id: str,
+    tool: str,
+    legacy_key: str | None = None,
+) -> ToolOutcome | None:
+    """Claim ``key`` for a call, honouring a row written under the old scheme.
+
+    Behaves exactly like :meth:`ToolLedger.begin`, plus one compatibility read:
+    when the content-addressed ``key`` is fresh and the caller can still name
+    the call's positional ``legacy_key`` (:func:`derive_idempotency_key`), the
+    legacy row decides —
+
+    * ``completed``: its result is copied onto ``key`` and returned, so the
+      effect is replayed rather than repeated;
+    * ``in_flight``: returned as held (the effect may have landed), and the
+      claim just taken on ``key`` is released as ``failed`` so a later retry,
+      once the legacy row resolves, is not locked out;
+    * ``failed`` or absent: the caller owns the call.
+
+    A failed compatibility read is logged and treated as "absent": the claim on
+    ``key`` already succeeded, and the legacy row is a courtesy to runs that
+    were in flight across the upgrade, not a precondition.
+
+    Args:
+        ledger: The ledger.
+        key: The content-addressed key (:func:`derive_call_key`).
+        run_id: The run this call belongs to.
+        tool: Tool name.
+        legacy_key: The positional key the same call had before the upgrade,
+            or ``None`` to skip the compatibility read.
+
+    Returns:
+        ``None`` when the caller owns the call, else the outcome holding it.
+    """
+    held = await ledger.begin(key, run_id=run_id, tool=tool)
+    if held is not None or legacy_key is None:
+        return held
+    try:
+        legacy = await ledger.lookup(legacy_key)
+    except Exception as exc:  # the compatibility read must not block the call
+        logger.warning(f"tool ledger legacy lookup failed for {tool}: {exc}")
+        return None
+    if legacy is None or legacy.status == "failed":
+        return None
+    try:
+        # Best effort: whether or not ``key`` records it, the legacy row has
+        # already answered, and answering differently would repeat the effect.
+        if legacy.is_replayable:
+            await ledger.complete(key, legacy.result)
+        else:
+            await ledger.fail(key, "legacy-scheme call still in flight")
+    except Exception as exc:
+        logger.warning(f"tool ledger could not migrate legacy row for {tool}: {exc}")
+    return legacy

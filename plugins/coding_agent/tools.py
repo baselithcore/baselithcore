@@ -157,7 +157,9 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["description"],
             },
             "handler": generate_code,
-            # Runs a sandboxed syntax check of the generated code.
+            # Python is syntax-checked in-process without running it; other
+            # languages still go through the sandbox, so the category stays
+            # conservative.
             "category": "destructive",
         },
         {
