@@ -13,9 +13,9 @@ from typing import Any
 from core.observability.logging import get_logger
 from plugins.baselithbot.browser.web_launcher import WebLauncher
 from plugins.baselithbot.computer_use.config import (
-    AuditLogger,
     ComputerUseConfig,
     ComputerUseError,
+    shared_audit_logger,
 )
 from plugins.baselithbot.computer_use.desktop_vision import DesktopVision
 from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
@@ -52,7 +52,7 @@ def build_computer_tool_definitions(
     # Idempotent: attaches the fs_write verification logger to the core
     # tool-hook bus once per process-wide registry instance.
     ensure_fs_write_hook()
-    audit = AuditLogger(config.audit_log_path)
+    audit = shared_audit_logger(config.audit_log_path)
     os_ctrl = OSController(config, audit, approvals=approvals)
     vision = DesktopVision(config, audit)
     shell = ShellExecutor(config, audit, approvals=approvals)

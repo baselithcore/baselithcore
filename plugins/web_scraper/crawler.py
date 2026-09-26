@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -15,6 +16,7 @@ from .models import CrawlError, CrawlResult, CrawlStats, ExtractedData, ScrapedP
 from .scraper import Scraper
 from .utils import (
     extract_domain,
+    get_pinned_url_for_host,
     is_blocked_extension,
     is_url_allowed_by_robots,
     is_valid_url,
@@ -24,6 +26,11 @@ from .utils import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+#: robots.txt bytes read before parsing stops — the 500 KiB limit RFC 9309
+#: §2.5 lets crawlers impose. The body used to be buffered whole, so a hostile
+#: server could stream an arbitrarily large "robots.txt" into memory.
+ROBOTS_MAX_BYTES = 500 * 1024
 
 
 class CrawlEngine:
@@ -79,6 +86,10 @@ class CrawlEngine:
 
         # Initialize BFS queue: (url, depth)
         queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
+        # Everything ever enqueued: a link repeated on every page (nav bars,
+        # footers) was appended once per page, growing the queue with
+        # duplicates that were only discarded when popped.
+        enqueued: set[str] = {seed_url}
         self._visited.clear()
 
         # Fetch robots.txt if configured
@@ -131,9 +142,10 @@ class CrawlEngine:
 
                             if is_same_domain or self.follow_external:
                                 normalized = normalize_url(link.url, url)
-                                if normalized not in self._visited and is_valid_url(
+                                if normalized not in enqueued and is_valid_url(
                                     normalized
                                 ):
+                                    enqueued.add(normalized)
                                     queue.append((normalized, depth + 1))
 
                 except Exception as e:
@@ -203,6 +215,14 @@ class CrawlEngine:
     async def _fetch_robots(self, seed_url: str) -> dict[str, list[str]]:
         """Fetch and parse robots.txt for a domain.
 
+        The fetch goes to the **pinned**, SSRF-verified address with the
+        original host restored as ``Host`` and TLS SNI — the same anti
+        DNS-rebinding discipline as page fetches. It used to validate the URL
+        and then let the shared client resolve the name again, so a zero-TTL
+        record could steer the request to an internal address. The DNS lookup
+        runs in a worker thread, and at most :data:`ROBOTS_MAX_BYTES` of the
+        body are read.
+
         Args:
             seed_url: URL to get robots.txt for.
 
@@ -211,31 +231,41 @@ class CrawlEngine:
         """
         parsed = urlparse(seed_url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-
-        from .utils import check_ssrf_safe
-
-        if not check_ssrf_safe(robots_url):
-            return {"allow": [], "disallow": []}
+        empty: dict[str, list[str]] = {"allow": [], "disallow": []}
 
         domain = parsed.netloc
         if domain in self._robots_cache:
             return self._robots_cache[domain]
 
+        pinned = await asyncio.to_thread(get_pinned_url_for_host, robots_url)
+        if pinned is None:
+            return empty
+        pinned_url, original_host = pinned
+
         try:
             client = await get_robots_client(timeout=10)
-            response = await client.get(robots_url)
-            if response.status_code == 200:
-                rules = parse_robots_txt(
-                    response.text,
-                    user_agent=self.config.user_agent,
-                )
-                self._robots_cache[domain] = rules
-                return rules
+            async with client.stream(
+                "GET",
+                pinned_url,
+                headers={"Host": original_host},
+                extensions={"sni_hostname": original_host},
+            ) as response:
+                if response.status_code != 200:
+                    return empty
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) >= ROBOTS_MAX_BYTES:
+                        break
+            text = bytes(body[:ROBOTS_MAX_BYTES]).decode("utf-8", errors="replace")
+            rules = parse_robots_txt(text, user_agent=self.config.user_agent)
+            self._robots_cache[domain] = rules
+            return rules
         except Exception:
             pass  # nosec B110
 
         # Return empty rules if fetch fails
-        return {"allow": [], "disallow": []}
+        return empty
 
 
 async def create_crawler(

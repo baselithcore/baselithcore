@@ -26,8 +26,18 @@ see [approvals.md](./approvals.md), [replay.md](./replay.md),
 `ConfirmProvider`, `ToastProvider`, `DashboardProvider`, `ErrorBoundary`
 (under [`ui/src/components/`](../ui/src/components/)).
 
-**Live events** — every page subscribes to `/dash/events/stream` through
-`DashboardProvider`, so charts update without polling.
+**Live events** — one `/dash/events/stream` connection, opened by
+`DashboardProvider`, feeds every page. Frames are batched (150 ms) into a
+500-event ring buffer, and each batch invalidates the affected queries once.
+While the stream is `open`, pages whose data is event-driven (overview,
+sessions, run task, approvals) drop to a slow safety poll; when it is down
+they fall back to their short polling interval, so the dashboard stays
+fresh either way.
+
+**Untrusted output** — agent- and LLM-supplied strings are rendered as
+text, never as HTML; agent-supplied links (canvas image URLs, extracted run
+values) are only made clickable for absolute `http(s)` URLs and open with
+`rel="noopener noreferrer"`.
 
 **Accessibility** — `useOverlayA11y` hook for focus trap / ESC handling,
 skip-to-content link, Lighthouse A11y audit gated in CI.

@@ -83,6 +83,25 @@ class ReasoningAgentPlugin(AgentPlugin):
         await super().shutdown()
 
 
+#: Ceilings on the per-request search shape. Tree-of-Thoughts cost grows with
+#: branching_factor x depth (plus the MCTS iteration budget), and both values
+#: may arrive from the request context or plugin config; unclamped, one caller
+#: could order an arbitrarily large tree of LLM calls.
+MAX_REASONING_STEPS = 10
+MAX_BRANCHING_FACTOR = 5
+
+
+def _bounded_int(value: Any, default: int, ceiling: int) -> int:
+    """Coerce ``value`` to an int in ``[1, ceiling]``, else use ``default``."""
+    if isinstance(value, bool):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(number, ceiling))
+
+
 class ReasoningFlowHandler:
     """Handles visual workflow execution for reasoning nodes."""
 
@@ -115,9 +134,15 @@ class ReasoningFlowHandler:
     async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """Handle reasoning request."""
         # Per-request context overrides the plugin config, which overrides defaults
-        max_steps = context.get("max_steps", self._setting("max_steps", 5))
-        branching_factor = context.get(
-            "branching_factor", self._setting("branching_factor", 3)
+        max_steps = _bounded_int(
+            context.get("max_steps", self._setting("max_steps", 5)),
+            5,
+            MAX_REASONING_STEPS,
+        )
+        branching_factor = _bounded_int(
+            context.get("branching_factor", self._setting("branching_factor", 3)),
+            3,
+            MAX_BRANCHING_FACTOR,
         )
 
         result = await self.agent.solve(

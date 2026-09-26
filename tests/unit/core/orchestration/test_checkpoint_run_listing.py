@@ -102,19 +102,67 @@ async def test_store_without_list_runs_falls_back_to_resumable_ids() -> None:
     assert [r["run_id"] for r in rows] == ["a"]  # only resumable ids are reachable
 
 
-async def test_postgres_run_list_types_its_nullable_filters() -> None:
-    """Untyped placeholders in an ``IS NULL`` test are rejected by Postgres.
+async def test_postgres_run_list_has_no_nullable_catch_all() -> None:
+    """Filters are appended only when given — no ``%s IS NULL OR`` predicate.
 
-    ``WHERE (%(tenant_id)s IS NULL OR tenant_id = %(tenant_id)s)`` sends the
-    filter twice as two independent parameters; the one that only appears in
-    the ``IS NULL`` test has no type context, so the server answers
-    ``42P18 could not determine data type of parameter $1`` and the whole run
-    explorer 500s. Every nullable filter must carry an explicit cast.
+    The catch-all form failed twice over: untyped it was a ``42P18`` (the
+    placeholder in the ``IS NULL`` test has no type context), and typed it
+    still defeated the tenant index once psycopg prepared the statement and
+    Postgres picked a generic plan (EXPLAIN: seq scan over every tenant).
     """
-    import re
+    from core.orchestration.checkpoint_postgres import _run_list_query
 
-    from core.orchestration.checkpoint_postgres import _RUN_LIST
+    sql, params = _run_list_query(None, None, 50)
+    assert "IS NULL" not in sql.upper()
+    assert "WHERE" not in sql
+    assert params == [50]
 
-    assert not re.search(r"%\(\w+\)s\s+IS\s+NULL", _RUN_LIST, re.IGNORECASE)
-    assert re.search(r"%\(tenant_id\)s::\w+\s+IS\s+NULL", _RUN_LIST)
-    assert re.search(r"%\(status\)s::\w+\s+IS\s+NULL", _RUN_LIST)
+    sql, params = _run_list_query("t1", None, 10)
+    assert "WHERE tenant_id = %s ORDER BY updated_at DESC LIMIT %s" in sql
+    assert params == ["t1", 10]
+
+    sql, params = _run_list_query("t1", "failed", 5)
+    assert "WHERE tenant_id = %s AND status = %s" in sql
+    assert params == ["t1", "failed", 5]
+
+
+async def test_postgres_run_list_strips_heavy_keys_server_side() -> None:
+    """Only the summary crosses the wire; the trajectory length is kept."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from core.orchestration.checkpoint_postgres import (
+        PostgresCheckpointStore,
+        _run_list_query,
+    )
+
+    sql, _ = _run_list_query(None, None, 1)
+    for heavy in ("steps", "trajectory", "plugin_data", "answer"):
+        assert f"- '{heavy}'" in sql
+
+    cursor = MagicMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchall = AsyncMock(
+        return_value=[
+            {
+                "data": {"run_id": "r1", "status": "completed", "step": 3},
+                "trajectory_length": 7,
+            }
+        ]
+    )
+
+    class _Ctx:
+        async def __aenter__(self):
+            return cursor
+
+        async def __aexit__(self, *exc):
+            return False
+
+    store = PostgresCheckpointStore.__new__(PostgresCheckpointStore)
+    with patch(
+        "core.orchestration.checkpoint_postgres.get_async_cursor",
+        lambda **_: _Ctx(),
+    ):
+        rows = await store.list_runs(tenant_id="t1", limit=10)
+    assert rows[0]["run_id"] == "r1"
+    assert rows[0]["trajectory_length"] == 7
+    assert cursor.execute.await_args.args[1] == ["t1", 10]

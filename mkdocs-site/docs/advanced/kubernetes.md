@@ -168,6 +168,16 @@ Required keys: `SECRET_KEY`, plus any of `DATA_ENCRYPTION_KEYS`, `DB_PASSWORD`,
 [Security & Encryption](../core-modules/security.md) for the encryption keys
 and the `file` secrets backend (mount K8s secrets and set `SECRETS_BACKEND=file`).
 
+The chart deploys no Redis/FalkorDB or Qdrant — it points at yours, and both
+must run authenticated. Put the credentials in the same Secret: the Redis
+URLs carry the password (`CACHE_REDIS_URL`, `QUEUE_REDIS_URL`, `GRAPH_DB_URL`,
+e.g. `rediss://:<password>@redis.example:6380/1`), and `QDRANT_API_KEY` is the
+key the app sends to Qdrant (with `QDRANT_HTTPS=true` across any network you
+do not control). An unauthenticated Redis exposes the RQ queue — pickled jobs
+the workers execute — and every rate-limit counter to anything that can reach
+it; the app logs a warning at startup in production for a plain `redis://` URL
+without a password. `values.yaml` lists the keys under `secrets.data`.
+
 ## Probes & draining
 
 The readiness endpoint distinguishes *being alive* from *being able to serve*:

@@ -867,7 +867,10 @@ rows = await list_runs(store, tenant_id="acme", status=None, limit=50)
 
 Summaries deliberately omit the heavy fields (`trajectory`, `steps`,
 `plugin_data`, `answer`) so a list stays cheap to serve; load the run to get
-them. Both shipped stores implement it natively (Postgres orders by
+them. The Postgres store strips them in SQL (`data - 'steps' - …`), shipping
+only the trajectory's length, and appends its `tenant_id` / `status` filters
+only when given so a prepared statement's generic plan can still use the
+tenant index. Both shipped stores implement it natively (Postgres orders by
 `updated_at` and filters server-side); a store without the method degrades to
 its resumable ids loaded individually, so protocol-only stores still answer.
 An unset `tenant_id` on a row is treated as the `default` tenant, matching the
@@ -946,7 +949,10 @@ only matters until the ledger's retention window has passed.
 The table is created by `migrations/versions/009_tool_invocations.py`, is
 tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
-window, not an audit log.
+window, not an audit log. The sweep bounds `created_at` as well as
+`updated_at` (equivalent, since a row is completed after it is created) so it
+range-scans `ix_tool_invocations_created_at` rather than the whole ledger;
+`updated_at` itself stays unindexed to keep completions HOT updates.
 
 The typed `Agent` consumes it **by default** — it no longer has to be handed
 one:

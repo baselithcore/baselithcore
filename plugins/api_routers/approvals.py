@@ -144,6 +144,12 @@ async def resume(run_id: str) -> dict[str, Any]:
 
     Completed tool steps replay from the checkpoint; the approval gate
     consumes the recorded decision and the run continues or aborts.
+
+    The run is re-entered under the tenant that **owns the checkpoint**, not
+    the operator's ambient tenant: this route is admin-authenticated, so the
+    request carries whatever tenant the admin credentials resolve to, and a
+    resumed run inheriting it would read and write another tenant's memory
+    and storage. Same binding the crash-recovery sweep applies.
     """
     store = _require_store()
     checkpoint = await store.load(run_id)
@@ -151,10 +157,15 @@ async def resume(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
 
     from core.chat import chat_service
+    from core.context import reset_tenant_context, set_tenant_context
 
+    owner = checkpoint.tenant_id
+    context: dict[str, Any] = {"tenant_id": owner} if owner else {}
+    token = set_tenant_context(owner) if owner else None
     try:
         result = await chat_service.agent.process(
             checkpoint.query or "",
+            context=context,
             run_id=run_id,
             resume=True,
         )
@@ -162,5 +173,10 @@ async def resume(run_id: str) -> dict[str, Any]:
         raise
     except Exception as exc:
         logger.error("approval_resume_failed run=%s error=%s", run_id, exc)
-        raise HTTPException(status_code=500, detail=f"Resume failed: {exc}") from exc
+        # The exception text can carry provider/storage internals; it stays in
+        # the operator log, keyed by run id.
+        raise HTTPException(status_code=500, detail="Resume failed.") from exc
+    finally:
+        if token is not None:
+            reset_tenant_context(token)
     return {"run_id": run_id, "result": result}

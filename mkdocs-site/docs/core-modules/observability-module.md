@@ -541,7 +541,7 @@ BASELITH_LOG_DIR=logs           # File-sink directory (plain env var); pin an
 TELEMETRY_ENABLED=false         # Master switch for OTel traces/metrics/logs
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317   # OTLP collector (:4318 for HTTP)
 TELEMETRY_OTEL_PROTOCOL=grpc                     # grpc | http/protobuf
-TELEMETRY_TRACES_SAMPLE_RATE=1.0                 # ParentBased(TraceIdRatio), 0.0–1.0
+TELEMETRY_TRACES_SAMPLE_RATE=                    # ParentBased(TraceIdRatio), 0.0–1.0; unset = 1.0 (dev) / 0.1 (production)
 TELEMETRY_METRICS_ENABLED=false                  # Push OTel-native metrics via OTLP
 TELEMETRY_LOGS_ENABLED=false                     # Push log records via OTLP
 TELEMETRY_CONSOLE_EXPORT=false                   # Also export spans/metrics/logs to stdout

@@ -33,6 +33,7 @@ from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.errors import LLMRefusalError
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
 from core.services.llm.fallback_runtime import maybe_run_with_fallback
+from core.services.llm.model_capabilities import configured_max_tokens
 from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage, billed_usage
 
@@ -246,6 +247,9 @@ async def generate_response(
     # nested function — it would still see the parameter's `str | None`.
     resolved_model: str = service._resolve_model(model, task_category)
     effort = _resolve_effort(service, effort, task_category)
+    # Before the cache key: a capped answer must not be served to an uncapped
+    # caller, nor the reverse.
+    max_tokens = configured_max_tokens(max_tokens, service.config)
 
     tracer = get_tracer("llm-service")
     span_attributes = _build_span_attributes(

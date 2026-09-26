@@ -55,6 +55,10 @@ class CronScheduler:
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
         self._tick = 1.0
+        # One task per running job. Jobs used to be awaited inline, so a
+        # single slow job (an ``http_webhook`` may take up to 60s) stalled
+        # every other job — token pruning, replay retention — behind it.
+        self._inflight: dict[str, asyncio.Task[None]] = {}
 
     @property
     def backend(self) -> str:
@@ -196,26 +200,52 @@ class CronScheduler:
                 await self._task
             finally:
                 self._task = None
+        inflight = list(self._inflight.values())
+        for task in inflight:
+            task.cancel()
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
+        self._inflight.clear()
+
+    async def _execute(self, job: CronJob) -> None:
+        try:
+            await job.fn()
+            job.last_error = None
+        except Exception as exc:
+            job.last_error = str(exc)
+            logger.warning("baselithbot_cron_job_error", name=job.name, error=str(exc))
+        job.runs += 1
+        job.last_run_at = time.time()
+        if job.cron_expr is not None:
+            job.next_run_at = _next_cron_ts(job.cron_expr)
+        else:
+            job.next_run_at = job.last_run_at + job.interval_seconds
+        self._wake.set()
+
+    def _dispatch_due(self, now: float) -> None:
+        """Start every due job that is not already running, concurrently."""
+        for job in list(self._jobs.values()):
+            if not job.enabled or job.next_run_at > now or job.name in self._inflight:
+                continue
+            # Tentative next slot; ``_execute`` recomputes it on completion.
+            # A job still running when that slot comes is skipped, never
+            # started twice.
+            if job.cron_expr is not None:
+                job.next_run_at = _next_cron_ts(job.cron_expr)
+            else:
+                job.next_run_at = now + job.interval_seconds
+            task = asyncio.create_task(self._execute(job), name=f"baselithbot-cron:{job.name}")
+            self._inflight[job.name] = task
+            task.add_done_callback(self._forget_inflight)
+
+    def _forget_inflight(self, task: asyncio.Task[None]) -> None:
+        for name, running in list(self._inflight.items()):
+            if running is task:
+                del self._inflight[name]
 
     async def _run_loop(self) -> None:
         while not self._stop.is_set():
-            now = time.time()
-            due: list[CronJob] = [
-                j for j in list(self._jobs.values()) if j.enabled and j.next_run_at <= now
-            ]
-            for job in due:
-                try:
-                    await job.fn()
-                    job.last_error = None
-                except Exception as exc:
-                    job.last_error = str(exc)
-                    logger.warning("baselithbot_cron_job_error", name=job.name, error=str(exc))
-                job.runs += 1
-                job.last_run_at = time.time()
-                if job.cron_expr is not None:
-                    job.next_run_at = _next_cron_ts(job.cron_expr)
-                else:
-                    job.next_run_at = job.last_run_at + job.interval_seconds
+            self._dispatch_due(time.time())
 
             sleep_for = self._sleep_until_next(now=time.time())
             self._wake.clear()
@@ -235,7 +265,11 @@ class CronScheduler:
                 raise
 
     def _sleep_until_next(self, *, now: float) -> float:
-        active = [j.next_run_at - now for j in self._jobs.values() if j.enabled]
+        active = [
+            j.next_run_at - now
+            for j in self._jobs.values()
+            if j.enabled and j.name not in self._inflight
+        ]
         if not active:
             return self._tick
         return max(0.05, min(self._tick, min(active)))

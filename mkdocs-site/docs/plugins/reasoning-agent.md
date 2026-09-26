@@ -46,6 +46,12 @@ in this order:
 3. the built-in defaults, `5` and `3` (also used when the config value is
    `None` or the lookup raises).
 
+Whatever the source, the resolved value is coerced to an integer and clamped:
+`max_steps` to `1..10` (`MAX_REASONING_STEPS`) and `branching_factor` to
+`1..5` (`MAX_BRANCHING_FACTOR`); a value that is not a number (or is a bool)
+falls back to the default. Tree-of-Thoughts cost grows with both, so a
+request context or config entry cannot order an unbounded tree of LLM calls.
+
 ### 2. Triggering the Agent
 
 Because the plugin registers an intent pattern, any user message containing keywords like `"analyze"`, `"solve"`, `"step by step"`, or `"plan"` will automatically be routed to the `ReasoningFlowHandler`.

@@ -28,7 +28,7 @@ export function Channels() {
     refetchInterval: 10_000,
   });
 
-  const channels = data?.channels ?? [];
+  const channels = useMemo(() => data?.channels ?? [], [data?.channels]);
   const { liveCount, configuredCount, totalEvents, missingCount } = useMemo(
     () => ({
       liveCount: channels.filter((c) => c.live).length,

@@ -182,14 +182,17 @@ services:
     # Pinned: a `latest` re-pull silently changes the data plane.
     image: falkordb/falkordb:v4.20.4
     container_name: baselith-falkordb
-    # REDIS_PASSWORD is optional but strongly recommended: without it any
-    # container on app_net (and any host process via the loopback publish)
-    # has full RW access to cache, queues, and rate-limit counters. When set,
-    # point CACHE_REDIS_URL etc. at redis://:<password>@falkordb:6379.
+    # REDIS_PASSWORD is REQUIRED here, like DB_PASSWORD.
+    # configs/.env.production builds CACHE_REDIS_URL / QUEUE_REDIS_URL /
+    # GRAPH_DB_URL from the same variable. URL-safe value
+    # (`openssl rand -hex 32`), or percent-encode it.
     # Passed via REDIS_ARGS (not a command override) so the image's default
     # entrypoint keeps loading the FalkorDB graph module.
     environment:
-      - REDIS_ARGS=${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      - REDIS_ARGS=--requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      # redis-cli reads REDISCLI_AUTH: the healthcheck authenticates without
+      # the password on its command line.
+      - REDISCLI_AUTH=${REDIS_PASSWORD}
     # Publish to host loopback so a natively-deployed app (running on the host,
     # not in a container) can reach the cache/graph at 127.0.0.1. Bound to
     # 127.0.0.1 only — not exposed on any external interface. Harmless for the
@@ -211,10 +214,18 @@ services:
           cpus: '0.8'
           memory: 1G
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
+      test: ['CMD-SHELL', 'redis-cli ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Vector store (excerpt; see compose.prod.yaml for the full service).
+  # REQUIRED API key: Qdrant ships unauthenticated. The app sends the same
+  # value as QDRANT_API_KEY (configs/.env.production).
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
 
   # Relational Database
   postgres:
@@ -402,7 +413,8 @@ networks:
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and **does not trust any caller by default**: it sends `X-Forwarded-For: $remote_addr` (never appending to a client-supplied chain) and its own `$scheme` / `$server_port` as `X-Forwarded-Proto` / `-Port`. Behind a load balancer, name it in `deploy/nginx/nginx.conf` — uncomment `set_real_ip_from <LB CIDR>` and add the same CIDR to the `geo $realip_remote_addr $from_trusted_lb` block: `realip` then recovers the client address from the LB's `X-Forwarded-For`, and the LB's `X-Forwarded-Proto` / `-Port` are honoured, but only on connections whose TCP peer is the LB. Never list a range untrusted clients can connect from.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `compose.yaml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `compose.sandbox.yaml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
     Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. Both stacks carry healthchecks for Qdrant (TCP connect probe — the image ships no curl), and `api`/`worker` gate on `condition: service_healthy` rather than `service_started`. In the production stack the `api` service used the bare list form of `depends_on`, which waits only for the container to be *created*, so it could take its first requests against a Postgres still running `initdb`; it now gates on health like the worker always did.
-    Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). Both compose files pass it through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
+
+    **Data-tier authentication is mandatory in `compose.prod.yaml`.** `REDIS_PASSWORD` and `QDRANT_API_KEY` are required like `DB_PASSWORD`: `docker compose config` refuses to interpolate the stack without them. `REDIS_PASSWORD` arms `--requirepass` on FalkorDB and is embedded in `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` by `configs/.env.production` (so use a URL-safe value — `openssl rand -hex 32` — or percent-encode it); `QDRANT_API_KEY` becomes the server's `QDRANT__SERVICE__API_KEY` and the key the app sends. Without them any container on `app_net` — and any host process through the loopback publish — had full read/write access to the cache, the RQ queue (pickled jobs the worker executes), the graph, the rate-limit counters and every vector collection. The FalkorDB healthcheck authenticates through `REDISCLI_AUTH` rather than a `-a` flag. In the single-host `compose.yaml` stack both stay optional: unset, the URLs read `redis://:@…` and the key is empty, which the clients treat as "no credentials". Both compose files pass the Redis password through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
 
 ### Container Image Build
 
@@ -440,6 +452,20 @@ worth keeping: dependencies and the project distribution are built in earlier
 stages and only their install prefixes are copied forward, so no compiler
 toolchain reaches the shipped layers. `--target deps` still gets you a shell
 with the toolchain when a dependency build needs debugging.
+
+The dependency set is installed **from `uv.lock` with hashes**: `uv export
+--frozen` emits every pinned version together with the sha256 digests the
+lock recorded, and the install runs `pip install --require-hashes --no-deps`,
+so a re-uploaded or tampered artifact fails the build instead of installing
+silently, and nothing outside the lock can arrive through a dependency's own
+metadata (`pip check` in the next stage proves the closure is consistent). The
+CUDA strip that keeps the image CPU-only is block-aware, because each hashed
+requirement spans several lines. The CPU builds of `torch`/`torchvision` come
+from the PyTorch index pinned by version — `uv.lock` resolved the PyPI build,
+so their per-architecture wheel hashes are not in it — and the lock's
+requirement is then already satisfied. Rebuilding the same commit with this
+change produced the same 11.6GB image and an identical `docker history` layer
+for layer; the difference is that the bytes are now verified.
 
 #### What the layer rewrite changed
 
@@ -672,9 +698,12 @@ Provides three critical functionalities:
 
 **Persistence** via AOF (Append-Only File) prevents data loss on restart.
 
-**Authentication** is armed by setting `REDIS_PASSWORD` (see the hardening
-note above); the healthcheck passes the same credential, so a password-protected
-instance still reports healthy.
+**Authentication** is mandatory in `compose.prod.yaml` (`REDIS_PASSWORD`, see
+the hardening note above) and optional in the single-host stack; the
+healthcheck authenticates through `REDISCLI_AUTH`, so a password-protected
+instance still reports healthy. (The single-host healthcheck used to pass
+`-a $REDIS_PASSWORD`, a variable that did not exist inside the container, so
+with a password set the service could never turn healthy.)
 
 #### PostgreSQL Service
 
@@ -762,7 +791,8 @@ $EDITOR configs/.env.production
 export COMPOSE_FILE=compose.prod.yaml
 
 # Start all services. --env-file feeds compose interpolation
-# (DB_PASSWORD, SANDBOX_DOCKER_HOST, SANDBOX_CERTS_DIR, REDIS_PASSWORD, SENTRY_DSN)
+# (DB_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY, SANDBOX_DOCKER_HOST,
+#  SANDBOX_CERTS_DIR, SENTRY_DSN)
 docker compose --env-file configs/.env.production up -d
 
 # Verify status
@@ -993,6 +1023,25 @@ timeout instead of turning into a 504 at 60s, `/metrics` **and** `/v1/metrics`
 restricted to private networks, and the trusted-LB `realip` block described
 in [The production stack](#the-production-stack). It is checked with
 `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
+
+It also sheds floods at the edge, keyed on `$binary_remote_addr` (the client
+address after `realip`, so a caller cannot choose its bucket), before a
+request costs the app a worker, a quota lookup or a Redis round trip:
+
+| Zone | Applies to | Limit | Over the limit |
+|---|---|---|---|
+| `api_req` | `location /` and synchronous chat | 30 r/s, burst 120 (`nodelay`) | `429` |
+| `auth_req` | `/admin`, `/admin/*`, `/v1/admin/*`, `/api/auth/*` (token and login endpoints an auth plugin serves) | 30 r/min, burst 20 (`nodelay`) | `429` |
+| `conn_per_ip` | every location | 64 concurrent requests per client | `429` |
+| `stream_conn` | the streaming location (`/chat/stream`, `/runs/{id}/events`, `/mcp`, the baselithbot dashboard feed, and `/v1` aliases) | 16 concurrent streams per client | `429` |
+
+Streams are exempt from `limit_req` — one stream is one request that lives for
+minutes, so its cost is concurrency, which `limit_conn` caps. `/health` and
+`/metrics` carry no request-rate limit (probes and scrapes must not be shed).
+These are a coarse first line; the app's per-key and per-tenant quotas and its
+failed-auth throttle remain the precise layer behind them. Raise the numbers
+if many clients share one address (a corporate NAT) — a dashboard SPA fetches
+dozens of assets on first load, which is what the `api_req` burst is sized for.
 
 ### SSL Certificate Setup (Let's Encrypt)
 

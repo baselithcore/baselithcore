@@ -11,7 +11,12 @@ from pathlib import Path
 from core.observability.logging import get_logger
 
 from .ocr_backends import run_image_ocr, run_pdf_ocr
-from .utils import normalize_text, strip_front_matter, warn_missing_dependency
+from .utils import (
+    normalize_text,
+    ooxml_archive_is_safe,
+    strip_front_matter,
+    warn_missing_dependency,
+)
 
 logger = get_logger(__name__)
 
@@ -99,6 +104,8 @@ def _read_docx(path: Path) -> str | None:
         warn_missing_dependency("python-docx", "lettura documenti Word")
         return None
 
+    if not ooxml_archive_is_safe(path):
+        return None
     try:
         document = Document(str(path))
     except Exception as exc:
@@ -154,6 +161,8 @@ def read_powerpoint(path: Path) -> str | None:
         warn_missing_dependency("python-pptx", "lettura presentazioni PowerPoint")
         return None
 
+    if not ooxml_archive_is_safe(path):
+        return None
     try:
         presentation = Presentation(str(path))
     except Exception as exc:
@@ -221,6 +230,8 @@ def _read_excel_xlsx(path: Path) -> str | None:
         logger.warning("[filesystem] Missing dependency for xlsx: openpyxl")
         return None
 
+    if not ooxml_archive_is_safe(path):
+        return None
     try:
         workbook = load_workbook(
             filename=str(path),

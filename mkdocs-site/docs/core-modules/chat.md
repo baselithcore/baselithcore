@@ -408,6 +408,15 @@ await history.append_turn(
 )
 ```
 
+`append_turn` re-reads the stored turns and writes them back with the new one
+appended. That read-modify-write runs under a per-conversation lock shared by
+every manager in the process, so two concurrent requests on one conversation (a
+double submit, two open tabs) both keep their turn — before, the second write
+silently dropped the first. The cache protocol has no compare-and-set, so
+writers on *different* workers are not serialised; a client that must never
+lose a turn under that race should not fire two turns of one conversation in
+parallel.
+
 ---
 
 ## Streaming Responses
@@ -502,6 +511,13 @@ to a prompt version. Deployments override it by shipping a catalog via
 `BASELITH_PROMPTS_DIR` — their versions/labels win over the packaged
 default; the embedded constant remains only as a registry-unavailable
 fallback.
+
+Version 3 moves the only per-request value, `{{ current_date }}`, from the
+opening sentence to the last line. Everything above it is now byte-identical
+from one request (and one day) to the next, which is what provider prefix
+caching keys on — OpenAI caches automatically once the shared prefix passes
+1 024 tokens, so a deployment catalog that lengthens this prompt benefits
+directly. Keep per-request values at the end when overriding it.
 
 ### Versioning & Audit
 

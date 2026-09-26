@@ -58,6 +58,33 @@ changes must be tagged `BREAKING CHANGE:` in the commit footer.
   `--warn-unused-ignores` (conflicts with `--ignore-missing-imports` and
   generated false positives on optional-dep guards).
 
+### Security
+
+- The `dm_policy` section of the plugin config is now applied at
+  initialisation; before, the sender allowlist written by
+  `pairing approve` was persisted but never enforced.
+- Inbound webhooks: body capped while streaming (no full buffering before
+  the 413), channel names canonicalised (no `Slack`/`slack` policy bypass,
+  unknown channels 404), Discord signed timestamps get the same ±5 min replay
+  window as Slack, non-ASCII signature/bearer headers no longer raise 500.
+- `POST /run`: a client `run_id` can no longer re-file another tenant's
+  recorded run (409); `run_id` is constrained to `[A-Za-z0-9._-]{1,64}`.
+- `tailscale_up/down/logout` MCP tools require Computer Use + `allow_shell`;
+  `process_kill` refuses pid ≤ 1 and the server pid; `workspace_remove`
+  refuses the primary/last workspace.
+- Audit entries from per-request tool builders were lost in unflushed
+  buffers; one shared logger per path is now flushed at shutdown/exit.
+- Channel `webhook_url` values are masked in the dashboard, and a masked
+  value posted back no longer overwrites the stored credential.
+- `SSHGatewayConfig` rejects option-shaped `host`/`user` (`-oProxyCommand=…`).
+
+### Performance
+
+- Replay SQLite calls on request paths and the retention cron run via
+  `asyncio.to_thread`; cron jobs run concurrently (one slow job no longer
+  stalls the rest); rate-limiter buckets and sessions stay bounded (idle
+  buckets swept, primary session never evicted by overflow).
+
 ## [1.0.0] — 2026-04-17
 
 ### Added

@@ -42,6 +42,7 @@ from core.services.llm.errors import (
     retry_after_from_exception,
 )
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
+from core.services.llm.model_capabilities import configured_max_tokens
 from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
@@ -324,6 +325,7 @@ async def generate_structured(
     from core.quotas.manager import CostBudgetExceededError
 
     model = service._resolve_model(model, task_category)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
     use_native = native_enabled and bool(
         getattr(service.provider, "supports_native_tools", False)

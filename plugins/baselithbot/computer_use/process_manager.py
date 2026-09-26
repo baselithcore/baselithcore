@@ -15,7 +15,11 @@ except ImportError:
     psutil = None  # type: ignore[assignment]
     _HAS_PSUTIL = False
 
-from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+from plugins.baselithbot.computer_use.config import (
+    AuditLogger,
+    ComputerUseConfig,
+    ComputerUseError,
+)
 
 
 class ProcessManager:
@@ -59,6 +63,14 @@ class ProcessManager:
 
     async def kill(self, pid: int, sig: int = signal.SIGTERM) -> dict[str, Any]:
         self._config.require_enabled("shell")
+        # ``os.kill`` treats pid <= 0 as a *group* target: 0 is our own
+        # process group, -1 every process this user may signal, -N group N.
+        # PID 1 is init/launchd and our own PID would kill the server. None of
+        # those is "a process" in this tool's sense.
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+            raise ComputerUseError(f"refusing to signal pid {pid!r}: not a single process")
+        if pid == os.getpid():
+            raise ComputerUseError("refusing to signal the Baselithbot server process")
         try:
             os.kill(pid, sig)
             self._audit.record("process_kill", pid=pid, signal=sig)

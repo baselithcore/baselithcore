@@ -22,8 +22,10 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from plugins.baselithbot.api.ui_api import create_dashboard_router, get_event_bus
+from plugins.baselithbot.control.replay import RunIdConflictError
 from plugins.baselithbot.control.tenant import tenant_from_request
 from plugins.baselithbot.inbound import InboundAuthError, InboundEvent, verify_inbound_request
+from plugins.baselithbot.inbound.body import read_body_capped
 from plugins.baselithbot.inbound.parsers import (
     parse_discord_interaction,
     parse_generic,
@@ -55,7 +57,9 @@ if TYPE_CHECKING:
 class RunRequest(BaseModel):
     """Request body for ``POST /api/baselithbot/run``."""
 
-    run_id: str | None = None
+    # Client-chosen ids are allowed (idempotent dashboards) but constrained:
+    # the id keys the replay store, so it must stay a short opaque token.
+    run_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
     goal: str = Field(..., min_length=1, max_length=4000)
     start_url: str | None = None
     max_steps: int = Field(default=20, ge=1, le=100)
@@ -97,19 +101,24 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
             max_steps=req.max_steps,
             extract_fields=req.extract_fields,
         )
+        try:
+            # Off the event loop (SQLite commits fsync). Refuses an id already
+            # owned by another tenant — see TaskReplayStore.start_run.
+            await plugin.replay.astart_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                goal=req.goal,
+                start_url=req.start_url,
+                max_steps=req.max_steps,
+            )
+        except RunIdConflictError as exc:
+            raise HTTPException(status_code=409, detail="run_id already in use") from exc
         plugin.run_tracker.start(
             run_id=run_id,
             goal=req.goal,
             start_url=req.start_url,
             max_steps=req.max_steps,
             extract_fields=req.extract_fields,
-        )
-        plugin.replay.start_run(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            goal=req.goal,
-            start_url=req.start_url,
-            max_steps=req.max_steps,
         )
         bus = get_event_bus()
         bus.publish(
@@ -184,7 +193,7 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
                 error=result.error,
                 last_screenshot_b64=result.last_screenshot_b64,
             )
-            plugin.replay.finish_run(
+            await plugin.replay.afinish_run(
                 run_id=run_id,
                 success=result.success,
                 final_url=result.final_url,
@@ -212,7 +221,7 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
                     metadata={"run_id": run_id, "error": str(exc)[:200]},
                 )
             )
-            plugin.replay.finish_run(
+            await plugin.replay.afinish_run(
                 run_id=run_id,
                 success=False,
                 final_url="",
@@ -266,12 +275,14 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
 
     @router.post("/inbound/{channel}")
     async def inbound(channel: str, request: Request) -> dict[str, Any]:
-        body = await request.body()
-        if len(body) > _MAX_INBOUND_BODY_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"body exceeds {_MAX_INBOUND_BODY_BYTES} bytes",
-            )
+        # One canonical spelling: policies, handlers and the metric label are
+        # keyed by the lowercase name, so "Slack" must not dodge an allowlist
+        # configured for "slack". Unknown names are refused before the body is
+        # read — they have no handler and would only mint metric labels.
+        channel = channel.strip().lower()
+        if channel not in plugin.inbound_dispatcher.known_channels():
+            raise HTTPException(status_code=404, detail="unknown channel")
+        body = await read_body_capped(request, _MAX_INBOUND_BODY_BYTES)
         try:
             verify_inbound_request(channel, dict(request.headers), body)
         except InboundAuthError as exc:

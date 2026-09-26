@@ -113,4 +113,5 @@ config:
 
 secrets:
   create: false
-  existingSecret: baselithcore-secrets   # SECRET_KEY, DATA_ENCRYPTION_KEYS, DB_PASSWORD, *_API_KEY
+  existingSecret: baselithcore-secrets   # SECRET_KEY, DATA_ENCRYPTION_KEYS, DB_PASSWORD, *_API_KEY,
+  # plus the authenticated CACHE_/QUEUE_REDIS_URL, GRAPH_DB_URL and QDRANT_API_KEY

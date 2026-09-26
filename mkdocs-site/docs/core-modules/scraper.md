@@ -45,6 +45,11 @@ graph TD
 
 The `Scraper` class is the main entry point for all operations.
 
+Leaving the `async with` block closes this scraper's own fetchers only; the
+process-wide robots.txt client stays open for concurrent crawls and is closed
+by the plugin's `shutdown()` (call `await scraper.close()` explicitly to close
+it too, e.g. in a one-off script).
+
 ```python
 from plugins.web_scraper import Scraper
 
@@ -100,9 +105,11 @@ The scraper includes industry-standard protections against **Server-Side Request
 1. **DNS Rebinding Protection**: The scraper performs explicit DNS resolution via `socket.getaddrinfo` for every request. Resolved IP addresses are validated against private network ranges (RFC 1918) to prevent DNS rebinding attacks that might bypass standard hostname-based blocks.
 2. **Redirect Handling**: Automatic redirects are disabled in the underlying fetchers. Redirects are followed manually (up to 10 hops), with SSRF validation re-performed at every hop.
 3. **Response Size Limits**: To prevent "Decompression Bombs" or memory exhaustion, a strict **10MB limit** is enforced on all responses. Fetchers use streaming APIs to monitor data transfer and terminate connections immediately if the limit is exceeded.
-4. **Robots.txt Safety**: Validation is also performed on `robots.txt` URLs to prevent path-based attacks.
+4. **Robots.txt Safety**: `robots.txt` is fetched like a page — pinned to the SSRF-verified IP with the original host restored as `Host` and TLS SNI (no second DNS lookup for a rebinding record to exploit), with the DNS resolution off the event loop — and at most 500 KiB of it is read (`ROBOTS_MAX_BYTES`, the limit RFC 9309 allows).
 5. **Playwright Sandbox Hardening**: Dynamic scraping via Playwright enforces Chromium's process-level sandboxing (`--enable-sandbox`, `--disable-setuid-sandbox`) and isolates resources (`--disable-dev-shm-usage`) to prevent escaping the browser context when visiting untrusted pages.
 6. **Playwright Sub-resource Guard**: When `block_private_ips` is enabled (the default), `PlaywrightFetcher` installs a route interceptor (`_ssrf_route_guard`) on `**/*` that re-validates **every** request the rendered page issues — not just the initial navigation — through `assert_url_safe_async`. A scraped page cannot smuggle an SSRF probe through a same-origin `<img>`/`fetch`/XHR sub-resource that the one-shot pre-`goto` check would never see; any exception (including an SSRF rejection) aborts the request rather than letting it through.
+
+7. **Event-loop hygiene**: the DNS-resolving SSRF pin in `HttpxFetcher`, the pre-navigation check in `PlaywrightFetcher`, and extraction (BeautifulSoup parsing of up to 10 MB, once per extractor) all run in a worker thread. Redirect `Location` values of every relative form are joined against the current URL, and `ScrapedPage.final_url` names the host, not the pinned IP.
 
 The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_host` in `plugins.web_scraper.utils`) now delegate to the unified `core.security.ssrf` module shared with the rest of the framework — see [Security & Encryption §SSRF Protection](security.md#ssrf-protection) for the full API and the other adopted call sites.
 

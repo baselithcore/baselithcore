@@ -201,8 +201,19 @@ class TestPurge:
         sql, params = cursor.execute.call_args.args
         assert "DELETE FROM tool_invocations" in sql
         assert "status = 'completed'" in sql
-        assert params == (3600,)
+        assert params == (3600, 3600)
         assert deleted == 3
+
+    async def test_purge_bounds_created_at_so_the_index_serves_it(self):
+        """``updated_at`` is unindexed on purpose (it is rewritten on every
+        completion); the redundant ``created_at`` bound is what lets the sweep
+        range-scan ``ix_tool_invocations_created_at`` instead of the table."""
+        cursor = _cursor(rowcount=0)
+        with patch(f"{MODULE}.get_async_cursor", _cursor_ctx(cursor)):
+            await PostgresToolLedger().purge_completed_before(60)
+        sql, _ = cursor.execute.call_args.args
+        assert "created_at < now() - make_interval(secs => %s)" in sql
+        assert "updated_at < now() - make_interval(secs => %s)" in sql
 
     async def test_negative_rowcount_is_clamped(self):
         """psycopg reports -1 when the count is unknown; never surface it."""

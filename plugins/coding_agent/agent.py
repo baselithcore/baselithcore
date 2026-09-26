@@ -127,6 +127,27 @@ class CodingAgent:
             execution_time_ms=result.execution_time * 1000.0,
         )
 
+    async def _syntax_check(self, code: str) -> CodeExecutionResult:
+        """Validate generated code **without running it**.
+
+        ``generate_code`` promises a syntax check, and it used to deliver one
+        by executing the whole generated program in the sandbox — model output
+        that a prompt-injected description can steer, run for up to
+        ``execution_timeout`` seconds with no reason to run at all. Python is
+        compiled in-process (``compile`` parses and byte-compiles, it executes
+        nothing); other languages have no in-process parser here, so they
+        still go through the sandbox.
+        """
+        if self.language is not CodeLanguage.PYTHON:
+            return await self._execute_code(code)
+        try:
+            compile(code, "<generated>", "exec", dont_inherit=True)
+        except (SyntaxError, ValueError) as exc:
+            return CodeExecutionResult(
+                success=False, error=f"{type(exc).__name__}: {exc}"
+            )
+        return CodeExecutionResult(success=True)
+
     async def _ask_llm(self, prompt: str) -> str:
         """Ask LLM for code generation/fixing."""
         llm = await self._get_llm()
@@ -302,7 +323,7 @@ class CodingAgent:
             response = await self._ask_llm(prompt)
             generated_code = self._extract_code(response)
 
-            result = await self._execute_code(f"# Syntax check\n{generated_code}\npass")
+            result = await self._syntax_check(generated_code)
 
             return self._apply_security_review(
                 CodingResult(

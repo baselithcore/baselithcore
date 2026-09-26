@@ -475,6 +475,16 @@ secrets:
     # DATA_ENCRYPTION_KEYS: "v1:..."
     # DB_PASSWORD: "..."
     # ANTHROPIC_API_KEY: "..."
+    # The chart deploys no Redis/FalkorDB or Qdrant; it points at yours. Run
+    # both with authentication and hand the credentials over here — an
+    # unauthenticated Redis exposes the job queue (pickled RQ jobs) and every
+    # rate-limit counter to anything that can reach it, an unauthenticated
+    # Qdrant the whole RAG corpus. The app logs a warning in production for a
+    # plain redis:// URL without a password.
+    # CACHE_REDIS_URL: "rediss://:<password>@redis.example:6380/1"
+    # QUEUE_REDIS_URL: "rediss://:<password>@redis.example:6380/2"
+    # GRAPH_DB_URL: "rediss://:<password>@redis.example:6380"
+    # QDRANT_API_KEY: "..."
 
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []

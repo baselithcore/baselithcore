@@ -1,6 +1,7 @@
 """Inbound channel receivers (webhooks + listeners + signature verifiers)."""
 
 from plugins.baselithbot.inbound.auth import InboundAuthError, verify_inbound_request
+from plugins.baselithbot.inbound.body import read_body_capped
 from plugins.baselithbot.inbound.default_handler import register_default_inbound_handlers
 from plugins.baselithbot.inbound.dispatcher import InboundDispatcher, InboundEvent, InboundHandler
 from plugins.baselithbot.inbound.signatures import (
@@ -17,6 +18,7 @@ __all__ = [
     "InboundDispatcher",
     "InboundEvent",
     "InboundHandler",
+    "read_body_capped",
     "register_default_inbound_handlers",
     "verify_hmac_signature",
     "verify_slack_signature",

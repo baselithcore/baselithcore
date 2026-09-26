@@ -32,6 +32,7 @@ from core.services.llm._telemetry import (
 )
 from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
+from core.services.llm.model_capabilities import configured_max_tokens
 from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage, billed_usage
 
@@ -59,6 +60,7 @@ async def stream_response(
     )
 
     model = service._resolve_model(model)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     tracer = get_tracer("llm-service")
 
     with tracer.start_span(

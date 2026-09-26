@@ -1419,6 +1419,64 @@
         ]
       }
     },
+    "/admin/reindex": {
+      "post": {
+        "description": "Run the incremental ``/reindex`` for the dashboard (Basic Auth).",
+        "operationId": "admin_reindex_admin_reindex_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Reindex Admin Reindex Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Admin Reindex",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/status": {
+      "get": {
+        "description": "Return the ``/status`` payload for the dashboard (Basic Auth).",
+        "operationId": "admin_status_admin_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Status Admin Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Admin Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/tenants": {
       "get": {
         "description": "List tenants, newest first (paginated \u2014 the listing is never unbounded).",
@@ -1579,7 +1637,7 @@
     },
     "/agent/status/{task_id}": {
       "get": {
-        "description": "Current TaskTracker record for the run (404 when unknown).",
+        "description": "Current TaskTracker record for the run.\n\n404 when the id is unknown *or* belongs to another tenant \u2014 the two are\ndeliberately indistinguishable.",
         "operationId": "async_run_status_agent_status__task_id__get",
         "parameters": [
           {
@@ -2460,7 +2518,7 @@
     },
     "/approvals/{run_id}/resume": {
       "post": {
-        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.",
+        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.",
         "operationId": "resume_approvals__run_id__resume_post",
         "parameters": [
           {
@@ -4004,7 +4062,7 @@
     },
     "/feedbacks": {
       "get": {
-        "description": "Returns all saved feedback entries.\n- If `feedback` is specified, filters by type ('positive' or 'negative').",
+        "description": "Returns the most recent feedback entries for the caller's tenant.\n- If `feedback` is specified, filters by type ('positive' or 'negative').\n- Always bounded: omitting `limit` returns the default page, never the\n  whole table (an unset limit used to translate into no SQL ``LIMIT``).",
         "operationId": "list_feedbacks_feedbacks_get",
         "parameters": [
           {
@@ -4030,23 +4088,17 @@
             }
           },
           {
-            "description": "Limit the number of returned records (max 200)",
+            "description": "Number of records to return, newest first (default 50, max 200)",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "maximum": 200,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Limit the number of returned records (max 200)",
-              "title": "Limit"
+              "default": 50,
+              "description": "Number of records to return, newest first (default 50, max 200)",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -5048,7 +5100,7 @@
     },
     "/v1/feedbacks": {
       "get": {
-        "description": "Returns all saved feedback entries.\n- If `feedback` is specified, filters by type ('positive' or 'negative').",
+        "description": "Returns the most recent feedback entries for the caller's tenant.\n- If `feedback` is specified, filters by type ('positive' or 'negative').\n- Always bounded: omitting `limit` returns the default page, never the\n  whole table (an unset limit used to translate into no SQL ``LIMIT``).",
         "operationId": "list_feedbacks_v1_feedbacks_get",
         "parameters": [
           {
@@ -5074,23 +5126,17 @@
             }
           },
           {
-            "description": "Limit the number of returned records (max 200)",
+            "description": "Number of records to return, newest first (default 50, max 200)",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "maximum": 200,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Limit the number of returned records (max 200)",
-              "title": "Limit"
+              "default": 50,
+              "description": "Number of records to return, newest first (default 50, max 200)",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

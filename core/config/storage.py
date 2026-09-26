@@ -213,6 +213,18 @@ class StorageConfig(BaseSettings):
     db_idle_in_transaction_timeout_ms: int = Field(
         default=60_000, alias="DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", ge=0
     )
+    db_prepared_statements: bool = Field(
+        default=True,
+        alias="DB_PREPARED_STATEMENTS",
+        description=(
+            "Let psycopg promote a query to a server-side prepared statement "
+            "after it has run 5 times on a connection (its default "
+            "prepare_threshold). Set false behind PgBouncer in transaction "
+            "pooling mode older than 1.21 (or without max_prepared_statements): "
+            "a statement prepared on one backend is then executed on another "
+            "and fails with 'prepared statement \"_pg3_0\" does not exist'."
+        ),
+    )
     postgres_enabled: bool = Field(default=True, alias="POSTGRES_ENABLED")
     # Run `alembic upgrade head` inside the app lifespan at boot. Default True
     # for single-node/back-compat. Set False when migrations run as a
@@ -250,6 +262,15 @@ class StorageConfig(BaseSettings):
             "-c idle_in_transaction_session_timeout="
             f"{self.db_idle_in_transaction_timeout_ms}"
         )
+
+    @property
+    def prepare_threshold(self) -> int | None:
+        """psycopg ``prepare_threshold`` for pooled connections.
+
+        ``5`` is psycopg's own default; ``None`` disables server-side prepared
+        statements (``DB_PREPARED_STATEMENTS=false``).
+        """
+        return 5 if self.db_prepared_statements else None
 
     @property
     def conninfo(self) -> str:

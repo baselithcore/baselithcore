@@ -8,6 +8,8 @@ the cheap string-prefix filter alone.
 
 from __future__ import annotations
 
+import importlib
+
 import httpx
 import pytest
 
@@ -136,3 +138,96 @@ async def test_fetch_refuses_other_internal_shapes(url: str) -> None:
         assert await source._fetch_with_httpx(url) is None
     finally:
         await source.close()
+
+
+class TestHardening:
+    def test_client_pins_every_request(self) -> None:
+        """The production client re-validates and IP-pins at the transport,
+        closing the rebinding window between screen and connect."""
+        from core.security.http import SsrfBlockingTransport
+
+        source = WebDocumentSource([PUBLIC_URL])
+        try:
+            assert isinstance(source._client._transport, SsrfBlockingTransport)
+        finally:
+            import anyio
+
+            anyio.run(source.close)
+
+    async def test_oversized_body_is_refused(self, monkeypatch) -> None:
+        web_module = importlib.import_module("plugins.document_sources.web")
+        monkeypatch.setattr(web_module, "WEB_DOCUMENTS_MAX_BODY_BYTES", 1024)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"x" * 4096)
+
+        source = _source_with_transport(handler)
+        try:
+            assert await source._fetch_with_httpx(PUBLIC_URL) is None
+        finally:
+            await source.close()
+
+    async def test_declared_oversized_body_is_refused(self, monkeypatch) -> None:
+        web_module = importlib.import_module("plugins.document_sources.web")
+        monkeypatch.setattr(web_module, "WEB_DOCUMENTS_MAX_BODY_BYTES", 1024)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, content=b"small", headers={"Content-Length": "999999"}
+            )
+
+        source = _source_with_transport(handler)
+        try:
+            assert await source._fetch_with_httpx(PUBLIC_URL) is None
+        finally:
+            await source.close()
+
+
+class TestBrowserRouteGuard:
+    async def test_internal_subresource_is_aborted(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from plugins.document_sources.web_guard import ssrf_route_guard
+
+        route = AsyncMock()
+        request = MagicMock(url="http://169.254.169.254/latest/meta-data")
+        await ssrf_route_guard(route, request)
+        route.abort.assert_awaited_once_with("blockedbyclient")
+        route.continue_.assert_not_called()
+
+    async def test_public_subresource_continues(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from plugins.document_sources.web_guard import ssrf_route_guard
+
+        route = AsyncMock()
+        request = MagicMock(url=PUBLIC_URL + "app.js")
+        await ssrf_route_guard(route, request)
+        route.continue_.assert_awaited_once()
+        route.abort.assert_not_called()
+
+
+async def test_page_parsing_runs_off_the_event_loop(monkeypatch) -> None:
+    import threading
+
+    web_module = importlib.import_module("plugins.document_sources.web")
+    loop_thread = threading.get_ident()
+    threads: list[int] = []
+
+    def fake_parse(*_args):
+        threads.append(threading.get_ident())
+        return None
+
+    monkeypatch.setattr(web_module, "parse_page", fake_parse)
+    source = WebDocumentSource([PUBLIC_URL])
+
+    async def fake_fetch(url, page):
+        return "<html></html>", PUBLIC_URL
+
+    monkeypatch.setattr(source, "_fetch_page", fake_fetch)
+    try:
+        items = [i async for i in source._crawl_seed(PUBLIC_URL, None)]
+    finally:
+        await source.close()
+    assert items == []
+    assert threads and threads[0] != loop_thread

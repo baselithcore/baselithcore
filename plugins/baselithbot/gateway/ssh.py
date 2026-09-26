@@ -89,6 +89,18 @@ class SSHGatewayConfig(BaseModel):
     allowed_commands: list[str] = Field(default_factory=list)
     timeout_seconds: float = 60.0
 
+    @field_validator("host", "user")
+    @classmethod
+    def _check_not_option(cls, value: str | None) -> str | None:
+        # ``ssh`` parses a leading "-" as an option wherever it sits in argv,
+        # so host="-oProxyCommand=..." would run a local command and bypass
+        # the ``extra_options`` allowlist entirely.
+        if value is not None and (
+            not value or value.startswith("-") or any(c.isspace() for c in value)
+        ):
+            raise ValueError("must be non-empty, without whitespace, and not start with '-'")
+        return value
+
     @field_validator("extra_options")
     @classmethod
     def _check_extra_options(cls, value: list[str]) -> list[str]:

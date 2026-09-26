@@ -24,14 +24,6 @@ if TYPE_CHECKING:
         CrossEncoder,
         SentenceTransformer,
     )
-else:  # pragma: no cover - exercised by import guards
-    # Runtime guarded import: mypy only ever sees the typed branch above, so
-    # the None fallback never reads as "assigning to a type".
-    try:
-        from sentence_transformers import CrossEncoder, SentenceTransformer
-    except ImportError:
-        CrossEncoder = None
-        SentenceTransformer = None
 
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.cache.single_flight import LayeredSingleFlight, build_single_flight
@@ -143,9 +135,44 @@ def _record_embedding_metrics(
         pass
 
 
+_MODEL_CLASSES = ("SentenceTransformer", "CrossEncoder")
+
+
+def _model_classes() -> tuple[Any, Any]:
+    """``(SentenceTransformer, CrossEncoder)``, imported on first call.
+
+    sentence-transformers pulls transformers, torch, scipy and sklearn (~2.2 s,
+    ~3 000 modules: 85% of importing ``core.api.factory``, whose lifespan
+    reaches this module via ``core.services.indexing``). Resolved names are
+    cached as module globals; one already there (a test's ``mock.patch``)
+    wins. Either is ``None`` without the ``[rag]`` extra.
+    """
+    namespace = globals()
+    if not all(name in namespace for name in _MODEL_CLASSES):
+        loaded: tuple[Any, Any] = (None, None)
+        try:
+            import sentence_transformers as _st  # type: ignore[import-untyped,unused-ignore]
+        except ImportError:
+            pass
+        else:
+            loaded = (_st.SentenceTransformer, _st.CrossEncoder)
+        namespace.setdefault("SentenceTransformer", loaded[0])
+        namespace.setdefault("CrossEncoder", loaded[1])
+    return namespace["SentenceTransformer"], namespace["CrossEncoder"]
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562: resolve ``SentenceTransformer`` / ``CrossEncoder`` lazily."""
+    if name in _MODEL_CLASSES:
+        sentence_transformer, cross_encoder = _model_classes()
+        return sentence_transformer if name == "SentenceTransformer" else cross_encoder
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _require_sentence_transformers() -> None:
     """Ensure sentence-transformers is available before using RAG models."""
-    if SentenceTransformer is None or CrossEncoder is None:
+    sentence_transformer, cross_encoder = _model_classes()
+    if sentence_transformer is None or cross_encoder is None:
         raise RuntimeError(
             "sentence-transformers is not installed. "
             "Install the optional extra with: pip install 'baselith-core[rag]'"
@@ -428,8 +455,9 @@ def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     _require_sentence_transformers()
 
     actual_model_name = model_name or vs_config.embedding_model
-    assert SentenceTransformer is not None
-    base_model = SentenceTransformer(actual_model_name)
+    sentence_transformer, _ = _model_classes()
+    assert sentence_transformer is not None
+    base_model = sentence_transformer(actual_model_name)
 
     return CachedEmbedder(
         base_model,
@@ -454,9 +482,10 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     chat_config = get_chat_config()
     _require_sentence_transformers()
     actual_model_name = model_name or chat_config.reranker_model
-    assert CrossEncoder is not None
+    _, cross_encoder = _model_classes()
+    assert cross_encoder is not None
     # sentence-transformers ships no py.typed, so the constructor is `Any`.
-    return cast("CrossEncoder", CrossEncoder(actual_model_name))
+    return cast("CrossEncoder", cross_encoder(actual_model_name))
 
 
 __all__ = [

@@ -206,7 +206,7 @@ Pagination is per endpoint — there is no global scheme:
 | `GET /webhooks/deliveries` | Opaque cursor: `limit` (default 50, clamped to 200) + `cursor`; the page carries `deliveries`, `next_cursor` and `has_more` |
 | `GET /admin/tenants` | `limit` (default 100, max 500) + `offset` |
 | `GET /admin/dlq` | `limit` (default 50, max 500) + `offset` |
-| `GET /feedbacks` | `limit` only (1–200) |
+| `GET /feedbacks` | `limit` only (default 50, max 200), newest first |
 
 ```bash
 GET /webhooks/deliveries?limit=50
@@ -684,8 +684,10 @@ token (`require_user`). Accepts a `FeedbackRequest` body (`query`, `answer`,
 
 ### `GET /feedbacks`
 
-List recorded feedback entries. Requires admin (`require_admin`). Optional
-`feedback` filter (`positive`|`negative`) and `limit` (1–200).
+List recorded feedback entries for the caller's tenant, newest first.
+Requires admin (`require_admin`). Optional `feedback` filter
+(`positive`|`negative`) and `limit` (default 50, max 200) — the listing is
+always bounded, an omitted `limit` returns the default page.
 
 ---
 

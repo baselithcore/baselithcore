@@ -55,3 +55,9 @@ To use the Reasoning Agent in your application:
 ## Development
 
 This plugin can be extended by providing it with custom `tools` (passed into the `solve()` method). By default, it attempts to use the `SandboxService` to run and verify code snippets during its reasoning steps.
+
+## Bounds
+
+`ReasoningFlowHandler` clamps the resolved `max_steps` to `1..10` and
+`branching_factor` to `1..5`, whether they come from the request context or
+the plugin config; non-numeric values fall back to the defaults (`5`, `3`).

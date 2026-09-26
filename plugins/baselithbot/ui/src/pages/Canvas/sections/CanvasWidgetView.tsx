@@ -1,5 +1,6 @@
 import type { CanvasDispatchPayload, CanvasWidget } from '../../../lib/api';
 import { truncate } from '../../../lib/format';
+import { safeExternalUrl } from '../../../lib/url';
 import { widgetTitle } from '../helpers';
 import { FormPreview } from './FormPreview';
 
@@ -17,6 +18,7 @@ export function CanvasWidgetView({
   dispatchBusy,
 }: CanvasWidgetViewProps) {
   const title = widgetTitle(widget);
+  const imageHref = widget.type === 'image' ? safeExternalUrl(widget.url) : null;
 
   return (
     <div className="canvas-widget" style={{ marginLeft: depth === 0 ? 0 : depth * 14 }}>
@@ -63,11 +65,15 @@ export function CanvasWidgetView({
 
       {widget.type === 'image' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {widget.url && (
-            <a href={widget.url} target="_blank" rel="noreferrer" className="mono">
-              {truncate(widget.url, 100)}
-            </a>
-          )}
+          {widget.url &&
+            (imageHref ? (
+              <a href={imageHref} target="_blank" rel="noopener noreferrer" className="mono">
+                {truncate(widget.url, 100)}
+              </a>
+            ) : (
+              // Agent-supplied URL with a non-http(s) scheme: show, never link.
+              <span className="mono muted">{truncate(widget.url, 100)}</span>
+            ))}
           {widget.base64_png && (
             <img
               className="screenshot"

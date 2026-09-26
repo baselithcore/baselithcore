@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useDashboardEvents } from '../lib/sse';
+import { useDashboardEventState } from '../lib/sse';
 import { useDashboardOverview } from './DashboardProvider';
 import { Icon, paths } from '../lib/icons';
 
@@ -34,7 +34,7 @@ export function TopBar({ open, onMenu }: Props) {
   }, [location.pathname]);
 
   const { data: overview } = useDashboardOverview();
-  const { state } = useDashboardEvents(1);
+  const state = useDashboardEventState();
 
   const agentState = overview?.agent.state ?? 'uninitialized';
   const tone = toneForState(agentState);

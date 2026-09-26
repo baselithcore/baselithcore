@@ -32,7 +32,7 @@ export function Nodes() {
     refetchInterval: 8_000,
   });
 
-  const paired = data?.paired ?? [];
+  const paired = useMemo(() => data?.paired ?? [], [data?.paired]);
   const selected = useMemo(
     () => paired.find((node) => node.node_id === selectedId) ?? null,
     [paired, selectedId]

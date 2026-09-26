@@ -87,3 +87,59 @@ async def test_redirect_hop_repins_sni_to_the_new_host(
         "example.com",
         "other.test",
     ]
+
+
+async def test_final_url_names_the_host_not_the_pinned_ip(
+    fetcher: HttpxFetcher,
+) -> None:
+    page = await fetcher.fetch(_ORIGINAL)
+    assert page.final_url == _ORIGINAL
+
+
+async def test_pinning_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch, seen: list[httpx.Request]
+) -> None:
+    """The DNS-resolving pin must not execute on the event-loop thread."""
+    import threading
+
+    loop_thread = threading.get_ident()
+    threads: list[int] = []
+
+    def pin(url: str) -> tuple[str, str]:
+        threads.append(threading.get_ident())
+        return (_PINNED, "example.com")
+
+    monkeypatch.setattr(fetcher_module, "get_pinned_url_for_host", pin)
+    instance: Any = HttpxFetcher()
+    instance._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, html="ok"))
+    )
+    await instance.fetch(_ORIGINAL)
+    assert threads and threads[0] != loop_thread
+
+
+async def test_path_relative_redirect_is_joined(
+    monkeypatch: pytest.MonkeyPatch, seen: list[httpx.Request]
+) -> None:
+    pinned_for: list[str] = []
+
+    def pin(url: str) -> tuple[str, str]:
+        pinned_for.append(url)
+        return (_PINNED, "example.com")
+
+    monkeypatch.setattr(fetcher_module, "get_pinned_url_for_host", pin)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "next"})
+        return httpx.Response(200, html="ok")
+
+    instance: Any = HttpxFetcher()
+    instance._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    page = await instance.fetch("https://example.com/dir/start")
+    assert pinned_for == [
+        "https://example.com/dir/start",
+        "https://example.com/dir/next",
+    ]
+    assert page.final_url == "https://example.com/dir/next"

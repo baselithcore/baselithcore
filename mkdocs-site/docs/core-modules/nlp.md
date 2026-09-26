@@ -83,6 +83,19 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 !!! tip "Performance"
     `get_embedder()` and `get_reranker()` are wrapped in `@functools.cache` (unbounded, one entry per `model_name`), so each model is loaded once and reused across all requests; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
 
+!!! note "Importing `core.nlp` loads no ML stack"
+    `sentence_transformers` (and with it transformers, torch, scipy and
+    scikit-learn) is imported on the first `get_embedder()` / `get_reranker()`
+    call, not when `core/nlp/models.py` is imported. The module sits on the
+    application's import path (`core.api.lifespan` → `core.services.indexing`
+    → `core.nlp`), and the former module-scope import was ~2.2 s and ~3 000
+    modules of every process start: importing `core.api.factory` dropped from
+    ~3.0 s / 4 618 modules to ~0.45 s / 1 373, and the same import inside the
+    container image from ~2.9 s to ~0.6 s. `SentenceTransformer` and
+    `CrossEncoder` stay reachable as module attributes (PEP 562), so
+    `mock.patch("core.nlp.models.SentenceTransformer")` keeps working; with the
+    `[rag]` extra absent they resolve to `None`.
+
 ### Loading models off the event loop
 
 `get_embedder()` / `get_reranker()` build the model synchronously — seconds of

@@ -54,6 +54,7 @@ Field constraints:
 
 | Field | Rule |
 |-------|------|
+| `run_id` | optional; `^[A-Za-z0-9._-]{1,64}$` (server mints `run-<hex>` when omitted) |
 | `goal` | 1–4000 chars, required |
 | `max_steps` | 1–100 |
 | `extract_fields` | optional list of field names |
@@ -65,6 +66,8 @@ Status codes:
 | 200 | Task completed (check `success` flag) |
 | 401 | Missing bearer token; on `POST /run`, also no resolvable tenant while central auth is active |
 | 403 | Invalid bearer token |
+| 409 | `run_id` already belongs to another tenant's recorded run |
+| 422 | Body validation failed (e.g. malformed `run_id`) |
 | 429 | Rate limit exceeded |
 | 500 | Unhandled exception — `error` contains message |
 
@@ -94,12 +97,20 @@ interaction, or anything through `parse_generic`). Path segment
 
 Processing pipeline:
 
-1. Body size check — reject > 1 MiB with `413`.
-2. JSON decode; malformed → `{"raw": "…"}`.
-3. Normalize to `InboundEvent` via [`inbound/parsers.py`](../inbound/parsers.py).
-4. `DMPairingPolicy.evaluate()` — DM from unpaired sender → `{"status": "denied", "reason": …}`.
-5. Prometheus counter `baselithbot_inbound_event_total{channel}`.
-6. `InboundDispatcher.dispatch()` → registered handlers.
+1. Channel name lower-cased; a name with no registered inbound handler → `404`
+   before the body is read.
+2. Body size check — `413` on a declared `Content-Length` > 1 MiB, or as soon
+   as a streamed (chunked) body crosses 1 MiB. The body is never buffered past
+   the cap.
+3. Signature verification ([`inbound/auth.py`](../inbound/auth.py)) — Slack and
+   Discord signed timestamps must be within ±5 minutes (replay window).
+4. JSON decode; malformed → `{"raw": "…"}`.
+5. Normalize to `InboundEvent` via [`inbound/parsers.py`](../inbound/parsers.py).
+6. `DMPairingPolicy.evaluate()` — sender outside the channel's configured
+   `dm_policy` allowlist (see [configuration.md §9](./configuration.md)) →
+   `{"status": "denied", "reason": …}`.
+7. Prometheus counter `baselithbot_inbound_event_total{channel}`.
+8. `InboundDispatcher.dispatch()` → registered handlers.
 
 Response:
 

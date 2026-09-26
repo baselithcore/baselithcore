@@ -32,7 +32,34 @@ async def test_generate_code(coding_agent):
             assert result.success
             assert result.final_code == "print('hello')"
             mock_ask.assert_called_once()
-            mock_exec.assert_called_once()
+            # A syntax check must not run the generated program.
+            mock_exec.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_code_syntax_error_fails_without_execution(coding_agent):
+    with patch.object(coding_agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
+        with patch.object(
+            coding_agent, "_execute_code", new_callable=AsyncMock
+        ) as mock_exec:
+            mock_ask.return_value = "def broken(:\n    pass"
+
+            result = await coding_agent.generate_code("anything")
+
+            assert not result.success
+            assert "SyntaxError" in (result.error or "")
+            mock_exec.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_code_non_python_still_uses_sandbox():
+    agent = CodingAgent(language=CodeLanguage.JAVASCRIPT)
+    with patch.object(agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
+        with patch.object(agent, "_execute_code", new_callable=AsyncMock) as mock_exec:
+            mock_ask.return_value = "console.log(1)"
+            mock_exec.return_value.success = True
+            await agent.generate_code("log one")
+            mock_exec.assert_called_once_with("console.log(1)")
 
 
 @pytest.mark.asyncio

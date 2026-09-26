@@ -90,9 +90,18 @@ SET status = 'failed', error = %s, updated_at = now()
 WHERE key = %s
 """
 
+# ``updated_at`` is not indexed — deliberately: every completion rewrites it,
+# and an index on it would turn each of those updates non-HOT. ``created_at``
+# is indexed (009) and is never later than ``updated_at`` (a row is created,
+# then completed or re-claimed), so ``updated_at < cutoff`` implies
+# ``created_at < cutoff``: the redundant bound changes no result but lets the
+# sweep range-scan ``ix_tool_invocations_created_at`` instead of seq-scanning
+# the whole ledger. Both placeholders take the same retention seconds.
 _PURGE = """
 DELETE FROM tool_invocations
-WHERE status = 'completed' AND updated_at < now() - make_interval(secs => %s)
+WHERE status = 'completed'
+  AND created_at < now() - make_interval(secs => %s)
+  AND updated_at < now() - make_interval(secs => %s)
 """
 
 
@@ -189,7 +198,7 @@ class PostgresToolLedger:
             Number of rows deleted.
         """
         async with get_async_cursor() as cur:
-            await cur.execute(_PURGE, (max_age_seconds,))
+            await cur.execute(_PURGE, (max_age_seconds, max_age_seconds))
             # psycopg reports -1 when the count is unknown; never surface it.
             deleted = int(cur.rowcount or 0)
         if deleted:

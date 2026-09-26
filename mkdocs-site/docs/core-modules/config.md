@@ -319,6 +319,7 @@ print(config.host)                      # "0.0.0.0"  (HOST)
 print(config.port)                      # 8000       (PORT)
 print(config.strict_tenant_isolation)   # True       (STRICT_TENANT_ISOLATION)
 print(config.telemetry_enabled)         # False      (TELEMETRY_ENABLED)
+print(config.telemetry_traces_sample_rate)  # 1.0 dev / 0.1 production (TELEMETRY_TRACES_SAMPLE_RATE)
 print(config.cost_control_enabled)      # True       (COST_CONTROL_ENABLED)
 print(config.agent_max_tokens)          # 10000      (AGENT_MAX_TOKENS)
 print(config.timezone)                  # ZoneInfo (derived from APP_TIMEZONE)
@@ -342,6 +343,9 @@ TELEMETRY_ENABLED=false
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 TELEMETRY_OTEL_PROTOCOL=grpc        # or http/protobuf (endpoint port becomes 4318)
 TELEMETRY_LOGS_ENABLED=false        # OTLP log-record export, alongside stdout
+# Head sampling ratio. Unset: 1.0 outside production, 0.1 when APP_ENV /
+# ENVIRONMENT resolves to production (unknown names count as production).
+# TELEMETRY_TRACES_SAMPLE_RATE=
 SENTRY_DSN=
 
 # Cost control

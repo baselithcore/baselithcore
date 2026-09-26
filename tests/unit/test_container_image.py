@@ -78,7 +78,9 @@ def test_image_strips_cuda_from_the_cpu_only_build() -> None:
     text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
     assert "--index-url https://download.pytorch.org/whl/cpu" in text
 
-    filter_match = re.search(r"grep -vE '([^']+)'", text)
+    # The strip is block-aware (awk) since the export carries hashes: each
+    # requirement spans a name line plus `--hash=` continuation lines.
+    filter_match = re.search(r"skip = \(\$0 ~ /([^/]+)/\)", text)
     assert filter_match is not None, (
         "The export no longer filters the GPU stack out of the locked set."
     )
@@ -104,7 +106,7 @@ def test_image_strips_cuda_from_the_cpu_only_build() -> None:
     # The post-install guard is the second half, and it missed the same family
     # for the same reason: it reads DIRECTORY names in site-packages, and
     # cuda-bindings installs one called `cuda`, not `nvidia`.
-    guard_match = re.search(r"grep -qE '([^']+)'", text)
+    guard_match = re.search(r"site-packages \| grep -qE '([^']+)'", text)
     assert guard_match is not None, "the CPU-only guard is gone"
     guard = re.compile(guard_match.group(1))
     for directory in ("nvidia", "cuda"):

@@ -121,7 +121,7 @@ Declared in `core.config.app`.
 | `TELEMETRY_METRICS_ENABLED` | `bool` | `False` | Push OTel-native metrics (e.g. HTTP server/client histograms from auto-instrumentation) to the collector via OTLP. Independent of the Prometheus `/metrics` scrape endpoint, which is always available. |
 | `TELEMETRY_OTEL_ENDPOINT` | `str` | `http://localhost:4317` | OpenTelemetry collector endpoint for traces, metrics and logs. The default is the OTLP/gRPC port; switch to :4318 when selecting `http/protobuf` below (the per-signal `/v1/...` path is appended for you). |
 | `TELEMETRY_OTEL_PROTOCOL`<br>also accepts `OTEL_EXPORTER_OTLP_PROTOCOL` | `str` | `grpc` | OTLP wire protocol: `grpc` (default) or `http/protobuf`. HTTP is what a collector's `otlphttp` receiver speaks, what most vendor ingest endpoints expose, and the only option behind an L7 proxy that will not forward HTTP/2 trailers. `OTEL_EXPORTER_OTLP_PROTOCOL` is the specification's own name for this knob, so it is accepted as an alias — a sidecar or chart that already sets it is honoured without a Baselith-specific variable. |
-| `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | `1.0` | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Lower in high-traffic production to cap cost. |
+| `TELEMETRY_TRACES_SAMPLE_RATE` | `float` | *computed* | Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all traces, 0.0 = none. Unset: 1.0 outside production, 0.1 in production (APP_ENV/ENVIRONMENT) — a full-rate default shipped every span tree of every request to the collector. Parent-based, so an upstream caller's sampled trace is always continued whatever this ratio is. |
 
 ## Audit-trail configuration
 
@@ -732,6 +732,7 @@ Declared in `core.config.storage`.
 | `DB_POOL_MIN_SIZE` | `int` | `2` | min_size=2 keeps warm connections through cold start / traffic ramp so early requests skip the TCP+TLS+auth handshake on the hot path; still small enough that idle deployments hold a negligible connection budget. |
 | `DB_POOL_TIMEOUT` | `float` | `30.0` |  |
 | `DB_PORT` | `int` | `5432` |  |
+| `DB_PREPARED_STATEMENTS` | `bool` | `True` | Let psycopg promote a query to a server-side prepared statement after it has run 5 times on a connection (its default prepare_threshold). Set false behind PgBouncer in transaction pooling mode older than 1.21 (or without max_prepared_statements): a statement prepared on one backend is then executed on another and fails with 'prepared statement "_pg3_0" does not exist'. |
 | `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
 | `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
@@ -827,6 +828,7 @@ Declared in `core.config.vectorstore`.
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
 | `VECTORSTORE_HNSW_EF_CONSTRUCTION` | `int` | `64` | HNSW build-time candidate list size (pgvector 'ef_construction'); must be >= 2 * hnsw_m. |
 | `VECTORSTORE_HNSW_EF_SEARCH` | `int` | `40` | HNSW query-time candidate list size, applied as SET LOCAL hnsw.ef_search per search. 0 leaves the server default alone and skips the enclosing transaction. |
+| `VECTORSTORE_HNSW_ITERATIVE_SCAN` | `Literal['off', 'strict_order', 'relaxed_order']` | `strict_order` | pgvector >= 0.8 'hnsw.iterative_scan' for filtered searches (tenant/payload filters, score threshold): keep walking the graph until LIMIT matching rows are found. 'strict_order' keeps exact distance order; 'relaxed_order' trades order for speed; 'off' restores post-filtering, which can return far fewer than LIMIT hits. Ignored on pgvector &lt; 0.8. |
 | `VECTORSTORE_HNSW_M` | `int` | `16` | HNSW graph connectivity (pgvector 'm'); build-time. |
 | `VECTORSTORE_HOST`<br>also accepts `VECTORSTORE_QDRANT_HOST` | `str` | `localhost` | Vector store server host |
 | `VECTORSTORE_PORT` | `int` | `6333` | Vector store HTTP/REST port |
@@ -903,4 +905,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-576 settings documented.
+578 settings documented.

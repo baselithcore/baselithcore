@@ -125,6 +125,17 @@ class TestPrompt:
         assert isinstance(CONVERSATION_SYSTEM_PROMPT, str)
         assert len(CONVERSATION_SYSTEM_PROMPT) > 100
 
+    def test_date_is_the_only_varying_suffix(self):
+        """The per-request date is the last line, so every day's prompt shares
+        the rest as a byte-stable prefix (provider prefix caching)."""
+        from core.chat.prompt import _system_prompt
+
+        first = _system_prompt("01/01/2026")
+        second = _system_prompt("02/01/2026")
+        assert first.endswith("The current date is 01/01/2026.")
+        stable = first.removesuffix("01/01/2026.")
+        assert second.startswith(stable)
+
     def test_build_prompt_basic(self):
         """build_prompt generates valid output."""
         from core.chat.prompt import build_prompt

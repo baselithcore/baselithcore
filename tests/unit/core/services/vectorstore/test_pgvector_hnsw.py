@@ -180,3 +180,78 @@ class TestEfSearchPerQuery:
             await PgVectorProvider().retrieve("documents", ["p1"])
             await PgVectorProvider().delete("documents", ["p1"])
         cursor.connection.transaction.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# Iterative scan for filtered searches
+# --------------------------------------------------------------------------- #
+
+
+def _versioned_cursor(extversion: str | None):
+    """A cursor whose version probe answers *extversion* (None = no row)."""
+    cursor = _cursor()
+    cursor.fetchone = AsyncMock(
+        return_value=None if extversion is None else (extversion,)
+    )
+    return cursor
+
+
+@pytest.mark.asyncio
+class TestIterativeScan:
+    """Post-filtering on a selective tenant filter returned 1 hit for LIMIT 10
+    against a seeded pgvector 0.8.6 (60k rows, tenant = 0.5%); with
+    ``hnsw.iterative_scan = strict_order`` the same query returned 10."""
+
+    async def test_filtered_search_enables_iterative_scan(self):
+        cursor = _versioned_cursor("0.8.1")
+        with _patched(cursor), _config():
+            await PgVectorProvider().search("documents", [0.1], tenant_id="t1")
+        statements = _sqls(cursor)
+        assert "SET LOCAL hnsw.iterative_scan = strict_order" in statements
+        assert "<=>" in statements[-1]
+        cursor.connection.transaction.assert_called_once()
+
+    async def test_relaxed_order_is_configurable(self):
+        cursor = _versioned_cursor("0.9.0")
+        with _patched(cursor), _config(hnsw_iterative_scan="relaxed_order"):
+            await PgVectorProvider().search("documents", [0.1], tenant_id="t1")
+        assert "SET LOCAL hnsw.iterative_scan = relaxed_order" in _sqls(cursor)
+
+    async def test_unfiltered_search_never_probes_or_sets_it(self):
+        cursor = _versioned_cursor("0.8.1")
+        with _patched(cursor), _config():
+            await PgVectorProvider().search("documents", [0.1])
+        assert not any(
+            "iterative_scan" in s or "extversion" in s for s in _sqls(cursor)
+        )
+
+    async def test_old_pgvector_is_left_alone(self):
+        """On < 0.8 the GUC prefix is reserved: setting it would be an error."""
+        cursor = _versioned_cursor("0.7.4")
+        with _patched(cursor), _config():
+            await PgVectorProvider().search("documents", [0.1], tenant_id="t1")
+        assert not any("iterative_scan" in s for s in _sqls(cursor))
+
+    async def test_off_disables_it_without_probing(self):
+        cursor = _versioned_cursor("0.8.1")
+        with _patched(cursor), _config(hnsw_iterative_scan="off"):
+            await PgVectorProvider().search("documents", [0.1], tenant_id="t1")
+        assert not any(
+            "iterative_scan" in s or "extversion" in s for s in _sqls(cursor)
+        )
+
+    async def test_version_probe_runs_once_per_provider(self):
+        cursor = _versioned_cursor("0.8.1")
+        provider = PgVectorProvider()
+        with _patched(cursor), _config():
+            await provider.search("documents", [0.1], tenant_id="t1")
+            await provider.search("documents", [0.1], tenant_id="t2")
+        assert sum("extversion" in s for s in _sqls(cursor)) == 1
+
+    async def test_failed_probe_is_not_cached(self):
+        provider = PgVectorProvider()
+        failing = _cursor()
+        failing.execute = AsyncMock(side_effect=OSError("down"))
+        with _patched(failing), _config():
+            assert await provider._iterative_scan_supported() is False
+        assert provider._iterative_scan_ok is None

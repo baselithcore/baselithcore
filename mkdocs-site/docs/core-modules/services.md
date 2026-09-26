@@ -101,6 +101,14 @@ Both `generate_response` and `generate_response_stream` accept optional
 their system prompt or sampling parameters no longer collide on a stale cached
 answer.
 
+When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
+fills it on every path — text, streaming, structured and the message API —
+via `core.services.llm.model_capabilities.configured_max_tokens`. The setting
+used to be bound and advertised but read by nothing, so it capped nothing and
+OpenAI/Gemini/Ollama calls ran to the model's own ceiling. Unset (the default)
+keeps each provider's default: Anthropic's per-family table, the model limit
+elsewhere. The resolved cap is part of the response-cache key.
+
 ### Native Tool-Calling & Structured Outputs
 
 `generate_response` returns a plain `str`. For agentic use, `generate()` returns
@@ -1288,6 +1296,23 @@ core/services/vectorstore/
     change. `pgvector` creates its tables (`vs_<collection>`, HNSW index)
     at `create_collection`; the extension must be installable in the target
     database (`CREATE EXTENSION vector`).
+
+!!! warning "pgvector: filtered searches and `hnsw.iterative_scan`"
+    An HNSW index scan visits `ef_search` candidates and applies the `WHERE`
+    clause *afterwards*. Every tenant-scoped search carries one
+    (`payload @> {"tenant_id": …}`), so a tenant owning a small share of a
+    collection gets a fraction of `limit`: on 60k vectors with a tenant at
+    0.5% of the rows, `LIMIT 10` returned **1** hit. pgvector ≥ 0.8 can keep
+    walking the graph until `limit` matches are found; the provider applies
+    `SET LOCAL hnsw.iterative_scan = <VECTORSTORE_HNSW_ITERATIVE_SCAN>`
+    (default `strict_order`, which keeps exact distance order) to every
+    filtered search — tenant, payload filter or `score_threshold` — and the
+    same query then returned 10 hits (~20 ms instead of ~4 ms). The server's
+    pgvector version is probed once per provider (`pg_extension.extversion`);
+    below 0.8 nothing is set, since the `hnsw.` GUC prefix is reserved there
+    and an unknown parameter would fail the search. Unfiltered searches are
+    untouched. `relaxed_order` is faster but may return hits slightly out of
+    order; `off` restores post-filtering.
 
 !!! info "Managed/remote Qdrant: auth, TLS, request deadline"
     Three `VectorStoreConfig` fields make a non-loopback Qdrant usable:

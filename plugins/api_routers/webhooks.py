@@ -149,15 +149,16 @@ async def list_deliveries(
     # The store retains a bounded window; paginate over it with an opaque cursor.
     records = await service.store.list_deliveries(get_current_tenant_id(), limit=1000)
     try:
-        page = paginate_sequence(
-            [d.model_dump() for d in records], limit=limit, cursor=cursor
-        )
+        # Paginate the records themselves and serialise only the page: dumping
+        # the whole retained window (up to 1000 records) per request did
+        # O(window) work to return O(limit) items.
+        page = paginate_sequence(records, limit=limit, cursor=cursor)
     except PaginationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         ) from e
     return {
-        "deliveries": page.items,
+        "deliveries": [d.model_dump() for d in page.items],
         "next_cursor": page.next_cursor,
         "has_more": page.has_more,
     }

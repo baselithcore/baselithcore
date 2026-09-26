@@ -23,6 +23,11 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["feedback"])
 
+#: ``GET /feedbacks`` page size when the caller passes no ``limit``.
+DEFAULT_FEEDBACK_PAGE_SIZE = 50
+#: Hard ceiling on one ``GET /feedbacks`` page.
+MAX_FEEDBACK_PAGE_SIZE = 200
+
 
 def _normalize_sources_payload(raw_sources: Any) -> list[dict[str, Any]] | None:
     """
@@ -139,16 +144,18 @@ async def list_feedbacks(
         default=None,
         description="Filter results by feedback type: 'positive' or 'negative'",
     ),
-    limit: int | None = Query(
-        default=None,
+    limit: int = Query(
+        default=DEFAULT_FEEDBACK_PAGE_SIZE,
         ge=1,
-        le=200,
-        description="Limit the number of returned records (max 200)",
+        le=MAX_FEEDBACK_PAGE_SIZE,
+        description="Number of records to return, newest first (default 50, max 200)",
     ),
 ) -> list[dict[str, object]]:
     """
-    Returns all saved feedback entries.
+    Returns the most recent feedback entries for the caller's tenant.
     - If `feedback` is specified, filters by type ('positive' or 'negative').
+    - Always bounded: omitting `limit` returns the default page, never the
+      whole table (an unset limit used to translate into no SQL ``LIMIT``).
     """
     feedback_service = get_feedback_service()
     return await feedback_service.get_feedbacks(feedback, limit=limit)

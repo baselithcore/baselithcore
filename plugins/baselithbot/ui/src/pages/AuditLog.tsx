@@ -62,7 +62,7 @@ export function AuditLog() {
     );
   }, [entries, selectedKey]);
 
-  const actionCounts = data?.action_counts ?? {};
+  const actionCounts = useMemo(() => data?.action_counts ?? {}, [data?.action_counts]);
   const topActions = useMemo(
     () =>
       Object.entries(actionCounts)

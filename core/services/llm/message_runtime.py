@@ -47,6 +47,7 @@ from core.services.llm.messages import (
     ToolResultBlock,
     render_as_prompt,
 )
+from core.services.llm.model_capabilities import configured_max_tokens
 from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.stop_reasons import STOP_REFUSAL, apply_stop_reason
 from core.services.llm.tool_calling import (
@@ -216,6 +217,7 @@ async def generate_messages(
     from core.quotas.manager import CostBudgetExceededError
 
     resolved_model = service._resolve_model(model, task_category)
+    max_tokens = configured_max_tokens(max_tokens, service.config)
     if not supports_message_api(service):
         return await _degrade_to_prompt(
             service,
