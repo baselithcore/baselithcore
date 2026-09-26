@@ -207,3 +207,58 @@ def test_an_api_failure_falls_back_to_full(monkeypatch) -> None:
 
     monkeypatch.setattr(ci_plan, "_run", broken)
     assert not ci_plan.tree_verified("o/r", "merge")
+
+
+# ---------------------------------------------------------------------------
+# Skips must not cascade into the release path
+# ---------------------------------------------------------------------------
+
+STATUS_FUNCTIONS = ("always()", "!cancelled()", "cancelled()", "failure()")
+
+
+def test_every_job_downstream_of_a_planned_skip_says_how_to_treat_it() -> None:
+    """Without a status function GitHub prepends `success()`, which is false
+    when ANY ancestor was skipped. In `release` mode every gate is skipped on
+    purpose, so a job below them with a bare `if:` never runs — which is how
+    v0.40.0 got a tag and a GitHub Release but no PyPI upload and no image.
+    """
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+    def needs(name: str) -> list[str]:
+        value = jobs[name].get("needs", [])
+        return [value] if isinstance(value, str) else list(value)
+
+    def ancestors(name: str) -> set[str]:
+        seen: set[str] = set()
+        stack = needs(name)
+        while stack:
+            job = stack.pop()
+            if job not in seen:
+                seen.add(job)
+                stack.extend(needs(job))
+        return seen
+
+    def flag(name: str) -> str | None:
+        found = re.search(
+            r"needs\.changes\.outputs\.(\w+)", str(jobs[name].get("if", ""))
+        )
+        return found.group(1) if found else None
+
+    # `gates` is false only in `release` mode, where every flag is false: a
+    # planned job skipped along with a `gates` job was going to skip anyway.
+    # Any other planned skip is independent of what runs below it, and a job
+    # outside the plan must survive every planned skip above it.
+    def at_risk(name: str) -> bool:
+        above = {flag(a) for a in ancestors(name)} - {None}
+        return bool(above - {"gates"}) or (flag(name) is None and bool(above))
+
+    offenders = [
+        name
+        for name in jobs
+        if at_risk(name)
+        and not any(fn in str(jobs[name].get("if", "")) for fn in STATUS_FUNCTIONS)
+    ]
+    assert not offenders, (
+        f"{offenders} sit below a job the plan skips and would be skipped with "
+        "it. Guard them with `!cancelled() && !failure() && ...`."
+    )
