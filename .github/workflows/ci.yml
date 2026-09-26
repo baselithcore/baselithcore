@@ -36,8 +36,14 @@ name: BaselithCore CI
 # ------------------------------------------------------------------
 
 on:
+  # main only. A push to develop is the merge of a pull request whose run just
+  # verified that change, and the promotion to main verifies it again in full,
+  # so a third run on the push added queue time and no signal. A push to main
+  # still runs: it is where the release happens, and the `changes` job below
+  # skips straight to it when a green pull-request run already verified the
+  # exact tree.
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
   # A merge queue re-runs the checks against the PR rebased onto the CURRENT
@@ -124,6 +130,67 @@ concurrency:
 
 jobs:
   # ============================================================
+  # 🧭 PLAN
+  # ============================================================
+  changes:
+    # Decides which jobs this run needs; every other job reads its outputs.
+    # Three modes, defined and tested in scripts/ci_plan.py:
+    #
+    #   scoped   pull request into develop — only the jobs whose inputs
+    #            changed, the suite on the floor Python only.
+    #   full     pull request into main, merge queue, an unverified push to
+    #            main, or a change to this pipeline — everything.
+    #   release  push to main whose tree equals the head of a pull request
+    #            whose CI run succeeded — the release path only.
+    #
+    # The promotion develop -> main is always `full`, so a job skipped on a
+    # develop pull request is never skipped on the way to a release. Anything
+    # uncertain (no diff, an API error, a bypass push) falls back to `full`.
+    #
+    # A skipped job reports as skipped, which a required status check accepts;
+    # jobs downstream of a skipped one use `!cancelled() && !failure()` so a
+    # skip does not cascade into skipping them.
+    name: Plan
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read        # the pull request's CI runs, for `release` mode
+      pull-requests: read  # the pull request a pushed commit came from
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      python_versions: ${{ steps.plan.outputs.python_versions }}
+      gates: ${{ steps.plan.outputs.gates }}
+      python: ${{ steps.plan.outputs.python }}
+      sbom: ${{ steps.plan.outputs.sbom }}
+      image: ${{ steps.plan.outputs.image }}
+      workflows: ${{ steps.plan.outputs.workflows }}
+      helm: ${{ steps.plan.outputs.helm }}
+      ui: ${{ steps.plan.outputs.ui }}
+      frontend: ${{ steps.plan.outputs.frontend }}
+      sdk: ${{ steps.plan.outputs.sdk }}
+      supply: ${{ steps.plan.outputs.supply }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+          # A pull request checks out its merge commit: HEAD^1 is the base
+          # tip, so `git diff HEAD^1 HEAD` is exactly what the PR changes.
+          fetch-depth: 2
+      - name: Compute the plan
+        id: plan
+        # Every value reaches the script through the environment, never
+        # through `${{ }}` inside the run block (template injection).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/ci_plan.py
+
+  # ============================================================
   # 📝 LINTING
   # ============================================================
   quality_gates:
@@ -160,6 +227,8 @@ jobs:
     name: Quality Gates (pre-commit)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 25
+    needs: [changes]
+    if: needs.changes.outputs.gates == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -214,6 +283,8 @@ jobs:
     name: Workflow Lint (zizmor)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.workflows == 'true'
     permissions:
       contents: read
     steps:
@@ -249,6 +320,8 @@ jobs:
     name: Helm Chart (lint + kubeconform)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.helm == 'true'
     permissions:
       contents: read
     steps:
@@ -313,6 +386,8 @@ jobs:
     name: Docs ↔ Code Consistency
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.gates == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -355,6 +430,8 @@ jobs:
     name: OpenAPI Drift Gate
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -383,6 +460,8 @@ jobs:
     name: Client SDKs (Python + TypeScript)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.sdk == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -426,6 +505,8 @@ jobs:
     name: Eval Regression Gate
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -454,6 +535,8 @@ jobs:
     name: Red-Team Gate
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -487,6 +570,8 @@ jobs:
     name: Bias Examination Gate
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -519,6 +604,8 @@ jobs:
     name: Lockfile Check (uv)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.supply == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -572,6 +659,8 @@ jobs:
     name: Secrets Scan (gitleaks)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.gates == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -600,7 +689,8 @@ jobs:
     name: Dependency Audit (pip-audit)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
-    needs: [quality_gates]
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.supply == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -643,10 +733,14 @@ jobs:
   # Software Bill of Materials (SBOM) — CycloneDX
   # ------------------------------------------------------------
   sbom:
+    # Promotions to main only (`full` mode). The SBOM that matters is the one
+    # the release job attaches to the GitHub Release; this 90-day artifact is
+    # a preview of it, and a develop pull request has no one to hand it to.
     name: SBOM (CycloneDX)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
-    needs: [quality_gates]
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.sbom == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -678,7 +772,8 @@ jobs:
     name: Trivy Scan
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
-    needs: [quality_gates]
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.supply == 'true'
     permissions:
       contents: read
       security-events: write
@@ -765,7 +860,8 @@ jobs:
     name: Package Smoke Test
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
-    needs: [quality_gates]
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -810,6 +906,8 @@ jobs:
     name: Frontend JS Tests
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 10
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true'
     permissions:
       contents: read
     steps:
@@ -850,13 +948,19 @@ jobs:
     # frontend_test join them for the same reason — a gate that nothing depends
     # on is advisory, and a workflow audit, a chart that will not render, a
     # stale dashboard bundle or a broken SSE client in the shipped chat UI are
-    # all things that must not reach a release. frontend_test is safe to depend
-    # on because it carries no `if:` and therefore runs on every trigger.
+    # all things that must not reach a release.
+    #
+    # Most of them are skipped when the `changes` plan says their inputs did
+    # not move, and a skipped dependency would skip this job too. Hence the
+    # `if:` below: run unless something upstream FAILED or was cancelled — a
+    # skip is not a failure. In `full` mode (every promotion to main) none of
+    # them is skipped, so the release path still waits on every gate.
     #
     # dependency_review is deliberately NOT here: it only runs on
-    # pull_request, so listing it would make every push to main skip
-    # python_test (a skipped dependency blocks the dependent job).
-    needs: [quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    # pull_request, and it gates the diff under review rather than the tree
+    # that ships.
+    needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.python == 'true' }}
     # 3.14 is NOT here. requires-python is >=3.12 with no upper cap, so it is
     # worth testing — but until every upstream dep publishes wheels it can only
     # run advisory, and an advisory leg is `continue-on-error`, which means it
@@ -867,10 +971,15 @@ jobs:
     # (`forward_compat`), which is where this repo already keeps its
     # forward-looking non-blocking signal. Move it back into this matrix — WITH
     # the advisory flags dropped — the day it is ready to block.
+    #
+    # The versions come from the plan: a pull request into develop runs the
+    # floor (3.12) only, everything else runs FULL_PYTHONS in
+    # scripts/ci_plan.py — which is also the list the trove classifiers are
+    # checked against.
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.12', '3.13']
+        python-version: ${{ fromJSON(needs.changes.outputs.python_versions) }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -949,6 +1058,8 @@ jobs:
     name: BaselithBot UI Build
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.ui == 'true'
     permissions:
       contents: read
     steps:
@@ -1016,7 +1127,8 @@ jobs:
     name: Container Image Build
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 90
-    needs: [quality_gates]
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.image == 'true'
     permissions:
       contents: read
       packages: write   # only used on main, to WRITE the shared buildcache
@@ -1221,8 +1333,12 @@ jobs:
     name: Semantic Release
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted", "baselith-01-org"]') }}
     timeout-minutes: 20
-    needs: [python_test]
-    if: github.ref == 'refs/heads/main'
+    # In `release` mode every gate was skipped because a green pull-request
+    # run already passed them on this exact tree; in `full` mode they all ran
+    # and python_test waited on them. Either way, nothing upstream may have
+    # failed.
+    needs: [changes, python_test]
+    if: ${{ !cancelled() && !failure() && github.ref == 'refs/heads/main' }}
     permissions:
       contents: write
       issues: write
