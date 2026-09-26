@@ -5,20 +5,13 @@ Provides secure endpoints for administrative tasks, including analytics
 dashboards and system monitoring. Protected by HTTP Basic Authentication.
 """
 
-import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core.config import get_security_config
-from core.middleware import (
-    check_admin_lockout,
-    clear_admin_failures,
-    record_admin_failure,
-    verify_admin_password_async,
-)
+from core.middleware import authenticate_admin_basic
 from core.services.feedback_service import get_feedback_service
 
 router = APIRouter(tags=["admin"])
@@ -29,11 +22,6 @@ security = HTTPBasic()
 #: this plugin: ``parents[2]`` is the repo/package root
 #: (plugins/api_routers/admin.py -> plugins/api_routers -> plugins -> <root>).
 BASE_DIR = Path(__file__).resolve().parents[2] / "core" / "static"
-
-
-def _get_admin_user() -> str:
-    """Read the admin username lazily from the active security config."""
-    return get_security_config().admin_user
 
 
 async def verify_credentials(
@@ -49,22 +37,18 @@ async def verify_credentials(
     so an attacker cannot lock the legitimate admin out by hammering the login.
     """
     client_ip = request.client.host if request.client else "unknown"
-    await check_admin_lockout(client_ip)
-
-    correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
-    # PBKDF2 verification is CPU-bound (100k+ iterations): the async variant
-    # offloads it to a thread so it cannot stall other in-flight requests.
-    correct_password = await verify_admin_password_async(credentials.password)
-
-    if not (correct_username and correct_password):
-        await record_admin_failure(client_ip)
+    # Lockout check, PBKDF2 verification (off-loop, bounded concurrency) and
+    # failure accounting run as one sequence in core, so a concurrent burst
+    # cannot race past the lockout threshold.
+    if not await authenticate_admin_basic(
+        client_ip, credentials.username, credentials.password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali non valide",
             headers={"WWW-Authenticate": "Basic"},
         )
 
-    await clear_admin_failures(client_ip)
     return credentials.username
 
 

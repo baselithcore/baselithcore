@@ -4,6 +4,7 @@ Core Middleware Module
 Provides HTTP middleware components for the baselith-core.
 """
 
+from ._admin_auth import authenticate_admin_basic
 from .cost_control import (
     BudgetExceededError,
     CostController,
@@ -57,6 +58,7 @@ __all__ = [
     "check_admin_lockout",
     "record_admin_failure",
     "clear_admin_failures",
+    "authenticate_admin_basic",
     # CSRF
     "CSRFOriginMiddleware",
     # Idempotency

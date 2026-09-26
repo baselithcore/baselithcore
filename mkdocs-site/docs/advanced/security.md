@@ -488,18 +488,36 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — production **refuses to boot** that way unless `BASELITH_ALLOW_UNVALIDATED_HOST=true`. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
+| `API_KEY_ENABLED`          | `true`       | Master switch for API-key authentication (legacy alias `SECURITY_API_KEY_ENABLED`). `false` rejects every API key. |
+| `API_KEY_REVOCATION_FAIL_MODE` | `closed` | When the shared revocation denylist (Redis) is unreadable: `closed` rejects the key, `open` accepts it on process-local state — which un-revokes keys revoked elsewhere for the outage. |
+| `ADMIN_USER`               | `admin`      | Username for the Basic-auth admin console and `/metrics` (paired with `ADMIN_PASS` / `ADMIN_PASS_HASHED`). |
+| `METRICS_AUTH_REQUIRED`    | `true`       | Require admin Basic auth on `GET /metrics` (and `/v1/metrics`). Disable only when the endpoint is reachable solely from the scrape network or the scraper sends credentials. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
 | `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
 | `JWT_SIGNING_KEY`          | `None`       | Private key for asymmetric signing; omit on verify-only services so they cannot mint. |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
 | `JWT_STRICT_VALIDATION`    | auto         | Rejects any JWT missing `aud` or `iss`. Enabled automatically once `AUTH_REQUIRED=true` and both claims resolve; set explicitly to override. |
+| `JWT_ALGORITHM`            | `HS256`      | JWS algorithm for access/refresh tokens. `HS256` signs with `SECRET_KEY`; an asymmetric choice (`EdDSA`/`RS256`/`ES256`) also needs `JWT_SIGNING_KEY` and `JWT_KEYS`. |
+| `AUTH_ACCESS_TOKEN_LIFETIME` | `3600`     | Access-token lifetime in seconds, minimum `60` (legacy alias `AUTH_SESSION_LIFETIME`). Refresh tokens keep 7 days. |
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
 | `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
+| `HSTS_MAX_AGE`             | `31536000`   | `max-age` of the `Strict-Transport-Security` header, in seconds (one year). |
+| `X_FRAME_OPTIONS`          | `DENY`       | `X-Frame-Options` value. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
 | `CROSS_ORIGIN_OPENER_POLICY` | `same-origin-allow-popups` | `Cross-Origin-Opener-Policy` value; severs `window.opener` with cross-origin windows while keeping OAuth/SSO popups opened by the console working. Empty omits the header. |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | `same-origin` | `Cross-Origin-Resource-Policy` value; blocks no-cors subresource loads of API responses from foreign origins (CORS-approved fetches are exempt). Use `same-site` for split api/app subdomains; empty omits the header. |
 | `MAX_REQUEST_SIZE_BYTES`   | `10485760` (10 MiB) | Hard cap on inbound request body size. Bodies that advertise or stream beyond the cap are rejected with HTTP 413. Set to `0` to disable. |
+| `MFA_ENABLED`              | `false`      | Opt-in TOTP second factor (RFC 6238); additive, no effect on existing auth paths until enabled. |
+| `MFA_ISSUER`               | `BaselithCore` | Issuer label shown in the user's authenticator app. |
+| `OIDC_ENABLED`             | `false`      | Verify non-local bearer tokens against an external OpenID Connect provider's JWKS. Opt-in; local JWT/API-key auth is unaffected. |
+| `OIDC_ISSUER` / `OIDC_AUDIENCE` | `None`  | Expected `iss` / `aud` of the provider's tokens. |
+| `OIDC_JWKS_URL`            | `None`       | Explicit JWKS endpoint; unset, it is discovered from `{issuer}/.well-known/openid-configuration`. |
+| `OIDC_ALGORITHMS`          | `RS256`      | Comma-separated list of accepted signature algorithms. |
+| `OIDC_USERNAME_CLAIM` / `OIDC_ROLES_CLAIM` / `OIDC_SCOPES_CLAIM` | `sub` / `roles` / `scope` | Claims identity, roles and scopes are read from. |
+| `OIDC_TENANT_CLAIM`        | `None`       | Claim carrying the tenant id, when the IdP issues one. |
+| `OIDC_DEFAULT_ROLE`        | `user`       | Role assigned when no mapped role is present. |
+| `OIDC_ROLE_MAP`            | `{}` (empty) | IdP role → BaselithCore role, as `idp-admins:admin,idp-users:user`. |
 
 Generate a secure secret key:
 
@@ -989,6 +1007,14 @@ auth never touches this counter, so a mistyped token or a NAT'd client is not
 penalised. Set it to a blank value to disable the throttle (not recommended —
 it leaves every authenticated route brute-forceable).
 
+A failure is any *presented* credential that does not authenticate — whether
+the auth layer raises or, as it does for an unknown bearer token or API key,
+resolves the caller to the anonymous identity. A request that carries no
+credential at all is not charged. IPv6 clients are bucketed by their **/64**
+(one subscriber usually holds a whole /64, so keying on the full address
+would hand an attacker 2^64 fresh budgets); IPv4-mapped IPv6 addresses count
+as the embedded IPv4 address. The MCP endpoint charges the same bucket.
+
 A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
 SQL-query limits) is rendered as a `429` RFC 9457 problem document
 (`urn:baselith:error:budget_exceeded`) wherever it is raised: a dedicated
@@ -1001,6 +1027,20 @@ before the cost-control middleware could see them.
 ## Admin Account Lockout
 
 After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login. Each failure is recorded by a single atomic Lua script (increment, arm the window, extend to the lockout TTL at the threshold), so a crash mid-update can never leave a counter without an expiry — which used to mean a permanent lockout for that IP.
+
+**A concurrent burst cannot race past the threshold.** Lockout check, PBKDF2
+verification and failure accounting run as one sequence
+(`authenticate_admin_basic`): each derivation takes one of a small per-process
+pool of slots (`KDF_MAX_CONCURRENCY`, **2**), and the lockout is re-checked and
+the failure recorded *inside* the slot. Before, 500 parallel requests from one
+source all passed the up-front check while the counter was still below 5 —
+500 guesses and 500 PBKDF2 derivations at 600k iterations, enough to saturate
+every core. Now at most the threshold plus the slot count get a derivation. A
+credential verified within the cache TTL skips the slot entirely, so a
+legitimate burst (dashboard polls, metrics scrapes) never waits. Clients are
+keyed by IPv4 address or IPv6 /64, as above. The in-memory fallback applies
+the same 60-second failure window as the Redis key, restarts counting once a
+lock has expired, and is bounded to 10 000 entries.
 
 !!! warning "Behind a reverse proxy: run uvicorn with `--proxy-headers`"
     IP-keyed protections (this lockout, anonymous rate limiting) key on
@@ -1431,6 +1471,11 @@ outbound call sites build on — full API reference in [Security & Encryption
   PyJWT's own `PyJWKClient` (which fetches via `urllib.request.urlopen`,
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
+  The token's `kid` is read from an *unverified* header, so a re-fetch on an
+  unknown `kid` is rate-limited: at most one forced refresh per **60 s**,
+  single-flight across concurrent verifications, and a failed fetch is not
+  retried for **5 s**. A forged token therefore cannot turn into an outbound
+  IdP call; a genuine key rotation is picked up at most 60 s late.
 - **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
   gated by `A2AClientConfig.allow_internal_endpoints` (env
   `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:

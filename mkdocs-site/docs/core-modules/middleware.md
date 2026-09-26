@@ -55,7 +55,8 @@ core/middleware/
 ├── cost_control.py        # CostControlMiddleware, CostController, cost_controller
 ├── optimization.py        # StaticCacheMiddleware, SmartGzipMiddleware
 ├── idempotency.py         # IdempotencyMiddleware (pure ASGI, Idempotency-Key replay)
-├── _idempotency_store.py  # Redis replay-or-lock Lua step + unverified `exp` reader (shared by the above)
+├── _idempotency_store.py  # Redis replay-or-lock Lua step, lock keep-alive, unverified `exp` reader (shared by the above)
+├── _idempotency_replay.py # credential gate, request-body fingerprint, entry encode/decode, gzip-aware replay
 ├── csrf.py                # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
 ├── plugin_activation.py   # PluginActivationMiddleware (pure ASGI)
 ├── plugin_context.py      # PluginContextMiddleware (pure ASGI)
@@ -113,7 +114,7 @@ adds, in order:
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` (header pre-encoded once at construction) |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
-| `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
+| `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request; a plugin whose activation failed is answered `503` + `Retry-After` for 60 s without a new attempt |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins; preflight answers cacheable for `max_age=7200`, the ceiling Chromium honours, instead of Starlette's 600s — see below) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
@@ -403,9 +404,11 @@ request (`POST`/`PUT`/`PATCH`/`DELETE`) carrying an `Idempotency-Key` header has
 its response captured in Redis; a later request with the same key replays it
 with an `Idempotency-Replayed: true` header instead of re-executing the side
 effect. Streaming (`text/event-stream`) and oversized responses pass through
-uncached, `5xx` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
-stored, a duplicate still in flight gets `409`, and the whole thing is
-fail-open if Redis is down.
+uncached; nothing is stored unless the request **matched a route**; `5xx`,
+`404`/`405` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
+stored; a duplicate still in flight gets `409`; a retry reusing the key with a
+**different request body** gets `422`; and the whole thing is fail-open if
+Redis is down.
 
 **Tee, not buffer.** Capture never delays the response: **every** response is
 forwarded frame by frame as the app produces it — the start frame and all
@@ -415,8 +418,29 @@ response before sending anything). A cacheable response is *additionally*
 accumulated on the side, and only its **final** chunk waits for the single
 Redis store round-trip: persisting before that last emit guarantees that a
 client which saw the complete response gets a replay on its next retry.
-SSE, oversized and non-cacheable (`5xx`/retryable-`4xx`) responses are never
-accumulated at all.
+SSE, oversized and non-cacheable (unrouted, `5xx`, `404`/`405`,
+retryable-`4xx`) responses are never accumulated at all.
+
+**Bound to the payload.** The request body is hashed (SHA-256) *as the app
+reads it* — a `receive` wrapper feeding one streaming hash, so the body is
+never held twice — and the digest is stored with the response. On the replay
+path the app does not run, so the retry's body is drained through the same
+hash and compared: a mismatch is refused with `422` (the behaviour
+`draft-ietf-httpapi-idempotency-key-header` specifies) instead of handing the
+first payload's response to a different request. A handler that never reads
+its body stores no digest (its result cannot depend on it), and entries written
+before fingerprinting replay as before.
+
+**The lock outlives long handlers.** The in-flight lock's TTL is capped at
+300 s so a crashed worker cannot block a key for long; while the handler runs
+a background task re-arms it every third of that (`EXPIRE`, a no-op once the
+lock is released), so a handler slower than the cap no longer loses its lock
+to a concurrent duplicate.
+
+**Replay honours `Accept-Encoding`.** Compression (`SmartGzipMiddleware`) runs
+*inside* this layer, so a stored body may be gzip-encoded. A retry that does
+not accept gzip gets it decompressed, with `Content-Encoding` dropped and
+`Content-Length` recomputed, instead of bytes it cannot read.
 
 **One round trip before the route runs.** "Is there a stored response?" and
 "claim the in-flight lock" are a single atomic Lua step
@@ -431,15 +455,23 @@ client without `register_script` (a minimal stand-in) keeps the sequential
 path, re-check included.
 
 **Who a stored response belongs to.** Replay happens *before* route
-authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:
-{sha256(key)}` where `identity` is a hash of the raw
-`Authorization`/`X-API-Key` header. A caller presenting **no** credential is
+authentication, so the storage key is `{tenant}:{identity}:{method}:
+{sha256(path)}:{sha256(key)}` where `identity` is a hash of the raw
+`Authorization`/`X-API-Key` header — and that header must **verify**: the
+middleware reads the per-request auth memo the tenant layer already filled
+(`core/middleware/_auth_memo.py`, no extra verification), and a credential
+that does not authenticate (junk, expired, an unsupported scheme such as
+`Basic`) gets no bucket at all — the request runs, nothing is stored. Before
+this, every distinct header value minted its own bucket, so an
+unauthenticated client could fill Redis. The path is hashed rather than
+embedded so the caller cannot choose Redis key material. A caller presenting **no** credential is
 given no idempotency at all — the request runs, nothing is stored, nothing is
 replayed — because all such callers would otherwise share one bucket, leaving
 the (non-secret) `Idempotency-Key` as the only thing between one anonymous
 caller and another's cached response. Set
 `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` to opt back in with per-peer-address
-bucketing (weak: NAT and reverse proxies collapse callers onto one address).
+bucketing (weak: NAT and reverse proxies collapse callers onto one address);
+anonymous entries follow the same routed-only, never-`404`/`405` rule.
 
 Knobs and the full rationale: [Idempotency-Key replay](../advanced/runtime-tuning.md#idempotency-key-replay).
 
@@ -479,10 +511,22 @@ route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests a
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
 
+**Refund when no work was done.** The unit is taken *before* the route runs
+(the check must precede the work), then given back via
+`QuotaManager.refund_pair` when the response status shows nothing was done:
+`401`, `403`, `404`, `405`, `429` (an inner guard such as the rate limiter)
+and `503` (e.g. a plugin that failed to activate). The status is read from the
+`http.response.start` frame, so streaming responses are handled without
+buffering; the refund uses the same timestamp as the consumption, so it hits
+the same period keys even across midnight. Other statuses — including `400`,
+`422` and `5xx` other than `503` — keep the unit, since the handler may have
+done (and billed) work. A failed refund is logged and leaves the unit spent.
+
 Infrastructure paths are **exempt from quota metering**: `/health`,
-`/health/ready`, `/docs`, `/redoc`, `/openapi.json` and `/metrics` pass
-straight through. Without the allowlist a full JWT/API-key verification ran
-on every liveness poll and Prometheus scrape.
+`/health/ready`, `/docs`, `/redoc`, `/openapi.json` and `/metrics` — plus their
+`/v1/health`, `/v1/health/ready` and `/v1/metrics` aliases — pass straight
+through. Without the allowlist a full JWT/API-key verification ran on every
+liveness poll and Prometheus scrape.
 
 !!! note "API-key callers are quota-scoped too"
     Credentials are read from `Authorization` first; when it is absent but an
@@ -498,7 +542,13 @@ the shared helper in `core/middleware/_auth_memo.py`: `effective_auth_header()`
 builds the same `Authorization`/`ApiKey <key>` value the route dependency would
 see (so the two middlewares and the dependency memo-match on an identical
 string), and `auth_manager()` resolves the app-configured `AuthManager` with a
-core-global fallback. `effective_auth_header()` coerces its return to an
+core-global fallback — probing the service registry with `has()` first, since
+the manager is normally unregistered and a raised-and-caught
+`ServiceNotFoundError` used to cost every request twice. Only `Bearer` and
+`ApiKey` credentials are verified there: `Basic` (the `/admin` and `/metrics`
+routes verify it themselves) resolves to "no user" without calling
+`AuthManager.authenticate`, which used to refuse it with an
+"unsupported scheme" `WARNING` on every call. `effective_auth_header()` coerces its return to an
 explicit `str` rather than passing through `Headers.get()`'s untyped result.
 
 ---
@@ -561,6 +611,13 @@ never touches the counter, so a mistyped token or a NAT'd client is not penalise
 set the value to `None` to disable the throttle (not recommended — it leaves
 authenticated routes brute-forceable).
 
+A failure is any *presented* credential that does not authenticate.
+`AuthManager.authenticate()` reports an unknown bearer token or API key by
+returning the anonymous identity rather than raising, so the throttle is
+charged on that path too (before the audit write); a request with no
+credential is not charged. The key is `authfail:{client_bucket(ip)}` — IPv6
+clients share one budget per /64 — and the MCP endpoint charges the same one.
+
 ### RateLimiter
 
 A distributed **sliding-window** limiter keyed by `role:credential`/IP, backed
@@ -602,11 +659,20 @@ backed by `SecurityManager`:
 - `verify_admin_password(candidate)` — compares against `ADMIN_PASS` or, when
   set, a PBKDF2-SHA256 `ADMIN_PASS_HASHED` digest (constant-time compare).
 - `verify_admin_password_async(candidate)` — same check, but offloads the
-  PBKDF2 derivation to a worker thread so a slow hash never blocks the event
-  loop. The admin Basic-auth dependency uses this variant.
-- `check_admin_lockout(username)` — raises `429` while an account is locked.
-- `record_admin_failure(username)` — increments the failure counter.
-- `clear_admin_failures(username)` — clears it after a successful login.
+  PBKDF2 derivation to a worker thread (inside a bounded slot pool, skipped
+  for a credential verified within the cache TTL) so a slow hash never
+  blocks the event loop.
+- `authenticate_admin_basic(client_ip, username, password)` — the whole
+  admin Basic-auth sequence, and what the admin dependency uses: lockout
+  check, PBKDF2 verification in one of `KDF_MAX_CONCURRENCY` (**2**) slots
+  with the lockout **re-checked and the failure recorded inside the slot**,
+  counter cleared on success. The older check → verify → record sequence
+  was check-then-act, so a burst of 500 concurrent guesses all passed the
+  up-front check; now at most the threshold plus the slot count get a
+  derivation. Keyed by `client_bucket(ip)` — IPv4 as-is, IPv6 by /64.
+- `check_admin_lockout(ip)` — raises `429` while a source is locked.
+- `record_admin_failure(ip)` — increments the failure counter.
+- `clear_admin_failures(ip)` — clears it after a successful login.
 
 Lockout policy: **5 failures** within a 60s window locks the account for
 **15 minutes**, tracked in Redis with an in-memory fallback. Recording a

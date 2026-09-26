@@ -261,13 +261,14 @@ async def throttle_auth_failure(request: Request) -> JSONResponse | None:
         ``RATE_LIMIT_FAIL_MODE=closed``) once the budget is spent, else
         ``None``.
     """
+    from core.middleware._admin_auth import client_bucket
     from core.middleware.security import get_security_manager
 
     manager = get_security_manager()
     client_ip = request.client.host if request.client else "unknown"
     try:
         await manager.rate_limiter.check(
-            f"authfail:{client_ip}",
+            f"authfail:{client_bucket(client_ip)}",
             manager.config.auth_failure_limit_per_minute,
             manager.config.rate_limit_window_seconds,
         )

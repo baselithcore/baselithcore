@@ -68,6 +68,7 @@ class AdminLockoutMixin:
     _LOCKOUT_MAX_FAILURES: int = 5
     _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
     _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
+    _LOCKOUT_FALLBACK_MAX_ENTRIES: int = 10_000
 
     def _refuse_without_shared_counter(self) -> None:
         """Fail closed in production when no shared lockout counter exists.
@@ -140,8 +141,8 @@ class AdminLockoutMixin:
                 )
 
         # Fallback
-        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
-        if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
+        count, deadline = self._lockout_fallback.get(identifier, (0, 0.0))
+        if count >= self._LOCKOUT_MAX_FAILURES and time.time() < deadline:
             SECURITY_EVENTS.labels(reason="admin_lockout").inc()
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -174,28 +175,29 @@ class AdminLockoutMixin:
                     type(exc).__name__,
                 )
 
-        # Fallback
-        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
-        count += 1
-        lock_until = (
-            time.time() + self._LOCKOUT_DURATION_SECONDS
-            if count >= self._LOCKOUT_MAX_FAILURES
-            else lock_until
-        )
-        self._lockout_fallback[identifier] = (count, lock_until)
-        # Evict stale entries to prevent unbounded growth when Redis is down.
-        # An entry is stale if its lock_until timestamp is older than 2x the
-        # lockout duration (entry has expired and is no longer tracking anything).
+        # Fallback. Each entry is ``(count, deadline)``: while below the
+        # threshold the deadline closes the failure window (same semantics as
+        # the Redis key's TTL), once at/over it the deadline ends the lock.
+        # Past its deadline an entry is dead: counting restarts from zero, so
+        # a lock that has expired is not re-armed by a single later typo, and
+        # every such entry is evictable.
         now = time.time()
-        stale_threshold = now - (2 * self._LOCKOUT_DURATION_SECONDS)
-        if len(self._lockout_fallback) > 1000:
-            stale_keys = [
-                k
-                for k, (_, lu) in self._lockout_fallback.items()
-                if lu and lu < stale_threshold
-            ]
-            for k in stale_keys:
-                self._lockout_fallback.pop(k, None)
+        count, deadline = self._lockout_fallback.get(identifier, (0, 0.0))
+        if now >= deadline:
+            count, deadline = 0, now + self._LOCKOUT_WINDOW_SECONDS
+        count += 1
+        if count >= self._LOCKOUT_MAX_FAILURES:
+            deadline = now + self._LOCKOUT_DURATION_SECONDS
+        self._lockout_fallback[identifier] = (count, deadline)
+        # Bound the map while Redis is down: an address-rotating client
+        # otherwise grows it forever. Dead entries go first; if live ones
+        # alone exceed the ceiling, the oldest insertions are dropped.
+        if len(self._lockout_fallback) > self._LOCKOUT_FALLBACK_MAX_ENTRIES:
+            live = {k: v for k, v in self._lockout_fallback.items() if v[1] > now}
+            while len(live) > self._LOCKOUT_FALLBACK_MAX_ENTRIES:
+                live.pop(next(iter(live)))
+            self._lockout_fallback.clear()
+            self._lockout_fallback.update(live)
 
     async def _record_failure_atomic(self, redis_client: Any, key: str) -> int:
         """Run :data:`_RECORD_FAILURE_LUA` for ``key`` and return the new count.

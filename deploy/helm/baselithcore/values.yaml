@@ -870,6 +870,23 @@ backup:
     retentionDays: 0
     credentialsSecret: ""
     extraArgs: []
+    # The rclone upload container. Streams files, so memory stays small.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  # The wait-for-db and pg_dump containers. Without requests the pod is
+  # BestEffort — first to be evicted under node pressure, mid-dump — and a
+  # namespace ResourceQuota rejects it outright. pg_dump | gzip is CPU-bound
+  # and streams; raise the limit for a very large database.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30

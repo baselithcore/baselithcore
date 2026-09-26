@@ -20,6 +20,13 @@ logger = get_logger(__name__)
 # the semaphore rather than all running in parallel.
 _MEMORY_WRITE_CONCURRENCY = 32
 
+# Max scheduled-but-unfinished writes (running + queued on the semaphore).
+# The semaphore bounds concurrency, not the backlog: under a sustained burst
+# faster than the vector store, every request parked one more task (holding
+# its query and response text) with no ceiling. Beyond this bound new writes
+# are dropped — memory is best-effort, the request path is not.
+_MEMORY_WRITE_MAX_BACKLOG = 1024
+
 
 def schedule_memory_write(
     owner: Any, query: str, response_text: str, intent: str | None
@@ -46,6 +53,15 @@ def schedule_memory_write(
         owner._memory_write_sem = asyncio.Semaphore(_MEMORY_WRITE_CONCURRENCY)
     sem = owner._memory_write_sem
     assert sem is not None
+    if len(owner._memory_write_tasks) >= _MEMORY_WRITE_MAX_BACKLOG:
+        # Counted on the owner so an operator (or a test) can see the loss.
+        owner._memory_writes_dropped = getattr(owner, "_memory_writes_dropped", 0) + 1
+        logger.debug(
+            "memory_write_dropped_backlog_full backlog=%d dropped_total=%d",
+            len(owner._memory_write_tasks),
+            owner._memory_writes_dropped,
+        )
+        return
 
     async def _write() -> None:
         async with sem:

@@ -83,6 +83,16 @@ Allowed request headers (anything else fails the preflight): `Content-Type`,
 MCP Streamable HTTP headers `Mcp-Session-Id`, `Mcp-Protocol-Version`,
 `Mcp-Method` and `Mcp-Name`, and `Last-Event-ID` (SSE resumption).
 
+**`Idempotency-Key` on mutating requests.** An authenticated `POST`/`PUT`/
+`PATCH`/`DELETE` carrying `Idempotency-Key` has its response stored and replayed
+(with `Idempotency-Replayed: true`) for a retry with the same key and
+credential. The key is bound to the request body: reusing it with a
+**different body** returns `422` rather than the first request's response, and
+a retry while the original is still running returns `409`. Only requests with a
+credential that authenticates and that match a route are stored; `404`, `405`,
+`5xx` and retryable statuses never are. See
+[IdempotencyMiddleware](../core-modules/middleware.md#idempotencymiddleware).
+
 Four response headers are **exposed** to the calling script, since a browser
 cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
 report), `Idempotency-Replayed`, `Retry-After`, and `Mcp-Session-Id` (how an
@@ -216,7 +226,9 @@ Beyond per-minute [rate limiting](../core-modules/auth.md#api-key-hashing),
 identities can carry **persistent usage budgets** per calendar window (daily /
 monthly), enabled with `QUOTAS_ENABLED=true`. When an identity exhausts a
 window, requests return `429` with code `quota_exceeded` until the window resets.
-Limits default per identity and can be raised per key. See
+Limits default per identity and can be raised per key. A request that is
+admitted but then answered `401`/`403`/`404`/`405`/`429`/`503` does not spend
+a unit. See
 [Usage Quotas](../core-modules/quotas.md).
 
 ---
@@ -436,11 +448,14 @@ and receives typed JSON frames back:
 | ------------ | ------- |
 | `{"type": "chunk", "content": "..."}` | One streamed answer fragment |
 | `{"type": "final"}` | The turn is complete — send the next query |
-| `{"type": "error", "detail": "..."}` | The frame was rejected (missing `query`, over-long query, rate-limited turn — then with `retry_after`); the connection stays open |
+| `{"type": "error", "detail": "..."}` | The frame was rejected (missing `query`, over-long query, rate-limited turn — then with `retry_after`), or the turn hit its deadline (`"stream timed out"`, followed by `final`); the connection stays open |
 
 Each turn's stream runs through the **same size guards as SSE** (4 MB total /
-64 KB per chunk), and the query is bound by the same `ChatRequest` limits as
-the REST chat surface.
+64 KB per chunk) and the **same wall-clock budget**
+(`CHAT_STREAM_TIMEOUT_SECONDS`, default 300 s), and the query is bound by the
+same `ChatRequest` limits as the REST chat surface. The upstream stream is
+closed on every exit — deadline, error or client disconnect — so the LLM call
+behind an abandoned turn is released instead of running on.
 
 ```python
 import asyncio

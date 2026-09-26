@@ -120,9 +120,12 @@ IDEs.
       backend is down and `RATE_LIMIT_FAIL_MODE=closed`) with JSON-RPC code
       `-32003` and the limiter's own `Retry-After` / `RateLimit-*` headers.
     - **Failed-credential throttle** — a *presented* credential that fails
-      authentication is charged to the same per-IP `authfail:<ip>` window the
-      REST surface uses (`AUTH_FAILURE_LIMIT_PER_MINUTE` per
-      `RATE_LIMIT_WINDOW_SECONDS`), so the endpoint is not an unmetered 401
+      authentication is charged to the same per-source `authfail:<bucket>`
+      window the REST surface uses (`AUTH_FAILURE_LIMIT_PER_MINUTE` per
+      `RATE_LIMIT_WINDOW_SECONDS`). The bucket is the IPv4 address, while an
+      IPv6 client is keyed by its `/64` network (an IPv4-mapped address by the
+      embedded IPv4), so rotating addresses inside one allocation does not
+      reset the budget. The endpoint is not an unmetered 401
       oracle for credential stuffing. Once spent the answer is `429` (JSON-RPC
       `-32003`, with `Retry-After`) instead of `401`. A request carrying no
       `Authorization` header — the spec's discovery step — is not charged.

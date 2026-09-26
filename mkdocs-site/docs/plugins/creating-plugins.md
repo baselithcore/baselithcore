@@ -981,6 +981,21 @@ After creating your plugin:
     **Solution**: Verify plugin inherits `RouterPlugin`, returns the router, and
     leaves the router prefix empty
 
+??? failure "Plugin endpoint answers `503` with `Retry-After` after a failed activation"
+    **Symptom**: requests to a lazy plugin's router prefix return `503` with a
+    `Retry-After` header, without the plugin being re-imported
+
+    **Cause**: a lazy activation that fails (returns `False` or raises) is
+    remembered for 60 s (`core/plugins/_activation_backoff.py`). Within that
+    window request traffic does not retry it — the activator raises
+    `PluginActivationBackoffError` and the middleware answers `503` — so an
+    anonymous client looping on a broken plugin cannot keep the global
+    activation lock busy.
+
+    **Solution**: fix the error logged by the first failed activation, then
+    enable or reload the plugin through the plugin-management API (which
+    bypasses and, on success, clears the backoff) or wait out the window
+
 ??? failure "New SKILL.md not visible to the catalog"
     **Symptom**: A freshly added `skills/<name>/SKILL.md` is not returned by
     the skill catalog or activation

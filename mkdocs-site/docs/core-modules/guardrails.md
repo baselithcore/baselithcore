@@ -409,6 +409,17 @@ print(result.redactions)        # e.g. {"email": 2, "phone": 1} or None
 | `redactions` | `dict[str, int] \| None` | PII type → count redacted |
 | `warnings` | `list[str] \| None` | Truncation / harmful-content notes |
 
+The PII regex layer (`PII_PATTERNS` in `config.py`) is linear on adversarial
+input. Patterns with an unbounded character run (`email`, `jwt`) may only
+start a match where that run starts (a negative lookbehind on the run's own
+class) and consume it possessively; a `\b` anchor alone let the engine restart
+at every word boundary inside the run, so `"a." * 25000` cost about a second
+per `filter()` call. Side effects: an address whose local part begins with
+punctuation (`.john@x.com`) is redacted together with that punctuation, and a
+JWT glued to a preceding `-` is not matched. An unterminated
+`-----BEGIN … PRIVATE KEY-----` header never scans past the next `BEGIN`.
+Each pattern redacts and counts in a single `subn` pass.
+
 When `filter_harmful_content` is on, each match of `HARMFUL_PATTERNS`
 (case-insensitive) is replaced with `[CONTENT_FILTERED]`, a
 `harmful_content:<category>` warning is appended and `is_safe` goes `False`.

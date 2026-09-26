@@ -664,7 +664,7 @@ Declared in `core.config.security`.
 | `SECRETS_DIR` | `str \| None` | *empty* |  |
 | `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |
-| `TRUSTED_HOSTS` | `Annotated[list[str], NoDecode]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production logs an ERROR at startup while this is empty. |
+| `TRUSTED_HOSTS` | `Annotated[list[str], NoDecode]` | *computed* | Host allowlist. Empty — the default — leaves TrustedHostMiddleware unmounted and the Host header unvalidated, so a spoofed Host poisons absolute URLs built from the request (reset and verification links) and host-keyed caches. Production refuses to start while this is empty, unless BASELITH_ALLOW_UNVALIDATED_HOST=true downgrades the check to an ERROR log. |
 | `X_FRAME_OPTIONS` | `str` | `DENY` |  |
 
 ## Service-level configuration internal engines

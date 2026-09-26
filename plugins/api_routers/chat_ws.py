@@ -18,11 +18,16 @@ quota middlewares do not see WebSocket scopes, so the per-turn gate is what
 keeps a long-lived connection from becoming an unmetered channel.
 Cross-site WebSocket hijacking is rejected upstream by the CSWSH origin guard
 in :mod:`core.middleware.csrf`. Each turn's stream goes through the same
-size guards as the SSE surface.
+size guards and the same wall-clock budget (``CHAT_STREAM_TIMEOUT_SECONDS``)
+as the SSE surface, and is closed on every exit — a disconnect included — so
+the LLM call behind it is released.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -89,6 +94,68 @@ async def _enforce(websocket: WebSocket) -> str:
         allowed_roles=_CHAT_ROLES,
         limit_per_minute=manager.config.rate_limit_user_per_minute,
     )
+
+
+def _stream_timeout_seconds() -> float:
+    """The SSE surface's per-response wall-clock budget, shared by each turn."""
+    from core.config import get_app_config
+    from plugins.api_routers.chat import DEFAULT_STREAM_TIMEOUT_SECONDS
+
+    return float(
+        getattr(
+            get_app_config(),
+            "chat_stream_timeout_seconds",
+            DEFAULT_STREAM_TIMEOUT_SECONDS,
+        )
+    )
+
+
+async def _relay_turn(
+    websocket: WebSocket, source: AsyncIterator[str], timeout_seconds: float
+) -> None:
+    """Send one turn's chunks, bounded by the clock, and always close ``source``.
+
+    Mirrors ``sse_stream``: a stalled provider used to hold the turn (and the
+    connection) open forever, and a client that disconnected mid-turn left the
+    upstream generator — and the LLM call behind it — running until garbage
+    collection.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    iterator = source.__aiter__()
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                chunk = await asyncio.wait_for(iterator.__anext__(), remaining)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                logger.warning(
+                    "chat_ws_stream_timeout", extra={"timeout_seconds": timeout_seconds}
+                )
+                await websocket.send_json(
+                    {"type": "error", "detail": "stream timed out"}
+                )
+                break
+            await websocket.send_json({"type": "chunk", "content": chunk})
+    finally:
+        await _aclose_quietly(iterator)
+
+
+async def _aclose_quietly(stream: Any) -> None:
+    """Close an async generator on any exit path, WebSocketDisconnect included.
+
+    A source already finished or cancelled by the timeout may raise from
+    ``aclose``; that must not mask the exit reason, so it is logged, not raised.
+    """
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception:
+            logger.debug("chat_ws_source_close_failed", exc_info=True)
 
 
 def _user_id(websocket: WebSocket) -> str:
@@ -168,10 +235,16 @@ async def chat_ws(websocket: WebSocket) -> None:
                 )
                 continue
             stream = await chat_service.handle_chat_stream_async(request)
-            async for chunk in bounded_stream(
-                stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES
-            ):
-                await websocket.send_json({"type": "chunk", "content": chunk})
+            try:
+                await _relay_turn(
+                    websocket,
+                    bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
+                    _stream_timeout_seconds(),
+                )
+            finally:
+                # Closing the size-guard wrapper does not close the generator
+                # it iterates, so the upstream is closed explicitly.
+                await _aclose_quietly(stream)
             await websocket.send_json({"type": "final"})
     except WebSocketDisconnect:
         logger.debug("chat_ws_disconnected", extra={"user_id": _user_id(websocket)})

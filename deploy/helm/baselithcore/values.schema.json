@@ -847,6 +847,9 @@
         "enabled": {
           "type": "boolean"
         },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
         "schedule": {
           "type": "string",
           "minLength": 1
@@ -945,6 +948,9 @@
           "properties": {
             "enabled": {
               "type": "boolean"
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
             },
             "image": {
               "type": "string",

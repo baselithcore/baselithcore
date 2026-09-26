@@ -747,6 +747,7 @@
       "RequestSizeLimitMiddleware",
       "SecurityHeadersMiddleware",
       "TenantMiddleware",
+      "authenticate_admin_basic",
       "check_admin_lockout",
       "clear_admin_failures",
       "clear_request_size_overrides",

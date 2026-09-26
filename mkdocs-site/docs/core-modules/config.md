@@ -817,9 +817,11 @@ See [SecurityHeadersMiddleware](middleware.md#securityheadersmiddleware).
     Two further checks run later, in the app lifespan
     (`core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
     **refuses to start** when `AUTH_REQUIRED=true` (opt out with
-    `BASELITH_ALLOW_UNBOUND_JWT=true`), while production with an empty
-    `TRUSTED_HOSTS` only logs an ERROR — there is no hostname the framework can
-    infer, so that one stays advisory. See
+    `BASELITH_ALLOW_UNBOUND_JWT=true`), and production with an empty
+    `TRUSTED_HOSTS` **refuses to start** too (`UnvalidatedHostConfigError`) —
+    there is no hostname the framework can infer, so the operator must name
+    them, or set `BASELITH_ALLOW_UNVALIDATED_HOST=true` to accept the risk,
+    which downgrades the abort to an ERROR log. See
     [Host header validation](../advanced/security.md#host-header-validation).
 
 ---

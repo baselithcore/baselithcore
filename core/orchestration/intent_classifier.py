@@ -297,13 +297,19 @@ class IntentClassifier:
         intent set (invalidated together with the other intent caches), so a
         repeated identical input can skip the LLM round-trip entirely. The
         caller still applies the confidence threshold to the returned value, so
-        caching the raw result changes nothing about the decision.
+        caching the raw result changes nothing about the decision. A ``None``
+        result is never cached.
         """
         cache = self._llm_result_cache
         if text in cache:
             cache.move_to_end(text)
             return cache[text]
         result = await self._classify_with_llm(text)
+        if result is None:
+            # None is a failed or unusable LLM call (timeout, provider error,
+            # unparseable reply), not an answer: caching it would pin the
+            # input to the default intent until eviction.
+            return None
         cache[text] = result
         cache.move_to_end(text)
         if len(cache) > _LLM_CACHE_MAXSIZE:

@@ -24,9 +24,11 @@ services:
       # image default (127.0.0.1) never matches the nginx gateway, whose
       # address on app_net is dynamic — so every request looked like it came
       # from the proxy and the per-IP rate limits, the failed-auth throttle
-      # and the admin lockout all shared ONE bucket. app_net is pinned to a
-      # known subnet below so the whole gateway network can be named here.
-      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
+      # and the admin lockout all shared ONE bucket. The gateway gets a fixed
+      # address (GATEWAY_IP, on the pinned app_net subnet below) and ONLY that
+      # address is trusted: trusting the whole subnet let any other container
+      # on app_net forge a client address or claim https.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -266,7 +268,11 @@ services:
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
-      - app_net
+      app_net:
+        # Fixed so the api service can trust exactly this peer
+        # (FORWARDED_ALLOW_IPS). Must lie inside APP_NET_SUBNET — change the
+        # two together.
+        ipv4_address: ${GATEWAY_IP:-172.28.0.10}
     depends_on:
       - api
     read_only: true
@@ -336,9 +342,10 @@ volumes:
 
 networks:
   app_net:
-    # Fixed subnet so FORWARDED_ALLOW_IPS (api service above) can trust the
-    # gateway by network. Override APP_NET_SUBNET if it collides with an
-    # existing network on the host; keep the two values in step.
+    # Fixed subnet so the gateway can hold a fixed address (GATEWAY_IP) that
+    # FORWARDED_ALLOW_IPS (api service above) trusts. Override APP_NET_SUBNET
+    # if it collides with an existing network on the host, and move
+    # GATEWAY_IP into the new subnet with it.
     ipam:
       config:
         - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}

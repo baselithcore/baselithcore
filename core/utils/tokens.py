@@ -22,6 +22,9 @@ The system uses a tiered approach:
   network call in most production deployments, which already set the key.
 - Level 1 (Exact-ish): Uses `tiktoken` (cl100k_base/gpt-4) if the library is
   installed, calibrated per model family (see ``_MODEL_TOKENIZER_FACTORS``).
+  The encoder is never loaded on a running event loop: a sync call there
+  starts a background load and uses Level 2 until it lands, and
+  :func:`estimate_tokens_async` awaits the load in a worker thread.
 - Level 2 (Heuristic): Falls back to a character-class analysis (Code, CJK, Prose)
   that is significantly more accurate than the naive ``len // 4`` rule.
 """
@@ -53,6 +56,11 @@ _ASYNC_OFFLOAD_THRESHOLD_CHARS = 65_536
 # Tiktoken encoder (lazy-loaded, cached)
 _encoder = None
 _tiktoken_available: bool | None = None
+# Serializes the blocking load; the second lock only guards the one-shot
+# background warm-up flag, so checking it never waits on a load in progress.
+_encoder_lock = threading.Lock()
+_encoder_warmup_lock = threading.Lock()
+_encoder_warmup_started = False
 
 # Anthropic client for exact Claude token counting (lazy-loaded, cached for
 # the lifetime of the process — see ``_load_anthropic_client``).
@@ -144,20 +152,46 @@ def _model_factor(model: str | None) -> float:
     return 1.0
 
 
-def _get_tiktoken_encoder() -> Any:
-    """
-    Attempt to load and cache the tiktoken cl100k_base encoder.
+def _load_tiktoken_encoder() -> Any:
+    """Load and cache the cl100k_base encoder. Blocking — keep off the loop.
+
+    The first load reads (or, on a cold cache, downloads) the BPE ranks file:
+    tens of milliseconds at best, a network round trip at worst.
     """
     global _encoder, _tiktoken_available
-    if _tiktoken_available is None:
-        try:
-            import tiktoken
+    with _encoder_lock:
+        if _tiktoken_available is None:
+            try:
+                import tiktoken
 
-            _encoder = tiktoken.encoding_for_model("gpt-4")
-            _tiktoken_available = True
-        except (ImportError, Exception):
-            _tiktoken_available = False
+                _encoder = tiktoken.encoding_for_model("gpt-4")
+                _tiktoken_available = True
+            except Exception:
+                _tiktoken_available = False
     return _encoder
+
+
+def _get_tiktoken_encoder() -> Any:
+    """Return the cached tiktoken encoder, or None while it is unavailable.
+
+    Outside an event loop the first call loads it inline. On a running loop
+    it never blocks: the load starts once in a background thread and callers
+    get None — the heuristic — until it lands.
+    """
+    global _encoder_warmup_started
+    if _tiktoken_available is not None:
+        return _encoder
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _load_tiktoken_encoder()
+    with _encoder_warmup_lock:
+        if not _encoder_warmup_started:
+            _encoder_warmup_started = True
+            threading.Thread(
+                target=_load_tiktoken_encoder, name="tiktoken-warmup", daemon=True
+            ).start()
+    return None
 
 
 def _anthropic_api_key() -> str | None:
@@ -347,6 +381,10 @@ async def estimate_tokens_async(text: str, model: str | None = None) -> int:
         if exact is not None:
             return exact
 
+    if _tiktoken_available is None:
+        # Async callers can afford to wait for an exact count: load the
+        # encoder in a worker thread rather than fall back to the heuristic.
+        await asyncio.to_thread(_load_tiktoken_encoder)
     if len(text) < _ASYNC_OFFLOAD_THRESHOLD_CHARS:
         return estimate_tokens(text, model)
     return await asyncio.to_thread(estimate_tokens, text, model)

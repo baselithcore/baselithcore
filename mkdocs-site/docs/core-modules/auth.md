@@ -668,8 +668,12 @@ graph LR
 
 1. The IdP's JWKS endpoint is resolved — either the explicit `OIDC_JWKS_URL`, or
    discovered from `{OIDC_ISSUER}/.well-known/openid-configuration`.
-2. The signing key for the token's `kid` is fetched (cached by `PyJWKClient`;
-   the network call runs in a worker thread so the event loop never blocks).
+2. The signing key for the token's `kid` is looked up in the cached JWKS
+   (fetched through the SSRF-pinned path, in a worker thread so the event
+   loop never blocks). An unknown `kid` forces a re-fetch at most once per
+   60 s, single-flight across concurrent requests, and a failed fetch backs
+   off for 5 s — the `kid` comes from an unverified header, so without the
+   limit every forged token would cost one outbound call to the IdP.
 3. The signature (`RS256`/`ES256`), `iss`, `aud`, and `exp` are validated.
 4. Claims are mapped to an `AuthUser` (see below).
 

@@ -136,7 +136,11 @@ break the tool path. See
     `ExecutionMixin.process` overlaps I/O at the request boundaries. The
     request-start memory reads (`recall` + `get_context_async`) run
     **concurrently**, and post-response memory writes run as a **tracked
-    background task** instead of delaying the reply.
+    background task** instead of delaying the reply. At most 32 run at once,
+    and the backlog (running plus queued) is capped at 1024: past it a new
+    write is dropped with a debug log and counted on the orchestrator's
+    `_memory_writes_dropped`, since memory is best-effort and the request
+    path is not.
 
 !!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
     Those background writes are awaited by nobody on the request path, so an
@@ -341,6 +345,10 @@ The LLM strategy's classification prompt is a registry-served catalog prompt
 embedded template as fallback), so deployments can version/override it through
 the prompt registry — see
 [Prompt Registry › Packaged catalog prompts](prompts.md#packaged-catalog-prompts).
+Raw LLM classifications are memoized per input text in a small LRU (cleared
+whenever an intent is registered or unregistered); a failed or unparseable
+call (`None`) is never cached, so a provider blip does not pin that input to
+the default intent.
 The swarm task-decomposition prompt
 (`core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
 is catalog-served the same way.

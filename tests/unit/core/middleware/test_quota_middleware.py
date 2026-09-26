@@ -172,3 +172,61 @@ def test_probe_and_docs_paths_skip_quota_auth(monkeypatch):
     assert "/health" in QuotaMiddleware._EXEMPT_PATHS
     assert "/metrics" in QuotaMiddleware._EXEMPT_PATHS
     assert "/docs" in QuotaMiddleware._EXEMPT_PATHS
+
+
+class _RefundingQuota(_FakeQuota):
+    def __init__(self) -> None:
+        super().__init__()
+        self.refunds: list[tuple[str, str, object]] = []
+        self.consumed_at: object = None
+
+    async def check_and_consume_pair(self, ident, tid, **k):
+        self.consumed_at = k.get("now")
+        await super().check_and_consume_pair(ident, tid, **k)
+
+    async def refund_pair(self, ident, tid, *, now=None, **k):
+        self.refunds.append((ident, tid, now))
+
+
+class _StatusApp:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    async def __call__(self, scope, receive, send) -> None:
+        await send({"type": "http.response.start", "status": self.status})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403, 404, 405, 429, 503])
+async def test_unit_is_refunded_when_no_work_was_done(monkeypatch, status):
+    """A request admitted by quota but answered by an inner guard (or not
+    routed at all) must not spend the caller's budget."""
+    q = _RefundingQuota()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=q)
+    sent = await _run(qm.QuotaMiddleware(_StatusApp(status)))
+    assert sent[0]["status"] == status
+    # Refunded against the same instant it was consumed at (same period keys).
+    assert q.refunds == [("u1", "t1", q.consumed_at)]
+    assert q.consumed_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 201, 400, 422, 500])
+async def test_unit_stays_spent_when_work_may_have_been_done(monkeypatch, status):
+    q = _RefundingQuota()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=q)
+    await _run(qm.QuotaMiddleware(_StatusApp(status)))
+    assert q.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_refund_failure_never_breaks_the_response(monkeypatch):
+    class _Broken(_RefundingQuota):
+        async def refund_pair(self, *a, **k):
+            raise ConnectionError("redis down")
+
+    q = _Broken()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=q)
+    sent = await _run(qm.QuotaMiddleware(_StatusApp(429)))
+    assert sent[0]["status"] == 429

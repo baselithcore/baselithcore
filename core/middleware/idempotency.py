@@ -20,41 +20,62 @@ Design notes:
 - **Fail-open**: if Redis is unavailable or anything goes wrong on the storage
   path, the request proceeds normally (idempotency is best-effort, never a
   hard dependency that can take the API down).
-- **Credential-scoped, and inert without a credential**: the storage key binds
-  the stored response to the caller's raw ``Authorization``/``X-API-Key``
-  header. A caller presenting neither gets no idempotency at all (the request
-  simply executes) unless ``BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS`` is set — see
+- **Credential-scoped, verified, and inert without a credential**: the
+  storage key binds the stored response to the caller's raw
+  ``Authorization``/``X-API-Key`` header, and nothing is replayed or stored
+  unless that credential actually verifies (the per-request auth memo the
+  tenant layer already filled, so no extra verification). An invalid or
+  unsupported credential used to get its own bucket — any junk header value
+  could fill Redis. A caller presenting no credential gets no idempotency at
+  all unless ``BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS`` is set — see
   :meth:`IdempotencyMiddleware._identity_scope`.
-- **Transient responses are not cached**: ``5xx`` plus the retryable ``4xx``
-  statuses (``401``/``403``/``408``/``425``/``429``) are never stored, so a
-  request throttled or auth-rejected by an inner guard is not frozen under the
-  key for the full TTL and replayed on every legitimate retry. Deterministic
-  client errors (``400``/``404``/``409``/``422``) are still cached — replaying
-  the identical error is the correct idempotent behaviour.
+- **Only routed, non-transient responses are cached**: nothing is stored
+  unless the request matched a route, and ``404``/``405``, ``5xx`` plus the
+  retryable ``4xx`` statuses (``401``/``403``/``408``/``425``/``429``) are
+  never stored — so neither a scan of made-up paths nor a request throttled
+  by an inner guard is frozen under a key. Deterministic client errors of a
+  real route (``400``/``409``/``422``) are still cached.
+- **Payload-bound**: the SHA-256 of the request body (hashed while the app
+  streams it in, never buffered twice) is stored with the response; a retry
+  reusing the key with a *different* body gets ``422`` instead of the first
+  body's response (``draft-ietf-httpapi-idempotency-key-header``).
+- **Lock kept alive**: the in-flight lock (TTL capped at 300 s) is refreshed
+  while the handler runs, so a long handler cannot lose it to a duplicate.
+- **Encoding-safe replay**: compression runs inside this layer, so a stored
+  body may be gzip; it is decompressed for a retry that does not accept gzip.
 
 Follows the IETF ``Idempotency-Key`` header draft / the Stripe model. The
 atomic replay-or-lock script and the ``exp`` reader live in
-:mod:`core.middleware._idempotency_store`.
+:mod:`core.middleware._idempotency_store`; body fingerprinting and entry
+encode/decode in :mod:`core.middleware._idempotency_replay`.
 """
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import hashlib
 import os
 import time
 from typing import Any
 
-import orjson
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.context import get_current_tenant_id
+from core.middleware._idempotency_replay import (
+    BodyFingerprint,
+    credential_verified,
+    decode_entry,
+    encode_entry,
+    replay_entry,
+)
 from core.middleware._idempotency_store import (
+    MAX_LOCK_TTL,
     REPLAY_OR_LOCK_LUA,
     jwt_exp,
+    keep_lock_alive,
     replay_or_lock,
 )
 from core.observability.logging import get_logger
@@ -71,7 +92,9 @@ _MAX_KEY_LENGTH = 255
 # they must never be frozen under an Idempotency-Key: 401 Unauthorized,
 # 403 Forbidden (e.g. CSRF), 408 Request Timeout, 425 Too Early, 429 Too Many
 # Requests. Any 5xx is treated the same way (handled separately by range).
-_NON_CACHEABLE_4XX = frozenset({401, 403, 408, 425, 429})
+# 404/405 join them for a different reason: they mean no route did any work,
+# and caching them let any caller mint Redis entries for made-up paths.
+_NON_CACHEABLE_4XX = frozenset({401, 403, 404, 405, 408, 425, 429})
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -104,6 +127,7 @@ class IdempotencyMiddleware:
         )
         cache_config = get_redis_cache_config()
         self._prefix = cache_config.cache_prefix + ":idem:"
+        self._lock_ttl = max(1, min(self.ttl_seconds, MAX_LOCK_TTL))
         self._token_lifetime: int | None = None
         self._redis: Any = None
         self._replay_or_lock_script: Any = None
@@ -218,9 +242,12 @@ class IdempotencyMiddleware:
             # No bucket this caller may safely own — no storage key, no replay.
             return None
         key_hash = hashlib.sha256(idem_key.encode("utf-8")).hexdigest()
+        # The path is hashed, not embedded: a raw path let the caller choose
+        # arbitrary (and arbitrarily long) Redis key material.
+        path_hash = hashlib.sha256(str(scope["path"]).encode("utf-8")).hexdigest()[:32]
         return (
             f"{self._prefix}{tenant}:{identity}:"
-            f"{scope['method']}:{scope['path']}:{key_hash}"
+            f"{scope['method']}:{path_hash}:{key_hash}"
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -244,6 +271,15 @@ class IdempotencyMiddleware:
             )(scope, receive, send)
             return
 
+        has_credential = self._header(scope, b"authorization") or self._header(
+            scope, b"x-api-key"
+        )
+        if has_credential and not await credential_verified(scope):
+            # Unverifiable credential: no bucket, no replay, no storage. The
+            # route's own auth dependency produces the 401.
+            await self.app(scope, receive, send)
+            return
+
         storage_key = self._storage_key(scope, idem_key)
         if storage_key is None:
             # Credential-less caller (and anonymous idempotency not enabled):
@@ -262,18 +298,14 @@ class IdempotencyMiddleware:
                 self._replay_or_lock_script,
                 storage_key,
                 lock_key,
-                max(1, min(self.ttl_seconds, 300)),
+                self._lock_ttl,
             )
         except Exception:
             await self.app(scope, receive, send)
             return
 
         if stored is not None:
-            if await self._send_stored(stored, send):
-                return
-            # Undecodable entry: execute normally rather than 409 on a lock
-            # that was never taken (the script returns before the SET).
-            await self.app(scope, receive, send)
+            await self._replay(scope, receive, send, stored)
             return
 
         # 2) Lock held by a duplicate still in flight.
@@ -292,27 +324,18 @@ class IdempotencyMiddleware:
             scope, receive, send, storage_key, lock_key, ttl=self._replay_ttl(scope)
         )
 
-    async def _send_stored(self, stored: Any, send: Send) -> bool:
-        """Emit a stored response; ``False`` when the entry cannot be decoded."""
-        try:
-            payload = orjson.loads(stored)
-            body = base64.b64decode(payload["body"])
-            headers = [
-                (k.encode("latin-1"), v.encode("latin-1"))
-                for k, v in payload["headers"]
-            ]
-        except Exception:  # pragma: no cover - corrupt cache entry
-            return False
-        headers.append((b"idempotency-replayed", b"true"))
-        await send(
-            {
-                "type": "http.response.start",
-                "status": int(payload["status"]),
-                "headers": headers,
-            }
-        )
-        await send({"type": "http.response.body", "body": body, "more_body": False})
-        return True
+    async def _replay(
+        self, scope: Scope, receive: Receive, send: Send, stored: Any
+    ) -> None:
+        """Answer a retry from its stored entry — or refuse a changed payload."""
+        entry = decode_entry(stored)
+        if entry is None:
+            # Undecodable entry: execute normally rather than 409 on a lock
+            # that was never taken (the script returns before the SET).
+            await self.app(scope, receive, send)
+            return
+        accept_encoding = self._header(scope, b"accept-encoding") or ""
+        await replay_entry(entry, accept_encoding, scope, receive, send)
 
     async def _run_and_capture(
         self,
@@ -331,6 +354,7 @@ class IdempotencyMiddleware:
             "size": 0,
             "cacheable": True,
         }
+        fingerprint = BodyFingerprint(receive)
 
         async def capture(message: Message) -> None:
             msg_type = message["type"]
@@ -346,8 +370,15 @@ class IdempotencyMiddleware:
                 # errors (throttling/auth) — those must not be replayed for the
                 # full TTL when a corrected retry could succeed.
                 status = message["status"]
+                # The router records the matched route on the shared scope
+                # (FastAPI's "route", a Mount's "endpoint"); neither means no
+                # route ran — nothing worth replaying, only key material.
+                routed = (
+                    scope.get("route") is not None or scope.get("endpoint") is not None
+                )
                 if (
-                    content_type.startswith(b"text/event-stream")
+                    not routed
+                    or content_type.startswith(b"text/event-stream")
                     or status >= 500
                     or status in _NON_CACHEABLE_4XX
                 ):
@@ -395,14 +426,20 @@ class IdempotencyMiddleware:
                 state["headers"],
                 full_body,
                 ttl=ttl,
+                body_sha256=fingerprint.digest,
             )
             await send(message)
 
+        keepalive = asyncio.create_task(
+            keep_lock_alive(self._redis, lock_key, self._lock_ttl)
+        )
         try:
-            await self.app(scope, receive, capture)
+            await self.app(scope, fingerprint, capture)
         except Exception:
             await self._release(lock_key)
             raise
+        finally:
+            keepalive.cancel()
         # If the response was never cached (streamed, oversized, a 5xx, or a
         # retryable 4xx), drop the lock so a genuine retry isn't blocked for the
         # full TTL.
@@ -418,21 +455,14 @@ class IdempotencyMiddleware:
         body: bytes,
         *,
         ttl: int | None = None,
+        body_sha256: str | None = None,
     ) -> None:
         ttl = ttl or self.ttl_seconds
         try:
             # orjson emits bytes — Redis accepts them directly, and decoding
             # replayed entries accepts bytes and str alike, so entries written
             # by the previous stdlib-json code still parse.
-            payload = orjson.dumps(
-                {
-                    "status": status,
-                    "headers": [
-                        [k.decode("latin-1"), v.decode("latin-1")] for k, v in headers
-                    ],
-                    "body": base64.b64encode(body).decode("ascii"),
-                }
-            )
+            payload = encode_entry(status, headers, body, body_sha256)
             # Store the response and drop the in-flight lock in a single round
             # trip (pipeline) rather than two sequential SET + DEL calls.
             if hasattr(self._redis, "pipeline"):

@@ -16,8 +16,6 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from core.guardrails.input_guard import InputGuard
-from core.guardrails.moderation import get_guardrails_config
 from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
 from core.services.chat.exceptions import ChatServiceError
@@ -30,6 +28,7 @@ from core.services.chat.utils.conversation import (
     record_turn,
     recording_stream,
 )
+from core.services.chat.utils.guard import validate_input
 from core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
 from core.services.chat.utils.streaming import on_stream_end
 from core.utils.concurrency import drain_async_iterator
@@ -274,11 +273,7 @@ class ChatService:
                 )
 
             # Validate input using Guardrails
-            guard_result = InputGuard(get_guardrails_config()).validate(req.query)
-            if not guard_result.is_valid:
-                raise ChatServiceError(
-                    f"Blocked by InputGuard: {guard_result.blocked_reason or 'Potentially harmful content detected'}"
-                )
+            validate_input(req.query)
 
             # Execution context for the orchestrator.
             context = {
@@ -366,11 +361,7 @@ class ChatService:
         try:
             self._record_metric("chat_requests_total", route="async_sync")
             # Validate input using Guardrails
-            guard_result = InputGuard(get_guardrails_config()).validate(req.query)
-            if not guard_result.is_valid:
-                raise ChatServiceError(
-                    f"Blocked by InputGuard: {guard_result.blocked_reason or 'Potentially harmful content detected'}"
-                )
+            validate_input(req.query)
 
             history_key = self._history_key(req)
             turns, history_text = await load_history(self.history_manager, history_key)

@@ -72,5 +72,5 @@ permissions:
   - TELEGRAM_WEBHOOK_SECRET
   filesystem:
   - configs/plugins.yaml
-integrity_sha256: fa8ba34101bbe953c42400d25fa1655d1237dc6c7766e2a1266b0855d6c4ae52
+integrity_sha256: 0e39a1142c149b7dfb97274e4ca96e963e6937402317482fab54915afae2e81c
 hash_surface_version: 5

@@ -137,9 +137,10 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
-      # Trust X-Forwarded-* from the gateway network (pinned subnet below), so
-      # per-IP rate limits / admin lockout see the real client, not nginx.
-      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${APP_NET_SUBNET:-172.28.0.0/24}}
+      # Trust X-Forwarded-* from the gateway's fixed address only, so per-IP
+      # rate limits / admin lockout see the real client, not nginx — and no
+      # other container on app_net can forge one.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
@@ -305,14 +306,16 @@ services:
 
   # Reverse Proxy
   gateway:
-    image: nginx:alpine
+    image: nginx:1.31.5-alpine
     container_name: baselith-gateway
     ports:
       - "80:80"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
-      - app_net
+      app_net:
+        # Fixed so the api trusts exactly this peer (FORWARDED_ALLOW_IPS).
+        ipv4_address: ${GATEWAY_IP:-172.28.0.10}
     depends_on:
       - api
     read_only: true
@@ -381,8 +384,9 @@ volumes:
 
 networks:
   app_net:
-    # Fixed subnet so FORWARDED_ALLOW_IPS above can trust the gateway by
-    # network; override APP_NET_SUBNET on collision, keeping both in step.
+    # Fixed subnet so the gateway can hold the fixed GATEWAY_IP that
+    # FORWARDED_ALLOW_IPS trusts; override APP_NET_SUBNET on collision and
+    # move GATEWAY_IP into the new subnet with it.
     ipam:
       config:
         - subnet: ${APP_NET_SUBNET:-172.28.0.0/24}
@@ -395,7 +399,7 @@ networks:
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
     JSON logs are selected by `LOG_JSON` (default `true`), which the `api` and `worker` services set explicitly; the older `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` are deprecated and have no effect — see [Production Configuration](#production-configuration).
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
-    TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
+    TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and **does not trust any caller by default**: it sends `X-Forwarded-For: $remote_addr` (never appending to a client-supplied chain) and its own `$scheme` / `$server_port` as `X-Forwarded-Proto` / `-Port`. Behind a load balancer, name it in `deploy/nginx/nginx.conf` — uncomment `set_real_ip_from <LB CIDR>` and add the same CIDR to the `geo $realip_remote_addr $from_trusted_lb` block: `realip` then recovers the client address from the LB's `X-Forwarded-For`, and the LB's `X-Forwarded-Proto` / `-Port` are honoured, but only on connections whose TCP peer is the LB. Never list a range untrusted clients can connect from.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `compose.yaml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `compose.sandbox.yaml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
     Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. Both stacks carry healthchecks for Qdrant (TCP connect probe — the image ships no curl), and `api`/`worker` gate on `condition: service_healthy` rather than `service_started`. In the production stack the `api` service used the bare list form of `depends_on`, which waits only for the container to be *created*, so it could take its first requests against a Postgres still running `initdb`; it now gates on health like the worker always did.
     Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). Both compose files pass it through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
@@ -603,8 +607,10 @@ variables, so the three entry points behave alike behind one proxy.
   address** (IPs or CIDRs, comma-separated): without it every request appears
   to originate from the proxy IP, and per-IP rate limiting, the failed-auth
   throttle and the admin lockout collapse into a single shared bucket. The
-  production compose pins `app_net` to a fixed subnet (`APP_NET_SUBNET`,
-  default `172.28.0.0/24`) and trusts it by default; the Helm chart exposes the
+  production compose gives the nginx gateway a fixed address (`GATEWAY_IP`,
+  default `172.28.0.10`, inside `APP_NET_SUBNET`, default `172.28.0.0/24`) and
+  trusts only that address — not the whole subnet, where any other container
+  could forge the header; the Helm chart exposes the
   same knob as `forwardedAllowIps` (set it to the ingress controller's pod
   CIDR).
 - **`--no-server-header`** — drop the `Server: uvicorn` banner. The bundled
@@ -931,12 +937,14 @@ server {
         # Accept-Encoding so the upstream answers identity.
         proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Request-ID $req_id;
 
-        # Timeout for LLM (long responses)
-        proxy_read_timeout 120s;
+        # Timeout for LLM (long responses): above LLM_REQUEST_TIMEOUT (120s
+        # default), or a synchronous POST /chat still working on a slow
+        # answer is cut into a 504 by the edge.
+        proxy_read_timeout 180s;
         proxy_connect_timeout 10s;
     }
 
@@ -946,18 +954,22 @@ server {
     # its shorter read timeout. The other long-lived streams are listed as
     # well: the run event feed (GET /runs/{id}/events), the MCP Streamable
     # HTTP transport (POST /mcp, SSE responses) and the baselithbot dashboard
-    # event feed (`/dash/events/stream`, a mounted sub-app) — under
-    # `location /` each of them was cut
+    # event feed (`/baselithbot/dash/events/stream`: the plugin router is
+    # mounted at `/baselithbot`, its dashboard router at `/dash`, and plugin
+    # routes get no `/v1` alias) — under `location /` each of them was cut
     # by the read timeout after a minute of silence (an agent waiting on a
     # slow LLM call).
-    location ~ ^/(v1/)?(chat/stream|runs/[^/]+/events|mcp|dash/events/stream)$ {
+    location ~ ^(/v1)?/(chat/stream|runs/[^/]+/events|mcp)$|^/baselithbot/dash/events/stream$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Request-ID $req_id;
+        # Empty Connection so the stream reuses the upstream keepalive pool;
+        # no path here is a WebSocket (those stay under `location /`).
+        proxy_set_header Connection "";
         proxy_buffering off;
         proxy_cache off;
         # NOT `add_header X-Accel-Buffering no` here: one add_header inside a
@@ -971,11 +983,16 @@ server {
 ```
 
 The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
-`compose.prod.yaml`) applies the same four rules — empty `Connection`
+`compose.prod.yaml`) applies the same rules — empty `Connection`
 for non-upgrade requests so `keepalive 32` is actually used, the extended
-streaming location, no `add_header` inside a location, and the validated
-`X-Request-ID` that is forwarded and logged — and is checked
-with `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
+streaming location, no `add_header` inside a location, the validated
+`X-Request-ID` that is forwarded and logged, and `X-Forwarded-For` set (not
+appended) to the client address — plus three of its own: a `location ~
+^(/v1)?/chat$` with a 180s read timeout so synchronous chat outlives the LLM
+timeout instead of turning into a 504 at 60s, `/metrics` **and** `/v1/metrics`
+restricted to private networks, and the trusted-LB `realip` block described
+in [The production stack](#the-production-stack). It is checked with
+`nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
 
 ### SSL Certificate Setup (Let's Encrypt)
 
@@ -1084,10 +1101,10 @@ AUTH_REQUIRED=true
 DOCS_ENABLED=false
 MAX_REQUEST_SIZE_BYTES=10485760
 
-# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address or
-# CIDR; the production compose defaults it to the app_net subnet)
+# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer / proxy
+# address; the production compose defaults it to the gateway's GATEWAY_IP)
 WEB_CONCURRENCY=4
-FORWARDED_ALLOW_IPS=172.28.0.0/24
+FORWARDED_ALLOW_IPS=172.28.0.10
 GRACEFUL_SHUTDOWN_TIMEOUT=30
 
 # Database
@@ -1131,6 +1148,14 @@ SENTRY_DSN=${SENTRY_DSN}
     excludes `configs/.env*`, so a filled-in template on the build host is never
     baked into an image layer. Compose injects it from the host via `env_file:`;
     the application itself never reads `configs/.env.*` at runtime.
+
+    The same holds for **plugin runtime state**: `plugins/*/.state/` is
+    excluded, because a working checkout that has run baselithbot holds its
+    secret-store master key (`.state/.secret_key`) there, and an image built
+    from it would silently encrypt production credentials with the
+    developer's key. Credential, log, SQLite and cache patterns carry a `**/`
+    prefix — Docker matches a bare `*.key` only at the context root, so it
+    never reached the `COPY core/` and `COPY plugins/` trees.
 
 ### Environment naming
 

@@ -164,7 +164,10 @@ safe_output = output.filtered_output
     redaction patterns split across chunk boundaries are still caught. The
     inbound gate (`guard_input_async`) also layers **content moderation**
     (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
-    when `BASELITH_MODERATION_PROVIDER` names a provider. Moderation of the
+    when `BASELITH_MODERATION_PROVIDER` names a provider; a surface that
+    validates before handing off (the chat service) reuses the same compiled
+    `InputGuard` through `get_input_guard()` rather than building one per
+    request. Moderation of the
     **output** side is a second opt-in (`BASELITH_MODERATION_OUTPUT=true` —
     one extra moderation call per response): `guard_output_async` replaces a
     flagged final response, and `moderate_stream` re-checks the accumulated
@@ -780,6 +783,13 @@ memory = AgentMemory()
 context = await memory.get_context_async(max_tokens=2000)
 related = await memory.recall(query, limit=5)
 ```
+
+!!! note "Post-response memory writes are bounded"
+    The orchestrator writes each turn to memory as a tracked background task
+    (`core/orchestration/mixins/_memory_write.py`): at most 32 run at once and
+    the backlog (running plus queued) is capped at 1024. Past the cap a new
+    write is dropped with a debug log and counted on
+    `_memory_writes_dropped` — memory is best-effort, the request path is not.
 
 ---
 

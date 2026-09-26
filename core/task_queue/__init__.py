@@ -7,7 +7,7 @@ Enables asynchronous and scheduled task execution using Redis and RQ.
 
 from typing import Any, Optional
 
-from redis import Redis
+from redis import BlockingConnectionPool, Redis
 from rq import Queue
 
 from core.config import get_task_queue_config
@@ -15,6 +15,10 @@ from core.task_queue.cron import CronExpression
 
 # Global connection cache
 _redis_conn: Redis | None = None
+
+# How long a caller waits for a free pooled connection once the queue pool is
+# at ``max_connections``.
+_POOL_WAIT_SECONDS = 5.0
 
 
 def get_queue_redis_connection() -> Redis:
@@ -27,11 +31,15 @@ def get_queue_redis_connection() -> Redis:
         # same Redis database, or jobs are enqueued where no worker listens.
         url = config.get_redis_url()
         # Bound the connection pool so the queue can't exhaust Redis under load.
-        _redis_conn = Redis.from_url(
+        # Blocking pool: at the cap an enqueue waits briefly for a released
+        # connection instead of failing at once with "Too many connections".
+        pool = BlockingConnectionPool.from_url(
             url,
             max_connections=config.max_connections,
+            timeout=_POOL_WAIT_SECONDS,
             health_check_interval=config.health_check_interval,
         )
+        _redis_conn = Redis(connection_pool=pool)
     return _redis_conn
 
 

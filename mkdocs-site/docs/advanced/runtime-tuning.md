@@ -130,12 +130,25 @@ used to be a `GET` followed by a `SET NX`, plus a third `GET` when the lock was
 held to cover the gap between the two; inside one script there is no gap, so
 the hot path costs a single Redis latency and the `409` needs no re-check.
 
-Replay is **credential-scoped**: the storage key includes a hash of the raw
+Replay is **credential-scoped**: the storage key includes a hash of the
 `Authorization`/`X-API-Key` header, because the middleware replays *before*
 route authentication runs — without this, a caller reusing another client's
 `Idempotency-Key` on the same path would be served that client's cached
 response. A rotated token simply misses the cache and executes fresh, which is
-safe.
+safe. Only a credential that **verifies** gets a bucket (the check reuses the
+auth memo the tenant layer already filled, so it costs nothing extra): an
+invalid key or a Basic header is treated like no credential. The request path
+is hashed into the key rather than embedded, and nothing is stored unless a
+route matched — `404` and `405` are never cached — so an unauthenticated caller
+cannot fill Redis with 24-hour entries by spraying random paths.
+
+The request **body is bound to the key**: its SHA-256, computed as the handler
+reads it, is stored with the response, and a retry with the same key but a
+different body gets **`422`** (per the IETF `Idempotency-Key` draft) instead
+of the stale response. The in-flight lock is re-armed every third of its TTL
+while the handler runs, so a long agent loop cannot lose it and let a retry
+execute the side effect twice. A stored gzip body is decompressed for a retry
+whose `Accept-Encoding` does not include gzip.
 
 A stored response also never **outlives the credential that earned it**. The
 configured TTL is an upper bound; for a bearer token the entry expires with the

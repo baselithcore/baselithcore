@@ -1016,7 +1016,7 @@ print(tracker.get_usage())
 # {"tokens_used": 150, "max_tokens": 10000, "remaining": 9850}
 ```
 
-Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`.
+Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`. The tiktoken encoder is never loaded on a running event loop (its first load reads, or downloads, the BPE file): a sync `estimate_tokens` call there starts a one-shot background load and uses the heuristic until it lands, while `estimate_tokens_async` awaits the load in a worker thread and returns the exact count.
 
 !!! note "Enforced per-request budget"
     Beyond token tracking, each `generate_response` call charges its **real USD

@@ -104,7 +104,10 @@ on its first `await encode(...)` (off the loop), and
 `LazyReranker(factory, model_name)` on its first `predict(...)`, which the
 rerank path already runs on the inference pool. `loaded` reports whether the
 model exists yet. The chat dependencies, the semantic LLM cache and the
-hierarchical-memory bootstrap all load this way.
+hierarchical-memory bootstrap all load this way. The vector-store rerank
+service (`core.services.retrieval.reranker.Reranker`) does too: `rerank()`
+awaits `aload_model()`, which builds its CrossEncoder in a worker thread under
+a lock, so the first rerank neither stalls the loop nor builds the model twice.
 
 ### Embedding cache & miss coalescing
 

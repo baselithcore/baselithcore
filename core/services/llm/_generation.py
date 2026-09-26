@@ -186,6 +186,35 @@ def _build_cache_key(
     return f"{tenant_id}:{model}:{json_mode}:{prompt_hash}", prompt_hash
 
 
+def _semantic_namespace(
+    *,
+    model: str,
+    json_mode: bool,
+    system_prompt: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
+    effort: str | None,
+) -> str:
+    """Hash of every non-prompt input that changes the completion.
+
+    The semantic cache matches on prompt similarity alone, so without this
+    namespace two callers with the same prompt but a different system prompt,
+    model or sampling config were served each other's answers. Mirrors the
+    inputs of :func:`_build_cache_key`, minus the prompt itself.
+    """
+    material = "\x1f".join(
+        (
+            model,
+            repr(json_mode),
+            system_prompt or "",
+            repr(temperature),
+            repr(max_tokens),
+            effort or "",
+        )
+    )
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
 async def generate_response(
     service: LLMService,
     prompt: str,
@@ -244,6 +273,14 @@ async def generate_response(
             max_tokens=max_tokens,
             effort=effort,
         )
+        semantic_ns = _semantic_namespace(
+            model=resolved_model,
+            json_mode=json,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            effort=effort,
+        )
         if service.cache is not None:
             cached = await service.cache.get(cache_key)
             if cached:
@@ -253,7 +290,9 @@ async def generate_response(
 
         # Semantic cache (approximate match) only on exact miss.
         if service.semantic_cache is not None:
-            semantic_cached = await service.semantic_cache.get_similar(prompt)
+            semantic_cached = await service.semantic_cache.get_similar(
+                prompt, namespace=semantic_ns
+            )
             if semantic_cached:
                 span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
                 return str(semantic_cached)
@@ -411,7 +450,7 @@ async def generate_response(
 
             # Cache response (semantic)
             if service.semantic_cache is not None:
-                await service.semantic_cache.set(prompt, content)
+                await service.semantic_cache.set(prompt, content, namespace=semantic_ns)
 
             return content
 

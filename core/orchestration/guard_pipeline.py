@@ -66,6 +66,16 @@ def _guards() -> tuple[Any, Any]:
     return InputGuard(config), OutputGuard(config)
 
 
+def get_input_guard() -> Any:
+    """The process-wide :class:`~core.guardrails.input_guard.InputGuard`.
+
+    Shared so a surface that validates before handing off to the orchestrator
+    (the chat service) reuses the compiled instance instead of rebuilding one
+    per request.
+    """
+    return _guards()[0]
+
+
 def guard_input(query: str) -> dict[str, Any] | None:
     """Validate an inbound query. ``None`` = pass; a result dict = blocked.
 

@@ -100,6 +100,14 @@ take a single `ChatRequest`:
     already inside a loop, always use the `_async` variants: the synchronous
     ones would block that loop for the whole request, and cannot run at all.
 
+The non-streaming methods run the regex input guard before orchestration and
+raise `ChatServiceError("Blocked by InputGuard: …")` on a block. They use the
+same compiled `InputGuard` instance the orchestrator's guard pipeline caches
+(`core.orchestration.guard_pipeline.get_input_guard`) instead of building one
+per request; the orchestrator still runs its own `guard_input_async` (regex,
+then the opt-in moderation and taxonomy layers), which is the only input
+guard on the streaming path.
+
 `handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
 through `core.utils.concurrency.drain_async_iterator`, so the guardrails, the
 metrics, the streaming-disabled fallback and the error stream have one

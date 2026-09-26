@@ -13,10 +13,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import orjson
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.middleware.idempotency import IdempotencyMiddleware, _jwt_exp
+
+# Replay/storage require a credential that verifies; see the conftest fixture.
+pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
 
 
 class _RecordingRedis:

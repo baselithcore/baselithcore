@@ -146,10 +146,11 @@ class OutputGuard:
         counts: dict[str, int] = {}
 
         for pii_type, pattern in COMPILED_PII_PATTERNS.items():
-            matches = pattern.findall(result)
-            if matches:
-                counts[pii_type] = len(matches)
-                result = pattern.sub(f"[{pii_type.upper()}_REDACTED]", result)
+            # One pass per pattern: subn counts while it substitutes, where
+            # findall + sub scanned the text twice.
+            result, n = pattern.subn(f"[{pii_type.upper()}_REDACTED]", result)
+            if n:
+                counts[pii_type] = n
 
         return result, counts
 

@@ -529,7 +529,7 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 | `failure_ttl`               | `TASK_QUEUE_FAILURE_TTL` | `604800` | Failed-job retention (s) |
 | `default_retry_count`       | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `3` | Retries when not overridden |
 | `default_retry_delay`       | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `60` | Base delay before the first retry (s); later retries back off exponentially — see [Retry Configuration](#retry-configuration) |
-| `max_connections`           | `TASK_QUEUE_MAX_CONNECTIONS` | `50` | Broker connection-pool ceiling |
+| `max_connections`           | `TASK_QUEUE_MAX_CONNECTIONS` | `50` | Broker connection-pool ceiling; the pool is blocking, so at the ceiling a caller waits up to 5 s for a free connection instead of failing with "Too many connections" |
 | `health_check_interval`     | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `30.0` | Idle-connection health check (s) |
 | `dlq_retention_seconds`     | `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `604800` | DLQ record TTL (s); `0` keeps records forever |
 | `dlq_replay_allowed_modules` | `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `["core.", "plugins."]` | Module prefixes a dead-lettered job may be replayed from; empty refuses every replay |

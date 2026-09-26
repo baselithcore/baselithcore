@@ -665,6 +665,18 @@ sequenceDiagram
     Plugin-->>Loader: Instance Ready
 ```
 
+**Failed activations back off.** "First use" is often an HTTP request to the
+plugin's prefix, which `PluginActivationMiddleware` serves before any
+authentication. A lazy activation that fails (returns `False` or raises) is
+remembered for **60 s** (`core/plugins/_activation_backoff.py`): during that
+window the runtime activator raises `PluginActivationBackoffError` (a
+`RuntimeError`) instead of re-hashing and re-importing the plugin under the
+global activation lock, and the middleware answers `503` with a `Retry-After`
+of the seconds left. Requests that queued behind the failing attempt see the
+backoff too. An operator enable or reload through the plugin-management API
+goes straight to the hot-reload controller, never consults the backoff, and on
+success clears it.
+
 ### Resource analysis
 
 The loader uses AST-based static analysis to extract plugin metadata without executing

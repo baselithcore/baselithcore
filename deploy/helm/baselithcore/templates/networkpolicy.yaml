@@ -1,4 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if and (not .Values.networkPolicy.ingressFrom) (or .Values.ingress.enabled .Values.serviceMonitor.enabled) }}
+{{- fail "networkPolicy.enabled with ingress.enabled or serviceMonitor.enabled requires networkPolicy.ingressFrom: the empty default admits only pods in this namespace, which locks out the ingress controller and Prometheus (both usually in their own namespaces) — the deployment goes dark and every scrape target goes red. Name them, e.g. a namespaceSelector on kubernetes.io/metadata.name: ingress-nginx and one on kubernetes.io/metadata.name: monitoring (see values-production.yaml)." }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
