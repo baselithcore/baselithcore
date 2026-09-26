@@ -7,6 +7,27 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.40.0](https://github.com/baselithcore/baselithcore/compare/v0.39.0...v0.40.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **core:** prune excluded trees when hashing a plugin; expire stale DLQ records on read ([a20e850](https://github.com/baselithcore/baselithcore/commit/a20e850e95f56bc40e8b8d5b0192eee4e4178c68))
+* **core:** wire and repair what the core audit found unreachable or broken ([8b2fa60](https://github.com/baselithcore/baselithcore/commit/8b2fa60d399f9a47aabe1a6bc64bcecfe9e22ac9))
+
+
+### Features
+
+* **config:** exempt plugin-owned env vars from typo detection ([52d996d](https://github.com/baselithcore/baselithcore/commit/52d996d92f5091de50d1034463c4d43916d60efb))
+* **core:** LLM rate limit, guardrail normalisation, path-independent resume, summarised compaction ([36bb400](https://github.com/baselithcore/baselithcore/commit/36bb4003cc232673418ca5d699aca7638861ba95))
+* **core:** harden auth, quota, LLM, and DB layers ([9825eff](https://github.com/baselithcore/baselithcore/commit/9825efffeb4cb22fe0f35a9a2dd4eedc62c3751e))
+* **llm:** add vLLM provider with dedicated config, preflight, and fallback ([6e38bfa](https://github.com/baselithcore/baselithcore/commit/6e38bfa6ee39737851678f9a5f71387905c6b894))
+* **llm:** filter thinking-model reasoning from vLLM provider output ([b4e6fe0](https://github.com/baselithcore/baselithcore/commit/b4e6fe0dd9892d2644ebee6a46759716e182824d))
+* **llm:** re-resolve pin per call on funnel-issued services ([e6d8fb6](https://github.com/baselithcore/baselithcore/commit/e6d8fb6da11f77eac21173ca1e460a8a80664d23))
+* **llm:** route vLLM calls across several servers by model via LLM_VLLM_ENDPOINTS ([08ae3e7](https://github.com/baselithcore/baselithcore/commit/08ae3e7724072137c90f83c7ec828fa5f0a4eecc))
+* **llm:** route vLLM through governed clients and console-stored credentials ([f17e56f](https://github.com/baselithcore/baselithcore/commit/f17e56f36dcb7d191d68d33113fa9ed9e02cc3ea))
+* **security:** harden auth, quota, idempotency and cache layers ([4a79e72](https://github.com/baselithcore/baselithcore/commit/4a79e7236ee0ab5a67a9adf0e79725bb061bf911))
+
 # [0.39.0](https://github.com/baselithcore/baselithcore/compare/v0.38.2...v0.39.0) (2026-09-23)
 
 
