@@ -46,6 +46,11 @@ def _reset_exact_token_globals(monkeypatch):
     monkeypatch.setattr("core.config.services._llm_config", None)
     tokens_module._exact_token_cache.clear()
     tokens_module._exact_count_failed_at.clear()
+    # Resolve the tiktoken encoder up front. Left unresolved (which depends on
+    # test order and on the background warm-up thread), the async path spends
+    # an extra `to_thread` loading it, and every assertion here that counts
+    # `to_thread` awaits turns red under an unlucky random seed.
+    tokens_module._load_tiktoken_encoder()
     yield
     tokens_module._exact_token_cache.clear()
     tokens_module._exact_count_failed_at.clear()
