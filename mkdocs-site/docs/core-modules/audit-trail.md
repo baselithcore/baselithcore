@@ -183,6 +183,17 @@ Verification compares with `hmac.compare_digest`.
     archive the current database, start a fresh one under the new key — and keep
     the old key alongside the archive so the archive stays verifiable.
 
+!!! note "Several processes, one chain"
+    Every uvicorn worker (and a task-queue worker) opens its own sink on the same
+    SQLite file. Each append reads the chain head and inserts the new row inside
+    one `BEGIN IMMEDIATE` transaction, so a second process waits for the first to
+    commit instead of reading the same head (`busy_timeout` 10 s). Before this, two
+    workers appending in the same millisecond (the retention sweep each one runs at
+    boot, typically) could both name the same `prev_hash`: the chain forked and
+    `verify_chain()` reported *"prev_hash does not match the preceding
+    entry_hash"*, which reads as tampering. A database written before the fix may
+    carry such forks; archive it at a chain boundary as above.
+
 Even keyed, this is **detection, not prevention**. When the threat model includes
 a compromised host, anchor the digest externally: ship `sink.head_hash()`
 periodically to a WORM store or a separate SIEM, and compare on verification.

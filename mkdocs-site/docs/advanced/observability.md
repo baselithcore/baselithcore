@@ -770,6 +770,18 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
 2. **Create alert** if it grows beyond threshold
 3. **Correlate with trace** to identify problematic operations
 
+### Problem: Audit Chain Reports Tampering
+
+1. **Run** `verify_chain()` on the audit sink and note the first failing `seq`
+2. **If the reason is** *"prev_hash does not match the preceding entry_hash"* and
+   two rows share a `prev_hash`, the chain forked rather than being edited: every
+   worker process appends to the same SQLite file, and releases before the fix
+   let two of them read the same head
+3. **Current releases** serialize appends across processes with a
+   `BEGIN IMMEDIATE` transaction, so new rows cannot fork
+4. **Solution**: archive the database at a chain boundary and start a fresh one —
+   see [Audit Trail › Tamper evidence](../core-modules/audit-trail.md#tamper-evidence)
+
 ---
 
 ## Best Practices

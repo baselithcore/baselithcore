@@ -496,6 +496,13 @@ await audit.log(
 Convenience helpers `log_auth`, `log_api_request`, and `log_chat` wrap the
 common event types.
 
+The hash-chained SQLite sink behind it is safe to share between processes:
+every uvicorn or task-queue worker opens its own sink on the same file, and each
+append reads the chain head and inserts the new row inside one
+`BEGIN IMMEDIATE` transaction, so concurrent workers never link two rows to the
+same predecessor. Chain layout, keyed hashing and verification are covered in
+[Audit Trail](audit-trail.md).
+
 ---
 
 ## Health Checks
