@@ -557,6 +557,11 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
     non-RAG chat; only the first RAG request fails, with the "install
     `baselith-core[rag]`" error.
 
+`rerank_hits` scores candidates through `core.nlp.rerank.score_pairs` rather
+than `predict` directly, so the cross-encoder runs with a batch size suited to
+its device (8 off CUDA, 32 on CUDA) — see
+[NLP › Loading models off the event loop](nlp.md#loading-models-off-the-event-loop).
+
 !!! note "Candidate / top-k counts"
     `INITIAL_SEARCH_K` (`40`) and `FINAL_TOP_K` (`6`) are class-level
     constants on `ChatService`, not `ChatDependencyConfig` fields.

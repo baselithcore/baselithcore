@@ -428,6 +428,15 @@ concurrent request) for the duration of the torch forward pass. The same
 treatment applies to the sync `encode()` in `VectorMemoryProvider.search()`,
 which now awaits async embedders and offloads sync ones to a thread.
 
+### Device-Sized Rerank Batches
+
+`CrossEncoder.predict` defaults to `batch_size=32`. Off CUDA that only adds
+padding: sentence-transformers sorts pairs by length and maps scores back, so
+the batch size never changes scores or ranking. All core rerank paths score
+through `core.nlp.rerank.score_pairs`, which uses 8 on CPU/MPS and 32 on CUDA.
+Measured on 50 candidates on CPU: `ms-marco-MiniLM-L-6-v2` 723 ms → 623 ms,
+`bge-reranker-v2-m3` 8.0 s → 6.6 s, with scores equal to within 1.2e-6.
+
 ### Batched Vectorstore Indexing
 
 `VectorStoreService.index()` collects chunks across all supplied documents into a

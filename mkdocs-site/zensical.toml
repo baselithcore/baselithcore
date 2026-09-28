@@ -90,6 +90,7 @@ nav = [
       { "Swarm Intelligence"   = "core-modules/swarm.md" },
       { "A2A Protocol"         = "core-modules/a2a.md" },
       { "MCP Integration"      = "core-modules/mcp.md" },
+      { "Connectors"           = "core-modules/connectors.md" },
       { "Task Queue"           = "core-modules/task-queue.md" },
       { "Guardrails"           = "core-modules/guardrails.md" },
       { "Event System"         = "core-modules/events.md" },

@@ -287,6 +287,11 @@ plugins should reuse instead of reimplementing:
   `Exception`.
 - **`core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
   tool/skill return envelope.
+- **`core.connectors`** — the contract for integrations with external systems:
+  SSRF-guarded, retrying, circuit-broken HTTP, one error hierarchy, per-tenant
+  credential resolution, audited agent/MCP tools and DORA vendor declaration.
+  Contribute connectors through `get_connectors()`; see
+  [Connectors](connectors.md).
 
 ```python
 from core.registries import BaseRegistry
@@ -327,6 +332,9 @@ rows = registry.list_plugins()  # list[dict]
 The registry also aggregates contributions across all plugins via
 `get_all_agents()`, `get_all_routers()`, `get_all_intent_patterns()`,
 `get_all_entity_types()`, `get_all_flow_handlers()`, and `get_all_static_paths()`.
+Connectors returned by `get_connectors()` go to the connector registry
+(`core.connectors.get_connector_registry()`) with the plugin as owner, and are
+withdrawn when the plugin unloads.
 
 ### Thread Safety
 

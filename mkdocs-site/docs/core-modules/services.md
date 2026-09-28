@@ -1495,6 +1495,12 @@ Note `retrieval_limit`, not `k`: a re-ranked search deepens retrieval to
 `max(k * 3, 20)`, and the cached rows are what the provider was actually asked
 for.
 
+The re-rank step itself (`core/services/retrieval/reranker.py`) scores pairs
+through `core.nlp.rerank.score_pairs` in a worker thread, which picks a
+device-sized batch (8 off CUDA, 32 on CUDA). Batch size changes padding only,
+never scores or order — see
+[Performance Tuning](../advanced/performance-optimizations.md#device-sized-rerank-batches).
+
 The previous key hashed the query vector's **first ten components** and omitted
 the provider kwargs entirely. Two distinct embeddings that agreed on their head
 collided, and the same vector searched with and without a filter shared one

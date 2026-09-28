@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 from core.cache.protocols import AnyCache as CacheProtocol
 from core.interfaces import ScoreRerankerProtocol
+from core.nlp.rerank import score_pairs
 from core.observability.logging import get_logger
 from core.utils.concurrency import run_inference
 
@@ -180,9 +181,10 @@ async def rerank_hits(
     if uncached_pairs:
         # Cross-encoder inference is sync CPU/GPU-bound work — run it off the
         # event loop so concurrent requests are not stalled behind it.
+        # ``score_pairs`` picks the device's batch size (see core.nlp.rerank).
         with m_latency.time():
             predicted_scores = (
-                await run_inference(reranker.predict, uncached_pairs)
+                await run_inference(score_pairs, reranker, uncached_pairs)
             ).tolist()
         cache_writes = []
         for (idx, hit, cache_key), score in zip(

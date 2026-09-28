@@ -79,6 +79,7 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     "core.cli",
     "core.compliance",
     "core.config",
+    "core.connectors",
     "core.context",
     "core.db",
     "core.di",

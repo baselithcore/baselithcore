@@ -135,6 +135,7 @@ PACKAGE_STABILITY: Final[Mapping[str, Stability]] = {
     "core.world_model": Stability.BETA,
     # -- experimental: research surface, no compatibility promise ---------
     "core.adversarial": Stability.EXPERIMENTAL,
+    "core.connectors": Stability.EXPERIMENTAL,
     "core.exploration": Stability.EXPERIMENTAL,
     "core.finetuning": Stability.EXPERIMENTAL,
     "core.human": Stability.EXPERIMENTAL,

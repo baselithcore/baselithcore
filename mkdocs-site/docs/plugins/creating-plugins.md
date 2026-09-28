@@ -359,6 +359,7 @@ The `Plugin` interface provides several hooks for registering components:
 | `get_mcp_tools` | `list` | Tools for Model Context Protocol |
 | `get_flow_handlers` | `dict` | Intent name → handler object with `async handle(query, context)` (or an async callable with that signature) |
 | `get_entity_types` | `list` | Knowledge Graph node types |
+| `get_connectors` | `list` | Connectors to external systems (`BaseConnector` subclasses); see [Connectors](../core-modules/connectors.md) |
 
 !!! tip "Routing"
     The orchestrator uses these patterns to identify when a user request should be handled by your plugin's agents.
