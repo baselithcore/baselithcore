@@ -77,6 +77,12 @@ from core.services.llm.tool_calling import (
     tool_spec_from_mcp,
 )
 from core.services.llm.usage import Usage
+from core.services.llm.usage_sinks import (
+    UsageReport,
+    UsageSink,
+    register_usage_sink,
+    unregister_usage_sink,
+)
 
 __all__ = [
     "EffortLevel",
@@ -128,6 +134,10 @@ __all__ = [
     "register_token_sink",
     "report_external_usage",
     "unregister_token_sink",
+    "UsageReport",
+    "UsageSink",
+    "register_usage_sink",
+    "unregister_usage_sink",
     "reset_fallback_services",
     "resolve_governed_client_config",
     "resolve_llm_credential",

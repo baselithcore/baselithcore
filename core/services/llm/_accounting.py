@@ -31,6 +31,7 @@ from core.services.llm._telemetry import (
 )
 from core.services.llm.tool_calling import LLMResult
 from core.services.llm.usage import Usage, billed_usage
+from core.services.llm.usage_sinks import UsageReport, emit_usage_report
 
 if TYPE_CHECKING:
     from core.services.llm.service import LLMService
@@ -97,7 +98,9 @@ def charge_usage_to_budget(model: str, usage: Usage) -> float:
     )
 
 
-async def record_usage_cost(model: str, usage: Usage, *, batch: bool = False) -> None:
+async def record_usage_cost(
+    model: str, usage: Usage, *, batch: bool = False, requests: int = 1
+) -> None:
     """Book one turn's dollar cost on the ambient tenant's cumulative ledger.
 
     The one ledger :func:`account_turn` cannot book itself (it is sync and
@@ -122,7 +125,16 @@ async def record_usage_cost(model: str, usage: Usage, *, batch: bool = False) ->
             path may set it: an interactive call priced as a batch would
             under-meter by 2x, exactly as a batch priced interactively
             over-meters by 2x.
+        requests: How many model calls *usage* stands for (the metered
+            entries of a batch job; one otherwise). Forwarded to the usage
+            sinks, which count requests.
     """
+    # Every billed turn reaches the usage sinks here, before pricing, so an
+    # unpriced model under the reject policy is still observed as tokens.
+    emit_usage_report(
+        UsageReport(model=model, usage=usage, batch=batch, requests=requests)
+    )
+
     from core.quotas.cost_enforcement import (
         UnknownModelCostRejected,
         llm_call_cost_usd,

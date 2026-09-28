@@ -556,6 +556,17 @@ reports `true`. Results are cached (~30s).
     the package default and answers every request from a local model on that
     pod, successfully, which is exactly why nothing downstream reports it.
 
+!!! note "Shutdown drains long-lived streams"
+    At startup the application lifespan installs a drain hook in front of the
+    server's SIGTERM/SIGINT handlers (`core.lifecycle.drain`). The first stop
+    signal marks the process as draining before the server waits for open
+    connections, so a stream that awaits `wait_for_drain()` — an SSE feed or
+    WebSocket subscription that would otherwise stay open until the client
+    leaves — ends cleanly instead of being cancelled at
+    `--timeout-graceful-shutdown`. Clients should treat such an end as a cue
+    to reconnect, which lands them on a pod that is still serving. See
+    [Draining long-lived streams](../core-modules/lifecycle.md#draining-long-lived-streams).
+
 ---
 
 ### `GET /status` - System Status

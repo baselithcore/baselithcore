@@ -700,7 +700,11 @@
       "HealthStatus",
       "LifecycleError",
       "LifecycleMixin",
-      "RecoverableError"
+      "RecoverableError",
+      "install_drain_signal_hook",
+      "is_draining",
+      "mark_draining",
+      "wait_for_drain"
     ],
     "core.loops": [
       "AttemptContext",
@@ -1300,6 +1304,8 @@
       "ToolResultBlock",
       "ToolUseBlock",
       "Usage",
+      "UsageReport",
+      "UsageSink",
       "api_key_from_config",
       "capabilities_for",
       "clamp_effort",
@@ -1311,6 +1317,7 @@
       "message_from_result",
       "parse_fallback_chain",
       "register_token_sink",
+      "register_usage_sink",
       "rejects_forced_tool_choice",
       "render_as_prompt",
       "report_external_usage",
@@ -1325,7 +1332,8 @@
       "to_anthropic",
       "to_openai",
       "tool_spec_from_mcp",
-      "unregister_token_sink"
+      "unregister_token_sink",
+      "unregister_usage_sink"
     ],
     "core.services.sandbox": [
       "ExecutionResult",

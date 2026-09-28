@@ -1097,6 +1097,36 @@ regardless. Do **not** monkeypatch `service._report_tokens_to_middleware`
 instead: every call site imports the report function directly at import time,
 so rebinding that module alias silently detaches from the real call path.
 
+#### Billed-turn observer seam
+
+The token reports above are what the middleware budget needs *before* and
+*during* a call, but they are a poor basis for pricing: the prompt side is a
+local tokenizer estimate, cached prompt tokens are folded into it (a cache read
+bills at ~0.1x input), a streamed call arrives in chunks, and a batch job
+reports nothing at all. A consumer that prices usage — a spend ledger, a cost
+dashboard — subscribes to the usage seam instead:
+
+```python
+from core.services.llm import UsageReport, register_usage_sink, unregister_usage_sink
+
+def my_ledger(report: UsageReport) -> None:
+    report.model      # the model that answered ("ollama/<tag>" when local)
+    report.usage      # Usage: input, output, cache_read, cache_write tokens
+    report.batch      # True when billed at the batch rate
+    report.requests   # calls it stands for (a batch job's metered entries)
+
+register_usage_sink(my_ledger)   # idempotent
+unregister_usage_sink(my_ledger)
+```
+
+One report is delivered per billed turn, from `record_usage_cost` — the same
+point, and the same record, the tenant cost ledger books — so a ledger built on
+it agrees with the core's own. `report_external_usage` delivers one too. Sinks
+run in the caller's context (the bound identity and plugin are visible), are
+resolved at call time, and are best-effort: what they raise is swallowed. A turn
+with an empty record (a cache hit, a call the provider never answered) is not
+delivered.
+
 #### Reporting usage measured outside the funnel
 
 A caller that does **not** go through this service — a plugin with a vendored
@@ -1117,6 +1147,7 @@ real model id — because consumers pair the two to reconstruct one call. Unlike
 `report_tokens_to_middleware` it never raises: the tokens were already spent by
 an engine this process does not gate, so a budget rejection must neither corrupt
 a response that is already paid for nor swallow the second half of the pair.
+The same call is also delivered to the usage sinks as one billed turn.
 
 Report **measured** counts only (the provider's `usage` block, Ollama's
 `prompt_eval_count`/`eval_count`) and report from **inside the request that made
