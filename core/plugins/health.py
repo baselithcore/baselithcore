@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from core.plugins.init_scope import plugin_init_scope
 
 from .nursery import PluginTaskNursery
 
@@ -127,7 +128,8 @@ class HealthMixin:
 
             # 2. Re-initialize with config
             config = new_config if new_config is not None else old_config
-            await plugin.initialize(config)
+            with plugin_init_scope():
+                await plugin.initialize(config)
 
             # 3. Re-register components
             self.register_all_components(plugin)
@@ -151,7 +153,8 @@ class HealthMixin:
             logger.error(f"Failed to reload plugin '{plugin_name}': {e}")
             # Try to restore old state
             try:
-                await plugin.initialize(old_config)
+                with plugin_init_scope():
+                    await plugin.initialize(old_config)
                 self.register_all_components(plugin)
             except Exception:
                 pass  # nosec B110

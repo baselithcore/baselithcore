@@ -587,6 +587,12 @@ Run it with `baselith plugin schema-init` (every enabled plugin) or
 `baselith plugin schema-init --plugin my-plugin`. Leave the method out entirely
 when your tables come from an Alembic migration — the default is a no-op.
 
+Under row-level security (`DB_RLS_ENABLED=true`) your `initialize()` runs as
+the `system` tenant, not as whichever user enabled the plugin, and a background
+task you start from it inherits that identity. Anything that serves a request
+must still bind the request's own tenant — see
+[`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope).
+
 Doing this at boot instead breaks any deployment that connects as a
 least-privilege role for row-level security: it cannot `CREATE`, and if it
 could, it would *own* the tables and PostgreSQL would exempt it from their

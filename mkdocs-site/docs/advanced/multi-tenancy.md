@@ -417,6 +417,16 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     their policies, which is the failure this whole arrangement exists to
     prevent.
 
+    Two knobs for deployments that provision differently. When the runtime
+    role is created outside the chart by an operator holding an admin DSN,
+    set `database.runtimeRole.createRole: false`: the Job then only verifies
+    the role exists, is `NOSUPERUSER NOBYPASSRLS` and does not own the
+    database, and grants — all of which a plain owner may do, so the owner
+    never needs `CREATEROLE`. When `PLUGIN_CONFIG_PATH` lives on a writable
+    volume, set `database.pluginSchemaInit.mountVolumes: true` so the schema
+    Job mounts the application's volumes and seed step and reads the same
+    file the application will.
+
 === "Docker Compose"
 
     ```bash
@@ -460,6 +470,7 @@ Who uses it today:
 | `core/bootstrap/lazy_init.py`, `core/db/schema.py`, `core/api/startup_checks.py` | Boot and schema paths |
 | `core/orchestration/checkpoint_postgres.py`, `core/a2a/task_store_postgres.py`, `core/prompts/store_postgres.py` | `initialize()` / DDL on first touch |
 | `core/task_queue/worker.py` | Wraps job execution — but only when RLS is on |
+| `core/plugins/init_scope.py` (`loader.py`, `bulk_load.py`, `hotreload.py`, `health.py`) | Every plugin's `initialize()` — but only when RLS is on |
 | `core/cli/handlers.py` | CLI commands that read the database |
 | `core/orchestration/recovery.py` | Crash-recovery and stale-run sweeps |
 | `core/services/tenant/purge.py` | GDPR erasure — cross-tenant by construction |

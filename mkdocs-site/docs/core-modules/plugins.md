@@ -748,6 +748,13 @@ class MyPlugin(Plugin):
         await self.db.close()
 ```
 
+With row-level security on (`DB_RLS_ENABLED=true`), `initialize()` runs
+inside [`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope)
+(`core/plugins/init_scope.py`): activation is boot work, not a tenant's
+request, so a database call made from it would otherwise be refused with
+`TenantContextError`. A background task started from `initialize()` inherits
+that identity. With RLS off no tenant is bound, as before.
+
 ---
 
 ## Hot Reload

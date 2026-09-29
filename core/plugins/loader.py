@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.plugins.init_scope import plugin_init_scope
 from core.utils.logsafe import sanitize_log_value
 
 from ._audit import audit_plugin_load
@@ -337,7 +338,8 @@ class PluginLoader:
                 if self.lifecycle_manager:
                     await self.lifecycle_manager.transition_to_initializing(plugin_name)
 
-                await plugin_instance.initialize(config)
+                with plugin_init_scope():
+                    await plugin_instance.initialize(config)
 
                 # Track active state
                 if self.lifecycle_manager:
