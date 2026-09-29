@@ -454,6 +454,13 @@ config:
   APP_ENV: production
   AUTH_REQUIRED: "true"
   SECURITY_HEADERS_ENABLED: "true"
+  # The update checker (core/plugin_updates) caches its last report, the
+  # announced-versions set and verified release tarballs. Its default,
+  # data/plugin_updates, sits in the read-only image tree, so every check would
+  # fail to persist; /tmp is the pod's writable emptyDir (tmpVolumes, 256Mi),
+  # which is enough for a cache that a restart may drop. Point it at a mounted
+  # volume (extraVolumeMounts) to keep it across restarts.
+  PLUGIN_UPDATE_CACHE_DIR: /tmp/plugin_updates
   # NOTE: the secrets backend selector defaults to 'env' in code. It is NOT set
   # here on purpose: its key name ("SECRETS_BACKEND") trips ConfigMap-secret
   # scanners (Trivy KSV-0109) even though the value is a selector, not a secret.

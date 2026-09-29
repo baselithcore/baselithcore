@@ -345,3 +345,8 @@ a plugin installed there is picked up on the next start — see
     JWT). The key is not a field on `PluginConfig`. Without any source the
     command aborts and asks you to run `baselith plugin marketplace login` or
     pass `--key`.
+
+## Related
+
+Detecting newer signed releases of installed plugins is covered in
+[Plugin Updates](plugin-updates.md).

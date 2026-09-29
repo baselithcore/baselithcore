@@ -334,4 +334,49 @@ spec:
         {{- with .Values.prometheusRule.extraRules }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+    {{- if or (not (has "BaselithcoreUpdateAvailable" $off)) (not (has "BaselithcoreSecurityUpdateAvailable" $off)) }}
+    # A group of its own: these are notices about the release, not about the
+    # cell's health, so they never share an evaluation instant with the
+    # "is it up" alerts above and can be dropped as a unit. The series is
+    # `baselith_update_available{component,security}` (core/plugin_updates).
+    - name: {{ include "baselithcore.fullname" . }}-updates
+      {{- with .Values.prometheusRule.interval }}
+      interval: {{ . }}
+      {{- end }}
+      rules:
+        {{- if not (has "BaselithcoreUpdateAvailable" $off) }}
+        - alert: BaselithcoreUpdateAvailable
+          expr: max(baselith_update_available{namespace="{{ $ns }}",security="false"}) by (component) == 1
+          for: 1h
+          labels:
+            severity: info
+            component: updates
+          annotations:
+            summary: "Update available for {{ "{{ $labels.component }}" }} in {{ $ns }}"
+            description: >-
+              A newer release exists for `{{ "{{ $labels.component }}" }}` (`core`
+              is the framework, `plugin:<name>` a plugin) and no known security
+              advisory affects the running version. Nothing is installed by the
+              notice: plan the upgrade (roll out the new image) in the next maintenance
+              window. It resolves once the cell runs the new version.
+        {{- end }}
+        {{- if not (has "BaselithcoreSecurityUpdateAvailable" $off) }}
+        - alert: BaselithcoreSecurityUpdateAvailable
+          expr: max(baselith_update_available{namespace="{{ $ns }}",security="true"}) by (component) == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: updates
+          annotations:
+            summary: "Security update available for {{ "{{ $labels.component }}" }} in {{ $ns }}"
+            description: >-
+              A published security advisory affects the running version of
+              `{{ "{{ $labels.component }}" }}`. When a fixed release exists,
+              upgrade promptly (roll out the fixed image) rather than waiting for a
+              window; when none exists yet, apply the advisory's mitigation and
+              upgrade once it ships. The advisories and their severity are listed
+              by `/api/plugins/updates`. It resolves once the cell runs a version
+              outside the vulnerable range.
+        {{- end }}
+    {{- end }}
 {{- end }}

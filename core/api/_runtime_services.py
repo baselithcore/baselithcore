@@ -12,6 +12,8 @@ Current services:
 * **Prompt sync** (``BASELITH_PROMPT_SYNC=postgres``) — durable prompt
   catalog: write-through Postgres backend + per-replica refresh loop, so
   runtime label promotion reaches every replica.
+* **Plugin updates** (``PLUGIN_UPDATE_SOURCES_FILE``) — periodic check of the
+  plugins' release mirrors; only fully verified newer releases are reported.
 """
 
 from __future__ import annotations
@@ -26,6 +28,17 @@ logger = get_logger(__name__)
 
 async def start_runtime_services(app: Any) -> None:
     """Start the opt-in runtime services; failures degrade, never abort."""
+    from pathlib import Path
+
+    from core.plugins.overlay import bundled_shadow_modules
+
+    shadows = bundled_shadow_modules(Path("plugins"))
+    if shadows:
+        logger.error(
+            "plugin_overlay_shadowed: modules of overlaid plugins were loaded from "
+            "the bundled tree before the overlay registered: %s",
+            ", ".join(shadows),
+        )
     if os.environ.get("BASELITH_RUN_EVENTS_BRIDGE", "").strip().lower() == "redis":
         try:
             from core.orchestration.run_events_bridge import RedisRunEventsBridge
@@ -41,6 +54,21 @@ async def start_runtime_services(app: Any) -> None:
         app.state.prompt_sync = await start_prompt_sync_from_env()
     except Exception as exc:
         logger.warning("prompt_sync_start_failed: %s", exc)
+
+    try:
+        from core.config.plugin_updates import get_plugin_update_config
+        from core.plugin_updates.service import (
+            PluginUpdateService,
+            set_plugin_update_service,
+        )
+
+        update_cfg = get_plugin_update_config()
+        if update_cfg.enabled:
+            app.state.plugin_updates = PluginUpdateService(update_cfg)
+            set_plugin_update_service(app.state.plugin_updates)
+            await app.state.plugin_updates.start()
+    except Exception as exc:
+        logger.warning("plugin_updates_start_failed: %s", exc)
 
 
 async def stop_runtime_services(app: Any) -> None:
@@ -58,6 +86,16 @@ async def stop_runtime_services(app: Any) -> None:
             await prompt_sync.stop()
         except Exception as exc:
             logger.warning("prompt_sync_stop_failed: %s", exc)
+
+    plugin_updates = getattr(app.state, "plugin_updates", None)
+    if plugin_updates is not None:
+        try:
+            from core.plugin_updates.service import set_plugin_update_service
+
+            await plugin_updates.stop()
+            set_plugin_update_service(None)
+        except Exception as exc:
+            logger.warning("plugin_updates_stop_failed: %s", exc)
 
 
 async def drain_orchestrator() -> None:

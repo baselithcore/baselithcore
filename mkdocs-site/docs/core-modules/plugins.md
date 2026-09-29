@@ -403,6 +403,27 @@ handlers exactly like directory ones — the two paths cannot disagree about whi
 plugins exist. See
 [Packaging › Shipping a plugin as a distribution](../plugins/packaging.md#distribution-entry-points).
 
+### Overlay directory (verified updates)
+
+When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
+`core/plugins/overlay.py` registers each signed entry `<overlay>/<name>` as the
+package `plugins.<name>` before any plugin module is imported
+(`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
+verify against the trust store regardless of
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and a tree containing a symlink is refused
+(`core/plugins/_links.py`); a rejected entry is logged and the bundled plugin
+loads instead.
+
+`discovery.apply_overlay()` then swaps a registered overlay entry in for its
+bundled namesake, keeping scan order, and appends overlay-only plugins. The
+loader's `discover_plugins()` / `resolve_plugin_dir()`, `ResourceAnalyzer` and
+`apply_plugin_app_middleware()` all route through it, so capabilities, routes and
+middleware come from the code that actually runs. At startup
+`bundled_shadow_modules()` logs `plugin_overlay_shadowed` if a bundled module of
+an overlaid plugin was imported before registration. Activation is a process
+restart, never a hot reload. See
+[Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory).
+
 ### Which class gets instantiated
 
 `resolve_plugin_class()` (`core/plugins/plugin_class.py`) honours the manifest's
@@ -1185,6 +1206,10 @@ AUDIT | PLUGIN | <action> plugin=<name> success=<bool> from=<ip>
 | `GET`    | `/api/plugins/metrics/{name}`       | Plugin metrics                   |
 | `DELETE` | `/api/plugins/metrics/{name}`       | Reset plugin metrics             |
 | `DELETE` | `/api/plugins/metrics/system/reset` | Reset all metrics                |
+
+Update detection lives on a separate admin router, `GET /api/plugins/updates`
+and `POST /api/plugins/updates/check` — see
+[Plugin Updates › API](plugin-updates.md#api).
 
 !!! warning "Management Plane"
     The reload endpoint accepts an optional `config` payload that is passed directly to the plugin's `initialize` method. Only trusted administrators should have access to this API.

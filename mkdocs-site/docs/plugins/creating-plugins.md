@@ -861,6 +861,18 @@ python scripts/sign_changed_plugins.py plugins/my-plugin   # one tree
 python scripts/sign_changed_plugins.py --all               # every plugin
 ```
 
+### Publishing updates
+
+Deployments that configure `PLUGIN_UPDATE_SOURCES_FILE` poll your plugin's
+release mirror and offer a new version only if it is fully verified: tag
+`v<version>` equals the manifest `version`, the recomputed hash matches
+`integrity_sha256`, `signature_ed25519` verifies against their trust store, the
+version is strictly newer, `min_core_version`/`max_core_version` admit the
+running core, and every `python_dependencies` entry is already satisfied. An
+unsigned release is never offered. Verified releases are installed into
+`BASELITH_PLUGIN_OVERLAY_DIR`, which shadows the bundled copy on restart. See
+[Plugin Updates](../core-modules/plugin-updates.md).
+
 ### Disabling/Enabling
 
 Temporarily deactivate a plugin without deleting its files:

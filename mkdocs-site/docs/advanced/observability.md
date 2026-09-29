@@ -289,6 +289,10 @@ Guardrail layers are instrumented too — `mas_guardrail_blocks_total`,
 labelled by `layer`) and `mas_tool_rate_limited_total` — see
 [Observability › Guardrail metrics](../core-modules/observability-module.md#guardrail-metrics).
 
+Update notices are exported as `baselith_update_available{component,security}`
+(no `mas_` prefix) — `1` while a framework or plugin update is available. See
+[Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts).
+
 ### HTTP RED metrics (automatic)
 
 Every HTTP request is instrumented automatically by
@@ -622,6 +626,11 @@ rule_files:
   - 'alert-rules.yml'
   - 'slo-rules.yml'
 ```
+
+The Helm chart's `PrometheusRule` also ships an update-notice group built on
+`baselith_update_available`: `BaselithcoreUpdateAvailable` (info, `for: 1h`) and
+`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`). Silence either via
+`prometheusRule.disabledAlerts`.
 
 ### SLOs & Error-Budget Alerting
 

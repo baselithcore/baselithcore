@@ -418,6 +418,20 @@ Declared in `core.config.orchestration`.
 | `ROUTER_RETRIEVAL_LIMIT` | `int` | `50` | Number of entities to retrieve from vector store (N >> K) |
 | `ROUTER_SCORE_THRESHOLD` | `float` | `0.7` | Minimum similarity score for tool retrieval |
 
+## Signed plugin updates (release polling and overlay)
+
+Declared in `core.config.plugin_updates`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
+| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
+| `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
+| `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
+| `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `int` | `200` | Largest release artifact downloaded, in MB; a larger one is refused before its signature is checked (it unpacks to at most 4x this) |
+| `PLUGIN_UPDATE_SOURCES_FILE` | `Path \| None` | *empty* | YAML file mapping plugin names to their GitHub mirror repos (the mirror registry); update checks are off while unset |
+| `SYSTEM_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_SYSTEM_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo whose releases and security advisories are compared with the running framework version (env SYSTEM_UPDATE_REPO); empty disables the system update notice |
+
 ## Plugin-specific configuration settings
 
 Declared in `core.config.plugins`.
@@ -907,4 +921,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-580 settings documented.
+587 settings documented.

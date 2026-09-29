@@ -215,7 +215,8 @@ class TestPrometheusRule:
         ]
         assert len(objects) == 1, [doc["metadata"]["name"] for doc in objects]
         groups = objects[0]["spec"]["groups"]
-        assert len(groups) == 1, "one group keeps every expression on one instant"
+        # The health group is first; release notices sit in a group of their
+        # own (tests/unit/test_helm_chart_update_alerts.py).
         return groups[0]["rules"]
 
     def test_absent_by_default(self) -> None:

@@ -57,6 +57,7 @@ core/config/
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── processing.py         # ProcessingConfig (documents, web crawling, OCR, NLP)
 ├── plugins.py            # PluginConfig
+├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, SYSTEM_UPDATE_REPO)
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 ├── drift.py              # suspected-typo detection for environment variables
@@ -74,7 +75,10 @@ declarative `MCP_SERVERS` registry under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
-under [Webhooks › Configuration](webhooks.md#configuration).
+under [Webhooks › Configuration](webhooks.md#configuration). The
+`PLUGIN_UPDATE_*` / `SYSTEM_UPDATE_REPO` settings read by
+`get_plugin_update_config()` are listed under
+[Plugin Updates › Configuration](plugin-updates.md#configuration).
 
 ---
 

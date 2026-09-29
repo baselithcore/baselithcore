@@ -729,6 +729,19 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
     Hot-reload is exposed via this REST API only; there is **no**
     `reload` subcommand under `baselith plugin`.
 
+### Plugin update checks (`/api/plugins/updates`)
+
+Served by `core/plugin_updates/api.py`, admin-only, and registered before the
+plugin-management router so `/{name}` does not capture `/updates`.
+
+| Method & path                         | Description                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `GET /api/plugins/updates`            | `{"enabled": bool, "report": ...}` — last saved report, no network   |
+| `POST /api/plugins/updates/check`     | Run a check now (throttled to one per 60 s per worker); `503` when updates are not configured |
+
+The report shape, refusal reasons and trust model are described in
+[Plugin Updates](../core-modules/plugin-updates.md#api).
+
 ### `GET /api/plugins/frontend-manifest`
 
 Returns the manifest of all plugin frontend assets for UI injection. Defined

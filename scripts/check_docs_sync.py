@@ -86,9 +86,18 @@ def _git(*args: str) -> list[str]:
     return [line for line in completed.stdout.splitlines() if line.strip()]
 
 
-def changed_paths(base_ref: str | None) -> set[str]:
+def changed_paths(base_ref: str | None, *, staged_only: bool = False) -> set[str]:
+    """Paths the check judges.
+
+    At ``commit-msg`` time only the staged set is the commit. Counting the
+    working tree there made unrelated unstaged edits demand docs for a commit
+    that did not contain them, and let an unstaged (or untracked) page satisfy
+    the gate for a commit that did not ship it.
+    """
     if base_ref:
         return set(_git("diff", "--name-only", f"{base_ref}...HEAD"))
+    if staged_only:
+        return set(_git("diff", "--cached", "--name-only"))
     paths = set(_git("diff", "--name-only"))
     paths |= set(_git("diff", "--cached", "--name-only"))
     paths |= {
@@ -182,7 +191,7 @@ def main() -> int:
         # unattributed one reads the same as a clean pass.
         print(f"Docs sync: skipped — {SKIP_MARKER} requested by: {skip_source}")
         return 0
-    paths = changed_paths(base_ref)
+    paths = changed_paths(base_ref, staged_only=commit_msg_file is not None)
 
     touched_docs = {path for path in paths if path.startswith(f"{DOCS_ROOT}/")}
     changed_modules = sorted(
@@ -204,9 +213,12 @@ def main() -> int:
             if module not in UNDOCUMENTED_MODULES:
                 unmapped.append(module)
             continue
-        missing = [page for page in pages if page not in touched_docs]
-        if missing:
-            stale.append(f"  core/{module}/ -> {', '.join(missing)}")
+        # One touched page satisfies the module. A module mapped to several
+        # pages (plugins, observability) splits reference from guide, and a
+        # change rarely owes both: demanding every page taught people to pad
+        # the secondary one or to reach for the skip marker.
+        if not any(page in touched_docs for page in pages):
+            stale.append(f"  core/{module}/ -> {' or '.join(pages)}")
         if module in AGENTIC_MODULES and AGENTIC_PAGE not in touched_docs:
             stale.append(f"  core/{module}/ -> {AGENTIC_PAGE}")
 
@@ -228,7 +240,7 @@ def main() -> int:
     print("\nDocs NOT updated for:")
     print("\n".join(sorted(set(stale))))
     print(
-        "\nUpdate each page in this same change, or state explicitly why the "
+        "\nUpdate one listed page per module in this same change, or state explicitly why the "
         "change is not substantial enough to document.\n"
         f"To ship without a doc update, put {SKIP_MARKER} in the commit "
         "message along with the reason — it stays in history for review. Do "

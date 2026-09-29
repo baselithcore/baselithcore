@@ -118,6 +118,7 @@ PACKAGE_STABILITY: Final[Mapping[str, Stability]] = {
     "core.observability": Stability.BETA,
     "core.orchestration": Stability.BETA,
     "core.personas": Stability.BETA,
+    "core.plugin_updates": Stability.BETA,
     "core.privacy": Stability.BETA,
     "core.prompts": Stability.BETA,
     "core.quotas": Stability.BETA,
