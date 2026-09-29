@@ -798,7 +798,18 @@ API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr
 AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
 CROSS_ORIGIN_OPENER_POLICY=same-origin-allow-popups   # COOP header; empty omits it
 CROSS_ORIGIN_RESOURCE_POLICY=same-origin              # CORP header; same-site for split subdomains, empty omits
+METRICS_AUTH_REQUIRED=true           # Basic auth on /metrics
+METRICS_USERNAME=metrics             # Scrape-only credential for /metrics
+METRICS_PASSWORD=                    # SecretStr; unset = only the admin credential opens /metrics
 ```
+
+`METRICS_USERNAME` / `METRICS_PASSWORD` are a **scrape-only** credential: the
+`/metrics` endpoint accepts them, compared in constant time, and no other route
+consults them. Give Prometheus this pair rather than the admin credential — a
+ServiceMonitor's `basicAuth` Secret is readable by the monitoring operator in
+another namespace, and the admin pair would open `/admin` to whoever reads it.
+The admin credential still opens `/metrics`, so existing scrapers keep working;
+with `METRICS_PASSWORD` unset it is the only way in.
 
 The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
 stuffing per source IP: rejected authentication attempts (counted on

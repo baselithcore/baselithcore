@@ -587,10 +587,13 @@ serviceMonitor:
   # not a name that resolves anywhere else. Turn it off only when you set
   # config.TRUSTED_HOSTS yourself and have made the pod IP trusted there.
   trustPodIP: true
-  # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
-  # Point secretName at a Secret with the admin credentials so Prometheus can
-  # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and
-  # restrict /metrics via NetworkPolicy instead.
+  # /metrics is basic-auth-protected by default (METRICS_AUTH_REQUIRED). Point
+  # secretName at a Secret holding a scrape-only credential and feed the same
+  # pair to the pods as METRICS_USERNAME / METRICS_PASSWORD (extraEnv with a
+  # secretKeyRef): it opens /metrics and nothing else. The admin credential
+  # is still accepted, but a Secret the Prometheus Operator can read is the
+  # wrong place for one that also opens /admin. Alternative: set
+  # METRICS_AUTH_REQUIRED=false and restrict /metrics via NetworkPolicy.
   basicAuth: {}
   #  secretName: baselithcore-metrics-auth
   #  usernameKey: username

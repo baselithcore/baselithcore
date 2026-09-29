@@ -641,6 +641,8 @@ Declared in `core.config.security`.
 | `JWT_STRICT_VALIDATION` | `bool` | `False` | When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments). |
 | `MAX_REQUEST_SIZE_BYTES` | `int` | `10 * 1024 * 1024` | Maximum request body size in bytes. 0 disables the check. |
 | `METRICS_AUTH_REQUIRED` | `bool` | `True` | Require admin basic auth on GET /metrics. Disable only when the endpoint is reachable solely from the scrape network (e.g. restricted by NetworkPolicy) or the scraper sends credentials. |
+| `METRICS_PASSWORD` :material-key: | `SecretStr \| None` | *empty* | Password of the scrape-only /metrics credential. Unset leaves admin basic auth as the only way in; it grants no other route. |
+| `METRICS_USERNAME` | `str` | `metrics` | Username of the scrape-only /metrics credential. |
 | `MFA_ENABLED` | `bool` | `False` | Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can enroll users via AuthManager.mfa and require a TOTP step-up at login. Disabled by default — purely additive, no effect on existing auth paths. |
 | `MFA_ISSUER` | `str` | `BaselithCore` | Issuer label shown in the user's authenticator app (Google Authenticator, Authy, …) — typically the product or tenant name. |
 | `OIDC_ALGORITHMS` | `Annotated[list[str], NoDecode]` | *computed* | `NoDecode` on every collection field below: pydantic-settings JSON-decodes complex types inside EnvSettingsSource *before* any validator runs, so the coercers these fields already declare never saw the raw string and a plain `RS256,ES256` raised SettingsError out of the whole SecurityConfig — i.e. no API at all. |
@@ -905,4 +907,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-578 settings documented.
+580 settings documented.

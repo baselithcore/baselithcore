@@ -257,6 +257,45 @@ spec:
               most recent one into a scratch database and count the tables
               before trusting it.
         {{- end }}
+        {{- if and .Values.backup.enabled (not (has "BaselithcoreBackupJobFailed" $off)) }}
+        # BackupStale answers "when did a backup last work" and cannot fire
+        # before the threshold has passed since the last success — on the
+        # default 26h that is the morning AFTER the failure. This one answers
+        # "did the most recent run fail", the same night.
+        #
+        # "Most recent" is the whole expression. A failed Job is kept for
+        # failedJobsHistoryLimit runs, so `kube_job_status_failed > 0` alone
+        # keeps firing for days after a later run succeeded, which teaches
+        # people to ignore it. The right-hand side keeps only the Job with the
+        # latest start time, so the alert resolves as soon as the next run
+        # starts, and fires again if that one fails too. The job_name pattern
+        # also matches a manual `kubectl create job --from=cronjob/...` run
+        # named after the CronJob, which is how the runbook retries.
+        - alert: BaselithcoreBackupJobFailed
+          expr: |-
+            (kube_job_status_failed{namespace="{{ $ns }}",job_name=~"{{ $api }}-backup-.*"} > 0)
+              and on (job_name)
+            (
+              kube_job_status_start_time{namespace="{{ $ns }}",job_name=~"{{ $api }}-backup-.*"}
+                == on () group_left ()
+              max(kube_job_status_start_time{namespace="{{ $ns }}",job_name=~"{{ $api }}-backup-.*"})
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "The latest backup run {{ "{{ $labels.job_name }}" }} failed in {{ $ns }}"
+            description: >-
+              The Job exhausted its retries, so tonight's dump does not exist.
+              Read the failed pod's log before re-running it: a dump that dies
+              on the database password or on the bucket credential fails the
+              same way every night, and only the log says which. Re-run with
+              `kubectl create job --from=cronjob/{{ $api }}-backup
+              {{ $api }}-backup-manual-1` once the cause is fixed (keep the
+              name prefix, or this alert cannot see the retry); it resolves
+              when the next run starts.
+        {{- end }}
         {{- if not (has "BaselithcoreVolumeAlmostFull" $off) }}
         - alert: BaselithcoreVolumeAlmostFull
           expr: |-

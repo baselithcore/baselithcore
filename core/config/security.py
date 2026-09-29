@@ -229,6 +229,23 @@ class SecurityConfig(BaseSettings):
             "restricted by NetworkPolicy) or the scraper sends credentials."
         ),
     )
+    # A scrape-only credential for GET /metrics. It exists so a Prometheus
+    # that has to hold a password (a ServiceMonitor basicAuth Secret, read by
+    # an operator in another namespace) never holds one that opens anything
+    # else: nothing but the metrics route consults these two fields.
+    metrics_username: str = Field(
+        default="metrics",
+        alias="METRICS_USERNAME",
+        description="Username of the scrape-only /metrics credential.",
+    )
+    metrics_password: SecretStr | None = Field(
+        default=None,
+        alias="METRICS_PASSWORD",
+        description=(
+            "Password of the scrape-only /metrics credential. Unset leaves "
+            "admin basic auth as the only way in; it grants no other route."
+        ),
+    )
     admin_pass: SecretStr | None = Field(default=None, alias="ADMIN_PASS")
     admin_pass_hashed: SecretStr | None = Field(default=None, alias="ADMIN_PASS_HASHED")
 
