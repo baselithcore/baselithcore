@@ -24,6 +24,9 @@ _TIMEOUT = httpx.Timeout(30.0)
 #: Download cap when the caller sets none (``PLUGIN_UPDATE_MAX_ARTIFACT_MB``).
 DEFAULT_MAX_ARTIFACT_BYTES = 200 * 1024 * 1024
 
+#: Repos already logged as publishing no advisories (once per process).
+_NO_ADVISORIES_LOGGED: set[str] = set()
+
 
 def _discard(path: Path) -> None:
     """Remove a partial download, ignoring a file that is already gone."""
@@ -79,7 +82,15 @@ def _parse_release(plugin: str, rel: Any) -> tuple[SemanticVersion, ReleaseInfo]
 
 
 class SourceError(Exception):
-    """A release source could not be queried or downloaded from."""
+    """A release source could not be queried or downloaded from.
+
+    ``status`` is the HTTP status when the failure was an HTTP status error,
+    else ``None``. It never carries a token.
+    """
+
+    def __init__(self, message: str = "", status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def safe_error(exc: Exception) -> str:
@@ -167,7 +178,9 @@ class GitHubReleaseSource:
             if self._client is None:
                 await client.aclose()
         if not response.is_success:
-            raise SourceError(f"GitHub returned HTTP {response.status_code}")
+            raise SourceError(
+                f"GitHub returned HTTP {response.status_code}", response.status_code
+            )
         return response
 
     async def _json_list(self, url: str, what: str) -> list[Any]:
@@ -217,16 +230,28 @@ class GitHubReleaseSource:
         One :class:`Advisory` per (advisory, vulnerability) pair; malformed
         entries are skipped.
 
+        A repo that publishes no advisories (GitHub answers 404: private
+        repositories have none) yields an empty list, exactly like a
+        successful empty fetch; it is logged once per process.
+
         Raises:
-            SourceError: On a transport failure, a non-2xx response (a token
-                without the advisories scope answers 403/404), or a body that
-                is not a JSON list.
+            SourceError: On a transport failure, a non-2xx response other than
+                404 (a token without the advisories scope answers 403), or a
+                body that is not a JSON list.
         """
-        entries = await self._json_list(
-            f"{self._api_url}/repos/{slug}/security-advisories"
-            "?state=published&per_page=100",
-            "advisories",
-        )
+        try:
+            entries = await self._json_list(
+                f"{self._api_url}/repos/{slug}/security-advisories"
+                "?state=published&per_page=100",
+                "advisories",
+            )
+        except SourceError as exc:
+            if exc.status != 404:
+                raise
+            if slug not in _NO_ADVISORIES_LOGGED:
+                _NO_ADVISORIES_LOGGED.add(slug)
+                logger.info("%s publishes no security advisories", slug)
+            return []
         return [adv for entry in entries for adv in parse_advisory(entry)]
 
     async def download(self, asset_url: str, dest: Path) -> None:
@@ -262,7 +287,10 @@ class GitHubReleaseSource:
                 follow_redirects=True,
             ) as response:
                 if not response.is_success:
-                    raise SourceError(f"GitHub returned HTTP {response.status_code}")
+                    raise SourceError(
+                        f"GitHub returned HTTP {response.status_code}",
+                        response.status_code,
+                    )
                 declared = response.headers.get("content-length", "")
                 if declared.isdigit() and int(declared) > self.max_bytes:
                     raise SourceError(self._too_large())

@@ -98,7 +98,9 @@ This is a notice only: the framework is never installed or upgraded by this
 code, and only the GitHub API of the configured repo is contacted. Advisories
 need a token that can read them (`PLUGIN_UPDATE_GITHUB_TOKEN`); without that
 scope the update is still reported and `system.error` says the advisories are
-unavailable. The plugin part and the system part fail independently, and the
+unavailable. A private repository publishes no security advisories
+(GitHub answers 404): that is not an error, and only release notices appear
+for it. The plugin part and the system part fail independently, and the
 service starts when either is configured. A new system version emits
 `system.update_available` once on the event bus.
 

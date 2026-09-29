@@ -102,12 +102,31 @@ async def test_non_matching_advisory() -> None:
 
 
 async def test_advisories_forbidden_still_reports_update() -> None:
-    for status in (403, 404):
+    for status in (403, 500):
         res = await check_system(
             "1.14.0", "o/r", source=_source(REL, adv_status=status)
         )
         assert res.available and res.advisories == [] and not res.security
         assert res.error is not None and "advisories unavailable" in res.error
+
+
+async def test_advisories_404_is_not_an_error() -> None:
+    res = await check_system("1.14.0", "o/r", source=_source(REL, adv_status=404))
+    assert res.available and res.advisories == [] and not res.security
+    assert res.error is None
+
+
+async def test_advisories_404_clears_carried_security() -> None:
+    prev = await check_system(
+        "1.14.0",
+        "o/r",
+        source=_source(REL, advisories=[_adv("GHSA-1", "high", "< 1.14.1")]),
+    )
+    assert prev.security
+    res = await check_system(
+        "1.14.0", "o/r", source=_source(REL, adv_status=404), previous=prev
+    )
+    assert not res.security and res.advisories == [] and res.error is None
 
 
 async def test_releases_failure_sets_error() -> None:
