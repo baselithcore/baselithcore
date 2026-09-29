@@ -34,7 +34,11 @@ failed. Unsupported providers are named in the report, never silently skipped.
 
 - **`DataSubjectService`** — aggregates all registered providers and emits an
   audit log line (`AUDIT | PRIVACY | …`) per operation. One failing provider is
-  recorded and **does not abort** the others.
+  recorded and **does not abort** the others. On erasure it is listed in
+  `ErasureReport.failed` (and `complete` is `False`), never counted as zero
+  records: a provider that could not erase still holds the subject's data, so
+  the request must be retried for it. The `privacy.erase` audit event carries
+  the same list.
 
 ## Registering a provider
 

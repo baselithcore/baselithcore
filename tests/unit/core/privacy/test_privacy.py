@@ -73,6 +73,13 @@ class TestErase:
         assert bundle.data["feedback"] == []
 
     @pytest.mark.asyncio
+    async def test_a_clean_erasure_is_complete(self):
+        svc, _, _ = _service()
+        report = await svc.erase_subject("s1")
+        assert report.failed == []
+        assert report.complete is True
+
+    @pytest.mark.asyncio
     async def test_only_targets_subject(self):
         svc, _, mem = _service()
         await svc.erase_subject("s1")
@@ -94,8 +101,11 @@ class TestErase:
 
         svc.registry.register(Broken())
         report = await svc.erase_subject("s1")
-        assert report.erased["broken"] == 0
+        # A failed provider is reported failed, never as "0 records held".
+        assert report.failed == ["broken"]
+        assert "broken" not in report.erased
         assert report.erased["feedback"] == 2
+        assert report.complete is False
 
 
 class TestRetention:

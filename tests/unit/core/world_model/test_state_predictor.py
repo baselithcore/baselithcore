@@ -104,3 +104,36 @@ async def test_compare_outcomes_predicts_alternatives_concurrently():
 
     assert max_in_flight > 1
     assert set(outcomes.keys()) == {f"action-{i}" for i in range(4)}
+
+
+def test_custom_predictor_never_resolves_the_llm_service(monkeypatch):
+    """A deterministic predictor must not need a configured LLM to exist."""
+    import core.services.llm as llm_module
+
+    def _boom():
+        raise AssertionError("get_llm_service must not be called")
+
+    monkeypatch.setattr(llm_module, "get_llm_service", _boom)
+
+    predictor = StatePredictor(custom_predictor=lambda state, action: state)
+
+    assert predictor.llm_service is None
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_llm_degrades_to_rule_based(monkeypatch):
+    """No provider credentials: construction succeeds and effects still apply."""
+    import core.services.llm as llm_module
+    from core.services.llm.exceptions import LLMProviderError
+
+    def _no_key():
+        raise LLMProviderError("OpenAI API key is required")
+
+    monkeypatch.setattr(llm_module, "get_llm_service", _no_key)
+
+    predictor = StatePredictor()
+    state = State(name="test", variables={"count": 1})
+    action = Action(name="inc", action_type=ActionType.UPDATE, effects={"count": 2})
+
+    assert predictor.llm_service is None
+    assert (await predictor.predict(state, action)).variables["count"] == 2

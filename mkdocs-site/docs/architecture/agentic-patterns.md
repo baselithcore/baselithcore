@@ -499,7 +499,9 @@ Internal representation of world state.
 
 The world model is built from `State` and `Action` value objects plus a
 `StatePredictor` (LLM- or rule-based). `MCTSSimulator` and `RiskAssessor`
-operate over the same primitives.
+operate over the same primitives. The predictor never needs model
+credentials to exist: with a `custom_predictor=` it skips the LLM, and with no
+usable provider it falls back to applying action effects.
 
 ```python
 from core.world_model import State, Action, StatePredictor, RiskAssessor

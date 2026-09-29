@@ -79,17 +79,22 @@ class DataSubjectService:
                     "privacy_erase_provider_failed",
                     extra={"provider": provider.name, "error": str(exc)},
                 )
-                report.erased[provider.name] = 0
+                report.failed.append(provider.name)
         logger.info(
-            "AUDIT | PRIVACY | subject erasure | subject=%s removed=%d",
+            "AUDIT | PRIVACY | subject erasure | subject=%s removed=%d failed=%s",
             subject_id,
             report.total,
+            ",".join(report.failed) or "-",
         )
         await get_audit_logger().log(
             AuditEventType.PRIVACY_ERASE,
             resource=subject_id,
             action="erase",
-            details={"erased": dict(report.erased), "total": report.total},
+            details={
+                "erased": dict(report.erased),
+                "total": report.total,
+                "failed": list(report.failed),
+            },
         )
         return report
 

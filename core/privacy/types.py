@@ -30,15 +30,26 @@ class SubjectExport(BaseModel):
 
 
 class ErasureReport(BaseModel):
-    """Per-provider record counts removed for a subject (right to erasure)."""
+    """Per-provider record counts removed for a subject (right to erasure).
+
+    A provider that raised is listed in ``failed`` and absent from ``erased``:
+    reporting it as ``0`` would read as "nothing held there" while the data is
+    still stored, which is the one answer an erasure request must never give.
+    """
 
     subject_id: str
     completed_at: float = Field(default_factory=time.time)
     erased: dict[str, int] = Field(default_factory=dict)
+    failed: list[str] = Field(default_factory=list)
 
     @property
     def total(self) -> int:
         return sum(self.erased.values())
+
+    @property
+    def complete(self) -> bool:
+        """True only when every provider answered."""
+        return not self.failed
 
 
 class RetentionReport(BaseModel):
