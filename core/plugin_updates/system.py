@@ -14,7 +14,12 @@ from core.plugins.version import SemanticVersion
 
 from ._advisories import SEVERITY_ORDER
 from .models import Advisory, ReleaseInfo, SystemUpdate
-from .sources import GitHubReleaseSource, SourceError, safe_error
+from .sources import (
+    AdvisoriesNotPublished,
+    GitHubReleaseSource,
+    SourceError,
+    safe_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +112,9 @@ async def check_system(
         slug: ``owner/repo`` of the distribution.
         source: The GitHub source to query.
         previous: The last saved result; the state of a part that fails to
-            refresh is carried over (a fetched-and-empty advisory list still
-            clears the security flag).
+            refresh is carried over, and so is a known security state when the
+            advisories endpoint answers 404 (no error is set for it). Only a
+            successful fetch that does not match clears the security flag.
 
     Returns:
         The status. The release lookup and the advisory lookup fail
@@ -137,6 +143,8 @@ async def check_system(
             if affects(adv, installed) and adv.ghsa_id not in seen:
                 seen.add(adv.ghsa_id)
                 matching.append(adv)
+    except AdvisoriesNotPublished:
+        advisories_failed = True
     except SourceError as exc:
         advisories_failed = True
         errors.append(f"advisories unavailable ({safe_error(exc)})")

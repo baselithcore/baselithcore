@@ -116,7 +116,7 @@ async def test_advisories_404_is_not_an_error() -> None:
     assert res.error is None
 
 
-async def test_advisories_404_clears_carried_security() -> None:
+async def test_advisories_404_keeps_carried_security() -> None:
     prev = await check_system(
         "1.14.0",
         "o/r",
@@ -125,6 +125,19 @@ async def test_advisories_404_clears_carried_security() -> None:
     assert prev.security
     res = await check_system(
         "1.14.0", "o/r", source=_source(REL, adv_status=404), previous=prev
+    )
+    assert res.security and res.severity == prev.severity == "high"
+    assert res.advisories == prev.advisories and res.error is None
+
+
+async def test_advisories_2xx_empty_clears_carried_security() -> None:
+    prev = await check_system(
+        "1.14.0",
+        "o/r",
+        source=_source(REL, advisories=[_adv("GHSA-1", "high", "< 1.14.1")]),
+    )
+    res = await check_system(
+        "1.14.0", "o/r", source=_source(REL, advisories=[]), previous=prev
     )
     assert not res.security and res.advisories == [] and res.error is None
 

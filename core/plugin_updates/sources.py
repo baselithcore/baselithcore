@@ -81,6 +81,16 @@ def _parse_release(plugin: str, rel: Any) -> tuple[SemanticVersion, ReleaseInfo]
     )
 
 
+class AdvisoriesNotPublished(Exception):
+    """The advisories endpoint answered 404: nothing is known, not "none".
+
+    A 404 is also what a token without the advisories permission, a renamed
+    repo or a transient GitHub fault looks like, so it is a distinct signal
+    (not a :class:`SourceError`, no error text) and never proof that a known
+    security notice is gone.
+    """
+
+
 class SourceError(Exception):
     """A release source could not be queried or downloaded from.
 
@@ -231,10 +241,12 @@ class GitHubReleaseSource:
         entries are skipped.
 
         A repo that publishes no advisories (GitHub answers 404: private
-        repositories have none) yields an empty list, exactly like a
-        successful empty fetch; it is logged once per process.
+        repositories have none) raises :class:`AdvisoriesNotPublished`, which
+        is not an empty list: only a 2xx fetch may say "no advisories". It is
+        logged once per process.
 
         Raises:
+            AdvisoriesNotPublished: On a 404.
             SourceError: On a transport failure, a non-2xx response other than
                 404 (a token without the advisories scope answers 403), or a
                 body that is not a JSON list.
@@ -251,7 +263,7 @@ class GitHubReleaseSource:
             if slug not in _NO_ADVISORIES_LOGGED:
                 _NO_ADVISORIES_LOGGED.add(slug)
                 logger.info("%s publishes no security advisories", slug)
-            return []
+            raise AdvisoriesNotPublished(slug) from exc
         return [adv for entry in entries for adv in parse_advisory(entry)]
 
     async def download(self, asset_url: str, dest: Path) -> None:
@@ -314,6 +326,7 @@ class GitHubReleaseSource:
 
 
 __all__ = [
+    "AdvisoriesNotPublished",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "GitHubReleaseSource",
     "SourceError",

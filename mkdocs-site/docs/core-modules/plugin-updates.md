@@ -100,7 +100,9 @@ need a token that can read them (`PLUGIN_UPDATE_GITHUB_TOKEN`); without that
 scope the update is still reported and `system.error` says the advisories are
 unavailable. A private repository publishes no security advisories
 (GitHub answers 404): that is not an error, and only release notices appear
-for it. The plugin part and the system part fail independently, and the
+for it. A 404 never clears a known notice: a previously reported security
+state is carried over, and only a successful fetch that no longer matches
+clears it. The plugin part and the system part fail independently, and the
 service starts when either is configured. A new system version emits
 `system.update_available` once on the event bus.
 
