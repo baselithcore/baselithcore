@@ -355,7 +355,7 @@ spec:
             summary: "Update available for {{ "{{ $labels.component }}" }} in {{ $ns }}"
             description: >-
               A newer release exists for `{{ "{{ $labels.component }}" }}` (`core`
-              is the framework, `plugin:<name>` a plugin) and no known security
+              is the public core release, `plugin:<name>` a plugin) and no known security
               advisory affects the running version. Nothing is installed by the
               notice: plan the upgrade (roll out the new image) in the next maintenance
               window. It resolves once the cell runs the new version.

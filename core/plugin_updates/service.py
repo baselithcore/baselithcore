@@ -9,7 +9,8 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from core._version import __version__ as CORE_VERSION
+from core._core_version import CORE_VERSION
+from core._version import __version__ as FRAMEWORK_VERSION
 from core.config.plugin_updates import PluginUpdateConfig
 from core.events import get_event_bus
 from core.plugins.signing import load_trusted_keys
@@ -50,8 +51,39 @@ class PluginUpdateService:
         self._last: tuple[float, CheckReport] | None = None
 
     def report(self) -> CheckReport | None:
-        """The last saved report, if any."""
-        return self._cache.load()
+        """The last saved report, if any, as :meth:`_present` shapes it."""
+        return self._present(self._cache.load())
+
+    def _present(self, report: CheckReport | None) -> CheckReport | None:
+        """``report`` with its system notice passed through :meth:`_present_system`."""
+        if report is None or report.system is None:
+            return report
+        system = self._present_system(report.system)
+        if system is report.system:
+            return report
+        return report.model_copy(update={"system": system})
+
+    def _present_system(self, system: SystemUpdate | None) -> SystemUpdate | None:
+        """Serve only a notice about this core, with today's guide link.
+
+        A saved notice about another repository or another installed version
+        (a cache from before an upgrade, or from before the notice referenced
+        the public core release) is dropped rather than shown, and so is one
+        saved while the check was on and read after it was switched off. The
+        upgrade guide link always comes from the current configuration.
+        """
+        if system is None:
+            return None
+        if (
+            not self._config.system_checks_enabled
+            or system.repo != self._config.core_update_repo.strip()
+            or system.installed_version != CORE_VERSION
+        ):
+            return None
+        guide = self._config.upgrade_guide_url
+        if system.upgrade_guide_url == guide:
+            return system
+        return system.model_copy(update={"upgrade_guide_url": guide})
 
     async def request_check(self) -> CheckReport:
         """``check_now`` for API callers, throttled per process.
@@ -74,7 +106,7 @@ class PluginUpdateService:
         candidates are kept and ``error`` set.
         """
         async with self._lock:
-            previous = self._cache.load()
+            previous = self._present(self._cache.load())
             source = GitHubReleaseSource(
                 self._config.github_api_url,
                 self._config.github_token,
@@ -82,6 +114,7 @@ class PluginUpdateService:
             )
             candidates, error = await self._plugin_part(source, previous)
             system = await self._system_part(source, previous)
+            system = self._present_system(system)
             report = CheckReport(
                 checked_at=datetime.now(UTC),
                 candidates=candidates,
@@ -119,7 +152,7 @@ class PluginUpdateService:
     ) -> SystemUpdate | None:
         if not self._config.system_checks_enabled:
             return None
-        slug = self._config.system_update_repo.strip()
+        slug = self._config.core_update_repo.strip()
         prior = previous.system if previous else None
         try:
             return await check_system(CORE_VERSION, slug, source=source, previous=prior)
@@ -141,7 +174,7 @@ class PluginUpdateService:
             installed_versions(self._bundled_root),
             source=source,
             cache=self._cache,
-            core_version=CORE_VERSION,
+            core_version=FRAMEWORK_VERSION,
             trusted_keys=keys,
         )
 
@@ -217,7 +250,7 @@ class PluginUpdateService:
         """Start the periodic check (idempotent)."""
         if self._task is None or self._task.done():
             # A restart must not blank the alert until the first check lands.
-            publish_update_metrics(self._cache.load())
+            publish_update_metrics(self.report())
             self._task = asyncio.create_task(self._loop(), name="plugin-updates")
 
     async def stop(self) -> None:

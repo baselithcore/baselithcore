@@ -1,5 +1,9 @@
-"""System (framework) update check: newer releases and security advisories.
+"""System (core) update check: newer releases and security advisories.
 
+The running core is always referenced against the public core project: the
+installed version is the public core release the tree corresponds to
+(``core._core_version.CORE_VERSION``), never a downstream distribution's own
+version, and the repo is the public core repository (``CORE_UPDATE_REPO``).
 Notice only: nothing here installs or downloads anything.
 """
 
@@ -105,11 +109,11 @@ async def check_system(
     source: GitHubReleaseSource,
     previous: SystemUpdate | None = None,
 ) -> SystemUpdate:
-    """Compare the running framework with its repo's releases and advisories.
+    """Compare the running core with the public core's releases and advisories.
 
     Args:
-        installed: The running framework version.
-        slug: ``owner/repo`` of the distribution.
+        installed: The public core release the running tree corresponds to.
+        slug: ``owner/repo`` of the public core project.
         source: The GitHub source to query.
         previous: The last saved result; the state of a part that fails to
             refresh is carried over, and so is a known security state when the

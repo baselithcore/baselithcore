@@ -424,13 +424,14 @@ Declared in `core.config.plugin_updates`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
 | `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
 | `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
 | `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `int` | `200` | Largest release artifact downloaded, in MB; a larger one is refused before its signature is checked (it unpacks to at most 4x this) |
 | `PLUGIN_UPDATE_SOURCES_FILE` | `Path \| None` | *empty* | YAML file mapping plugin names to their GitHub mirror repos (the mirror registry); update checks are off while unset |
-| `SYSTEM_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_SYSTEM_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo whose releases and security advisories are compared with the running framework version (env SYSTEM_UPDATE_REPO); empty disables the system update notice |
+| `SYSTEM_UPGRADE_GUIDE_URL`<br>also accepts `PLUGIN_UPDATE_UPGRADE_GUIDE_URL` | `str \| None` | *empty* | https link to this deployment's upgrade instructions, shown with the system update notice (env SYSTEM_UPGRADE_GUIDE_URL); anything but an absolute https URL is ignored |
 
 ## Plugin-specific configuration settings
 
@@ -921,4 +922,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-587 settings documented.
+588 settings documented.

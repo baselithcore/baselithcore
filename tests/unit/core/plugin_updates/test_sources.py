@@ -114,7 +114,7 @@ def test_load_sources_skips_subtrees(tmp_path: Path) -> None:
 
 
 def test_config_enabled_needs_existing_sources_file(tmp_path: Path) -> None:
-    off = {"system_update_repo": ""}
+    off = {"core_update_repo": ""}
     assert not PluginUpdateConfig(sources_file=None, **off).enabled
     assert not PluginUpdateConfig(sources_file=tmp_path / "nope.yaml", **off).enabled
     f = tmp_path / "m.yaml"
@@ -207,19 +207,12 @@ async def test_list_releases_newest_first_semver_only() -> None:
     assert latest is not None and latest.version == "1.2.0"
 
 
-def test_config_system_repo_semantics(tmp_path: Path) -> None:
-    only_system = PluginUpdateConfig(sources_file=None, system_update_repo="o/r")
+def test_config_core_repo_semantics(tmp_path: Path) -> None:
+    only_system = PluginUpdateConfig(sources_file=None, core_update_repo="o/r")
     assert only_system.enabled and not only_system.plugin_checks_enabled
-    assert PluginUpdateConfig().system_update_repo == "baselithcore/baselithcore"
-    off = PluginUpdateConfig(sources_file=None, system_update_repo="")
+    assert PluginUpdateConfig().core_update_repo == "baselithcore/baselithcore"
+    off = PluginUpdateConfig(sources_file=None, core_update_repo="")
     assert not off.enabled
-
-
-def test_config_system_repo_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SYSTEM_UPDATE_REPO", "x/y")
-    assert PluginUpdateConfig().system_update_repo == "x/y"
-    monkeypatch.setenv("SYSTEM_UPDATE_REPO", "")
-    assert not PluginUpdateConfig().enabled
 
 
 def _capped(

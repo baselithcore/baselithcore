@@ -1,6 +1,45 @@
 {
   "components": {
     "schemas": {
+      "Advisory": {
+        "description": "A published GitHub Security Advisory for one vulnerable version range.",
+        "properties": {
+          "ghsa_id": {
+            "title": "Ghsa Id",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "patched_versions": {
+            "title": "Patched Versions",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "vulnerable_range": {
+            "title": "Vulnerable Range",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ghsa_id",
+          "severity",
+          "summary",
+          "html_url",
+          "vulnerable_range",
+          "patched_versions"
+        ],
+        "title": "Advisory",
+        "type": "object"
+      },
       "AgentCardResponse": {
         "additionalProperties": true,
         "description": "The agent card as served at the discovery endpoints.\n\nMirrors :meth:`core.a2a.agent_card.AgentCard.to_dict`; unknown members are\npassed through untouched.",
@@ -288,6 +327,50 @@
           "query"
         ],
         "title": "ChatRequest",
+        "type": "object"
+      },
+      "CheckReport": {
+        "description": "Result of a full update check across plugins and the framework.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/UpdateCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "checked_at",
+          "candidates"
+        ],
+        "title": "CheckReport",
         "type": "object"
       },
       "CreateTenantRequest": {
@@ -653,6 +736,30 @@
         "title": "PluginStatusResponse",
         "type": "object"
       },
+      "PluginUpdatesResponse": {
+        "description": "The last update report, and whether the feature is configured.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "PluginUpdatesResponse",
+        "type": "object"
+      },
       "PromptVersionIn": {
         "description": "Payload for registering one prompt version.",
         "properties": {
@@ -772,6 +879,25 @@
         ],
         "title": "PublishRequest",
         "type": "object"
+      },
+      "Refusal": {
+        "description": "Why a release is not offered or not installable.",
+        "enum": [
+          "manifest_invalid",
+          "name_mismatch",
+          "version_mismatch",
+          "integrity_mismatch",
+          "signature_invalid",
+          "no_trusted_keys",
+          "not_newer",
+          "incompatible_core",
+          "needs_environment_update",
+          "artifact_missing",
+          "artifact_checksum",
+          "source_error"
+        ],
+        "title": "Refusal",
+        "type": "string"
       },
       "RegisterSystemRequest": {
         "description": "Declare an AI system for the registry.",
@@ -898,6 +1024,75 @@
         "title": "RegisterSystemRequest",
         "type": "object"
       },
+      "ReleaseInfo": {
+        "description": "A published release of a plugin, as reported by its source.",
+        "properties": {
+          "html_url": {
+            "default": "",
+            "title": "Html Url",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "plugin": {
+            "title": "Plugin",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "release_json_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Json Url"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          },
+          "tarball_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tarball Url"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin",
+          "version",
+          "tag",
+          "published_at"
+        ],
+        "title": "ReleaseInfo",
+        "type": "object"
+      },
       "RetentionRequest": {
         "description": "Retention sweep horizon.",
         "properties": {
@@ -928,6 +1123,101 @@
         "title": "SubjectRequest",
         "type": "object"
       },
+      "SystemUpdate": {
+        "description": "Status of the running core against the public core project's releases.\n\n``installed_version`` is the public core release the running tree\ncorresponds to (``core._core_version.CORE_VERSION``), never a downstream\ndistribution's own version, and ``repo`` is the public core repository.\n``upgrade_guide_url`` is the operator's upgrade instructions\n(``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration\nwhenever the report is served. Notice only: nothing is ever installed from\nthis data.",
+        "properties": {
+          "advisories": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Advisory"
+            },
+            "title": "Advisories",
+            "type": "array"
+          },
+          "available": {
+            "default": false,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "behind": {
+            "default": 0,
+            "title": "Behind",
+            "type": "integer"
+          },
+          "component": {
+            "default": "core",
+            "title": "Component",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "installed_version": {
+            "title": "Installed Version",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "major": {
+            "default": false,
+            "title": "Major",
+            "type": "boolean"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "security": {
+            "default": false,
+            "title": "Security",
+            "type": "boolean"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "upgrade_guide_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upgrade Guide Url"
+          }
+        },
+        "required": [
+          "repo",
+          "installed_version"
+        ],
+        "title": "SystemUpdate",
+        "type": "object"
+      },
       "Tenant": {
         "description": "Data model representing a system tenant.\n\nAttributes:\n    id: Unique tenant identifier (slug).\n    name: Human-readable display name.\n    status: Operational status (active, suspended, etc.).\n    created_at: ISO timestamp of creation.",
         "properties": {
@@ -955,6 +1245,63 @@
           "created_at"
         ],
         "title": "Tenant",
+        "type": "object"
+      },
+      "UpdateCandidate": {
+        "description": "One plugin's update status.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "installed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Version"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plugin": {
+            "title": "Plugin",
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "plugin",
+          "installed_version",
+          "latest",
+          "available"
+        ],
+        "title": "UpdateCandidate",
         "type": "object"
       },
       "ValidationError": {
@@ -1019,7 +1366,7 @@
   },
   "info": {
     "title": "Baselith-Core",
-    "version": "0.40.0"
+    "version": "0.40.2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2157,6 +2504,50 @@
         "summary": "Get Plugin Status",
         "tags": [
           "Plugin Management"
+        ]
+      }
+    },
+    "/api/plugins/updates": {
+      "get": {
+        "description": "Return the last saved check report (no network access).",
+        "operationId": "get_updates_api_plugins_updates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUpdatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Updates",
+        "tags": [
+          "Plugin Updates"
+        ]
+      }
+    },
+    "/api/plugins/updates/check": {
+      "post": {
+        "description": "Run an update check now (throttled per process) and return the report.",
+        "operationId": "check_updates_api_plugins_updates_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Updates",
+        "tags": [
+          "Plugin Updates"
         ]
       }
     },

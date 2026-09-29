@@ -79,9 +79,15 @@ class Advisory(BaseModel):
 
 
 class SystemUpdate(BaseModel):
-    """Status of the running framework against its distribution's releases.
+    """Status of the running core against the public core project's releases.
 
-    Notice only: nothing is ever installed from this data.
+    ``installed_version`` is the public core release the running tree
+    corresponds to (``core._core_version.CORE_VERSION``), never a downstream
+    distribution's own version, and ``repo`` is the public core repository.
+    ``upgrade_guide_url`` is the operator's upgrade instructions
+    (``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration
+    whenever the report is served. Notice only: nothing is ever installed from
+    this data.
     """
 
     component: str = "core"
@@ -95,6 +101,7 @@ class SystemUpdate(BaseModel):
     severity: str | None = None
     advisories: list[Advisory] = []
     error: str | None = None
+    upgrade_guide_url: str | None = None
 
 
 class CheckReport(BaseModel):

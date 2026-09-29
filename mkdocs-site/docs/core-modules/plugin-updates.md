@@ -4,24 +4,25 @@ description: Signed plugin release detection, the trust model and the admin API
 ---
 
 The `core/plugin_updates` module watches GitHub releases and tells
-administrators when a newer version exists: of the framework itself (the
-system update notice, on by default) and of your plugins (only once a sources
-file is configured).
+administrators when a newer version exists: of the core itself (the system
+update notice, on by default) and of your plugins (only once a sources file is
+configured).
 
 What it contacts: `api.github.com` (or `PLUGIN_UPDATE_GITHUB_API_URL`), for the
-releases and published security advisories of `SYSTEM_UPDATE_REPO`, about 60
+releases and published security advisories of `CORE_UPDATE_REPO`, about 60
 seconds after boot and then every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS`. Each
 API worker process runs its own check. The requests are plain reads of release
 data: nothing about the deployment (its version, plugins, hosts or users) is
 sent beyond what any HTTPS request carries (the source address, the HTTP
-client's user agent and, when configured, the token). Set `SYSTEM_UPDATE_REPO=""` to switch the system check off;
-with no sources file either, the module never contacts GitHub.
+client's user agent and, when configured, the token). Set `CORE_UPDATE_REPO=""`
+to switch the system check off; with no sources file either, the module never
+contacts GitHub.
 
 !!! warning "Upgrade note"
     Earlier releases stayed silent until a sources file was configured. From
     this release on, a deployment with default settings contacts the GitHub API
-    for the framework's releases and advisories. An air-gapped or egress-filtered
-    deployment should set `SYSTEM_UPDATE_REPO=""` (or allow `api.github.com`),
+    for the core's releases and advisories. An air-gapped or egress-filtered
+    deployment should set `CORE_UPDATE_REPO=""` (or allow `api.github.com`),
     otherwise each check fails and the report carries the error.
 
 !!! note "Detection only, for now"
@@ -75,7 +76,8 @@ fails rule 3.
 | `PLUGIN_UPDATE_GITHUB_TOKEN` | unset | GitHub token with read access to the mirror repos' releases; kept server-side as a secret |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `https://api.github.com` | GitHub API base URL (GitHub Enterprise); must be `https`, except `http` on a loopback host |
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `21600` | Seconds between automatic checks (minimum `300`) |
-| `SYSTEM_UPDATE_REPO` | `baselithcore/baselithcore` | GitHub `owner/repo` whose releases and security advisories are compared with the running framework; empty disables the system notice |
+| `CORE_UPDATE_REPO` | `baselithcore/baselithcore` | GitHub `owner/repo` of the public core project, whose releases and security advisories are compared with the running core release; empty disables the system notice |
+| `SYSTEM_UPGRADE_GUIDE_URL` | unset | `https` link to this deployment's upgrade instructions, served with the system notice; any other value is ignored |
 | `PLUGIN_UPDATE_CACHE_DIR` | `data/plugin_updates` | Cached last report and verified release artifacts; the Helm chart sets `/tmp/plugin_updates`, since its root filesystem is read-only |
 | `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `200` | Largest release artifact downloaded; it may unpack to at most four times this and 20 000 members, or it is refused before any signature check |
 | `BASELITH_PLUGIN_OVERLAY_DIR` | unset | Directory of updated plugins that shadows the bundled `plugins/<name>` |
@@ -84,27 +86,51 @@ fails rule 3.
 
 ## System update notice
 
-The same periodic check also compares the running framework version
-(`core._version.__version__`) with the latest stable GitHub Release of
-`SYSTEM_UPDATE_REPO`. The report gains a `system` section: the latest release,
-how many releases the deployment is behind, whether the jump crosses a major
-version, and the published GitHub Security Advisories whose vulnerable range
-contains the installed version (highest severity wins; `security: true` on any
-match). A downstream distribution that versions independently sets
-`SYSTEM_UPDATE_REPO` to its own repo (with a token that can read it, if it is
-private); an empty value disables the system check.
+The same periodic check compares the running core with the latest stable
+GitHub Release of the public core project, `CORE_UPDATE_REPO`. The installed
+version is `CORE_VERSION` from `core/_core_version.py`: the public core release
+the running `core/` tree corresponds to. The report gains a `system` section
+(`component: "core"`): the latest release, how many releases the deployment is
+behind, whether the jump crosses a major version, and the published GitHub
+Security Advisories whose vulnerable range contains the installed version
+(highest severity wins; `security: true` on any match).
 
-This is a notice only: the framework is never installed or upgraded by this
-code, and only the GitHub API of the configured repo is contacted. Advisories
-need a token that can read them (`PLUGIN_UPDATE_GITHUB_TOKEN`); without that
-scope the update is still reported and `system.error` says the advisories are
-unavailable. A private repository publishes no security advisories
-(GitHub answers 404): that is not an error, and only release notices appear
-for it. A 404 never clears a known notice: a previously reported security
-state is carried over, and only a successful fetch that no longer matches
-clears it. The plugin part and the system part fail independently, and the
-service starts when either is configured. A new system version emits
-`system.update_available` once on the event bus.
+**Why `CORE_VERSION` and not `__version__`.** In the core project the two are
+the same release: its release job rewrites `core/_version.py` and
+`core/_core_version.py` together, and `tests/unit/core/test_core_version.py`
+fails if they disagree. A downstream distribution that ships this `core/`
+beside components of its own versions independently. It marks its
+`core/_version.py` with `__distribution__ = "<name>"`, keeps its own version
+there and receives `core/_core_version.py` unchanged through its normal core
+alignment (its release job must never rewrite it; the same test checks that).
+The notice therefore always says which public core release a deployment runs
+and whether a newer one, or a security advisory against it, exists, whatever
+the distribution's own version number. `SYSTEM_UPDATE_REPO`, which once
+pointed the notice at another repository, is ignored: when it is still set, a
+single warning is logged at startup.
+
+This is a notice only: the core is never installed or upgraded by this code,
+and only the GitHub API of the configured repo is contacted. The public repo
+needs no token. When `PLUGIN_UPDATE_GITHUB_TOKEN` is set (plugin mirrors need
+it), it is sent to the same API host for the core requests too: a read-only
+token on a public repository grants nothing extra, and an authenticated client
+gets a much higher rate limit. Without advisory read access the update is still
+reported and `system.error` says the advisories are unavailable. A repository
+that publishes no security advisories answers 404: that is not an error, and
+only release notices appear for it. A 404 never clears a known notice: a
+previously reported security state is carried over, and only a successful
+fetch that no longer matches clears it. A saved notice about another repository
+or another installed version is never served (after an upgrade, the first check
+replaces it). The plugin part and the system part fail independently, and the
+service starts when either is configured. A new core version emits
+`system.update_available` (with `component: "core"`) once on the event bus.
+
+**How to upgrade.** The notice never claims how the deployment is upgraded.
+Set `SYSTEM_UPGRADE_GUIDE_URL` to the operator's own instructions and the
+report carries it as `system.upgrade_guide_url` (read from the current
+configuration every time the report is served) for a console to link as "How
+to upgrade"; without it a console should say that upgrading is done by
+whoever operates the deployment.
 
 ### Metric and alerts
 

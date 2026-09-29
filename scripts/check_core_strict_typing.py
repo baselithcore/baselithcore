@@ -66,6 +66,7 @@ STRICT_CORE_PACKAGES: tuple[str, ...] = (
     # suggestion — but it is the one package every downstream program imports,
     # so it is strict from its first commit.
     "baselith",
+    "core._core_version",
     "core._version",
     "core.a2a",
     "core.adversarial",

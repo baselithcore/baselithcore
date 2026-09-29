@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from core._core_version import CORE_VERSION
 from core.config.plugin_updates import PluginUpdateConfig
 from core.plugin_updates import service as svc_mod
 from core.plugin_updates.models import (
@@ -20,7 +21,7 @@ def _cfg(tmp: Path) -> PluginUpdateConfig:
     src = tmp / "m.yaml"
     src.write_text("mirrors:\n  demo:\n    repo: git@github.com:o/r.git\n")
     return PluginUpdateConfig(
-        sources_file=src, cache_dir=tmp / "c", system_update_repo=""
+        sources_file=src, cache_dir=tmp / "c", core_update_repo=""
     )
 
 
@@ -140,7 +141,7 @@ async def test_source_error_message_is_kept(
 def _sys_update(version: str = "1.15.0", *, error: str | None = None) -> SystemUpdate:
     return SystemUpdate(
         repo="o/r",
-        installed_version="1.14.0",
+        installed_version=CORE_VERSION,
         latest=ReleaseInfo(
             plugin="core", version=version, tag=f"v{version}", published_at=None
         ),
@@ -153,9 +154,9 @@ def _sys_update(version: str = "1.15.0", *, error: str | None = None) -> SystemU
 def _sys_cfg(tmp: Path, *, with_plugins: bool) -> PluginUpdateConfig:
     if with_plugins:
         cfg = _cfg(tmp)
-        return cfg.model_copy(update={"system_update_repo": "o/r"})
+        return cfg.model_copy(update={"core_update_repo": "o/r"})
     return PluginUpdateConfig(
-        sources_file=None, cache_dir=tmp / "c", system_update_repo="o/r"
+        sources_file=None, cache_dir=tmp / "c", core_update_repo="o/r"
     )
 
 
@@ -237,11 +238,7 @@ async def test_system_disabled_leaves_system_none(
 async def test_unexpected_system_exception_keeps_previous_security(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core._version import __version__
-
-    prior = _sys_update().model_copy(
-        update={"installed_version": __version__, "security": True, "severity": "high"}
-    )
+    prior = _sys_update().model_copy(update={"security": True, "severity": "high"})
     svc = svc_mod.PluginUpdateService(_sys_cfg(tmp_path, with_plugins=False))
     svc._cache.save(
         CheckReport(checked_at=datetime.now(UTC), candidates=[], system=prior)

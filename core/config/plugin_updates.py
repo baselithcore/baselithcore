@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -9,7 +12,60 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+#: The public core project, whose releases and advisories the notice reads.
+PUBLIC_CORE_REPO = "baselithcore/baselithcore"
+#: Environment names that once pointed the notice at another repository. The
+#: notice now always references the public core release, so they are ignored.
+LEGACY_REPO_ENV = ("SYSTEM_UPDATE_REPO", "PLUGIN_UPDATE_SYSTEM_UPDATE_REPO")
+_legacy_warned = False
+
+
+def warn_ignored_legacy_env(environ: Mapping[str, str] | None = None) -> bool:
+    """Log, once per process, that a legacy repo variable is set and ignored.
+
+    Args:
+        environ: The environment to inspect (``os.environ`` when omitted).
+
+    Returns:
+        True when this call logged the warning.
+    """
+    global _legacy_warned
+    env = os.environ if environ is None else environ
+    names = [name for name in LEGACY_REPO_ENV if env.get(name, "").strip()]
+    if not names or _legacy_warned:
+        return False
+    _legacy_warned = True
+    logger.warning(
+        "%s is set but ignored: the system update notice always compares the "
+        "running core with the public core release (CORE_UPDATE_REPO, default "
+        "%s). Remove the variable from this deployment.",
+        ", ".join(names),
+        PUBLIC_CORE_REPO,
+    )
+    return True
+
+
+def _https_link(value: str | None) -> str | None:
+    """``value`` when it is an absolute https URL without credentials, else None."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    parts = urlsplit(text)
+    if (
+        parts.scheme != "https"
+        or not parts.hostname
+        or parts.username is not None
+        or any(ch.isspace() for ch in text)
+    ):
+        logger.warning(
+            "SYSTEM_UPGRADE_GUIDE_URL ignored: it must be an absolute https URL"
+        )
+        return None
+    return text
 
 
 class PluginUpdateConfig(BaseSettings):
@@ -56,15 +112,33 @@ class PluginUpdateConfig(BaseSettings):
         description="Where downloaded release artifacts and the last check are cached",
     )
 
-    system_update_repo: str = Field(
+    core_update_repo: str = Field(
+        # Literal, not PUBLIC_CORE_REPO: the generated configuration reference
+        # renders the default from the source.
         default="baselithcore/baselithcore",
         validation_alias=AliasChoices(
-            "SYSTEM_UPDATE_REPO", "PLUGIN_UPDATE_SYSTEM_UPDATE_REPO"
+            "CORE_UPDATE_REPO", "PLUGIN_UPDATE_CORE_UPDATE_REPO"
         ),
-        description="GitHub owner/repo whose releases and security advisories are "
-        "compared with the running framework version (env SYSTEM_UPDATE_REPO); "
-        "empty disables the system update notice",
+        description="GitHub owner/repo of the public core project, whose releases "
+        "and security advisories are compared with the running core release "
+        "(core/_core_version.py; env CORE_UPDATE_REPO); empty disables the "
+        "system update notice",
     )
+    upgrade_guide_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SYSTEM_UPGRADE_GUIDE_URL", "PLUGIN_UPDATE_UPGRADE_GUIDE_URL"
+        ),
+        description="https link to this deployment's upgrade instructions, shown "
+        "with the system update notice (env SYSTEM_UPGRADE_GUIDE_URL); anything "
+        "but an absolute https URL is ignored",
+    )
+
+    @field_validator("upgrade_guide_url", mode="before")
+    @classmethod
+    def _guide_is_https(cls, value: object) -> str | None:
+        """A notice link must never become a phishing or script vector."""
+        return _https_link(value if isinstance(value, str) else None)
 
     @field_validator("github_api_url")
     @classmethod
@@ -89,8 +163,8 @@ class PluginUpdateConfig(BaseSettings):
 
     @property
     def system_checks_enabled(self) -> bool:
-        """True when a system repo is configured."""
-        return bool(self.system_update_repo.strip())
+        """True when a core repo is configured."""
+        return bool(self.core_update_repo.strip())
 
     @property
     def enabled(self) -> bool:
@@ -100,8 +174,19 @@ class PluginUpdateConfig(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_plugin_update_config() -> PluginUpdateConfig:
-    """Get the cached plugin update configuration."""
+    """Get the cached plugin update configuration.
+
+    Also warns (once) when a legacy repo variable is still set: it no longer
+    changes anything, and an operator should know that.
+    """
+    warn_ignored_legacy_env()
     return PluginUpdateConfig()
 
 
-__all__ = ["PluginUpdateConfig", "get_plugin_update_config"]
+__all__ = [
+    "LEGACY_REPO_ENV",
+    "PUBLIC_CORE_REPO",
+    "PluginUpdateConfig",
+    "get_plugin_update_config",
+    "warn_ignored_legacy_env",
+]
