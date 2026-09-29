@@ -83,6 +83,13 @@ if rollback.can_rollback:
     log.info("Rollback is feasible.")
 ```
 
+`StatePredictor` does not require a configured LLM. Passing
+`custom_predictor=` (a deterministic `(state, action) -> state` model) skips
+the LLM service entirely, and when no provider is usable — no API key, for
+instance — the constructor logs a warning and falls back to applying action
+effects instead of raising. A module that builds its predictor at import time
+therefore stays importable in a deployment with no model credentials.
+
 For multi-step lookahead, `MCTSSimulator` runs Monte Carlo Tree Search over
 candidate action paths (`await simulator.search(...)` returns a
 `SimulationResult`), and `StatePredictor.predict_sequence(...)` chains
