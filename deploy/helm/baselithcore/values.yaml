@@ -698,6 +698,14 @@ database:
     # the running pods: ReadWriteMany, or ReadWriteOnce with every pod (the Job
     # inherits nodeSelector/affinity/tolerations) pinned to one node.
     mountVolumes: false
+    # Raw env appended to this Job's container only — never to the api or
+    # worker pods. It comes after the owner's DB_USER/DB_PASSWORD (with
+    # runtimeRole on), so `$(DB_USER)` / `$(DB_PASSWORD)` in a value expand to
+    # the owner: the place for an owner-only credential a plugin's schema step
+    # reads, e.g. an engine's own database URL
+    #   - name: MYPLUGIN_SCHEMA_DATABASE_URL
+    #     value: postgresql://app_owner:$(DB_PASSWORD)@pg:5432/myplugin_engine
+    extraEnv: []
     backoffLimit: 1
     activeDeadlineSeconds: 900
     resources:

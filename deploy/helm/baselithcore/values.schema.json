@@ -707,6 +707,13 @@
             "mountVolumes": {
               "type": "boolean"
             },
+            "extraEnv": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"]
+              }
+            },
             "backoffLimit": {
               "type": "integer",
               "minimum": 0

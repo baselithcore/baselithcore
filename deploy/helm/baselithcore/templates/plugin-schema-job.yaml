@@ -104,6 +104,10 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.migrationSecretName" . }}
                 optional: true
+          {{- $schemaEnv := .Values.database.pluginSchemaInit.extraEnv }}
+          {{- if or .Values.database.runtimeRole.enabled $schemaEnv }}
+          env:
+          {{- end }}
           {{- if .Values.database.runtimeRole.enabled }}
           # Alembic must NOT run as the runtime role. That role exists to have
           # row-level security apply to it, which is the same thing as saying it
@@ -116,7 +120,6 @@ spec:
           # Env wins over envFrom, so these two entries put the owner back for
           # this Job only; the api and worker pods keep the least-privilege role
           # they read from the release ConfigMap.
-          env:
             {{- if .Values.database.runtimeRole.adminUser }}
             - name: DB_USER
               value: {{ .Values.database.runtimeRole.adminUser | quote }}
@@ -132,6 +135,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.runtimeRole.adminSecret.name | quote }}
                   key: {{ .Values.database.runtimeRole.adminSecret.passwordKey | quote }}
+          {{- end }}
+          {{- with $schemaEnv }}
+            # database.pluginSchemaInit.extraEnv, after the two entries above so
+            # a `$(DB_USER)` / `$(DB_PASSWORD)` reference in it expands to the
+            # owner. The api and worker pods never see these.
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           resources:
             {{- toYaml .Values.database.pluginSchemaInit.resources | nindent 12 }}
