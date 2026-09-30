@@ -571,7 +571,7 @@ ones fail, one line per blocker, and keeps showing the manual instructions.
   both verify against this deployment's trust store
   ([Installable releases](#installable-releases)). A provenance-only release
   stays a notice.
-- The deployment is a **host install** (`source` or `pip`) with an overlay
+- The deployment is a **host install** (`source`, `pip`, or `custom` on a host) with an overlay
   directory the updater can write, and the updater is running the same core
   version as the API.
 - Every `python_dependencies` requirement is already satisfied and the
@@ -582,7 +582,7 @@ ones fail, one line per blocker, and keeps showing the manual instructions.
 | Blocker | Meaning | What to do |
 | --- | --- | --- |
 | `apply_disabled` | `UPDATE_APPLY_ENABLED` is off, or the live updater reports itself disabled or without a restart command | Set the switch and `UPDATE_APPLY_RESTART_COMMAND` for the API and the updater, restart both |
-| `not_host_install` | Install method `helm`, `docker` or `custom`, `KUBERNETES_SERVICE_HOST` set, or a container detected, whatever `SYSTEM_INSTALL_METHOD` says | None: use the instructions (see [why Kubernetes is excluded](#why-kubernetes-is-excluded)) |
+| `not_host_install` | Install method `helm` or `docker`, `KUBERNETES_SERVICE_HOST` set, or a container detected, whatever `SYSTEM_INSTALL_METHOD` says | None: use the instructions (see [why Kubernetes is excluded](#why-kubernetes-is-excluded)) |
 | `overlay_unconfigured` | `BASELITH_PLUGIN_OVERLAY_DIR` unset, missing or not writable by the updater | Create the directory, owned by the service user, and set the variable for both units |
 | `updater_offline` | No updater heartbeat within three `UPDATE_APPLY_HEARTBEAT_SECONDS` | Start the updater unit; `baselith plugin-updater status` shows the heartbeat |
 | `updater_mismatch` | The updater runs another core version than the API | Restart the updater after pulling a new core |
@@ -821,8 +821,10 @@ and never cached. Blockers, in console order: `apply_disabled`,
 within three `heartbeat_seconds`), `updater_mismatch` (the updater runs another
 core version), `unsigned_release`, `signature_failed`,
 `needs_environment_update`, `host_build_required` and `run_active`. Only
-`source` and `pip` installs qualify, and `KUBERNETES_SERVICE_HOST` or a
-detected container blocks whatever `SYSTEM_INSTALL_METHOD` says. A candidate
+`source`, `pip` and `custom` installs qualify (`custom` only names who wrote the
+core-upgrade instructions, not the deployment's shape), and
+`KUBERNETES_SERVICE_HOST` or a detected container blocks whatever
+`SYSTEM_INSTALL_METHOD` says. A candidate
 whose version the running tree already reached is served as not available.
 
 A live updater that reports itself disabled, or without a restart command,

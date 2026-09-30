@@ -83,9 +83,31 @@ def test_kill_switch_first() -> None:
     assert status.blockers[0] is ApplyBlocker.APPLY_DISABLED
 
 
-@pytest.mark.parametrize("method", ["helm", "docker", "custom"])
+@pytest.mark.parametrize("method", ["helm", "docker"])
 def test_non_host_methods_are_blocked(method: str) -> None:
     assert ApplyBlocker.NOT_HOST_INSTALL in _status(_cand(), method=method).blockers
+
+
+def test_custom_instructions_on_a_host_are_a_host_install() -> None:
+    """Custom core-upgrade instructions say nothing about the deployment shape.
+
+    A source checkout that ships its own upgrade runbook is still a host: the
+    Kubernetes and container probes decide, as they do for source and pip.
+    """
+    status = _status(_cand(), method="custom")
+    assert ApplyBlocker.NOT_HOST_INSTALL not in status.blockers
+
+
+def test_custom_instructions_in_kubernetes_or_a_container_are_blocked(
+    tmp_path: Path,
+) -> None:
+    kube = _status(
+        _cand(), method="custom", env={"KUBERNETES_SERVICE_HOST": "10.0.0.1"}
+    )
+    assert ApplyBlocker.NOT_HOST_INSTALL in kube.blockers
+    (tmp_path / ".dockerenv").write_text("")
+    boxed = _status(_cand(), method="custom", root=tmp_path)
+    assert ApplyBlocker.NOT_HOST_INSTALL in boxed.blockers
 
 
 def test_kubernetes_env_blocks_even_when_method_forced_to_source() -> None:

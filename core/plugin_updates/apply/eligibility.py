@@ -15,7 +15,9 @@ from ..upgrade.method import _in_container
 from ..upgrade_models import InstallMethod
 from .models import ApplyRun, UpdaterHeartbeat
 
-HOST_METHODS: tuple[InstallMethod, ...] = ("source", "pip")
+# ``custom`` is operator-written core-upgrade instructions: it says nothing
+# about the deployment's shape, so the Kubernetes and container probes decide.
+HOST_METHODS: tuple[InstallMethod, ...] = ("source", "pip", "custom")
 
 _UNSIGNED = (None, Refusal.ARTIFACT_MISSING, Refusal.LEGACY_RELEASE)
 
@@ -26,7 +28,7 @@ def host_install_ok(
     environ: Mapping[str, str] | None = None,
     root: Path = Path("/"),
 ) -> bool:
-    """A host install: source/pip, not Kubernetes, not a container.
+    """A host install: source/pip/custom, not Kubernetes, not a container.
 
     Kubernetes and containers block whatever ``SYSTEM_INSTALL_METHOD`` says.
     """
