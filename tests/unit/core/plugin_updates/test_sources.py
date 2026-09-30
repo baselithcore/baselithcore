@@ -296,3 +296,28 @@ def test_config_api_url_accepted(url: str) -> None:
 def test_config_api_url_must_be_https_off_loopback(url: str) -> None:
     with pytest.raises(ValueError, match="github_api_url"):
         PluginUpdateConfig(github_api_url=url)
+
+
+async def test_release_by_tag_asks_for_one_tag() -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if req.url.path.endswith("/v1.2.0"):
+            return httpx.Response(200, json=_rel("v1.2.0"))
+        if req.url.path.endswith("/v1.3.0-rc1"):
+            return httpx.Response(200, json=_rel("v1.3.0-rc1", pre=True))
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    src = _source(handler)
+    info = await src.release_by_tag("demo", "o/r", "v1.2.0")
+    assert info is not None and info.version == "1.2.0" and info.tarball_url
+    assert seen == ["/repos/o/r/releases/tags/v1.2.0"]
+    assert await src.release_by_tag("demo", "o/r", "v9.9.9") is None
+    assert await src.release_by_tag("demo", "o/r", "v1.3.0-rc1") is None
+
+
+async def test_release_by_tag_raises_on_server_error() -> None:
+    src = _source(lambda req: httpx.Response(500))
+    with pytest.raises(SourceError):
+        await src.release_by_tag("demo", "o/r", "v1.2.0")

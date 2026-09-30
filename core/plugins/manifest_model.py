@@ -175,6 +175,9 @@ class PluginManifestModel(BaseModel):
     # --- Runtime posture ----------------------------------------------------
     environment_variables: list[Any] | None = None
     frontend: Any = None
+    #: Not self-contained: a host-side build (e.g. a Node sidecar's dist and
+    #: node_modules) must run first. Never one-click installable.
+    host_build_required: bool = False
     health_endpoint: str | None = None
     system: bool = False
     tenancy: str = "shared"

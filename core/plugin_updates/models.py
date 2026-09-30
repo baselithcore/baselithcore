@@ -60,6 +60,51 @@ class VerificationResult(BaseModel):
         return self.refusal is None
 
 
+class SignedAssets(BaseModel):
+    """Whether a release's signed assets (release.json + tarball) verified here.
+
+    Computed by the check in both trust modes whenever the release carries the
+    two assets, and cached with the report. ``tarball_sha256`` pins what an
+    install may use; ``host_build_required`` is read from the verified
+    manifest (a release that is not self-contained).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    verified: bool
+    refusal: Refusal | None = None
+    detail: str = ""
+    tarball_sha256: str | None = None
+    files_count: int = 0
+    host_build_required: bool = False
+
+
+class ApplyBlocker(StrEnum):
+    """Why a one-click install is not offered, in console order."""
+
+    APPLY_DISABLED = "apply_disabled"
+    NOT_HOST_INSTALL = "not_host_install"
+    OVERLAY_UNCONFIGURED = "overlay_unconfigured"
+    UPDATER_OFFLINE = "updater_offline"
+    UPDATER_MISMATCH = "updater_mismatch"
+    UNSIGNED_RELEASE = "unsigned_release"
+    SIGNATURE_FAILED = "signature_failed"
+    NEEDS_ENVIRONMENT_UPDATE = "needs_environment_update"
+    HOST_BUILD_REQUIRED = "host_build_required"
+    RUN_ACTIVE = "run_active"
+
+
+class PluginApplyStatus(BaseModel):
+    """Whether one available update may be installed with one click here."""
+
+    model_config = ConfigDict(frozen=True)
+
+    installable: bool
+    blockers: list[ApplyBlocker] = []
+    detail: str = ""
+    active_run: str | None = None
+
+
 class ReleaseInfo(BaseModel):
     """A published release of a plugin, as reported by its source."""
 
@@ -115,6 +160,10 @@ class UpdateCandidate(BaseModel):
     trust: TrustMode | None = None
     #: Who published the release, from which commit (when known).
     provenance: ReleaseProvenance | None = None
+    #: The signed-asset verification outcome (None: not attempted).
+    signed_assets: SignedAssets | None = None
+    #: The one-click install verdict; stamped when served, never cached.
+    apply: PluginApplyStatus | None = None
 
 
 class Advisory(BaseModel):
@@ -174,10 +223,13 @@ class CheckReport(BaseModel):
 
 __all__ = [
     "Advisory",
+    "ApplyBlocker",
     "CheckReport",
+    "PluginApplyStatus",
     "Refusal",
     "ReleaseInfo",
     "ReleaseProvenance",
+    "SignedAssets",
     "SystemUpdate",
     "TrustMode",
     "UpdateCandidate",

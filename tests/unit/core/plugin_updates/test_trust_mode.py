@@ -47,7 +47,7 @@ def _cfg(tmp: Path, trust: str) -> PluginUpdateConfig:
 
 
 @pytest.mark.parametrize("trust", ["provenance", "signed"])
-async def test_service_passes_the_mode_and_reads_keys_only_when_signed(
+async def test_service_passes_the_mode_and_reads_keys_in_both_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trust: str
 ) -> None:
     seen: dict[str, object] = {}
@@ -66,7 +66,7 @@ async def test_service_passes_the_mode_and_reads_keys_only_when_signed(
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path, trust), bundled_root=tmp_path)
     await svc.check_now()
     assert seen["trust"] == trust
-    assert bool(loaded) is (trust == "signed")
+    assert loaded  # both modes verify signed assets
 
 
 def _saved(trust: str | None) -> CheckReport:

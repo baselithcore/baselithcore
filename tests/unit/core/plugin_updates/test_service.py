@@ -53,7 +53,9 @@ async def test_check_failure_keeps_cached_candidates(
     monkeypatch.setattr(svc_mod, "run_check", boom)
     report = await svc.check_now()
     # Served candidates carry install guidance; the cached ones never do.
-    bare = [c.model_copy(update={"install": None}) for c in report.candidates]
+    bare = [
+        c.model_copy(update={"install": None, "apply": None}) for c in report.candidates
+    ]
     assert bare == prev.candidates and report.error == "RuntimeError"
     assert svc.report() is not None and svc.report().error == "RuntimeError"  # type: ignore[union-attr]
 
@@ -340,7 +342,7 @@ async def test_request_check_is_throttled_per_process(
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path), bundled_root=tmp_path)
     first = await svc.request_check()
     clock[0] += svc_mod.CHECK_COOLDOWN_SECONDS - 1
-    assert await svc.request_check() is first
+    assert await svc.request_check() == first
     assert calls == 1
     # The periodic path is never throttled.
     await svc.check_now()

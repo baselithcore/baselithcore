@@ -25,3 +25,19 @@ def _announcement_gate_uses_file_lock(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(config_pkg, "get_storage_config", _without_redis)
+
+
+@pytest.fixture(autouse=True)
+def _apply_state_is_private(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Keep every service off the checkout's ``data/plugin_updates/apply``."""
+    from core.config.plugin_update_apply import UpdateApplyConfig
+    from core.plugin_updates import service as svc_mod
+
+    state = tmp_path_factory.mktemp("apply-state")
+    monkeypatch.setattr(
+        svc_mod,
+        "get_update_apply_config",
+        lambda: UpdateApplyConfig(state_dir=state),
+    )

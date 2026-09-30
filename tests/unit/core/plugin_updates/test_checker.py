@@ -25,13 +25,14 @@ def _signed_tarball(
     *,
     docs: dict[str, str] | None = None,
     listed: dict[str, str] | None = None,
+    extra_manifest: str = "",
 ) -> tuple[Path, dict]:
     """A signed release; ``docs`` are unhashed files, ``listed`` overrides ``files``."""
     src = tmp / "src" / "demo"
     src.mkdir(parents=True)
     (src / "__init__.py").write_text("X = 1\n")
     (src / "manifest.yaml").write_text(
-        f"name: demo\nversion: {version}\nhash_surface_version: 5\n"
+        f"name: demo\nversion: {version}\nhash_surface_version: 5\n{extra_manifest}"
     )
     for rel, text in (docs or {}).items():
         (src / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +202,7 @@ def test_unpack_refuses_too_many_members(
 ) -> None:
     from core.plugin_updates import checker
 
-    monkeypatch.setattr(checker, "MAX_ARCHIVE_MEMBERS", 3)
+    monkeypatch.setattr("core.plugin_updates.archive.MAX_ARCHIVE_MEMBERS", 3)
     tgz = _tar_of(tmp_path / "m.tgz", {f"p/f{i}": b"" for i in range(4)})
     with pytest.raises(checker.ArchiveLimitError, match="more than 3 members"):
         checker._unpack(tgz, tmp_path / "out")

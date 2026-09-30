@@ -154,6 +154,7 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `entry_point`           | No       | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`), resolved inside the plugin's own package. Required when `plugin.py` exposes more than one concrete `Plugin` subclass — ambiguity is a hard error, not a guess. A *file* name (`__init__.py`, `plugin.py`, `src/plugin.py` — the marketplace spelling) names no class, so it is ignored and the class is resolved by inspecting the module; ambiguity there is still refused. |
 | `entrypoint`            | No       | Legacy spelling of `entry_point`, accepted for manifests written before the canonical key existed. `entry_point` wins when both are present; new plugins declare `entry_point` only. |
 | `frontend`              | For a UI | Frontend build contract read by `baselith plugin add <repository> --docker` and by `baselith doctor`: a mapping with `path` (relative to the plugin directory, default `ui`), `package_manager` (`npm`, `pnpm` or `yarn`), `build_command` and `output_dir` (relative to `path`, default `dist`), or `false` to disable frontend detection. Declare it whenever the plugin ships a UI — without it the installer falls back to guessing and `doctor` cannot tell a missing build from a plugin that has no frontend at all. See [Packaging › Docker installation contract](packaging.md#docker-installation-contract). |
+| `host_build_required`   | No | `true` when the release is not self-contained: a host-side build (a Node sidecar's `dist`, `node_modules`) must run before the plugin works. Such a release is never one-click installable. Default `false`. |
 | `health_endpoint`       | No       | Local HTTP path probed after a Docker installation. It must answer 200 with no authentication and no redirect; without it the installer probes the default `/<name>/`. |
 | `runtime_state_paths`   | No       | Paths **inside the plugin directory** that hold runtime state the update engine must carry over to a new version (relative, no `..`, no globs, never the manifest or a code/asset file or tree such as `ui`, `static`, `skills`; the engine never carries over a file the new release ships and re-verifies integrity after carry-over). Prefer keeping state in `core.plugins.data_dir("<name>")` (in production set `BASELITH_PLUGIN_DATA_DIR` explicitly, outside the code and release directories) and declaring nothing. An installed tree with files that neither shipped with the release nor sit under a declared path cannot be updated. |
 
@@ -881,6 +882,16 @@ deployment installs it only when the unpacked tree matches the list exactly —
 see [Release manifest](../core-modules/plugin-updates.md#release-manifest).
 Keep the published tree free of symbolic and hard links: a release holding one
 is refused.
+
+A one-click update runs `baselith plugin schema-init --plugin <name>` before
+it restarts the API, and a rollback **never reverts it**: the previous version
+then runs against the new schema. Keep `init_schema()` changes expand-only
+(add tables, columns and indexes; drop or rename only one release later), so
+the version before stays compatible. An overlay entry that is not newer than
+the bundled copy, or whose core bounds exclude the running core, is not loaded
+(`core.plugins._overlay_guard.overlay_refusal_code` names the reason; an
+unreadable bundled version refuses too) — see
+[Executing a run](../core-modules/plugin-updates.md#executing-a-run).
 
 ### Disabling/Enabling
 

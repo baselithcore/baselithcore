@@ -418,6 +418,26 @@ Declared in `core.config.orchestration`.
 | `ROUTER_RETRIEVAL_LIMIT` | `int` | `50` | Number of entities to retrieve from vector store (N >> K) |
 | `ROUTER_SCORE_THRESHOLD` | `float` | `0.7` | Minimum similarity score for tool retrieval |
 
+## One-click plugin update (host installs): the updater's and the console's settings
+
+Declared in `core.config.plugin_update_apply`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `int` | `24 * 3600` | Expiry of approval requests created without their own window |
+| `UPDATE_APPLY_ENABLED` | `bool` | `False` | Kill switch: one-click plugin updates on this host |
+| `UPDATE_APPLY_HEALTH_TIMEOUT_SECONDS` | `int` | `180` | Deadline for the post-restart health check |
+| `UPDATE_APPLY_HEALTH_URL` | `str` | `http://127.0.0.1:8000/health/ready` | Readiness URL probed after a restart |
+| `UPDATE_APPLY_HEARTBEAT_SECONDS` | `int` | `5` | Updater heartbeat period |
+| `UPDATE_APPLY_KEEP_VERSIONS` | `int` | `2` | Store entries kept per plugin |
+| `UPDATE_APPLY_POLL_SECONDS` | `float` | `2.0` | Updater poll period for approved runs |
+| `UPDATE_APPLY_RESTART_COMMAND` | `Annotated[list[str], NoDecode]` | *computed* | argv (JSON list or comma-separated) that restarts the API service; no shell |
+| `UPDATE_APPLY_RESTART_TIMEOUT_SECONDS` | `int` | `60` | Timeout of the restart command |
+| `UPDATE_APPLY_SCHEMA_ENV_FILE` | `Path \| None` | *empty* | dotenv with the schema owner's DB credentials, for schema-init only |
+| `UPDATE_APPLY_SCHEMA_INIT` | `bool` | `True` | Run `baselith plugin schema-init --plugin &lt;name>` before the restart |
+| `UPDATE_APPLY_STABLE_SECONDS` | `int` | `20` | Readiness must hold this long without a failure |
+| `UPDATE_APPLY_STATE_DIR` | `Path` | `Path('data/plugin_updates/apply')` | Run store shared by the API and the updater |
+
 ## Plugin updates (release polling, trust mode and overlay)
 
 Declared in `core.config.plugin_updates`.
@@ -926,4 +946,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-592 settings documented.
+605 settings documented.

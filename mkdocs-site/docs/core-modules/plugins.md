@@ -409,7 +409,8 @@ The directory scan is authoritative: on a name clash the local tree wins, the
 installed package is ignored and a warning names both paths. Broken distribution
 metadata, an entry point that no longer imports, and a package without a manifest
 are each logged and skipped — discovery can never stop the process from starting.
-A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory).
+
+A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory). `core.plugins._overlay_guard.overlay_refusal_code` returns the refusal as a structured `OverlayRefusal` (`version_invalid`, `incompatible_core`, `not_newer`, `bundled_unreadable`); `overlay_refusal` keeps the historical string form, in which an unreadable bundled version still reads `not_newer: ...`.
 
 `BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the
 entry-point source (the second one above) off entirely.
@@ -491,6 +492,11 @@ are declarative metadata: the runtime carries them, the CLI acts on them —
 build output exists, resolving `path` against the plugin directory and
 `output_dir` against `path` exactly as the installer does. See
 [Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
+
+The boolean `host_build_required` (default `false`) marks a release that is not
+self-contained — a host-side build such as a Node sidecar's `dist` and
+`node_modules` must run first — so the update flow never offers it as a
+one-click install.
 
 `display_name` is an optional, presentation-only name (e.g. `CV Intake`).
 `name` keys the plugin's routes, `configs/plugins.yaml` entry, env prefix,
@@ -893,7 +899,6 @@ the optional async hook:
 
 ```python
 from core.plugins import Plugin, PluginHealth
-
 
 class WeatherPlugin(Plugin):
     async def health(self) -> PluginHealth:

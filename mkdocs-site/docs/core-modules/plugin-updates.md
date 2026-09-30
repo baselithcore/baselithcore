@@ -27,13 +27,17 @@ contacts GitHub.
     deployment should set `CORE_UPDATE_REPO=""` (or allow `api.github.com`),
     otherwise each check fails and the report carries the error.
 
-!!! note "Notify and instruct, never execute"
-    The framework never upgrades itself and never installs a plugin. When a
-    newer release exists, it tells the administrator, and for the core it
-    serves the exact instructions to upgrade this deployment with the standard
-    tools of its installation method (Helm, Docker Compose, pip, a source
-    checkout, or the operator's own procedure). The administrator runs them. See
-    [Upgrade instructions](#upgrade-instructions).
+!!! note "Notify and instruct; plugins alone may be installed, and only on a host"
+    The framework never upgrades itself. When a newer release exists, it tells
+    the administrator, and for the core it serves the exact instructions to
+    upgrade this deployment with the standard tools of its installation method
+    (Helm, Docker Compose, pip, a source checkout, or the operator's own
+    procedure). The administrator runs them. See
+    [Upgrade instructions](#upgrade-instructions). The one exception is a
+    maintainer-signed **plugin** release on a host install, which an operator
+    may switch on: see
+    [One-click plugin updates (host installs)](#one-click-plugin-updates-host-installs).
+    It is off by default, and the web process never installs anything itself.
 
 ## What it does
 
@@ -60,11 +64,21 @@ nor a cache directory each announce once. When the cache directory is not
 writable the failure is logged (`plugin_update_cache_write_failed`) and the
 metric and events still go out.
 
+### Module map
+
+| File | Role |
+| --- | --- |
+| `archive.py` | Unpacks a release tarball under the member and size limits, and verifies it exactly as a deployment does (`verify_tarball`, `verify_release_tarball`) |
+| `signed_assets.py` | `verify_signed_assets`: downloads a release's `release.json` and tarball, checks the signature, checksum and file list, and keeps the verified tarball in the cache; the outcome is a `SignedAssets` record |
+| `checker.py` | Per-plugin and whole-deployment checks under the configured trust mode |
+
 ## Trust modes
 
 `PLUGIN_UPDATE_TRUST` chooses what makes a plugin release trusted enough to be
-offered. Either way, the result is a notice: installing a release is always a
-manual step of the deployment's own procedure.
+offered. Either way, the result is a notice: installing a release is a manual
+step of the deployment's own procedure, unless the release also carries signed
+assets and the host runs the
+[one-click updater](#one-click-plugin-updates-host-installs).
 
 | Mode | Offered when | Downloads | Needs |
 |---|---|---|---|
@@ -122,6 +136,20 @@ A saved verdict is served only under the mode that reached it: after
 `PLUGIN_UPDATE_TRUST` changes, the previous mode's candidates are dropped
 (also when a failed check would otherwise carry them over) until the next
 check replaces them.
+
+#### Installable releases
+
+Independently of the trust mode, when an available release carries both signed
+assets (`<plugin>-<version>.tar.gz` and `release.json`) the check verifies them
+against the trusted publisher keys and reports the
+verdict as `signed_assets` on the candidate, cached with the report. A verified
+release has its tarball kept in the cache and reports `tarball_sha256`, the
+signed file count and `host_build_required`; a release without assets reports
+`artifact_missing` ("no signed assets attached"), a foreign or bad signature
+`signature_invalid`. In provenance mode this never changes the notice: the
+candidate stays `available`, it merely also says whether it is *installable*.
+A candidate whose manifest sets `host_build_required: true` is never
+one-click installable.
 
 #### What provenance trust proves
 
@@ -455,11 +483,13 @@ its plugins' bounds do not speak about the public core release: there the check
 is reported as not computed (`plugins.checked: false`), rather than flagging
 every plugin.
 
-**Plugin updates.** No console action and no command installs a plugin
-release. Each available plugin candidate carries `install` (`method`,
-`guide_url`, `automated: false`): a console says so and points to how plugins
-reach this installation (in the image for Helm and Docker Compose, the plugin
-directory on a host or in a source checkout) and to the operator's guide.
+**Plugin updates.** Each available plugin candidate carries `install`
+(`method`, `guide_url`, `automated: false`): the instructions describe how
+plugins reach this installation (in the image for Helm and Docker Compose, the
+plugin directory on a host or in a source checkout) and point to the
+operator's guide. A host install may additionally enable
+[one-click plugin updates](#one-click-plugin-updates-host-installs); the
+instructions stay the fallback wherever a release is not installable that way.
 
 ## Overlay directory
 
@@ -520,3 +550,623 @@ latest release, `available`, `refusal`, `detail`, `trust` and `provenance`) and
 an `error` field. When a
 whole check fails, the previous candidates are kept and `error` names the
 failure type only; credentials never appear in it.
+
+## One-click plugin updates (host installs)
+
+On a host install an operator may let administrators install a newer plugin
+release from a console, and roll it back, instead of pulling the code by hand.
+The core itself is never updated this way. The web process only records a
+request: a separate updater process verifies, installs, restarts the API,
+checks its health and rolls back on its own. It is **off by default**
+(`UPDATE_APPLY_ENABLED=false`). The sections after this one describe each
+module; this one is the operator's view.
+
+### When a release can be installed
+
+A release is installable only when all of these hold. The console says which
+ones fail, one line per blocker, and keeps showing the manual instructions.
+
+- The release is **signed by the maintainer**: it carries `release.json`
+  (format 2, with its manifest signature) and `<plugin>-<version>.tar.gz`, and
+  both verify against this deployment's trust store
+  ([Installable releases](#installable-releases)). A provenance-only release
+  stays a notice.
+- The deployment is a **host install** (`source` or `pip`) with an overlay
+  directory the updater can write, and the updater is running the same core
+  version as the API.
+- Every `python_dependencies` requirement is already satisfied and the
+  release does not declare `host_build_required` (it needs no build on the
+  host).
+- No other run of that plugin is in progress.
+
+| Blocker | Meaning | What to do |
+| --- | --- | --- |
+| `apply_disabled` | `UPDATE_APPLY_ENABLED` is off, or the live updater reports itself disabled or without a restart command | Set the switch and `UPDATE_APPLY_RESTART_COMMAND` for the API and the updater, restart both |
+| `not_host_install` | Install method `helm`, `docker` or `custom`, `KUBERNETES_SERVICE_HOST` set, or a container detected, whatever `SYSTEM_INSTALL_METHOD` says | None: use the instructions (see [why Kubernetes is excluded](#why-kubernetes-is-excluded)) |
+| `overlay_unconfigured` | `BASELITH_PLUGIN_OVERLAY_DIR` unset, missing or not writable by the updater | Create the directory, owned by the service user, and set the variable for both units |
+| `updater_offline` | No updater heartbeat within three `UPDATE_APPLY_HEARTBEAT_SECONDS` | Start the updater unit; `baselith plugin-updater status` shows the heartbeat |
+| `updater_mismatch` | The updater runs another core version than the API | Restart the updater after pulling a new core |
+| `unsigned_release` | The release has no signed assets | Publish a signed release, or install by hand |
+| `signature_failed` | Signed assets present but refused; the refusal code is in the detail | Fix the trust store or the release |
+| `needs_environment_update` | A Python dependency of the release is not installed | Install the dependency, or install by hand |
+| `host_build_required` | The release needs a build on the host (a Node sidecar, for example) | Install by hand |
+| `run_active` | A run for this plugin is not finished yet | Wait for it, or see `baselith plugin-updater status` |
+
+### What happens during a run
+
+A console plugin and the CLI (`baselith plugin-updater request` /
+`rollback`) create the same run in the run store under
+`UPDATE_APPLY_STATE_DIR`.
+
+1. **Request.** An administrator asks for version *V*, pinned to the tarball
+   SHA-256 they were shown. The console demands a fresh MFA code (an account
+   without an enrolled authenticator, and any API key, is refused) and
+   re-checks installability on the server. The run starts in
+   `awaiting_approval`.
+2. **Approval.** A second administrator approves it with their own MFA code.
+   Whether the requester may approve their own request is the console's
+   policy (a console enforcing four-eyes refuses it). A request nobody
+   approves expires after the console's approval window (`expired`); a
+   denied one ends `denied`; an approval that finds the served release
+   changed since the request refuses it and expires the request at once, so
+   the plugin is free for a new one. The CLI path, run by someone with a
+   shell on the host, skips this step.
+3. **Install.** The updater picks up the approved run, re-downloads the signed
+   `release.json`, refuses anything that differs from the pinned SHA-256,
+   refuses a release whose manifest sets `host_build_required`, stages the
+   release into the overlay store, carries over the plugin's `.env` and
+   declared runtime state, and runs `schema-init` for that plugin as the
+   schema owner — against a scratch copy of the overlay where the plugin
+   already resolves to the new version, while the running API still
+   resolves the old one. A failed `schema-init` ends the run
+   `migration_failed` with nothing changed on the running API.
+4. **Restart and health.** It records `restart_at`, switches the plugin's
+   link, runs `UPDATE_APPLY_RESTART_COMMAND` and waits until every API worker that booted
+   after `restart_at` reports the new version active and healthy, every plugin
+   that was active before is still active, and `UPDATE_APPLY_HEALTH_URL`
+   answers 200 for `UPDATE_APPLY_STABLE_SECONDS` in a row.
+5. **Outcome.** `succeeded`; or, when the restart or the health check fails,
+   the link goes back and the API is restarted again: `rolled_back`. If that
+   rollback fails too, the run ends `rollback_failed` (a CRITICAL log line and
+   the `plugin.update_rollback_failed` event) and the plugin accepts no new
+   run until an operator repairs it and runs
+   `baselith plugin-updater resolve <run_id>` (the run then ends `failed`,
+   and a consumer auditing outcomes records that one as well).
+
+**Roll back** (the console button, or `baselith plugin-updater rollback`)
+returns the plugin to the version before its newest successful update, or to
+the bundled copy. It asks for MFA again but, by default, no second approval:
+it is incident response. It restarts the API like an update.
+
+!!! warning "A rollback never reverts `schema-init`"
+    The previous version runs against the schema the new one created. Plugin
+    schema changes must therefore be **expand-only** (additive, backward
+    compatible) for at least one version. The `rolled_back` detail says
+    `schema changes from <version> remain` when schema-init ran.
+
+Two conditions make the updater refuse a run up front, before changing
+anything:
+
+- **No boot report yet.** The API writes a boot report on every start only
+  while `UPDATE_APPLY_ENABLED` is on. Right after switching the feature on,
+  restart the API once, or every run fails `apply_disabled` with "no boot
+  report yet — restart the API once with UPDATE_APPLY_ENABLED on".
+- **A schema credentials file that cannot be read.** When
+  `UPDATE_APPLY_SCHEMA_ENV_FILE` is set but missing, the run fails
+  `migration_failed`; it never falls back to the runtime credentials.
+
+**Worker count.** The health check waits for as many distinct workers as the
+launcher declared. `baselith run --workers N` declares them
+(`BASELITH_WEB_CONCURRENCY`); a single-process `backend.py` is one worker. An
+API started as `uvicorn --workers N` directly declares nothing, so the check
+would wait for one worker only: launch a multi-worker API with
+`baselith run`, or set `BASELITH_WEB_CONCURRENCY` in its unit.
+
+### The updater unit
+
+`baselith plugin-updater serve` runs as its own systemd unit
+(an example is in [systemd units](#systemd-units)), as the same user, in
+the same environment and on the same checkout or virtualenv as the API, with
+the same absolute `UPDATE_APPLY_STATE_DIR`:
+
+- It is **not** `PartOf`, `BindsTo` or `Requires` the API unit: it restarts
+  the API and must survive that restart to judge it and roll back. It never
+  serves HTTP and never imports plugin code, so a plugin update never needs
+  it restarted. After a core upgrade, restart it (otherwise
+  `updater_mismatch`).
+- The only privileged command it runs is the API restart, through a sudoers
+  drop-in that allows exactly that command and nothing else.
+- `NoNewPrivileges=true` is left off on purpose: `sudo` is setuid, so that
+  option (and the sandboxing options that imply it for a non-root unit) would
+  break the restart. Turn it on if the restart is granted through a polkit
+  rule instead. See [systemd units](#systemd-units).
+
+### Settings
+
+All are read by both the API and the updater; the updater reads them at
+start, so restart it after a change.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `UPDATE_APPLY_ENABLED` | `false` | Kill switch |
+| `UPDATE_APPLY_STATE_DIR` | `data/plugin_updates/apply` | Run store, heartbeat and boot reports shared by the API and the updater; must be absolute in production |
+| `UPDATE_APPLY_RESTART_COMMAND` | `[]` | argv that restarts the API — a JSON array or a comma-separated list — run without a shell |
+| `UPDATE_APPLY_RESTART_TIMEOUT_SECONDS` | `60` | Timeout of the restart command (5–600) |
+| `UPDATE_APPLY_HEALTH_URL` | `http://127.0.0.1:8000/health/ready` | Readiness URL probed after a restart |
+| `UPDATE_APPLY_HEALTH_TIMEOUT_SECONDS` | `180` | Deadline of the post-restart health check (30–1800) |
+| `UPDATE_APPLY_STABLE_SECONDS` | `20` | How long readiness must hold without a failure (5–300) |
+| `UPDATE_APPLY_KEEP_VERSIONS` | `2` | Store entries kept per plugin (2–10) |
+| `UPDATE_APPLY_SCHEMA_INIT` | `true` | Run `schema-init --plugin <name>` before the restart |
+| `UPDATE_APPLY_SCHEMA_ENV_FILE` | unset | dotenv with the schema owner's database credentials, read only into the `schema-init` environment |
+| `UPDATE_APPLY_HEARTBEAT_SECONDS` | `5` | Updater heartbeat period (1–60) |
+| `UPDATE_APPLY_POLL_SECONDS` | `2.0` | How often the updater looks for approved runs (0.2–30) |
+| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request created with the core's default; runs created by `baselith plugin-updater` are pre-approved, and a console plugin sets its own window |
+
+They come on top of `BASELITH_PLUGIN_OVERLAY_DIR`, the trust store
+(`BASELITH_PLUGIN_TRUST_STORE`), `PLUGIN_UPDATE_SOURCES_FILE` and the other
+[plugin update settings](#configuration). A console plugin that asks for a
+second approval sets the expiry of the requests it creates with its own
+setting; `UPDATE_APPLY_APPROVAL_TTL_SECONDS` applies only to requests created
+without one.
+
+### Example: a source checkout under systemd
+
+A git checkout run by systemd as user `baselith`, with the API unit
+`baselithcore.service`. In the `.env` both units read:
+
+```bash
+UPDATE_APPLY_ENABLED=true
+SYSTEM_INSTALL_METHOD=source
+UPDATE_APPLY_STATE_DIR=/opt/baselith-data/plugin_updates/apply
+BASELITH_PLUGIN_OVERLAY_DIR=/opt/baselith-overlay        # outside the checkout: git never touches it
+BASELITH_PLUGIN_TRUST_STORE=/etc/baselith/plugin-trust.json
+PLUGIN_UPDATE_SOURCES_FILE=/etc/baselith/plugin-sources.yaml
+UPDATE_APPLY_RESTART_COMMAND=["sudo","-n","/usr/bin/systemctl","restart","baselithcore.service"]
+UPDATE_APPLY_HEALTH_URL=http://127.0.0.1:8000/health/ready
+UPDATE_APPLY_SCHEMA_ENV_FILE=/etc/baselith/schema-owner.env   # mode 0600, owner DSN only
+```
+
+The sudoers drop-in, and nothing broader:
+
+```bash
+echo 'baselith ALL=(root) NOPASSWD: /usr/bin/systemctl restart baselithcore.service' \
+  | sudo tee /etc/sudoers.d/baselith-updater
+sudo chmod 0440 /etc/sudoers.d/baselith-updater
+sudo visudo -c
+```
+
+Then install and start the updater unit, restart the API once (so it writes a
+boot report), and check:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now baselithcore-plugin-updater
+sudo systemctl restart baselithcore.service
+baselith plugin-updater status          # a fresh heartbeat, no unfinished runs
+```
+
+A console then offers the update for a signed release. Keep
+the signing key off the host: only its public key sits in the trust store.
+
+### Why Kubernetes is excluded
+
+On Kubernetes, and in any container, the button is never offered
+(`not_host_install`) and no updater runs. Images are immutable and
+replicated: an overlay written inside one pod would diverge between replicas
+and disappear on the next reschedule, and restarting a Deployment is the
+rollout controller's job, audited in the cluster. Plugins there reach a new
+version with a new image, through Helm or your image pipeline, and the console
+keeps showing the instructions.
+
+## One-click update: settings and run store
+
+`core.config.plugin_update_apply.UpdateApplyConfig` (prefix `UPDATE_APPLY_`)
+holds the settings of host-side one-click updates. The kill switch
+`UPDATE_APPLY_ENABLED` is **off by default**. `UPDATE_APPLY_RESTART_COMMAND` is
+an argv run without a shell, given as a JSON array
+(`["sudo","-n","/usr/bin/systemctl","restart","api.service"]`) or a
+comma-separated list (`sudo,-n,/usr/bin/systemctl,restart,api.service`); a
+blank value means none. `UPDATE_APPLY_APPROVAL_TTL_SECONDS` (default 24 h) is
+the expiry of approval requests created without their own window.
+
+Settings that fail to load never take the update checker down:
+`PluginUpdateService` logs the error's type and falls back to the defaults,
+so one-click updates stay off until the settings are fixed.
+
+`core.plugin_updates.apply.RunStore` is the file-based store the API workers
+and the updater process share. Each plugin has at most one active run: a
+per-plugin exclusive `flock` serialises every create and transition across
+threads and processes, records are written by atomic replace, and every
+transition is journaled to an append-only log before the snapshot changes. A
+terminal state releases the claim; `rollback_failed` keeps it until an
+operator intervenes.
+
+`RunStore.transition` takes an optional `expect` (a state or a set of states)
+that is compared under the plugin lock and raises `RunStateConflict` when a
+concurrent change won (for example an approval arriving after the request
+expired). A run in a terminal state can never be transitioned again, only a
+fixed set of fields may be changed, and a torn journal line left by a crash is
+skipped on read. `UPDATE_APPLY_STATE_DIR` is resolved to an absolute path at
+load; a relative value is refused when the switch is on and `APP_ENV=production`.
+
+`RunStore.runs(states=None)` lists every run of every plugin, oldest first
+(optionally only those in `states`).
+
+A consumer that audits finished runs — several web workers may share one
+store — does it in three steps: `RunStore.claim_audit(run_id)` (True for one
+caller only; False once the run is audited or while another caller's claim is
+younger than five minutes — an older claim belongs to a worker that died and
+is taken over), then writes its audit row, then
+`RunStore.mark_audited(run_id)` (True exactly once per run; it ends the claim).
+When the write fails it calls `RunStore.release_audit(run_id)` so the next
+pass retries. `RunStore.is_audited(run_id)` reads the mark without taking it.
+A run whose outcome changes after it was audited — an operator resolving a
+`rollback_failed` run to `failed` — loses its mark, so the new outcome is
+audited too.
+
+`RunStore.prune_finished(now=None, older_than=90 days)` deletes finished runs
+(snapshot, journal and audit markers) last updated more than `older_than` ago
+that were audited, and finished runs nobody audited after a year. The newest
+succeeded update of each plugin is always kept (a roll back needs it) and
+`rollback_failed` runs are never pruned. The updater calls it when it starts
+and then at most once an hour.
+
+### Installability verdict
+
+Every available plugin update is served with an `apply` verdict
+(`PluginApplyStatus`: `installable`, `blockers`, `detail`, `active_run`),
+computed on each read by `core.plugin_updates.apply.eligibility.apply_status`
+and never cached. Blockers, in console order: `apply_disabled`,
+`not_host_install`, `overlay_unconfigured`, `updater_offline` (no heartbeat
+within three `heartbeat_seconds`), `updater_mismatch` (the updater runs another
+core version), `unsigned_release`, `signature_failed`,
+`needs_environment_update`, `host_build_required` and `run_active`. Only
+`source` and `pip` installs qualify, and `KUBERNETES_SERVICE_HOST` or a
+detected container blocks whatever `SYSTEM_INSTALL_METHOD` says. A candidate
+whose version the running tree already reached is served as not available.
+
+A live updater that reports itself disabled, or without a restart command,
+yields `apply_disabled` with a detail naming which. The verdict is re-stamped
+on every read, including a "Check now" answered from the cooldown, so a run
+started moments ago shows as `run_active` at once. Plugin names the run store
+rejects (for example hyphenated ones) get no verdict (`apply` is `null`), so
+they are never installable: the check fails closed.
+
+### Overlay swap and store pruning
+
+`core.plugin_updates.apply.swap` owns the plugin's link in the overlay.
+`point_to` switches `<overlay>/<plugin>` to `.store/<plugin>-<version>` with a
+temporary relative symlink, `os.replace` and a directory `fsync`, so a reader
+sees the old or the new target and never neither; `None` unlinks (back to the
+bundled copy). `current_target` reads the link and raises `ValueError` for a
+plain directory or a link that leaves `.store`. `prune_store` removes the
+oldest store entries of one plugin down to `UPDATE_APPLY_KEEP_VERSIONS`,
+never the linked target or a name in `keep`, never follows a symlink, and
+clears `.staging-*` / `.trash-*` scratch older than a day. It complements
+`core.plugins.overlay_prune`, which removes entries the bundled plugin has
+overtaken.
+
+The link may be relative or absolute: `current_target` applies the loader's
+rule (the resolved target must sit directly in `.store`), and additionally
+requires the entry to be `<plugin>-<semantic version>`; a link to another
+plugin's entry (or to `<plugin>-extra-1.0.0`), or one that cannot be resolved
+(a symlink loop), raises
+`ValueError`. When the link cannot be read, `prune_store` leaves every version
+alone and only clears stale scratch.
+
+### Staging a release
+
+`core.plugin_updates.apply.staging.stage_release` turns the approved, cached
+tarball into `.store/<plugin>-<version>/` plus the sidecar
+`.store/<plugin>-<version>.release.json` (the signed `release.json`, read back
+by `known_files_of`). Each step raises `StagingError` with a run failure code:
+
+1. `release.json` must name this release, carry a valid signature from a
+   trusted key and pin the same tarball SHA-256 the run was approved with
+   (`verification_failed` / `artifact_checksum`).
+2. `private_copy` opens the tarball **once** with `O_NOFOLLOW` and copies it
+   through that descriptor into `.store/.staging-<run_id>/`, hashing the bytes
+   as they are written; a link, a FIFO or a digest other than the pin is
+   `artifact_checksum`. Everything after reads only that private copy, so a
+   cached tarball replaced mid-run changes nothing.
+3. The copy is unpacked with the checker's rules (member count, the
+   `max_unpacked_bytes` bound, no links, no path escapes, a single plugin
+   root) and verified with `verify_release` against the signed file list
+   (`verification_failed`).
+4. The installed tree must hold nothing but files its release shipped, its
+   `.env` and its declared `runtime_state_paths` (`undeclared_runtime_state`).
+   Shipped files come from the sidecar for a store entry, from `git ls-files`
+   for a source checkout, and otherwise every file present counts as shipped
+   (pip hosts: undeclared state cannot be detected there). An installed
+   manifest whose `runtime_state_paths` cannot be read is `verification_failed`.
+5. `.env` and the declared paths are copied into the new tree, never over a
+   file the new release ships and never through a symbolic link; a link or a
+   hash-covered file inside a carried path is refused (`overlay_refused`).
+6. The result is re-verified as an overlay entry (`verify_overlay_entry`,
+   then `overlay_refusal` against the bundled copy) — `overlay_refused`.
+7. Promotion is one `os.rename` inside `.store`, then the sidecar is written
+   (temp file + `os.replace`), so a sidecar never describes a missing entry;
+   if the sidecar write fails the entry goes back into staging. An existing
+   entry of the same name (with its sidecar) is never reused or overwritten:
+   it is renamed into `.trash-<run_id>-*` (cleared later by `prune_store`),
+   unless it is the entry the plugin's link currently points to, which refuses
+   the run (`overlay_refused`). The caller holds the per-plugin run lock; the
+   target is still re-checked right before the rename, because `os.rename`
+   over an empty directory succeeds silently.
+
+The staging directory is removed in every outcome, including read-only
+directories a tarball created. `run_id` must match the run store's format
+(`pinstall-<YYYYmmddTHHMMSSZ>-<8 hex>`), and error details name paths relative
+to the overlay root (a bundled installed tree shows as `<installed>`).
+
+### Boot report
+
+After the plugins are up, every API worker calls
+`core.plugin_updates.apply.boot_report.write_boot_report` (from
+`core.api._runtime_services`, only when `UPDATE_APPLY_ENABLED`). It first
+activates each plugin that has a pending expectation (a lazily loaded plugin
+would otherwise never show up), then writes
+`boot/<pid>.json` by atomic replace: the worker's pid, boot time, core
+version, and per plugin its version, directory, `active` and `healthy` flags.
+Nothing else is recorded. The directory is the resolved path: the loader
+registers a plugin under its overlay link, so the report records the store
+entry that link pointed to at boot, which is what the worker loaded and what
+the health check compares with the run's target. Reports older than seven days are removed.
+`read_boot_reports(store, since=...)` returns the reports of a restart and
+`latest_active_plugins(store)` the active names of the newest one. The hook
+logs and swallows every failure: a boot is never blocked or delayed by it.
+
+`activation_timeout` (default 30 s) is one total deadline for all activations
+and health probes; a health probe that times out reports `healthy=false`, and
+plugins the budget did not reach are reported `active=false`, `healthy=null`.
+The report is written regardless. A timed-out activation is cancelled mid-way
+and can leave partial plugin state until the next restart. The hook adds a
+five-second `asyncio.wait_for` margin as a backstop.
+
+### Health check
+
+`core.plugin_updates.apply.health.wait_healthy` decides whether a restart
+succeeded. `evaluate_boot_reports` requires every worker that booted after
+`restart_at` to show the target plugin active, on the expected version and
+release directory (or off the overlay for a rollback to the bundled copy) with
+`healthy` exactly `true` (`false` and unknown both fail), and every
+`must_stay_active` plugin still active and not unhealthy. No report at all
+fails. `wait_healthy` re-reads the reports on every poll and additionally needs
+`health_url` to answer 200 for `stable_seconds` in a row within
+`health_timeout_seconds`; a flapping probe or a late wrong worker resets the
+window. Failure reasons name plugins and versions only, never host paths.
+
+Each report also records `workers` (the launcher's declared worker count, 1
+when unknown). The verdict fails with "N of M workers reported" until as many
+distinct pids as the largest declared count have written a report since the
+restart, so a worker that is still booting, crash-looping or never restarted
+cannot be missed. The readiness probe itself is bounded by the overall
+deadline.
+
+### Executing a run
+
+`core.plugin_updates.apply.executor.Executor` takes one approved run to a
+terminal state; only the updater process calls it, and it never imports the
+`plugins` package. An update:
+
+1. moves `approved` → `preparing` (a compare-and-set: a run someone else
+   moved is left alone) and refuses with `apply_disabled` when the kill switch
+   is off, no restart command is configured, or **no boot report exists yet**
+   (detail: "no boot report yet — restart the API once with
+   UPDATE_APPLY_ENABLED on"; logged as a warning) — without a report nothing
+   is known about which plugins must survive the restart, so the run fails
+   closed. A report listing no active plugin is not the same thing and is
+   accepted. All of this happens before touching anything;
+2. reads `UPDATE_APPLY_SCHEMA_ENV_FILE` (the schema owner's credentials; never
+   logged, never stored). When it is set but missing or unreadable the run
+   fails `migration_failed` before anything is downloaded or staged — it
+   never falls back to the runtime credentials;
+3. fetches the signed `release.json` of the release tagged `v<version>` and
+   holds it to the tarball SHA-256 pinned on the run when it was requested. A
+   different name, version or tarball is `release_changed`; a bad signature or
+   an unreachable release is `verification_failed`. The pin passed to
+   `stage_release` is always the run's own, never one re-read from the
+   download. A missing cached tarball is downloaded first (to a temporary
+   file, then renamed). A tarball matching the pin whose manifest sets
+   `host_build_required` is refused (`verification_failed`) before staging:
+   the verdict already blocks such a release, and the updater re-checks it
+   on what it is about to install;
+4. stages the release (see above) in a worker thread **while holding the
+   per-plugin run lock** (`RunStore.plugin_lock`), which also covers every
+   link switch, the verification of a rollback target and the pruning;
+5. records on the run, once, the plugins the newest boot report shows active
+   (`must_stay_active`, the API as it ran before the run, read in step 1), journals
+   `migrating` with the previous and new link targets, and runs
+   `python -m core.cli plugin schema-init --plugin <name>` with the process
+   environment plus the owner's credentials and `BASELITH_PLUGIN_OVERLAY_DIR`
+   pointed at a **scratch overlay**: `.store/.staging-<run>-schema-*/` holding
+   `.store -> ..`, `<plugin> -> .store/<new entry>` and the other plugins'
+   links as they are live. The live link is not touched: the running API
+   resolves `plugins.<name>` through it for lazy imports, on-demand
+   activation and respawned workers, so it must keep pointing at the code the
+   API booted with for as long as `schema-init` runs (up to ten minutes). The
+   scratch overlay is removed on every path. A non-zero exit fails the run
+   `migration_failed` — "nothing changed on the running API", with no switch
+   and no restart. Whatever schema-init changed before it failed stays in
+   the database;
+6. moves to `activating` and writes the restart expectation — its
+   `restart_at` taken from the same UTC wall clock the workers stamp their
+   boot reports with, its `must_stay_active` the list recorded in step 5 —
+   then switches the live link, then issues `UPDATE_APPLY_RESTART_COMMAND`,
+   moves to `health_checking` and waits for the health verdict. A worker
+   respawned between the switch and the restart boots after `restart_at` on
+   the new version, which is what the verdict expects. A switch that fails
+   with the link still on the previous target fails the run
+   `overlay_refused` without a restart;
+7. on success journals `succeeded`, clears the expectation, and only then
+   prunes the store (keeping the new and the previous target) and stale
+   overlay links.
+
+A failed restart (`restart_failed`) or verdict (`health_failed`) moves to
+`rolling_back`: the link goes back to the previous target and the API is
+restarted and judged again, against the same recorded `must_stay_active` (not
+against the failed boot, which may already have lost dependents). Success ends
+in `rolled_back`; failure ends in `rollback_failed`, logged at `CRITICAL`,
+which keeps the plugin's claim until an operator intervenes. The recorded list
+also serves `resume_activation` after a partial boot.
+
+**A rollback never reverts `schema-init`.** The previous version runs against
+the schema the new version created, so plugin schema changes must be
+expand-only (additive, backward compatible) for at least one version. When
+schema-init ran, the `rolled_back` detail says so: `schema changes from
+<version> remain`.
+
+A rollback run verifies its target store entry **before** the live link
+changes: a scratch `.store/.staging-<run>-verify-*/` holds `.store -> ..` and
+`<plugin> -> .store/<target>`, so the entry is judged under the plugin's own
+name (signature, manifest name, core bounds, bundled version) exactly as the
+loader would, and removed afterwards (the same scratch technique as
+`schema-init`'s). A refused entry fails
+`verification_failed` with the live link untouched; so does an I/O error
+while building or walking the scratch entry (the detail names the error type,
+never a path), and the claim is released. Only the structured
+`not_newer` refusal (`core.plugins._overlay_guard.overlay_refusal_code`: the
+bundled plugin has overtaken the entry) falls back to the bundled copy; an
+unreadable bundled version is a refusal. A rollback run never runs
+`schema-init`; like an update, it switches the live link only right before
+its restart.
+
+Every terminal state — including the up-front refusals and
+`rollback_failed` — is journaled first and then clears the plugin's restart
+expectation, **only when that expectation is the run's own** (its `run_id`
+matches), so a later run's expectation is never deleted; a crash in between leaves an expectation of a finished run, which
+`RunStore.clear_stale_expectations()` (called by reconciliation) removes. Run
+messages carry failure codes, versions, store entry names and exit codes,
+never host paths, URLs or credentials; a boot report's `directory` is never
+copied into a run. All blocking work (the run store, staging, link switches,
+pruning, commands, boot-report reads) runs in worker threads.
+`resume_activation`, `redo_rollback` and `undo_swap` are the reconciliation
+entry points for an updater that died mid-run.
+
+`core.plugin_updates.apply._io` holds the seams: `subprocess_runner` (an argv
+list, `shell=False`, the exit code or `-1` on timeout / `OSError`; only the
+program name is logged), `schema_env` (raises `SchemaEnvError`, without the
+path, for a configured file it cannot read), `GitHubReleaseFetcher` (one
+`GET /repos/<slug>/releases/tags/v<version>` through
+`GitHubReleaseSource.release_by_tag`, then the assets) and `http_probe` (a
+5 s GET of `health_url`; `0` when unreachable).
+
+### Crash reconciliation
+
+`core.plugin_updates.apply.reconcile.reconcile(store, executor)` brings every
+run a dead updater left behind to a terminal state. It expires
+stale approval requests first, then, per unfinished run:
+
+| State found | Action |
+| --- | --- |
+| `approved`, `awaiting_approval` (not yet stale), `rollback_failed` | untouched |
+| `preparing` | nothing was switched: its `.store/.staging-<run>*` directories are removed, `failed: interrupted` |
+| `migrating` | `schema-init` ran (or was running) against a scratch overlay and the live link was never switched: its scratch and staging directories are removed, `failed: interrupted` ("nothing changed on the running API"). `Executor.undo_swap` only acts on a link an older updater had already switched, putting it back on `previous_target`; one that cannot be switched back is `rollback_failed` (CRITICAL log) |
+| `activating`, `health_checking` | `Executor.resume_activation`: the updater died before or after switching the link, so it switches (idempotently) and restarts again, then judges it; pass → `succeeded`, fail → rollback. `schema-init` is not run again |
+| `rolling_back` | `Executor.redo_rollback` (idempotent) |
+
+It ends with `RunStore.clear_stale_expectations()`. Each handled run is logged
+as `AUDIT | PLUGIN_UPDATE | reconciled`. When one run's recovery raises, the
+remaining runs are still settled and stale expectations cleared before the
+first error is re-raised. A run recorded before `must_stay_active` existed
+that is resumed with no boot report at all is never judged healthy: it is
+rolled back (`health_failed`, "no boot report yet …").
+
+### The updater service
+
+`baselith plugin-updater serve` (`core.plugin_updates.apply.updater.serve`)
+is a separate host process: it never serves HTTP, never imports the
+`plugins` package (it refuses to run if plugin code was loaded, and the CLI
+skips its plugin-CLI scan for this command) and never starts Sentry or any
+other error reporter — `schema-init`'s environment, which holds the schema
+owner's credentials, is a local of the executor, and a reporter capturing
+frame locals would ship it off-host. Unexpected errors are logged by type name
+only, never with a traceback.
+
+It takes an exclusive `flock` on `<state_dir>/updater.lock` (a second updater
+exits `2`; the fd is not inheritable, and subprocesses start with
+`close_fds`), publishes `heartbeat.json` every `UPDATE_APPLY_HEARTBEAT_SECONDS`,
+reconciles, then loops: prune old finished runs (at start, then at most once
+an hour: `RunStore.prune_finished`; a failure is logged and ignored), expire
+stale approval requests, execute the oldest approved run, or wait
+`UPDATE_APPLY_POLL_SECONDS`. Every store call runs in a
+worker thread. SIGTERM/SIGINT stop it between runs; the heartbeat has its own
+stop and keeps beating while a run in flight finishes (an error writing it is
+logged by type name and the next beat is tried). A run still in flight when
+systemd's stop timeout expires is reconciled at the next start.
+
+**Crash policy.** An executor call that raises unexpectedly is reconciled at
+once, so the run never stays stranded holding its plugin's claim, and the loop
+goes on. When the run is still unfinished after that (the executor failed
+before it left `approved`), `serve` exits non-zero: systemd restarts it
+(`Restart=on-failure`), the next start reconciles again, and a repeating
+failure trips the unit's start limit, leaving it `failed` rather than looping.
+
+**`plugin.update_rollback_failed`.** A run that ends `rollback_failed`
+(from a run, a resumed activation, a redone rollback or a failed undo) emits
+`plugin.update_rollback_failed` (payload: `run_id`, `plugin`, `kind`,
+`from_version`, `to_version`, `failure`) on the updater's in-process event bus,
+next to the CRITICAL `AUDIT | PLUGIN_UPDATE | rollback_failed` log line. That
+bus is not shared with the API workers, so subscribers in the API see the
+event only when the web tier re-announces the outcome it audits once per run.
+
+The event name and payload builder are public:
+`core.plugin_updates.apply.ROLLBACK_FAILED_EVENT` and
+`core.plugin_updates.apply.rollback_failed_payload(run)`, so a web tier that
+records the outcome re-announces it with the same payload.
+
+`build_executor(config)` wires the production executor: the overlay from
+`BASELITH_PLUGIN_OVERLAY_DIR` (unset → exit `2`), the bundled root from
+`PLUGINS_PATH`, the release sources, GitHub API and download cap from the
+`PLUGIN_UPDATE_*` settings (the sources file is read once at start), trusted
+keys re-read for every run, `http_probe(UPDATE_APPLY_HEALTH_URL)` and
+`subprocess_runner`.
+
+### systemd units
+
+A unit for a virtualenv layout runs `baselith plugin-updater serve`. It is deliberately **not** `PartOf`,
+`BindsTo` or `Requires` the API unit: the updater restarts the API and must
+survive that restart to health-check it and roll back. `Restart=on-failure`
+with `StartLimitBurst=5` in 600 s makes a crash loop end `failed`;
+`RestartPreventExitStatus=2` keeps a configuration refusal from looping at
+all. The unit grants no privilege: the only privileged command is the API
+restart, allowed by a narrow sudoers rule
+(`<user> ALL=(root) NOPASSWD: /usr/bin/systemctl restart baselithcore.service`)
+and configured as
+`UPDATE_APPLY_RESTART_COMMAND=["sudo","-n","/usr/bin/systemctl","restart","baselithcore.service"]`.
+Because sudo is setuid, `NoNewPrivileges=true` — and the sandboxing options
+that imply it for a non-root unit (`ProtectKernel*`, `RestrictSUIDSGID`,
+`SystemCallFilter`, …) — would break it and are left off; turn them on if you
+grant the restart through a polkit rule instead.
+
+Adjust paths and user to your host (save it as
+`/etc/systemd/system/baselithcore-plugin-updater.service`):
+
+```ini
+[Unit]
+Description=BaselithCore — plugin updater (one-click plugin updates)
+After=network-online.target baselithcore.service
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=baselith
+Group=baselith
+WorkingDirectory=/opt/baselithcore
+EnvironmentFile=/etc/baselithcore/env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/baselithcore/.venv/bin/baselith plugin-updater serve
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2
+KillSignal=SIGTERM
+TimeoutStopSec=30
+PrivateTmp=true
+ProtectHome=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+```

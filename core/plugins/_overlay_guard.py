@@ -15,6 +15,7 @@ heavier imports stay inside the functions.
 from __future__ import annotations
 
 import sys
+from enum import StrEnum
 from pathlib import Path
 
 _MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
@@ -56,16 +57,20 @@ def _bound(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def overlay_refusal(
-    entry: Path, bundled_root: Path | None, core_version: str
-) -> str | None:
-    """Why ``entry`` must not shadow the bundled plugin, or None when it may.
+class OverlayRefusal(StrEnum):
+    """Why an overlay entry may not shadow the bundled plugin."""
 
-    Returns:
-        ``"version_invalid: ..."``, ``"incompatible_core: ..."`` or
-        ``"not_newer: ..."``; None when the entry is newer than the bundled
-        plugin (or there is none) and accepts ``core_version``.
-    """
+    VERSION_INVALID = "version_invalid"
+    INCOMPATIBLE_CORE = "incompatible_core"
+    NOT_NEWER = "not_newer"
+    #: The bundled version cannot be read, so "newer" cannot be decided.
+    BUNDLED_UNREADABLE = "bundled_unreadable"
+
+
+def overlay_refusal_code(
+    entry: Path, bundled_root: Path | None, core_version: str
+) -> tuple[OverlayRefusal, str] | None:
+    """Structured :func:`overlay_refusal`: ``(code, detail)``, or None when it may."""
     from core.plugins.version import SemanticVersion, check_plugin_compatibility
 
     data = read_manifest_mapping(entry.resolve()) or {}
@@ -73,14 +78,14 @@ def overlay_refusal(
     try:
         version = SemanticVersion(raw)
     except ValueError:
-        return f"version_invalid: {raw!r}"
+        return OverlayRefusal.VERSION_INVALID, repr(raw)
     problems = check_plugin_compatibility(
         core_version=core_version,
         min_core_version=_bound(data.get("min_core_version")),
         max_core_version=_bound(data.get("max_core_version")),
     )
     if problems:
-        return "incompatible_core: " + "; ".join(problems)
+        return OverlayRefusal.INCOMPATIBLE_CORE, "; ".join(problems)
     bundled = bundled_version(bundled_root, entry.name)
     if bundled is None:
         return None
@@ -88,13 +93,39 @@ def overlay_refusal(
         if version > SemanticVersion(bundled):
             return None
     except ValueError:
-        return f"not_newer: bundled version {bundled!r} is unreadable"
-    return f"not_newer: overlay {raw} <= bundled {bundled}"
+        return (
+            OverlayRefusal.BUNDLED_UNREADABLE,
+            f"bundled version {bundled!r} is unreadable",
+        )
+    return OverlayRefusal.NOT_NEWER, f"overlay {raw} <= bundled {bundled}"
+
+
+def overlay_refusal(
+    entry: Path, bundled_root: Path | None, core_version: str
+) -> str | None:
+    """Why ``entry`` must not shadow the bundled plugin, or None when it may.
+
+    Returns:
+        ``"version_invalid: ..."``, ``"incompatible_core: ..."`` or
+        ``"not_newer: ..."`` (an unreadable bundled version included); None
+        when the entry is newer than the bundled plugin (or there is none) and
+        accepts ``core_version``.
+    """
+    refused = overlay_refusal_code(entry, bundled_root, core_version)
+    if refused is None:
+        return None
+    code, detail = refused
+    prefix = (
+        OverlayRefusal.NOT_NEWER if code is OverlayRefusal.BUNDLED_UNREADABLE else code
+    )
+    return f"{prefix.value}: {detail}"
 
 
 __all__ = [
+    "OverlayRefusal",
     "bundled_version",
     "default_bundled_root",
     "overlay_refusal",
+    "overlay_refusal_code",
     "read_manifest_mapping",
 ]

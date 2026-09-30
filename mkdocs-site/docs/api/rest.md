@@ -1006,6 +1006,14 @@ for line in response.iter_lines(decode_unicode=True):
 
 ---
 
+## Worker boot report
+
+When `UPDATE_APPLY_ENABLED=true`, each API worker writes a small report of the
+plugins it loaded (`boot/<pid>.json` under the update state directory) at the
+end of its startup, so the plugin updater can confirm a restart. The hook never
+delays or fails the boot: errors are logged and swallowed. See
+[Plugin updates](../core-modules/plugin-updates.md#boot-report).
+
 ## Interactive Documentation
 
 Access interactive Swagger/OpenAPI documentation:

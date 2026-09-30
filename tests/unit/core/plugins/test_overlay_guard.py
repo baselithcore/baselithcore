@@ -176,3 +176,26 @@ def test_prune_removes_only_stale_entries(
     assert (root / "p_new").is_symlink() and (store / "p_new-1.1.0").is_dir()
     assert (root / "p_plain").is_dir()
     assert prune_stale_overlay(root, bundled) == []
+
+
+def test_refusal_codes_tell_an_unreadable_bundled_version_from_an_older_entry(
+    tmp_path: Path,
+) -> None:
+    bundled = tmp_path / "bundled"
+    _plugin(bundled, "guard_bad", "guard_bad", "not-a-version")
+    _plugin(bundled, "guard_new", "guard_new", "2.0.0")
+    bad = _plugin(tmp_path / "ov", "guard_bad", "guard_bad", "1.0.0")
+    old = _plugin(tmp_path / "ov", "guard_new", "guard_new", "1.0.0")
+    code = _overlay_guard.OverlayRefusal
+    assert (
+        _overlay_guard.overlay_refusal_code(bad, bundled, "1.50.0")[0]
+        is code.BUNDLED_UNREADABLE
+    )  # type: ignore[index]
+    assert (
+        _overlay_guard.overlay_refusal_code(old, bundled, "1.50.0")[0] is code.NOT_NEWER
+    )  # type: ignore[index]
+    assert (
+        _overlay_guard.overlay_refusal(old, bundled, "1.50.0")
+        == "not_newer: overlay 1.0.0 <= bundled 2.0.0"
+    )
+    assert _overlay_guard.overlay_refusal_code(old, None, "1.50.0") is None

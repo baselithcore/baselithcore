@@ -1327,3 +1327,15 @@ manifest at the tagged commit agrees with it; nothing is downloaded) or
 trusted publisher keys). Any other value is treated as `signed`, the stricter
 mode, with a warning rather than a failed boot. See
 [Plugin updates › Trust modes](plugin-updates.md#trust-modes).
+
+## One-click plugin updates
+
+`UpdateApplyConfig` (`core.config.plugin_update_apply`, prefix
+`UPDATE_APPLY_`) holds the settings of host-side one-click plugin updates;
+its kill switch `UPDATE_APPLY_ENABLED` is off by default.
+`UPDATE_APPLY_APPROVAL_TTL_SECONDS` is the expiry of approval requests
+created without their own window: a console that asks for a second approval
+applies its own setting, and runs filed from the host's CLI are pre-approved.
+Settings that fail to load leave the update checker running with one-click
+updates off. See
+[Plugin updates › One-click update: settings and run store](plugin-updates.md#one-click-update-settings-and-run-store).

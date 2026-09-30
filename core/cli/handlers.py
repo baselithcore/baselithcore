@@ -63,7 +63,9 @@ UNSCOPED_COMMANDS: frozenset[str] = frozenset(
 #: RQ's own bookkeeping, the scheduler poll, failure handlers and startup.
 #: ``baselith queue status`` is an ordinary short command and stays scoped, so
 #: the exemption cannot be keyed on the top-level name alone.
-UNSCOPED_SUBCOMMANDS: frozenset[tuple[str, str]] = frozenset({("queue", "worker")})
+UNSCOPED_SUBCOMMANDS: frozenset[tuple[str, str]] = frozenset(
+    {("queue", "worker"), ("plugin-updater", "serve")}
+)
 
 
 def _wants_json(args: argparse.Namespace) -> bool:
@@ -84,7 +86,7 @@ def _subcommand(command: str, args: argparse.Namespace) -> str | None:
     (``db_command``, ``queue_command``, …), so one rule covers them all; a
     command with no subparser simply has no such attribute.
     """
-    value = getattr(args, f"{command}_command", None)
+    value = getattr(args, f"{command.replace('-', '_')}_command", None)
     return str(value) if value else None
 
 
@@ -287,6 +289,14 @@ def cmd_queue(args: argparse.Namespace) -> int:
     return run_queue(getattr(args, "queue_command", "status") or "status", vars(args))
 
 
+def cmd_plugin_updater(args: argparse.Namespace) -> int:
+    """Execute the 'plugin-updater' command (the one-click plugin updater)."""
+    from core.cli.commands.plugin_updater import run_plugin_updater
+
+    command = getattr(args, "plugin_updater_command", None) or "status"
+    return run_plugin_updater(command, vars(args))
+
+
 def cmd_docs(args: argparse.Namespace) -> int:
     """Execute the 'docs' command for local documentation maintenance."""
     from core.cli.commands.docs import run_docs
@@ -349,6 +359,7 @@ COMMAND_HANDLERS_MAP = {
     "db": cmd_db,
     "cache": cmd_cache,
     "queue": cmd_queue,
+    "plugin-updater": cmd_plugin_updater,
     "docs": cmd_docs,
     "doctor": cmd_doctor,
     "test": cmd_test,

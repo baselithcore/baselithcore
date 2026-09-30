@@ -13,11 +13,15 @@ from pathlib import Path
 from core import _version
 from core._core_version import CORE_VERSION
 from core._version import __version__ as FRAMEWORK_VERSION
+from core.config.plugin_update_apply import UpdateApplyConfig, get_update_apply_config
 from core.config.plugin_updates import PluginUpdateConfig
 from core.events import get_event_bus
 from core.plugins.signing import load_trusted_keys
 
 from .announce import AnnouncementGate, build_announcement_gate
+from .apply.eligibility import already_reached, apply_status
+from .apply.models import UpdaterHeartbeat
+from .apply.store import RunStore
 from .cache import UpdateCache
 from .checker import installed_versions, run_check
 from .metrics import publish_update_metrics
@@ -47,6 +51,22 @@ SYSTEM_EVENT_NAME = "system.update_available"
 _safe_error = safe_error
 
 
+def _apply_config_or_defaults() -> UpdateApplyConfig:
+    """``UPDATE_APPLY_*`` settings; unloadable ones mean defaults (kill switch off).
+
+    A bad one-click setting must never take the update checker down with it;
+    only the error's type is logged (its text may echo a configured value).
+    """
+    try:
+        return get_update_apply_config()
+    except Exception as exc:
+        logger.warning(
+            "plugin_update_apply_config_invalid error=%s; one-click updates off",
+            type(exc).__name__,
+        )
+        return UpdateApplyConfig.model_construct()
+
+
 class PluginUpdateService:
     """Owns the update cache and the background check loop."""
 
@@ -55,6 +75,9 @@ class PluginUpdateService:
         config: PluginUpdateConfig,
         bundled_root: Path = Path("plugins"),
         gate: AnnouncementGate | None = None,
+        *,
+        apply_config: UpdateApplyConfig | None = None,
+        run_store: RunStore | None = None,
     ) -> None:
         """Create the service; nothing runs until :meth:`start`."""
         self._config = config
@@ -72,6 +95,9 @@ class PluginUpdateService:
         self._deployment: Deployment | None = None
         self._bounds: list[PluginBoundsIssue] | None = None
         self._warned: set[str] = set()
+        self._apply_config = apply_config or _apply_config_or_defaults()
+        self._runs = run_store or RunStore(self._apply_config.state_dir)
+        self._installed: dict[str, str] | None = None
 
     def report(self) -> CheckReport | None:
         """The last saved report, if any, as :meth:`_present` shapes it."""
@@ -129,10 +155,43 @@ class PluginUpdateService:
         except Exception as exc:
             self._warn_once("plugin_install_guidance_failed", exc)
             guidance = None
+        try:
+            heartbeat = self._runs.read_heartbeat()  # one snapshot per read
+        except Exception as exc:
+            self._warn_once("apply_heartbeat_failed", exc)
+            heartbeat = None
         return [
-            c.model_copy(update={"install": guidance if c.available else None})
+            self._with_apply(
+                c.model_copy(update={"install": guidance if c.available else None}),
+                heartbeat,
+            )
             for c in self._current_trust(report.candidates)
         ]
+
+    def _with_apply(
+        self, c: UpdateCandidate, heartbeat: UpdaterHeartbeat | None
+    ) -> UpdateCandidate:
+        """Hide what the running version already reached; stamp the verdict."""
+        if not c.available:
+            return c
+        try:
+            if self._installed is None:  # plugins change only across a restart
+                self._installed = installed_versions(self._bundled_root)
+            if already_reached(c, self._installed.get(c.plugin)):
+                return c.model_copy(update={"available": False, "install": None})
+            status = apply_status(
+                c,
+                config=self._apply_config,
+                method=self.deployment().method,
+                heartbeat=heartbeat,
+                active_run=self._runs.active(c.plugin),
+                core_version=FRAMEWORK_VERSION,
+                now=datetime.now(UTC),
+            )
+        except Exception as exc:
+            self._warn_once("apply_status_failed", exc)
+            return c
+        return c.model_copy(update={"apply": status})
 
     def _current_trust(
         self, candidates: list[UpdateCandidate]
@@ -198,7 +257,7 @@ class PluginUpdateService:
         """
         last = self._last
         if last is not None and time.monotonic() - last[0] < CHECK_COOLDOWN_SECONDS:
-            return last[1]
+            return self._present(last[1]) or last[1]  # re-stamp: runs move fast
         return await self.check_now()
 
     async def check_now(self) -> CheckReport:
@@ -235,7 +294,7 @@ class PluginUpdateService:
                     "plugin_update_cache_write_failed: %s", type(exc).__name__
                 )
             served = self._present(report) or report
-            self._last = (time.monotonic(), served)
+            self._last = (time.monotonic(), report)
             publish_update_metrics(served)
             if error is None:
                 await self._announce(report)
@@ -278,12 +337,7 @@ class PluginUpdateService:
             raise RuntimeError("no sources file configured")
         sources = load_sources(sources_file)
         trust = self._config.trust
-        # Provenance trust needs no publisher key; only the signed mode reads them.
-        keys = (
-            [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
-            if trust == "signed"
-            else []
-        )
+        keys = [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
         return await run_check(
             sources,
             installed_versions(self._bundled_root),

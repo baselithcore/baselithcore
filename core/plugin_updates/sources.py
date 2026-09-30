@@ -6,6 +6,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import yaml
@@ -192,6 +193,30 @@ class GitHubReleaseSource:
         parsed = [p for rel in releases if (p := _parse_release(plugin, rel))]
         parsed.sort(key=lambda pair: pair[0], reverse=True)
         return [info for _, info in parsed]
+
+    async def release_by_tag(
+        self, plugin: str, slug: str, tag: str
+    ) -> ReleaseInfo | None:
+        """Return the stable release tagged ``tag`` (``GET /releases/tags/<tag>``).
+
+        ``None`` when there is no such release (404) or it is a draft, a
+        prerelease or not ``v<semver>``.
+
+        Raises:
+            SourceError: On a transport failure, another non-2xx response, or
+                a response that is not a JSON object.
+        """
+        try:
+            rel = await self._json_object(
+                f"{self._api_url}/repos/{slug}/releases/tags/{quote(tag, safe='')}",
+                "release",
+            )
+        except SourceError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        parsed = _parse_release(plugin, rel)
+        return parsed[1] if parsed is not None and parsed[1].tag == tag else None
 
     async def latest_release(self, plugin: str, slug: str) -> ReleaseInfo | None:
         """Return the highest stable ``v<semver>`` release, or ``None``.
