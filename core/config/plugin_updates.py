@@ -1,4 +1,4 @@
-"""Configuration for signed plugin updates (release polling and overlay)."""
+"""Configuration for plugin updates (release polling, trust mode and overlay)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
@@ -22,6 +23,11 @@ PUBLIC_CORE_REPO = "baselithcore/baselithcore"
 #: notice now always references the public core release, so they are ignored.
 LEGACY_REPO_ENV = ("SYSTEM_UPDATE_REPO", "PLUGIN_UPDATE_SYSTEM_UPDATE_REPO")
 _legacy_warned = False
+#: Accepted ``PLUGIN_UPDATE_TRUST`` values; an unknown one falls back to the
+#: stricter ``signed``.
+_TRUST_MODES = ("provenance", "signed")
+#: Accepted ``SYSTEM_INSTALL_METHOD`` values (see ``upgrade_models``).
+_INSTALL_METHODS = ("helm", "docker", "pip", "source", "custom")
 
 
 def warn_ignored_legacy_env(environ: Mapping[str, str] | None = None) -> bool:
@@ -71,7 +77,7 @@ def _https_link(value: str | None) -> str | None:
 class PluginUpdateConfig(BaseSettings):
     """Plugin update checker settings.
 
-    Environment variables: ``PLUGIN_UPDATE_SOURCES_FILE``,
+    Environment variables: ``PLUGIN_UPDATE_SOURCES_FILE``, ``PLUGIN_UPDATE_TRUST``,
     ``PLUGIN_UPDATE_GITHUB_TOKEN``, ``PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS``...
     """
 
@@ -86,6 +92,15 @@ class PluginUpdateConfig(BaseSettings):
         default=None,
         description="YAML file mapping plugin names to their GitHub mirror repos "
         "(the mirror registry); update checks are off while unset",
+    )
+    trust: Literal["provenance", "signed"] = Field(
+        default="provenance",
+        description="What makes a plugin release trusted enough to be offered: "
+        "provenance (a GitHub release created by the plugin repository's own "
+        "release workflow, whose manifest at the tagged commit agrees with it; "
+        "notice only, nothing is downloaded) or signed (an Ed25519-signed "
+        "release whose tarball is downloaded and verified against the trusted "
+        "publisher keys); any other value is treated as signed",
     )
     github_token: SecretStr | None = Field(
         default=None,
@@ -134,6 +149,31 @@ class PluginUpdateConfig(BaseSettings):
         "but an absolute https URL is ignored",
     )
 
+    install_method: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SYSTEM_INSTALL_METHOD", "PLUGIN_UPDATE_INSTALL_METHOD"
+        ),
+        description="How this deployment was installed, which decides the "
+        "upgrade instructions shown with the system update notice: helm, "
+        "docker, pip, source or custom (env SYSTEM_INSTALL_METHOD); unset "
+        "detects it (Kubernetes: helm, a container: docker, a source checkout: "
+        "source, otherwise pip, or custom when an instructions file is set); "
+        "any other value is ignored",
+    )
+    upgrade_instructions_file: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SYSTEM_UPGRADE_INSTRUCTIONS_FILE",
+            "PLUGIN_UPDATE_UPGRADE_INSTRUCTIONS_FILE",
+        ),
+        description="Markdown file with this deployment's own upgrade procedure "
+        "(installation method custom; env SYSTEM_UPGRADE_INSTRUCTIONS_FILE); "
+        "{version} and {current} are replaced with the target and installed "
+        "core releases, and the console shows it without raw HTML; empty "
+        "means unset",
+    )
+
     instance_id: str = Field(
         default="",
         description="Identity of this deployment for update announcements; "
@@ -143,11 +183,55 @@ class PluginUpdateConfig(BaseSettings):
         "warning is logged)",
     )
 
+    @field_validator("trust", mode="before")
+    @classmethod
+    def _known_trust(cls, value: object) -> str:
+        """Unset means provenance; a value that is not a mode means signed.
+
+        A mistyped mode must never loosen what is offered, so it falls back to
+        the stricter mode rather than the default.
+        """
+        text = value.strip().lower() if isinstance(value, str) else ""
+        if not text:
+            return "provenance"
+        if text not in _TRUST_MODES:
+            logger.warning(
+                "PLUGIN_UPDATE_TRUST %r is not one of %s; using signed",
+                text[:40],
+                ", ".join(_TRUST_MODES),
+            )
+            return "signed"
+        return text
+
     @field_validator("upgrade_guide_url", mode="before")
     @classmethod
     def _guide_is_https(cls, value: object) -> str | None:
         """A notice link must never become a phishing or script vector."""
         return _https_link(value if isinstance(value, str) else None)
+
+    @field_validator("upgrade_instructions_file", mode="before")
+    @classmethod
+    def _blank_file_is_unset(cls, value: object) -> object:
+        """An empty setting is no file (``Path("")`` would be the cwd)."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
+
+    @field_validator("install_method", mode="before")
+    @classmethod
+    def _known_install_method(cls, value: object) -> str | None:
+        """An unknown method is ignored (detection applies), never fatal."""
+        text = value.strip().lower() if isinstance(value, str) else ""
+        if not text:
+            return None
+        if text not in _INSTALL_METHODS:
+            logger.warning(
+                "SYSTEM_INSTALL_METHOD ignored: %r is not one of %s",
+                text[:40],
+                ", ".join(_INSTALL_METHODS),
+            )
+            return None
+        return text
 
     @field_validator("github_api_url")
     @classmethod

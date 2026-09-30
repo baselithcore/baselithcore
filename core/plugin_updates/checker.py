@@ -1,4 +1,8 @@
-"""Check plugins for newer signed releases and verify them before offering."""
+"""Check plugins for newer releases under the configured trust mode.
+
+``signed`` releases are downloaded and verified here before being offered;
+``provenance`` releases are judged by :mod:`.provenance` without a download.
+"""
 
 from __future__ import annotations
 
@@ -28,9 +32,12 @@ from .models import (
     CheckReport,
     Refusal,
     ReleaseInfo,
+    ReleaseProvenance,
+    TrustMode,
     UpdateCandidate,
     VerificationResult,
 )
+from .provenance import check_plugin_provenance
 from .release_manifest import (
     RELEASE_FORMAT,
     ReleaseManifestError,
@@ -39,7 +46,7 @@ from .release_manifest import (
     parse_files,
     verify_release_manifest,
 )
-from .sources import GitHubReleaseSource, SourceError
+from .sources import GitHubReleaseSource, SourceError, is_commit_sha
 from .verifier import verify_release
 
 logger = logging.getLogger(__name__)
@@ -369,20 +376,43 @@ async def check_plugin(
     then kept in ``cache`` and any refused one is removed.
     """
     try:
-        return await _check(
+        candidate = await _check(
             plugin, slug, installed, source, cache, core_version, trusted_keys
         )
     except SourceError as exc:
-        return _refused(plugin, installed, None, Refusal.SOURCE_ERROR, str(exc))
+        candidate = _refused(plugin, installed, None, Refusal.SOURCE_ERROR, str(exc))
     except Exception as exc:  # contain everything; the type name carries no secret
         logger.warning("plugin_update_check_failed: %s: %s", plugin, type(exc).__name__)
-        return _refused(
+        candidate = _refused(
             plugin,
             installed,
             None,
             Refusal.SOURCE_ERROR,
             f"unexpected {type(exc).__name__}",
         )
+    return _stamp_signed(candidate, slug, source)
+
+
+def _stamp_signed(
+    candidate: UpdateCandidate, slug: str, source: GitHubReleaseSource
+) -> UpdateCandidate:
+    """Mark a signed-mode candidate and record what its release says of itself.
+
+    The commit is the release's ``target_commitish`` when that is a commit id;
+    the signature, not this, is what the signed mode trusts.
+    """
+    latest = candidate.latest
+    provenance = None
+    if latest is not None:
+        target = latest.target_commitish
+        sha = target.lower() if target and is_commit_sha(target) else None
+        provenance = ReleaseProvenance(
+            author=latest.author,
+            commit_sha=sha,
+            commit_url=source.commit_url(slug, sha) if sha else None,
+            published_at=latest.published_at,
+        )
+    return candidate.model_copy(update={"trust": "signed", "provenance": provenance})
 
 
 async def run_check(
@@ -393,12 +423,27 @@ async def run_check(
     cache: UpdateCache,
     core_version: str,
     trusted_keys: Sequence[str],
+    trust: TrustMode = "signed",
 ) -> CheckReport:
-    """Check every plugin that has both a source and an installed version."""
+    """Check every plugin that has both a source and an installed version.
+
+    ``trust`` selects the rule a release must pass to be offered:
+    ``signed`` (:func:`check_plugin`) or ``provenance``
+    (:func:`~.provenance.check_plugin_provenance`, which ignores ``cache``
+    and ``trusted_keys``).
+    """
     gate = asyncio.Semaphore(_CONCURRENCY)
 
     async def one(name: str) -> UpdateCandidate:
         async with gate:
+            if trust == "provenance":
+                return await check_plugin_provenance(
+                    name,
+                    sources[name],
+                    installed[name],
+                    source=source,
+                    core_version=core_version,
+                )
             return await check_plugin(
                 name,
                 sources[name],

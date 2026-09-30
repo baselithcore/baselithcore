@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +11,9 @@ import httpx
 import yaml
 from pydantic import SecretStr
 
-from core.plugins.version import SemanticVersion
-
 from ._advisories import parse_advisory
+from ._release_parse import parse_release as _parse_release
+from ._release_parse import text as _text
 from .github import repo_slug
 from .models import Advisory, ReleaseInfo
 
@@ -24,61 +24,24 @@ _TIMEOUT = httpx.Timeout(30.0)
 #: Download cap when the caller sets none (``PLUGIN_UPDATE_MAX_ARTIFACT_MB``).
 DEFAULT_MAX_ARTIFACT_BYTES = 200 * 1024 * 1024
 
+#: Largest text file (a plugin manifest) read through the contents API.
+MAX_TEXT_FILE_BYTES = 1024 * 1024
+_COMMIT_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+#: Branch names put into a compare URL (git ref characters, no ``..``).
+_BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,255}$")
+
 #: Repos already logged as publishing no advisories (once per process).
 _NO_ADVISORIES_LOGGED: set[str] = set()
+
+
+def is_commit_sha(value: str | None) -> bool:
+    """Whether ``value`` is a full 40-hex git commit id."""
+    return bool(value) and _COMMIT_SHA.match(value or "") is not None
 
 
 def _discard(path: Path) -> None:
     """Remove a partial download, ignoring a file that is already gone."""
     path.unlink(missing_ok=True)
-
-
-def _text(value: Any) -> str | None:
-    """Return ``value`` when it is a string, else ``None``."""
-    return value if isinstance(value, str) else None
-
-
-def _parse_release(plugin: str, rel: Any) -> tuple[SemanticVersion, ReleaseInfo] | None:
-    """Map one GitHub release object to a candidate, or ``None`` to skip it."""
-    if not isinstance(rel, dict) or rel.get("draft") or rel.get("prerelease"):
-        return None
-    tag = _text(rel.get("tag_name"))
-    if tag is None or not tag.startswith("v"):
-        return None
-    try:
-        ver = SemanticVersion(tag[1:])
-    except ValueError:
-        return None
-    if ver.prerelease:
-        return None
-    version = f"{ver.major}.{ver.minor}.{ver.patch}"
-    assets: dict[str, str] = {}
-    raw_assets = rel.get("assets")
-    for asset in raw_assets if isinstance(raw_assets, list) else []:
-        if not isinstance(asset, dict):
-            continue
-        name, url = _text(asset.get("name")), _text(asset.get("url"))
-        if name is not None and url is not None:
-            assets[name] = url
-    published_raw = _text(rel.get("published_at"))
-    try:
-        published = (
-            datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
-            if published_raw
-            else None
-        )
-    except ValueError:
-        return None
-    return ver, ReleaseInfo(
-        plugin=plugin,
-        version=version,
-        tag=tag,
-        published_at=published,
-        notes=_text(rel.get("body")) or "",
-        html_url=_text(rel.get("html_url")) or "",
-        tarball_url=assets.get(f"{plugin}-{version}.tar.gz"),
-        release_json_url=assets.get("release.json"),
-    )
 
 
 class AdvisoriesNotPublished(Exception):
@@ -164,6 +127,11 @@ class GitHubReleaseSource:
         self._token = token
         self._client = client
         self.max_bytes = max_bytes
+
+    @property
+    def api_url(self) -> str:
+        """The GitHub API base URL, without a trailing slash."""
+        return self._api_url
 
     def _headers(self, accept: str) -> dict[str, str]:
         headers = {"Accept": accept, "X-GitHub-Api-Version": _API_VERSION}
@@ -266,6 +234,124 @@ class GitHubReleaseSource:
             raise AdvisoriesNotPublished(slug) from exc
         return [adv for entry in entries for adv in parse_advisory(entry)]
 
+    async def _json_object(self, url: str, what: str) -> dict[str, Any]:
+        response = await self._get(url, "application/vnd.github+json")
+        try:
+            body: Any = response.json()
+        except ValueError as exc:
+            raise SourceError(f"GitHub returned a non-JSON {what} response") from exc
+        if not isinstance(body, dict):
+            raise SourceError(f"GitHub returned an unexpected {what} response")
+        return body
+
+    async def tag_commit(self, slug: str, tag: str) -> str:
+        """Return the commit SHA ``tag`` points at, peeling an annotated tag.
+
+        Args:
+            slug: ``owner/repo`` of the mirror.
+            tag: A ``v<semver>`` release tag (validated by the caller).
+
+        Raises:
+            SourceError: On a transport failure, a non-2xx response (a missing
+                tag answers 404), or a reference that does not resolve to a
+                commit.
+        """
+        obj = (
+            await self._json_object(
+                f"{self._api_url}/repos/{slug}/git/ref/tags/{tag}", "tag"
+            )
+        ).get("object")
+        if isinstance(obj, dict) and obj.get("type") == "tag":
+            peeled = await self._json_object(
+                f"{self._api_url}/repos/{slug}/git/tags/{_text(obj.get('sha'))}",
+                "tag",
+            )
+            obj = peeled.get("object")
+        sha = _text(obj.get("sha")) if isinstance(obj, dict) else None
+        if not isinstance(obj, dict) or obj.get("type") != "commit" or not sha:
+            raise SourceError(f"tag {tag} does not point at a commit")
+        if not is_commit_sha(sha):
+            raise SourceError(f"tag {tag} resolved to a malformed commit id")
+        return sha.lower()
+
+    async def default_branch(self, slug: str) -> str:
+        """Return the repository's default branch name.
+
+        Raises:
+            SourceError: On a transport failure, a non-2xx response, or a
+                missing or malformed branch name.
+        """
+        repo = await self._json_object(f"{self._api_url}/repos/{slug}", "repository")
+        branch = _text(repo.get("default_branch"))
+        if not branch or not _BRANCH.match(branch) or ".." in branch:
+            raise SourceError("repository reports no usable default branch")
+        return branch
+
+    async def compare_status(self, slug: str, base: str, head: str) -> str:
+        """GitHub's ``status`` of ``base...head``: ahead, behind, identical, diverged.
+
+        ``ahead`` or ``identical`` means ``base`` is an ancestor of ``head``.
+
+        Raises:
+            SourceError: On a transport failure, a non-2xx response, or a
+                response without a status.
+        """
+        body = await self._json_object(
+            f"{self._api_url}/repos/{slug}/compare/{base}...{head}?per_page=1",
+            "compare",
+        )
+        status = _text(body.get("status"))
+        if not status:
+            raise SourceError("GitHub returned a comparison without a status")
+        return status
+
+    async def file_at(self, slug: str, path: str, ref: str) -> str | None:
+        """Return a text file of the mirror at ``ref``, or None when absent.
+
+        Read through the contents API on the API host (the token never leaves
+        it), capped at :data:`MAX_TEXT_FILE_BYTES`.
+
+        Raises:
+            SourceError: On a transport failure, a non-2xx response other than
+                404, a file over the cap, or bytes that are not UTF-8.
+        """
+        try:
+            response = await self._get(
+                f"{self._api_url}/repos/{slug}/contents/{path}?ref={ref}",
+                "application/vnd.github.raw+json",
+            )
+        except SourceError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if len(response.content) > MAX_TEXT_FILE_BYTES:
+            raise SourceError(f"{path} is larger than {MAX_TEXT_FILE_BYTES} bytes")
+        try:
+            return response.content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise SourceError(f"{path} is not UTF-8 text") from exc
+
+    def commit_url(self, slug: str, sha: str) -> str | None:
+        """The https page of commit ``sha`` on the web host of this API, if known.
+
+        ``api.github.com`` maps to ``github.com`` and a GitHub Enterprise
+        ``https://<host>/api/v3`` to ``https://<host>``; any other API URL (a
+        local fake) has no known web host and gets no link.
+        """
+        if not is_commit_sha(sha):
+            return None
+        api = httpx.URL(self._api_url)
+        if api.scheme != "https" or not api.host:
+            return None
+        if api.host == "api.github.com":
+            base = "https://github.com"
+        elif api.path.rstrip("/") == "/api/v3":
+            port = f":{api.port}" if api.port else ""
+            base = f"https://{api.host}{port}"
+        else:
+            return None
+        return f"{base}/{slug}/commit/{sha.lower()}"
+
     async def download(self, asset_url: str, dest: Path) -> None:
         """Stream a release asset to ``dest``.
 
@@ -329,7 +415,9 @@ __all__ = [
     "AdvisoriesNotPublished",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "GitHubReleaseSource",
+    "MAX_TEXT_FILE_BYTES",
     "SourceError",
+    "is_commit_sha",
     "load_sources",
     "safe_error",
 ]

@@ -418,7 +418,7 @@ Declared in `core.config.orchestration`.
 | `ROUTER_RETRIEVAL_LIMIT` | `int` | `50` | Number of entities to retrieve from vector store (N >> K) |
 | `ROUTER_SCORE_THRESHOLD` | `float` | `0.7` | Minimum similarity score for tool retrieval |
 
-## Signed plugin updates (release polling and overlay)
+## Plugin updates (release polling, trust mode and overlay)
 
 Declared in `core.config.plugin_updates`.
 
@@ -432,7 +432,10 @@ Declared in `core.config.plugin_updates`.
 | `PLUGIN_UPDATE_INSTANCE_ID` | `str` | *empty* | Identity of this deployment for update announcements; deployments sharing one Redis or cache directory use distinct values so they do not suppress each other's notices (falls back to the APP_BASE_URL host; with neither set the Redis key is shared and a warning is logged) |
 | `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `int` | `200` | Largest release artifact downloaded, in MB; a larger one is refused before its signature is checked (it unpacks to at most 4x this) |
 | `PLUGIN_UPDATE_SOURCES_FILE` | `Path \| None` | *empty* | YAML file mapping plugin names to their GitHub mirror repos (the mirror registry); update checks are off while unset |
+| `PLUGIN_UPDATE_TRUST` | `Literal['provenance', 'signed']` | `provenance` | What makes a plugin release trusted enough to be offered: provenance (a GitHub release created by the plugin repository's own release workflow, whose manifest at the tagged commit agrees with it; notice only, nothing is downloaded) or signed (an Ed25519-signed release whose tarball is downloaded and verified against the trusted publisher keys); any other value is treated as signed |
+| `SYSTEM_INSTALL_METHOD`<br>also accepts `PLUGIN_UPDATE_INSTALL_METHOD` | `str \| None` | *empty* | How this deployment was installed, which decides the upgrade instructions shown with the system update notice: helm, docker, pip, source or custom (env SYSTEM_INSTALL_METHOD); unset detects it (Kubernetes: helm, a container: docker, a source checkout: source, otherwise pip, or custom when an instructions file is set); any other value is ignored |
 | `SYSTEM_UPGRADE_GUIDE_URL`<br>also accepts `PLUGIN_UPDATE_UPGRADE_GUIDE_URL` | `str \| None` | *empty* | https link to this deployment's upgrade instructions, shown with the system update notice (env SYSTEM_UPGRADE_GUIDE_URL); anything but an absolute https URL is ignored |
+| `SYSTEM_UPGRADE_INSTRUCTIONS_FILE`<br>also accepts `PLUGIN_UPDATE_UPGRADE_INSTRUCTIONS_FILE` | `Path \| None` | *empty* | Markdown file with this deployment's own upgrade procedure (installation method custom; env SYSTEM_UPGRADE_INSTRUCTIONS_FILE); {version} and {current} are replaced with the target and installed core releases, and the console shows it without raw HTML; empty means unset |
 
 ## Plugin-specific configuration settings
 
@@ -923,4 +926,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-589 settings documented.
+592 settings documented.

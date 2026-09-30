@@ -30,7 +30,11 @@ def _report() -> CheckReport:
         checked_at=datetime.now(UTC),
         candidates=[
             UpdateCandidate(
-                plugin="demo", installed_version="1.0.0", latest=None, available=True
+                plugin="demo",
+                installed_version="1.0.0",
+                latest=None,
+                available=True,
+                trust="provenance",
             )
         ],
     )
@@ -48,7 +52,9 @@ async def test_check_failure_keeps_cached_candidates(
 
     monkeypatch.setattr(svc_mod, "run_check", boom)
     report = await svc.check_now()
-    assert report.candidates == prev.candidates and report.error == "RuntimeError"
+    # Served candidates carry install guidance; the cached ones never do.
+    bare = [c.model_copy(update={"install": None}) for c in report.candidates]
+    assert bare == prev.candidates and report.error == "RuntimeError"
     assert svc.report() is not None and svc.report().error == "RuntimeError"  # type: ignore[union-attr]
 
 

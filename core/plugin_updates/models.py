@@ -1,11 +1,14 @@
-"""Data models for signed plugin updates: releases, verdicts and check reports."""
+"""Data models for plugin updates: releases, verdicts and check reports."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from .upgrade_models import PluginInstallGuidance, UpgradeInstructions
 
 
 class Refusal(StrEnum):
@@ -25,6 +28,22 @@ class Refusal(StrEnum):
     LEGACY_RELEASE = "legacy_release"
     FILES_MISMATCH = "files_mismatch"
     SOURCE_ERROR = "source_error"
+    #: Provenance mode: the release was not created by the mirror's own
+    #: release workflow.
+    UNTRUSTED_RELEASE_AUTHOR = "untrusted_release_author"
+    #: Provenance mode: the release tag no longer points at the commit the
+    #: release was created from.
+    TAG_MOVED = "tag_moved"
+    #: Provenance mode: the tagged commit is not on the repository's default
+    #: branch (a release cut from a side branch, or retargeted to one).
+    NOT_ON_DEFAULT_BRANCH = "not_on_default_branch"
+
+
+#: How a deployment decides that a published plugin release is genuine.
+#: ``provenance``: a GitHub release created by the mirror repository's own
+#: release workflow, whose manifest at the tagged commit agrees with it.
+#: ``signed``: an Ed25519-signed release (``release.json`` plus tarball).
+TrustMode = Literal["provenance", "signed"]
 
 
 class VerificationResult(BaseModel):
@@ -54,6 +73,30 @@ class ReleaseInfo(BaseModel):
     html_url: str = ""
     tarball_url: str | None = None
     release_json_url: str | None = None
+    #: Login of the account that created the release (``author.login``).
+    author: str | None = None
+    #: Numeric id of that account (``author.id``).
+    author_id: int | None = None
+    #: Account type of that account (``author.type``: ``User``, ``Bot``...).
+    author_type: str | None = None
+    #: The release's ``target_commitish`` as GitHub reports it.
+    target_commitish: str | None = None
+
+
+class ReleaseProvenance(BaseModel):
+    """Where a release came from: who published it, from which commit, when.
+
+    ``commit_url`` is the commit's page on the plugin's repository (https,
+    built from the repository slug and a validated SHA, never taken from
+    the release body).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    author: str | None = None
+    commit_sha: str | None = None
+    commit_url: str | None = None
+    published_at: datetime | None = None
 
 
 class UpdateCandidate(BaseModel):
@@ -65,6 +108,13 @@ class UpdateCandidate(BaseModel):
     available: bool
     refusal: Refusal | None = None
     detail: str = ""
+    #: How the release reaches this deployment; stamped when served, never
+    #: cached (an available update only).
+    install: PluginInstallGuidance | None = None
+    #: The trust mode the release was checked under (None: not checked).
+    trust: TrustMode | None = None
+    #: Who published the release, from which commit (when known).
+    provenance: ReleaseProvenance | None = None
 
 
 class Advisory(BaseModel):
@@ -88,8 +138,13 @@ class SystemUpdate(BaseModel):
     distribution's own version, and ``repo`` is the public core repository.
     ``upgrade_guide_url`` is the operator's upgrade instructions
     (``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration
-    whenever the report is served. Notice only: nothing is ever installed from
-    this data.
+    whenever the report is served. ``upgrade_path`` is computed by the check
+    from the published releases: the stops, in order, of an upgrade that
+    crosses a major version (the latest release of each major on the way, then
+    the latest release), empty for a direct upgrade. ``upgrade`` is the
+    version-specific instructions for this deployment's installation method,
+    stamped when served and never cached. Notice only: nothing is ever
+    installed from this data.
     """
 
     component: str = "core"
@@ -104,6 +159,8 @@ class SystemUpdate(BaseModel):
     advisories: list[Advisory] = []
     error: str | None = None
     upgrade_guide_url: str | None = None
+    upgrade_path: list[str] = []
+    upgrade: UpgradeInstructions | None = None
 
 
 class CheckReport(BaseModel):
@@ -120,7 +177,9 @@ __all__ = [
     "CheckReport",
     "Refusal",
     "ReleaseInfo",
+    "ReleaseProvenance",
     "SystemUpdate",
+    "TrustMode",
     "UpdateCandidate",
     "VerificationResult",
 ]

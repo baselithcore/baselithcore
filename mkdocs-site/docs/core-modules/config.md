@@ -1304,3 +1304,26 @@ directory set distinct values so they do not suppress each other's notices; it
 falls back to the `APP_BASE_URL` host. With neither set the Redis key is
 shared, and a warning is logged once when Redis is in use. See
 [Plugin updates](plugin-updates.md).
+
+## Upgrade instructions
+
+`PluginUpdateConfig` also carries the two settings behind the upgrade
+instructions served with the system update notice: `SYSTEM_INSTALL_METHOD`
+(`helm`, `docker`, `pip`, `source` or `custom`; unset detects it, any other
+value is ignored with a warning rather than failing the boot) and
+`SYSTEM_UPGRADE_INSTRUCTIONS_FILE` (the operator's own markdown procedure for
+method `custom`, with `{version}` and `{current}` filled in; an empty value
+means unset). The framework
+never runs an upgrade: see
+[Plugin updates › Upgrade instructions](plugin-updates.md#upgrade-instructions).
+
+## Plugin update trust
+
+`PluginUpdateConfig.trust` (`PLUGIN_UPDATE_TRUST`) picks what makes a plugin
+release trusted enough to be offered: `provenance` (the default — a GitHub
+release created by the plugin repository's own release workflow, whose
+manifest at the tagged commit agrees with it; nothing is downloaded) or
+`signed` (the Ed25519-signed release, downloaded and verified against the
+trusted publisher keys). Any other value is treated as `signed`, the stricter
+mode, with a warning rather than a failed boot. See
+[Plugin updates › Trust modes](plugin-updates.md#trust-modes).

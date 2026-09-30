@@ -24,6 +24,7 @@ from .sources import (
     SourceError,
     safe_error,
 )
+from .upgrade.path import upgrade_path
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ def carry_over(
             available=previous.available,
             behind=previous.behind,
             major=previous.major,
+            upgrade_path=previous.upgrade_path,
         )
     if advisories:
         update.update(
@@ -162,6 +164,7 @@ async def check_system(
             "behind": len(newer),
             "major": bool(newer)
             and SemanticVersion(newer[0].version).major > current.major,
+            "upgrade_path": upgrade_path(installed, releases),
             "security": bool(matching),
             "severity": severity,
             "advisories": matching,

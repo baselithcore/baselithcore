@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from core import _version
 from core._core_version import CORE_VERSION
 from core._version import __version__ as FRAMEWORK_VERSION
 from core.config.plugin_updates import PluginUpdateConfig
@@ -22,6 +24,15 @@ from .metrics import publish_update_metrics
 from .models import CheckReport, SystemUpdate, UpdateCandidate
 from .sources import GitHubReleaseSource, load_sources, safe_error
 from .system import carry_over, check_system
+from .upgrade import (
+    Deployment,
+    build_upgrade_instructions,
+    detect_install_method,
+    installed_bounds,
+    plugin_install_guidance,
+    read_namespace,
+)
+from .upgrade_models import PluginBoundsIssue
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +69,104 @@ class PluginUpdateService:
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._last: tuple[float, CheckReport] | None = None
+        self._deployment: Deployment | None = None
+        self._bounds: list[PluginBoundsIssue] | None = None
+        self._warned: set[str] = set()
 
     def report(self) -> CheckReport | None:
         """The last saved report, if any, as :meth:`_present` shapes it."""
         return self._present(self._cache.load())
 
-    def _present(self, report: CheckReport | None) -> CheckReport | None:
-        """``report`` with its system notice passed through :meth:`_present_system`."""
-        if report is None or report.system is None:
-            return report
-        system = self._present_system(report.system)
-        if system is report.system:
-            return report
-        return report.model_copy(update={"system": system})
+    def deployment(self) -> Deployment:
+        """This deployment's installation method and context (read once)."""
+        if self._deployment is None:
+            method, detected = detect_install_method(self._config)
+            self._deployment = Deployment(
+                method=method,
+                detected=detected,
+                framework_version=FRAMEWORK_VERSION,
+                distribution=getattr(_version, "__distribution__", None),
+                namespace=read_namespace() if method == "helm" else None,
+                base_url=os.getenv("APP_BASE_URL", "").strip() or None,
+            )
+        return self._deployment
 
-    def _present_system(self, system: SystemUpdate | None) -> SystemUpdate | None:
+    def _warn_once(self, what: str, exc: Exception) -> None:
+        """Log a presentation failure once per process, not on every read."""
+        if what not in self._warned:
+            self._warned.add(what)
+            logger.warning("%s: %s", what, type(exc).__name__)
+
+    def _plugin_bounds(self) -> list[PluginBoundsIssue] | None:
+        """The installed plugins' core bounds, or None when they cannot be read.
+
+        Plugins change only across a restart, so a successful scan is kept; a
+        failed one is retried on the next read.
+        """
+        if self._bounds is None:
+            try:
+                self._bounds = installed_bounds(self._bundled_root)
+            except Exception as exc:
+                self._warn_once("plugin_bounds_scan_failed", exc)
+                return None
+        return self._bounds
+
+    def _with_instructions(self, system: SystemUpdate) -> SystemUpdate:
+        """``system`` with its upgrade instructions; without them on a failure."""
+        try:
+            upgrade = build_upgrade_instructions(
+                system, self._config, self.deployment(), self._plugin_bounds()
+            )
+        except Exception as exc:
+            self._warn_once("upgrade_instructions_failed", exc)
+            upgrade = None
+        return system.model_copy(update={"upgrade": upgrade})
+
+    def _with_guidance(self, report: CheckReport) -> list[UpdateCandidate]:
+        """The candidates, each available one with its install guidance."""
+        try:
+            guidance = plugin_install_guidance(self._config, self.deployment().method)
+        except Exception as exc:
+            self._warn_once("plugin_install_guidance_failed", exc)
+            guidance = None
+        return [
+            c.model_copy(update={"install": guidance if c.available else None})
+            for c in self._current_trust(report.candidates)
+        ]
+
+    def _current_trust(
+        self, candidates: list[UpdateCandidate]
+    ) -> list[UpdateCandidate]:
+        """Only verdicts reached under today's ``PLUGIN_UPDATE_TRUST`` mode.
+
+        A verdict saved (or carried over a failed check) under the other mode
+        answers a question this deployment no longer asks: switching from
+        signed to provenance must not keep offering a signed-only verdict, nor
+        the reverse.
+        """
+        mode = self._config.trust
+        return [c for c in candidates if c.trust == mode]
+
+    def _present(self, report: CheckReport | None) -> CheckReport | None:
+        """``report`` as served: current notice, instructions and guidance.
+
+        The system notice goes through :meth:`_scope_system` and gains the
+        version-specific upgrade instructions; every available plugin update
+        gains its install guidance. Both are derived from the current
+        configuration on each read and never cached. A plugin verdict reached
+        under another trust mode is dropped. Neither can fail the
+        read: a failure is logged once and the report is served without that
+        part (a plugin scan failure reports the plugin check as not computed).
+        """
+        if report is None:
+            return None
+        system = self._scope_system(report.system)
+        if system is not None:
+            system = self._with_instructions(system)
+        candidates = self._with_guidance(report)
+        return report.model_copy(update={"system": system, "candidates": candidates})
+
+    def _scope_system(self, system: SystemUpdate | None) -> SystemUpdate | None:
         """Serve only a notice about this core, with today's guide link.
 
         A saved notice about another repository or another installed version
@@ -90,9 +184,9 @@ class PluginUpdateService:
         ):
             return None
         guide = self._config.upgrade_guide_url
-        if system.upgrade_guide_url == guide:
+        if system.upgrade_guide_url == guide and system.upgrade is None:
             return system
-        return system.model_copy(update={"upgrade_guide_url": guide})
+        return system.model_copy(update={"upgrade_guide_url": guide, "upgrade": None})
 
     async def request_check(self) -> CheckReport:
         """``check_now`` for API callers, throttled per process.
@@ -115,7 +209,11 @@ class PluginUpdateService:
         candidates are kept and ``error`` set.
         """
         async with self._lock:
-            previous = self._present(self._cache.load())
+            previous = self._cache.load()
+            if previous is not None:
+                previous = previous.model_copy(
+                    update={"system": self._scope_system(previous.system)}
+                )
             source = GitHubReleaseSource(
                 self._config.github_api_url,
                 self._config.github_token,
@@ -123,7 +221,7 @@ class PluginUpdateService:
             )
             candidates, error = await self._plugin_part(source, previous)
             system = await self._system_part(source, previous)
-            system = self._present_system(system)
+            system = self._scope_system(system)
             report = CheckReport(
                 checked_at=datetime.now(UTC),
                 candidates=candidates,
@@ -136,13 +234,14 @@ class PluginUpdateService:
                 logger.warning(
                     "plugin_update_cache_write_failed: %s", type(exc).__name__
                 )
-            self._last = (time.monotonic(), report)
-            publish_update_metrics(report)
+            served = self._present(report) or report
+            self._last = (time.monotonic(), served)
+            publish_update_metrics(served)
             if error is None:
                 await self._announce(report)
             elif system is not None:
                 await self._announce_system(system)
-            return report
+            return served
 
     async def _plugin_part(
         self, source: GitHubReleaseSource, previous: CheckReport | None
@@ -153,7 +252,8 @@ class PluginUpdateService:
             report = await self._run(source)
         except Exception as exc:
             logger.warning("plugin_update_check_failed: %s", type(exc).__name__)
-            return (previous.candidates if previous else []), _safe_error(exc)
+            carried = self._current_trust(previous.candidates) if previous else []
+            return carried, _safe_error(exc)
         return report.candidates, report.error
 
     async def _system_part(
@@ -177,7 +277,13 @@ class PluginUpdateService:
         if sources_file is None:
             raise RuntimeError("no sources file configured")
         sources = load_sources(sources_file)
-        keys = [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
+        trust = self._config.trust
+        # Provenance trust needs no publisher key; only the signed mode reads them.
+        keys = (
+            [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
+            if trust == "signed"
+            else []
+        )
         return await run_check(
             sources,
             installed_versions(self._bundled_root),
@@ -185,6 +291,7 @@ class PluginUpdateService:
             cache=self._cache,
             core_version=FRAMEWORK_VERSION,
             trusted_keys=keys,
+            trust=trust,
         )
 
     async def _emit(self, name: str, data: dict[str, object]) -> bool:
