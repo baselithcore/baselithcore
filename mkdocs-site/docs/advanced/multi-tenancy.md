@@ -446,6 +446,33 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     fresh data directory** — an existing volume never sees it, so provision the
     role by hand there with the SQL above.
 
+#### Plugin tables: `core.db.rls_policy` {#plugin-table-policies}
+
+Core's tenant-scoped tables get their `tenant_isolation` policy from the
+migrations. A plugin that owns a table with a `tenant_id` column builds it in
+its own idempotent `init_schema()`, and gives it the **same** policy from
+`core.db.rls_policy` rather than a hand-written copy that drifts:
+
+```python
+from core.db.rls_policy import tenant_isolation_ddl
+
+async def init_schema(self, config: dict | None = None) -> None:
+    async with get_connection() as conn, conn.cursor() as cursor:
+        await cursor.execute(MY_TABLES_DDL)
+        await cursor.execute(tenant_isolation_ddl(["myplugin_notes"]))
+```
+
+`tenant_isolation_ddl(tables)` enables RLS and (re)creates the policy with the
+`system` exemption of migration 010. It is inert where RLS does not apply (the
+owner, a superuser, a `BYPASSRLS` role) and skips a table with a `NOTICE` when
+the connected role does not own it, so it never fails a boot.
+
+A plugin whose rows are keyed by something other than the session tenant — a
+`personal` tenancy override keys them by user id — wraps its database work in
+`row_tenant_scope(key)`, so the session carries the same key the rows were
+written under; otherwise every read is filtered to nothing and every write is
+refused by the policy's `WITH CHECK`.
+
 #### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
 
 Not everything that touches Postgres belongs to a tenant. Under RLS an unbound
