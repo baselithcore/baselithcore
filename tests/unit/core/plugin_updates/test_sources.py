@@ -105,12 +105,12 @@ async def test_download_error_raises(tmp_path: Path) -> None:
 def test_load_sources_skips_subtrees(tmp_path: Path) -> None:
     f = tmp_path / "m.yaml"
     f.write_text(
-        "mirrors:\n  dbview:\n    repo: git@github.com:o/plugin-dbview.git\n"
-        "  red_agent_daemon:\n    repo: git@github.com:o/d.git\n"
-        "    path: plugins/red_agent/daemon\n"
+        "mirrors:\n  example:\n    repo: git@github.com:o/plugin-example.git\n"
+        "  example_daemon:\n    repo: git@github.com:o/d.git\n"
+        "    path: plugins/example/daemon\n"
         "  broken:\n    repo: not-a-url\n"
     )
-    assert load_sources(f) == {"dbview": "o/plugin-dbview"}
+    assert load_sources(f) == {"example": "o/plugin-example"}
 
 
 def test_config_enabled_needs_existing_sources_file(tmp_path: Path) -> None:

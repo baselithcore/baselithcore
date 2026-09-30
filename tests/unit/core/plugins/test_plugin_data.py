@@ -14,8 +14,8 @@ def test_default_root_is_data_plugins_under_cwd(
 ) -> None:
     monkeypatch.delenv(DATA_DIR_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
-    path = data_dir("agent_jira")
-    assert path == (tmp_path / "data" / "plugins" / "agent_jira").resolve()
+    path = data_dir("example_plugin")
+    assert path == (tmp_path / "data" / "plugins" / "example_plugin").resolve()
     assert path.is_dir()
 
 

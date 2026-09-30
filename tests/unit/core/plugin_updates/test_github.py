@@ -8,13 +8,13 @@ from core.plugin_updates.github import repo_slug
 @pytest.mark.parametrize(
     "url",
     [
-        "git@github.com:baselithcore/plugin-dbview.git",
-        "https://github.com/baselithcore/plugin-dbview.git",
-        "https://github.com/baselithcore/plugin-dbview",
+        "git@github.com:baselithcore/plugin-example.git",
+        "https://github.com/baselithcore/plugin-example.git",
+        "https://github.com/baselithcore/plugin-example",
     ],
 )
 def test_repo_slug(url: str) -> None:
-    assert repo_slug(url) == "baselithcore/plugin-dbview"
+    assert repo_slug(url) == "baselithcore/plugin-example"
 
 
 @pytest.mark.parametrize(
