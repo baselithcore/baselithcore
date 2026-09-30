@@ -136,11 +136,20 @@ spec:
           resources:
             {{- toYaml .Values.database.pluginSchemaInit.resources | nindent 12 }}
           {{- $appVolumes := and $mountVolumes .Values.extraVolumes }}
-          {{- if or .Values.tmpVolumes.enabled $appVolumes }}
+          {{- $pluginSet := .Values.plugins.config }}
+          {{- if or .Values.tmpVolumes.enabled $appVolumes $pluginSet }}
           volumeMounts:
             {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
               mountPath: /tmp
+            {{- end }}
+            {{- if $pluginSet }}
+            # The release's declarative plugin set, from its hook-scoped copy
+            # (plugins-configmap.yaml): the set the pods run, not the image's.
+            - name: plugins-config
+              mountPath: /app/configs/plugins.yaml
+              subPath: plugins.yaml
+              readOnly: true
             {{- end }}
             {{- if $appVolumes }}
             {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
@@ -153,12 +162,17 @@ spec:
       # whatever the console last wrote.
       {{- include "baselithcore.seedInitContainers" . | trim | nindent 6 }}
       {{- end }}
-      {{- if or .Values.tmpVolumes.enabled $appVolumes }}
+      {{- if or .Values.tmpVolumes.enabled $appVolumes $pluginSet }}
       volumes:
         {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- if $pluginSet }}
+        - name: plugins-config
+          configMap:
+            name: {{ include "baselithcore.pluginsHookConfigName" . }}
         {{- end }}
         {{- if $appVolumes }}
         {{- toYaml .Values.extraVolumes | nindent 8 }}

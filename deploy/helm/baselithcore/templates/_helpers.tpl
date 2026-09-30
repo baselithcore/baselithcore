@@ -59,6 +59,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+Hook-scoped copy of that ConfigMap, for the plugin-schema Job: Helm applies the
+ordinary one only after the pre-install/pre-upgrade hooks have run.
+*/}}
+{{- define "baselithcore.pluginsHookConfigName" -}}
+{{- printf "%s-plugins-hook" (include "baselithcore.fullname" .) -}}
+{{- end -}}
+
+{{/*
 Volume + mount for the declarative plugin set. Rendered into both pod specs
 only when `plugins.config` is non-empty, so a chart without it renders
 byte-identically to before the key existed. `subPath` mounts a single file
