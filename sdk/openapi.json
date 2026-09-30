@@ -632,6 +632,91 @@
         "title": "PluginActionResponse",
         "type": "object"
       },
+      "PluginBoundsIssue": {
+        "description": "An installed plugin whose declared core bounds exclude the target.",
+        "properties": {
+          "max_core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Core Version"
+          },
+          "min_core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Core Version"
+          },
+          "plugin": {
+            "title": "Plugin",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "plugin"
+        ],
+        "title": "PluginBoundsIssue",
+        "type": "object"
+      },
+      "PluginCompatibility": {
+        "description": "Installed plugins checked against the target core version.\n\n``checked`` is False when the check cannot be computed honestly here:\nplugin manifests declare ``min_core_version``/``max_core_version`` against\n``core._version``, and a downstream distribution versions that file\nindependently of the public core release (``reason`` says so).",
+        "properties": {
+          "checked": {
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "incompatible": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PluginBoundsIssue"
+            },
+            "title": "Incompatible",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "target_version": {
+            "title": "Target Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checked",
+          "target_version"
+        ],
+        "title": "PluginCompatibility",
+        "type": "object"
+      },
       "PluginEnableRequest": {
         "description": "Request to enable a plugin.",
         "properties": {
@@ -650,6 +735,43 @@
           }
         },
         "title": "PluginEnableRequest",
+        "type": "object"
+      },
+      "PluginInstallGuidance": {
+        "description": "How a newer plugin release reaches this deployment.\n\nNo console action and no command installs a signed plugin release yet, so\nthis carries only what is true: the installation method (which decides\nwhere plugins come from) and the operator's instructions link.\n``automated`` is always False; it exists so a client never has to guess.",
+        "properties": {
+          "automated": {
+            "default": false,
+            "title": "Automated",
+            "type": "boolean"
+          },
+          "guide_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guide Url"
+          },
+          "method": {
+            "enum": [
+              "helm",
+              "docker",
+              "pip",
+              "source",
+              "custom"
+            ],
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "PluginInstallGuidance",
         "type": "object"
       },
       "PluginListResponse": {
@@ -894,7 +1016,12 @@
           "needs_environment_update",
           "artifact_missing",
           "artifact_checksum",
-          "source_error"
+          "legacy_release",
+          "files_mismatch",
+          "source_error",
+          "untrusted_release_author",
+          "tag_moved",
+          "not_on_default_branch"
         ],
         "title": "Refusal",
         "type": "string"
@@ -1027,6 +1154,39 @@
       "ReleaseInfo": {
         "description": "A published release of a plugin, as reported by its source.",
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "author_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Id"
+          },
+          "author_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Type"
+          },
           "html_url": {
             "default": "",
             "title": "Html Url",
@@ -1079,6 +1239,17 @@
             ],
             "title": "Tarball Url"
           },
+          "target_commitish": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Commitish"
+          },
           "version": {
             "title": "Version",
             "type": "string"
@@ -1091,6 +1262,58 @@
           "published_at"
         ],
         "title": "ReleaseInfo",
+        "type": "object"
+      },
+      "ReleaseProvenance": {
+        "description": "Where a release came from: who published it, from which commit, when.\n\n``commit_url`` is the commit's page on the plugin's repository (https,\nbuilt from the repository slug and a validated SHA, never taken from\nthe release body).",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "commit_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Url"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "title": "ReleaseProvenance",
         "type": "object"
       },
       "RetentionRequest": {
@@ -1124,7 +1347,7 @@
         "type": "object"
       },
       "SystemUpdate": {
-        "description": "Status of the running core against the public core project's releases.\n\n``installed_version`` is the public core release the running tree\ncorresponds to (``core._core_version.CORE_VERSION``), never a downstream\ndistribution's own version, and ``repo`` is the public core repository.\n``upgrade_guide_url`` is the operator's upgrade instructions\n(``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration\nwhenever the report is served. Notice only: nothing is ever installed from\nthis data.",
+        "description": "Status of the running core against the public core project's releases.\n\n``installed_version`` is the public core release the running tree\ncorresponds to (``core._core_version.CORE_VERSION``), never a downstream\ndistribution's own version, and ``repo`` is the public core repository.\n``upgrade_guide_url`` is the operator's upgrade instructions\n(``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration\nwhenever the report is served. ``upgrade_path`` is computed by the check\nfrom the published releases: the stops, in order, of an upgrade that\ncrosses a major version (the latest release of each major on the way, then\nthe latest release), empty for a direct upgrade. ``upgrade`` is the\nversion-specific instructions for this deployment's installation method,\nstamped when served and never cached. Notice only: nothing is ever\ninstalled from this data.",
         "properties": {
           "advisories": {
             "default": [],
@@ -1199,6 +1422,16 @@
             ],
             "title": "Severity"
           },
+          "upgrade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UpgradeInstructions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "upgrade_guide_url": {
             "anyOf": [
               {
@@ -1209,6 +1442,14 @@
               }
             ],
             "title": "Upgrade Guide Url"
+          },
+          "upgrade_path": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Upgrade Path",
+            "type": "array"
           }
         },
         "required": [
@@ -1259,6 +1500,16 @@
             "title": "Detail",
             "type": "string"
           },
+          "install": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginInstallGuidance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "installed_version": {
             "anyOf": [
               {
@@ -1284,6 +1535,16 @@
             "title": "Plugin",
             "type": "string"
           },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "refusal": {
             "anyOf": [
               {
@@ -1293,6 +1554,21 @@
                 "type": "null"
               }
             ]
+          },
+          "trust": {
+            "anyOf": [
+              {
+                "enum": [
+                  "provenance",
+                  "signed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust"
           }
         },
         "required": [
@@ -1302,6 +1578,182 @@
           "available"
         ],
         "title": "UpdateCandidate",
+        "type": "object"
+      },
+      "UpgradeInstructions": {
+        "description": "How to upgrade this deployment to the next core release.\n\n``target_version`` is the release the steps install: the first stop of\n``path`` when the jump crosses a major version (upgrade one stop at a\ntime), otherwise the latest release. ``path`` lists every stop in order,\nending at the latest release, and is empty for a direct upgrade.\n``custom_text`` is the operator's own procedure (method ``custom``) with\nits placeholders filled in: untrusted text, to be shown without raw HTML.\n``distribution`` names the downstream distribution this deployment runs\n(``core._version.__distribution__``); its steps are then only a pointer to\nthe operator's own procedure, since the public core procedure would\nreplace the distribution with the public release. ``image`` is the\npublished container image of the target release, which the Docker steps\nname (null for the other methods).",
+        "properties": {
+          "checklist": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UpgradeStep"
+            },
+            "title": "Checklist",
+            "type": "array"
+          },
+          "current_version": {
+            "title": "Current Version",
+            "type": "string"
+          },
+          "custom_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Error"
+          },
+          "custom_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Text"
+          },
+          "detected": {
+            "title": "Detected",
+            "type": "boolean"
+          },
+          "distribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distribution"
+          },
+          "guide_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guide Url"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "helm",
+              "docker",
+              "pip",
+              "source",
+              "custom"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "plugins": {
+            "$ref": "#/components/schemas/PluginCompatibility"
+          },
+          "release_notes_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Notes Url"
+          },
+          "steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UpgradeStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "target_version": {
+            "title": "Target Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "detected",
+          "current_version",
+          "target_version",
+          "latest_version",
+          "plugins"
+        ],
+        "title": "UpgradeInstructions",
+        "type": "object"
+      },
+      "UpgradeStep": {
+        "description": "One step of an upgrade or one pre/post-upgrade checklist item.\n\n``id`` is stable (a console translates it); ``text`` is the English\nwording; ``command`` is shown verbatim with a copy button and is never\nexecuted by the framework; ``url`` is an optional https reference.",
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "UpgradeStep",
         "type": "object"
       },
       "ValidationError": {
