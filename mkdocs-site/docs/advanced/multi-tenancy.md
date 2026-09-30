@@ -425,7 +425,11 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     never needs `CREATEROLE`. When `PLUGIN_CONFIG_PATH` lives on a writable
     volume, set `database.pluginSchemaInit.mountVolumes: true` so the schema
     Job mounts the application's volumes and seed step and reads the same
-    file the application will.
+    file the application will. A declarative `plugins.config` needs no
+    knob: the chart gives the Job a hook-scoped copy of that plugin set
+    (Helm creates the ordinary ConfigMap only after its hooks), so
+    `schema-init` builds the schema of the plugins the release runs, not
+    of every plugin in the image.
 
 === "Docker Compose"
 
