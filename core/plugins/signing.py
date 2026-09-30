@@ -109,13 +109,46 @@ def generate_keypair_hex() -> tuple[str, str]:
     return private_hex, public_hex
 
 
-def sign_plugin_hash(integrity_hash_hex: str, private_key_hex: str) -> str:
-    """Sign the (lowercase) integrity hash; returns the hex signature."""
+def sign_message(message: bytes, private_key_hex: str) -> str:
+    """Sign ``message`` with a raw Ed25519 private key; returns the hex signature."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     private = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key_hex))
-    signature: bytes = private.sign(integrity_hash_hex.lower().encode("ascii"))
+    signature: bytes = private.sign(message)
     return signature.hex()
+
+
+def verify_message(
+    message: bytes,
+    signature_hex: str | None,
+    trusted_public_keys_hex: list[str],
+) -> bool:
+    """True when ``signature_hex`` over ``message`` verifies against ANY key.
+
+    Malformed signatures and keys return ``False`` rather than raising.
+    """
+    if not signature_hex or not trusted_public_keys_hex:
+        return False
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    try:
+        signature = bytes.fromhex(signature_hex)
+    except ValueError:
+        return False
+    for public_hex in trusted_public_keys_hex:
+        try:
+            public = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_hex))
+            public.verify(signature, message)
+            return True
+        except (InvalidSignature, ValueError):
+            continue
+    return False
+
+
+def sign_plugin_hash(integrity_hash_hex: str, private_key_hex: str) -> str:
+    """Sign the (lowercase) integrity hash; returns the hex signature."""
+    return sign_message(integrity_hash_hex.lower().encode("ascii"), private_key_hex)
 
 
 def verify_plugin_signature(
@@ -130,24 +163,11 @@ def verify_plugin_signature(
     return ``False`` rather than raising: at the loader boundary a broken
     signature is a refusal, not a crash.
     """
-    if not signature_hex or not trusted_public_keys_hex:
-        return False
-    from cryptography.exceptions import InvalidSignature
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
-    try:
-        signature = bytes.fromhex(signature_hex)
-    except ValueError:
-        return False
-    message = integrity_hash_hex.lower().encode("ascii")
-    for public_hex in trusted_public_keys_hex:
-        try:
-            public = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_hex))
-            public.verify(signature, message)
-            return True
-        except (InvalidSignature, ValueError):
-            continue
-    return False
+    return verify_message(
+        integrity_hash_hex.lower().encode("ascii"),
+        signature_hex,
+        trusted_public_keys_hex,
+    )
 
 
 #: Stand-in expiry for an entry whose ``not_after`` will not parse. Safely in
@@ -405,6 +425,8 @@ __all__ = [
     "load_trust_roots",
     "load_trust_store",
     "load_trusted_keys",
+    "sign_message",
     "sign_plugin_hash",
+    "verify_message",
     "verify_plugin_signature",
 ]

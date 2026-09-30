@@ -42,6 +42,8 @@ from pydantic import (
     field_validator,
 )
 
+from .runtime_state import normalize_runtime_state_paths
+
 #: Marks a manifest key the core deliberately does not interpret. Borrowed
 #: from HTTP headers and OpenAPI, where it means exactly this: "mine, not
 #: yours". No field of :class:`PluginManifestModel` starts with it, and none
@@ -86,6 +88,7 @@ _SCALAR_TO_LIST_FIELDS = (
     "screenshots",
     "environment_variables",
     "llm_scopes",
+    "runtime_state_paths",
 )
 
 
@@ -186,6 +189,11 @@ class PluginManifestModel(BaseModel):
     #: carrying it validates.
     hash_surface_version: int | str | None = None
 
+    # --- Updates ------------------------------------------------------------
+    #: Paths inside the plugin tree that hold runtime state the update engine
+    #: carries over; see :mod:`core.plugins.runtime_state`.
+    runtime_state_paths: list[str] | None = None
+
     #: Vendor extensions, keyed by the manifest key exactly as written
     #: (``"x-control"``). A private attribute rather than a field so
     #: ``extensions:`` never becomes a second, un-prefixed way in — see
@@ -229,6 +237,12 @@ class PluginManifestModel(BaseModel):
         if isinstance(value, str | int | float | bool):
             return [value]
         return value
+
+    @field_validator("runtime_state_paths")
+    @classmethod
+    def _safe_runtime_state_paths(cls, value: list[str] | None) -> list[str] | None:
+        """Relative, normalised paths that never name code or the manifest."""
+        return None if value is None else normalize_runtime_state_paths(value)
 
 
 def describe_manifest_failure(manifest_path: Path) -> str:

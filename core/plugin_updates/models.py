@@ -22,6 +22,8 @@ class Refusal(StrEnum):
     NEEDS_ENVIRONMENT_UPDATE = "needs_environment_update"
     ARTIFACT_MISSING = "artifact_missing"
     ARTIFACT_CHECKSUM = "artifact_checksum"
+    LEGACY_RELEASE = "legacy_release"
+    FILES_MISMATCH = "files_mismatch"
     SOURCE_ERROR = "source_error"
 
 

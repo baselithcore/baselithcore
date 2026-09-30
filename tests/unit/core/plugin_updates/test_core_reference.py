@@ -176,9 +176,12 @@ def test_report_hides_the_notice_when_the_check_is_disabled(tmp_path: Path) -> N
     assert report is not None and report.system is None
 
 
-def test_old_cache_json_still_loads(tmp_path: Path) -> None:
+def test_report_without_newer_fields_still_loads(tmp_path: Path) -> None:
+    # A current-format report written before ``upgrade_guide_url`` existed; a
+    # report of an older cache format is dropped (tests/.../test_cache_format).
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path))
     legacy = {
+        "cache_format": 2,
         "checked_at": "2026-09-29T10:00:00Z",
         "candidates": [],
         "error": None,

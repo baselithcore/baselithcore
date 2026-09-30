@@ -134,6 +134,15 @@ class PluginUpdateConfig(BaseSettings):
         "but an absolute https URL is ignored",
     )
 
+    instance_id: str = Field(
+        default="",
+        description="Identity of this deployment for update announcements; "
+        "deployments sharing one Redis or cache directory use distinct values so "
+        "they do not suppress each other's notices (falls back to the "
+        "APP_BASE_URL host; with neither set the Redis key is shared and a "
+        "warning is logged)",
+    )
+
     @field_validator("upgrade_guide_url", mode="before")
     @classmethod
     def _guide_is_https(cls, value: object) -> str | None:

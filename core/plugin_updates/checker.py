@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
+import posixpath
 import shutil
 import tarfile
 import tempfile
-from collections.abc import Sequence
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -29,6 +31,14 @@ from .models import (
     UpdateCandidate,
     VerificationResult,
 )
+from .release_manifest import (
+    RELEASE_FORMAT,
+    ReleaseManifestError,
+    is_legacy,
+    load_release_json,
+    parse_files,
+    verify_release_manifest,
+)
 from .sources import GitHubReleaseSource, SourceError
 from .verifier import verify_release
 
@@ -44,6 +54,10 @@ UNPACKED_SIZE_FACTOR = 4
 
 class ArchiveLimitError(tarfile.TarError):
     """An update tarball holds too many members or unpacks too large."""
+
+
+class UnsupportedMemberError(tarfile.TarError):
+    """An update tarball holds a link, device or other non-regular member."""
 
 
 def _manifest_version(plugin_dir: Path) -> str | None:
@@ -79,14 +93,28 @@ def _unpack(tarball: Path, dest: Path, max_bytes: int | None = None) -> None:
 
     Members are counted and sized from their headers before anything is
     written: more than :data:`MAX_ARCHIVE_MEMBERS`, or a declared total above
-    ``max_bytes``, raises :class:`ArchiveLimitError`.
+    ``max_bytes``, raises :class:`ArchiveLimitError`; any member that is not a
+    regular file or a directory (a symbolic or hard link, a device, a FIFO),
+    or whose path repeats another's up to case and Unicode normalisation,
+    raises :class:`UnsupportedMemberError` — which of two such members wins
+    depends on the filesystem, so the verified tree could differ from the one
+    installed later.
     """
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tarball, "r:gz") as tar:
         total = 0
+        seen: set[str] = set()
         for count, member in enumerate(tar, start=1):
             if count > MAX_ARCHIVE_MEMBERS:
                 raise ArchiveLimitError(f"more than {MAX_ARCHIVE_MEMBERS} members")
+            if not (member.isfile() or member.isdir()):
+                raise UnsupportedMemberError("a link or special file")
+            folded = unicodedata.normalize(
+                "NFC", posixpath.normpath(member.name)
+            ).casefold()
+            if folded in seen:
+                raise UnsupportedMemberError("a duplicate or case-colliding member")
+            seen.add(folded)
             total += max(member.size, 0)
             if max_bytes is not None and total > max_bytes:
                 raise ArchiveLimitError(f"unpacks to more than {max_bytes} bytes")
@@ -135,13 +163,20 @@ def _verify_tarball(
     core_version: str,
     trusted_keys: Sequence[str],
     max_unpacked_bytes: int | None = None,
+    expected_files: Mapping[str, str] | None = None,
+    requirement_ok: Callable[[str], bool] | None = None,
 ) -> VerificationResult:
+    extra: dict[str, Any] = (
+        {} if requirement_ok is None else {"requirement_ok": requirement_ok}
+    )
     with tempfile.TemporaryDirectory(prefix="plugin-update-") as tmp:
         root = Path(tmp) / "unpacked"
         try:
             _unpack(tarball, root, max_unpacked_bytes)
         except ArchiveLimitError as exc:
             return _bad_archive(f"archive too large: {exc}")
+        except UnsupportedMemberError as exc:
+            return _bad_archive(f"archive holds {exc}")
         except (tarfile.TarError, OSError, EOFError) as exc:
             return _bad_archive(f"unpack failed: {type(exc).__name__}")
         entries = list(root.iterdir())
@@ -154,14 +189,88 @@ def _verify_tarball(
             installed_version=installed,
             core_version=core_version,
             trusted_keys=trusted_keys,
+            expected_files=expected_files,
+            **extra,
         )
+
+
+def verify_release_tarball(
+    tarball: Path,
+    plugin: str,
+    version: str,
+    core_version: str,
+    trusted_keys: Sequence[str],
+    *,
+    expected_files: Mapping[str, str] | None = None,
+    requirement_ok: Callable[[str], bool] | None = None,
+) -> VerificationResult:
+    """Unpack and verify a release tarball exactly as a deployment does.
+
+    Shares the unpack (member types, case/NFC collisions, limits), the
+    single-root rule and :func:`verify_release` with the update checker.
+    ``requirement_ok`` overrides the dependency predicate (release-time
+    callers must not judge the publisher's environment).
+    """
+    return _verify_tarball(
+        tarball,
+        plugin,
+        version,
+        None,
+        core_version,
+        trusted_keys,
+        expected_files=expected_files,
+        requirement_ok=requirement_ok,
+    )
 
 
 def _bad_archive(detail: str) -> VerificationResult:
     return VerificationResult(refusal=Refusal.MANIFEST_INVALID, detail=detail)
 
 
+def _release_manifest_refusal(
+    meta: dict[str, Any], trusted_keys: Sequence[str]
+) -> tuple[Refusal, str] | None:
+    """Refuse a legacy, unsigned, foreign-signed or malformed ``release.json``."""
+    if is_legacy(meta):
+        return Refusal.LEGACY_RELEASE, "release.json has no signed file list"
+    if not trusted_keys:
+        return Refusal.NO_TRUSTED_KEYS, ""
+    if not verify_release_manifest(meta, trusted_keys):
+        return Refusal.SIGNATURE_INVALID, "release.json signature"
+    fmt = meta.get("release_format")
+    if type(fmt) is not int or fmt != RELEASE_FORMAT:
+        return Refusal.MANIFEST_INVALID, "unsupported release_format"
+    try:
+        parse_files(meta, max_entries=MAX_ARCHIVE_MEMBERS)
+    except ReleaseManifestError as exc:
+        return Refusal.MANIFEST_INVALID, str(exc)
+    return None
+
+
 async def _check(
+    plugin: str,
+    slug: str,
+    installed: str | None,
+    source: GitHubReleaseSource,
+    cache: UpdateCache,
+    core_version: str,
+    trusted_keys: Sequence[str],
+) -> UpdateCandidate:
+    """:func:`_check_release`, dropping the cached tarball of any refused release.
+
+    Every refusal path — not only one that downloaded — removes it, so a
+    tarball verified under earlier rules never outlives a refusal of its
+    release under the current ones.
+    """
+    candidate = await _check_release(
+        plugin, slug, installed, source, cache, core_version, trusted_keys
+    )
+    if candidate.refusal is not None and candidate.latest is not None:
+        cache.tarball_path(plugin, candidate.latest.version).unlink(missing_ok=True)
+    return candidate
+
+
+async def _check_release(
     plugin: str,
     slug: str,
     installed: str | None,
@@ -188,12 +297,13 @@ async def _check(
     try:
         meta_path = tmp_dir / "release.json"
         await source.download(latest.release_json_url, meta_path)
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(meta, dict)
-            or meta.get("name") != plugin
-            or str(meta.get("version")) != latest.version
-        ):
+        try:
+            meta = load_release_json(meta_path.read_bytes())
+        except ReleaseManifestError as exc:
+            return _refused(
+                plugin, installed, latest, Refusal.MANIFEST_INVALID, str(exc)
+            )
+        if meta.get("name") != plugin or str(meta.get("version")) != latest.version:
             return _refused(
                 plugin,
                 installed,
@@ -201,6 +311,10 @@ async def _check(
                 Refusal.MANIFEST_INVALID,
                 "release.json disagrees",
             )
+        manifest_refusal = _release_manifest_refusal(meta, trusted_keys)
+        if manifest_refusal is not None:
+            return _refused(plugin, installed, latest, *manifest_refusal)
+        files = parse_files(meta, max_entries=MAX_ARCHIVE_MEMBERS)
         candidate_tgz = final if final.is_file() else tmp_dir / "release.tar.gz"
         if candidate_tgz is not final:
             await source.download(latest.tarball_url, candidate_tgz)
@@ -216,6 +330,7 @@ async def _check(
             core_version,
             trusted_keys,
             source.max_bytes * UNPACKED_SIZE_FACTOR,
+            files,
         )
         if not result.ok:
             final.unlink(missing_ok=True)
@@ -247,9 +362,11 @@ async def check_plugin(
 ) -> UpdateCandidate:
     """Check one plugin; never raises (failures become a refusal).
 
-    Only a release that downloads, matches its declared checksum and passes
-    :func:`verify_release` is reported ``available``; its tarball is then kept
-    in ``cache`` and any refused one is removed.
+    Only a release whose ``release.json`` is format 2 and signed by a trusted
+    key (checked before the tarball is fetched), whose tarball matches the
+    signed checksum, and whose unpacked files match the signed ``files`` list
+    and pass :func:`verify_release` is reported ``available``; its tarball is
+    then kept in ``cache`` and any refused one is removed.
     """
     try:
         return await _check(
@@ -301,7 +418,9 @@ __all__ = [
     "MAX_ARCHIVE_MEMBERS",
     "UNPACKED_SIZE_FACTOR",
     "ArchiveLimitError",
+    "UnsupportedMemberError",
     "check_plugin",
     "installed_versions",
     "run_check",
+    "verify_release_tarball",
 ]

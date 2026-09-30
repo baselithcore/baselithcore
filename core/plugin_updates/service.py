@@ -15,6 +15,7 @@ from core.config.plugin_updates import PluginUpdateConfig
 from core.events import get_event_bus
 from core.plugins.signing import load_trusted_keys
 
+from .announce import AnnouncementGate, build_announcement_gate
 from .cache import UpdateCache
 from .checker import installed_versions, run_check
 from .metrics import publish_update_metrics
@@ -39,12 +40,20 @@ class PluginUpdateService:
     """Owns the update cache and the background check loop."""
 
     def __init__(
-        self, config: PluginUpdateConfig, bundled_root: Path = Path("plugins")
+        self,
+        config: PluginUpdateConfig,
+        bundled_root: Path = Path("plugins"),
+        gate: AnnouncementGate | None = None,
     ) -> None:
         """Create the service; nothing runs until :meth:`start`."""
         self._config = config
         self._bundled_root = bundled_root
         self._cache = UpdateCache(config.cache_dir)
+        self._gate = (
+            gate
+            if gate is not None
+            else build_announcement_gate(config.cache_dir, config.instance_id)
+        )
         self._interval: float = config.check_interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -178,11 +187,28 @@ class PluginUpdateService:
             trusted_keys=keys,
         )
 
-    async def _emit(self, name: str, data: dict[str, object]) -> None:
+    async def _emit(self, name: str, data: dict[str, object]) -> bool:
         try:
             await get_event_bus().emit(name, data, source="plugin_updates")
         except Exception as exc:
             logger.warning("plugin_update_event_failed: %s", type(exc).__name__)
+            return False
+        return True
+
+    async def _announce_once(
+        self, key: str, name: str, data: dict[str, object]
+    ) -> bool:
+        """Emit ``name`` unless another process did; True once the key is settled.
+
+        A claim whose emit fails is released, so the next check retries.
+        """
+        if not await self._gate.claim(key):
+            return await self._gate.is_done(key)
+        if await self._emit(name, data):
+            await self._gate.commit(key)
+            return True
+        await self._gate.release(key)
+        return False
 
     def _save_notified(self, notified: set[str]) -> None:
         try:
@@ -196,7 +222,8 @@ class PluginUpdateService:
         notified = self._cache.load_notified()
         if not system.available or version is None or key in notified:
             return
-        await self._emit(
+        settled = await self._announce_once(
+            key,
             SYSTEM_EVENT_NAME,
             {
                 "component": system.component,
@@ -209,8 +236,9 @@ class PluginUpdateService:
                 "severity": system.severity,
             },
         )
-        notified.add(key)
-        self._save_notified(notified)
+        if settled:
+            notified.add(key)
+            self._save_notified(notified)
 
     async def _announce(self, report: CheckReport) -> None:
         notified = self._cache.load_notified()
@@ -220,8 +248,10 @@ class PluginUpdateService:
             key = f"{cand.plugin}@{version or ''}"
             if cand.available and key not in notified:
                 fresh.append((key, cand, version))
+        changed = False
         for key, cand, version in fresh:
-            await self._emit(
+            settled = await self._announce_once(
+                key,
                 EVENT_NAME,
                 {
                     "plugin": cand.plugin,
@@ -229,8 +259,10 @@ class PluginUpdateService:
                     "latest_version": version,
                 },
             )
-            notified.add(key)
-        if fresh:
+            if settled:
+                notified.add(key)
+                changed = True
+        if changed:
             self._save_notified(notified)
         if report.system is not None:
             await self._announce_system(report.system)
@@ -249,6 +281,12 @@ class PluginUpdateService:
     async def start(self) -> None:
         """Start the periodic check (idempotent)."""
         if self._task is None or self._task.done():
+            try:
+                self._cache.purge_legacy()
+            except OSError as exc:  # never installable: tarball_path ignores it
+                logger.warning(
+                    "plugin_update_cache_purge_failed: %s", type(exc).__name__
+                )
             # A restart must not blank the alert until the first check lands.
             publish_update_metrics(self.report())
             self._task = asyncio.create_task(self._loop(), name="plugin-updates")

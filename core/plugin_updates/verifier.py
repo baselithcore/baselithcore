@@ -7,7 +7,7 @@ first failure is the reported one.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as dist_version
 from pathlib import Path
@@ -21,6 +21,7 @@ from core.plugins.signing import verify_plugin_signature
 from core.plugins.version import SemanticVersion, check_plugin_compatibility
 
 from .models import Refusal, VerificationResult
+from .release_manifest import files_mismatch
 
 
 def requirement_satisfied(req: str) -> bool:
@@ -59,11 +60,20 @@ def verify_release(
     core_version: str,
     trusted_keys: Sequence[str],
     requirement_ok: Callable[[str], bool] = requirement_satisfied,
+    expected_files: Mapping[str, str] | None = None,
 ) -> VerificationResult:
-    """Apply every spec §3 rule to an unpacked release; first failure wins."""
+    """Apply every spec §3 rule to an unpacked release; first failure wins.
+
+    ``expected_files``: the signed ``files`` list; every file must match it
+    exactly (checked right after the symlink check).
+    """
     link = first_symlink(plugin_dir)
     if link is not None:
         return _refuse(Refusal.INTEGRITY_MISMATCH, f"symlink: {link}")
+    if expected_files is not None:
+        mismatch = files_mismatch(plugin_dir, expected_files)
+        if mismatch is not None:
+            return _refuse(Refusal.FILES_MISMATCH, mismatch)
     manifest_path = find_manifest_file(plugin_dir)
     if manifest_path is None:
         return _refuse(Refusal.MANIFEST_INVALID, "no manifest")

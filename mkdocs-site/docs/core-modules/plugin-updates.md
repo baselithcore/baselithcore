@@ -36,7 +36,18 @@ mirror repository for its latest release, downloads the release artifact and
 runs the full verification described below. A release that passes is reported
 as `available`; one that fails is reported with the reason it was refused. The
 last report is cached on disk, and the `plugin.update_available` event is
-emitted on the EventBus once per new version. When the cache directory is not
+emitted on the EventBus once per new version, once per deployment rather than
+once per worker. The first process to see a version takes a ten-minute lease on
+it with Redis `SET NX` when `CACHE_BACKEND=redis`, or with a lock file under
+`<PLUGIN_UPDATE_CACHE_DIR>/announced/` otherwise, and records a long-lived
+`done` marker once the event went out. A process that dies mid-announcement, or
+an emit that fails, leaves no marker: the lease is released or expires and the
+next check announces again. A Redis error falls back to the lock file; a lock
+file that cannot be written announces anyway. Keys are namespaced by
+`PLUGIN_UPDATE_INSTANCE_ID` (default: the `APP_BASE_URL` host) so deployments
+sharing one Redis do not suppress each other; with neither set the key is
+shared and a warning is logged once when Redis is in use. Replicas that share neither Redis
+nor a cache directory each announce once. When the cache directory is not
 writable the failure is logged (`plugin_update_cache_write_failed`) and the
 metric and events still go out.
 
@@ -67,6 +78,49 @@ In order, before anything is offered:
 
 The signing key never leaves the maintainers, so a tag pushed by anyone else
 fails rule 3.
+
+## Release manifest
+
+Each release carries `release.json` next to its tarball. From release format 2
+it lists the SHA-256 of **every** file in the tarball under `files` (paths
+relative to the plugin directory — documentation, locales, templates and any
+`wheelhouse/` included, not only the files the plugin hash covers) and signs
+itself: `manifest_signature_ed25519` is an Ed25519 signature, by the same
+trusted publisher key, over the canonical JSON of every other key (sorted keys,
+no whitespace, ASCII, prefixed with `baselith-release-manifest-v1\n`). Before
+downloading the tarball the checker refuses a `release.json` without both
+fields (`legacy_release`: the release is listed but cannot be installed) or
+whose signature does not verify; after unpacking, any missing, extra or changed
+file is `files_mismatch`.
+
+The checker is strict about the shape as well. `release.json` must be a single
+JSON object without duplicate keys, `NaN`/`Infinity` or any floating-point
+number (the canonical text of a float would depend on the Python that prints
+it), and `release_format` must be the integer `2`. A `files` key must be a plain relative POSIX path (no
+empty, `.` or `..` segment, no leading `/`, no backslash, no control
+character), and two keys naming one file on a case-insensitive or
+Unicode-normalising filesystem are refused as ambiguous; any of these is
+`manifest_invalid`. The tarball may hold only regular files and directories,
+each path once (compared ignoring case and Unicode normalisation): a symbolic or
+hard link, a device, a FIFO or a colliding path is refused before anything is
+extracted.
+An empty directory anywhere in the unpacked tree is `files_mismatch`: a file
+list cannot show it, yet it can turn an import into a namespace package.
+
+`core.plugin_updates.checker.verify_release_tarball` runs this same unpack and
+verification for callers outside the checker; the mirror release step uses it as
+a self-check, with a syntax-only dependency predicate so a release never depends
+on the publisher's installed packages.
+
+Verified tarballs are cached under
+`<PLUGIN_UPDATE_CACHE_DIR>/tarballs-v2/`, and the saved report carries a
+`cache_format`. A report saved before the signed file list existed loads
+without its plugin candidates, so none is served until the next check
+completes. Its core update notice is kept, a security notice included, and a
+failed check still carries it over. The service deletes the old `tarballs/`
+directory when it starts. A tarball verified under the old rules
+is therefore never offered, and neither is an `available` verdict about it. Any
+refusal also removes the cached tarball of the refused version.
 
 ## Configuration
 
@@ -168,6 +222,14 @@ plugin present there takes precedence over the bundled copy:
 Removing `<overlay>/<name>` falls back to the bundled version. Activation is
 always a process restart, never a hot reload.
 
+An entry is registered only when it is **newer than the bundled plugin** of the
+same name and its `min_core_version`/`max_core_version` accept the running
+core. Otherwise it is logged (`refused (not_newer: overlay 1.3.0 <= bundled
+1.5.0)` or `refused (incompatible_core: ...)`) and the bundled plugin loads, so
+an image upgrade is never undone by an old overlay entry. The update engine
+removes such entries with `core.plugins.overlay_prune.prune_stale_overlay`;
+plain directories at the overlay root are reported, never deleted.
+
 ## Refusal reasons
 
 | Value | Meaning |
@@ -183,6 +245,8 @@ always a process restart, never a hot reload.
 | `needs_environment_update` | A required Python dependency is not satisfied |
 | `artifact_missing` | The release has no artifact for the plugin |
 | `artifact_checksum` | The downloaded artifact does not match its checksum |
+| `legacy_release` | The release predates the signed file list; it is shown but cannot be installed |
+| `files_mismatch` | The unpacked files differ from the signed file list |
 | `source_error` | The release source could not be queried |
 
 ## API

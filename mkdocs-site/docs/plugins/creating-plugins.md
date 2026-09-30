@@ -155,6 +155,7 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `entrypoint`            | No       | Legacy spelling of `entry_point`, accepted for manifests written before the canonical key existed. `entry_point` wins when both are present; new plugins declare `entry_point` only. |
 | `frontend`              | For a UI | Frontend build contract read by `baselith plugin add <repository> --docker` and by `baselith doctor`: a mapping with `path` (relative to the plugin directory, default `ui`), `package_manager` (`npm`, `pnpm` or `yarn`), `build_command` and `output_dir` (relative to `path`, default `dist`), or `false` to disable frontend detection. Declare it whenever the plugin ships a UI — without it the installer falls back to guessing and `doctor` cannot tell a missing build from a plugin that has no frontend at all. See [Packaging › Docker installation contract](packaging.md#docker-installation-contract). |
 | `health_endpoint`       | No       | Local HTTP path probed after a Docker installation. It must answer 200 with no authentication and no redirect; without it the installer probes the default `/<name>/`. |
+| `runtime_state_paths`   | No       | Paths **inside the plugin directory** that hold runtime state the update engine must carry over to a new version (relative, no `..`, no globs, never the manifest or a code/asset file or tree such as `ui`, `static`, `skills`; the engine never carries over a file the new release ships and re-verifies integrity after carry-over). Prefer keeping state in `core.plugins.data_dir("<name>")` (in production set `BASELITH_PLUGIN_DATA_DIR` explicitly, outside the code and release directories) and declaring nothing. An installed tree with files that neither shipped with the release nor sit under a declared path cannot be updated. |
 
 !!! danger "Unknown manifest keys are refused"
     The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
@@ -872,6 +873,14 @@ running core, and every `python_dependencies` entry is already satisfied. An
 unsigned release is never offered. Verified releases are installed into
 `BASELITH_PLUGIN_OVERLAY_DIR`, which shadows the bundled copy on restart. See
 [Plugin Updates](../core-modules/plugin-updates.md).
+
+The plugin hash does not cover everything a release ships (documentation,
+locales, templates stay outside it). A signed update release therefore also
+lists the SHA-256 of every file in its tarball and signs that list, and a
+deployment installs it only when the unpacked tree matches the list exactly —
+see [Release manifest](../core-modules/plugin-updates.md#release-manifest).
+Keep the published tree free of symbolic and hard links: a release holding one
+is refused.
 
 ### Disabling/Enabling
 

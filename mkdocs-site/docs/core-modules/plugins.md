@@ -106,6 +106,21 @@ class MyPlugin(Plugin):
 See [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared)
 for the full model.
 
+### Runtime data directory
+
+Plugin code is replaced as a unit when the plugin is updated, so a plugin never
+writes state into its own directory. `core.plugins.data_dir("<name>")` returns
+`$BASELITH_PLUGIN_DATA_DIR/<name>` (default `data/plugins/<name>` under the
+working directory) and creates it on first use; pass `create=False` to only
+compute the path. The name must be a single segment of letters, digits, `_` or
+`-`. A plugin that still keeps state in its tree declares those paths in the
+manifest's `runtime_state_paths` (never a code or asset tree such as `ui`, `static`
+or `skills`). In production set `BASELITH_PLUGIN_DATA_DIR` explicitly to a path
+outside the code and release directories: the default is relative to the working
+directory. The update engine never carries over a file the new release ships
+and re-verifies integrity after carry-over. A plugin-root `.env` is always
+carried over; `node_modules` is ignored.
+
 ### Schema is deploy work, not boot work
 
 A plugin that owns tables creates them in `init_schema()`, not in
@@ -394,8 +409,10 @@ The directory scan is authoritative: on a name clash the local tree wins, the
 installed package is ignored and a warning names both paths. Broken distribution
 metadata, an entry point that no longer imports, and a package without a manifest
 are each logged and skipped — discovery can never stop the process from starting.
-`BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the second
-source off entirely.
+A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory).
+
+`BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the
+entry-point source (the second one above) off entirely.
 
 `core/api/lifespan.py` hands the merged list to `ResourceAnalyzer.discover_plugins(
 extra_dirs=...)`, so entry-point plugins contribute routes, UI tabs and flow
@@ -601,6 +618,11 @@ manifest — it asks "does this file contribute its raw bytes?" — so pair it w
 under (`read_declared_surface()`). It is **advisory**: it sits outside the digest by
 construction, and verification always tries the current surface first and falls back
 through the superseded ones, so tampering with the number buys nothing.
+
+`core.plugins.signing.sign_message` / `verify_message` are the underlying Ed25519
+primitives; `sign_plugin_hash` / `verify_plugin_signature` sign the lowercase
+integrity hash through them, and signed plugin releases use them for their
+per-file manifest.
 
 !!! warning "Re-sign after building a plugin UI — or editing the manifest"
     `ui/dist/**` entered the surface in 0.27 and the manifest in V5, so both

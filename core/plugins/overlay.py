@@ -114,17 +114,46 @@ def _trusted_public_keys() -> list[str]:
     return [key.public_key_hex for key in load_trusted_keys() if key.is_usable]
 
 
-def register_overlay_packages(root: Path | None = None) -> list[str]:
-    """Verify and register every overlay entry; idempotent. Returns the names."""
+def _running_core_version() -> str:
+    # The same version the loader's compatibility gate compares against.
+    from core._version import __version__
+
+    return __version__
+
+
+def register_overlay_packages(
+    root: Path | None = None,
+    *,
+    bundled_root: Path | None = None,
+    core_version: str | None = None,
+) -> list[str]:
+    """Verify and register every overlay entry; idempotent. Returns the names.
+
+    An entry is registered only when its signature verifies and
+    :func:`core.plugins._overlay_guard.overlay_refusal` accepts it: newer than
+    the bundled plugin of the same name and compatible with the running core.
+
+    Args:
+        root: Overlay directory; defaults to ``$BASELITH_PLUGIN_OVERLAY_DIR``.
+        bundled_root: The bundled plugins tree; defaults to the directory of
+            the imported ``plugins`` package.
+        core_version: Running core version; defaults to ``core._version``.
+    """
+    from core.plugins._overlay_guard import default_bundled_root, overlay_refusal
+
     base = root if root is not None else overlay_root()
     if base is None:
         return sorted(_REGISTERED)
     keys = _trusted_public_keys()
+    bundled = bundled_root if bundled_root is not None else default_bundled_root()
+    running = core_version or _running_core_version()
     for entry in candidate_overlay_dirs(base):
         if entry.name in _REGISTERED:
             continue
         try:
             reason = verify_overlay_entry(entry, keys)
+            if reason is None:
+                reason = overlay_refusal(entry, bundled, running)
         except Exception as exc:  # one malformed entry never blocks the rest
             logger.error(
                 "Plugin overlay entry %s could not be verified (%s); skipped.",
@@ -133,7 +162,9 @@ def register_overlay_packages(root: Path | None = None) -> list[str]:
             )
             reason = "verify_error"
         if reason is not None:
-            logger.error(
+            level = logging.WARNING if reason.startswith("not_newer") else logging.ERROR
+            logger.log(
+                level,
                 "Plugin overlay entry %s refused (%s); the bundled plugin loads instead.",
                 entry.name,
                 reason,

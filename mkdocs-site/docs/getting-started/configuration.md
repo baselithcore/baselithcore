@@ -429,6 +429,7 @@ Declared in `core.config.plugin_updates`.
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
 | `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
+| `PLUGIN_UPDATE_INSTANCE_ID` | `str` | *empty* | Identity of this deployment for update announcements; deployments sharing one Redis or cache directory use distinct values so they do not suppress each other's notices (falls back to the APP_BASE_URL host; with neither set the Redis key is shared and a warning is logged) |
 | `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `int` | `200` | Largest release artifact downloaded, in MB; a larger one is refused before its signature is checked (it unpacks to at most 4x this) |
 | `PLUGIN_UPDATE_SOURCES_FILE` | `Path \| None` | *empty* | YAML file mapping plugin names to their GitHub mirror repos (the mirror registry); update checks are off while unset |
 | `SYSTEM_UPGRADE_GUIDE_URL`<br>also accepts `PLUGIN_UPDATE_UPGRADE_GUIDE_URL` | `str \| None` | *empty* | https link to this deployment's upgrade instructions, shown with the system update notice (env SYSTEM_UPGRADE_GUIDE_URL); anything but an absolute https URL is ignored |
@@ -922,4 +923,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-588 settings documented.
+589 settings documented.

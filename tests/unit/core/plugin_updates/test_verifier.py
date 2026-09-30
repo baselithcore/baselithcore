@@ -210,3 +210,27 @@ def test_symlinked_manifest_is_refused(tmp_path: Path, keys: tuple[str, str]) ->
     (d / "manifest.yaml").rename(real)
     (d / "manifest.yaml").symlink_to(real)
     assert _verify(d, pub).refusal is Refusal.INTEGRITY_MISMATCH
+
+
+def test_expected_files_match_passes(tmp_path: Path, keys: tuple[str, str]) -> None:
+    from core.plugin_updates.release_manifest import file_digests
+
+    priv, pub = keys
+    d = _release(tmp_path, sign_with=priv)
+    assert _verify(d, pub, expected_files=file_digests(d)).ok
+
+
+def test_expected_files_mismatch_is_refused_first(
+    tmp_path: Path, keys: tuple[str, str]
+) -> None:
+    from core.plugin_updates.release_manifest import file_digests
+
+    priv, pub = keys
+    d = _release(tmp_path, sign_with=priv)
+    listed = file_digests(d)
+    (d / "README.md").write_text("added after listing\n")  # outside the hash surface
+    result = _verify(d, pub, expected_files=listed)
+    assert (
+        result.refusal is Refusal.FILES_MISMATCH and result.detail == "extra: README.md"
+    )
+    assert _verify(d, pub).ok  # without a list, only the hash surface is checked

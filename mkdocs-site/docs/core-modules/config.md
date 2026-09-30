@@ -1295,3 +1295,12 @@ def test_with_env(monkeypatch):
     config = LLMConfig()
     assert config.model == "test-model"
 ```
+
+## Update announcements
+
+`PluginUpdateConfig` gains `PLUGIN_UPDATE_INSTANCE_ID`, the identity of a
+deployment for update announcements. Deployments that share one Redis or cache
+directory set distinct values so they do not suppress each other's notices; it
+falls back to the `APP_BASE_URL` host. With neither set the Redis key is
+shared, and a warning is logged once when Redis is in use. See
+[Plugin updates](plugin-updates.md).
