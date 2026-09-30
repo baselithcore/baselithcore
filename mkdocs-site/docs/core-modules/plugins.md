@@ -424,12 +424,15 @@ plugins exist. See
 ### Overlay directory (verified updates)
 
 When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
-`core/plugins/overlay.py` registers each signed entry `<overlay>/<name>` as the
-package `plugins.<name>` before any plugin module is imported
+`core/plugins/overlay.py` registers each accepted entry `<overlay>/<name>` as
+the package `plugins.<name>` before any plugin module is imported
 (`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
-verify against the trust store regardless of
-`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and a tree containing a symlink is refused
-(`core/plugins/_links.py`); a rejected entry is logged and the bundled plugin
+carry a signature that verifies against the trust store regardless of
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and must pass the newer-than-bundled and
+core-bounds rule above. The entry itself may be a symlink into
+`<overlay>/.store/` (a link pointing elsewhere is refused), but a tree with a
+symlink anywhere below it is refused (`core/plugins/_links.py`), since the hash
+walk does not follow links. A rejected entry is logged and the bundled plugin
 loads instead.
 
 `discovery.apply_overlay()` then swaps a registered overlay entry in for its

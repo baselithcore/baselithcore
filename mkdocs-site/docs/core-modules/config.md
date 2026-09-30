@@ -58,6 +58,7 @@ core/config/
 ├── processing.py         # ProcessingConfig (documents, web crawling, OCR, NLP)
 ├── plugins.py            # PluginConfig
 ├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, CORE_UPDATE_REPO, SYSTEM_UPGRADE_GUIDE_URL)
+├── plugin_update_apply.py # UpdateApplyConfig (UPDATE_APPLY_ prefix, one-click plugin updates)
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 ├── drift.py              # suspected-typo detection for environment variables

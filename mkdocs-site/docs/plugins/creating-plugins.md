@@ -865,15 +865,27 @@ python scripts/sign_changed_plugins.py --all               # every plugin
 
 ### Publishing updates
 
-Deployments that configure `PLUGIN_UPDATE_SOURCES_FILE` poll your plugin's
-release mirror and offer a new version only if it is fully verified: tag
-`v<version>` equals the manifest `version`, the recomputed hash matches
-`integrity_sha256`, `signature_ed25519` verifies against their trust store, the
-version is strictly newer, `min_core_version`/`max_core_version` admit the
-running core, and every `python_dependencies` entry is already satisfied. An
-unsigned release is never offered. Verified releases are installed into
-`BASELITH_PLUGIN_OVERLAY_DIR`, which shadows the bundled copy on restart. See
-[Plugin Updates](../core-modules/plugin-updates.md).
+Deployments that list your plugin's repository in `PLUGIN_UPDATE_SOURCES_FILE`
+poll its latest GitHub release and offer a newer version under their
+`PLUGIN_UPDATE_TRUST` mode:
+
+* **`provenance`** (the default): the release was created by the repository's
+  own release workflow (not by a person) from a commit on its default branch,
+  its tag is `v<version>`, and the manifest at that commit declares the same
+  `name` and `version` and `min_core_version`/`max_core_version` bounds that
+  admit the running core. Bumping the manifest `version` and pushing is the
+  release; nothing is signed.
+* **`signed`**: the release must carry a signed `release.json` and tarball
+  whose recomputed hash matches `integrity_sha256` and whose
+  `signature_ed25519` (Ed25519) verifies against the deployment's trust store;
+  the tag, `name`, strictly-newer and core-bounds rules apply as well, and every
+  `python_dependencies` entry must already be satisfied.
+
+Whatever the mode, a one-click install on a host needs those verified signed
+assets: a provenance-only release is a notice, installed through the
+deployment's own procedure. A verified release is installed into
+`BASELITH_PLUGIN_OVERLAY_DIR`, which shadows the bundled copy on the next
+restart. See [Plugin Updates › Trust modes](../core-modules/plugin-updates.md#trust-modes).
 
 The plugin hash does not cover everything a release ships (documentation,
 locales, templates stay outside it). A signed update release therefore also

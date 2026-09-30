@@ -737,7 +737,7 @@ plugin-management router so `/{name}` does not capture `/updates`.
 | Method & path                         | Description                                                          |
 | ------------------------------------- | -------------------------------------------------------------------- |
 | `GET /api/plugins/updates`            | `{"enabled": bool, "report": ...}` — last saved report, no network   |
-| `POST /api/plugins/updates/check`     | Run a check now (throttled to one per 60 s per worker); `503` when updates are not configured |
+| `POST /api/plugins/updates/check`     | Run a check now; `503` when updates are not configured. Within 60 s of the worker's last check the cached report is returned |
 
 The report shape, refusal reasons and trust model are described in
 [Plugin Updates](../core-modules/plugin-updates.md#api).
