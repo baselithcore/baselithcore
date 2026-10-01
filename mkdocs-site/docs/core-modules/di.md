@@ -381,3 +381,12 @@ def test_handler(container):
     handler = MyHandler(container)
     # handler resolves the mocks from the container
 ```
+
+## Inference resources
+
+`embedding`, `rerank` and `qdrant` are lazy resources: a plugin that lists
+them in its manifest's `required_resources` or `optional_resources` gets their
+factories registered, and
+`await get_lazy_registry().get_or_create("embedding")` builds the service on
+first use. `shutdown_all()` closes them through their `shutdown()` hook. See
+[Inference Services](../advanced/inference-services.md).

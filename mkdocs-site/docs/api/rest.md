@@ -1050,3 +1050,8 @@ From here you can test endpoints directly from the browser.
 
 !!! tip "Streaming for UX"
     Use `/chat/stream` for long responses to improve user experience.
+
+!!! note "Shutdown of the inference bridge"
+    The application lifespan closes the synchronous inference bridge
+    (`core.services.inference`) at shutdown, after plugins and lazy services
+    have stopped. See [Inference Services](../advanced/inference-services.md).

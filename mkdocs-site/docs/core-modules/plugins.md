@@ -1364,3 +1364,12 @@ print(skill.body)
 
 Inject the catalog into the system prompt as an XML index (name +
 description per skill) and expose `activate_skill(path)` as a tool.
+
+## Declaring inference resources
+
+A plugin that needs embeddings, reranking or vector search lists `embedding`,
+`rerank` and/or `qdrant` in its manifest's `required_resources` or
+`optional_resources` and calls the core services; it must not construct
+`SentenceTransformer`, `CrossEncoder`, `QdrantClient` or similar itself
+(`scripts/check_no_inprocess_ml.py` enforces this). See
+[Inference Services](../advanced/inference-services.md).

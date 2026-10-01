@@ -50,6 +50,9 @@ class ResourceAnalyzer:
         "vectorstore": ["postgres"],  # Qdrant may use postgres for metadata
         "memory": ["vectorstore", "redis"],  # Memory uses both
         "llm": [],  # No deps
+        "embedding": [],  # Remote TEI client, no deps
+        "rerank": [],  # Remote TEI client, no deps
+        "qdrant": [],  # Server-mode Qdrant client, no deps
         "evaluation": ["memory", "llm"],  # Evaluation needs memory and LLM
         "evolution": ["memory", "evaluation"],  # Evolution builds on evaluation
     }

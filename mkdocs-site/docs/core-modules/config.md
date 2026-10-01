@@ -1340,3 +1340,10 @@ applies its own setting, and runs filed from the host's CLI are pre-approved.
 Settings that fail to load leave the update checker running with one-click
 updates off. See
 [Plugin updates › One-click update: settings and run store](plugin-updates.md#one-click-update-settings-and-run-store).
+
+## Inference services settings
+
+`core.config.inference` holds the settings of the embedding, rerank and Qdrant
+services: `BASELITH_EMBEDDING_*`, `BASELITH_RERANK_*` and `BASELITH_QDRANT_*`.
+`remote` (Hugging Face TEI) is the default backend; `local` is a development
+opt-in. See [Inference Services](../advanced/inference-services.md).

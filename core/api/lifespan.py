@@ -446,6 +446,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         await close_shared_clients()
 
+        from core.services.inference import shutdown_sync_inference
+
+        # Blocking in-thread join: keep it off the event loop.
+        await asyncio.to_thread(shutdown_sync_inference)
+
         try:
             from core.middleware.security import get_security_manager
 

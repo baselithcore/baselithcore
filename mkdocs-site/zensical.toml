@@ -150,6 +150,7 @@ nav = [
       { "Kubernetes (Helm)"  = "advanced/kubernetes.md" },
       { "FalkorDB Tiering"   = "advanced/redis-tiering.md" },
       { "Lazy Loading"       = "advanced/lazy-loading.md" },
+      { "Inference Services" = "advanced/inference-services.md" },
       { "Testing"            = "advanced/testing.md" },
       { "Publishing to PyPI" = "advanced/publishing.md" },
       { "Versioning & Deprecation" = "advanced/versioning-and-deprecation.md" },

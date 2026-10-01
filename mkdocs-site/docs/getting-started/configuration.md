@@ -288,6 +288,36 @@ Declared in `core.config.incidents`.
 | `INCIDENT_NOTIFICATION_HOURS` | `int` | `72` |  |
 | `INCIDENT_REPORTING_ENABLED` | `bool` | `False` |  |
 
+## The shared inference services (embedding, rerank, Qdrant)
+
+Declared in `core.config.inference`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `BASELITH_EMBEDDING_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
+| `BASELITH_EMBEDDING_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
+| `BASELITH_EMBEDDING_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
+| `BASELITH_EMBEDDING_BATCH_SIZE` | `int` | `32` | Texts per HTTP request. |
+| `BASELITH_EMBEDDING_DIM` | `int` | `1024` | Vector dimension. |
+| `BASELITH_EMBEDDING_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model id. |
+| `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
+| `BASELITH_QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
+| `BASELITH_QDRANT_GRPC_PORT` | `int` | `6334` |  |
+| `BASELITH_QDRANT_PREFER_GRPC` | `bool` | `False` | Use gRPC for data calls; multivector (ColBERT) payloads serialize far faster than over REST. |
+| `BASELITH_QDRANT_TIMEOUT` | `float` | `60.0` |  |
+| `BASELITH_QDRANT_URL` | `str \| None` | *empty* | Qdrant server URL (e.g. `http://qdrant:6333`). |
+| `BASELITH_RERANK_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
+| `BASELITH_RERANK_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
+| `BASELITH_RERANK_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
+| `BASELITH_RERANK_BATCH_SIZE` | `int` | `32` | Texts per HTTP request (TEI limit). |
+| `BASELITH_RERANK_MAX_CANDIDATES` | `int` | `100` | Hard cap on texts per rerank call. |
+| `BASELITH_RERANK_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_RERANK_MODEL` | `str` | `BAAI/bge-reranker-v2-m3` | Reranker id. |
+| `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
+
 ## MCP Configuration
 
 Declared in `core.config.mcp`.
@@ -946,4 +976,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-605 settings documented.
+628 settings documented.

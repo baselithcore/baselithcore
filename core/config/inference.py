@@ -1,0 +1,168 @@
+"""Configuration for the shared inference services (embedding, rerank, Qdrant).
+
+Embedding, reranking and vector search are *core services*: plugins call them
+instead of loading ``torch`` models or opening a Qdrant client in-process. The
+default backend is ``remote`` (Hugging Face Text Embeddings Inference over
+HTTP), so an API pod carries no ML runtime at all; ``local`` is an explicit
+development opt-in.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Backend = Literal["remote", "local"]
+
+
+def _strip_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip().rstrip("/")
+    return value or None
+
+
+class EmbeddingConfig(BaseSettings):
+    """``BASELITH_EMBEDDING_*`` settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="BASELITH_EMBEDDING_", case_sensitive=False, extra="ignore"
+    )
+
+    backend: Backend = Field(
+        default="remote",
+        description="'remote' calls a TEI server; 'local' loads the model "
+        "in-process (development only, imports torch).",
+    )
+    url: str | None = Field(
+        default=None, description="Base URL of the TEI server (remote backend)."
+    )
+    api_key: SecretStr | None = Field(
+        default=None, description="Optional bearer token for the TEI server."
+    )
+    timeout: float = Field(default=60.0, gt=0, description="Per-request timeout (s).")
+    max_retries: int = Field(
+        default=3, ge=0, le=10, description="Retries on 5xx / 429 / timeout."
+    )
+    backoff_base: float = Field(
+        default=0.5, ge=0, description="First retry delay (s); doubles each attempt."
+    )
+
+    @field_validator("url")
+    @classmethod
+    def _normalize_url(cls, value: str | None) -> str | None:
+        return _strip_url(value)
+
+    model: str = Field(default="BAAI/bge-m3", description="Embedding model id.")
+    dim: int = Field(default=1024, gt=0, description="Vector dimension.")
+    batch_size: int = Field(
+        default=32, ge=1, le=512, description="Texts per HTTP request."
+    )
+
+
+class RerankConfig(BaseSettings):
+    """``BASELITH_RERANK_*`` settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="BASELITH_RERANK_", case_sensitive=False, extra="ignore"
+    )
+
+    backend: Backend = Field(
+        default="remote",
+        description="'remote' calls a TEI server; 'local' loads the model "
+        "in-process (development only, imports torch).",
+    )
+    url: str | None = Field(
+        default=None, description="Base URL of the TEI server (remote backend)."
+    )
+    api_key: SecretStr | None = Field(
+        default=None, description="Optional bearer token for the TEI server."
+    )
+    timeout: float = Field(default=60.0, gt=0, description="Per-request timeout (s).")
+    max_retries: int = Field(
+        default=3, ge=0, le=10, description="Retries on 5xx / 429 / timeout."
+    )
+    backoff_base: float = Field(
+        default=0.5, ge=0, description="First retry delay (s); doubles each attempt."
+    )
+
+    @field_validator("url")
+    @classmethod
+    def _normalize_url(cls, value: str | None) -> str | None:
+        return _strip_url(value)
+
+    model: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranker id.")
+    max_candidates: int = Field(
+        default=100, ge=1, le=1000, description="Hard cap on texts per rerank call."
+    )
+    batch_size: int = Field(
+        default=32, ge=1, le=512, description="Texts per HTTP request (TEI limit)."
+    )
+
+
+class QdrantServerConfig(BaseSettings):
+    """``BASELITH_QDRANT_*`` settings. Server mode only — never ``path=``."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="BASELITH_QDRANT_", case_sensitive=False, extra="ignore"
+    )
+
+    url: str | None = Field(
+        default=None, description="Qdrant server URL (e.g. http://qdrant:6333)."
+    )
+    api_key: SecretStr | None = Field(default=None)
+    timeout: float = Field(default=60.0, gt=0)
+    prefer_grpc: bool = Field(
+        default=False,
+        description="Use gRPC for data calls; multivector (ColBERT) payloads "
+        "serialize far faster than over REST.",
+    )
+    grpc_port: int = Field(default=6334, ge=1, le=65535)
+
+
+_embedding: EmbeddingConfig | None = None
+_rerank: RerankConfig | None = None
+_qdrant: QdrantServerConfig | None = None
+
+
+def get_embedding_config() -> EmbeddingConfig:
+    """Return the process-wide :class:`EmbeddingConfig`."""
+    global _embedding
+    if _embedding is None:
+        _embedding = EmbeddingConfig()
+    return _embedding
+
+
+def get_rerank_config() -> RerankConfig:
+    """Return the process-wide :class:`RerankConfig`."""
+    global _rerank
+    if _rerank is None:
+        _rerank = RerankConfig()
+    return _rerank
+
+
+def get_qdrant_server_config() -> QdrantServerConfig:
+    """Return the process-wide :class:`QdrantServerConfig`."""
+    global _qdrant
+    if _qdrant is None:
+        _qdrant = QdrantServerConfig()
+    return _qdrant
+
+
+def reset_inference_config() -> None:
+    """Drop the cached configs (tests)."""
+    global _embedding, _rerank, _qdrant
+    _embedding = _rerank = _qdrant = None
+
+
+__all__ = [
+    "EmbeddingConfig",
+    "QdrantServerConfig",
+    "RerankConfig",
+    "get_embedding_config",
+    "get_qdrant_server_config",
+    "get_rerank_config",
+    "reset_inference_config",
+]

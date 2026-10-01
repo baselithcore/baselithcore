@@ -1340,6 +1340,19 @@
       "IndexingService",
       "get_indexing_service"
     ],
+    "core.services.inference": [
+      "EmbeddingService",
+      "InferenceConfigError",
+      "InferenceError",
+      "QdrantRuntime",
+      "RerankService",
+      "ScopedVectorStore",
+      "SyncInference",
+      "SyncScopedStore",
+      "TenantScopeError",
+      "get_sync_inference",
+      "shutdown_sync_inference"
+    ],
     "core.services.llm": [
       "ANY",
       "AUTO",

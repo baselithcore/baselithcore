@@ -2325,3 +2325,11 @@ VOICE_ELEVENLABS_STABILITY=0.5
 VOICE_ELEVENLABS_SIMILARITY_BOOST=0.75
 VOICE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 ```
+
+## Inference services
+
+`core.services.inference` provides `EmbeddingService`, `RerankService` and a
+tenant-scoped `ScopedVectorStore` over one server-mode Qdrant client, plus a
+blocking bridge for synchronous plugins. Plugins call these instead of loading
+models or opening Qdrant clients themselves. See
+[Inference Services](../advanced/inference-services.md).
