@@ -112,3 +112,38 @@ no longer matches a flagged call fails the gate.
 containers (CPU image, models cached in the `tei_cache` volume) next to
 Qdrant: `tei-embed` for `BAAI/bge-m3` and `tei-rerank` for
 `BAAI/bge-reranker-v2-m3`, and points the API at them.
+
+## Kubernetes
+
+The Helm chart carries the three endpoints in its `inference` block.
+
+```yaml
+inference:
+  qdrant:
+    url: http://qdrant.data.svc:6333      # yours: the chart deploys no Qdrant
+  tei:
+    enabled: true                         # chart-deployed model servers
+    hfTokenSecret: {name: hf-token}       # optional, for gated models
+```
+
+With `tei.enabled` the chart deploys one Deployment, Service and model-cache
+PVC per model (`BAAI/bge-m3` and `BAAI/bge-reranker-v2-m3`) and writes
+`BASELITH_EMBEDDING_URL` and `BASELITH_RERANK_URL` into the ConfigMap that the
+API and worker pods read. A key you set yourself under `config` always wins, so
+you can point at servers you already run.
+
+- The TEI pods have their own `app.kubernetes.io/name`, so the API Service and
+  NetworkPolicy never select them. With `networkPolicy.enabled`, each gets a
+  policy that admits only this release's API and worker pods.
+- They run non-root with every capability dropped on port 8080, with the model
+  cache on a PVC (`persistence.enabled`, default) so a restart does not
+  download 2+ GiB again. The first start is slow; the startup probe waits up to
+  15 minutes.
+- The CPU image is `linux/amd64` only and slow. For real rerank latency use a
+  GPU image with `nvidia.com/gpu` in `resources` and a `nodeSelector`.
+- Database-style egress policies (`networkPolicy.egress.enabled`) must allow the
+  model servers: the `sameNamespace` preset does when they live in the release
+  namespace.
+- A plugin that still loads its own models (see
+  `configs/inprocess_ml_allowlist.yaml`) keeps the old memory footprint until it
+  migrates; size the API pod's `resources` for the plugin set you actually run.
