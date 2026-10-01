@@ -91,6 +91,23 @@ vulnerabilities:
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
     expired_at: 2026-10-29
+  - id: CVE-2026-80047
+    paths:
+      - uv.lock
+    statement: >-
+      transformers downloads custom generation code before trust consent.
+      Trivy reports it as "affected" with no fixed version listed for 4.57.6,
+      the newest 4.x, which the mineru cap (<5.0.0) pins — same structural
+      block as the three entries above. The scanner names no fix, so there is
+      nothing to re-lock to. Reachability: the code is fetched only when a
+      model repository ships custom generation code; mineru's pipeline loads
+      the fixed model set it documents, and the model id is deployment
+      configuration, not request input. The `huggingface` branch core imports
+      from resolves transformers 5.14.1, a separate resolution that this scan
+      did not flag. Re-argued with the entries above at the shared expiry:
+      check the advisory for a first patched version and re-lock to it the day
+      one exists.
+    expired_at: 2026-10-29
 
   # ----------------------------------------------------------------
   # accelerate 1.14.0 — present only with the `huggingface` extra installed

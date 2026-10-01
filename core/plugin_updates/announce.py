@@ -90,7 +90,7 @@ class AnnouncementGate:
 
     def _create_lock(self, lock: Path, key: str) -> bool:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
             return False
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

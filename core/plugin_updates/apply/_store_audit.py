@@ -55,7 +55,7 @@ class AuditMixin:
     def _audit_lock(self) -> Iterator[None]:
         path = self._root / "locks" / ".audit.lock"
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             yield
@@ -94,7 +94,7 @@ class AuditMixin:
         path = self._marker("audited", run_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         except FileExistsError:
             return False
         finally:

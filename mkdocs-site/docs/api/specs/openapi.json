@@ -182,6 +182,23 @@
         "title": "AgentCardResponse",
         "type": "object"
       },
+      "ApplyBlocker": {
+        "description": "Why a one-click install is not offered, in console order.",
+        "enum": [
+          "apply_disabled",
+          "not_host_install",
+          "overlay_unconfigured",
+          "updater_offline",
+          "updater_mismatch",
+          "unsigned_release",
+          "signature_failed",
+          "needs_environment_update",
+          "host_build_required",
+          "run_active"
+        ],
+        "title": "ApplyBlocker",
+        "type": "string"
+      },
       "ApprovalDecision": {
         "description": "Reviewer decision payload for a paused run.\n\n``approver`` is **not** the identity. Who decided comes from the\nauthenticated request; a body field is a string the client chose, which\nanswers none of the questions an auditor asks. It is kept only as an\noptional display label recorded beside the real principal.",
         "properties": {
@@ -630,6 +647,44 @@
           "plugin_name"
         ],
         "title": "PluginActionResponse",
+        "type": "object"
+      },
+      "PluginApplyStatus": {
+        "description": "Whether one available update may be installed with one click here.",
+        "properties": {
+          "active_run": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Run"
+          },
+          "blockers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ApplyBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "installable": {
+            "title": "Installable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "installable"
+        ],
+        "title": "PluginApplyStatus",
         "type": "object"
       },
       "PluginBoundsIssue": {
@@ -1331,6 +1386,56 @@
         "title": "RetentionRequest",
         "type": "object"
       },
+      "SignedAssets": {
+        "description": "Whether a release's signed assets (release.json + tarball) verified here.\n\nComputed by the check in both trust modes whenever the release carries the\ntwo assets, and cached with the report. ``tarball_sha256`` pins what an\ninstall may use; ``host_build_required`` is read from the verified\nmanifest (a release that is not self-contained).",
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "files_count": {
+            "default": 0,
+            "title": "Files Count",
+            "type": "integer"
+          },
+          "host_build_required": {
+            "default": false,
+            "title": "Host Build Required",
+            "type": "boolean"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tarball_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tarball Sha256"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verified"
+        ],
+        "title": "SignedAssets",
+        "type": "object"
+      },
       "SubjectRequest": {
         "description": "Identify the data subject for an export or erasure.",
         "properties": {
@@ -1491,6 +1596,16 @@
       "UpdateCandidate": {
         "description": "One plugin's update status.",
         "properties": {
+          "apply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginApplyStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "available": {
             "title": "Available",
             "type": "boolean"
@@ -1549,6 +1664,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signed_assets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignedAssets"
               },
               {
                 "type": "null"

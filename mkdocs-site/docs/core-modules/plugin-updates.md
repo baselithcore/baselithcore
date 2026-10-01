@@ -1049,7 +1049,7 @@ entry points for an updater that died mid-run.
 list, `shell=False`, the exit code or `-1` on timeout / `OSError`; only the
 program name is logged), `schema_env` (raises `SchemaEnvError`, without the
 path, for a configured file it cannot read), `GitHubReleaseFetcher` (one
-`GET /repos/<slug>/releases/tags/v<version>` through
+GitHub API lookup of the `v<version>` release tag for the repository slug, through
 `GitHubReleaseSource.release_by_tag`, then the assets) and `http_probe` (a
 5 s GET of `health_url`; `0` when unreachable).
 
