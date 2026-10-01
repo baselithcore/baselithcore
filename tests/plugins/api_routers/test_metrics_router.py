@@ -1,11 +1,14 @@
 """Tests for the /metrics router: auth toggle and multiprocess registry."""
 
+import uuid
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import core.config.security as security_config_module
 import core.middleware.security as security_manager_module
+from core.middleware.rate_limiter import RateLimiter
 
 SCRAPE = ("prometheus", "scrape-only-password-0123456789")
 ADMIN = ("admin", "admin-password-0123456789abcdef")
@@ -21,7 +24,20 @@ def _build_app() -> FastAPI:
 
 @pytest.fixture
 def fresh_security_config(monkeypatch):
-    """Force SecurityConfig re-read from env for each test."""
+    """Force SecurityConfig re-read from env for each test.
+
+    Each manager also gets its own rate-limit key prefix: with a real Redis
+    (CI) the admin lockout counter for ``testclient`` outlives the test, so
+    failed logins in earlier tests locked this source out of later ones.
+    """
+    original_init = RateLimiter.__init__
+    prefix = f"test-{uuid.uuid4().hex}:"
+
+    def isolated_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self._prefix = prefix + self._prefix
+
+    monkeypatch.setattr(RateLimiter, "__init__", isolated_init)
     monkeypatch.setattr(security_config_module, "_security_config", None)
     monkeypatch.setattr(security_manager_module, "_security_manager", None)
     yield
