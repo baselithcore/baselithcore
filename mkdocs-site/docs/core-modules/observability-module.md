@@ -468,6 +468,16 @@ Emitted from the orchestrator guard pipeline
 [Guardrails](guardrails.md#prometheus-metrics) and
 [Orchestration › Tool burst rate limit](orchestration.md#tool-burst-rate-limit-rate_limitpy).
 
+### Update-notice metric
+
+`baselith_update_available{component,security}` (Gauge, `UPDATE_AVAILABLE`) is
+written by `core/plugin_updates` on every check: `1` while an update is
+available, `0` otherwise. `component` is `core` or `plugin:<name>`; `security`
+is `"true"` only for a framework update a published advisory affects. The gauge
+uses `multiprocess_mode="mostrecent"` and series are never removed, so a
+recycled worker's fresh `0` supersedes a dead worker's stale `1`. See
+[Plugin Updates › Metric and alerts](plugin-updates.md#metric-and-alerts).
+
 ---
 
 ## Audit Log
@@ -495,6 +505,13 @@ await audit.log(
 
 Convenience helpers `log_auth`, `log_api_request`, and `log_chat` wrap the
 common event types.
+
+The hash-chained SQLite sink behind it is safe to share between processes:
+every uvicorn or task-queue worker opens its own sink on the same file, and each
+append reads the chain head and inserts the new row inside one
+`BEGIN IMMEDIATE` transaction, so concurrent workers never link two rows to the
+same predecessor. Chain layout, keyed hashing and verification are covered in
+[Audit Trail](audit-trail.md).
 
 ---
 

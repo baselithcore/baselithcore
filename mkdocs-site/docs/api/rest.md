@@ -556,6 +556,17 @@ reports `true`. Results are cached (~30s).
     the package default and answers every request from a local model on that
     pod, successfully, which is exactly why nothing downstream reports it.
 
+!!! note "Shutdown drains long-lived streams"
+    At startup the application lifespan installs a drain hook in front of the
+    server's SIGTERM/SIGINT handlers (`core.lifecycle.drain`). The first stop
+    signal marks the process as draining before the server waits for open
+    connections, so a stream that awaits `wait_for_drain()` — an SSE feed or
+    WebSocket subscription that would otherwise stay open until the client
+    leaves — ends cleanly instead of being cancelled at
+    `--timeout-graceful-shutdown`. Clients should treat such an end as a cue
+    to reconnect, which lands them on a pod that is still serving. See
+    [Draining long-lived streams](../core-modules/lifecycle.md#draining-long-lived-streams).
+
 ---
 
 ### `GET /status` - System Status
@@ -717,6 +728,19 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
 !!! note "Reload is REST-only"
     Hot-reload is exposed via this REST API only; there is **no**
     `reload` subcommand under `baselith plugin`.
+
+### Plugin update checks (`/api/plugins/updates`)
+
+Served by `core/plugin_updates/api.py`, admin-only, and registered before the
+plugin-management router so `/{name}` does not capture `/updates`.
+
+| Method & path                         | Description                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `GET /api/plugins/updates`            | `{"enabled": bool, "report": ...}` — last saved report, no network   |
+| `POST /api/plugins/updates/check`     | Run a check now; `503` when updates are not configured. Within 60 s of the worker's last check the cached report is returned |
+
+The report shape, refusal reasons and trust model are described in
+[Plugin Updates](../core-modules/plugin-updates.md#api).
 
 ### `GET /api/plugins/frontend-manifest`
 
@@ -982,6 +1006,14 @@ for line in response.iter_lines(decode_unicode=True):
 
 ---
 
+## Worker boot report
+
+When `UPDATE_APPLY_ENABLED=true`, each API worker writes a small report of the
+plugins it loaded (`boot/<pid>.json` under the update state directory) at the
+end of its startup, so the plugin updater can confirm a restart. The hook never
+delays or fails the boot: errors are logged and swallowed. See
+[Plugin updates](../core-modules/plugin-updates.md#boot-report).
+
 ## Interactive Documentation
 
 Access interactive Swagger/OpenAPI documentation:
@@ -1018,3 +1050,8 @@ From here you can test endpoints directly from the browser.
 
 !!! tip "Streaming for UX"
     Use `/chat/stream` for long responses to improve user experience.
+
+!!! note "Shutdown of the inference bridge"
+    The application lifespan closes the synchronous inference bridge
+    (`core.services.inference`) at shutdown, after plugins and lazy services
+    have stopped. See [Inference Services](../advanced/inference-services.md).

@@ -105,6 +105,9 @@ if TYPE_CHECKING:  # pragma: no cover - the eager view, for type checkers
         PluginClassError,
         resolve_plugin_class,
     )
+    from .plugin_data import (
+        data_dir,
+    )
     from .protocols import (
         BackstageExporter,
         CatalogExporter,
@@ -186,6 +189,7 @@ _EXPORTS: Final[dict[str, str]] = {
     "check_plugin_compatibility": "version",
     "check_plugin_dependency": "version",
     "check_version_compatibility": "version",
+    "data_dir": "plugin_data",
     "emit_lifecycle_event": "lifecycle_events",
     "fail": "result",
     "get_metrics_collector": "metrics",
@@ -259,6 +263,8 @@ __all__ = [
     "PLUGIN_RELOADED",
     "PLUGIN_FAILED",
     "emit_lifecycle_event",
+    # Per-plugin runtime data directory
+    "data_dir",
     # Versioning
     "SemanticVersion",
     "VersionConstraint",

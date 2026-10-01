@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     warn_on_suspected_typos()
 
+    # Mark the process as draining on the first stop signal, so long-lived
+    # streams (SSE, WebSocket) can end themselves instead of being cancelled
+    # at the graceful-shutdown timeout. Must run inside the server's signal
+    # capture, which is where the lifespan startup runs.
+    from core.lifecycle.drain import install_drain_signal_hook
+
+    install_drain_signal_hook()
+
     # CORE_DETERMINISTIC_MODE: seed the RNGs once, before anything samples.
     from core.lifecycle.deterministic import apply_deterministic_mode
 
@@ -437,6 +445,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pass
 
         await close_shared_clients()
+
+        from core.services.inference import shutdown_sync_inference
+
+        # Blocking in-thread join: keep it off the event loop.
+        await asyncio.to_thread(shutdown_sync_inference)
 
         try:
             from core.middleware.security import get_security_manager

@@ -47,6 +47,8 @@ from core.config.orchestration import (
     get_orchestration_config,
     get_router_config,
 )
+from core.config.plugin_update_apply import UpdateApplyConfig, get_update_apply_config
+from core.config.plugin_updates import PluginUpdateConfig, get_plugin_update_config
 from core.config.plugins import PluginConfig, get_plugin_config
 from core.config.prioritization import PrioritizationConfig
 from core.config.processing import ProcessingConfig, get_processing_config
@@ -95,6 +97,8 @@ __all__ = [
     "MCPServerSpec",
     "OrchestrationConfig",
     "PluginConfig",
+    "PluginUpdateConfig",
+    "UpdateApplyConfig",
     "PrioritizationConfig",
     "ProcessingConfig",
     "ReasoningConfig",
@@ -127,6 +131,8 @@ __all__ = [
     "get_mcp_config",
     "get_orchestration_config",
     "get_plugin_config",
+    "get_plugin_update_config",
+    "get_update_apply_config",
     "get_processing_config",
     "get_reasoning_config",
     "get_redis_cache_config",

@@ -137,7 +137,9 @@ def cli_tree(repo_root: Path) -> dict[str, dict] | None:
     subparsers = parser.add_subparsers(dest="command")
     for cmd_name in commands:
         try:
-            module = importlib.import_module(f"core.cli.commands.{cmd_name}")
+            module = importlib.import_module(
+                f"core.cli.commands.{cmd_name.replace('-', '_')}"
+            )
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, argparse.HelpFormatter)
         except Exception:

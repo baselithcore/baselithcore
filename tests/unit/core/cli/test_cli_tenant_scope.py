@@ -286,6 +286,7 @@ class TestCoverage:
             "docs",
             "doctor",
             "info",
+            "plugin-updater",
         }
 
     def test_every_subcommand_exemption_names_a_scoped_command(self):

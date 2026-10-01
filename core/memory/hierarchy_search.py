@@ -172,6 +172,7 @@ class HierarchySearchMixin:
         try:
             # Lazy import kept: core.chat.dependencies pulls optional heavy deps.
             from core.chat.dependencies import get_reranker
+            from core.nlp.rerank import score_pairs
 
             # Any: same loose typing as the chat pipeline's RerankerProtocol —
             # the concrete CrossEncoder's overloads don't accept list[tuple]
@@ -180,7 +181,7 @@ class HierarchySearchMixin:
             if reranker is None:
                 return items
             pairs = [(query, item.content) for item in items]
-            raw = await run_inference(reranker.predict, pairs)
+            raw = await run_inference(score_pairs, reranker, pairs)
             scores = raw.tolist() if hasattr(raw, "tolist") else list(raw)
             ranked = sorted(
                 zip(items, scores, strict=True), key=lambda x: x[1], reverse=True

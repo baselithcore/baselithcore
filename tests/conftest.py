@@ -315,6 +315,22 @@ def _reset_assumed_production_posture():
 
 
 @pytest.fixture(autouse=True)
+def _reset_unknown_model_cost_policy():
+    """Drop the cached unknown-model cost policy around every test.
+
+    ``get_unknown_model_cost_config()`` caches the first value it reads. A test
+    that sets ``BASELITH_UNKNOWN_MODEL_COST_POLICY=reject`` without resetting
+    the singleton used to leave ``reject`` behind for whichever test ran next
+    in the randomized order, which then failed for any unpriced model.
+    """
+    from core.quotas import cost_enforcement
+
+    cost_enforcement._unknown_model_cost_config = None
+    yield
+    cost_enforcement._unknown_model_cost_config = None
+
+
+@pytest.fixture(autouse=True)
 async def cleanup_global_state_between_tests():
     """Reset global registries and event bus between tests to prevent cross-test pollution."""
     yield

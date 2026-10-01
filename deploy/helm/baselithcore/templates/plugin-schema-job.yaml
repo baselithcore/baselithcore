@@ -23,9 +23,19 @@ own. The three ways out, in the order worth preferring:
     serving process hold DDL (DB_RUNTIME_DDL=true), which a least-privilege
     role cannot do.
 */ -}}
+{{- $mountVolumes := .Values.database.pluginSchemaInit.mountVolumes -}}
 {{- with (.Values.config).PLUGIN_CONFIG_PATH }}
-{{- if not (hasPrefix "/app/configs/" .) }}
-{{- fail (printf "database.pluginSchemaInit and config.PLUGIN_CONFIG_PATH=%s are mutually exclusive: the schema Job mounts no application volume, so it cannot read that file — it would take every plugin as enabled with an empty config and build the wrong schema, silently and with exit 0. Use plugins.config, or keep PLUGIN_CONFIG_PATH inside the image, or set database.pluginSchemaInit.enabled=false." .) }}
+{{- $configPath := . -}}
+{{- $onMountedVolume := false -}}
+{{- if $mountVolumes }}
+{{- range $.Values.extraVolumeMounts }}
+{{- if hasPrefix (printf "%s/" (trimSuffix "/" .mountPath)) $configPath }}
+{{- $onMountedVolume = true -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if not (or (hasPrefix "/app/configs/" .) $onMountedVolume) }}
+{{- fail (printf "database.pluginSchemaInit and config.PLUGIN_CONFIG_PATH=%s are mutually exclusive: the schema Job cannot read that file — it would take every plugin as enabled with an empty config and build the wrong schema, silently and with exit 0. Use plugins.config, or keep PLUGIN_CONFIG_PATH inside the image, or put it under one of extraVolumeMounts and set database.pluginSchemaInit.mountVolumes=true, or set database.pluginSchemaInit.enabled=false." .) }}
 {{- end }}
 {{- end }}
 # Builds every enabled plugin's schema, at deploy time, as the table owner.
@@ -94,6 +104,10 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.migrationSecretName" . }}
                 optional: true
+          {{- $schemaEnv := .Values.database.pluginSchemaInit.extraEnv }}
+          {{- if or .Values.database.runtimeRole.enabled $schemaEnv }}
+          env:
+          {{- end }}
           {{- if .Values.database.runtimeRole.enabled }}
           # Alembic must NOT run as the runtime role. That role exists to have
           # row-level security apply to it, which is the same thing as saying it
@@ -106,7 +120,6 @@ spec:
           # Env wins over envFrom, so these two entries put the owner back for
           # this Job only; the api and worker pods keep the least-privilege role
           # they read from the release ConfigMap.
-          env:
             {{- if .Values.database.runtimeRole.adminUser }}
             - name: DB_USER
               value: {{ .Values.database.runtimeRole.adminUser | quote }}
@@ -123,18 +136,56 @@ spec:
                   name: {{ .Values.database.runtimeRole.adminSecret.name | quote }}
                   key: {{ .Values.database.runtimeRole.adminSecret.passwordKey | quote }}
           {{- end }}
+          {{- with $schemaEnv }}
+            # database.pluginSchemaInit.extraEnv, after the two entries above so
+            # a `$(DB_USER)` / `$(DB_PASSWORD)` reference in it expands to the
+            # owner. The api and worker pods never see these.
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.database.pluginSchemaInit.resources | nindent 12 }}
-          {{- if .Values.tmpVolumes.enabled }}
+          {{- $appVolumes := and $mountVolumes .Values.extraVolumes }}
+          {{- $pluginSet := .Values.plugins.config }}
+          {{- if or .Values.tmpVolumes.enabled $appVolumes $pluginSet }}
           volumeMounts:
+            {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
               mountPath: /tmp
+            {{- end }}
+            {{- if $pluginSet }}
+            # The release's declarative plugin set, from its hook-scoped copy
+            # (plugins-configmap.yaml): the set the pods run, not the image's.
+            - name: plugins-config
+              mountPath: /app/configs/plugins.yaml
+              subPath: plugins.yaml
+              readOnly: true
+            {{- end }}
+            {{- if $appVolumes }}
+            {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.tmpVolumes.enabled }}
+      {{- if $mountVolumes }}
+      # mountVolumes: the same seed the application's pods run, so on a first
+      # install the plugin set this Job reads is the image's default — exactly
+      # the copy the application is about to start from — and afterwards it is
+      # whatever the console last wrote.
+      {{- include "baselithcore.seedInitContainers" . | trim | nindent 6 }}
+      {{- end }}
+      {{- if or .Values.tmpVolumes.enabled $appVolumes $pluginSet }}
       volumes:
+        {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- if $pluginSet }}
+        - name: plugins-config
+          configMap:
+            name: {{ include "baselithcore.pluginsHookConfigName" . }}
+        {{- end }}
+        {{- if $appVolumes }}
+        {{- toYaml .Values.extraVolumes | nindent 8 }}
+        {{- end }}
       {{- end }}
       # The hook runs the same image against the same database as the app, so
       # it has to be schedulable wherever the app is. Without these it is not:

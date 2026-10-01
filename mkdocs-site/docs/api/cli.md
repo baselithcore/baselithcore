@@ -42,6 +42,7 @@ baselith --format json <command>  # Global output formatting
 │   INFRASTRUCTURE            db              Manage database systems                          │
 │                             cache           Manage Redis cache                               │
 │                             queue           Manage task queues                               │
+│                             plugin-updater  Run and operate the one-click plugin updater     │
 │   QUALITY & TESTS           test            Run test suite                                   │
 │                             lint            Run code linters                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -528,6 +529,11 @@ client is opened. A plugin with no schema of its own implements nothing and is
 reported as such. The exit code is the number of plugins that failed, so a
 deploy job stops instead of starting an application against a half-built
 schema.
+
+Verified plugin updates in `$BASELITH_PLUGIN_OVERLAY_DIR` are registered
+before discovery, so the schema that runs is the overlay release's, not the
+bundled copy's. A failure to read the overlay is reported as a warning and the
+bundled plugins still get their schema.
 
 In Kubernetes the chart runs this for you: set
 `database.pluginSchemaInit.enabled` and the Job lands after the migrations and
@@ -1194,6 +1200,35 @@ BaselithCore features a professional-grade global exception handler. In the even
 This allows for easier debugging by developers without overwhelming end-users.
 
 ---
+
+## Plugin updater
+
+`baselith plugin-updater` runs and operates the one-click plugin updater
+(host installs only; see
+[One-click plugin updates](../core-modules/plugin-updates.md#one-click-plugin-updates-host-installs)
+for setup and
+[the updater service](../core-modules/plugin-updates.md#the-updater-service)
+for its internals).
+It never imports plugin code: the CLI skips its `plugins/*/cli.py` scan for
+this command. Exit codes: `0` ok, `1` refused or failed, `2` invalid input or
+a configuration the updater cannot start with. `request`, `rollback` and
+`resolve` log `AUDIT | PLUGIN_UPDATE | <op> run=<id> plugin=<name> by=cli:<account>`,
+the account taken from the process's uid (not `$USER`).
+
+| Subcommand | What it does |
+| --- | --- |
+| `serve` | The service (run by systemd): heartbeat, crash reconciliation, then approved runs one at a time. Exit `2` when `BASELITH_PLUGIN_OVERLAY_DIR` is unset or another updater holds the lock. |
+| `status` | Prints the heartbeat and every unfinished run (`--format json` for JSON). |
+| `request <plugin> --version V --sha256 S` | Queues an update to `V` pinned to the tarball SHA-256 `S`, requested by `cli:<user>`, with no approval step (a shell on the host is already trusted with it). |
+| `rollback <plugin>` | Queues a rollback to the link target before the plugin's last successful update, with no approval step. Exit `1` when there is none; when the plugin already runs that target it prints so and queues nothing (no restart). |
+| `resolve <run_id>` | Moves a `rollback_failed` run to `failed` ("resolved by operator") and frees the plugin for new runs, once the operator has put the plugin right. Exit `1` for any other state. |
+
+```bash
+baselith plugin-updater status
+baselith plugin-updater request my_plugin --version 1.4.0 --sha256 <64 hex>
+baselith plugin-updater rollback my_plugin
+baselith plugin-updater resolve pinstall-20260930T120000Z-0a1b2c3d
+```
 
 ## Queue
 

@@ -91,6 +91,23 @@ vulnerabilities:
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
     expired_at: 2026-10-29
+  - id: CVE-2026-80047
+    paths:
+      - uv.lock
+    statement: >-
+      transformers downloads custom generation code before trust consent.
+      Trivy reports it as "affected" with no fixed version listed for 4.57.6,
+      the newest 4.x, which the mineru cap (<5.0.0) pins — same structural
+      block as the three entries above. The scanner names no fix, so there is
+      nothing to re-lock to. Reachability: the code is fetched only when a
+      model repository ships custom generation code; mineru's pipeline loads
+      the fixed model set it documents, and the model id is deployment
+      configuration, not request input. The `huggingface` branch core imports
+      from resolves transformers 5.14.1, a separate resolution that this scan
+      did not flag. Re-argued with the entries above at the shared expiry:
+      check the advisory for a first patched version and re-lock to it the day
+      one exists.
+    expired_at: 2026-10-29
 
   # ----------------------------------------------------------------
   # accelerate 1.14.0 — present only with the `huggingface` extra installed
@@ -175,6 +192,33 @@ vulnerabilities:
       a read-only root filesystem (readOnlyRootFilesystem), so the cache is not
       even persistent. Re-evaluate at expiry: if a pip release has shipped
       msgpack 1.2.1, drop this entry and raise the Dockerfile's pip floor.
+    expired_at: 2026-10-29
+  - id: CVE-2026-97687
+    statement: >-
+      urllib3 2.7.0, vendored in pip/_vendor/urllib3: an HTTPS proxy TLS
+      configuration override that can let traffic be intercepted, fixed in
+      2.8.0. Unreachable fix: pip 26.2.1 is the newest release and still
+      vendors 2.7.0, so there is no pip to raise the Dockerfile floor to. The
+      application's own urllib3 is a separate copy, locked at 2.8.0 and
+      reported clean. Blast radius: the vendored copy is used only by pip's
+      own downloads, i.e. `baselith plugin deps install`, and the proxy
+      override matters only where an operator has configured an HTTPS proxy
+      for that pip. Nothing in core/, plugins/, sdk/ or scripts/ imports pip's
+      vendored copy. Same shape and same expiry as GHSA-6v7p-g79w-8964: no
+      `paths`, because SBOM-derived components carry no PkgPath. Re-evaluate
+      at expiry: if a pip release vendors urllib3 >=2.8.0, drop both urllib3
+      entries and raise the Dockerfile's pip floor.
+    expired_at: 2026-10-29
+  - id: CVE-2026-97689
+    statement: >-
+      Denial of service through unbounded memory allocation in urllib3's chunk
+      parser, in the copy vendored by pip 26.2.1 (2.7.0; fixed in 2.8.0). Same
+      block and same scoping as CVE-2026-97687 above: no released pip carries
+      the fix, the application's own urllib3 is locked at 2.8.0, and the
+      vendored copy only parses responses to pip's own downloads during a
+      plugin dependency install. A hostile index could exhaust memory of that
+      one short-lived pip process, not of the API server. Re-argued with
+      CVE-2026-97687 at the shared expiry.
     expired_at: 2026-10-29
   - id: CVE-2025-47273
     statement: >-

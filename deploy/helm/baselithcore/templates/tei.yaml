@@ -1,0 +1,164 @@
+{{- if .Values.inference.tei.enabled }}
+{{- $tei := .Values.inference.tei }}
+{{- range $kind, $svc := dict "embed" $tei.embedding "rerank" $tei.rerank }}
+{{- $name := include "baselithcore.teiName" (dict "root" $ "kind" $kind) }}
+{{- $labels := dict "app.kubernetes.io/name" $name "app.kubernetes.io/instance" $.Release.Name }}
+{{- if $tei.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tei-{{ $kind }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $tei.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $tei.persistence.size }}
+{{- end }}
+---
+# Hugging Face Text Embeddings Inference serving {{ $svc.model }}.
+# Its pods carry their OWN app.kubernetes.io/name: the api Service and the
+# chart's NetworkPolicy select on name+instance, and a TEI pod sharing those
+# labels would receive API traffic and inherit the API pod's policy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tei-{{ $kind }}
+spec:
+  replicas: {{ $svc.replicas }}
+  # A RWO model cache cannot be mounted by a surge pod on another node.
+  strategy:
+    type: {{ ternary "Recreate" "RollingUpdate" $tei.persistence.enabled }}
+  selector:
+    matchLabels:
+      {{- toYaml $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+        app.kubernetes.io/component: tei-{{ $kind }}
+        app.kubernetes.io/part-of: baselithcore
+    spec:
+      {{- with $.Values.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: tei
+          image: "{{ $tei.image.repository }}:{{ $tei.image.tag }}"
+          imagePullPolicy: {{ $tei.image.pullPolicy }}
+          args:
+            - --model-id
+            - {{ $svc.model | quote }}
+            - --port
+            - {{ $tei.port | quote }}
+            {{- range $svc.args }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: HF_HOME
+              value: /data
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /data
+            {{- with $tei.hfTokenSecret.name }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $tei.hfTokenSecret.key }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $tei.port }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          # The first start downloads the model (2+Gi) and can take minutes:
+          # the startup probe holds liveness off for up to 15 minutes.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            - {name: models, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: models
+          {{- if $tei.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with $svc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $svc.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tei-{{ $kind }}
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    {{- toYaml $labels | nindent 4 }}
+{{- if $.Values.networkPolicy.enabled }}
+---
+# Only this release's API and worker pods may call the model server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $labels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "baselithcore.selectorLabels" $ | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $tei.port }}
+{{- end }}
+{{- end }}
+{{- end }}

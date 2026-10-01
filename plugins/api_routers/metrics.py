@@ -3,9 +3,13 @@ Metrics Router.
 
 Prometheus exposition endpoint.
 
-Auth: admin basic auth by default; set ``METRICS_AUTH_REQUIRED=false`` when
-the endpoint is only reachable from the scrape network (NetworkPolicy) or
-the scraper is configured with credentials (ServiceMonitor ``basicAuth``).
+Auth: basic auth by default; set ``METRICS_AUTH_REQUIRED=false`` when the
+endpoint is only reachable from the scrape network (NetworkPolicy). Two
+credentials are accepted: the scrape-only ``METRICS_USERNAME`` /
+``METRICS_PASSWORD`` pair, which no other route consults, and — for existing
+scrapers — the admin credential. Give Prometheus the scrape-only one: its
+ServiceMonitor Secret is readable by an operator in another namespace, and
+the admin credential would open ``/admin`` to whoever reads it.
 
 Multiprocess: when ``PROMETHEUS_MULTIPROC_DIR`` is set (required for
 ``WEB_CONCURRENCY>1`` — each uvicorn worker otherwise exports only its own
@@ -30,6 +34,7 @@ widely parseable — claim of the two. No scraper loses anything by it.
 """
 
 import os
+import secrets
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
@@ -42,6 +47,25 @@ from core.config.security import get_security_config
 router = APIRouter(tags=["metrics"])
 
 _basic = HTTPBasic(auto_error=False)
+
+
+def _is_scrape_credential(credentials: HTTPBasicCredentials) -> bool:
+    """True for the configured scrape-only credential, in constant time."""
+    config = get_security_config()
+    if config.metrics_password is None:
+        return False
+    # Both halves are compared on every call, so the response time does not
+    # say which one was wrong. Bytes, because compare_digest raises on
+    # non-ASCII str.
+    user_ok = secrets.compare_digest(
+        credentials.username.encode("utf-8"),
+        config.metrics_username.encode("utf-8"),
+    )
+    password_ok = secrets.compare_digest(
+        credentials.password.encode("utf-8"),
+        config.metrics_password.get_secret_value().encode("utf-8"),
+    )
+    return user_ok and password_ok
 
 
 def _render_metrics(accept_header: str) -> tuple[bytes, str]:
@@ -91,9 +115,11 @@ async def prometheus_metrics(request: Request) -> Response:
                 detail="Authentication required",
                 headers={"WWW-Authenticate": "Basic"},
             )
-        from plugins.api_routers.admin import verify_credentials
+        if not _is_scrape_credential(credentials):
+            # Anything else must be the admin credential, under its lockout.
+            from plugins.api_routers.admin import verify_credentials
 
-        await verify_credentials(request, credentials)
+            await verify_credentials(request, credentials)
 
     payload, content_type = _render_metrics(request.headers.get("accept", ""))
     return Response(content=payload, media_type=content_type)

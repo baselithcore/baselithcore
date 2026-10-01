@@ -1,10 +1,17 @@
 """Tests for the /metrics router: auth toggle and multiprocess registry."""
 
+import uuid
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import core.config.security as security_config_module
+import core.middleware.security as security_manager_module
+from core.middleware.rate_limiter import RateLimiter
+
+SCRAPE = ("prometheus", "scrape-only-password-0123456789")
+ADMIN = ("admin", "admin-password-0123456789abcdef")
 
 
 def _build_app() -> FastAPI:
@@ -17,10 +24,44 @@ def _build_app() -> FastAPI:
 
 @pytest.fixture
 def fresh_security_config(monkeypatch):
-    """Force SecurityConfig re-read from env for each test."""
+    """Force SecurityConfig re-read from env for each test.
+
+    Each manager also gets its own rate-limit key prefix: with a real Redis
+    (CI) the admin lockout counter for ``testclient`` outlives the test, so
+    failed logins in earlier tests locked this source out of later ones.
+    """
+    original_init = RateLimiter.__init__
+    prefix = f"test-{uuid.uuid4().hex}:"
+
+    def isolated_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self._prefix = prefix + self._prefix
+
+    monkeypatch.setattr(RateLimiter, "__init__", isolated_init)
     monkeypatch.setattr(security_config_module, "_security_config", None)
+    monkeypatch.setattr(security_manager_module, "_security_manager", None)
     yield
     monkeypatch.setattr(security_config_module, "_security_config", None)
+    monkeypatch.setattr(security_manager_module, "_security_manager", None)
+
+
+@pytest.fixture
+def two_credentials(monkeypatch, fresh_security_config):
+    """A scrape-only credential and a distinct admin one, auth required."""
+    monkeypatch.delenv("METRICS_AUTH_REQUIRED", raising=False)
+    monkeypatch.delenv("ADMIN_PASS_HASHED", raising=False)
+    monkeypatch.setenv("METRICS_USERNAME", SCRAPE[0])
+    monkeypatch.setenv("METRICS_PASSWORD", SCRAPE[1])
+    monkeypatch.setenv("ADMIN_USER", ADMIN[0])
+    monkeypatch.setenv("ADMIN_PASS", ADMIN[1])
+
+
+def _app_with_admin() -> FastAPI:
+    from plugins.api_routers import admin as admin_module
+
+    app = _build_app()
+    app.include_router(admin_module.router)
+    return app
 
 
 def test_metrics_requires_auth_by_default(monkeypatch, fresh_security_config):
@@ -186,3 +227,40 @@ def test_plain_fallback_declares_the_classic_text_version(
     resp = client.get("/metrics", headers={"Accept": "*/*"})
 
     assert resp.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
+
+
+def test_scrape_credential_reads_metrics(two_credentials):
+    resp = TestClient(_build_app()).get("/metrics", auth=SCRAPE)
+    assert resp.status_code == 200
+
+
+def test_scrape_username_with_wrong_password_is_401(two_credentials):
+    resp = TestClient(_build_app()).get("/metrics", auth=(SCRAPE[0], "wrong"))
+    assert resp.status_code == 401
+
+
+def test_admin_credential_still_reads_metrics(two_credentials):
+    """Backwards compatible: scrapers configured with the admin pair keep
+    working."""
+    resp = TestClient(_build_app()).get("/metrics", auth=ADMIN)
+    assert resp.status_code == 200
+
+
+def test_scrape_credential_grants_nothing_else(two_credentials):
+    """The whole point of a dedicated credential: a Prometheus that holds it
+    (and whoever can read its Secret) cannot open the admin surface."""
+    client = TestClient(_app_with_admin())
+    assert client.get("/admin", auth=SCRAPE).status_code == 401
+    assert client.get("/admin/data", auth=SCRAPE).status_code == 401
+
+
+def test_unset_scrape_password_accepts_no_scrape_login(
+    monkeypatch, fresh_security_config
+):
+    """An empty METRICS_PASSWORD must not turn into "any password works"."""
+    monkeypatch.delenv("METRICS_AUTH_REQUIRED", raising=False)
+    monkeypatch.delenv("METRICS_PASSWORD", raising=False)
+    monkeypatch.delenv("ADMIN_PASS", raising=False)
+    monkeypatch.delenv("ADMIN_PASS_HASHED", raising=False)
+    resp = TestClient(_build_app()).get("/metrics", auth=("metrics", ""))
+    assert resp.status_code == 401

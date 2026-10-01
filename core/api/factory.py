@@ -37,6 +37,7 @@ from core.middleware.security import (
 )
 from core.middleware.tenant import TenantMiddleware
 from core.observability.logging import ensure_configured
+from core.plugin_updates.api import router as plugin_updates_router
 from core.plugins import apply_plugin_app_middleware, backstage_exporter_router
 from core.plugins.api import router as plugin_management_router
 from core.routers import chat, console, feedback, index, metrics, status
@@ -377,6 +378,8 @@ def create_app() -> FastAPI:
     app.include_router(console.router)
 
     # === Plugin Management API ===
+    # Registered first: plugin_management_router's /{plugin_name} would swallow /updates.
+    app.include_router(plugin_updates_router)
     if plugin_management_router:
         app.include_router(plugin_management_router)
 

@@ -12,6 +12,7 @@ __all__ = [
     "init",
     "lint",
     "plugin",
+    "plugin_updater",
     "queue",
     "run",
     "shell",

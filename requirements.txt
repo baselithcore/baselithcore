@@ -55,7 +55,7 @@ orjson>=3.11.7,<4.0
 prometheus-client>=0.20.0,<1.0
 psycopg[binary,pool]>=3.2.1,<4.0
 pydantic-settings>=2.0.0
-PyJWT>=2.10.1,<3.0
+PyJWT>=2.14.0,<3.0
 # Direct, unguarded import in core/config/env.py and backend.py — do not rely
 # on pydantic-settings pulling it transitively.
 python-dotenv>=1.0.0

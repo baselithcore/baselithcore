@@ -240,8 +240,27 @@ HTTP_REQUESTS_IN_PROGRESS = Gauge(
     ["method"],
 )
 
+# === Update notices ===
+# Set from core.plugin_updates.metrics.publish_update_metrics: every known
+# (component, security) series is written on each check, 1 while an update is
+# available and 0 once it is not. ``component`` is ``core`` or ``plugin:<name>``.
+# Series are never removed: in multiprocess mode ``remove()`` does not touch the
+# mmap files, so a removed series would keep exporting its last 1. ``mostrecent``
+# makes the newest write across the workers' files win, so a recycled worker's
+# fresh 0 supersedes the dead worker's stale 1 without anyone calling
+# ``mark_process_dead`` (nothing here does; a live-only mode would need it).
+# Every worker publishes the same value, so two workers never sum. Outside
+# multiprocess mode the mode is ignored.
+UPDATE_AVAILABLE = Gauge(
+    "baselith_update_available",
+    "1 while a framework or plugin update is available.",
+    ["component", "security"],
+    multiprocess_mode="mostrecent",
+)
+
 
 __all__ = [
+    "UPDATE_AVAILABLE",
     # Chat
     "CHAT_REQUESTS_TOTAL",
     "CHAT_REQUEST_LATENCY_SECONDS",

@@ -289,6 +289,10 @@ Guardrail layers are instrumented too — `mas_guardrail_blocks_total`,
 labelled by `layer`) and `mas_tool_rate_limited_total` — see
 [Observability › Guardrail metrics](../core-modules/observability-module.md#guardrail-metrics).
 
+Update notices are exported as `baselith_update_available{component,security}`
+(no `mas_` prefix) — `1` while a framework or plugin update is available. See
+[Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts).
+
 ### HTTP RED metrics (automatic)
 
 Every HTTP request is instrumented automatically by
@@ -623,6 +627,11 @@ rule_files:
   - 'slo-rules.yml'
 ```
 
+The Helm chart's `PrometheusRule` also ships an update-notice group built on
+`baselith_update_available`: `BaselithcoreUpdateAvailable` (info, `for: 1h`) and
+`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`). Silence either via
+`prometheusRule.disabledAlerts`.
+
 ### SLOs & Error-Budget Alerting
 
 `deploy/prometheus/slo-rules.yml` defines formal Service Level Objectives and
@@ -769,6 +778,18 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
 1. **Monitor gauge** `process_resident_memory_bytes`
 2. **Create alert** if it grows beyond threshold
 3. **Correlate with trace** to identify problematic operations
+
+### Problem: Audit Chain Reports Tampering
+
+1. **Run** `verify_chain()` on the audit sink and note the first failing `seq`
+2. **If the reason is** *"prev_hash does not match the preceding entry_hash"* and
+   two rows share a `prev_hash`, the chain forked rather than being edited: every
+   worker process appends to the same SQLite file, and releases before the fix
+   let two of them read the same head
+3. **Current releases** serialize appends across processes with a
+   `BEGIN IMMEDIATE` transaction, so new rows cannot fork
+4. **Solution**: archive the database at a chain boundary and start a fresh one —
+   see [Audit Trail › Tamper evidence](../core-modules/audit-trail.md#tamper-evidence)
 
 ---
 

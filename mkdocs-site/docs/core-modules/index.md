@@ -23,6 +23,7 @@ description: Core modules of the BaselithCore Framework
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
 | **Multi-Factor Auth**     | TOTP (RFC 6238) second factor and single-use recovery codes      | [`core/auth/mfa.py`](mfa.md)                     |
 | **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
+| **Connectors**            | One contract for external-system integrations: egress, retries, credentials, audited tools | [`core/connectors/`](connectors.md) |
 | **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
 | **Audit Trail**           | Durable, hash-chained audit records (AI Act Art. 12/19, GDPR Art. 5(2)) | [`core/observability/`](audit-trail.md)    |
 | **Privacy & DSR**         | GDPR data-subject export/erasure and retention across providers  | [`core/privacy/`](privacy.md)                    |

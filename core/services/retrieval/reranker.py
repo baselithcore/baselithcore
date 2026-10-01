@@ -4,7 +4,7 @@ Reranker service for Advanced RAG.
 
 import asyncio
 import threading
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from core.observability.logging import get_logger
 
@@ -20,6 +20,7 @@ else:
 
 from core.config.services import get_chat_config
 from core.models.domain import SearchResult
+from core.nlp.rerank import score_pairs
 
 logger = get_logger(__name__)
 
@@ -131,21 +132,9 @@ class Reranker:
                 return results[:top_k]
 
             # Predict scores (offloaded so blocking torch inference does not
-            # stall the event loop).
-            # Wrapped in a lambda rather than passed as `to_thread(model.predict,
-            # pairs)`: CrossEncoder.predict is an overloaded function, and an
-            # overload set cannot be matched against to_thread's single
-            # Callable parameter. The closure gives it one concrete signature.
-            #
-            # The cast is list invariance, not a doubt about the value. From
-            # sentence-transformers 5.x the parameter is `list[PairInput]`,
-            # where `PairInput` is itself a union — so `list[tuple[str, str]]`
-            # is rejected even though every element is a valid `PairInput`.
-            # Widening here keeps `pairs` honestly typed above and avoids
-            # importing the library's private alias to satisfy the checker.
-            scores = await asyncio.to_thread(
-                lambda: model.predict(cast("list[Any]", pairs))
-            )
+            # stall the event loop). ``score_pairs`` picks the device's batch
+            # size — the library default is a padding trap off CUDA.
+            scores = await asyncio.to_thread(score_pairs, model, pairs)
 
             # Assign new scores
             for idx, score in zip(valid_indices, scores, strict=True):

@@ -200,9 +200,26 @@ def merge_plugin_dirs(
     return merged
 
 
+def apply_overlay(directory_dirs: list[Path], overlay_dirs: list[Path]) -> list[Path]:
+    """Replace scanned plugin dirs by same-named verified overlay entries.
+
+    Args:
+        directory_dirs: Plugin directories found under the plugins root.
+        overlay_dirs: Registered overlay entries (``core.plugins.overlay``).
+
+    Returns:
+        The scan in its original order with overlaid names swapped for their
+        overlay path, followed by overlay entries with no bundled counterpart.
+    """
+    by_name = {path.name: path for path in overlay_dirs}
+    merged = [by_name.pop(path.name, path) for path in directory_dirs]
+    return merged + [by_name[name] for name in sorted(by_name)]
+
+
 __all__ = [
     "ENTRY_POINT_GROUP",
     "MANIFEST_FILENAMES",
+    "apply_overlay",
     "find_manifest",
     "has_manifest",
     "is_entry_point_discovery_enabled",

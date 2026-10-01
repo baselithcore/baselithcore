@@ -340,6 +340,12 @@ class TestEstimateTokensAsync:
     @pytest.mark.asyncio
     async def test_large_text_offloaded_and_identical(self):
         text = "word " * 20_000  # 100k chars, over the 64k threshold
+        # Load the encoder first. Whether it is already loaded depends on test
+        # order and on the background warm-up thread; when it is not, the
+        # async path spends one extra to_thread loading it (a second await),
+        # and `expected`, computed on a running loop, is the heuristic rather
+        # than the exact count. This test is about the estimate's offload.
+        tokens_module._load_tiktoken_encoder()
         expected = tokens_module.estimate_tokens(text)
 
         with patch(
@@ -347,6 +353,7 @@ class TestEstimateTokensAsync:
         ) as spy:
             result = await tokens_module.estimate_tokens_async(text)
         spy.assert_awaited_once()
+        assert spy.await_args.args[0] is tokens_module.estimate_tokens
         assert result == expected
 
     @pytest.mark.asyncio

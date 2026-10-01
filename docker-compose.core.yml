@@ -22,6 +22,13 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8000
+      # Embedding, rerank and vector search are core services: the API pod
+      # loads no model and opens no embedded Qdrant (see core.services.inference).
+      BASELITH_QDRANT_URL: ${BASELITH_QDRANT_URL:-http://qdrant:6333}
+      BASELITH_EMBEDDING_BACKEND: ${BASELITH_EMBEDDING_BACKEND:-remote}
+      BASELITH_EMBEDDING_URL: ${BASELITH_EMBEDDING_URL:-http://tei-embed:80}
+      BASELITH_RERANK_BACKEND: ${BASELITH_RERANK_BACKEND:-remote}
+      BASELITH_RERANK_URL: ${BASELITH_RERANK_URL:-http://tei-rerank:80}
     volumes:
       - ./plugins:/app/plugins
       - ./configs:/app/configs
@@ -37,6 +44,12 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+      # started, not healthy: the first boot downloads the model, and the API
+      # only calls TEI lazily, so it must not wait for that download.
+      tei-embed:
+        condition: service_started
+      tei-rerank:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)"]
@@ -92,7 +105,50 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # --- Hugging Face Text Embeddings Inference (CPU) -------------------------
+  # cpu-1.9.4 is the latest stable release at the time of writing (GitHub
+  # release v1.9.4, 2026-09-15). The CPU image is linux/amd64 only: on Apple
+  # Silicon Docker runs it under emulation (slow but correct) — for real speed
+  # use a GPU image on a GPU host. Models are cached in tei_cache so a restart
+  # does not download them again.
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    platform: linux/amd64
+    command: ['--model-id', 'BAAI/bge-m3', '--port', '80']
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - '127.0.0.1:${BASELITH_TEI_EMBED_PORT:-8081}:80'
+    volumes:
+      - tei_cache:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/80" 2>/dev/null']
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+    restart: unless-stopped
+
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    platform: linux/amd64
+    command: ['--model-id', 'BAAI/bge-reranker-v2-m3', '--port', '80']
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - '127.0.0.1:${BASELITH_TEI_RERANK_PORT:-8082}:80'
+    volumes:
+      - tei_cache:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/80" 2>/dev/null']
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+    restart: unless-stopped
+
 volumes:
   postgres_core_data:
   redis_core_data:
   qdrant_core_data:
+  tei_cache:

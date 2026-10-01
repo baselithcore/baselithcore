@@ -323,6 +323,7 @@ services:
       - "80:80"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/errors:/usr/share/nginx/errors:ro
     networks:
       app_net:
         # Fixed so the api trusts exactly this peer (FORWARDED_ALLOW_IPS).
@@ -1023,6 +1024,19 @@ timeout instead of turning into a 504 at 60s, `/metrics` **and** `/v1/metrics`
 restricted to private networks, and the trusted-LB `realip` block described
 in [The production stack](#the-production-stack). It is checked with
 `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
+
+When the backend is down, restarting or overloaded, the gateway answers
+502/503/504 from `deploy/nginx/errors/` (mounted at `/usr/share/nginx/errors`)
+instead of nginx's bare default page. A `map` on `Accept` picks the body: a
+browser gets `50x.html`, one self-contained file (no external assets, since
+nothing behind the proxy is reachable) that names the failing hop, shows the
+real status through `ssi`, re-checks the same URL with backoff and reloads
+itself once the service answers; API clients get a `50x.problem` (`application/problem+json`) body, so
+an SDK never parses HTML out of a 502. The `/__errors/` location is
+`internal`, so neither page is reachable directly. An external edge proxy in
+front of the stack (a load balancer, Nginx Proxy Manager, openresty) serves its
+own default page unless it is given the same `error_page 502 503 504`
+directive and a copy of these files.
 
 It also sheds floods at the edge, keyed on `$binary_remote_addr` (the client
 address after `realip`, so a caller cannot choose its bucket), before a

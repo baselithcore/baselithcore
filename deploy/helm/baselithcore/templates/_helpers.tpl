@@ -59,6 +59,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+Hook-scoped copy of that ConfigMap, for the plugin-schema Job: Helm applies the
+ordinary one only after the pre-install/pre-upgrade hooks have run.
+*/}}
+{{- define "baselithcore.pluginsHookConfigName" -}}
+{{- printf "%s-plugins-hook" (include "baselithcore.fullname" .) -}}
+{{- end -}}
+
+{{/*
 Volume + mount for the declarative plugin set. Rendered into both pod specs
 only when `plugins.config` is non-empty, so a chart without it renders
 byte-identically to before the key existed. `subPath` mounts a single file
@@ -227,6 +235,33 @@ TRUSTED_HOSTS: {{ include "baselithcore.trustedHosts" . | quote }}
 ALLOW_ORIGINS: {{ include "baselithcore.allowOrigins" . | quote }}
 {{- end }}
 {{- include "baselithcore.telemetryConfigData" . }}
+{{- include "baselithcore.inferenceConfigData" . }}
+{{- end -}}
+
+{{/*
+In-cluster URL of a chart-deployed TEI server. `kind` is "embed" or "rerank".
+*/}}
+{{- define "baselithcore.teiName" -}}
+{{- printf "%s-tei-%s" (include "baselithcore.fullname" .root) .kind | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Inference endpoints for the ConfigMap (api and worker consume it via envFrom).
+A key already in `.Values.config` wins, so an operator can point at their own
+servers by hand without turning the chart's TEI off first.
+*/}}
+{{- define "baselithcore.inferenceConfigData" -}}
+{{- if and .Values.inference.qdrant.url (not (hasKey .Values.config "BASELITH_QDRANT_URL")) }}
+BASELITH_QDRANT_URL: {{ .Values.inference.qdrant.url | quote }}
+{{- end }}
+{{- if .Values.inference.tei.enabled }}
+{{- if not (hasKey .Values.config "BASELITH_EMBEDDING_URL") }}
+BASELITH_EMBEDDING_URL: {{ printf "http://%s:80" (include "baselithcore.teiName" (dict "root" . "kind" "embed")) | quote }}
+{{- end }}
+{{- if not (hasKey .Values.config "BASELITH_RERANK_URL") }}
+BASELITH_RERANK_URL: {{ printf "http://%s:80" (include "baselithcore.teiName" (dict "root" . "kind" "rerank")) | quote }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*

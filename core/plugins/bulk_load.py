@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from core.plugins.init_scope import plugin_init_scope
 from core.utils.logsafe import sanitize_log_value
 
 from .integrity import enforce_signing_policy
@@ -171,7 +172,8 @@ async def load_all_plugins(
                 continue
 
             if activate_on_load:
-                await plugin.initialize(config)
+                with plugin_init_scope():
+                    await plugin.initialize(config)
                 loader.registry.register(plugin)
                 logger.info(f"Initialized and registered plugin: {safe_name}")
             else:

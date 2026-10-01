@@ -43,6 +43,9 @@ class ResourceType(str, Enum):
     MEMORY = "memory"
     EVALUATION = "evaluation"
     EVOLUTION = "evolution"
+    EMBEDDING = "embedding"
+    RERANK = "rerank"
+    QDRANT = "qdrant"
 
 
 class LazyServiceRegistry:

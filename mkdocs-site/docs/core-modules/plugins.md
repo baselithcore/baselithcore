@@ -106,6 +106,21 @@ class MyPlugin(Plugin):
 See [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared)
 for the full model.
 
+### Runtime data directory
+
+Plugin code is replaced as a unit when the plugin is updated, so a plugin never
+writes state into its own directory. `core.plugins.data_dir("<name>")` returns
+`$BASELITH_PLUGIN_DATA_DIR/<name>` (default `data/plugins/<name>` under the
+working directory) and creates it on first use; pass `create=False` to only
+compute the path. The name must be a single segment of letters, digits, `_` or
+`-`. A plugin that still keeps state in its tree declares those paths in the
+manifest's `runtime_state_paths` (never a code or asset tree such as `ui`, `static`
+or `skills`). In production set `BASELITH_PLUGIN_DATA_DIR` explicitly to a path
+outside the code and release directories: the default is relative to the working
+directory. The update engine never carries over a file the new release ships
+and re-verifies integrity after carry-over. A plugin-root `.env` is always
+carried over; `node_modules` is ignored.
+
 ### Schema is deploy work, not boot work
 
 A plugin that owns tables creates them in `init_schema()`, not in
@@ -287,6 +302,11 @@ plugins should reuse instead of reimplementing:
   `Exception`.
 - **`core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
   tool/skill return envelope.
+- **`core.connectors`** — the contract for integrations with external systems:
+  SSRF-guarded, retrying, circuit-broken HTTP, one error hierarchy, per-tenant
+  credential resolution, audited agent/MCP tools and DORA vendor declaration.
+  Contribute connectors through `get_connectors()`; see
+  [Connectors](connectors.md).
 
 ```python
 from core.registries import BaseRegistry
@@ -327,6 +347,9 @@ rows = registry.list_plugins()  # list[dict]
 The registry also aggregates contributions across all plugins via
 `get_all_agents()`, `get_all_routers()`, `get_all_intent_patterns()`,
 `get_all_entity_types()`, `get_all_flow_handlers()`, and `get_all_static_paths()`.
+Connectors returned by `get_connectors()` go to the connector registry
+(`core.connectors.get_connector_registry()`) with the plugin as owner, and are
+withdrawn when the plugin unloads.
 
 ### Thread Safety
 
@@ -386,14 +409,41 @@ The directory scan is authoritative: on a name clash the local tree wins, the
 installed package is ignored and a warning names both paths. Broken distribution
 metadata, an entry point that no longer imports, and a package without a manifest
 are each logged and skipped — discovery can never stop the process from starting.
-`BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the second
-source off entirely.
+
+A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory). `core.plugins._overlay_guard.overlay_refusal_code` returns the refusal as a structured `OverlayRefusal` (`version_invalid`, `incompatible_core`, `not_newer`, `bundled_unreadable`); `overlay_refusal` keeps the historical string form, in which an unreadable bundled version still reads `not_newer: ...`.
+
+`BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the
+entry-point source (the second one above) off entirely.
 
 `core/api/lifespan.py` hands the merged list to `ResourceAnalyzer.discover_plugins(
 extra_dirs=...)`, so entry-point plugins contribute routes, UI tabs and flow
 handlers exactly like directory ones — the two paths cannot disagree about which
 plugins exist. See
 [Packaging › Shipping a plugin as a distribution](../plugins/packaging.md#distribution-entry-points).
+
+### Overlay directory (verified updates)
+
+When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
+`core/plugins/overlay.py` registers each accepted entry `<overlay>/<name>` as
+the package `plugins.<name>` before any plugin module is imported
+(`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
+carry a signature that verifies against the trust store regardless of
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and must pass the newer-than-bundled and
+core-bounds rule above. The entry itself may be a symlink into
+`<overlay>/.store/` (a link pointing elsewhere is refused), but a tree with a
+symlink anywhere below it is refused (`core/plugins/_links.py`), since the hash
+walk does not follow links. A rejected entry is logged and the bundled plugin
+loads instead.
+
+`discovery.apply_overlay()` then swaps a registered overlay entry in for its
+bundled namesake, keeping scan order, and appends overlay-only plugins. The
+loader's `discover_plugins()` / `resolve_plugin_dir()`, `ResourceAnalyzer` and
+`apply_plugin_app_middleware()` all route through it, so capabilities, routes and
+middleware come from the code that actually runs. At startup
+`bundled_shadow_modules()` logs `plugin_overlay_shadowed` if a bundled module of
+an overlaid plugin was imported before registration. Activation is a process
+restart, never a hot reload. See
+[Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory).
 
 ### Which class gets instantiated
 
@@ -445,6 +495,11 @@ are declarative metadata: the runtime carries them, the CLI acts on them —
 build output exists, resolving `path` against the plugin directory and
 `output_dir` against `path` exactly as the installer does. See
 [Packaging › Docker installation contract](../plugins/packaging.md#docker-installation-contract).
+
+The boolean `host_build_required` (default `false`) marks a release that is not
+self-contained — a host-side build such as a Node sidecar's `dist` and
+`node_modules` must run first — so the update flow never offers it as a
+one-click install.
 
 `display_name` is an optional, presentation-only name (e.g. `CV Intake`).
 `name` keys the plugin's routes, `configs/plugins.yaml` entry, env prefix,
@@ -572,6 +627,11 @@ manifest — it asks "does this file contribute its raw bytes?" — so pair it w
 under (`read_declared_surface()`). It is **advisory**: it sits outside the digest by
 construction, and verification always tries the current surface first and falls back
 through the superseded ones, so tampering with the number buys nothing.
+
+`core.plugins.signing.sign_message` / `verify_message` are the underlying Ed25519
+primitives; `sign_plugin_hash` / `verify_plugin_signature` sign the lowercase
+integrity hash through them, and signed plugin releases use them for their
+per-file manifest.
 
 !!! warning "Re-sign after building a plugin UI — or editing the manifest"
     `ui/dist/**` entered the surface in 0.27 and the manifest in V5, so both
@@ -740,6 +800,13 @@ class MyPlugin(Plugin):
         await self.db.close()
 ```
 
+With row-level security on (`DB_RLS_ENABLED=true`), `initialize()` runs
+inside [`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope)
+(`core/plugins/init_scope.py`): activation is boot work, not a tenant's
+request, so a database call made from it would otherwise be refused with
+`TenantContextError`. A background task started from `initialize()` inherits
+that identity. With RLS off no tenant is bound, as before.
+
 ---
 
 ## Hot Reload
@@ -835,7 +902,6 @@ the optional async hook:
 
 ```python
 from core.plugins import Plugin, PluginHealth
-
 
 class WeatherPlugin(Plugin):
     async def health(self) -> PluginHealth:
@@ -1070,7 +1136,8 @@ The denylist (`is_protected_env_key`) covers:
   `TRUSTED_HOSTS`, `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, plus
   the HTTP-surface controls `SECURITY_HEADERS_ENABLED`,
   `CONTENT_SECURITY_POLICY`, `X_FRAME_OPTIONS`, `MAX_REQUEST_SIZE_BYTES`,
-  `METRICS_AUTH_REQUIRED`, `FORWARDED_ALLOW_IPS`, `PROXY_HEADERS`.
+  `METRICS_AUTH_REQUIRED`, `METRICS_USERNAME`, `METRICS_PASSWORD`,
+  `FORWARDED_ALLOW_IPS`, `PROXY_HEADERS`.
 - **Egress / TLS knobs** honoured process-wide by httpx/requests/urllib —
   `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`, `SSL_CERT_FILE`/
   `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`.
@@ -1169,6 +1236,10 @@ AUDIT | PLUGIN | <action> plugin=<name> success=<bool> from=<ip>
 | `GET`    | `/api/plugins/metrics/{name}`       | Plugin metrics                   |
 | `DELETE` | `/api/plugins/metrics/{name}`       | Reset plugin metrics             |
 | `DELETE` | `/api/plugins/metrics/system/reset` | Reset all metrics                |
+
+Update detection lives on a separate admin router, `GET /api/plugins/updates`
+and `POST /api/plugins/updates/check` — see
+[Plugin Updates › API](plugin-updates.md#api).
 
 !!! warning "Management Plane"
     The reload endpoint accepts an optional `config` payload that is passed directly to the plugin's `initialize` method. Only trusted administrators should have access to this API.
@@ -1293,3 +1364,12 @@ print(skill.body)
 
 Inject the catalog into the system prompt as an XML index (name +
 description per skill) and expose `activate_skill(path)` as a tool.
+
+## Declaring inference resources
+
+A plugin that needs embeddings, reranking or vector search lists `embedding`,
+`rerank` and/or `qdrant` in its manifest's `required_resources` or
+`optional_resources` and calls the core services; it must not construct
+`SentenceTransformer`, `CrossEncoder`, `QdrantClient` or similar itself
+(`scripts/check_no_inprocess_ml.py` enforces this). See
+[Inference Services](../advanced/inference-services.md).

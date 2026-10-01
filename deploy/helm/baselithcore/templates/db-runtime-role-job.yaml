@@ -74,8 +74,38 @@ spec:
               # every process on the node via /proc/<pid>/cmdline.
               psql -v ON_ERROR_STOP=1 -q <<'SQL'
               \set role_name `printenv RUNTIME_ROLE`
-              \set role_pw `printenv RUNTIME_PASSWORD`
               \set db_name `printenv PGDATABASE`
+              {{- if not $role.createRole }}
+
+              -- createRole=false: the role was created outside the chart by
+              -- something holding CREATEROLE (the customer provisioner, with
+              -- the Postgres admin credential). The owner running this Job has
+              -- no such right — which is the point of it being a plain owner —
+              -- so it only checks the role is fit to be isolated and grants.
+              -- A named dollar-quote tag, never the bare double-dollar one:
+              -- Kubernetes rewrites a doubled dollar in a container command to
+              -- a single one before the shell sees it, and psql then fails.
+              SELECT set_config('baselith.runtime_role', :'role_name', false) \gset
+              DO $check$
+              DECLARE
+                target text := current_setting('baselith.runtime_role');
+                found_role pg_roles%ROWTYPE;
+              BEGIN
+                SELECT * INTO found_role FROM pg_roles WHERE rolname = target;
+                IF NOT FOUND THEN
+                  RAISE EXCEPTION 'runtime role % does not exist: with createRole=false it is provisioned before the release', target;
+                END IF;
+                IF found_role.rolsuper OR found_role.rolbypassrls THEN
+                  RAISE EXCEPTION 'runtime role % is SUPERUSER or BYPASSRLS: row-level security would not apply to it', target;
+                END IF;
+                IF EXISTS (SELECT 1 FROM pg_database
+                            WHERE datname = current_database()
+                              AND pg_get_userbyid(datdba) = target) THEN
+                  RAISE EXCEPTION 'runtime role % owns this database: it must not own what it is isolated from', target;
+                END IF;
+              END $check$;
+              {{- else }}
+              \set role_pw `printenv RUNTIME_PASSWORD`
 
               SELECT NOT EXISTS (
                 SELECT 1 FROM pg_roles WHERE rolname = :'role_name'
@@ -90,6 +120,7 @@ spec:
               ALTER ROLE :"role_name" LOGIN PASSWORD :'role_pw'
                 NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
               \endif
+              {{- end }}
 
               GRANT CONNECT ON DATABASE :"db_name" TO :"role_name";
               GRANT USAGE ON SCHEMA public TO :"role_name";
@@ -141,6 +172,7 @@ spec:
                 secretKeyRef:
                   name: {{ $role.adminSecret.name | quote }}
                   key: {{ $role.adminSecret.passwordKey | quote }}
+            {{- if $role.createRole }}
             # The password the app will authenticate with. Same secret the app
             # reads DB_PASSWORD from by default, so the two cannot drift.
             - name: RUNTIME_PASSWORD
@@ -148,6 +180,7 @@ spec:
                 secretKeyRef:
                   name: {{ $role.passwordSecret.name | default (include "baselithcore.secretName" .) | quote }}
                   key: {{ $role.passwordSecret.key | quote }}
+            {{- end }}
           resources:
             {{- toYaml $role.resources | nindent 12 }}
           {{- if .Values.tmpVolumes.enabled }}

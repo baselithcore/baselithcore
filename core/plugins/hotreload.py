@@ -7,6 +7,7 @@ import inspect
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.plugins.init_scope import plugin_init_scope
 
 from ._hotreload_deps import (
     build_dependency_graph,
@@ -180,7 +181,8 @@ class HotReloadController:
                 return False
 
             await self.lifecycle.transition_to_initializing(lifecycle_name)
-            await plugin.initialize(config or {})
+            with plugin_init_scope():
+                await plugin.initialize(config or {})
             if self.registry.get(plugin_name) is None:
                 self.registry.register(plugin)
             self.registry.unsuppress_discovered_plugin(plugin_name)
