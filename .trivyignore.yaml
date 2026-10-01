@@ -206,8 +206,8 @@ vulnerabilities:
       for that pip. Nothing in core/, plugins/, sdk/ or scripts/ imports pip's
       vendored copy. Same shape and same expiry as GHSA-6v7p-g79w-8964: no
       `paths`, because SBOM-derived components carry no PkgPath. Re-evaluate
-      at expiry: if a pip release vendors urllib3 >=2.8.0, drop both urllib3
-      entries and raise the Dockerfile's pip floor.
+      at expiry: if a pip release vendors urllib3 >=2.8.0, drop all three
+      urllib3 entries and raise the Dockerfile's pip floor.
     expired_at: 2026-10-29
   - id: CVE-2026-97689
     statement: >-
@@ -219,6 +219,17 @@ vulnerabilities:
       plugin dependency install. A hostile index could exhaust memory of that
       one short-lived pip process, not of the API server. Re-argued with
       CVE-2026-97687 at the shared expiry.
+    expired_at: 2026-10-29
+  - id: CVE-2026-97688
+    statement: >-
+      Denial of service through an infinite loop while decoding a chunked
+      Deflate response, in the copy vendored by pip 26.2.1 (2.7.0; fixed in
+      2.8.0). Same block and same scoping as CVE-2026-97687 above: no released
+      pip carries the fix (pip's main branch still vendors urllib3==2.7.0), the
+      application's own urllib3 is locked at 2.8.0, and the vendored copy only
+      decodes responses to pip's own downloads during a plugin dependency
+      install. A hostile index could hang that one short-lived pip process,
+      not the API server. Re-argued with CVE-2026-97687 at the shared expiry.
     expired_at: 2026-10-29
   - id: CVE-2025-47273
     statement: >-
