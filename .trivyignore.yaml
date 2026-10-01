@@ -193,6 +193,33 @@ vulnerabilities:
       even persistent. Re-evaluate at expiry: if a pip release has shipped
       msgpack 1.2.1, drop this entry and raise the Dockerfile's pip floor.
     expired_at: 2026-10-29
+  - id: CVE-2026-97687
+    statement: >-
+      urllib3 2.7.0, vendored in pip/_vendor/urllib3: an HTTPS proxy TLS
+      configuration override that can let traffic be intercepted, fixed in
+      2.8.0. Unreachable fix: pip 26.2.1 is the newest release and still
+      vendors 2.7.0, so there is no pip to raise the Dockerfile floor to. The
+      application's own urllib3 is a separate copy, locked at 2.8.0 and
+      reported clean. Blast radius: the vendored copy is used only by pip's
+      own downloads, i.e. `baselith plugin deps install`, and the proxy
+      override matters only where an operator has configured an HTTPS proxy
+      for that pip. Nothing in core/, plugins/, sdk/ or scripts/ imports pip's
+      vendored copy. Same shape and same expiry as GHSA-6v7p-g79w-8964: no
+      `paths`, because SBOM-derived components carry no PkgPath. Re-evaluate
+      at expiry: if a pip release vendors urllib3 >=2.8.0, drop both urllib3
+      entries and raise the Dockerfile's pip floor.
+    expired_at: 2026-10-29
+  - id: CVE-2026-97689
+    statement: >-
+      Denial of service through unbounded memory allocation in urllib3's chunk
+      parser, in the copy vendored by pip 26.2.1 (2.7.0; fixed in 2.8.0). Same
+      block and same scoping as CVE-2026-97687 above: no released pip carries
+      the fix, the application's own urllib3 is locked at 2.8.0, and the
+      vendored copy only parses responses to pip's own downloads during a
+      plugin dependency install. A hostile index could exhaust memory of that
+      one short-lived pip process, not of the API server. Re-argued with
+      CVE-2026-97687 at the shared expiry.
+    expired_at: 2026-10-29
   - id: CVE-2025-47273
     statement: >-
       Path traversal in setuptools' PackageIndex, reported against 70.3.0 and

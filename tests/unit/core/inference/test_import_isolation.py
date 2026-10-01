@@ -35,8 +35,16 @@ def _heavy_modules(script: str) -> str:
 
 
 def test_detector_sees_torch_when_it_is_imported() -> None:
-    """Negative control: the probe must fail loudly if torch does get loaded."""
-    probe = SCRIPT.replace("import core.services.inference as inf", "import torch")
+    """Negative control: the probe must fail loudly if torch does get loaded.
+
+    A stub module stands in for torch, so the control runs where the heavy
+    extras are not installed (CI's base set) and what it proves is the
+    detector, not the wheel.
+    """
+    probe = SCRIPT.replace(
+        "import core.services.inference as inf",
+        "import types\nsys.modules['torch'] = types.ModuleType('torch')",
+    )
     assert _heavy_modules(probe).startswith("HEAVY:torch")
 
 
