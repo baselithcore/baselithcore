@@ -288,6 +288,36 @@ Declared in `core.config.incidents`.
 | `INCIDENT_NOTIFICATION_HOURS` | `int` | `72` |  |
 | `INCIDENT_REPORTING_ENABLED` | `bool` | `False` |  |
 
+## The shared inference services (embedding, rerank, Qdrant)
+
+Declared in `core.config.inference`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `BASELITH_EMBEDDING_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
+| `BASELITH_EMBEDDING_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
+| `BASELITH_EMBEDDING_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
+| `BASELITH_EMBEDDING_BATCH_SIZE` | `int` | `32` | Texts per HTTP request. |
+| `BASELITH_EMBEDDING_DIM` | `int` | `1024` | Vector dimension. |
+| `BASELITH_EMBEDDING_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model id. |
+| `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
+| `BASELITH_QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
+| `BASELITH_QDRANT_GRPC_PORT` | `int` | `6334` |  |
+| `BASELITH_QDRANT_PREFER_GRPC` | `bool` | `False` | Use gRPC for data calls; multivector (ColBERT) payloads serialize far faster than over REST. |
+| `BASELITH_QDRANT_TIMEOUT` | `float` | `60.0` |  |
+| `BASELITH_QDRANT_URL` | `str \| None` | *empty* | Qdrant server URL (e.g. `http://qdrant:6333`). |
+| `BASELITH_RERANK_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
+| `BASELITH_RERANK_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
+| `BASELITH_RERANK_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
+| `BASELITH_RERANK_BATCH_SIZE` | `int` | `32` | Texts per HTTP request (TEI limit). |
+| `BASELITH_RERANK_MAX_CANDIDATES` | `int` | `100` | Hard cap on texts per rerank call. |
+| `BASELITH_RERANK_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_RERANK_MODEL` | `str` | `BAAI/bge-reranker-v2-m3` | Reranker id. |
+| `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
+
 ## MCP Configuration
 
 Declared in `core.config.mcp`.
@@ -417,6 +447,45 @@ Declared in `core.config.orchestration`.
 | `ROUTER_MAX_CANDIDATES` | `int` | `5` | Maximum number of agents to return |
 | `ROUTER_RETRIEVAL_LIMIT` | `int` | `50` | Number of entities to retrieve from vector store (N >> K) |
 | `ROUTER_SCORE_THRESHOLD` | `float` | `0.7` | Minimum similarity score for tool retrieval |
+
+## One-click plugin update (host installs): the updater's and the console's settings
+
+Declared in `core.config.plugin_update_apply`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `int` | `24 * 3600` | Expiry of approval requests created without their own window |
+| `UPDATE_APPLY_ENABLED` | `bool` | `False` | Kill switch: one-click plugin updates on this host |
+| `UPDATE_APPLY_HEALTH_TIMEOUT_SECONDS` | `int` | `180` | Deadline for the post-restart health check |
+| `UPDATE_APPLY_HEALTH_URL` | `str` | `http://127.0.0.1:8000/health/ready` | Readiness URL probed after a restart |
+| `UPDATE_APPLY_HEARTBEAT_SECONDS` | `int` | `5` | Updater heartbeat period |
+| `UPDATE_APPLY_KEEP_VERSIONS` | `int` | `2` | Store entries kept per plugin |
+| `UPDATE_APPLY_POLL_SECONDS` | `float` | `2.0` | Updater poll period for approved runs |
+| `UPDATE_APPLY_RESTART_COMMAND` | `Annotated[list[str], NoDecode]` | *computed* | argv (JSON list or comma-separated) that restarts the API service; no shell |
+| `UPDATE_APPLY_RESTART_TIMEOUT_SECONDS` | `int` | `60` | Timeout of the restart command |
+| `UPDATE_APPLY_SCHEMA_ENV_FILE` | `Path \| None` | *empty* | dotenv with the schema owner's DB credentials, for schema-init only |
+| `UPDATE_APPLY_SCHEMA_INIT` | `bool` | `True` | Run `baselith plugin schema-init --plugin &lt;name>` before the restart |
+| `UPDATE_APPLY_STABLE_SECONDS` | `int` | `20` | Readiness must hold this long without a failure |
+| `UPDATE_APPLY_STATE_DIR` | `Path` | `Path('data/plugin_updates/apply')` | Run store shared by the API and the updater |
+
+## Plugin updates (release polling, trust mode and overlay)
+
+Declared in `core.config.plugin_updates`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
+| `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
+| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
+| `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
+| `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
+| `PLUGIN_UPDATE_INSTANCE_ID` | `str` | *empty* | Identity of this deployment for update announcements; deployments sharing one Redis or cache directory use distinct values so they do not suppress each other's notices (falls back to the APP_BASE_URL host; with neither set the Redis key is shared and a warning is logged) |
+| `PLUGIN_UPDATE_MAX_ARTIFACT_MB` | `int` | `200` | Largest release artifact downloaded, in MB; a larger one is refused before its signature is checked (it unpacks to at most 4x this) |
+| `PLUGIN_UPDATE_SOURCES_FILE` | `Path \| None` | *empty* | YAML file mapping plugin names to their GitHub mirror repos (the mirror registry); update checks are off while unset |
+| `PLUGIN_UPDATE_TRUST` | `Literal['provenance', 'signed']` | `provenance` | What makes a plugin release trusted enough to be offered: provenance (a GitHub release created by the plugin repository's own release workflow, whose manifest at the tagged commit agrees with it; notice only, nothing is downloaded) or signed (an Ed25519-signed release whose tarball is downloaded and verified against the trusted publisher keys); any other value is treated as signed |
+| `SYSTEM_INSTALL_METHOD`<br>also accepts `PLUGIN_UPDATE_INSTALL_METHOD` | `str \| None` | *empty* | How this deployment was installed, which decides the upgrade instructions shown with the system update notice: helm, docker, pip, source or custom (env SYSTEM_INSTALL_METHOD); unset detects it (Kubernetes: helm, a container: docker, a source checkout: source, otherwise pip, or custom when an instructions file is set); any other value is ignored |
+| `SYSTEM_UPGRADE_GUIDE_URL`<br>also accepts `PLUGIN_UPDATE_UPGRADE_GUIDE_URL` | `str \| None` | *empty* | https link to this deployment's upgrade instructions, shown with the system update notice (env SYSTEM_UPGRADE_GUIDE_URL); anything but an absolute https URL is ignored |
+| `SYSTEM_UPGRADE_INSTRUCTIONS_FILE`<br>also accepts `PLUGIN_UPDATE_UPGRADE_INSTRUCTIONS_FILE` | `Path \| None` | *empty* | Markdown file with this deployment's own upgrade procedure (installation method custom; env SYSTEM_UPGRADE_INSTRUCTIONS_FILE); {version} and {current} are replaced with the target and installed core releases, and the console shows it without raw HTML; empty means unset |
 
 ## Plugin-specific configuration settings
 
@@ -641,6 +710,8 @@ Declared in `core.config.security`.
 | `JWT_STRICT_VALIDATION` | `bool` | `False` | When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments). |
 | `MAX_REQUEST_SIZE_BYTES` | `int` | `10 * 1024 * 1024` | Maximum request body size in bytes. 0 disables the check. |
 | `METRICS_AUTH_REQUIRED` | `bool` | `True` | Require admin basic auth on GET /metrics. Disable only when the endpoint is reachable solely from the scrape network (e.g. restricted by NetworkPolicy) or the scraper sends credentials. |
+| `METRICS_PASSWORD` :material-key: | `SecretStr \| None` | *empty* | Password of the scrape-only /metrics credential. Unset leaves admin basic auth as the only way in; it grants no other route. |
+| `METRICS_USERNAME` | `str` | `metrics` | Username of the scrape-only /metrics credential. |
 | `MFA_ENABLED` | `bool` | `False` | Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can enroll users via AuthManager.mfa and require a TOTP step-up at login. Disabled by default — purely additive, no effect on existing auth paths. |
 | `MFA_ISSUER` | `str` | `BaselithCore` | Issuer label shown in the user's authenticator app (Google Authenticator, Authy, …) — typically the product or tenant name. |
 | `OIDC_ALGORITHMS` | `Annotated[list[str], NoDecode]` | *computed* | `NoDecode` on every collection field below: pydantic-settings JSON-decodes complex types inside EnvSettingsSource *before* any validator runs, so the coercers these fields already declare never saw the raw string and a plain `RS256,ES256` raised SettingsError out of the whole SecurityConfig — i.e. no API at all. |
@@ -905,4 +976,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-578 settings documented.
+628 settings documented.

@@ -6,9 +6,11 @@ Contains all component registration methods for the PluginRegistry.
 from __future__ import annotations
 
 import inspect
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.exceptions import DuplicateRegistrationError
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -176,6 +178,26 @@ class RegistrationMixin:
         self._register_flow_handlers(plugin)
         self._register_static_assets(plugin)
         self._register_ui_tabs(plugin)
+        self._register_connectors(plugin)
+
+    def _register_connectors(self, plugin: Plugin) -> None:
+        """Register connectors from plugin; a bad one never blocks the plugin."""
+        name = plugin.metadata.name
+        try:
+            connectors = list(plugin.get_connectors() or [])
+        except Exception as exc:
+            logger.error(f"get_connectors() failed for {name}: {exc}")
+            return
+        if not connectors:
+            return
+        from core.connectors.registry import get_connector_registry
+
+        registry = get_connector_registry()
+        for item in connectors:
+            try:
+                registry.register_connector(item, owner=name)
+            except (TypeError, DuplicateRegistrationError) as exc:
+                logger.warning(f"Skipped connector {item!r} from {name}: {exc}")
 
     def _cleanup_plugin_components(self, plugin_name: str) -> None:
         """Clean up all components registered by a plugin."""
@@ -220,6 +242,12 @@ class RegistrationMixin:
             if owner == plugin_name:
                 self._flow_handler_owners.pop(intent_name, None)
                 self._flow_handlers.pop(intent_name, None)
+
+        # Withdraw the plugin's connectors. The registry module is only loaded
+        # if some plugin ever contributed one.
+        connectors = sys.modules.get("core.connectors.registry")
+        if connectors is not None:
+            connectors.get_connector_registry().remove_owned_by(plugin_name)
 
         # Note: Routers cannot be easily removed from FastAPI after registration
         # This would require application restart for full cleanup

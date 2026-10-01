@@ -105,6 +105,8 @@ _PROTECTED_ENV_KEYS = frozenset(
         "X_FRAME_OPTIONS",
         "MAX_REQUEST_SIZE_BYTES",
         "METRICS_AUTH_REQUIRED",
+        "METRICS_USERNAME",
+        "METRICS_PASSWORD",
         "FORWARDED_ALLOW_IPS",
         "PROXY_HEADERS",
         # Egress redirection honored by httpx/requests/urllib.

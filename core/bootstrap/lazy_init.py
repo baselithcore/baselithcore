@@ -257,6 +257,30 @@ async def initialize_hierarchical_memory() -> Any:
     return memory
 
 
+async def initialize_embedding() -> Any:
+    """Lazy initialize the shared :class:`EmbeddingService` (remote TEI by default)."""
+    from core.services.inference import EmbeddingService
+
+    logger.info("🔤 Lazy initializing Embedding Service...")
+    return EmbeddingService.from_config()
+
+
+async def initialize_rerank() -> Any:
+    """Lazy initialize the shared :class:`RerankService` (remote TEI by default)."""
+    from core.services.inference import RerankService
+
+    logger.info("📊 Lazy initializing Rerank Service...")
+    return RerankService.from_config()
+
+
+async def initialize_qdrant() -> Any:
+    """Lazy initialize the shared Qdrant runtime (server mode only)."""
+    from core.services.inference import QdrantRuntime
+
+    logger.info("🧭 Lazy initializing Qdrant runtime...")
+    return QdrantRuntime.open()
+
+
 # Global mapping of resource names to their corresponding factory functions.
 # This registry is used by `LazyRegistry` to instantiate services on-demand.
 RESOURCE_FACTORIES = {
@@ -269,4 +293,7 @@ RESOURCE_FACTORIES = {
     "hierarchical_memory": initialize_hierarchical_memory,
     "evaluation": initialize_evaluation,
     "evolution": initialize_evolution,
+    "embedding": initialize_embedding,
+    "rerank": initialize_rerank,
+    "qdrant": initialize_qdrant,
 }

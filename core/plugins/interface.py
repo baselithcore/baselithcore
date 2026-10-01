@@ -367,6 +367,20 @@ class Plugin(ABC):
         """
         return []
 
+    def get_connectors(self) -> list[Any]:
+        """
+        Contribute connectors to external systems (see ``core.connectors``).
+
+        Each item is a ``BaseConnector`` subclass (any callable carrying a
+        ``spec: ConnectorSpec``) or a ``ConnectorEntry``. They are registered
+        in the connector registry with this plugin as owner and withdrawn
+        when the plugin unloads.
+
+        Returns:
+            List: Connector classes or entries.
+        """
+        return []
+
     @classmethod
     def setup_app_middleware(cls, app: Any) -> None:
         """

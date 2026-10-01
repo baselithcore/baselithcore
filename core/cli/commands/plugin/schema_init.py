@@ -103,6 +103,16 @@ async def _load_enabled(
     from core.plugins.loader import PluginLoader
     from core.plugins.registry import PluginRegistry
 
+    # Discovery lists only overlay entries already registered, and nothing on
+    # this path imports the ``plugins`` package that registers them at boot:
+    # without this a verified overlay release would lose to the bundled copy.
+    try:
+        from core.plugins import overlay
+
+        overlay.register_overlay_packages()
+    except Exception as exc:  # the bundled plugins still get their schema
+        print_warning(f"plugin overlay registration failed: {type(exc).__name__}")
+
     loader = PluginLoader(Path("plugins"), PluginRegistry())
     configs = read_plugin_configs()
     found: list[tuple[str, Any, dict[str, Any]]] = []

@@ -111,6 +111,10 @@ def report_external_usage(
     rejection must neither corrupt a response that is already paid for nor
     swallow the second half of the pair.
 
+    The same call also reaches the usage sinks
+    (:func:`core.services.llm.register_usage_sink`) as one metered turn, since
+    the engine measured both sides itself.
+
     Args:
         model: The real model id the completion came from.
         prompt_tokens: Measured prompt/input tokens (skipped when <= 0).
@@ -130,6 +134,18 @@ def report_external_usage(
                 model=label,
                 error=str(exc),
             )
+    from core.services.llm.usage import Usage
+    from core.services.llm.usage_sinks import UsageReport, emit_usage_report
+
+    emit_usage_report(
+        UsageReport(
+            model=model,
+            usage=Usage(
+                input_tokens=max(int(prompt_tokens), 0),
+                output_tokens=max(int(completion_tokens), 0),
+            ),
+        )
+    )
 
 
 def record_genai_metrics(

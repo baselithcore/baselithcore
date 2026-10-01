@@ -204,7 +204,7 @@ async def _meter_batch_job(
 
     # One ledger write per job, not per entry: a ten-thousand-entry batch must
     # not become ten thousand quota-store round trips. Never raises.
-    await record_usage_cost(model, total, batch=True)
+    await record_usage_cost(model, total, batch=True, requests=len(metered))
 
 
 async def _sequential_fallback(

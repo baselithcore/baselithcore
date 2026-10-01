@@ -1,0 +1,13 @@
+# Plugins still allowed to build an ML model / Qdrant client in-process.
+#
+# Enforced by scripts/check_no_inprocess_ml.py. This list may only SHRINK: an
+# entry whose path no longer exists, or no longer holds a flagged call, fails
+# the gate. A new entry needs a reason a reviewer can disagree with:
+#
+#   - path: plugins/<name>/<dir-or-file>
+#     reason: why it still loads a model / opens a client itself
+allow:
+  - path: plugins/document_sources/docling_reader.py
+    reason: >-
+      Docling DocumentConverter. Docling as a service (docling-serve) is a
+      separate piece of work.

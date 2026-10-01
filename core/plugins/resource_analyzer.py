@@ -27,8 +27,9 @@ from .capability_scan import (
     parse_plugin_ast,
     scan_plugin_capabilities,
 )
-from .discovery import find_manifest, merge_plugin_dirs
+from .discovery import apply_overlay, find_manifest, merge_plugin_dirs
 from .interface import PluginMetadata
+from .overlay import registered_overlay_dirs
 
 logger = get_logger(__name__)
 
@@ -49,6 +50,9 @@ class ResourceAnalyzer:
         "vectorstore": ["postgres"],  # Qdrant may use postgres for metadata
         "memory": ["vectorstore", "redis"],  # Memory uses both
         "llm": [],  # No deps
+        "embedding": [],  # Remote TEI client, no deps
+        "rerank": [],  # Remote TEI client, no deps
+        "qdrant": [],  # Server-mode Qdrant client, no deps
         "evaluation": ["memory", "llm"],  # Evaluation needs memory and LLM
         "evolution": ["memory", "evaluation"],  # Evolution builds on evaluation
     }
@@ -214,6 +218,9 @@ class ResourceAnalyzer:
                 for plugin_dir in self.plugins_dir.iterdir()
                 if plugin_dir.is_dir() and not plugin_dir.name.startswith((".", "_"))
             ]
+        # Verified overlay entries replace their bundled namesake, so the
+        # capabilities and required resources are read from the code that runs.
+        candidate_dirs = apply_overlay(candidate_dirs, registered_overlay_dirs())
         if extra_dirs:
             candidate_dirs = merge_plugin_dirs(candidate_dirs, list(extra_dirs))
         if not candidate_dirs:

@@ -1,0 +1,1 @@
+{"type": "urn:baselith:error:upstream_unavailable", "title": "Upstream unavailable", "status": <!--# echo var="status" default="502" -->, "detail": "The backend is down, restarting or overloaded. Retry with backoff."}

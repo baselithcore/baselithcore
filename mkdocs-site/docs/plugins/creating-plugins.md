@@ -154,7 +154,9 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `entry_point`           | No       | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`), resolved inside the plugin's own package. Required when `plugin.py` exposes more than one concrete `Plugin` subclass — ambiguity is a hard error, not a guess. A *file* name (`__init__.py`, `plugin.py`, `src/plugin.py` — the marketplace spelling) names no class, so it is ignored and the class is resolved by inspecting the module; ambiguity there is still refused. |
 | `entrypoint`            | No       | Legacy spelling of `entry_point`, accepted for manifests written before the canonical key existed. `entry_point` wins when both are present; new plugins declare `entry_point` only. |
 | `frontend`              | For a UI | Frontend build contract read by `baselith plugin add <repository> --docker` and by `baselith doctor`: a mapping with `path` (relative to the plugin directory, default `ui`), `package_manager` (`npm`, `pnpm` or `yarn`), `build_command` and `output_dir` (relative to `path`, default `dist`), or `false` to disable frontend detection. Declare it whenever the plugin ships a UI — without it the installer falls back to guessing and `doctor` cannot tell a missing build from a plugin that has no frontend at all. See [Packaging › Docker installation contract](packaging.md#docker-installation-contract). |
+| `host_build_required`   | No | `true` when the release is not self-contained: a host-side build (a Node sidecar's `dist`, `node_modules`) must run before the plugin works. Such a release is never one-click installable. Default `false`. |
 | `health_endpoint`       | No       | Local HTTP path probed after a Docker installation. It must answer 200 with no authentication and no redirect; without it the installer probes the default `/<name>/`. |
+| `runtime_state_paths`   | No       | Paths **inside the plugin directory** that hold runtime state the update engine must carry over to a new version (relative, no `..`, no globs, never the manifest or a code/asset file or tree such as `ui`, `static`, `skills`; the engine never carries over a file the new release ships and re-verifies integrity after carry-over). Prefer keeping state in `core.plugins.data_dir("<name>")` (in production set `BASELITH_PLUGIN_DATA_DIR` explicitly, outside the code and release directories) and declaring nothing. An installed tree with files that neither shipped with the release nor sit under a declared path cannot be updated. |
 
 !!! danger "Unknown manifest keys are refused"
     The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
@@ -359,6 +361,7 @@ The `Plugin` interface provides several hooks for registering components:
 | `get_mcp_tools` | `list` | Tools for Model Context Protocol |
 | `get_flow_handlers` | `dict` | Intent name → handler object with `async handle(query, context)` (or an async callable with that signature) |
 | `get_entity_types` | `list` | Knowledge Graph node types |
+| `get_connectors` | `list` | Connectors to external systems (`BaseConnector` subclasses); see [Connectors](../core-modules/connectors.md) |
 
 !!! tip "Routing"
     The orchestrator uses these patterns to identify when a user request should be handled by your plugin's agents.
@@ -585,6 +588,12 @@ class MyPlugin(Plugin):
 Run it with `baselith plugin schema-init` (every enabled plugin) or
 `baselith plugin schema-init --plugin my-plugin`. Leave the method out entirely
 when your tables come from an Alembic migration — the default is a no-op.
+
+Under row-level security (`DB_RLS_ENABLED=true`) your `initialize()` runs as
+the `system` tenant, not as whichever user enabled the plugin, and a background
+task you start from it inherits that identity. Anything that serves a request
+must still bind the request's own tenant — see
+[`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope).
 
 Doing this at boot instead breaks any deployment that connects as a
 least-privilege role for row-level security: it cannot `CREATE`, and if it
@@ -853,6 +862,48 @@ drift. To re-sign on demand:
 python scripts/sign_changed_plugins.py plugins/my-plugin   # one tree
 python scripts/sign_changed_plugins.py --all               # every plugin
 ```
+
+### Publishing updates
+
+Deployments that list your plugin's repository in `PLUGIN_UPDATE_SOURCES_FILE`
+poll its latest GitHub release and offer a newer version under their
+`PLUGIN_UPDATE_TRUST` mode:
+
+* **`provenance`** (the default): the release was created by the repository's
+  own release workflow (not by a person) from a commit on its default branch,
+  its tag is `v<version>`, and the manifest at that commit declares the same
+  `name` and `version` and `min_core_version`/`max_core_version` bounds that
+  admit the running core. Bumping the manifest `version` and pushing is the
+  release; nothing is signed.
+* **`signed`**: the release must carry a signed `release.json` and tarball
+  whose recomputed hash matches `integrity_sha256` and whose
+  `signature_ed25519` (Ed25519) verifies against the deployment's trust store;
+  the tag, `name`, strictly-newer and core-bounds rules apply as well, and every
+  `python_dependencies` entry must already be satisfied.
+
+Whatever the mode, a one-click install on a host needs those verified signed
+assets: a provenance-only release is a notice, installed through the
+deployment's own procedure. A verified release is installed into
+`BASELITH_PLUGIN_OVERLAY_DIR`, which shadows the bundled copy on the next
+restart. See [Plugin Updates › Trust modes](../core-modules/plugin-updates.md#trust-modes).
+
+The plugin hash does not cover everything a release ships (documentation,
+locales, templates stay outside it). A signed update release therefore also
+lists the SHA-256 of every file in its tarball and signs that list, and a
+deployment installs it only when the unpacked tree matches the list exactly —
+see [Release manifest](../core-modules/plugin-updates.md#release-manifest).
+Keep the published tree free of symbolic and hard links: a release holding one
+is refused.
+
+A one-click update runs `baselith plugin schema-init --plugin <name>` before
+it restarts the API, and a rollback **never reverts it**: the previous version
+then runs against the new schema. Keep `init_schema()` changes expand-only
+(add tables, columns and indexes; drop or rename only one release later), so
+the version before stays compatible. An overlay entry that is not newer than
+the bundled copy, or whose core bounds exclude the running core, is not loaded
+(`core.plugins._overlay_guard.overlay_refusal_code` names the reason; an
+unreadable bundled version refuses too) — see
+[Executing a run](../core-modules/plugin-updates.md#executing-a-run).
 
 ### Disabling/Enabling
 

@@ -38,8 +38,10 @@ from core.observability.logging import get_logger
 
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .config_file import PluginConfigs, plugin_enabled, read_plugin_configs
+from .discovery import apply_overlay
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
+from .overlay import registered_overlay_dirs
 from .resource_analyzer import ResourceAnalyzer
 from .signing import enforce_plugin_signature
 
@@ -197,10 +199,16 @@ def apply_plugin_app_middleware(
     applied = 0
 
     plugins_root = plugins_dir.resolve()
-    for item in plugins_dir.iterdir():
-        # Reject symlinks and traversal-style paths, mirroring loader.discover_plugins.
-        if item.is_symlink() or not item.resolve().is_relative_to(plugins_root):
-            continue
+    # Bundled entries: reject symlinks and traversal-style paths, mirroring
+    # loader.discover_plugins. Overlay entries are verified at registration
+    # (and are symlinks into ``.store`` by design), so they bypass that filter
+    # and replace their bundled namesake — same routing as the loader.
+    bundled = [
+        item
+        for item in plugins_dir.iterdir()
+        if not item.is_symlink() and item.resolve().is_relative_to(plugins_root)
+    ]
+    for item in apply_overlay(bundled, registered_overlay_dirs()):
         if not item.is_dir() or item.name.startswith((".", "_")):
             continue
         plugin_file = item / "plugin.py"

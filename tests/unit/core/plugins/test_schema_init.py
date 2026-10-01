@@ -125,3 +125,50 @@ async def test_a_plugin_without_schema_is_neither_run_nor_failed(
 async def test_nothing_enabled_is_not_a_failure(monkeypatch) -> None:
     _arrange(monkeypatch, [])
     assert await _run(None, json_output=False) == 0
+
+
+async def test_overlay_entries_register_before_discovery(monkeypatch) -> None:
+    """schema-init must see a verified overlay release, not the bundled copy.
+
+    Discovery only lists overlay entries that ``register_overlay_packages``
+    recorded, and nothing on this path imports the ``plugins`` package that
+    normally does it — so without an explicit call the old bundled plugin's
+    schema would run.
+    """
+    import core.plugins.loader as loader_mod
+    import core.plugins.overlay as overlay_mod
+    from core.cli.commands.plugin import schema_init as module
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        overlay_mod, "register_overlay_packages", lambda: calls.append("register") or []
+    )
+
+    def _discover(self: Any) -> list[Any]:
+        calls.append("discover")
+        return []
+
+    monkeypatch.setattr(loader_mod.PluginLoader, "discover_plugins", _discover)
+    monkeypatch.setattr(
+        "core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
+    )
+    assert await module._load_enabled(None) == []
+    assert calls == ["register", "discover"]
+
+
+async def test_overlay_registration_failure_does_not_stop_schema_init(
+    monkeypatch,
+) -> None:
+    import core.plugins.loader as loader_mod
+    import core.plugins.overlay as overlay_mod
+    from core.cli.commands.plugin import schema_init as module
+
+    def _boom() -> list[str]:
+        raise RuntimeError("bad overlay")
+
+    monkeypatch.setattr(overlay_mod, "register_overlay_packages", _boom)
+    monkeypatch.setattr(loader_mod.PluginLoader, "discover_plugins", lambda self: [])
+    monkeypatch.setattr(
+        "core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
+    )
+    assert await module._load_enabled(None) == []

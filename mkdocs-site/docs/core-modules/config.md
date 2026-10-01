@@ -57,6 +57,8 @@ core/config/
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── processing.py         # ProcessingConfig (documents, web crawling, OCR, NLP)
 ├── plugins.py            # PluginConfig
+├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, CORE_UPDATE_REPO, SYSTEM_UPGRADE_GUIDE_URL)
+├── plugin_update_apply.py # UpdateApplyConfig (UPDATE_APPLY_ prefix, one-click plugin updates)
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 ├── drift.py              # suspected-typo detection for environment variables
@@ -74,7 +76,10 @@ declarative `MCP_SERVERS` registry under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
-under [Webhooks › Configuration](webhooks.md#configuration).
+under [Webhooks › Configuration](webhooks.md#configuration). The
+`PLUGIN_UPDATE_*`, `CORE_UPDATE_REPO` and `SYSTEM_UPGRADE_GUIDE_URL` settings
+read by `get_plugin_update_config()` are listed under
+[Plugin Updates › Configuration](plugin-updates.md#configuration).
 
 ---
 
@@ -798,7 +803,18 @@ API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr
 AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
 CROSS_ORIGIN_OPENER_POLICY=same-origin-allow-popups   # COOP header; empty omits it
 CROSS_ORIGIN_RESOURCE_POLICY=same-origin              # CORP header; same-site for split subdomains, empty omits
+METRICS_AUTH_REQUIRED=true           # Basic auth on /metrics
+METRICS_USERNAME=metrics             # Scrape-only credential for /metrics
+METRICS_PASSWORD=                    # SecretStr; unset = only the admin credential opens /metrics
 ```
+
+`METRICS_USERNAME` / `METRICS_PASSWORD` are a **scrape-only** credential: the
+`/metrics` endpoint accepts them, compared in constant time, and no other route
+consults them. Give Prometheus this pair rather than the admin credential — a
+ServiceMonitor's `basicAuth` Secret is readable by the monitoring operator in
+another namespace, and the admin pair would open `/admin` to whoever reads it.
+The admin credential still opens `/metrics`, so existing scrapers keep working;
+with `METRICS_PASSWORD` unset it is the only way in.
 
 The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
 stuffing per source IP: rejected authentication attempts (counted on
@@ -1280,3 +1296,54 @@ def test_with_env(monkeypatch):
     config = LLMConfig()
     assert config.model == "test-model"
 ```
+
+## Update announcements
+
+`PluginUpdateConfig` gains `PLUGIN_UPDATE_INSTANCE_ID`, the identity of a
+deployment for update announcements. Deployments that share one Redis or cache
+directory set distinct values so they do not suppress each other's notices; it
+falls back to the `APP_BASE_URL` host. With neither set the Redis key is
+shared, and a warning is logged once when Redis is in use. See
+[Plugin updates](plugin-updates.md).
+
+## Upgrade instructions
+
+`PluginUpdateConfig` also carries the two settings behind the upgrade
+instructions served with the system update notice: `SYSTEM_INSTALL_METHOD`
+(`helm`, `docker`, `pip`, `source` or `custom`; unset detects it, any other
+value is ignored with a warning rather than failing the boot) and
+`SYSTEM_UPGRADE_INSTRUCTIONS_FILE` (the operator's own markdown procedure for
+method `custom`, with `{version}` and `{current}` filled in; an empty value
+means unset). The framework
+never runs an upgrade: see
+[Plugin updates › Upgrade instructions](plugin-updates.md#upgrade-instructions).
+
+## Plugin update trust
+
+`PluginUpdateConfig.trust` (`PLUGIN_UPDATE_TRUST`) picks what makes a plugin
+release trusted enough to be offered: `provenance` (the default — a GitHub
+release created by the plugin repository's own release workflow, whose
+manifest at the tagged commit agrees with it; nothing is downloaded) or
+`signed` (the Ed25519-signed release, downloaded and verified against the
+trusted publisher keys). Any other value is treated as `signed`, the stricter
+mode, with a warning rather than a failed boot. See
+[Plugin updates › Trust modes](plugin-updates.md#trust-modes).
+
+## One-click plugin updates
+
+`UpdateApplyConfig` (`core.config.plugin_update_apply`, prefix
+`UPDATE_APPLY_`) holds the settings of host-side one-click plugin updates;
+its kill switch `UPDATE_APPLY_ENABLED` is off by default.
+`UPDATE_APPLY_APPROVAL_TTL_SECONDS` is the expiry of approval requests
+created without their own window: a console that asks for a second approval
+applies its own setting, and runs filed from the host's CLI are pre-approved.
+Settings that fail to load leave the update checker running with one-click
+updates off. See
+[Plugin updates › One-click update: settings and run store](plugin-updates.md#one-click-update-settings-and-run-store).
+
+## Inference services settings
+
+`core.config.inference` holds the settings of the embedding, rerank and Qdrant
+services: `BASELITH_EMBEDDING_*`, `BASELITH_RERANK_*` and `BASELITH_QDRANT_*`.
+`remote` (Hugging Face TEI) is the default backend; `local` is a development
+opt-in. See [Inference Services](../advanced/inference-services.md).

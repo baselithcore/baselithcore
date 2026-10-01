@@ -76,6 +76,9 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Wait for another process's write lock (appends are single-row, so brief).
+_BUSY_TIMEOUT_MS = 10_000
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_log (
     seq         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,6 +211,8 @@ class SQLiteAuditSink:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
+        # Every worker process appends to this file: wait for its write lock.
+        self._conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS};")
         self._conn.executescript(_SCHEMA)
         self._lock = RLock()
 
@@ -268,38 +273,52 @@ class SQLiteAuditSink:
     def _append(self, payload: dict[str, Any]) -> None:
         """Insert one record, linking it to the current chain head.
 
-        Read-head and insert happen under the same lock so two concurrent
-        writers can never derive the same ``prev_hash``.
+        Read-head and insert happen inside one ``BEGIN IMMEDIATE`` transaction,
+        so two writers can never derive the same ``prev_hash``. The in-process
+        lock alone covered threads, not processes: every worker opens its own
+        sink on the same file, and two of them reading one head forked the
+        chain, which ``verify_chain`` then reported as tampering.
         """
         payload["details"] = self._bounded_details(payload.get("details") or {})
         with self._lock:
-            prev_hash = self._head_hash_locked()
-            entry_hash = (
-                compute_entry_hash(prev_hash, payload, self._hmac_key)
-                if self._hash_chain
-                else ""
-            )
-            self._conn.execute(
-                "INSERT INTO audit_log (event_id, timestamp, event_type, user_id, "
-                "tenant_id, session_id, resource, action, success, ip_address, "
-                "details, prev_hash, entry_hash) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    payload["event_id"],
-                    payload["timestamp"],
-                    payload["event_type"],
-                    payload.get("user_id"),
-                    payload.get("tenant_id"),
-                    payload.get("session_id"),
-                    payload.get("resource"),
-                    payload.get("action"),
-                    1 if payload.get("success", True) else 0,
-                    payload.get("ip_address"),
-                    json.dumps(payload["details"], sort_keys=True, default=str),
-                    prev_hash,
-                    entry_hash,
-                ),
-            )
+            # Write lock before the head read: other processes wait for COMMIT.
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._insert_locked(payload)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
+
+    def _insert_locked(self, payload: dict[str, Any]) -> None:
+        """Link ``payload`` to the head and insert it; the caller holds the write lock."""
+        prev_hash = self._head_hash_locked()
+        entry_hash = (
+            compute_entry_hash(prev_hash, payload, self._hmac_key)
+            if self._hash_chain
+            else ""
+        )
+        self._conn.execute(
+            "INSERT INTO audit_log (event_id, timestamp, event_type, user_id, "
+            "tenant_id, session_id, resource, action, success, ip_address, "
+            "details, prev_hash, entry_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                payload["event_id"],
+                payload["timestamp"],
+                payload["event_type"],
+                payload.get("user_id"),
+                payload.get("tenant_id"),
+                payload.get("session_id"),
+                payload.get("resource"),
+                payload.get("action"),
+                1 if payload.get("success", True) else 0,
+                payload.get("ip_address"),
+                json.dumps(payload["details"], sort_keys=True, default=str),
+                prev_hash,
+                entry_hash,
+            ),
+        )
 
     def _bounded_details(self, details: dict[str, Any]) -> dict[str, Any]:
         """Cap caller-supplied details so one record cannot grow unbounded.

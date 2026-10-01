@@ -938,7 +938,9 @@ corpus of 64 items (`_FUSE_OFFLOAD_THRESHOLD`) it runs on the dedicated
 inference executor (`core.utils.concurrency.run_inference`) instead of inline
 on the event loop; below the threshold the thread hand-off would cost more
 than the work, so it stays inline. The opt-in reranker already ran off-loop
-the same way.
+the same way, and scores through `core.nlp.rerank.score_pairs` so the
+cross-encoder gets a device-sized batch (8 off CUDA, 32 on CUDA) instead of
+the library's padding-heavy default.
 
 The offload carries the caller's `contextvars` (tenant, trace) into the worker —
 see [NLP › Where inference runs](nlp.md#where-inference-runs). That is

@@ -704,6 +704,16 @@
             "enabled": {
               "type": "boolean"
             },
+            "mountVolumes": {
+              "type": "boolean"
+            },
+            "extraEnv": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"]
+              }
+            },
             "backoffLimit": {
               "type": "integer",
               "minimum": 0
@@ -729,6 +739,9 @@
             },
             "adminUser": {
               "type": "string"
+            },
+            "createRole": {
+              "type": "boolean"
             },
             "grantSchemaCreate": {
               "type": "boolean"

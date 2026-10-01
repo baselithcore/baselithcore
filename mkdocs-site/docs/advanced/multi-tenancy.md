@@ -417,6 +417,20 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     their policies, which is the failure this whole arrangement exists to
     prevent.
 
+    Two knobs for deployments that provision differently. When the runtime
+    role is created outside the chart by an operator holding an admin DSN,
+    set `database.runtimeRole.createRole: false`: the Job then only verifies
+    the role exists, is `NOSUPERUSER NOBYPASSRLS` and does not own the
+    database, and grants — all of which a plain owner may do, so the owner
+    never needs `CREATEROLE`. When `PLUGIN_CONFIG_PATH` lives on a writable
+    volume, set `database.pluginSchemaInit.mountVolumes: true` so the schema
+    Job mounts the application's volumes and seed step and reads the same
+    file the application will. A declarative `plugins.config` needs no
+    knob: the chart gives the Job a hook-scoped copy of that plugin set
+    (Helm creates the ordinary ConfigMap only after its hooks), so
+    `schema-init` builds the schema of the plugins the release runs, not
+    of every plugin in the image.
+
 === "Docker Compose"
 
     ```bash
@@ -431,6 +445,33 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     entrypoint, which executes `/docker-entrypoint-initdb.d/*` **only on a
     fresh data directory** — an existing volume never sees it, so provision the
     role by hand there with the SQL above.
+
+#### Plugin tables: `core.db.rls_policy` {#plugin-table-policies}
+
+Core's tenant-scoped tables get their `tenant_isolation` policy from the
+migrations. A plugin that owns a table with a `tenant_id` column builds it in
+its own idempotent `init_schema()`, and gives it the **same** policy from
+`core.db.rls_policy` rather than a hand-written copy that drifts:
+
+```python
+from core.db.rls_policy import tenant_isolation_ddl
+
+async def init_schema(self, config: dict | None = None) -> None:
+    async with get_connection() as conn, conn.cursor() as cursor:
+        await cursor.execute(MY_TABLES_DDL)
+        await cursor.execute(tenant_isolation_ddl(["myplugin_notes"]))
+```
+
+`tenant_isolation_ddl(tables)` enables RLS and (re)creates the policy with the
+`system` exemption of migration 010. It is inert where RLS does not apply (the
+owner, a superuser, a `BYPASSRLS` role) and skips a table with a `NOTICE` when
+the connected role does not own it, so it never fails a boot.
+
+A plugin whose rows are keyed by something other than the session tenant — a
+`personal` tenancy override keys them by user id — wraps its database work in
+`row_tenant_scope(key)`, so the session carries the same key the rows were
+written under; otherwise every read is filtered to nothing and every write is
+refused by the policy's `WITH CHECK`.
 
 #### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
 
@@ -460,6 +501,7 @@ Who uses it today:
 | `core/bootstrap/lazy_init.py`, `core/db/schema.py`, `core/api/startup_checks.py` | Boot and schema paths |
 | `core/orchestration/checkpoint_postgres.py`, `core/a2a/task_store_postgres.py`, `core/prompts/store_postgres.py` | `initialize()` / DDL on first touch |
 | `core/task_queue/worker.py` | Wraps job execution — but only when RLS is on |
+| `core/plugins/init_scope.py` (`loader.py`, `bulk_load.py`, `hotreload.py`, `health.py`) | Every plugin's `initialize()` — but only when RLS is on |
 | `core/cli/handlers.py` | CLI commands that read the database |
 | `core/orchestration/recovery.py` | Crash-recovery and stale-run sweeps |
 | `core/services/tenant/purge.py` | GDPR erasure — cross-tenant by construction |

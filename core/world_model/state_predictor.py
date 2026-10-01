@@ -53,14 +53,22 @@ class StatePredictor:
         self.config = config
         self.custom_predictor = custom_predictor
 
-        # Lazy load LLM service if not provided
-        if not self.llm_service:
+        # Lazy load LLM service if not provided. A custom predictor never
+        # consults it, and an unconfigured provider must degrade to rule-based
+        # prediction rather than fail construction (often at import time).
+        if not self.llm_service and self.custom_predictor is None:
             try:
                 from core.services.llm import get_llm_service
-
-                self.llm_service = get_llm_service()
+                from core.services.llm.exceptions import LLMProviderError
             except ImportError:
                 logger.warning("LLM service not available")
+            else:
+                try:
+                    self.llm_service = get_llm_service()
+                except LLMProviderError as exc:
+                    logger.warning(
+                        f"LLM service unavailable, using rule-based prediction: {exc}"
+                    )
 
     async def predict(
         self,

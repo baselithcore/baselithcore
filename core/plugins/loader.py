@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.plugins.init_scope import plugin_init_scope
 from core.utils.logsafe import sanitize_log_value
 
 from ._audit import audit_plugin_load
@@ -15,6 +16,7 @@ from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from ._resolve import safe_plugin_path, sort_by_dependencies
 from .bulk_load import load_all_plugins as _load_all_plugins
 from .discovery import (
+    apply_overlay,
     find_manifest,
     iter_entry_point_plugin_dirs,
     merge_plugin_dirs,
@@ -23,6 +25,7 @@ from .integrity import verify_plugin_integrity
 from .interface import Plugin
 from .load_gates import config_gate
 from .manifest_model import describe_manifest_failure
+from .overlay import registered_overlay_dirs
 from .plugin_class import PluginClassError, resolve_plugin_class
 from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
@@ -115,7 +118,7 @@ class PluginLoader:
         if self._discover_cache is not None:
             return self._discover_cache
 
-        plugin_dirs = self._scan_plugin_dirs()
+        plugin_dirs = apply_overlay(self._scan_plugin_dirs(), registered_overlay_dirs())
         self._discover_cache = merge_plugin_dirs(
             plugin_dirs, iter_entry_point_plugin_dirs()
         )
@@ -337,7 +340,8 @@ class PluginLoader:
                 if self.lifecycle_manager:
                     await self.lifecycle_manager.transition_to_initializing(plugin_name)
 
-                await plugin_instance.initialize(config)
+                with plugin_init_scope():
+                    await plugin_instance.initialize(config)
 
                 # Track active state
                 if self.lifecycle_manager:
@@ -369,6 +373,10 @@ class PluginLoader:
             direct_path = safe_plugin_path(self.plugins_dir, plugin_name)
         except ValueError:
             direct_path = None
+        # A verified overlay entry replaces its bundled namesake: look there first.
+        overlaid = {d.name: d for d in registered_overlay_dirs()}
+        if direct_path is not None and direct_path.name in overlaid:
+            return overlaid[direct_path.name]
         if direct_path is not None and direct_path.exists():
             return direct_path
 

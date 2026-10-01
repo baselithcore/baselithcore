@@ -8,7 +8,8 @@ The `core/nlp/` module provides Natural Language Processing utilities built on *
 core/nlp/
 ├── spacy_utils.py   # Lazy-loaded spaCy pipeline with fallback
 ├── models.py        # Embedding model loader (sentence-transformers)
-└── lazy.py          # Async accessors + LazyEmbedder / LazyReranker
+├── lazy.py          # Async accessors + LazyEmbedder / LazyReranker
+└── rerank.py        # score_pairs: cross-encoder scoring with a device batch size
 ```
 
 ---
@@ -121,6 +122,15 @@ hierarchical-memory bootstrap all load this way. The vector-store rerank
 service (`core.services.retrieval.reranker.Reranker`) does too: `rerank()`
 awaits `aload_model()`, which builds its CrossEncoder in a worker thread under
 a lock, so the first rerank neither stalls the loop nor builds the model twice.
+
+Every core rerank path — chat (`core/chat/reranking.py`), the vector-store
+service and memory recall — scores through `core.nlp.rerank.score_pairs`
+rather than calling `predict` directly. For a real sentence-transformers
+`CrossEncoder` (or a `LazyReranker` wrapping one) it passes a batch size
+suited to the model's device: 8 off CUDA, 32 on CUDA. The library default of
+32 is a padding trap on CPU and MPS — scores and order are identical at any
+batch size, only the padding per forward pass changes. Any other reranker
+gets the plain `predict(pairs)` call its protocol promises.
 
 ### Embedding cache & miss coalescing
 

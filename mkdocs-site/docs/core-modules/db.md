@@ -15,6 +15,7 @@ core/db/
 ├── session_setup.py  # Per-checkout session setup: timezone + RLS tenant binding
 ├── documents.py       # Document feedback aggregation helpers
 ├── feedback.py        # Feedback persistence and analytics functions
+├── rls_policy.py      # Core's tenant_isolation policy for plugin-owned tables
 ├── schema.py          # Schema bootstrap via Alembic migrations
 ├── serializers.py     # Source/row (de)serialization helpers
 └── ...
@@ -136,6 +137,15 @@ and `webhook_deliveries`, which migration `011_webhooks` creates with the
 system-tenant escape already in the predicate. See
 [Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
 for the two-role deployment that makes those policies effective.
+
+### Plugin-owned tables
+
+A plugin table with a `tenant_id` column is built by the plugin's
+`init_schema()`, not by the migrations, so it gets its policy from
+`core.db.rls_policy.tenant_isolation_ddl(tables)`: the same `tenant_isolation`
+predicate as migration 010, owner-guarded and idempotent. `row_tenant_scope(key)`
+binds the key a plugin writes rows under when that is not the session tenant.
+See [Plugin tables](../advanced/multi-tenancy.md#plugin-table-policies).
 
 ### Is row-level security actually enforced?
 

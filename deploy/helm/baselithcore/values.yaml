@@ -454,6 +454,13 @@ config:
   APP_ENV: production
   AUTH_REQUIRED: "true"
   SECURITY_HEADERS_ENABLED: "true"
+  # The update checker (core/plugin_updates) caches its last report, the
+  # announced-versions set and verified release tarballs. Its default,
+  # data/plugin_updates, sits in the read-only image tree, so every check would
+  # fail to persist; /tmp is the pod's writable emptyDir (tmpVolumes, 256Mi),
+  # which is enough for a cache that a restart may drop. Point it at a mounted
+  # volume (extraVolumeMounts) to keep it across restarts.
+  PLUGIN_UPDATE_CACHE_DIR: /tmp/plugin_updates
   # NOTE: the secrets backend selector defaults to 'env' in code. It is NOT set
   # here on purpose: its key name ("SECRETS_BACKEND") trips ConfigMap-secret
   # scanners (Trivy KSV-0109) even though the value is a selector, not a secret.
@@ -587,10 +594,13 @@ serviceMonitor:
   # not a name that resolves anywhere else. Turn it off only when you set
   # config.TRUSTED_HOSTS yourself and have made the pod IP trusted there.
   trustPodIP: true
-  # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
-  # Point secretName at a Secret with the admin credentials so Prometheus can
-  # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and
-  # restrict /metrics via NetworkPolicy instead.
+  # /metrics is basic-auth-protected by default (METRICS_AUTH_REQUIRED). Point
+  # secretName at a Secret holding a scrape-only credential and feed the same
+  # pair to the pods as METRICS_USERNAME / METRICS_PASSWORD (extraEnv with a
+  # secretKeyRef): it opens /metrics and nothing else. The admin credential
+  # is still accepted, but a Secret the Prometheus Operator can read is the
+  # wrong place for one that also opens /admin. Alternative: set
+  # METRICS_AUTH_REQUIRED=false and restrict /metrics via NetworkPolicy.
   basicAuth: {}
   #  secretName: baselithcore-metrics-auth
   #  usernameKey: username
@@ -687,6 +697,22 @@ database:
     # than producing a schema built from empty config blocks. Use
     # `plugins.config` for a release that needs both.
     enabled: false
+    # Give the Job the application's `extraVolumes`/`extraVolumeMounts` and its
+    # `seedFromImage` initContainer, so a PLUGIN_CONFIG_PATH kept on one of
+    # those volumes — writable, so the console's plugin toggles work — is the
+    # file the Job reads. The seed runs first, so a first install reads exactly
+    # the copy the application will. Only for volumes the Job can attach next to
+    # the running pods: ReadWriteMany, or ReadWriteOnce with every pod (the Job
+    # inherits nodeSelector/affinity/tolerations) pinned to one node.
+    mountVolumes: false
+    # Raw env appended to this Job's container only — never to the api or
+    # worker pods. It comes after the owner's DB_USER/DB_PASSWORD (with
+    # runtimeRole on), so `$(DB_USER)` / `$(DB_PASSWORD)` in a value expand to
+    # the owner: the place for an owner-only credential a plugin's schema step
+    # reads, e.g. an engine's own database URL
+    #   - name: MYPLUGIN_SCHEMA_DATABASE_URL
+    #     value: postgresql://app_owner:$(DB_PASSWORD)@pg:5432/myplugin_engine
+    extraEnv: []
     backoffLimit: 1
     activeDeadlineSeconds: 900
     resources:
@@ -728,6 +754,17 @@ database:
     # password in a Secret. So name it here; `adminSecret.userKey` stays as the
     # alternative for a deployment that does keep it alongside the password.
     adminUser: ""
+    # Create (and on every upgrade re-assert) the role from this Job.
+    #
+    # Needs `adminSecret` to hold CREATEROLE — a superuser, or on PostgreSQL 16+
+    # a role with CREATEROLE and ADMIN on this one. A plain database owner has
+    # neither, and should not: on a shared server CREATEROLE before 16 reaches
+    # every other tenant's role. Set this to false when the role is provisioned
+    # outside the chart (by an operator holding an admin DSN); the Job then only verifies the role exists, is NOSUPERUSER
+    # NOBYPASSRLS and does not own the database, and grants — all of which the
+    # owner may do. `passwordSecret` is unused in that mode: whoever created the
+    # role keeps its password in step with the Secret.
+    createRole: true
     # Let the runtime role create tables in `public`.
     #
     # Off by default, because DDL is what the role exists not to have. Turn it

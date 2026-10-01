@@ -9,6 +9,7 @@ core/lifecycle/
 ├── protocols.py      # AgentLifecycle, AgentHooks, AgentState, HealthStatus
 ├── mixins.py         # LifecycleMixin — startup()/shutdown() template methods
 ├── deterministic.py  # apply_deterministic_mode() + get_llm_override_kwargs()
+├── drain.py          # drain signal: wait_for_drain() for long-lived streams at shutdown
 └── errors.py         # BaseFrameworkError + LifecycleError/AgentError/... and FrameworkErrorCode
 ```
 
@@ -186,3 +187,50 @@ app = FastAPI(lifespan=lifespan)
     `get_or_start_agent()` (`plugins/baselithbot/plugin.py`) with
     `await new_agent.startup()`, and the plugin's `shutdown()` awaits
     `self._agent.shutdown()` before calling `super()`.
+
+## Draining long-lived streams
+
+A graceful shutdown waits for every open connection to finish before the
+lifespan teardown runs. A stream that only ends when the *client* leaves — an
+SSE feed, a WebSocket subscription — never finishes on its own, so the server
+waits out `--timeout-graceful-shutdown` and then cancels it, logging
+`Cancel N running task(s), timeout graceful shutdown exceeded` on every
+restart. The lifespan teardown cannot help: it runs after the connections
+are gone.
+
+`core.lifecycle.drain` is the moment in between. The application lifespan
+calls `install_drain_signal_hook()` at startup, which chains a handler in
+front of the ASGI server's SIGTERM/SIGINT handlers, so the first stop signal
+marks the process as draining **before** the server starts waiting. A stream
+awaits `wait_for_drain()` alongside its own work and returns:
+
+```python
+import asyncio
+from core.lifecycle import wait_for_drain
+
+async def feed(queue: asyncio.Queue[str]):
+    drained = asyncio.ensure_future(wait_for_drain())
+    try:
+        while True:
+            getter = asyncio.ensure_future(queue.get())
+            done, _ = await asyncio.wait(
+                {getter, drained}, timeout=20, return_when=asyncio.FIRST_COMPLETED
+            )
+            if getter not in done:
+                getter.cancel()
+                if drained in done:
+                    return          # the server is stopping: end the stream
+                yield ": ping\n\n"  # idle keepalive
+                continue
+            yield f"data: {getter.result()}\n\n"
+    finally:
+        drained.cancel()
+```
+
+Measured with uvicorn (`--timeout-graceful-shutdown 8`, one open SSE
+client, SIGTERM): without the hook the shutdown took 8.1 s and logged the
+cancellation; with it, 0.1 s and no error — also under `--workers`. An
+`EventSource` reconnects by itself to whichever worker comes up next.
+`is_draining()` answers the same question synchronously, and
+`mark_draining()` is safe from any thread. The hook is a no-op off the main
+thread (e.g. under a test client), and installs once.

@@ -77,6 +77,8 @@ from core.plugins._env import (
         "X_FRAME_OPTIONS",
         "MAX_REQUEST_SIZE_BYTES",
         "METRICS_AUTH_REQUIRED",
+        "METRICS_USERNAME",
+        "METRICS_PASSWORD",
         "FORWARDED_ALLOW_IPS",
         "PROXY_HEADERS",
         # Interpreter / dynamic-loader hijack (read before framework code runs).

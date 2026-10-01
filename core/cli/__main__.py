@@ -26,6 +26,7 @@ from core.cli.handlers import (
     cmd_init,
     cmd_lint,
     cmd_plugin,
+    cmd_plugin_updater,
     cmd_queue,
     cmd_run,
     cmd_setup,
@@ -68,7 +69,7 @@ COMMANDS_MAP = {
     "SCAFFOLDING": ["init", "setup", "plugin"],
     "DEVELOPMENT": ["run", "up", "shell", "docs"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
-    "INFRASTRUCTURE": ["db", "cache", "queue"],
+    "INFRASTRUCTURE": ["db", "cache", "queue", "plugin-updater"],
     "QUALITY & TESTS": ["test", "lint"],
 }
 
@@ -88,6 +89,7 @@ COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "db": lambda *args, **kwargs: cmd_db(*args, **kwargs),
     "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),
     "queue": lambda *args, **kwargs: cmd_queue(*args, **kwargs),
+    "plugin-updater": lambda *args, **kwargs: cmd_plugin_updater(*args, **kwargs),
     "docs": lambda *args, **kwargs: cmd_docs(*args, **kwargs),
     "doctor": lambda *args, **kwargs: cmd_doctor(*args, **kwargs),
     "test": lambda *args, **kwargs: cmd_test(*args, **kwargs),
@@ -335,7 +337,8 @@ def main() -> int:
     # always; the full repr under BASELITH_CLI_DEBUG.
     for cmd_name in COMMANDS:
         try:
-            module = importlib.import_module(f"core.cli.commands.{cmd_name}")
+            module_name = cmd_name.replace("-", "_")
+            module = importlib.import_module(f"core.cli.commands.{module_name}")
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, formatter_class)
         except Exception as e:
@@ -352,7 +355,7 @@ def main() -> int:
     base_dir = Path.cwd()
     plugins_dir = base_dir / "plugins" if (base_dir / "plugins").is_dir() else base_dir
 
-    if plugins_dir.is_dir() and plugins_dir.name == "plugins":
+    if plugins_dir.name == "plugins" and "plugin-updater" not in sys.argv:
         # Add cwd to sys.path once for the whole scan, and only remove it if we
         # were the ones who added it (don't clobber a pre-existing entry).
         base_dir_str = str(base_dir)
