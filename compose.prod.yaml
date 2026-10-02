@@ -437,7 +437,10 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
     container_name: baselith-tei-rerank
     profiles: ["inference"]
-    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--port", "8080"]
+    # --max-batch-tokens 4096: TEI's start-up warm-up runs one full batch; at
+    # the default 16384 the reranker peaked past 6G and was OOM-killed (k3d
+    # lab), at 4096 it peaks at 7.5G and settles at 4.4G.
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--port", "8080", "--max-batch-tokens", "4096"]
     environment:
       - HF_HOME=/data
       - HUGGINGFACE_HUB_CACHE=/data
@@ -459,7 +462,7 @@ services:
       resources:
         limits:
           pids: 512
-          memory: 6G
+          memory: 9G
 
   # === Observability Stack ===
   jaeger:

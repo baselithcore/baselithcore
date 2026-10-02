@@ -140,7 +140,10 @@ you can point at servers you already run.
   cache on a PVC (`persistence.enabled`, default) so a restart does not
   download 2+ GiB again. The first start is slow; the startup probe waits up to
   15 minutes.
-- The CPU image is `linux/amd64` only and slow. For real rerank latency use a
+- Memory is sized from the measured warm-up peak: TEI's start-up runs one full
+  `--max-batch-tokens` batch, so both servers default to 4096 tokens (embedding
+  7/9 GiB, rerank 5/9 GiB). A limit under the peak never becomes ready.
+- `cpu-<ver>` is `linux/amd64` only (ARM nodes need `cpu-arm64-<ver>`) and slow. For real rerank latency use a
   GPU image with `nvidia.com/gpu` in `resources` and a `nodeSelector`.
 - Database-style egress policies (`networkPolicy.egress.enabled`) must allow the
   model servers: the `sameNamespace` preset does when they live in the release

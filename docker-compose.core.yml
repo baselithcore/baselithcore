@@ -110,11 +110,13 @@ services:
   # release v1.9.4, 2026-09-15). The CPU image is linux/amd64 only: on Apple
   # Silicon Docker runs it under emulation (slow but correct) — for real speed
   # use a GPU image on a GPU host. Models are cached in tei_cache so a restart
-  # does not download them again.
+  # does not download them again. --max-batch-tokens 4096 holds bge-m3 at
+  # ~6.7G instead of 11.5G and keeps the reranker's start-up warm-up under
+  # ~7.5G (measured); bge-m3's 8192-token inputs still fit one request.
   tei-embed:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
     platform: linux/amd64
-    command: ['--model-id', 'BAAI/bge-m3', '--port', '80']
+    command: ['--model-id', 'BAAI/bge-m3', '--port', '80', '--max-batch-tokens', '4096']
     environment:
       HF_TOKEN: ${HF_TOKEN:-}
     ports:
@@ -132,7 +134,7 @@ services:
   tei-rerank:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
     platform: linux/amd64
-    command: ['--model-id', 'BAAI/bge-reranker-v2-m3', '--port', '80']
+    command: ['--model-id', 'BAAI/bge-reranker-v2-m3', '--port', '80', '--max-batch-tokens', '4096']
     environment:
       HF_TOKEN: ${HF_TOKEN:-}
     ports:

@@ -467,7 +467,7 @@ networks:
 `compose.prod.yaml` carries two optional Hugging Face Text Embeddings Inference
 servers behind the `inference` profile, mirroring the chart's `inference.tei`:
 `tei-embed` (`BAAI/bge-m3`, `--max-batch-tokens 4096`, 9G memory limit) and
-`tei-rerank` (`BAAI/bge-reranker-v2-m3`, 6G), both
+`tei-rerank` (`BAAI/bge-reranker-v2-m3`, `--max-batch-tokens 4096`, 9G), both
 `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4` (`linux/amd64` only),
 read-only, every capability dropped, models cached in the
 `tei_embed_models` / `tei_rerank_models` volumes. `configs/.env.production`
