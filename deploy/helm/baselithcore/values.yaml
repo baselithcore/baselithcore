@@ -1102,6 +1102,21 @@ backup:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Snapshot the release's own Qdrant (`qdrant.enabled`) beside the dump:
+  # one snapshot per collection, packed into qdrant_<ts>.tar.gz on the same
+  # volume, under the same retentionDays, and copied offsite with the dumps.
+  # Restore a collection by uploading its file to
+  # POST /collections/<name>/snapshots/upload?priority=snapshot.
+  qdrant:
+    enabled: true
+    image: curlimages/curl:8.22.0
+    # curl streams each snapshot to the volume; the tar runs on the volume.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30
