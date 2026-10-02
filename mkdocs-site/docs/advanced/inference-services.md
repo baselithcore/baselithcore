@@ -50,6 +50,23 @@ any other 4xx (see [Client hardening](#client-hardening)). The `local`
 backend is a development opt-in: sentence-transformers, loaded lazily as one
 singleton per process.
 
+### Model servers you do not run
+
+The `remote` backend speaks more than TEI, so the services can call
+inference that already exists on someone's own GPUs:
+
+| Variable | Values | Server |
+| --- | --- | --- |
+| `BASELITH_EMBEDDING_API` | `tei` (default), `openai` | `openai`: `/embeddings` of OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama — URL includes `/v1` |
+| `BASELITH_RERANK_API` | `tei` (default), `cohere`, `nim` | `cohere`: `/rerank` with `documents`/`top_n` (Cohere, Jina, vLLM, Infinity); `nim`: NIM `/ranking` |
+| `BASELITH_EMBEDDING_PATH`, `BASELITH_RERANK_PATH` | a path | when the server mounts the API elsewhere |
+| `BASELITH_EMBEDDING_QUERY_PREFIX`, `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | text | models trained with instructions (e5: `query:` / `passage:`, each followed by a space) |
+| `*_CA_BUNDLE`, `*_CLIENT_CERT`, `*_CLIENT_KEY` | PEM paths | a private CA, mutual TLS |
+
+`BASELITH_EMBEDDING_DIM` must be the model's own size: a vector of any other
+size is refused on the first call, before it reaches a collection. Changing
+the embedding model means re-indexing — vectors of two models do not compare.
+
 ## RerankService
 
 ```python

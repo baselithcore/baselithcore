@@ -2,8 +2,10 @@
 
 Backends:
 
-* ``remote`` (default): Hugging Face Text Embeddings Inference,
-  ``POST /embed`` with ``{"inputs": [...]}``.
+* ``remote`` (default): a model server over HTTP — the platform's Hugging
+  Face TEI, or a customer's own OpenAI-compatible endpoint (``api``; see
+  :mod:`core.services.inference._protocols`), with optional private-CA /
+  mutual TLS.
 * ``local`` (development, explicit opt-in): sentence-transformers, loaded
   lazily as a per-process singleton.
 """
@@ -16,7 +18,12 @@ from typing import Any, Protocol
 import httpx
 
 from core.config.inference import EmbeddingConfig, get_embedding_config
-from core.services.inference._http import RemoteClient
+from core.services.inference._http import RemoteClient, tls_context
+from core.services.inference._protocols import (
+    EMBED_PATHS,
+    embed_payload,
+    parse_embeddings,
+)
 from core.services.inference.errors import InferenceConfigError, InferenceError
 
 
@@ -29,7 +36,7 @@ class EmbeddingBackend(Protocol):
 
 
 class RemoteEmbeddingBackend:
-    """TEI ``/embed`` client."""
+    """HTTP client for the configured embedding protocol."""
 
     def __init__(
         self,
@@ -52,19 +59,22 @@ class RemoteEmbeddingBackend:
             max_response_bytes=config.max_response_bytes,
             retry_rate_limited=config.retry_rate_limited,
             allow_insecure_key=config.allow_insecure_key,
+            verify=tls_context(config.ca_bundle, config.client_cert, config.client_key),
             transport=transport,
         )
+        self._api = config.api
+        self._model = config.model
+        self._path = config.path or EMBED_PATHS[config.api]
+        self._query_prefix = config.query_prefix
+        self._document_prefix = config.document_prefix
 
     async def embed(self, texts: list[str], *, is_query: bool) -> list[list[float]]:
+        prefix = self._query_prefix if is_query else self._document_prefix
+        inputs = [prefix + t for t in texts] if prefix else texts
         body = await self._http.post_json(
-            "/embed", {"inputs": texts, "normalize": True, "truncate": True}
+            self._path, embed_payload(self._api, self._model, inputs)
         )
-        if not isinstance(body, list) or len(body) != len(texts):
-            raise InferenceError(
-                f"/embed returned {len(body) if isinstance(body, list) else 'a non-list'} "
-                f"vectors for {len(texts)} inputs"
-            )
-        return [[float(x) for x in vec] for vec in body]
+        return parse_embeddings(self._api, body, len(texts))
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -139,17 +149,34 @@ class EmbeddingService:
         """Dimension of the produced vectors."""
         return self._dim
 
+    def _checked(self, vectors: list[list[float]]) -> list[list[float]]:
+        """Refuse vectors of the wrong size before they reach a collection.
+
+        A customer's own model rarely has bge-m3's 1024 dimensions; written
+        into a collection created for ``dim`` they would fail on upsert, or —
+        worse — a collection would be created at the wrong size. Fail on the
+        first call, with the fix in the message.
+        """
+        for vec in vectors:
+            if len(vec) != self._dim:
+                raise InferenceError(
+                    f"embedding model '{self._model}' returned {len(vec)}-dim "
+                    f"vectors, configured dim is {self._dim}: set "
+                    "BASELITH_EMBEDDING_DIM to the model's size (and re-index)."
+                )
+        return vectors
+
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed ``texts`` (batched); output order matches input order."""
         out: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
             batch = texts[start : start + self._batch_size]
-            out.extend(await self._backend.embed(batch, is_query=False))
+            out.extend(self._checked(await self._backend.embed(batch, is_query=False)))
         return out
 
     async def embed_query(self, text: str) -> list[float]:
         """Embed one query string."""
-        return (await self._backend.embed([text], is_query=True))[0]
+        return self._checked(await self._backend.embed([text], is_query=True))[0]
 
     async def shutdown(self) -> None:
         """Close the backend (called by the lazy registry at shutdown)."""

@@ -1356,5 +1356,9 @@ opt-in. The Qdrant URL and key also bind from the unprefixed `QDRANT_URL` /
 `QDRANT_API_KEY` that every deploy file already sets for the vector store
 (`AliasChoices`; the prefixed name wins when both are set). The embedding and
 rerank clients carry four hardening knobs each — `MAX_TOTAL_SECONDS`,
-`MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. See
+`MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. Calling a
+model server that is not TEI, such as a customer's own GPUs, uses `API`
+(embedding `tei` | `openai`; rerank `tei` | `cohere` | `nim`), `PATH`, the
+embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, and `CA_BUNDLE` / `CLIENT_CERT` /
+`CLIENT_KEY` for a private CA or mutual TLS. See
 [Inference Services](../advanced/inference-services.md).

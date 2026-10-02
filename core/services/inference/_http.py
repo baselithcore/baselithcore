@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import ssl
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -55,6 +57,38 @@ def url_may_carry_key(url: str) -> bool:
         return False
 
 
+def tls_context(
+    ca_bundle: str | None, client_cert: str | None, client_key: str | None
+) -> ssl.SSLContext | bool:
+    """``verify`` for httpx: the system trust store, or a context that also
+    trusts a private CA and/or presents a client certificate (mutual TLS).
+
+    A customer's on-premises model server usually sits behind its own CA, and
+    often wants a client certificate; neither should require turning
+    verification off. Missing files are a configuration error at startup, not
+    a TLS failure on the first chat.
+    """
+    if not (ca_bundle or client_cert or client_key):
+        return True
+    for label, path in (
+        ("ca_bundle", ca_bundle),
+        ("client_cert", client_cert),
+        ("client_key", client_key),
+    ):
+        if path and not Path(path).is_file():
+            raise InferenceConfigError(f"inference TLS {label} not found: {path}")
+    if client_key and not client_cert:
+        raise InferenceConfigError("inference TLS client_key needs client_cert")
+    context = (
+        ssl.create_default_context(cafile=ca_bundle)
+        if ca_bundle
+        else ssl.create_default_context()
+    )
+    if client_cert:
+        context.load_cert_chain(certfile=client_cert, keyfile=client_key)
+    return context
+
+
 class RemoteClient:
     """One shared ``httpx.AsyncClient`` plus a retrying ``post_json``.
 
@@ -83,6 +117,7 @@ class RemoteClient:
         max_response_bytes: int = 64 * 1024 * 1024,
         retry_rate_limited: bool = False,
         allow_insecure_key: bool = False,
+        verify: ssl.SSLContext | bool = True,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if api_key and not allow_insecure_key and not url_may_carry_key(base_url):
@@ -99,6 +134,7 @@ class RemoteClient:
             headers=headers,
             transport=transport,
             trust_env=False,
+            verify=verify,
         )
         self._timeout = timeout
         self._max_retries = max_retries

@@ -15,6 +15,10 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Backend = Literal["remote", "local"]
+#: Wire protocol of the model server (see core/services/inference/_protocols.py):
+#: the platform's TEI, or what a customer's own GPUs already expose.
+EmbeddingApi = Literal["tei", "openai"]
+RerankApi = Literal["tei", "cohere", "nim"]
 
 
 def _strip_url(value: str | None) -> str | None:
@@ -76,6 +80,39 @@ class EmbeddingConfig(BaseSettings):
         description="Send the API key over plain http to a host that is not "
         "loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). "
         "Off by default: the key would cross the network in clear.",
+    )
+
+    api: EmbeddingApi = Field(
+        default="tei",
+        description="Server protocol: 'tei' (Hugging Face TEI /embed) or "
+        "'openai' (/embeddings: OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, "
+        "Infinity, Ollama /v1). For 'openai' the URL includes /v1.",
+    )
+    path: str | None = Field(
+        default=None,
+        description="Request path under the URL; empty = the protocol's own "
+        "(/embed for tei, /embeddings for openai).",
+    )
+    query_prefix: str = Field(
+        default="",
+        description="Text prepended to queries, for models trained with an "
+        "instruction (e5: 'query: ', Qwen3-Embedding, ...). bge-m3 needs none.",
+    )
+    document_prefix: str = Field(
+        default="", description="Text prepended to documents (e5: 'passage: ')."
+    )
+    ca_bundle: str | None = Field(
+        default=None,
+        description="PEM file of a private CA to trust, for a model server on "
+        "the customer's own hardware.",
+    )
+    client_cert: str | None = Field(
+        default=None,
+        description="PEM client certificate presented to the server (mutual TLS).",
+    )
+    client_key: str | None = Field(
+        default=None,
+        description="PEM private key of client_cert (mutual TLS).",
     )
 
     @field_validator("url")
@@ -142,6 +179,30 @@ class RerankConfig(BaseSettings):
         description="Send the API key over plain http to a host that is not "
         "loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). "
         "Off by default: the key would cross the network in clear.",
+    )
+
+    api: RerankApi = Field(
+        default="tei",
+        description="Server protocol: 'tei' (TEI /rerank), 'cohere' (/rerank "
+        "with documents/top_n: Cohere, Jina, vLLM, Infinity) or 'nim' (NVIDIA "
+        "NIM /ranking). URL includes /v1 where the server has one.",
+    )
+    path: str | None = Field(
+        default=None,
+        description="Request path under the URL; empty = the protocol's own.",
+    )
+    ca_bundle: str | None = Field(
+        default=None,
+        description="PEM file of a private CA to trust, for a model server on "
+        "the customer's own hardware.",
+    )
+    client_cert: str | None = Field(
+        default=None,
+        description="PEM client certificate presented to the server (mutual TLS).",
+    )
+    client_key: str | None = Field(
+        default=None,
+        description="PEM private key of client_cert (mutual TLS).",
     )
 
     @field_validator("url")
@@ -225,8 +286,10 @@ def reset_inference_config() -> None:
 
 
 __all__ = [
+    "EmbeddingApi",
     "EmbeddingConfig",
     "QdrantServerConfig",
+    "RerankApi",
     "RerankConfig",
     "get_embedding_config",
     "get_qdrant_server_config",

@@ -295,15 +295,22 @@ Declared in `core.config.inference`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `BASELITH_EMBEDDING_ALLOW_INSECURE_KEY` | `bool` | `False` | Send the API key over plain http to a host that is not loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). Off by default: the key would cross the network in clear. |
+| `BASELITH_EMBEDDING_API` | `EmbeddingApi` | `tei` | Server protocol: 'tei' (Hugging Face TEI /embed) or 'openai' (/embeddings: OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama /v1). For 'openai' the URL includes /v1. |
 | `BASELITH_EMBEDDING_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
 | `BASELITH_EMBEDDING_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
 | `BASELITH_EMBEDDING_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
 | `BASELITH_EMBEDDING_BATCH_SIZE` | `int` | `32` | Texts per HTTP request. |
+| `BASELITH_EMBEDDING_CA_BUNDLE` | `str \| None` | *empty* | PEM file of a private CA to trust, for a model server on the customer's own hardware. |
+| `BASELITH_EMBEDDING_CLIENT_CERT` | `str \| None` | *empty* | PEM client certificate presented to the server (mutual TLS). |
+| `BASELITH_EMBEDDING_CLIENT_KEY` | `str \| None` | *empty* | PEM private key of client_cert (mutual TLS). |
 | `BASELITH_EMBEDDING_DIM` | `int` | `1024` | Vector dimension. |
+| `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | `str` | *empty* | Text prepended to documents (e5: 'passage: '). |
 | `BASELITH_EMBEDDING_MAX_RESPONSE_BYTES` | `int` | `64 * 1024 * 1024` | Largest response body accepted from the server. |
 | `BASELITH_EMBEDDING_MAX_RETRIES` | `int` | `3` | Retries on 5xx / timeout (429 only with retry_rate_limited). |
 | `BASELITH_EMBEDDING_MAX_TOTAL_SECONDS` | `float` | `50.0` | Budget for one call, retries and backoff included; each attempt's timeout is clamped to what is left. Keep it below the edge proxy's read timeout (nginx/ingress default 60 s) so a slow model server fails the call rather than the client's connection. |
 | `BASELITH_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model id. |
+| `BASELITH_EMBEDDING_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own (/embed for tei, /embeddings for openai). |
+| `BASELITH_EMBEDDING_QUERY_PREFIX` | `str` | *empty* | Text prepended to queries, for models trained with an instruction (e5: 'query: ', Qwen3-Embedding, ...). bge-m3 needs none. |
 | `BASELITH_EMBEDDING_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
 | `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
@@ -313,15 +320,20 @@ Declared in `core.config.inference`.
 | `BASELITH_QDRANT_TIMEOUT` | `float` | `60.0` |  |
 | `BASELITH_QDRANT_URL`<br>also accepts `QDRANT_URL` | `str \| None` | *empty* | Qdrant server URL (e.g. `http://qdrant:6333`). |
 | `BASELITH_RERANK_ALLOW_INSECURE_KEY` | `bool` | `False` | Send the API key over plain http to a host that is not loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). Off by default: the key would cross the network in clear. |
+| `BASELITH_RERANK_API` | `RerankApi` | `tei` | Server protocol: 'tei' (TEI /rerank), 'cohere' (/rerank with documents/top_n: Cohere, Jina, vLLM, Infinity) or 'nim' (NVIDIA NIM /ranking). URL includes /v1 where the server has one. |
 | `BASELITH_RERANK_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
 | `BASELITH_RERANK_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
 | `BASELITH_RERANK_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
 | `BASELITH_RERANK_BATCH_SIZE` | `int` | `32` | Texts per HTTP request (TEI limit). |
+| `BASELITH_RERANK_CA_BUNDLE` | `str \| None` | *empty* | PEM file of a private CA to trust, for a model server on the customer's own hardware. |
+| `BASELITH_RERANK_CLIENT_CERT` | `str \| None` | *empty* | PEM client certificate presented to the server (mutual TLS). |
+| `BASELITH_RERANK_CLIENT_KEY` | `str \| None` | *empty* | PEM private key of client_cert (mutual TLS). |
 | `BASELITH_RERANK_MAX_CANDIDATES` | `int` | `100` | Hard cap on texts per rerank call. |
 | `BASELITH_RERANK_MAX_RESPONSE_BYTES` | `int` | `64 * 1024 * 1024` | Largest response body accepted from the server. |
 | `BASELITH_RERANK_MAX_RETRIES` | `int` | `3` | Retries on 5xx / timeout (429 only with retry_rate_limited). |
 | `BASELITH_RERANK_MAX_TOTAL_SECONDS` | `float` | `50.0` | Budget for one call, retries and backoff included; each attempt's timeout is clamped to what is left. Keep it below the edge proxy's read timeout (nginx/ingress default 60 s) so a slow model server fails the call rather than the client's connection. |
 | `BASELITH_RERANK_MODEL` | `str` | `BAAI/bge-reranker-v2-m3` | Reranker id. |
+| `BASELITH_RERANK_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own. |
 | `BASELITH_RERANK_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
@@ -985,4 +997,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-637 settings documented.
+649 settings documented.

@@ -2347,7 +2347,11 @@ VOICE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 `core.services.inference` provides `EmbeddingService`, `RerankService` and a
 tenant-scoped `ScopedVectorStore` over one server-mode Qdrant client, plus a
 blocking bridge for synchronous plugins. Plugins call these instead of loading
-models or opening Qdrant clients themselves. See
+models or opening Qdrant clients themselves. The wire protocol is pluggable
+(`core/services/inference/_protocols.py`): TEI by default, or an
+OpenAI-compatible `/embeddings` and a Cohere- or NIM-style rerank for a
+customer's own servers. `EmbeddingService` refuses vectors whose size differs
+from the configured `dim` before they reach a collection. See
 [Inference Services](../advanced/inference-services.md).
 
 `core.services.retrieval.Reranker` follows the same rule: with the rerank
