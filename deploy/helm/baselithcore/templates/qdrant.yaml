@@ -1,0 +1,126 @@
+{{- if .Values.qdrant.enabled }}
+{{- $q := .Values.qdrant }}
+{{- $name := include "baselithcore.qdrantName" . }}
+{{- $labels := dict "app.kubernetes.io/name" $name "app.kubernetes.io/instance" .Release.Name }}
+---
+# A Qdrant server of this release's own: the cell's vectors on its own volume,
+# behind its own API key, reachable only from this release's pods. One shared
+# Qdrant for many cells would put every customer's vectors behind one key —
+# Qdrant's tokens are scoped to collections named up front, and plugins create
+# theirs at run time — so isolation needs a server per cell.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- toYaml $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+        app.kubernetes.io/component: qdrant
+        app.kubernetes.io/part-of: baselithcore
+    spec:
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: qdrant
+          # The -unprivileged image runs as uid 1000, which `restricted` Pod
+          # Security (and runAsNonRoot) requires.
+          image: "{{ $q.image.repository }}:{{ $q.image.tag }}"
+          imagePullPolicy: {{ $q.image.pullPolicy }}
+          env:
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "baselithcore.secretName" . }}
+                  key: BASELITH_QDRANT_API_KEY
+                  # A cell created before this key existed runs without one
+                  # until `rotate --what qdrant-api-key` adds it; the
+                  # NetworkPolicy below still admits only this release.
+                  optional: true
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+          ports:
+            - {name: http, containerPort: 6333}
+            - {name: grpc, containerPort: 6334}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml $q.resources | nindent 12 }}
+          volumeMounts:
+            - {name: storage, mountPath: /qdrant/storage}
+            - {name: snapshots, mountPath: /qdrant/snapshots}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: snapshots
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $q.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $q.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  ports:
+    - {name: http, port: 6333, targetPort: http}
+    - {name: grpc, port: 6334, targetPort: grpc}
+  selector:
+    {{- toYaml $labels | nindent 4 }}
+---
+# Ingress only from this release's api, worker and job pods; always rendered,
+# independent of networkPolicy.enabled, because the store holds customer data.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $labels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "baselithcore.selectorLabels" . | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 6333}
+        - {protocol: TCP, port: 6334}
+{{- end }}

@@ -149,6 +149,15 @@ you can point at servers you already run.
   `configs/inprocess_ml_allowlist.yaml`) keeps the old memory footprint until it
   migrates; size the API pod's `resources` for the plugin set you actually run.
 
+With `qdrant.enabled` the chart also deploys a Qdrant of the release's own: a
+StatefulSet (`qdrant/qdrant:<ver>-unprivileged`, non-root, read-only root
+filesystem) on its own volume, with `BASELITH_QDRANT_API_KEY` from the release
+Secret as its API key and a NetworkPolicy admitting only the release's pods;
+`BASELITH_QDRANT_URL` and `VECTORSTORE_HOST` then point at it. That is the
+isolating choice when several tenants share a cluster: Qdrant's API key is
+global and its JWT tokens name collections up front, so one server for many
+deployments would put all their vectors behind one key.
+
 ## The core's own models
 
 The embedder and reranker the core itself uses — retrieval, memory, the chat

@@ -246,12 +246,28 @@ In-cluster URL of a chart-deployed TEI server. `kind` is "embed" or "rerank".
 {{- end -}}
 
 {{/*
+Name of the release's own Qdrant (StatefulSet, Service, NetworkPolicy).
+*/}}
+{{- define "baselithcore.qdrantName" -}}
+{{- printf "%s-qdrant" (include "baselithcore.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
 Inference endpoints for the ConfigMap (api and worker consume it via envFrom).
 A key already in `.Values.config` wins, so an operator can point at their own
 servers by hand without turning the chart's TEI off first.
 */}}
 {{- define "baselithcore.inferenceConfigData" -}}
-{{- if and .Values.inference.qdrant.url (not (hasKey .Values.config "BASELITH_QDRANT_URL")) }}
+{{- if .Values.qdrant.enabled }}
+{{- $qhost := include "baselithcore.qdrantName" . }}
+{{- if not (hasKey .Values.config "BASELITH_QDRANT_URL") }}
+BASELITH_QDRANT_URL: {{ printf "http://%s:6333" $qhost | quote }}
+{{- end }}
+{{- if not (hasKey .Values.config "VECTORSTORE_HOST") }}
+VECTORSTORE_HOST: {{ $qhost | quote }}
+{{- end }}
+{{- end }}
+{{- if and (not .Values.qdrant.enabled) .Values.inference.qdrant.url (not (hasKey .Values.config "BASELITH_QDRANT_URL")) }}
 BASELITH_QDRANT_URL: {{ .Values.inference.qdrant.url | quote }}
 {{- end }}
 {{- if .Values.inference.tei.enabled }}

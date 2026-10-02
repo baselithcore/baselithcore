@@ -626,6 +626,31 @@ inference:
       nodeSelector: {}
       tolerations: []
 
+# -------------------------------------------------------------------------
+# Qdrant of this release's own (templates/qdrant.yaml)
+# -------------------------------------------------------------------------
+# A vector store per release: a StatefulSet with its own volume and API key
+# (BASELITH_QDRANT_API_KEY in the release Secret), reachable only from this
+# release's pods. On means the chart also points BASELITH_QDRANT_URL and
+# VECTORSTORE_HOST at it. The isolation choice for multi-customer fleets: one
+# Qdrant shared by many cells would hold every customer's vectors behind one
+# key. Leave off and set inference.qdrant.url to use a server you run.
+qdrant:
+  enabled: false
+  image:
+    repository: qdrant/qdrant
+    # -unprivileged: runs as uid 1000, as `restricted` Pod Security requires.
+    tag: v1.19.1-unprivileged
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  # Qdrant keeps vectors and HNSW graphs in memory: size the limit to the
+  # cell's corpus (bge-m3 dense, 1024 floats ≈ 4 KiB per chunk before index).
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []
 
