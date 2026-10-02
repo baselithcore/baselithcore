@@ -147,6 +147,11 @@ class RateLimiter:
     Distributed sliding-window rate limiter by role/key/IP, using Redis.
     """
 
+    #: Hard ceiling on the in-process fallback map. Stale windows are pruned
+    #: amortised below, but within one window an address-rotating client is
+    #: bounded by nothing else; past the cap the oldest entries go first.
+    _FALLBACK_MAX_ENTRIES: int = 10_000
+
     def __init__(self) -> None:
         cache_config = get_redis_cache_config()
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
@@ -230,6 +235,10 @@ class RateLimiter:
                 self._fallback = {
                     k: v for k, v in self._fallback.items() if v[1] >= index - 1
                 }
+            # Live entries alone can exceed the ceiling: evict oldest-first
+            # (insertion order) so the map is bounded whatever the churn.
+            while len(self._fallback) > self._FALLBACK_MAX_ENTRIES:
+                self._fallback.pop(next(iter(self._fallback)))
 
             self._enforce(prev, count, limit, window_seconds, elapsed)
 

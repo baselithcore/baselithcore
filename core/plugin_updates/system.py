@@ -45,7 +45,9 @@ def _specifier(vulnerable_range: str) -> SpecifierSet:
 def affects(advisory: Advisory, version: str) -> bool:
     """Whether ``version`` lies in the advisory's vulnerable range.
 
-    An unparseable range or version is logged and treated as not matching.
+    An unparseable or missing range, or an unparseable installed version,
+    cannot rule the advisory out, so it *counts* — logged as uncertain —
+    rather than quietly dropping a real advisory from the notice.
     """
     try:
         if not advisory.vulnerable_range.strip():
@@ -55,11 +57,12 @@ def affects(advisory: Advisory, version: str) -> bool:
         )
     except (InvalidSpecifier, InvalidVersion):
         logger.warning(
-            "system_update_range_unparseable: %s %r",
+            "system_update_range_uncertain: %s %r vs %r — reported as affecting",
             advisory.ghsa_id,
             advisory.vulnerable_range,
+            version,
         )
-        return False
+        return True
 
 
 def carry_over(

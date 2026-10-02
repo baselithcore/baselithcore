@@ -79,8 +79,13 @@ def test_image_strips_cuda_from_the_cpu_only_build() -> None:
     assert "--index-url https://download.pytorch.org/whl/cpu" in text
 
     # The strip is block-aware (awk) since the export carries hashes: each
-    # requirement spans a name line plus `--hash=` continuation lines.
-    filter_match = re.search(r"skip = \(\$0 ~ /([^/]+)/\)", text)
+    # requirement spans a name line plus `--hash=` continuation lines. The
+    # pattern is chosen per ML_RUNTIME and handed to awk as `strip`; the
+    # `local` arm is the CPU-only build this test is about.
+    assert "skip = ($0 ~ strip)" in text, (
+        "The export no longer filters the locked set through the strip pattern."
+    )
+    filter_match = re.search(r"local\) strip='([^']+)'", text)
     assert filter_match is not None, (
         "The export no longer filters the GPU stack out of the locked set."
     )

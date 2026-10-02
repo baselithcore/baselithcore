@@ -1114,8 +1114,13 @@ def my_ledger(report: UsageReport) -> None:
     report.usage      # Usage: input, output, cache_read, cache_write tokens
     report.batch      # True when billed at the batch rate
     report.requests   # calls it stands for (a batch job's metered entries)
+    report.tenant_id  # tenant bound when the turn ran, None outside one
+
+async def my_async_ledger(report: UsageReport) -> None:
+    ...                # I/O-bound sinks may be coroutines
 
 register_usage_sink(my_ledger)   # idempotent
+register_usage_sink(my_async_ledger)
 unregister_usage_sink(my_ledger)
 ```
 
@@ -1123,9 +1128,20 @@ One report is delivered per billed turn, from `record_usage_cost` — the same
 point, and the same record, the tenant cost ledger books — so a ledger built on
 it agrees with the core's own. `report_external_usage` delivers one too. Sinks
 run in the caller's context (the bound identity and plugin are visible), are
-resolved at call time, and are best-effort: what they raise is swallowed. A turn
-with an empty record (a cache hit, a call the provider never answered) is not
-delivered.
+resolved at call time, and are best-effort: they never block or fail the call.
+The bound tenant is stamped on the report as `tenant_id` before delivery (a
+report built with it already set keeps it), so a sink that hands the record to
+another task or process does not lose it. A sink that does I/O is an
+`async def`: its coroutine is scheduled on the running loop, not awaited
+inline, so the turn is never held up by the ledger (with no running loop — a
+sync script — it runs to completion in place).
+
+A failing sink is **not** silent: a lost ledger write is a billing gap nobody
+else would notice, so each failure, sync or async, is logged at `WARNING` and
+counted in `mas_usage_sink_failures_total{sink}`, labelled with the sink's
+qualified name (never its `repr`, which would carry an address). Alert on any
+increase. A turn with an empty record (a cache hit, a call the provider never
+answered) is not delivered.
 
 #### Reporting usage measured outside the funnel
 

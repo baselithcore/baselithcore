@@ -17,6 +17,8 @@ graph TB
         Metrics[HTTPMetricsMiddleware]
         ReqId[RequestIdMiddleware]
         SecHdr[SecurityHeadersMiddleware]
+        CORS[CORSMiddleware]
+        Unhandled[UnhandledErrorMiddleware]
         Size[RequestSizeLimitMiddleware]
         CSRF[CSRFOriginMiddleware]
         Quota[QuotaMiddleware]
@@ -62,7 +64,8 @@ core/middleware/
 ├── plugin_context.py      # PluginContextMiddleware (pure ASGI)
 ├── _plugin_route.py       # Per-request memo of the plugin route match (shared by the two above)
 ├── tenant.py              # TenantMiddleware
-└── quota.py               # QuotaMiddleware
+├── quota.py               # QuotaMiddleware
+└── unhandled_error.py     # UnhandledErrorMiddleware (pure ASGI catch-all 500)
 ```
 
 ---
@@ -90,6 +93,8 @@ from core.middleware import (
     QuotaMiddleware,
     # HTTP RED metrics
     HTTPMetricsMiddleware,
+    # Catch-all 500 inside the observability layers
+    UnhandledErrorMiddleware,
 )
 ```
 
@@ -115,14 +120,15 @@ adds, in order:
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request; a plugin whose activation failed is answered `503` + `Retry-After` for 60 s without a new attempt |
-| `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins; preflight answers cacheable for `max_age=7200`, the ceiling Chromium honours, instead of Starlette's 600s — see below) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
 | Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot). Only plugins the enable-list in `configs/plugins.yaml` allows are consulted — the same rule the lifespan applies to routers, read through `core/plugins/config_file.py`, so a plugin disabled there installs no middleware and mounts no SPA either |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** — a single cheap header compare that rejects before a quota unit is consumed, an idempotency lock taken or a plugin route matched |
 | `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); added after CSRF so it runs outermost of the two; see the note below |
-| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work |
+| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work; inner only to the catch-all, CORS and the observability layers, none of which reads the body |
+| `UnhandledErrorMiddleware` | `unhandled_error.py` | Catch-all `500`: renders an unhandled exception as RFC 9457 `problem+json` *inside* CORS, `SecurityHeaders` and `RequestId`, then re-raises — see [below](#unhandlederrormiddleware) |
+| `CORSMiddleware` | FastAPI | CORS, outer to every perimeter guard so a browser can read their refusals (credentials disabled for wildcard origins; preflight answers cacheable for `max_age=7200`, the ceiling Chromium honours, instead of Starlette's 600s — see below) |
 | `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP — registered near-outermost so they land on **every** response, including short-circuits from the inner guards |
 | `RequestIdMiddleware` | `observability.py` | Propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it and every inner log line can bind it |
 | `HTTPMetricsMiddleware` | `http_metrics.py` | Registered **last** → **outermost**: RED metrics measuring true end-to-end latency and capturing every response status |
@@ -134,10 +140,13 @@ adds, in order:
     `RequestIdMiddleware` sits just inside it, so every response carries an
     `X-Request-ID`; `SecurityHeadersMiddleware` just inside that, so
     CSP/HSTS/nosniff also land on responses emitted by the inner guards
-    (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights); and
-    `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
-    rejected before any other middleware does work. Neither of the two
-    outermost layers ever short-circuits a request.
+    (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights); CORS just
+    inside that, so every guard's refusal carries the CORS grant; then
+    `UnhandledErrorMiddleware`, so an unhandled exception still leaves through
+    all four; and `RequestSizeLimitMiddleware` just inside that, so oversized
+    bodies are rejected before any other middleware does work. Neither of the
+    two outermost layers ever short-circuits a request.
+    `tests/unit/core/api/test_middleware_order.py` pins the sequence.
 
 !!! warning "`TRUSTED_HOSTS` is empty by default"
     Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
@@ -164,7 +173,9 @@ fit). Anything else — CR/LF, whitespace, `;`, non-ASCII, an 8 KiB blob — is
 replaced by a fresh UUID4. The value is echoed on the response, bound into
 every log line for the request and copied into the RFC 9457 `request_id`
 member, so an unvalidated header would be a log-/header-injection primitive
-and an unbounded per-request allocation.
+and an unbounded per-request allocation. The request path bound into the same
+log context (`http_path`) is caller-controlled too, so it is sanitised to a
+single line and truncated to **256** characters.
 
 The bundled nginx gateway (`deploy/nginx/nginx.conf`) applies the **same
 rule at the edge**: a caller id matching that pattern is kept, anything else
@@ -188,6 +199,28 @@ router mutates in place — never the raw URL — so per-id paths collapse into 
 series; unmatched requests bucket under `__unmatched__` and unusual verbs under
 `OTHER`, keeping the label set bounded regardless of traffic. See
 [HTTP RED metrics](../advanced/observability.md#http-red-metrics-automatic).
+
+---
+
+## UnhandledErrorMiddleware
+
+`core/middleware/unhandled_error.py`. Pure ASGI. Starlette renders an
+unhandled exception in `ServerErrorMiddleware`, the outermost layer of all —
+outside `RequestIdMiddleware`, `SecurityHeadersMiddleware` and CORS. A `500`
+built there had no `X-Request-ID` header, a `null` `request_id` in the problem
+body (the contextvar was already reset), no CSP/`nosniff`, and no
+`Access-Control-Allow-Origin`, so a browser client saw an opaque CORS failure
+instead of the error, and the one correlation id an operator needs was missing.
+
+This layer sits inside those three and renders the same RFC 9457 document
+through `core.api.errors.unhandled_exception_handler`, so a `500` carries the
+`X-Request-ID` header, the `request_id` member, the security headers and the
+CORS grant like every other response. The exception is then **re-raised**:
+`ServerErrorMiddleware` sees that a response has started, skips its own
+rendering and propagates it to the server as before, so nothing is swallowed
+and server-side logging is unchanged. A failure *after* the response has
+started cannot be answered and is propagated untouched. WebSocket and lifespan
+scopes pass straight through.
 
 ---
 
@@ -328,6 +361,8 @@ Rejections increment `security_events_total` with
 `reason="csrf_origin_rejected"` / `reason="cswsh_handshake_rejected"`, and both
 log the offending origin plus the configured allowlist — the fix for the classic
 reverse-proxy 403 is then obvious (add the public origin to `ALLOW_ORIGINS`).
+The logged `Origin` is attacker-supplied and logged before any authentication,
+so it is sanitised to one line and truncated to **256** characters.
 
 !!! note "Same-origin browser UIs need no allowlist entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too; a UI served
@@ -360,6 +395,11 @@ stats = cost_controller.get_stats()
 catches it and, if the response has not started, returns `429` with a
 `Quota exceeded` body. Limits are sourced from app/storage config; the global
 `cost_controller` instance is constructed at import time.
+
+That `429` comes *after* the handler has spent its budget, so before answering
+the middleware sets the ASGI scope key `baselith.work_done`
+(`WORK_DONE_SCOPE_KEY`). The outer `QuotaMiddleware` reads it and does **not**
+refund the quota unit, although `429` is otherwise a refunded status.
 
 ---
 
@@ -437,6 +477,15 @@ a background task re-arms it every third of that (`EXPIRE`, a no-op once the
 lock is released), so a handler slower than the cap no longer loses its lock
 to a concurrent duplicate.
 
+**The lock is released whenever nothing was stored.** Unless the response was
+persisted (which drops the lock in the same pipeline), the lock is released:
+a streamed, oversized, `5xx` or retryable-`4xx` response, a handler that never
+answered, and a Redis store write that failed. A cancelled request — a client
+disconnect or a worker shutdown, which arrives as `CancelledError` — releases
+it as well. Before, both a cancellation and a failed store left the lock held
+for up to the 300 s cap, at exactly the moment the client retried, so the
+retry got `409`.
+
 **Replay honours `Accept-Encoding`.** Compression (`SmartGzipMiddleware`) runs
 *inside* this layer, so a stored body may be gzip-encoded. A retry that does
 not accept gzip gets it decompressed, with `Content-Encoding` dropped and
@@ -506,21 +555,33 @@ Policy](services.md#central-per-plugin-llm-policy).
 `core/middleware/quota.py`. Self-authenticates from the caller's credentials,
 then consumes one unit from both the caller's **identity** budget and their
 **tenant** aggregate budget via `QuotaManager`. If either calendar window (daily /
-monthly) is exhausted it short-circuits with `429` + `Retry-After: 60` before the
-route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
+monthly) is exhausted it short-circuits with `429` before the route runs. Its
+`Retry-After` is the number of seconds until the exhausted window rolls over
+(midnight UTC for the daily window, the first of next month for the monthly
+one): nothing frees up earlier, and the old flat `60` told a daily caller to
+retry 1 440 times for nothing. A quota store that cannot answer (Redis down)
+is a `503` with `Retry-After: 5` and a `Quota service unavailable` body —
+fail closed, but as a stamped response instead of an exception escaping the
+stack. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
 
 **Refund when no work was done.** The unit is taken *before* the route runs
 (the check must precede the work), then given back via
 `QuotaManager.refund_pair` when the response status shows nothing was done:
-`401`, `403`, `404`, `405`, `429` (an inner guard such as the rate limiter)
-and `503` (e.g. a plugin that failed to activate). The status is read from the
-`http.response.start` frame, so streaming responses are handled without
-buffering; the refund uses the same timestamp as the consumption, so it hits
-the same period keys even across midnight. Other statuses — including `400`,
-`422` and `5xx` other than `503` — keep the unit, since the handler may have
-done (and billed) work. A failed refund is logged and leaves the unit spent.
+`401`, `403`, `404`, `405`, `409` (the idempotency layer's "duplicate still in
+flight"), `429` (an inner guard such as the rate limiter) and `503` (e.g. a
+plugin that failed to activate) — `REFUNDED_STATUSES` — and any response
+carrying `Idempotency-Replayed` (a stored response, nothing re-executed). The
+status is read from the `http.response.start` frame, so streaming responses
+are handled without buffering; the refund uses the same timestamp as the
+consumption, so it hits the same period keys even across midnight. Other
+statuses — including `400`, `422` and `5xx` other than `503` — keep the unit,
+since the handler may have done (and billed) work. So does a request whose
+scope carries `baselith.work_done`: `CostControlMiddleware` sets it on its
+post-work `429`. A failed refund is logged and leaves the unit spent; how the
+store gives a unit back is described in
+[Usage Quotas](quotas.md#refunds).
 
 Infrastructure paths are **exempt from quota metering**: `/health`,
 `/health/ready`, `/docs`, `/redoc`, `/openapi.json` and `/metrics` — plus their
@@ -649,7 +710,15 @@ or, when it is already full, after the rollover.
 The in-memory fallback prunes expired entries **amortized**: at most one O(n)
 sweep per 100 checks, and only once the map exceeds 1000 entries. The
 unamortized version swept on *every* check past the threshold — under one
-global lock, exactly when Redis is down and load is at its worst.
+global lock, exactly when Redis is down and load is at its worst. Pruning only
+drops stale windows, so within one window an address-rotating client was
+bounded by nothing; the map now has a hard ceiling of **10 000** entries
+(`RateLimiter._FALLBACK_MAX_ENTRIES`), past which the oldest are evicted first.
+
+Unauthenticated identifiers are keyed by `client_bucket(ip)` — the per-role
+`{tenant}:{role}:{ip}` key and the auth-disabled `default:anonymous:{ip}` key
+alike — so an IPv6 client cannot mint a fresh budget per address: its whole
+/64 shares one. IPv4 addresses are used as-is.
 
 ### Admin Basic-Auth helpers & lockout
 

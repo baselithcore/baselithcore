@@ -110,7 +110,8 @@ def test_network_policy_admits_only_this_releases_pods_to_tei() -> None:
             rule["from"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]
             == "baselithcore"
         )
-        assert pol["spec"]["policyTypes"] == ["Ingress"]
+        # Egress is restricted too (test_helm_chart_perimeter covers the rules).
+        assert pol["spec"]["policyTypes"] == ["Ingress", "Egress"]
 
 
 def test_hf_token_comes_from_an_existing_secret() -> None:

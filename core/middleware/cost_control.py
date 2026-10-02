@@ -47,6 +47,11 @@ _cost_context: contextvars.ContextVar[CostStats | None] = contextvars.ContextVar
 )
 
 
+#: ASGI scope key shared with ``core.middleware.quota``: set once a request
+#: has consumed resources, so a later refundable status stays charged.
+WORK_DONE_SCOPE_KEY = "baselith.work_done"
+
+
 class BudgetExceededError(Exception):
     """Raised when a budget limit is exceeded."""
 
@@ -272,6 +277,9 @@ class CostControlMiddleware:
                 )
 
         if budget_error is not None and not response_started:
+            # The handler ran up to the budget before this refusal: the outer
+            # quota layer must not read the 429 as "no work was done".
+            scope[WORK_DONE_SCOPE_KEY] = True
             response = JSONResponse(
                 status_code=429,
                 # The exception text carries the configured limits

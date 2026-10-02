@@ -16,7 +16,7 @@ from core._version import __version__ as FRAMEWORK_VERSION
 from core.config.plugin_update_apply import UpdateApplyConfig, get_update_apply_config
 from core.config.plugin_updates import PluginUpdateConfig
 from core.events import get_event_bus
-from core.plugins.signing import load_trusted_keys
+from core.plugins.signing import load_trust_roots
 
 from .announce import AnnouncementGate, build_announcement_gate
 from .apply.eligibility import already_reached, apply_status
@@ -337,14 +337,13 @@ class PluginUpdateService:
             raise RuntimeError("no sources file configured")
         sources = load_sources(sources_file)
         trust = self._config.trust
-        keys = [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
         return await run_check(
             sources,
             installed_versions(self._bundled_root),
             source=source,
             cache=self._cache,
             core_version=FRAMEWORK_VERSION,
-            trusted_keys=keys,
+            trusted_keys=load_trust_roots,
             trust=trust,
         )
 

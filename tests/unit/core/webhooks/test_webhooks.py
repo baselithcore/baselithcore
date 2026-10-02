@@ -79,6 +79,12 @@ class TestSigning:
         hdr = build_signature_header("secret", b'{"a":1}', timestamp=1000)
         assert not verify_signature("secret", b'{"a":2}', hdr, tolerance_seconds=0)
 
+    def test_non_ascii_signature_is_rejected_not_a_500(self):
+        """``compare_digest`` raises TypeError on non-ASCII str — a receiver
+        turned a crafted header into a 500 instead of a clean 401."""
+        hdr = "t=1000,v1=caf\u00e9"
+        assert not verify_signature("secret", b'{"a":1}', hdr, tolerance_seconds=0)
+
     def test_stale_timestamp_rejected(self):
         body = b"x"
         hdr = build_signature_header("secret", body, timestamp=1000)

@@ -255,6 +255,14 @@ async def enforce_rls_posture() -> None:
     if not getattr(storage, "db_rls_enabled", False):
         return
 
+    # A pooling mode that cannot carry the session-scoped tenant GUC is a
+    # configuration conflict, not a posture the database can report: refuse
+    # it in every environment, before a single connection is opened. The
+    # explicit acceptance flag is the only way through.
+    conflict = getattr(storage, "rls_pooler_conflict", lambda: None)()
+    if conflict is not None:
+        raise RlsBypassError(f"🔒 {conflict}")
+
     try:
         from core.db.connection import get_async_connection, system_tenant_scope
 

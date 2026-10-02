@@ -394,6 +394,18 @@ jobs:
           # platform digest, which a puller of the tag never resolves to.
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          # Read back through the tag, which is a mutable pointer: anything
+          # that re-pushed the tag between `create` and `inspect` would hand
+          # the signing step a foreign index. The index we sign must be the
+          # one made of exactly the two platform digests this run built.
+          MANIFESTS="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+            --format '{{range .Manifest.Manifests}}{{.Digest}} {{end}}')"
+          for want in "${AMD64_DIGEST}" "${ARM64_DIGEST}"; do
+            case " ${MANIFESTS} " in
+              *" ${want} "*) ;;
+              *) echo "index ${DIGEST} does not reference ${want}: the tag moved under us" >&2; exit 1 ;;
+            esac
+          done
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
       - name: Sign image (keyless / Sigstore OIDC)
         env:
@@ -401,7 +413,11 @@ jobs:
           IMAGE: ${{ needs.meta.outputs.image }}
           COSIGN_YES: "true"
         run: |
-          cosign sign "${IMAGE}@${DIGEST}"
+          # --recursive: sign the per-platform manifests as well as the index.
+          # A verifier that resolves the tag to its platform image (an
+          # admission controller on a single-arch node does) finds no
+          # signature on an index-only signing.
+          cosign sign --recursive "${IMAGE}@${DIGEST}"
 
       # The CVE scan that used to sit here now runs in the `scan` job, before
       # this job is allowed to start — see the block above it. Re-scanning the

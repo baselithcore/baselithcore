@@ -248,6 +248,53 @@
         },
         "tls": {
           "type": "array"
+        },
+        "guards": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "ingress-nginx only: a /metrics deny Ingress and a per-IP rate-limited Ingress over the auth paths, rendered beside the main one.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "allowSourceRange": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^/"
+                  }
+                },
+                "rps": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "burstMultiplier": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -526,6 +573,9 @@
         }
       }
     },
+    "seedResources": {
+      "$ref": "#/definitions/resources"
+    },
     "plugins": {
       "type": "object",
       "additionalProperties": false,
@@ -758,7 +808,8 @@
               "type": "string"
             },
             "image": {
-              "type": "string"
+              "type": "string",
+              "description": "Pin by content with repo:tag@sha256:<64 hex> once the digest is known."
             },
             "adminSecret": {
               "type": "object",
@@ -869,7 +920,8 @@
         },
         "image": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Pin by content with repo:tag@sha256:<64 hex> once the digest is known; a tag is a mutable pointer."
         },
         "retentionDays": {
           "type": "integer",
@@ -1039,6 +1091,11 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(sha256:[a-f0-9]{64})?$",
+                  "description": "Empty, or a full sha256 digest; wins over tag."
+                },
                 "pullPolicy": {
                   "type": "string",
                   "enum": ["Always", "IfNotPresent", "Never"]
@@ -1049,6 +1106,49 @@
               "type": "integer",
               "minimum": 1024,
               "maximum": 65535
+            },
+            "apiKeySecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "networkPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "egress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "rules": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            },
+            "podDisruptionBudget": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "maxUnavailable": {
+                  "type": ["integer", "string"]
+                }
+              }
             },
             "hfTokenSecret": {
               "type": "object",

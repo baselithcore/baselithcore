@@ -356,6 +356,19 @@ class SecurityConfig(BaseSettings):
         description="Maximum request body size in bytes. 0 disables the check.",
     )
 
+    @field_validator("metrics_password", mode="before")
+    @classmethod
+    def _empty_metrics_password_is_unset(cls, v: Any) -> Any:
+        """``METRICS_PASSWORD=`` (empty or blank) means *no* scrape credential.
+
+        An empty ``SecretStr`` would otherwise be a valid password — one the
+        route compares in constant time and accepts — so the commented
+        template line, uncommented as-is, would open ``/metrics`` to anyone.
+        """
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
     def _coerce_to_secret_set(cls, v: Any) -> Any:

@@ -193,7 +193,12 @@ Request-validation failures return **422** with code `validation_error`,
 `detail` `"Request validation failed."` and the per-field list under `errors`
 (the offending `input` is deliberately dropped, so a submitted secret is never
 echoed back). Uncaught exceptions return **500** with code `internal_error`
-and a generic `detail` — check the logged traceback by `request_id`.
+and a generic `detail` — check the logged traceback by `request_id`. The
+`500` is rendered by `UnhandledErrorMiddleware` inside the request-id,
+security-header and CORS layers, so it carries the `X-Request-ID` header, a
+non-null `request_id` member, the security headers and — for an allowed
+browser origin — `Access-Control-Allow-Origin`, like every other error. See
+[UnhandledErrorMiddleware](../core-modules/middleware.md#unhandlederrormiddleware).
 
 ---
 
@@ -225,10 +230,14 @@ mounted with `WEBHOOKS_ENABLED=true` and has no `/v1` alias.
 Beyond per-minute [rate limiting](../core-modules/auth.md#api-key-hashing),
 identities can carry **persistent usage budgets** per calendar window (daily /
 monthly), enabled with `QUOTAS_ENABLED=true`. When an identity exhausts a
-window, requests return `429` with code `quota_exceeded` until the window resets.
+window, requests return `429` until the window resets, with `Retry-After` set
+to the seconds left in that window (until midnight UTC, or the first of next
+month). An unreachable quota store answers `503` with `Retry-After: 5`.
 Limits default per identity and can be raised per key. A request that is
-admitted but then answered `401`/`403`/`404`/`405`/`429`/`503` does not spend
-a unit. See
+admitted but then answered `401`/`403`/`404`/`405`/`409`/`429`/`503`, or
+answered from the idempotency store (`Idempotency-Replayed`), does not spend
+a unit; a per-request cost-budget `429` (`budget_exceeded`) does, because the
+handler ran first. See
 [Usage Quotas](../core-modules/quotas.md).
 
 ---
@@ -531,7 +540,9 @@ until it recovers. Redis and the vector store are reported but advisory
 neither gates readiness. `vectorstore` is `false` both when the store is
 unreachable and when it answers but the configured collection does not exist
 (the server log says which); a provider without a cheap probe (pgvector)
-reports `true`. Results are cached (~30s).
+reports `true`. The three probes run concurrently, so a cache miss costs the
+slowest probe's timeout rather than the sum of the three. Results are cached
+(~30s).
 
 **Response** (200 OK / 503 Service Unavailable):
 
@@ -586,13 +597,28 @@ curl -H "X-API-Key: your-admin-api-key" http://localhost:8000/status
 Exports metrics in Prometheus format.
 
 !!! warning "Authentication Required"
-    Protected by administrator HTTP Basic Auth (`verify_credentials`) while
-    `METRICS_AUTH_REQUIRED=true` (the default), to prevent unauthorized
-    scraping of system metrics. Set it to `false` only when the scrape
-    endpoint is reachable solely from a trusted network.
+    Protected by HTTP Basic Auth while `METRICS_AUTH_REQUIRED=true` (the
+    default), to prevent unauthorized scraping of system metrics. Set it to
+    `false` only when the scrape endpoint is reachable solely from a trusted
+    network.
+
+Two credentials are accepted: the scrape-only pair `METRICS_USERNAME`
+(default `metrics`) / `METRICS_PASSWORD` (default unset), which grants this
+route and nothing else, and the admin pair. Give Prometheus the scrape-only
+one. An empty or blank `METRICS_PASSWORD` is read as **unset**, never as an
+empty password, so an uncommented `METRICS_PASSWORD=` template line does not
+open the endpoint.
+
+Both credentials share the **admin lockout**: the lockout is checked first,
+keyed by `client_bucket(ip)`, and a wrong scrape guess falls through to the
+admin check, which records the failure against the same bucket. A locked-out
+source gets `429` even with the correct scrape password, so the `200`/`429`
+split cannot confirm guesses. The payload is rendered in a worker thread
+(`asyncio.to_thread`), so a scrape — including the per-scrape merge of every
+worker's files under `PROMETHEUS_MULTIPROC_DIR` — never stalls the event loop.
 
 ```bash
-curl -u admin:password http://localhost:8000/metrics
+curl -u metrics:"$METRICS_PASSWORD" http://localhost:8000/metrics
 ```
 
 ---
@@ -922,10 +948,12 @@ code is the stable contract.
 ## Rate Limiting
 
 Rate limits are enforced per authenticated identity by the `require_*`
-dependencies (`core/middleware/rate_limiter.py`): a Redis-backed fixed window
-of `RATE_LIMIT_WINDOW_SECONDS` (default `60`), with an in-memory fallback when
-Redis is unavailable. With `AUTH_REQUIRED=false` and no API keys configured,
-anonymous traffic on user routes is metered per client IP with the same limit.
+dependencies (`core/middleware/rate_limiter.py`): a Redis-backed sliding window
+of `RATE_LIMIT_WINDOW_SECONDS` (default `60`), with an in-memory fallback
+(capped at 10 000 keys) when Redis is unavailable. With `AUTH_REQUIRED=false`
+and no API keys configured, anonymous traffic on user routes is metered per
+client address with the same limit — an IPv4 address as-is, an IPv6 address
+by its /64, so rotating through one prefix buys no extra budget.
 
 | Setting | Default | Applies to |
 | ------- | ------- | ---------- |

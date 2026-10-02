@@ -140,27 +140,50 @@ class GitHubReleaseSource:
             headers["Authorization"] = f"Bearer {self._token.get_secret_value()}"
         return headers
 
-    def _too_large(self) -> str:
-        return f"asset larger than {self.max_bytes} bytes"
-
     async def _get(self, url: str, accept: str) -> httpx.Response:
+        """GET a metadata response, read through :data:`MAX_TEXT_FILE_BYTES`.
+
+        Release lists, tags and advisories are small JSON documents; a body
+        past the cap is cut off while streaming rather than buffered, so a
+        compromised or misbehaving API host cannot exhaust the checker.
+        """
         client = self._client or httpx.AsyncClient(
             timeout=_TIMEOUT, follow_redirects=True
         )
+        cap = MAX_TEXT_FILE_BYTES
         try:
-            response = await client.get(
-                url, headers=self._headers(accept), follow_redirects=True
-            )
+            async with client.stream(
+                "GET", url, headers=self._headers(accept), follow_redirects=True
+            ) as response:
+                if not response.is_success:
+                    raise SourceError(
+                        f"GitHub returned HTTP {response.status_code}",
+                        response.status_code,
+                    )
+                declared = response.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > cap:
+                    raise SourceError(f"response is larger than {cap} bytes")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body += chunk
+                    if len(body) > cap:
+                        raise SourceError(f"response is larger than {cap} bytes")
+                headers = [
+                    (k, v)
+                    for k, v in response.headers.multi_items()
+                    if k.lower() not in ("content-encoding", "content-length")
+                ]
+                return httpx.Response(
+                    response.status_code,
+                    headers=headers,
+                    content=bytes(body),
+                    request=response.request,
+                )
         except httpx.HTTPError as exc:
             raise SourceError(f"request failed: {type(exc).__name__}") from exc
         finally:
             if self._client is None:
                 await client.aclose()
-        if not response.is_success:
-            raise SourceError(
-                f"GitHub returned HTTP {response.status_code}", response.status_code
-            )
-        return response
 
     async def _json_list(self, url: str, what: str) -> list[Any]:
         response = await self._get(url, "application/vnd.github+json")
@@ -377,13 +400,17 @@ class GitHubReleaseSource:
             return None
         return f"{base}/{slug}/commit/{sha.lower()}"
 
-    async def download(self, asset_url: str, dest: Path) -> None:
+    async def download(
+        self, asset_url: str, dest: Path, *, max_bytes: int | None = None
+    ) -> None:
         """Stream a release asset to ``dest``.
 
         Args:
             asset_url: The API asset URL from :class:`ReleaseInfo`.
             dest: Destination file; parents are created, and nothing is left
                 behind on failure.
+            max_bytes: A tighter cap than the source-wide ``max_bytes`` for
+                this one asset (``release.json`` is metadata, not a tarball).
 
         Raises:
             SourceError: If ``asset_url`` is not on the API host's scheme and
@@ -399,6 +426,8 @@ class GitHubReleaseSource:
             api.port,
         ):
             raise SourceError("asset URL is not on the GitHub API host")
+        cap = self.max_bytes if max_bytes is None else min(max_bytes, self.max_bytes)
+        too_large = f"asset larger than {cap} bytes"
         client = self._client or httpx.AsyncClient(
             timeout=_TIMEOUT, follow_redirects=True
         )
@@ -415,16 +444,16 @@ class GitHubReleaseSource:
                         response.status_code,
                     )
                 declared = response.headers.get("content-length", "")
-                if declared.isdigit() and int(declared) > self.max_bytes:
-                    raise SourceError(self._too_large())
+                if declared.isdigit() and int(declared) > cap:
+                    raise SourceError(too_large)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     with dest.open("wb") as fh:
                         written = 0
                         async for chunk in response.aiter_bytes():
                             written += len(chunk)
-                            if written > self.max_bytes:
-                                raise SourceError(self._too_large())
+                            if written > cap:
+                                raise SourceError(too_large)
                             fh.write(chunk)
                 except BaseException:
                     _discard(dest)

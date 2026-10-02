@@ -153,6 +153,11 @@ ok = verify_signature(
 )
 ```
 
+`verify_signature` compares the digests as UTF-8 bytes in constant time, so a
+crafted header with non-ASCII characters returns `False` instead of raising
+(`hmac.compare_digest` refuses a non-ASCII `str`) — a receiver built on it
+answers a clean rejection, not a `500`.
+
 `tolerance_seconds` bounds the timestamp age. Left at `None` (the default) it
 reads `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` (default `300`), so the setting
 governs every caller that does not pass an explicit value; pass an integer to

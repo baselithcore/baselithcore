@@ -373,6 +373,13 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/models \
     HUGGINGFACE_HUB_CACHE=/app/models \
     SENTENCE_TRANSFORMERS_HOME=/app/models \
+    # The cache above is the WHOLE model set this image serves. Without this,
+    # every in-process model load still asks the Hub whether `main` moved and
+    # pulls a newer revision if it has: untested weights swapped under a
+    # running deployment, a write into a cache that is read-only in
+    # production, and an outbound call the egress policy has to allow. The
+    # chart's TEI pods download their own models and are not affected.
+    HF_HUB_OFFLINE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     # Thread caps. torch and OpenBLAS size their pools from the number of CPUs
     # they can see, which is the HOST's count — not the container's CPU limit.

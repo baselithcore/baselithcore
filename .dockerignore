@@ -11,8 +11,11 @@
 **/.ruff_cache
 **/*.egg-info
 .eggs/
-.env
-.env.*
+# `**/`: a bare `.env` matches only the context root, while `COPY plugins/`,
+# `COPY configs/` and `COPY templates/` take whole trees — a filled-in
+# plugins/<name>/.env would ride straight into a pushed layer.
+**/.env
+**/.env.*
 !.env.example
 
 # === Credentials (never part of a build context) ===

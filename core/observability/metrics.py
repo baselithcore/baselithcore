@@ -14,6 +14,14 @@ from core.observability.metric_context import (
     TenantLabeledCounter,
 )
 
+# === Billing observers ===
+USAGE_SINK_FAILURES_TOTAL = Counter(
+    "mas_usage_sink_failures_total",
+    "Billed-turn reports a registered usage sink failed to accept "
+    "(a lost ledger write, surfaced per sink).",
+    ["sink"],
+)
+
 # === Chat Metrics ===
 CHAT_REQUESTS_TOTAL = Counter(
     "mas_chat_requests_total",

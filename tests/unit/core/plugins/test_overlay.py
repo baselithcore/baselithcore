@@ -105,7 +105,7 @@ def test_register_and_import_from_overlay(
 
     private_hex, public_hex = keys
     link = _store_entry(tmp_path, "demo_ov", "1.1.0", private_hex)
-    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda: [public_hex])
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     monkeypatch.delitem(sys.modules, "plugins.demo_ov", raising=False)
     assert overlay.register_overlay_packages(tmp_path) == ["demo_ov"]
     import plugins.demo_ov as mod  # type: ignore[import-not-found]
@@ -124,7 +124,7 @@ def test_no_trusted_keys_registers_nothing(
 ) -> None:
     private_hex, _ = keys
     _store_entry(tmp_path, "demo_ov2", "1.1.0", private_hex)
-    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda: [])
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [])
     assert overlay.register_overlay_packages(tmp_path) == []
 
 
@@ -186,7 +186,7 @@ def test_app_middleware_hook_comes_from_overlay(
 
     for mod in ("plugins.demo_mw", "plugins.demo_mw.plugin"):
         monkeypatch.delitem(sys.modules, mod, raising=False)
-    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda: [public_hex])
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     assert overlay.register_overlay_packages(root) == ["demo_mw"]
 
     class _App:
@@ -263,6 +263,29 @@ def test_malformed_entry_does_not_block_a_later_good_one(
     bad = _make_plugin(tmp_path, "aaa_bad", "1.0.0")
     (bad / "manifest.yaml").write_text("name: [unclosed\n")
     _store_entry(tmp_path, "zzz_good", "1.1.0", private_hex)
-    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda: [public_hex])
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     monkeypatch.delitem(sys.modules, "plugins.zzz_good", raising=False)
     assert overlay.register_overlay_packages(tmp_path) == ["zzz_good"]
+
+
+def test_package_path_is_the_verified_store_dir_not_the_link(
+    tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Imports must resolve inside the tree that was hashed and signed.
+
+    ``<overlay>/<name>`` is a symlink the updater swaps atomically while the
+    API keeps running. Registering the link as ``__path__`` would make every
+    lazy submodule import after a swap load from a tree this process never
+    verified; registering the resolved store directory pins the imports to
+    the verified release until the restart.
+    """
+    import plugins  # noqa: F401
+
+    private_hex, public_hex = keys
+    link = _store_entry(tmp_path, "demo_pin", "1.1.0", private_hex)
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
+    monkeypatch.delitem(sys.modules, "plugins.demo_pin", raising=False)
+    assert overlay.register_overlay_packages(tmp_path) == ["demo_pin"]
+    pkg = sys.modules["plugins.demo_pin"]
+    assert pkg.__path__ == [str(link.resolve())]
+    assert pkg.__path__ != [str(link)]

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Backend = Literal["remote", "local"]
@@ -44,10 +44,38 @@ class EmbeddingConfig(BaseSettings):
     )
     timeout: float = Field(default=60.0, gt=0, description="Per-request timeout (s).")
     max_retries: int = Field(
-        default=3, ge=0, le=10, description="Retries on 5xx / 429 / timeout."
+        default=3,
+        ge=0,
+        le=10,
+        description="Retries on 5xx / timeout (429 only with retry_rate_limited).",
     )
     backoff_base: float = Field(
         default=0.5, ge=0, description="First retry delay (s); doubles each attempt."
+    )
+    max_total_seconds: float = Field(
+        default=50.0,
+        gt=0,
+        description="Budget for one call, retries and backoff included; each "
+        "attempt's timeout is clamped to what is left. Keep it below the edge "
+        "proxy's read timeout (nginx/ingress default 60 s) so a slow model "
+        "server fails the call rather than the client's connection.",
+    )
+    max_response_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024,
+        description="Largest response body accepted from the server.",
+    )
+    retry_rate_limited: bool = Field(
+        default=False,
+        description="Retry on HTTP 429. Off by default: a full TEI queue is "
+        "not helped by more requests on the interactive path; enable for "
+        "batch indexing jobs.",
+    )
+    allow_insecure_key: bool = Field(
+        default=False,
+        description="Send the API key over plain http to a host that is not "
+        "loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). "
+        "Off by default: the key would cross the network in clear.",
     )
 
     @field_validator("url")
@@ -82,10 +110,38 @@ class RerankConfig(BaseSettings):
     )
     timeout: float = Field(default=60.0, gt=0, description="Per-request timeout (s).")
     max_retries: int = Field(
-        default=3, ge=0, le=10, description="Retries on 5xx / 429 / timeout."
+        default=3,
+        ge=0,
+        le=10,
+        description="Retries on 5xx / timeout (429 only with retry_rate_limited).",
     )
     backoff_base: float = Field(
         default=0.5, ge=0, description="First retry delay (s); doubles each attempt."
+    )
+    max_total_seconds: float = Field(
+        default=50.0,
+        gt=0,
+        description="Budget for one call, retries and backoff included; each "
+        "attempt's timeout is clamped to what is left. Keep it below the edge "
+        "proxy's read timeout (nginx/ingress default 60 s) so a slow model "
+        "server fails the call rather than the client's connection.",
+    )
+    max_response_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024,
+        description="Largest response body accepted from the server.",
+    )
+    retry_rate_limited: bool = Field(
+        default=False,
+        description="Retry on HTTP 429. Off by default: a full TEI queue is "
+        "not helped by more requests on the interactive path; enable for "
+        "batch indexing jobs.",
+    )
+    allow_insecure_key: bool = Field(
+        default=False,
+        description="Send the API key over plain http to a host that is not "
+        "loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). "
+        "Off by default: the key would cross the network in clear.",
     )
 
     @field_validator("url")
@@ -106,13 +162,24 @@ class QdrantServerConfig(BaseSettings):
     """``BASELITH_QDRANT_*`` settings. Server mode only — never ``path=``."""
 
     model_config = SettingsConfigDict(
-        env_prefix="BASELITH_QDRANT_", case_sensitive=False, extra="ignore"
+        env_prefix="BASELITH_QDRANT_",
+        case_sensitive=False,
+        extra="ignore",
+        populate_by_name=True,
     )
 
+    # ``QDRANT_URL`` / ``QDRANT_API_KEY`` are what every deploy file already
+    # sets for the vector store (compose, Helm, configs/.env.*); the prefixed
+    # names remain for an inference-only Qdrant and win when both are set.
     url: str | None = Field(
-        default=None, description="Qdrant server URL (e.g. http://qdrant:6333)."
+        default=None,
+        validation_alias=AliasChoices("BASELITH_QDRANT_URL", "QDRANT_URL"),
+        description="Qdrant server URL (e.g. http://qdrant:6333).",
     )
-    api_key: SecretStr | None = Field(default=None)
+    api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("BASELITH_QDRANT_API_KEY", "QDRANT_API_KEY"),
+    )
     timeout: float = Field(default=60.0, gt=0)
     prefer_grpc: bool = Field(
         default=False,

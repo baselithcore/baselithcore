@@ -444,6 +444,7 @@ metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
 | `mas_indexed_documents_current`   | Gauge     | Documents currently indexed      |
 | `mas_agent_steps_total`           | Counter   | Agent loop steps                 |
 | `mas_auth_requests_total`         | Counter   | Auth requests                    |
+| `mas_usage_sink_failures_total`   | Counter   | Billed-turn reports a registered usage sink failed to accept, labelled `sink` (a lost ledger write) |
 
 This is a representative subset — see `metrics.py` for the full set
 (rerank cache hits/misses, indexing runs, plugin load/call, agent tool

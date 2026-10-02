@@ -381,6 +381,16 @@ the remediation; elsewhere it logs at ERROR.
 `BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out for a deployment that
 knows why (a single-tenant install that wants the GUC and nothing else).
 
+!!! warning "Session pooling only"
+    The tenant GUC is bound per **session**. Behind a transaction-mode pooler
+    (PgBouncer `pool_mode = transaction`) the statements of one checkout can
+    reach different backends, so `DB_RLS_ENABLED=true` with
+    `DB_PREPARED_STATEMENTS=false` (the transaction-pooler setting) is refused
+    at boot in every environment, and by the pool factory itself.
+    `DB_RLS_ALLOW_TRANSACTION_POOLER=true` (default `false`) is the explicit
+    acceptance for a session-mode pooler with prepared statements off. See
+    [Database › RLS and connection poolers](../core-modules/db.md#rls-and-connection-poolers).
+
 ##### Provisioning the role
 
 Two supported paths, both idempotent and both keeping DDL with the owner:
@@ -472,6 +482,14 @@ A plugin whose rows are keyed by something other than the session tenant — a
 `row_tenant_scope(key)`, so the session carries the same key the rows were
 written under; otherwise every read is filtered to nothing and every write is
 refused by the policy's `WITH CHECK`.
+
+`row_tenant_scope` binds only a key the bound identity can derive to — the
+bound tenant, or the bound user's id (the two keys
+`core.context.resolve_plugin_tenant_key` produces). Any other key raises
+`ForeignTenantKeyError` (`core.db.rls_policy`, a `ValueError`), so a plugin
+cannot select another tenant's rows by passing that tenant's id; a reserved id
+that is not the bound tenant still raises `ReservedTenantError`. Outside a
+bound tenant the block runs unchanged.
 
 #### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
 

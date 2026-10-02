@@ -26,6 +26,7 @@ the flag unset the historical logger-only behaviour is byte-for-byte unchanged.
 | ------ | ---- |
 | [`audit.py`](https://github.com/baselithcore/baselithcore) | Event model (`AuditEvent`, `AuditEventType`), sink protocol, fan-out `AuditLogger`, `audit_emit()` |
 | `audit_chain.py` | `SQLiteAuditSink` — append-only, hash-chained, queryable, purgeable |
+| `_audit_models.py` | `ChainVerification`, `AuditQuery` and the internal row type — re-exported from `audit_chain.py`, so the public import path is unchanged |
 | `audit_digest.py` | `compute_entry_hash`, `coerce_chain_key`, `AuditChainKeyError`, `require_chain_key_from_env` — re-exported from `audit_chain.py`, so the public import path is unchanged |
 | `audit_setup.py` | Builds the logger from config; owns the retention sweep |
 | `core/config/audit.py` | `AuditConfig` / `get_audit_config()` |
@@ -228,6 +229,12 @@ back newest-first with `details` already decoded.
   zero new dependencies, no infrastructure, single-writer semantics that suit an
   append-only workload. Writes are offloaded to the default executor so a
   disk-bound append never blocks the request path.
+- **Committed means on disk.** The database runs with `PRAGMA synchronous=FULL`
+  (it was `NORMAL`): an evidence sink must not lose a committed record to a
+  power cut, and the extra `fsync` per append is the price of that claim.
+- **The file is owner-only.** It holds user ids and client addresses, so the
+  sink `chmod`s `AUDIT_DB_PATH` to `0600` when it opens it, whatever the
+  process umask says.
 - **Sink failures are contained.** One broken sink never breaks the request path
   and never stops the remaining sinks from recording the event.
 - **Details are bounded.** Oversized `details` are truncated *before* hashing,

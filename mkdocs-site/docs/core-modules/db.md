@@ -12,7 +12,8 @@ classes here.
 ```txt
 core/db/
 ├── connection.py     # Sync + async connection / cursor helpers and pool management
-├── session_setup.py  # Per-checkout session setup: timezone + RLS tenant binding
+├── session_setup.py  # Per-checkout session setup: timezone + system_tenant_scope
+├── _tenant_binding.py # RLS tenant binding (app.tenant_id) per pooled connection
 ├── documents.py       # Document feedback aggregation helpers
 ├── feedback.py        # Feedback persistence and analytics functions
 ├── rls_policy.py      # Core's tenant_isolation policy for plugin-owned tables
@@ -26,7 +27,12 @@ timezone-apply helpers and, now, `system_tenant_scope()` — split out purely to
 keep `connection.py` under the file-size cap. `connection.py` re-exports every
 name (`APP_TIMEZONE_NAME`, `SYSTEM_TENANT_ID`, `system_tenant_scope`, plus the
 private `_sync_apply_timezone`/`_async_apply_timezone`), so existing imports
-and test monkeypatches against `core.db.connection.<name>` are unaffected.
+and test monkeypatches against `core.db.connection.<name>` are unaffected. The
+RLS tenant-binding helpers (`_current_tenant_for_session`,
+`_sync_apply_tenant`, `_async_apply_tenant`) moved to `_tenant_binding.py` for
+the same reason and are re-exported from `connection.py` the same way;
+`core.db.connection.DB_RLS_ENABLED` is still the one switch they read, at call
+time.
 
 ---
 
@@ -111,6 +117,29 @@ if the body raises — a plain `contextmanager`, so it works in both sync and
 async code. Because it binds the tenant *context* (not just the DB session),
 everything else that scopes by tenant sees the same explicit identity too.
 
+### RLS and connection poolers
+
+The binding above is **session-scoped** (`set_config(..., false)`) and memoized
+per pooled connection. Behind a transaction-mode pooler (PgBouncer
+`pool_mode = transaction`) consecutive statements of one checkout can land on
+different backends, one of them still carrying another tenant's
+`app.tenant_id` — and the policies then isolate nothing.
+`DB_PREPARED_STATEMENTS=false` is the setting this configuration already uses
+to say "transaction pooler", so `DB_RLS_ENABLED=true` together with it is
+refused:
+
+- at startup, by `enforce_rls_posture` (`RlsBypassError`), in **every**
+  environment and before a connection is opened;
+- when a pool is first built (`RuntimeError: Refusing to open the database
+  pool: …`) — the backstop for entry points that never run the startup checks:
+  the CLI, the task-queue worker, a migration Job.
+
+The refusal is described by `StorageConfig.rls_pooler_conflict()`, which returns
+the reason or `None`. `DB_RLS_ALLOW_TRANSACTION_POOLER=true` (default `false`)
+accepts the combination explicitly; set it only when the pooler runs in
+**session** mode and prepared statements are off for another reason.
+`BASELITH_ALLOW_RLS_BYPASS` does not cover this conflict.
+
 ### Who creates the schema
 
 `core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
@@ -145,6 +174,10 @@ A plugin table with a `tenant_id` column is built by the plugin's
 `core.db.rls_policy.tenant_isolation_ddl(tables)`: the same `tenant_isolation`
 predicate as migration 010, owner-guarded and idempotent. `row_tenant_scope(key)`
 binds the key a plugin writes rows under when that is not the session tenant.
+It only binds a key the bound identity derives to — the tenant, or the user id
+under personal tenancy; any other key raises `ForeignTenantKeyError` (a
+`ValueError`, exported from `core.db.rls_policy`), so a plugin cannot reach
+another tenant's rows by passing its id.
 See [Plugin tables](../advanced/multi-tenancy.md#plugin-table-policies).
 
 ### Is row-level security actually enforced?
@@ -405,6 +438,8 @@ DB_POOL_MAX_SIZE=20                # Maximum connections in pool
 DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
 DB_STATEMENT_TIMEOUT_MS=30000      # Server-side cap per statement (0 = unbounded)
 DB_RLS_ENABLED=false               # Bind app.tenant_id per checkout for row-level security — see below
+DB_PREPARED_STATEMENTS=true        # false behind a transaction-mode pooler — see PgBouncer below
+DB_RLS_ALLOW_TRANSACTION_POOLER=false  # accept RLS with DB_PREPARED_STATEMENTS=false — see below
 DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
 ```
 
@@ -461,7 +496,9 @@ that mode:
 - the timezone and the RLS `app.tenant_id` binding are session-scoped
   `set_config` calls memoized per client connection, which a transaction-mode
   pooler does not pin to one backend. Use session pooling when
-  `DB_RLS_ENABLED=true`.
+  `DB_RLS_ENABLED=true`: RLS with `DB_PREPARED_STATEMENTS=false` is refused at
+  boot unless `DB_RLS_ALLOW_TRANSACTION_POOLER=true` — see
+  [RLS and connection poolers](#rls-and-connection-poolers).
 
 ### Indexes behind the hot queries
 

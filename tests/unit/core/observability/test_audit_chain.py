@@ -304,3 +304,16 @@ class TestAuditSetup:
         finally:
             reset_audit_logger()
             reset_audit_config()
+
+
+class TestDurabilityAndPermissions:
+    def test_commits_are_fsynced_and_the_file_is_private(self, tmp_path):
+        import stat
+
+        path = tmp_path / "evidence" / "audit.db"
+        sink = SQLiteAuditSink(path)
+        try:
+            assert sink._conn.execute("PRAGMA synchronous;").fetchone()[0] == 2  # FULL
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        finally:
+            sink.close()

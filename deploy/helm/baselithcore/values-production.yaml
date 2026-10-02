@@ -30,6 +30,15 @@ podDisruptionBudget:
 # controller's pod CIDR (cluster-specific — this is a placeholder); leaving it
 # unset makes every request look like it came from the controller and
 # collapses per-IP rate limiting / admin lockout into a single bucket.
+#
+# Two things this value is NOT: it is not "the pod CIDR" in general — the
+# whole pod network is every pod in the cluster, and any of them could then
+# forge X-Forwarded-For (pick its rate-limit bucket, dodge the admin lockout)
+# or claim https. And 10.244.0.0/16 is flannel/kindnet's default: on Calico,
+# EKS or GKE it matches nothing, every client collapses into one bucket, and
+# nothing logs it. Narrow it to the controller's own pods (its node range or
+# a dedicated node pool) and check with `kubectl get pods -n ingress-nginx
+# -o wide` that the addresses fall inside it.
 forwardedAllowIps: "10.244.0.0/16"
 
 # Measured on a local k3d install, not guessed: core's own document ingestion
@@ -76,6 +85,10 @@ ingress:
     - secretName: baselithcore-tls
       hosts:
         - api.example.com
+  # /metrics denied at the edge and the auth paths rate-limited per client
+  # IP, as the compose stack's nginx.conf already does. See values.yaml.
+  guards:
+    enabled: true
 
 worker:
   enabled: true
@@ -98,9 +111,24 @@ networkPolicy:
       podSelector:
         matchLabels:
           app.kubernetes.io/name: ingress-nginx
+    # The Prometheus pods, not the whole namespace: everything in
+    # `monitoring` (Grafana, Alertmanager, an exporter someone added) would
+    # otherwise reach the API — and every peer listed here can present a
+    # forged X-Forwarded-For if it also falls inside forwardedAllowIps.
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+  # Deny-by-default outbound (DNS, this namespace, HTTPS to the internet
+  # minus cloud metadata and the private ranges). Off in values.yaml because
+  # a datastore outside the cluster needs its own `rules` entry; a production
+  # overlay with no egress policy leaves a prompt-injected agent one hop from
+  # 169.254.169.254. Add your managed Postgres / Redis / LLM gateway under
+  # `rules` (see values.yaml) before applying.
+  egress:
+    enabled: true
 
 config:
   CORE_LOG_LEVEL: INFO
@@ -114,4 +142,6 @@ config:
 secrets:
   create: false
   existingSecret: baselithcore-secrets   # SECRET_KEY, DATA_ENCRYPTION_KEYS, DB_PASSWORD, *_API_KEY,
-  # plus the authenticated CACHE_/QUEUE_REDIS_URL, GRAPH_DB_URL and QDRANT_API_KEY
+  # plus the authenticated CACHE_/QUEUE_REDIS_URL, GRAPH_DB_URL and QDRANT_API_KEY.
+  # QDRANT_API_KEY feeds both the vector store and the core inference
+  # services; BASELITH_QDRANT_API_KEY, when set, overrides it for the latter.

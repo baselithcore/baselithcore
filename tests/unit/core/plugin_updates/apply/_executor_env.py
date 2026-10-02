@@ -91,7 +91,7 @@ def build_env(tmp_path: Path, **config: Any) -> Env:
         fetcher=fetcher,
         runner=runner,
         probe=probe,
-        trusted_keys=lambda: [pub],
+        trusted_keys=lambda _plugin: [pub],
         core_version="1.50.0",
         max_unpacked_bytes=10_000_000,
         clock=clock,

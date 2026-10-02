@@ -49,7 +49,6 @@ dependencies = [
   "aiohttp>=3.9.4",
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
-  "argon2-cffi>=23.1.0",
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
   # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
   # plugin (Fernet secret store).

@@ -40,12 +40,13 @@ shutdown.
 | `BASELITH_EMBEDDING_DIM` | `1024` | vector size |
 | `BASELITH_EMBEDDING_BATCH_SIZE` | `32` | texts per HTTP request |
 | `BASELITH_EMBEDDING_TIMEOUT` | `60` | per-request timeout, seconds |
-| `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx, 429, timeout |
+| `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx and timeouts (429 only with `RETRY_RATE_LIMITED`) |
 | `BASELITH_EMBEDDING_API_KEY` | — | optional bearer token |
 
 The `remote` backend posts `{"inputs": [...]}` to TEI's `/embed` over one
-shared `httpx.AsyncClient`, retries 5xx, 429, timeouts and connection errors
-with exponential backoff, and fails at once on any other 4xx. The `local`
+shared `httpx.AsyncClient`, retries 5xx, timeouts and connection errors
+with exponential backoff within a total time budget, and fails at once on
+any other 4xx (see [Client hardening](#client-hardening)). The `local`
 backend is a development opt-in: sentence-transformers, loaded lazily as one
 singleton per process.
 
@@ -199,8 +200,7 @@ every call and guard the bearer token. Each knob exists once per service, under
 **Retries.** Timeouts, connection errors and `408`/`425`/`500`/`502`/`503`/`504`
 are retried with exponential backoff until `MAX_RETRIES` or
 `MAX_TOTAL_SECONDS` runs out, whichever comes first. `429` is retried only
-with `RETRY_RATE_LIMITED=true` — this supersedes the "retries on 5xx, 429"
-wording earlier on this page. Any other `4xx` fails at once, and the upstream
+with `RETRY_RATE_LIMITED=true`. Any other `4xx` fails at once, and the upstream
 error body is never echoed into the raised `InferenceError` (a TEI error text
 can name model paths or internal hosts).
 

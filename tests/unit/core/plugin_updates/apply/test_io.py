@@ -71,7 +71,9 @@ class _Source:
         self.asked.append((plugin, slug, tag))
         return self.releases.get(tag)
 
-    async def download(self, asset_url: str, dest: Path) -> None:
+    async def download(
+        self, asset_url: str, dest: Path, *, max_bytes: int | None = None
+    ) -> None:
         self.downloads.append(asset_url)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(asset_url.encode())
@@ -137,3 +139,35 @@ async def test_http_probe_status_and_unreachable() -> None:
 
     down = httpx.AsyncClient(transport=httpx.MockTransport(boom))
     assert await http_probe("http://127.0.0.1:1/health/ready", client=down) == 0
+
+
+def test_schema_env_refuses_a_shared_owner_file(tmp_path: Path) -> None:
+    owner = tmp_path / "owner.env"
+    owner.write_text("POSTGRES_PASSWORD=pw\n")
+    owner.chmod(0o664)  # group-writable: anyone in the group can swap the owner
+    cfg = UpdateApplyConfig(state_dir=tmp_path / "s", schema_env_file=owner)
+    with pytest.raises(SchemaEnvError, match="writable"):
+        schema_env(cfg)
+    owner.chmod(0o600)
+    assert schema_env(cfg)["POSTGRES_PASSWORD"] == "pw"
+
+
+def test_schema_env_withholds_the_updaters_own_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PLUGIN_UPDATE_GITHUB_TOKEN", "ghp_secret")
+    monkeypatch.setenv("ADMIN_PASS", "adm")
+    monkeypatch.setenv("ADMIN_PASS_HASHED", "pbkdf2$x")
+    monkeypatch.setenv("METRICS_PASSWORD", "met")
+    monkeypatch.setenv("UPDATE_APPLY_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x")
+    env = schema_env(UpdateApplyConfig(state_dir=tmp_path / "s"))
+    for name in (
+        "PLUGIN_UPDATE_GITHUB_TOKEN",
+        "ADMIN_PASS",
+        "ADMIN_PASS_HASHED",
+        "METRICS_PASSWORD",
+        "UPDATE_APPLY_STATE_DIR",
+    ):
+        assert name not in env
+    assert env["DATABASE_URL"] == "postgresql://x"

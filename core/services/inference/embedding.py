@@ -48,6 +48,10 @@ class RemoteEmbeddingBackend:
             max_retries=config.max_retries,
             backoff_base=config.backoff_base,
             api_key=config.api_key.get_secret_value() if config.api_key else None,
+            max_total_seconds=config.max_total_seconds,
+            max_response_bytes=config.max_response_bytes,
+            retry_rate_limited=config.retry_rate_limited,
+            allow_insecure_key=config.allow_insecure_key,
             transport=transport,
         )
 

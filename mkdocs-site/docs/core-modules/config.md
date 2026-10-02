@@ -597,6 +597,7 @@ print(config.db_user)             # "baselith"          (DB_USER)
 print(config.conninfo)            # "postgresql://..."  (computed)
 print(config.postgres_enabled)    # True                (POSTGRES_ENABLED)
 print(config.db_rls_enabled)      # False               (DB_RLS_ENABLED)
+print(config.rls_pooler_conflict())  # None, or why RLS + DB_PREPARED_STATEMENTS=false is refused
 
 # GraphDB (RedisGraph)
 print(config.graph_db_url)        # "redis://localhost:6379"  (GRAPH_DB_URL)
@@ -618,6 +619,7 @@ DB_USER=baselith
 DB_PASSWORD=your-strong-password     # Required in production — stored as SecretStr
 # DATABASE_URL=postgresql://...      # Optional: overrides the discrete DB_* fields
 # DB_RLS_ENABLED=false               # Opt-in: bind app.tenant_id per checkout for Postgres RLS
+# DB_RLS_ALLOW_TRANSACTION_POOLER=false  # Accept RLS with DB_PREPARED_STATEMENTS=false (session-mode pooler only)
 
 GRAPH_DB_ENABLED=true
 GRAPH_DB_URL=redis://localhost:6379
@@ -805,7 +807,7 @@ CROSS_ORIGIN_OPENER_POLICY=same-origin-allow-popups   # COOP header; empty omits
 CROSS_ORIGIN_RESOURCE_POLICY=same-origin              # CORP header; same-site for split subdomains, empty omits
 METRICS_AUTH_REQUIRED=true           # Basic auth on /metrics
 METRICS_USERNAME=metrics             # Scrape-only credential for /metrics
-METRICS_PASSWORD=                    # SecretStr; unset = only the admin credential opens /metrics
+METRICS_PASSWORD=                    # SecretStr; unset (or empty/blank) = only the admin credential opens /metrics
 ```
 
 `METRICS_USERNAME` / `METRICS_PASSWORD` are a **scrape-only** credential: the
@@ -814,7 +816,11 @@ consults them. Give Prometheus this pair rather than the admin credential — a
 ServiceMonitor's `basicAuth` Secret is readable by the monitoring operator in
 another namespace, and the admin pair would open `/admin` to whoever reads it.
 The admin credential still opens `/metrics`, so existing scrapers keep working;
-with `METRICS_PASSWORD` unset it is the only way in.
+with `METRICS_PASSWORD` unset it is the only way in. An empty or blank
+`METRICS_PASSWORD` is normalised to unset by a `mode="before"` validator — an
+empty `SecretStr` would otherwise be a valid password the route accepts. Both
+credentials share the admin lockout; see
+[`GET /metrics`](../api/rest.md#get-metrics-prometheus-metrics).
 
 The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
 stuffing per source IP: rejected authentication attempts (counted on
@@ -1346,4 +1352,9 @@ updates off. See
 `core.config.inference` holds the settings of the embedding, rerank and Qdrant
 services: `BASELITH_EMBEDDING_*`, `BASELITH_RERANK_*` and `BASELITH_QDRANT_*`.
 `remote` (Hugging Face TEI) is the default backend; `local` is a development
-opt-in. See [Inference Services](../advanced/inference-services.md).
+opt-in. The Qdrant URL and key also bind from the unprefixed `QDRANT_URL` /
+`QDRANT_API_KEY` that every deploy file already sets for the vector store
+(`AliasChoices`; the prefixed name wins when both are set). The embedding and
+rerank clients carry four hardening knobs each — `MAX_TOTAL_SECONDS`,
+`MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. See
+[Inference Services](../advanced/inference-services.md).

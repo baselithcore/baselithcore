@@ -100,7 +100,7 @@ class Executor(ActivationMixin):
         fetcher: ReleaseFetcher,
         runner: CommandRunner,
         probe: Callable[[], Awaitable[int]],
-        trusted_keys: Callable[[], list[str]],
+        trusted_keys: Callable[[str], list[str]],
         core_version: str,
         max_unpacked_bytes: int,
         clock: Callable[[], float] = time.monotonic,
@@ -279,7 +279,7 @@ class Executor(ActivationMixin):
         """Stage the pinned release; ``(store entry, link target before the run)``."""
         if not run.to_version or not run.tarball_sha256:
             raise StagingError("verification_failed", "the run pins no release")
-        keys = await asyncio.to_thread(self._keys)
+        keys = await asyncio.to_thread(self._keys, run.plugin)
         meta = await self._release_meta(run, keys)
         tarball = await self._ensure_tarball(run)
         try:
@@ -386,7 +386,7 @@ class Executor(ActivationMixin):
         except ValueError:
             return await self._fail(run, "overlay_refused", _BAD_LINK)
         if target is not None:
-            keys = await asyncio.to_thread(self._keys)
+            keys = await asyncio.to_thread(self._keys, run.plugin)
             try:
                 refused = await asyncio.to_thread(
                     self._verify_target_locked, run, target, keys

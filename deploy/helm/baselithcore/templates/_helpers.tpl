@@ -265,6 +265,41 @@ BASELITH_RERANK_URL: {{ printf "http://%s:80" (include "baselithcore.teiName" (d
 {{- end -}}
 
 {{/*
+Image reference of a chart-deployed TEI server: digest wins over tag, like
+`baselithcore.image`.
+*/}}
+{{- define "baselithcore.teiImage" -}}
+{{- $image := .Values.inference.tei.image -}}
+{{- if $image.digest -}}
+{{- if not (hasPrefix "sha256:" $image.digest) -}}
+{{- fail (printf "inference.tei.image.digest must be a full digest starting with 'sha256:'; got %q" $image.digest) -}}
+{{- end -}}
+{{- printf "%s@%s" $image.repository $image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $image.repository $image.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Container env the api and worker pods need to authenticate to the chart's
+TEI servers. Empty unless `inference.tei.apiKeySecret.name` is set; the same
+Secret key feeds TEI's own API_KEY (tei.yaml), so the two cannot drift.
+Rendered as `env` entries, which win over the envFrom ConfigMap/Secret.
+*/}}
+{{- define "baselithcore.inferenceEnv" -}}
+{{- $tei := .Values.inference.tei -}}
+{{- if and $tei.enabled $tei.apiKeySecret.name }}
+{{- range $var := list "BASELITH_EMBEDDING_API_KEY" "BASELITH_RERANK_API_KEY" }}
+- name: {{ $var }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $tei.apiKeySecret.name | quote }}
+      key: {{ $tei.apiKeySecret.key | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Telemetry env for the ConfigMap (api and worker both consume it via envFrom).
 
 Every key is skipped when `.Values.config` already carries it: the two would
@@ -344,6 +379,8 @@ initContainers:
     imagePullPolicy: {{ .Values.image.pullPolicy }}
     securityContext:
       {{- toYaml .Values.securityContext | nindent 6 }}
+    resources:
+      {{- toYaml .Values.seedResources | nindent 6 }}
     command:
       - sh
       - -c

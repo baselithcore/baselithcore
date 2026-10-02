@@ -15,6 +15,11 @@ from psycopg.rows import AsyncRowFactory, RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from core.config import get_storage_config
+from core.db._tenant_binding import (
+    _async_apply_tenant,
+    _current_tenant_for_session,
+    _sync_apply_tenant,
+)
 from core.db._tracking import TrackingAsyncCursor, TrackingCursor, _track_db_query
 
 # Re-exported for import compatibility: these used to live in this module and
@@ -33,6 +38,9 @@ __all__ = [
     "SYSTEM_TENANT_ID",
     "TrackingAsyncCursor",
     "TrackingCursor",
+    "_async_apply_tenant",
+    "_current_tenant_for_session",
+    "_sync_apply_tenant",
     "_track_db_query",
     "system_tenant_scope",
 ]
@@ -65,87 +73,6 @@ _REPLICA_POOL_OPENED: bool = False
 _ASYNC_REPLICA_POOL_OPENED: bool = False
 
 
-def _current_tenant_for_session() -> str:
-    """Resolve the tenant to bind to the DB session.
-
-    Outside a request (background task, script) the tenant contextvar may be
-    unset. What that should mean depends on whether row-level security is on:
-
-    * **RLS off** — nothing downstream reads ``app.tenant_id`` for access
-      control, so an unbound caller degrades to ``"default"`` exactly as
-      before and its work is not broken by a missing context.
-    * **RLS on** — ``"default"`` is the worst possible answer. Every RLS
-      policy would then match the ``default`` tenant's rows, so an unbound
-      background job reads and writes another tenant's data while the database
-      reports that isolation is enforced. Such a caller must say what it is:
-      wrap it in :func:`system_tenant_scope`.
-
-    Returns:
-        The tenant id to bind to ``app.tenant_id``.
-
-    Raises:
-        core.context.TenantContextError: RLS is enabled and no tenant is bound.
-    """
-    from core.context import (
-        TenantContextError,
-        get_current_tenant_id,
-        tenant_is_bound,
-    )
-
-    # Ask whether a tenant is *bound*, not what it resolves to:
-    # ``get_current_tenant_id`` only distinguishes bound from unbound when
-    # ``strict_tenant_isolation`` is on, and RLS must fail closed regardless of
-    # that unrelated switch.
-    if DB_RLS_ENABLED and not tenant_is_bound():
-        raise TenantContextError(
-            "Row-level security is enabled (DB_RLS_ENABLED=true) but no tenant "
-            "is bound to this context, so app.tenant_id cannot be set. Bind the "
-            "request tenant upstream, or wrap out-of-request work in "
-            "core.db.connection.system_tenant_scope()."
-        )
-
-    try:
-        return get_current_tenant_id()
-    except TenantContextError:
-        return "default"
-
-
-def _sync_apply_tenant(connection: Connection[object]) -> None:
-    """Bind ``app.tenant_id`` to a sync connection for RLS (opt-in).
-
-    A pooled connection serves different tenants across requests, so the GUC
-    must always reflect the current one — but re-issuing ``set_config`` when
-    the bound tenant is *unchanged* costs one full round-trip per checkout
-    for nothing. The last-applied tenant is memoized on the connection
-    (``set_config(..., false)`` is session-scoped, so it survives checkouts on
-    the same physical connection) and only a tenant change re-applies it.
-    """
-    tenant = _current_tenant_for_session()
-    if getattr(connection, "_app_tenant_id", None) == tenant:
-        return
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT set_config('app.tenant_id', %s, false)",
-            (tenant,),
-        )
-    # Dynamic marker attribute — psycopg's Connection doesn't declare it.
-    setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
-
-
-async def _async_apply_tenant(connection: AsyncConnection[object]) -> None:
-    """Async counterpart of :func:`_sync_apply_tenant`."""
-    tenant = _current_tenant_for_session()
-    if getattr(connection, "_app_tenant_id", None) == tenant:
-        return
-    async with connection.cursor() as cursor:
-        await cursor.execute(
-            "SELECT set_config('app.tenant_id', %s, false)",
-            (tenant,),
-        )
-    # Dynamic marker attribute — psycopg's AsyncConnection doesn't declare it.
-    setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
-
-
 def _connection_kwargs(cursor_factory: type[Any]) -> dict[str, Any]:
     """Per-connection settings shared by every pool (primary and replica).
 
@@ -161,12 +88,28 @@ def _connection_kwargs(cursor_factory: type[Any]) -> dict[str, Any]:
     }
 
 
+def _refuse_rls_pooler_conflict() -> None:
+    """Refuse to build a pool whose pooling mode defeats RLS tenant binding.
+
+    The startup posture check reports the same conflict first and more
+    readably; this is the backstop for every entry point that never runs it
+    (the CLI, the task-queue worker, a migration Job).
+    """
+    # ``getattr`` + ``isinstance``: legacy test doubles stub the storage
+    # config with a bare namespace or a MagicMock.
+    describe = getattr(_storage_config, "rls_pooler_conflict", None)
+    problem = describe() if callable(describe) else None
+    if isinstance(problem, str):
+        raise RuntimeError(f"Refusing to open the database pool: {problem}")
+
+
 def _get_pool() -> ConnectionPool:
     """Get or initialize the synchronous connection pool."""
     global _POOL
     if _POOL is None:
         if not POSTGRES_ENABLED:
             raise RuntimeError("PostgreSQL is disabled (POSTGRES_ENABLED=false).")
+        _refuse_rls_pooler_conflict()
         _POOL = ConnectionPool(
             conninfo=DB_CONNINFO,
             min_size=DB_POOL_MIN_SIZE,
@@ -190,6 +133,7 @@ def _get_async_pool() -> AsyncConnectionPool:
     if _ASYNC_POOL is None:
         if not POSTGRES_ENABLED:
             raise RuntimeError("PostgreSQL is disabled (POSTGRES_ENABLED=false).")
+        _refuse_rls_pooler_conflict()
         _ASYNC_POOL = AsyncConnectionPool(
             conninfo=DB_CONNINFO,
             min_size=DB_POOL_MIN_SIZE,

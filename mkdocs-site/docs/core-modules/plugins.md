@@ -35,7 +35,8 @@ core/plugins/
 ├── app_setup.py          # Sync pre-discovery for app-level middleware hooks
 ├── integrity.py          # Hashed surface (V1–V5), canonical manifest digest
 ├── integrity_policy.py   # Verification policy: strict mode, legacy fallback
-├── signing.py            # Ed25519 signatures, trust roots and trust store
+├── signing.py            # Ed25519 signatures and trust roots (re-exports the store)
+├── _trust_store.py       # TrustedKey + trust store file loader (expiry, revocation, plugin scope)
 ├── manifest_rewrite.py   # Comment-preserving manifest writer used by signing
 ├── declarative.py        # SKILL.md declarative skill loader
 ├── skills_service.py     # SkillService — registry-backed catalog + gated activation
@@ -428,12 +429,17 @@ When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
 the package `plugins.<name>` before any plugin module is imported
 (`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
 carry a signature that verifies against the trust store regardless of
-`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and must pass the newer-than-bundled and
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES` — against the keys whose `plugins` scope
+covers that entry's name (`load_trust_roots(name)`), so a key scoped to other
+plugins cannot vouch for it — and must pass the newer-than-bundled and
 core-bounds rule above. The entry itself may be a symlink into
 `<overlay>/.store/` (a link pointing elsewhere is refused), but a tree with a
 symlink anywhere below it is refused (`core/plugins/_links.py`), since the hash
 walk does not follow links. A rejected entry is logged and the bundled plugin
-loads instead.
+loads instead. An accepted entry's package is registered from the **resolved**
+store directory, not from the link: an update swaps the link atomically while
+the process runs, and only the tree verified at registration may back a later
+lazy submodule import.
 
 `discovery.apply_overlay()` then swaps a registered overlay entry in for its
 bundled namesake, keeping scan order, and appends overlay-only plugins. The

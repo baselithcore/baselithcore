@@ -36,7 +36,9 @@ logger = get_logger(__name__)
 _HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 _HOOK_MARKER = "_baselith_drain_hook"
 
-_lock = threading.Lock()
+# Re-entrant: a stop signal may be delivered while this thread already holds
+# the lock inside ``_event_for``; ``mark_draining`` then runs nested.
+_lock = threading.RLock()
 _draining = False
 _events: dict[asyncio.AbstractEventLoop, asyncio.Event] = {}
 
