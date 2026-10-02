@@ -276,6 +276,15 @@ logged without blocking boot. The method is a `classmethod` so it never pays a
 plugin's `__init__` cost. Write middleware as **pure ASGI** (never
 `BaseHTTPMiddleware`).
 
+A plugin the enable-list disables at boot is skipped by this pass, so enabling
+it later at runtime would leave it without its SPA mount. Activation therefore
+calls `apply_late_app_hook(app, plugin)`, which runs the hook once per plugin
+class per app: `app.mount(...)` works on the running app, while
+`app.add_middleware(...)` cannot join a started Starlette stack — that
+`RuntimeError` is logged as a restart-required warning and activation still
+completes, so a plugin whose hook adds middleware needs a restart to finish
+enabling.
+
 !!! warning "This path imports plugin code before the async loader runs"
     `apply_plugin_app_middleware` executes at app-construction time, so it is
     the *first* place a plugin's module body runs. Both gates therefore apply

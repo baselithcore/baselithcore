@@ -1086,6 +1086,7 @@
       "SkillService",
       "VENDOR_EXTENSION_PREFIX",
       "VersionConstraint",
+      "apply_late_app_hook",
       "apply_plugin_app_middleware",
       "backstage_exporter_router",
       "check_plugin_compatibility",

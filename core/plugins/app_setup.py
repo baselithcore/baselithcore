@@ -31,6 +31,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import sys
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +152,55 @@ def _overrides_setup_app_middleware(plugin_class: type[Plugin]) -> bool:
             if "setup_app_middleware" in base.__dict__:
                 return True
         return False
+    return True
+
+
+_HOOKS_APPLIED: weakref.WeakKeyDictionary[Any, set[str]] = weakref.WeakKeyDictionary()
+
+
+def _applied_hooks(app: Any) -> set[str]:
+    """Names of plugin classes whose ``setup_app_middleware`` already ran on ``app``."""
+    return _HOOKS_APPLIED.setdefault(app, set())
+
+
+def apply_late_app_hook(app: Any, plugin: Plugin) -> bool:
+    """Run ``setup_app_middleware`` for a plugin enabled after app construction.
+
+    ``create_app()`` skips the hook for plugins the config disables, so a
+    runtime enable would otherwise never get its SPA mount. Mounts can be added
+    to a running app (the hook is keyed by class name, since the loader and the
+    pre-discovery import the module separately); middleware cannot (Starlette has frozen the stack), which
+    is reported as a restart-required warning instead of raised.
+
+    Returns:
+        True when the hook ran now; False if it was absent, already applied
+        or could not be applied without a restart.
+    """
+    plugin_class = type(plugin)
+    if not _overrides_setup_app_middleware(plugin_class):
+        return False
+    applied = _applied_hooks(app)
+    if plugin_class.__name__ in applied:
+        return False
+    try:
+        plugin_class.setup_app_middleware(app)
+    except RuntimeError as exc:
+        logger.warning(
+            "Plugin %s needs an app restart to finish enabling: %s",
+            plugin.metadata.name,
+            exc,
+        )
+        return False
+    except Exception as exc:
+        logger.error(
+            "Plugin %s.setup_app_middleware failed on runtime enable: %s",
+            plugin_class.__name__,
+            exc,
+            exc_info=True,
+        )
+        return False
+    applied.add(plugin_class.__name__)
+    logger.info("🔌 Plugin app-middleware applied late: %s", plugin.metadata.name)
     return True
 
 
@@ -277,6 +327,7 @@ def apply_plugin_app_middleware(
 
         try:
             plugin_class.setup_app_middleware(app)
+            _applied_hooks(app).add(plugin_class.__name__)
             applied += 1
             logger.info("🔌 Plugin app-middleware applied: %s", item.name)
         except Exception as exc:

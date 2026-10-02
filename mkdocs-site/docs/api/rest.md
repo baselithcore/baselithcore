@@ -755,6 +755,15 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
     Hot-reload is exposed via this REST API only; there is **no**
     `reload` subcommand under `baselith plugin`.
 
+!!! note "Enabling a plugin that was disabled at boot"
+    `POST /api/plugins/{name}/enable` also runs the plugin's
+    `setup_app_middleware` hook, once per plugin class, so a plugin skipped at
+    boot gets its SPA mount on enable. Middleware cannot join an already
+    started stack: a hook that calls `app.add_middleware(...)` logs a
+    restart-required warning and the plugin finishes enabling only after a
+    restart. See
+    [Plugins › App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
+
 ### Plugin update checks (`/api/plugins/updates`)
 
 Served by `core/plugin_updates/api.py`, admin-only, and registered before the
