@@ -4,7 +4,7 @@ Reranker service for Advanced RAG.
 
 import asyncio
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from core.observability.logging import get_logger
 
@@ -20,6 +20,7 @@ else:
 
 from core.config.services import get_chat_config
 from core.models.domain import SearchResult
+from core.nlp._remote import RemoteCrossEncoder, use_remote_reranker
 from core.nlp.rerank import score_pairs
 
 logger = get_logger(__name__)
@@ -41,13 +42,16 @@ class Reranker:
         self.model_name = model_name or getattr(
             self.config, "reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
-        self._model = None
+        self._model: CrossEncoder | None = None
         self._enabled = False
         # Serializes the first load: concurrent cold callers each wait in a
         # worker thread instead of each constructing a CrossEncoder.
         self._load_lock = threading.Lock()
 
-        if CrossEncoder:
+        # The core RerankService (TEI) serves the model when configured, so a
+        # runtime without sentence-transformers can still rerank.
+        self._remote = use_remote_reranker(str(self.model_name))
+        if CrossEncoder or self._remote:
             try:
                 # We load the model lazily or on init? Init is better for fail-fast, but lazy is better for startup.
                 # Let's lazy load during first usage to speed up cli commands if not used.
@@ -68,13 +72,17 @@ class Reranker:
         Returns:
             Optional[CrossEncoder]: The loaded model or None if initialization failed.
         """
-        if self._model is None and self._enabled and CrossEncoder:
+        if self._model is None and self._enabled and (CrossEncoder or self._remote):
             with self._load_lock:
                 # Re-checked under the lock: a racing loader may have won.
                 if self._model is None and self._enabled:
                     try:
                         logger.info(f"Loading CrossEncoder model: {self.model_name}")
-                        self._model = CrossEncoder(self.model_name)
+                        self._model = (
+                            cast("CrossEncoder", RemoteCrossEncoder())
+                            if self._remote
+                            else CrossEncoder(self.model_name)
+                        )
                     except Exception as e:
                         logger.error(f"Failed to load CrossEncoder model: {e}")
                         self._enabled = False

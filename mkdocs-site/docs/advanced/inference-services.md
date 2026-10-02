@@ -147,3 +147,79 @@ you can point at servers you already run.
 - A plugin that still loads its own models (see
   `configs/inprocess_ml_allowlist.yaml`) keeps the old memory footprint until it
   migrates; size the API pod's `resources` for the plugin set you actually run.
+
+## The core's own models
+
+The embedder and reranker the core itself uses — retrieval, memory, the chat
+pipeline, `core.services.retrieval.Reranker` — go through the same services.
+`core.nlp.models.get_embedder()` and `get_reranker()` return TEI-backed
+stand-ins (`core.nlp._remote`) with the sentence-transformers surface
+(`encode`, `get_sentence_embedding_dimension`, `predict`) when:
+
+- the backend is `remote` and its URL is set, **and**
+- the requested model is the one the server serves (`BASELITH_EMBEDDING_MODEL`,
+  `BASELITH_RERANK_MODEL`), or no local sentence-transformers is installed —
+  then the served model is used and a `remote_model_substituted` warning names
+  both.
+
+Otherwise they load the local model exactly as before. The embedding cache and
+its keys are unchanged.
+
+## An image without torch
+
+The `Dockerfile` takes `--build-arg ML_RUNTIME=remote`. It skips torch,
+sentence-transformers, FlagEmbedding and accelerate and the model pre-cache,
+and fails the build if any other requirement pulls torch in. The default stays
+`local`.
+
+```bash
+docker build --build-arg ML_RUNTIME=remote -t baselith:remote .
+```
+
+Measured on the same tree, with only `auth` and `wikigen` enabled and the
+inference services configured: the `remote` image is 7.9 GB against 13.1 GB, and
+the API process (one worker) holds about 250 MB RSS after startup, where an
+in-process BGE-M3 plus reranker cost 2.8 GB. A plugin listed in
+`configs/inprocess_ml_allowlist.yaml` cannot run on this image: disable it, or
+build `local`.
+
+## Client hardening
+
+The embedding and rerank clients (`core/services/inference/_http.py`) bound
+every call and guard the bearer token. Each knob exists once per service, under
+`BASELITH_EMBEDDING_*` and `BASELITH_RERANK_*`:
+
+| Variable suffix | Default | Meaning |
+| --- | --- | --- |
+| `MAX_TOTAL_SECONDS` | `50` | Budget for one call, retries and backoff included. Each attempt's timeout is clamped to what is left, so the call fails before the edge proxy's read timeout (nginx/ingress default 60 s) instead of surfacing to the user as a `504`. |
+| `MAX_RESPONSE_BYTES` | `67108864` (64 MiB) | Largest response body accepted. A larger declared `Content-Length` is refused before reading; otherwise the body is streamed and cut off past the cap. Minimum `1024`. |
+| `RETRY_RATE_LIMITED` | `false` | Retry on HTTP `429`. Off by default: TEI answers `429` when its queue is full, and more requests from the interactive path only lengthen the backlog. Enable it for batch indexing jobs. |
+| `ALLOW_INSECURE_KEY` | `false` | Send `API_KEY` over plain `http` to a host that may be public. |
+
+**Retries.** Timeouts, connection errors and `408`/`425`/`500`/`502`/`503`/`504`
+are retried with exponential backoff until `MAX_RETRIES` or
+`MAX_TOTAL_SECONDS` runs out, whichever comes first. `429` is retried only
+with `RETRY_RATE_LIMITED=true` — this supersedes the "retries on 5xx, 429"
+wording earlier on this page. Any other `4xx` fails at once, and the upstream
+error body is never echoed into the raised `InferenceError` (a TEI error text
+can name model paths or internal hosts).
+
+**Where the key may travel.** With `API_KEY` set, the client is built only when
+the URL is `https`, or plain `http` to a host that cannot be on the public
+internet: loopback (`localhost`, `127.0.0.1`, `::1`), a single-label name (a
+compose service or same-namespace Kubernetes Service such as
+`http://tei-embed:8080`), or a cluster-local name ending in `.svc` or
+`.cluster.local`. Anything else raises `InferenceConfigError` when the service
+is built, unless `ALLOW_INSECURE_KEY=true` accepts the risk for that service.
+Environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`) are ignored by these clients
+(`trust_env=False`), so the token cannot be routed through one.
+
+**Qdrant names.** `BASELITH_QDRANT_URL` and `BASELITH_QDRANT_API_KEY` also bind
+from the unprefixed `QDRANT_URL` and `QDRANT_API_KEY` that the compose files,
+the Helm chart and `configs/.env.*` already set for the vector store. The
+prefixed names remain for an inference-only Qdrant and win when both are set.
+
+For the Helm side — the shared TEI bearer token (`inference.tei.apiKeySecret`),
+the image digest pin, the TEI egress policy and disruption budget — and for
+the compose `inference` profile, see
+[Deployment › Inference model servers](deployment.md#inference-model-servers).

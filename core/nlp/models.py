@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.cache.single_flight import LayeredSingleFlight, build_single_flight
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
+from core.nlp import _remote  # TEI-backed stand-ins when BASELITH_*_URL is set
 from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
@@ -451,13 +452,14 @@ def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     """
     vs_config = get_vectorstore_config()
     storage_config = get_storage_config()
-
-    _require_sentence_transformers()
-
     actual_model_name = model_name or vs_config.embedding_model
-    sentence_transformer, _ = _model_classes()
-    assert sentence_transformer is not None
-    base_model = sentence_transformer(actual_model_name)
+    if _remote.use_remote_embedder(actual_model_name):  # core EmbeddingService
+        base_model: Any = _remote.RemoteEmbeddingModel()
+    else:
+        _require_sentence_transformers()
+        sentence_transformer, _ = _model_classes()
+        assert sentence_transformer is not None
+        base_model = sentence_transformer(actual_model_name)
 
     return CachedEmbedder(
         base_model,
@@ -479,9 +481,10 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     Returns:
         CrossEncoder instance
     """
-    chat_config = get_chat_config()
+    actual_model_name = model_name or get_chat_config().reranker_model
+    if _remote.use_remote_reranker(actual_model_name):
+        return cast("CrossEncoder", _remote.RemoteCrossEncoder())
     _require_sentence_transformers()
-    actual_model_name = model_name or chat_config.reranker_model
     _, cross_encoder = _model_classes()
     assert cross_encoder is not None
     # sentence-transformers ships no py.typed, so the constructor is `Any`.

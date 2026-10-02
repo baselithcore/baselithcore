@@ -52,6 +52,12 @@ WORKDIR /app
 # --- Build-time args ---
 ARG EMBEDDER_MODEL="BAAI/bge-m3"
 ARG RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+# `local` (default): torch, sentence-transformers and the pre-cached models,
+# for plugins that still run a model in-process. `remote`: none of them —
+# embedding and reranking come from the core inference services (TEI over
+# HTTP, core.services.inference), so the API image carries no ML runtime. Any
+# plugin listed in configs/inprocess_ml_allowlist.yaml needs `local`.
+ARG ML_RUNTIME="local"
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -133,6 +139,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # multi-line block (`name==v \` followed by `--hash=...` continuation lines),
 # the CUDA strip is block-aware: a plain `grep -v` on the name line would leave
 # its hash lines behind, glued onto the previous requirement.
+#
+# ML_RUNTIME=remote strips the packages that need torch as well: torch,
+# torchvision and every lock entry that depends on torch directly or
+# transitively (accelerate, docling-ibm-models, sentence-transformers —
+# computed from uv.lock; recompute when the lock changes). The guard after the
+# install fails the build if torch still ends up in the prefix.
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -142,7 +154,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
         --extra web --extra browser --extra documents \
         --format requirements-txt -o /tmp/requirements.lock.txt \
-    && awk '/^[^ #]/ { skip = ($0 ~ /^(nvidia-|triton|cuda-)/) } !skip' \
+    && case "${ML_RUNTIME}" in \
+         local) strip='^(nvidia-|triton|cuda-)' ;; \
+         remote) strip='^(nvidia-|triton|cuda-|torch==|torchvision==|sentence-transformers==|accelerate==|docling-ibm-models==)' ;; \
+         *) echo "ERROR: ML_RUNTIME must be 'local' or 'remote', got '${ML_RUNTIME}'" >&2; exit 1 ;; \
+       esac \
+    && awk -v strip="$strip" '/^[^ #]/ { skip = ($0 ~ strip) } !skip' \
         /tmp/requirements.lock.txt > /tmp/requirements.image.txt \
     && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages" \
     && if grep -qE '^(nvidia-|triton|cuda-)' /tmp/requirements.image.txt; then \
@@ -209,17 +226,25 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install "setuptools>=83.0.0" \
-    && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --prefix /install \
-        torch==2.13.0 \
-        torchvision==0.28.0 \
-        --index-url https://download.pytorch.org/whl/cpu \
+    && if [ "${ML_RUNTIME}" = "local" ]; then \
+         PYTHONPATH=/install/lib/python3.12/site-packages \
+         pip install --prefix /install \
+          torch==2.13.0 \
+          torchvision==0.28.0 \
+          --index-url https://download.pytorch.org/whl/cpu; \
+       fi \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install --require-hashes --no-deps \
         -r /tmp/requirements.image.txt \
     && if ls /install/lib/python3.12/site-packages | grep -qE '^(nvidia|cuda)'; then \
          echo "ERROR: CUDA packages installed into a CPU-only image" >&2; \
          ls /install/lib/python3.12/site-packages | grep -E '^(nvidia|cuda)' >&2; \
+         exit 1; \
+       fi \
+    && if [ "${ML_RUNTIME}" = "remote" ] \
+         && ls /install/lib/python3.12/site-packages | grep -qiE '^(torch|sentence_transformers)'; then \
+         echo "ERROR: ML_RUNTIME=remote but an ML runtime is in the image:" >&2; \
+         ls /install/lib/python3.12/site-packages | grep -iE '^(torch|sentence_transformers)' >&2; \
          exit 1; \
        fi
 
@@ -264,7 +289,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # hundred MB from Hugging Face during its startup probe is a cold start that
 # can outlive the probe budget, and it needs egress to huggingface.co from
 # production.
-RUN python - <<'PY'
+#
+# Skipped for ML_RUNTIME=remote (there is nothing to load the models with); the
+# directory is still created because the runtime stage copies it.
+RUN mkdir -p /build/models && [ "${ML_RUNTIME}" = "remote" ] || python - <<'PY'
 import os, sys
 from pathlib import Path
 site = Path("/install") / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"

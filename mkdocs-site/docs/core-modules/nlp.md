@@ -223,3 +223,14 @@ tenant, span or budget.
 | `BASELITH_INFERENCE_THREADS` | `min(4, cpu_count // 2)` | Small on purpose: torch and sentence-transformers parallelise internally, so extra threads buy contention rather than throughput. Raise it only with a measurement to justify it. |
 
 The pool is built on first use and shut down at interpreter exit.
+
+## Remote models
+
+With the core inference services configured (`BASELITH_EMBEDDING_BACKEND=remote`
+plus `BASELITH_EMBEDDING_URL`, and the `BASELITH_RERANK_*` pair),
+`get_embedder()` and `get_reranker()` return TEI-backed stand-ins from
+`core.nlp._remote` with the same surface (`encode`,
+`get_sentence_embedding_dimension`, `predict`). They are used when the requested
+model is the one the server serves, or when sentence-transformers is not
+installed (an image built with `ML_RUNTIME=remote`); otherwise the local model
+loads as before. See [Inference Services](../advanced/inference-services.md).

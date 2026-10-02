@@ -2333,3 +2333,6 @@ tenant-scoped `ScopedVectorStore` over one server-mode Qdrant client, plus a
 blocking bridge for synchronous plugins. Plugins call these instead of loading
 models or opening Qdrant clients themselves. See
 [Inference Services](../advanced/inference-services.md).
+
+`core.services.retrieval.Reranker` follows the same rule: with the rerank
+service configured it scores through TEI instead of loading a CrossEncoder.
