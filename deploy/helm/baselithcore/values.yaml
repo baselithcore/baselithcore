@@ -545,7 +545,8 @@ inference:
   # (a key you set in `config` still wins).
   tei:
     enabled: false
-    # CPU image, linux/amd64 only. Use a GPU image (and `resources` with
+    # CPU image: `cpu-<ver>` is linux/amd64 only; ARM nodes (Graviton, Apple
+    # Silicon labs) need `cpu-arm64-<ver>`. Use a GPU image (and `resources` with
     # nvidia.com/gpu plus a nodeSelector/tolerations) for real throughput —
     # CPU TEI is correct but slow, and rerank latency is on every chat turn.
     image:
@@ -597,12 +598,15 @@ inference:
       enabled: true
       size: 10Gi
       storageClass: ""
-    # Memory is measured, not guessed (TEI cpu-1.9.4, bge-m3, amd64 under
-    # emulation on a Mac; re-measure on your nodes): with the default
-    # --max-batch-tokens (16384) the embedding server sat at 11.5Gi; at 4096 it
-    # holds 6.7Gi idle and under load. bge-m3 accepts 8192-token inputs, so the
-    # batch budget — not the 2.3Gi of weights — is what sizes the pod. The
-    # reranker measured 3.9Gi at its defaults.
+    # Memory is measured, not guessed: cgroup memory.peak on a k3d lab
+    # (cpu-arm64-1.9.4) and docker stats (cpu-1.9.4, amd64). The batch budget,
+    # not the ~2.3Gi of weights, sizes these pods, and the PEAK is the startup
+    # warm-up, which runs one full --max-batch-tokens batch:
+    #   embedding, default 16384 tokens: 11.5Gi; at 4096: peak 6.8Gi, 5.6Gi after.
+    #   rerank, default 16384 tokens: OOMKilled at 6Gi during warm-up; at 4096:
+    #   peak 7.5Gi, 4.4Gi after.
+    # A limit below the warm-up peak never becomes ready (OOMKilled, restart
+    # loop). Re-measure on your nodes. ARM nodes: use tag cpu-arm64-1.9.4.
     embedding:
       model: BAAI/bge-m3
       replicas: 1
@@ -615,10 +619,10 @@ inference:
     rerank:
       model: BAAI/bge-reranker-v2-m3
       replicas: 1
-      args: []
+      args: ["--max-batch-tokens", "4096"]
       resources:
-        requests: {cpu: "1", memory: 4Gi}
-        limits: {memory: 6Gi}
+        requests: {cpu: "1", memory: 5Gi}
+        limits: {memory: 9Gi}
       nodeSelector: {}
       tolerations: []
 
