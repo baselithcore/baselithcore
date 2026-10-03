@@ -142,10 +142,11 @@ is hashed into the key rather than embedded, and nothing is stored unless a
 route matched — `404` and `405` are never cached — so an unauthenticated caller
 cannot fill Redis with 24-hour entries by spraying random paths.
 
-The request **body is bound to the key**: its SHA-256, computed as the handler
-reads it, is stored with the response, and a retry with the same key but a
-different body gets **`422`** (per the IETF `Idempotency-Key` draft) instead
-of the stale response. The in-flight lock is re-armed every third of its TTL
+The request **body and query string are bound to the key**: the body's SHA-256,
+computed as the handler reads it, and a SHA-256 of path + query string are
+stored with the response, and a retry with the same key but a different body or
+a different query (`?amount=10` vs `?amount=99`) gets **`422`** (per the IETF
+`Idempotency-Key` draft) instead of the stale response. The in-flight lock is re-armed every third of its TTL
 while the handler runs, so a long agent loop cannot lose it and let a retry
 execute the side effect twice. A stored gzip body is decompressed for a retry
 whose `Accept-Encoding` does not include gzip.
@@ -257,7 +258,18 @@ upsert.
 
 ## Connection-pool drain on shutdown
 
-The FastAPI lifespan shutdown now explicitly closes the shared Postgres
+The teardown is an ordered list of named steps (`core.api._shutdown`):
+runtime services, orchestrator drain, background tasks, retention and
+regulatory subsystems, plugins, lazy registry, shared clients, usage sinks,
+sync inference, rate limiter, OpenTelemetry flush, bootstrapper, then the
+Postgres and Redis pools. `run_shutdown_steps()` bounds each awaitable step
+(15 s by default; 30 s for the orchestrator drain and plugin shutdown), logs a
+failure as `shutdown_step_failed step=<name>` with the traceback, and always
+moves on — one failing step used to skip every step after it, leaving pools
+undrained and telemetry unflushed. The shutdown log line names any failed
+steps.
+
+The FastAPI lifespan shutdown explicitly closes the shared Postgres
 connection pools (`core.db.connection.close_async_pool`) and the shared Redis
 pools (`core.cache.redis_cache.close_redis_pools`) instead of relying on
 garbage collection. uvicorn drains in-flight requests before running lifespan

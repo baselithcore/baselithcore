@@ -9,6 +9,7 @@ failures (logged via the done callback).
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -26,6 +27,38 @@ _MEMORY_WRITE_CONCURRENCY = 32
 # its query and response text) with no ceiling. Beyond this bound new writes
 # are dropped — memory is best-effort, the request path is not.
 _MEMORY_WRITE_MAX_BACKLOG = 1024
+
+# A dropped write is lost memory, so it is a WARNING — but a saturated store
+# drops one per request, so at most one line per interval (per process); the
+# Prometheus counter carries the exact count.
+_DROP_WARNING_INTERVAL_S = 60.0
+_last_drop_warning = 0.0
+
+
+def _record_dropped_write(owner: Any) -> None:
+    """Count a dropped write (owner, Prometheus) and warn, rate-limited."""
+    global _last_drop_warning
+    # Counted on the owner so an operator (or a test) can see the loss.
+    owner._memory_writes_dropped = getattr(owner, "_memory_writes_dropped", 0) + 1
+    try:
+        # Local import: only a saturated backlog pays for the metrics module.
+        from core.observability.metrics import MEMORY_WRITES_DROPPED_TOTAL
+
+        MEMORY_WRITES_DROPPED_TOTAL.inc()
+    except Exception as exc:  # metrics must never break the request path
+        logger.debug("memory_write_drop_metric_failed error=%s", exc)
+    now = time.monotonic()
+    if now - _last_drop_warning < _DROP_WARNING_INTERVAL_S:
+        return
+    _last_drop_warning = now
+    logger.warning(
+        "memory_write_dropped_backlog_full backlog=%d dropped_total=%d "
+        "(memory store slower than the request rate; further drops in the "
+        "next %.0fs are counted in mas_memory_writes_dropped_total only)",
+        len(owner._memory_write_tasks),
+        owner._memory_writes_dropped,
+        _DROP_WARNING_INTERVAL_S,
+    )
 
 
 def schedule_memory_write(
@@ -54,13 +87,7 @@ def schedule_memory_write(
     sem = owner._memory_write_sem
     assert sem is not None
     if len(owner._memory_write_tasks) >= _MEMORY_WRITE_MAX_BACKLOG:
-        # Counted on the owner so an operator (or a test) can see the loss.
-        owner._memory_writes_dropped = getattr(owner, "_memory_writes_dropped", 0) + 1
-        logger.debug(
-            "memory_write_dropped_backlog_full backlog=%d dropped_total=%d",
-            len(owner._memory_write_tasks),
-            owner._memory_writes_dropped,
-        )
+        _record_dropped_write(owner)
         return
 
     async def _write() -> None:
@@ -85,7 +112,7 @@ def schedule_memory_write(
     task = asyncio.create_task(_write())
     owner._memory_write_tasks.add(task)
 
-    def _done(finished: asyncio.Task) -> None:
+    def _done(finished: asyncio.Task[None]) -> None:
         owner._memory_write_tasks.discard(finished)
         if not finished.cancelled() and finished.exception() is not None:
             logger.warning(f"Failed to save memory: {finished.exception()}")

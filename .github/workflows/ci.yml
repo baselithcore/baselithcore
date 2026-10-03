@@ -844,6 +844,22 @@ jobs:
           export SOURCE_DATE_EPOCH
           echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
           python -m build --no-isolation
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The validator unpacks the wheel and checks it the way an install uses
+      # it: signed plugins verify against their installed copy (PyYAML) and the
+      # packaged migrations load into one head (Alembic). Both are runtime
+      # dependencies, installed from the lock with hashes, not floating.
+      - name: Install locked runtime dependencies
+        run: |
+          uv export --frozen --no-default-groups --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-runtime.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-runtime.txt
       - name: Validate distribution artifacts
         run: python scripts/check_distribution_artifacts.py
 

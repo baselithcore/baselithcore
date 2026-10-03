@@ -225,7 +225,7 @@ Returns the operational status of the Backstage exporter and the count of regist
 
 ### `GET /api/backstage/software-template.yaml`
 
-Returns the standard Baselith plugin scaffolding template YAML (`Content-Type: application/x-yaml`). Returns `404` if the template file is not found in the framework installation.
+Returns the standard Baselith plugin scaffolding template YAML (`Content-Type: application/x-yaml`). Both template endpoints read `templates/backstage/` from the source checkout the framework runs from (resolved from the package location, so any working directory works), then from a checkout around the current directory. `templates/` is not shipped in the `baselith-core` wheel: a plain `pip install` answers `404` with a detail saying so — register the template in Backstage from the repository URL instead.
 
 ### `GET /api/backstage/publish-template.yaml`
 

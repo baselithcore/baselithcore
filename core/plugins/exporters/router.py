@@ -43,14 +43,34 @@ from .backstage_provider import BackstageProvider
 
 router = APIRouter(prefix="/api/backstage", tags=["Backstage Integration"])
 
-# Absolute paths to the Scaffolder templates — resolved relative to this file
-# so endpoints work regardless of the working directory at startup.
-_TEMPLATE_PATH = (
-    Path(__file__).parents[3] / "templates" / "backstage" / "software-template.yaml"
-)
-_PUBLISH_TEMPLATE_PATH = (
-    Path(__file__).parents[3] / "templates" / "backstage" / "publish-template.yaml"
-)
+# The Scaffolder templates live in the repository's top-level ``templates/``
+# tree, beside ``core/``. Resolved from this file, so a source checkout (or an
+# editable install) serves them from any working directory. ``templates/`` is
+# not shipped in the wheel: a ``pip install`` falls back to a checkout around
+# the cwd, and otherwise answers 404 with a message saying so.
+_BACKSTAGE_TEMPLATES = Path(__file__).resolve().parents[3] / "templates" / "backstage"
+_TEMPLATE_PATH = _BACKSTAGE_TEMPLATES / "software-template.yaml"
+_PUBLISH_TEMPLATE_PATH = _BACKSTAGE_TEMPLATES / "publish-template.yaml"
+
+
+async def _template_response(path: Path) -> Response:
+    """Serve a Scaffolder template YAML, or a 404 that says why it is absent."""
+    candidates = [path, Path.cwd() / "templates" / "backstage" / path.name]
+    found = next((c for c in candidates if c.is_file()), None)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Backstage template {path.name} not found: templates/ ships "
+                "with a source checkout of the framework, not with the "
+                "installed package. Run from a checkout, or register the "
+                "template in Backstage from the repository URL."
+            ),
+        )
+    # Offloaded: sync file I/O would block the event loop per request.
+    content = await asyncio.to_thread(found.read_text, encoding="utf-8")
+    return Response(content=content, media_type="application/x-yaml")
+
 
 # Global instances — set once at startup via set_backstage_provider()
 _provider: BackstageProvider | None = None
@@ -232,15 +252,7 @@ async def get_software_template(
     Return the Backstage Software Template YAML.
     Requires admin or job-level credentials.
     """
-    if not _TEMPLATE_PATH.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Software template not found in the framework.",
-        )
-
-    # Offloaded: sync file I/O would block the event loop per request.
-    content = await asyncio.to_thread(_TEMPLATE_PATH.read_text, encoding="utf-8")
-    return Response(content=content, media_type="application/x-yaml")
+    return await _template_response(_TEMPLATE_PATH)
 
 
 @router.get(
@@ -256,16 +268,7 @@ async def get_publish_template(
     _: str = Depends(require_admin_or_job),
 ) -> Response:
     """Return the Backstage publish-template YAML."""
-    if not _PUBLISH_TEMPLATE_PATH.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Publish template not found in the framework.",
-        )
-
-    content = await asyncio.to_thread(
-        _PUBLISH_TEMPLATE_PATH.read_text, encoding="utf-8"
-    )
-    return Response(content=content, media_type="application/x-yaml")
+    return await _template_response(_PUBLISH_TEMPLATE_PATH)
 
 
 class PublishRequest(BaseModel):

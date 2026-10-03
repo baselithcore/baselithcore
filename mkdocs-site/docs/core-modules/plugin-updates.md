@@ -579,7 +579,9 @@ failure type only; credentials never appear in it.
 ## One-click plugin updates (host installs)
 
 On a host install an operator may let administrators install a newer plugin
-release from a console, and roll it back, instead of pulling the code by hand.
+release, and roll it back — from the host shell with `baselith
+plugin-updater`, or from an external console if one is installed (the core
+ships none) — instead of pulling the code by hand.
 The core itself is never updated this way. The web process only records a
 request: a separate updater process verifies, installs, restarts the API,
 checks its health and rolls back on its own. It is **off by default**
@@ -619,16 +621,23 @@ ones fail, one line per blocker, and keeps showing the manual instructions.
 
 ### What happens during a run
 
-A console plugin and the CLI (`baselith plugin-updater request` /
-`rollback`) create the same run in the run store under
-`UPDATE_APPLY_STATE_DIR`.
+!!! note "The core ships no console"
+    The core creates runs only through the CLI (`baselith plugin-updater
+    request` / `rollback`), and every such run is **pre-approved**: whoever
+    has a shell on the host is trusted, so it goes straight to step 3.
+    Nothing in the core creates a run in `awaiting_approval`, demands an MFA
+    code or asks a second administrator. Steps 1–2 below — and the
+    `awaiting_approval`, `expired` and `denied` states — apply only when an
+    external console (a separate plugin or service) writes runs to the same
+    store under `UPDATE_APPLY_STATE_DIR`, and their MFA and four-eyes rules
+    are that console's, not the core's.
 
-1. **Request.** An administrator asks for version *V*, pinned to the tarball
+1. **Request** (external console only). An administrator asks for version *V*, pinned to the tarball
    SHA-256 they were shown. The console demands a fresh MFA code (an account
    without an enrolled authenticator, and any API key, is refused) and
    re-checks installability on the server. The run starts in
    `awaiting_approval`.
-2. **Approval.** A second administrator approves it with their own MFA code.
+2. **Approval** (external console only). A second administrator approves it with their own MFA code.
    Whether the requester may approve their own request is the console's
    policy (a console enforcing four-eyes refuses it). A request nobody
    approves expires after the console's approval window (`expired`); a
@@ -726,7 +735,7 @@ start, so restart it after a change.
 | `UPDATE_APPLY_SCHEMA_ENV_FILE` | unset | dotenv with the schema owner's database credentials, read only into the `schema-init` environment; refused unless owner-writable only (`0600`) |
 | `UPDATE_APPLY_HEARTBEAT_SECONDS` | `5` | Updater heartbeat period (1–60) |
 | `UPDATE_APPLY_POLL_SECONDS` | `2.0` | How often the updater looks for approved runs (0.2–30) |
-| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request created with the core's default; runs created by `baselith plugin-updater` are pre-approved, and a console plugin sets its own window |
+| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request. Matters only when an external console creates runs that need approval without setting its own window; runs created by `baselith plugin-updater` (the only creator in the core) are pre-approved and carry no approval expiry |
 
 They come on top of `BASELITH_PLUGIN_OVERLAY_DIR`, the trust store
 (`BASELITH_PLUGIN_TRUST_STORE`), `PLUGIN_UPDATE_SOURCES_FILE` and the other
@@ -793,7 +802,8 @@ an argv run without a shell, given as a JSON array
 (`["sudo","-n","/usr/bin/systemctl","restart","api.service"]`) or a
 comma-separated list (`sudo,-n,/usr/bin/systemctl,restart,api.service`); a
 blank value means none. `UPDATE_APPLY_APPROVAL_TTL_SECONDS` (default 24 h) is
-the expiry of approval requests created without their own window.
+the expiry of approval requests created without their own window — only an
+external console creates such requests; the core's CLI runs are pre-approved.
 
 Settings that fail to load never take the update checker down:
 `PluginUpdateService` logs the error's type and falls back to the defaults,

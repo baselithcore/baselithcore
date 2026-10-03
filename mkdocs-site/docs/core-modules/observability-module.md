@@ -443,6 +443,7 @@ metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
 | `mas_rerank_latency_seconds`      | Histogram | Reranker latency                 |
 | `mas_indexed_documents_current`   | Gauge     | Documents currently indexed      |
 | `mas_agent_steps_total`           | Counter   | Agent loop steps                 |
+| `mas_memory_writes_dropped_total` | Counter   | Post-response memory writes dropped because the background backlog (1024) was full |
 | `mas_auth_requests_total`         | Counter   | Auth requests                    |
 | `mas_usage_sink_failures_total`   | Counter   | Billed-turn reports a registered usage sink failed to accept, labelled `sink` (a lost ledger write) |
 

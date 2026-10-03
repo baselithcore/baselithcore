@@ -393,7 +393,7 @@ class SecurityConfig(BaseSettings):
         """Accept ``a,b`` and a blank value, as well as a JSON array.
 
         Paired with ``NoDecode`` on both fields. JSON stays supported because
-        ``.env.example`` itself ships ``TRUSTED_HOSTS=["app.example.com"]`` and
+        ``.env.example`` itself ships ``TRUSTED_HOSTS=["localhost","127.0.0.1"]`` and
         deployments configured against the old behaviour have arrays in their
         environment.
         """

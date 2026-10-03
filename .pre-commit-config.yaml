@@ -209,7 +209,7 @@ repos:
         entry: python scripts/check_migrations.py
         language: system
         pass_filenames: false
-        files: ^migrations/
+        files: ^core/db/migrations/
       # The hand-written SDKs must keep calling routes the spec still declares.
       - id: sdk-contract
         name: sdk-contract
@@ -240,7 +240,7 @@ repos:
         entry: python scripts/check_docs_consistency.py --fast
         language: system
         pass_filenames: false
-        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|migrations/|\.env\.example|compose|docker-compose|Dockerfile)
+        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|\.env\.example|compose|docker-compose|Dockerfile)
       # The sibling of the gate above, and the one that was CI-only: it asks
       # whether a changed core/ module's PAGE moved, not whether the prose is
       # still true. Left to the pull request it reported on a change that was

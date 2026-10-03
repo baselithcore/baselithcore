@@ -375,11 +375,17 @@ async def warm_async_pool(timeout: float = 10.0) -> bool:
     open on first use still covers requests, and startup must not die
     because the database was briefly unreachable.
 
+    A timed-out ``open(wait=True)`` *closes* the pool, and psycopg_pool cannot
+    reopen a closed pool — so a failed warmup discards the singleton and the
+    next use builds a fresh one. Keeping it would fail every later request
+    with ``PoolClosed`` for the life of the process, even once the database
+    is back.
+
     Returns:
         True when the pool is warm (or already was), False when PostgreSQL
         is disabled or the warmup attempt failed.
     """
-    global _ASYNC_POOL_OPENED
+    global _ASYNC_POOL, _ASYNC_POOL_OPENED
     if not POSTGRES_ENABLED:
         return False
     if _ASYNC_POOL_OPENED:
@@ -391,6 +397,8 @@ async def warm_async_pool(timeout: float = 10.0) -> bool:
         return True
     except Exception as exc:
         logger.warning("db_pool_warmup_failed error=%s", exc)
+        if _ASYNC_POOL is not None and _ASYNC_POOL.closed:
+            _ASYNC_POOL = None
         return False
 
 

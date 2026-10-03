@@ -1,0 +1,6 @@
+# The sdist must be able to rebuild the wheel: the build_py hook that ships the
+# `baselith init` starters (see [tool.setuptools] cmdclass in pyproject.toml)
+# and the `templates/` tree it copies from.
+include build_support/*.py
+graft templates
+global-exclude __pycache__ *.py[cod] .DS_Store

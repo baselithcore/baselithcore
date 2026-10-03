@@ -31,7 +31,6 @@ LITERAL_SCAN = (
     "core",
     "plugins",
     "scripts",
-    "migrations",
     "configs",
     "deploy",
     ".github/workflows",

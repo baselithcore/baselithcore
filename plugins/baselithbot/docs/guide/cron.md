@@ -28,7 +28,7 @@ manual trigger), `POST /dash/crons/{name}/remove` (🔒, 20/min — publishes
 
 ## Notes
 
-Custom cron jobs persist to `plugins/baselithbot/.state/custom_crons.json`
+Custom cron jobs persist to `<state_dir>/custom_crons.json`
 and are restored (`bootstrap()`) on plugin startup. The cron backend label
 (currently `"asyncio"`) is surfaced on both [Overview](overview.md) and this
 page.

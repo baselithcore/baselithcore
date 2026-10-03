@@ -217,8 +217,10 @@ through `core.api.errors.unhandled_exception_handler`, so a `500` carries the
 `X-Request-ID` header, the `request_id` member, the security headers and the
 CORS grant like every other response. The exception is then **re-raised**:
 `ServerErrorMiddleware` sees that a response has started, skips its own
-rendering and propagates it to the server as before, so nothing is swallowed
-and server-side logging is unchanged. A failure *after* the response has
+rendering and propagates it to the server as before, so nothing is swallowed.
+`ServerErrorMiddleware` still calls the same handler (and discards its
+response); the handler marks the exception on its first pass, so one failure
+is **one** `Unhandled exception` ERROR line, not two. A failure *after* the response has
 started cannot be answered and is propagated untouched. WebSocket and lifespan
 scopes pass straight through.
 
@@ -447,7 +449,7 @@ effect. Streaming (`text/event-stream`) and oversized responses pass through
 uncached; nothing is stored unless the request **matched a route**; `5xx`,
 `404`/`405` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
 stored; a duplicate still in flight gets `409`; a retry reusing the key with a
-**different request body** gets `422`; and the whole thing is fail-open if
+**different request body or query string** gets `422`; and the whole thing is fail-open if
 Redis is down.
 
 **Tee, not buffer.** Capture never delays the response: **every** response is

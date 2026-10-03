@@ -86,8 +86,8 @@ MCP Streamable HTTP headers `Mcp-Session-Id`, `Mcp-Protocol-Version`,
 **`Idempotency-Key` on mutating requests.** An authenticated `POST`/`PUT`/
 `PATCH`/`DELETE` carrying `Idempotency-Key` has its response stored and replayed
 (with `Idempotency-Replayed: true`) for a retry with the same key and
-credential. The key is bound to the request body: reusing it with a
-**different body** returns `422` rather than the first request's response, and
+credential. The key is bound to the request body and query string: reusing it with a
+**different body** or a **different query string** returns `422` rather than the first request's response, and
 a retry while the original is still running returns `409`. Only requests with a
 credential that authenticates and that match a route are stored; `404`, `405`,
 `5xx` and retryable statuses never are. See
@@ -188,6 +188,16 @@ Authorization, quota and budget failures raised by the guards and middleware:
 | `InsufficientScopeError` (missing capability)  | 403 | `insufficient_scope` |
 | `QuotaExceededError` (usage budget) | 429 | `quota_exceeded` |
 | `BudgetExceededError` (per-request cost budget) | 429 | `budget_exceeded` |
+
+Database outages are infrastructure conditions, not defects:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `psycopg_pool.PoolTimeout` (no connection within `DB_POOL_TIMEOUT`) | 503 | `service_unavailable` |
+| `psycopg.OperationalError` (connection refused, server shut down, query cancelled) | 503 | `service_unavailable` |
+
+Both carry `Retry-After: 5`; the driver's class and message (which can name
+the database host) are logged at WARNING and never returned to the caller.
 
 Request-validation failures return **422** with code `validation_error`,
 `detail` `"Request validation failed."` and the per-field list under `errors`
@@ -544,6 +554,12 @@ reports `true`. The three probes run concurrently, so a cache miss costs the
 slowest probe's timeout rather than the sum of the three. Results are cached
 (~30s).
 
+With PostgreSQL down at boot the app still starts — in well under a second,
+since every boot step reuses one short reachability probe instead of waiting
+out a pool timeout each (see
+[PostgreSQL down at boot](../core-modules/db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
+— and this probe answers 503 until the database returns.
+
 **Response** (200 OK / 503 Service Unavailable):
 
 ```json
@@ -760,8 +776,10 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
     `setup_app_middleware` hook, once per plugin class, so a plugin skipped at
     boot gets its SPA mount on enable. Middleware cannot join an already
     started stack: a hook that calls `app.add_middleware(...)` logs a
-    restart-required warning and the plugin finishes enabling only after a
-    restart. See
+    restart-required warning and the response carries
+    `restart_required: true`. The enable is not persisted to
+    `configs/plugins.yaml`, so restarting alone does not finish it: set
+    `enabled: true` for the plugin in the plugin config, then restart. See
     [Plugins › App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
 
 ### Plugin update checks (`/api/plugins/updates`)

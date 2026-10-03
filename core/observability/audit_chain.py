@@ -44,9 +44,10 @@ Even keyed, this is *detection*, not prevention. Anchor the digest externally
 when the threat model includes a compromised host.
 
 **Retention and truncation.** Purging by definition removes the chain's oldest
-links. Verification therefore treats the earliest *surviving* row's stored
-``prev_hash`` as a trusted anchor and validates forward from there, so a
-retention sweep does not masquerade as tampering.
+links — always a contiguous ``seq`` prefix, never a middle link, even when
+timestamps are out of ``seq`` order. Verification therefore treats the earliest
+*surviving* row's stored ``prev_hash`` as a trusted anchor and validates forward
+from there, so a retention sweep does not masquerade as tampering.
 """
 
 from __future__ import annotations
@@ -403,7 +404,18 @@ class SQLiteAuditSink:
     # -------------------------------------------------------------- retention
 
     def purge_older_than(self, days: int) -> int:
-        """Delete records older than ``days``; returns how many were removed.
+        """Delete the expired *prefix* of the chain; returns how many were removed.
+
+        The chain links by ``seq``, but timestamps are not monotonic in ``seq``:
+        an event is stamped before its worker wins the write lock, and worker
+        clocks drift. Deleting ``WHERE timestamp < cutoff`` could therefore
+        remove a link from the middle of the chain, which ``verify_chain``
+        would report as tampering forever after. Only the contiguous run of
+        rows *below the first unexpired one* is removed; an expired row that
+        follows a fresh one is retained until the prefix catches up (kept
+        longer, never shorter, than the horizon). Boundary read and delete run
+        in one ``BEGIN IMMEDIATE`` transaction, so a concurrent append cannot
+        slip between them.
 
         ``days <= 0`` is a no-op (retain forever). Never call this with a
         horizon below the statutory floor for a deployment in scope of the AI
@@ -413,10 +425,26 @@ class SQLiteAuditSink:
             return 0
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM audit_log WHERE timestamp < ?", (cutoff,)
-            )
-            return max(cur.rowcount, 0)
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT MIN(seq) AS boundary FROM audit_log WHERE timestamp >= ?",
+                    (cutoff,),
+                ).fetchone()
+                boundary = row["boundary"] if row is not None else None
+                if boundary is None:
+                    # Every surviving record is expired: the whole trail goes.
+                    cur = self._conn.execute("DELETE FROM audit_log")
+                else:
+                    cur = self._conn.execute(
+                        "DELETE FROM audit_log WHERE seq < ?", (int(boundary),)
+                    )
+                removed = max(cur.rowcount, 0)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
+            return removed
 
     def close(self) -> None:
         """Close the underlying connection. Never raises."""

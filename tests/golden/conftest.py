@@ -14,7 +14,12 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
-from tests.golden.cassette import Cassette, RecordedLLMService, RecordingLLMService
+from tests.golden.cassette import (
+    CASSETTE_DIR,
+    Cassette,
+    RecordedLLMService,
+    RecordingLLMService,
+)
 
 RECORD_ENV = "BASELITH_GOLDEN_RECORD"
 
@@ -31,7 +36,7 @@ def golden_llm() -> Iterator[Callable[[str], RecordedLLMService | RecordingLLMSe
 
             service = RecordingLLMService(get_llm_service(), name=name)
         else:
-            service = RecordedLLMService(Cassette.load(name))
+            service = RecordedLLMService(Cassette.load(name, CASSETTE_DIR))
         opened.append(service)
         return service
 
@@ -39,6 +44,6 @@ def golden_llm() -> Iterator[Callable[[str], RecordedLLMService | RecordingLLMSe
 
     for service in opened:
         if isinstance(service, RecordingLLMService):
-            service.save()
+            service.save(CASSETTE_DIR)
         else:
             service.assert_exhausted()

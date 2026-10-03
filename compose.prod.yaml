@@ -39,16 +39,23 @@ services:
       # address is trusted: trusting the whole subnet let any other container
       # on app_net forge a client address or claim https.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
+      # The plugin_state volume below, named explicitly. Mounted inside the
+      # plugin package with no variable, the plugin found it only through its
+      # deprecated in-package fallback and warned on every boot.
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
       # The root filesystem is read-only below, as in the Helm chart. The
       # bundled baselithbot plugin keeps its secret-store master key, replay
-      # database and workspace registry under its own directory; a named
+      # database and workspace registry in BASELITHBOT_STATE_DIR; a named
       # volume shared with the worker, so both processes read ONE key (two
       # keys would decrypt nothing of each other's) and it survives a
-      # re-pull. Any other plugin that writes under /app needs the same.
-      - plugin_state:/app/plugins/baselithbot/.state
+      # re-pull. Same volume as when it was mounted at
+      # /app/plugins/baselithbot/.state: only the mount point moved, so an
+      # existing deployment keeps its key and stores. Any other plugin that
+      # writes under /app needs a volume of its own.
+      - plugin_state:/app/state/baselithbot
     networks:
       - app_net
       - obs_net
@@ -292,10 +299,11 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot   # see the api service
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
-      - plugin_state:/app/plugins/baselithbot/.state   # shared with api, see there
+      - plugin_state:/app/state/baselithbot   # shared with api, see there
     networks:
       - app_net
       - obs_net

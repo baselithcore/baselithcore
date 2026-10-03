@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -218,14 +219,13 @@ def test_get_plugin_patterns_empty(client, mock_provider, mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_get_software_template_success(client):
+async def test_get_software_template_success(client, tmp_path):
     """Test successful retrieval of the software template."""
     template_content = "apiVersion: scout.backstage.io/v1alpha1\nkind: Template"
-    mock_path = MagicMock()
-    mock_path.exists.return_value = True
-    mock_path.read_text.return_value = template_content
+    template = tmp_path / "software-template.yaml"
+    template.write_text(template_content)
 
-    with patch("core.plugins.exporters.router._TEMPLATE_PATH", mock_path):
+    with patch("core.plugins.exporters.router._TEMPLATE_PATH", template):
         response = client.get("/api/backstage/software-template.yaml")
 
         assert response.status_code == 200
@@ -233,16 +233,43 @@ async def test_get_software_template_success(client):
         assert response.headers["content-type"] == "application/x-yaml"
 
 
-def test_get_software_template_not_found(client):
-    """Test behavior when the template file is missing."""
-    mock_path = MagicMock()
-    mock_path.exists.return_value = False
+def test_get_software_template_not_found(client, tmp_path, monkeypatch):
+    """A wheel install has no templates/: 404 that says why."""
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "absent" / "software-template.yaml"
 
-    with patch("core.plugins.exporters.router._TEMPLATE_PATH", mock_path):
+    with patch("core.plugins.exporters.router._TEMPLATE_PATH", missing):
         response = client.get("/api/backstage/software-template.yaml")
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]
+        assert "source checkout" in response.json()["detail"]
+
+
+def test_templates_resolve_to_the_checkout_tree():
+    """The packaged path points at the repository's templates/backstage/."""
+    from core.plugins.exporters import router as router_mod
+
+    repo_root = Path(__file__).resolve().parents[3]
+    assert router_mod._TEMPLATE_PATH == (
+        repo_root / "templates" / "backstage" / "software-template.yaml"
+    )
+    assert router_mod._TEMPLATE_PATH.is_file()
+    assert router_mod._PUBLISH_TEMPLATE_PATH.is_file()
+
+
+def test_template_found_in_checkout_around_cwd(client, tmp_path, monkeypatch):
+    """With the packaged path absent, a checkout around the cwd serves it."""
+    (tmp_path / "templates" / "backstage").mkdir(parents=True)
+    (tmp_path / "templates" / "backstage" / "publish-template.yaml").write_text("k: v")
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "absent" / "publish-template.yaml"
+
+    with patch("core.plugins.exporters.router._PUBLISH_TEMPLATE_PATH", missing):
+        response = client.get("/api/backstage/publish-template.yaml")
+
+    assert response.status_code == 200
+    assert response.text == "k: v"
 
 
 # ── Auth / security ───────────────────────────────────────────────────────────

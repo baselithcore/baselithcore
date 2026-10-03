@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path, PurePath
 from urllib.parse import urlparse
 
-from core.config.plugins import get_plugin_config
+from core.config.plugins import get_plugin_config, plugin_install_root
 from core.marketplace.models import MarketplacePlugin
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,9 @@ class PluginInstaller:
 
     def __init__(self) -> None:
         self.config = get_plugin_config()
-        self.plugins_dir = Path(self.config.plugins_path)
+        # Not ``plugins_path``: that may resolve to the installed package,
+        # which is read-only territory (see plugin_install_root).
+        self.plugins_dir = plugin_install_root(self.config)
 
     def _ensure_plugins_dir(self) -> None:
         """Ensure the plugins directory exists."""

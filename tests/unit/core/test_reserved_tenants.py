@@ -39,6 +39,8 @@ def test_the_migration_exempts_exactly_the_reserved_identity():
 
     path = (
         Path(__file__).resolve().parents[3]
+        / "core"
+        / "db"
         / "migrations"
         / "versions"
         / "010_system_tenant_rls_exemption.py"

@@ -27,7 +27,14 @@ from .capability_scan import (
     parse_plugin_ast,
     scan_plugin_capabilities,
 )
-from .discovery import apply_overlay, find_manifest, merge_plugin_dirs
+from .config_file import plugin_enabled
+from .discovery import (
+    apply_overlay,
+    find_manifest,
+    is_bundled_install_dir,
+    merge_plugin_dirs,
+    with_bundled_plugins,
+)
 from .interface import PluginMetadata
 from .overlay import registered_overlay_dirs
 
@@ -218,6 +225,7 @@ class ResourceAnalyzer:
                 for plugin_dir in self.plugins_dir.iterdir()
                 if plugin_dir.is_dir() and not plugin_dir.name.startswith((".", "_"))
             ]
+        candidate_dirs = with_bundled_plugins(self.plugins_dir, candidate_dirs)
         # Verified overlay entries replace their bundled namesake, so the
         # capabilities and required resources are read from the code that runs.
         candidate_dirs = apply_overlay(candidate_dirs, registered_overlay_dirs())
@@ -226,27 +234,20 @@ class ResourceAnalyzer:
         if not candidate_dirs:
             return discoveries
 
-        filter_by_config = len(plugin_configs) > 0
-
         for plugin_dir in candidate_dirs:
             discovery = self.discover_plugin(plugin_dir)
             if discovery is None:
                 continue
 
-            config_key = self._match_config_key(
-                plugin_configs, discovery.directory_name, discovery.name
-            )
-
-            if filter_by_config and config_key is None:
-                logger.debug(
-                    "Skipping plugin %s (not present in config)",
-                    discovery.directory_name,
-                )
-                continue
-
-            plugin_config = plugin_configs.get(config_key or discovery.name, {})
-            if not plugin_config.get("enabled", True):
-                logger.debug("Skipping disabled plugin: %s", discovery.name)
+            # The shared enable-list rule; a plugin shipped inside the
+            # installed wheel is opt-in even when the config is empty.
+            if not plugin_enabled(
+                plugin_configs,
+                discovery.directory_name,
+                discovery.name,
+                bundled=is_bundled_install_dir(plugin_dir),
+            ):
+                logger.debug("Skipping plugin %s (not enabled)", discovery.name)
                 continue
 
             discoveries[discovery.name] = discovery

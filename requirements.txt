@@ -69,6 +69,8 @@ rich>=13.7.0
 rich-argparse>=1.4.0
 rq>=1.15.0
 sentry-sdk[fastapi]>=2.0.0
+# Async Alembic environment needs greenlet (the `asyncio` extra).
+sqlalchemy[asyncio]>=2.0.0
 sse-starlette>=2.1.0
 structlog>=24.1.0
 uvicorn[standard]>=0.30.0,<1.0

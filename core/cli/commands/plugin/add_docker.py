@@ -291,7 +291,7 @@ def _local_file_dependency_paths(path: Path) -> list[Path]:
 def _write_plugin_requirements() -> None:
     requirements: list[str] = []
     for plugin_dir in sorted(Path("plugins").iterdir()):
-        if not plugin_dir.is_dir() or not _plugin_enabled(plugin_dir.name):
+        if not plugin_dir.is_dir() or not _plugin_enabled(plugin_dir.name, plugin_dir):
             continue
         manifest_path = next(
             (
@@ -348,19 +348,24 @@ def _load_manifest(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _plugin_enabled(plugin_name: str) -> bool:
+def _plugin_enabled(plugin_name: str, plugin_dir: Path | None = None) -> bool:
     """Whether the runtime would load ``plugin_name``.
 
     Delegates to the loaders' shared reader and rule
     (:mod:`core.plugins.config_file`): ``PLUGIN_CONFIG_PATH``, ``-``/``_``
     name variants, a block without ``enabled:`` counting as enabled, and no
-    file meaning every plugin runs. A private reader here disagreed on all
-    four, so ``plugin sync`` could skip the requirements and frontend of a
-    plugin the runtime then loaded.
+    file meaning every plugin of the user's root runs — a plugin shipped
+    inside the installed wheel (``plugin_dir``) stays opt-in. A private
+    reader here disagreed on all four, so ``plugin sync`` could skip the
+    requirements and frontend of a plugin the runtime then loaded.
     """
     from core.plugins.config_file import plugin_enabled, read_plugin_configs
+    from core.plugins.discovery import is_bundled_install_dir
 
-    return plugin_enabled(read_plugin_configs(), plugin_name, plugin_name)
+    bundled = plugin_dir is not None and is_bundled_install_dir(plugin_dir)
+    return plugin_enabled(
+        read_plugin_configs(), plugin_name, plugin_name, bundled=bundled
+    )
 
 
 def _compose(args: list[str]) -> int:

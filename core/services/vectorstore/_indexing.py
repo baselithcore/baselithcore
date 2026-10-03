@@ -162,6 +162,7 @@ async def index_documents(
             all_enriched_chunks,
             service.cache,
             model_id=service.config.embedding_model,
+            dim=service.config.embedding_dim,
         )
     except Exception as e:
         logger.error(f"Failed to generate embeddings for batch: {e}")

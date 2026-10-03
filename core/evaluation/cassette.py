@@ -32,9 +32,12 @@ from core.orchestration.tool_output import UNTRUSTED_OPEN_PREFIX
 from core.services.llm.messages import Message, ToolResultBlock, render_as_prompt
 from core.services.llm.tool_calling import LLMResult, ToolCall
 
-#: Where the golden unit-test cassettes live. Callers with their own
-#: library (the eval gate) pass ``directory=`` explicitly.
-CASSETTE_DIR = Path(__file__).resolve().parents[2] / "tests" / "golden" / "cassettes"
+#: Default cassette library, relative to the current working directory (the
+#: repository's golden-test cassettes when run from a checkout). Relative on
+#: purpose: anchoring it to this file pointed recordings into the installed
+#: package. Callers with their own library (the eval gate, the golden tests)
+#: pass ``directory=`` explicitly.
+CASSETTE_DIR = Path("tests") / "golden" / "cassettes"
 
 
 class CassetteMismatch(AssertionError):

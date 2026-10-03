@@ -148,12 +148,13 @@ services:
       # rate limits / admin lockout see the real client, not nginx — and no
       # other container on app_net can forge one.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
       # Root filesystem is read-only (below): the baselithbot plugin keeps its
       # secret-store key and state here, on a volume shared with the worker.
-      - plugin_state:/app/plugins/baselithbot/.state
+      - plugin_state:/app/state/baselithbot
     networks:
       - app_net
       - obs_net
@@ -307,10 +308,11 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
-      - plugin_state:/app/plugins/baselithbot/.state   # shared with api
+      - plugin_state:/app/state/baselithbot   # shared with api
     networks:
       - app_net
       - obs_net
@@ -452,7 +454,7 @@ networks:
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime reads both `APP_ENV` and `ENVIRONMENT` (`APP_ENV` wins) to activate production-only checks consistently. The aliases `prod`, `prd` and `live` now resolve to `production` too, and an environment name the framework does not recognise is treated as production — see [Environment naming](#environment-naming).
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
-    The `api` and `worker` containers run with a **read-only root filesystem** too, the posture the Helm chart already had: writable paths are `/tmp`, the `./data` volume and the named `plugin_state` volume mounted at `/app/plugins/baselithbot/.state`, which both services share so they read one secret-store master key. Any other plugin that writes under `/app` needs a volume of its own, and `baselith plugin enable` (which rewrites `configs/plugins.yaml`) becomes a deploy-time change, as in Kubernetes. Every service logs through the `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`), so a chatty worker or a flood of edge `429`s cannot fill the host disk, and carries a `pids` limit under `deploy.resources.limits` (1024 for `api`/`worker`, 512 for Postgres, Qdrant and the TEI servers, 256 for FalkorDB, Jaeger and Prometheus, 128 for the gateway) so a fork bomb from a tool result stops at the cgroup. The `worker` disables the inherited image `HEALTHCHECK` (`healthcheck: disable: true`) — it probes `:8000/health`, which an RQ consumer never serves, and flagged the worker unhealthy after every start; `compose.yaml` does the same. The `api` start period is `300s` with `start_interval: 5s`.
+    The `api` and `worker` containers run with a **read-only root filesystem** too, the posture the Helm chart already had: writable paths are `/tmp`, the `./data` volume and the named `plugin_state` volume mounted at `/app/state/baselithbot` and named by `BASELITHBOT_STATE_DIR`, which both services share so they read one secret-store master key. (It used to be mounted at `/app/plugins/baselithbot/.state`, which the plugin only found through its deprecated in-package fallback; the volume is the same, so an existing deployment keeps its key and stores across the move. The image creates the mount point owned by `appuser` with mode `0700`, so a fresh volume is writable.) Any other plugin that writes under `/app` needs a volume of its own, and `baselith plugin enable` (which rewrites `configs/plugins.yaml`) becomes a deploy-time change, as in Kubernetes. Every service logs through the `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`), so a chatty worker or a flood of edge `429`s cannot fill the host disk, and carries a `pids` limit under `deploy.resources.limits` (1024 for `api`/`worker`, 512 for Postgres, Qdrant and the TEI servers, 256 for FalkorDB, Jaeger and Prometheus, 128 for the gateway) so a fork bomb from a tool result stops at the cgroup. The `worker` disables the inherited image `HEALTHCHECK` (`healthcheck: disable: true`) — it probes `:8000/health`, which an RQ consumer never serves, and flagged the worker unhealthy after every start; `compose.yaml` does the same. The `api` start period is `300s` with `start_interval: 5s`.
     The gateway publishes `0.0.0.0:80:80` — **IPv4 only**. A bare `"80:80"` also binds `[::]:80`, and on a dual-stack host IPv6 clients reach nginx through `docker-proxy` with the bridge gateway as their source address, so every IPv6 client shared one rate-limit bucket. Put a real IPv6 listener in front, or run the daemon with `userland-proxy` off, before publishing on `[::]`. Its own healthcheck probes `/__gateway/healthz`, which nginx answers `204` itself, so a backend restart does not flag the gateway unhealthy.
     JSON logs are selected by `LOG_JSON` (default `true`), which the `api` and `worker` services set explicitly; the older `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` are deprecated and have no effect — see [Production Configuration](#production-configuration).
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
@@ -1249,7 +1251,7 @@ Before going live, verify every point:
 - [ ] Log rotation configured
 - [ ] Circuit breakers enabled (LLM, VectorStore)
 - [ ] Retry policies configured (LLM, VectorStore, Database)
-- [ ] Run `alembic upgrade head` before first deploy — migration status is checked at startup and logged as ERROR if outdated
+- [ ] Run `baselith db migrate` (or `alembic upgrade head` from a checkout) before first deploy — the migrations ship inside the package, so a `pip install` deployment needs no checkout; migration status is checked at startup and logged as ERROR if outdated
 
 ### Performance
 

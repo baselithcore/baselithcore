@@ -502,10 +502,11 @@ COPY --from=app /install-app /install-app
 # configs/plugins.yaml on every plugin enable/disable, and a plugin may persist
 # state under its own directory (baselithbot's .state/.secret_key).
 COPY --chown=appuser:appuser backend.py ./
-# Alembic config + migration scripts: both `alembic upgrade head` (the
-# pre-deploy Job) and the in-app ensure_schema() fallback resolve them from /app.
+# Alembic config for the pre-deploy Job's `alembic upgrade head`. The scripts
+# themselves live in core/db/migrations (copied with core/ below); alembic.ini
+# points there relative to itself, and the in-app ensure_schema() and
+# `baselith db migrate` locate them through the package, not the cwd.
 COPY --chown=appuser:appuser alembic.ini ./
-COPY --chown=appuser:appuser migrations/ migrations/
 COPY --chown=appuser:appuser baselith/ baselith/
 COPY --chown=appuser:appuser core/ core/
 COPY --chown=appuser:appuser plugins/ plugins/
@@ -523,7 +524,7 @@ COPY --chown=appuser:appuser configs/ configs/
 # Nothing the image runs needs any of it. The API entrypoint is
 # `uvicorn backend:app`, the worker is `baselith queue worker` (a console
 # script from /install-app), and the migration Job runs `alembic upgrade head`
-# against alembic.ini + migrations/, both copied above. Verified by grepping
+# against alembic.ini + core/db/migrations/, both copied above. Verified by grepping
 # core/, backend.py, the compose files and every Helm template for a reference
 # to scripts/ — the only one was this COPY.
 #
@@ -544,8 +545,15 @@ RUN python -m compileall -q --invalidation-mode checked-hash \
     /app/backend.py /app/core /app/plugins
 
 # --- Writable runtime directories ---
-RUN mkdir -p data logs documents qdrant_data \
-    && chown appuser:appuser /app data logs documents qdrant_data
+# state/baselithbot is the mount point of compose.prod.yaml's plugin_state
+# volume (BASELITHBOT_STATE_DIR). It must exist in the image, owned by appuser
+# and 0700: Docker seeds an empty named volume from the image directory it is
+# mounted on, ownership included, and a mount point the image lacks is created
+# root-owned — a fresh volume the plugin could not write its key into.
+RUN mkdir -p data logs documents qdrant_data state/baselithbot \
+    && chown appuser:appuser /app data logs documents qdrant_data \
+        state state/baselithbot \
+    && chmod 0700 state/baselithbot
 
 # --- Debian security updates ---
 # LAST, and the position is the whole point.

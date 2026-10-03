@@ -625,6 +625,12 @@
             "title": "Plugin Name",
             "type": "string"
           },
+          "restart_required": {
+            "default": false,
+            "description": "Enabled, but its app middleware cannot join the running app: set `enabled: true` in the plugin config and restart.",
+            "title": "Restart Required",
+            "type": "boolean"
+          },
           "state": {
             "anyOf": [
               {
@@ -3263,7 +3269,7 @@
     },
     "/api/plugins/{plugin_name}/enable": {
       "post": {
-        "description": "Enable a disabled plugin.\n\nArgs:\n    plugin_name: Name of the plugin to enable\n    request: Enable request with optional configuration\n\nReturns:\n    Action response with success status",
+        "description": "Enable a disabled plugin for this process (not persisted to config).\n\nArgs:\n    plugin_name: Name of the plugin to enable\n    request: Enable request with optional configuration\n\nReturns:\n    Action response; ``restart_required`` flags pending app middleware.",
         "operationId": "enable_plugin_api_plugins__plugin_name__enable_post",
         "parameters": [
           {

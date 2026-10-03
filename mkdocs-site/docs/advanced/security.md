@@ -1182,6 +1182,13 @@ Example:
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
 
+`.env.example` ships `TRUSTED_HOSTS=["localhost","127.0.0.1"]` so a local copy
+of the template works out of the box (any other `Host` gets **400**). A
+production boot whose allowlist holds **only** loopback names logs a WARNING —
+the template value carried over unedited would answer 400 to the public
+hostname. Starlette compares the `Host` up to the first `:`, so the port is
+ignored and an IPv6 literal (`[::1]`) can never match.
+
 !!! danger "Startup check: empty `TRUSTED_HOSTS` in production is fail-closed"
     `core.api.startup_checks._warn_missing_trusted_hosts` — run from
     `warm_auth_singletons()` during lifespan — **refuses to start** the app in

@@ -15,11 +15,14 @@ import threading
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
+from core.observability.logging import get_logger
 from core.services.inference.embedding import EmbeddingService
 from core.services.inference.rerank import RerankService
 from core.services.inference.vectorstore import QdrantRuntime, ScopedVectorStore
 
 T = TypeVar("T")
+
+logger = get_logger(__name__)
 
 _STORE_METHODS = frozenset(
     {
@@ -131,6 +134,12 @@ class SyncInference:
 
         return self.run(go())
 
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        async def go() -> list[list[float]]:
+            return await (await self._embedding_service()).embed_queries(texts)
+
+        return self.run(go())
+
     def rerank(
         self, query: str, texts: list[str], top_k: int
     ) -> list[tuple[int, float]]:
@@ -156,9 +165,18 @@ class SyncInference:
             return
 
         async def shut() -> None:
+            # One service failing to close must not leave the others open.
             for svc in (self._embedding, self._rerank, self._qdrant):
-                if svc is not None:
+                if svc is None:
+                    continue
+                try:
                     await svc.shutdown()
+                except Exception as exc:
+                    logger.warning(
+                        "inference_service_close_failed",
+                        service=type(svc).__name__,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
 
         try:
             asyncio.run_coroutine_threadsafe(shut(), loop).result(10)
@@ -189,3 +207,18 @@ def shutdown_sync_inference() -> None:
         bridge, _bridge = _bridge, None
     if bridge is not None:
         bridge.close()
+
+
+async def ashutdown_sync_inference() -> None:
+    """Close the bridge from async code (lifespan shutdown). Never raises.
+
+    The thread join is blocking, so it runs off the event loop; a failure is
+    logged, not raised, so the teardown steps after it still run.
+    """
+    try:
+        await asyncio.to_thread(shutdown_sync_inference)
+    except Exception as exc:
+        logger.error(
+            "inference_bridge_shutdown_failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )

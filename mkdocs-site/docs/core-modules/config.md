@@ -195,8 +195,8 @@ non-empty strings:
 
 The JSON form is still accepted on purpose: deployments configured against the
 previous behaviour have one in their environment (`.env.example` itself ships
-`TRUSTED_HOSTS=["app.example.com"]`), and `NoDecode` would otherwise hand them
-the single-element list `['["app.example.com"]']`.
+`TRUSTED_HOSTS=["localhost","127.0.0.1"]`), and `NoDecode` would otherwise hand
+them the single-element list `['["localhost","127.0.0.1"]']`.
 
 !!! warning "`csv_list` splits on a literal comma"
     A value that legitimately contains a comma cannot be expressed in the CSV

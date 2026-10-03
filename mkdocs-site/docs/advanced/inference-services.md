@@ -24,6 +24,7 @@ from core.di.lazy_registry import get_lazy_registry
 embeddings = await get_lazy_registry().get_or_create("embedding")
 vectors = await embeddings.embed_documents(["first", "second"])
 query = await embeddings.embed_query("what is covered?")
+queries = await embeddings.embed_queries(["first?", "second?"])
 embeddings.model, embeddings.dim   # "BAAI/bge-m3", 1024
 ```
 
@@ -42,6 +43,7 @@ shutdown.
 | `BASELITH_EMBEDDING_TIMEOUT` | `60` | per-request timeout, seconds |
 | `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx and timeouts (429 only with `RETRY_RATE_LIMITED`) |
 | `BASELITH_EMBEDDING_API_KEY` | — | optional bearer token |
+| `BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION` | `false` | let the served model stand in for a different requested one (see [The core's own models](#the-cores-own-models)) |
 
 The `remote` backend posts `{"inputs": [...]}` to TEI's `/embed` over one
 shared `httpx.AsyncClient`, retries 5xx, timeouts and connection errors
@@ -59,8 +61,8 @@ inference that already exists on someone's own GPUs:
 | --- | --- | --- |
 | `BASELITH_EMBEDDING_API` | `tei` (default), `openai` | `openai`: `/embeddings` of OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama — URL includes `/v1` |
 | `BASELITH_RERANK_API` | `tei` (default), `cohere`, `nim` | `cohere`: `/rerank` with `documents`/`top_n` (Cohere, Jina, vLLM, Infinity); `nim`: NIM `/ranking` |
-| `BASELITH_EMBEDDING_PATH`, `BASELITH_RERANK_PATH` | a path | when the server mounts the API elsewhere |
-| `BASELITH_EMBEDDING_QUERY_PREFIX`, `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | text | models trained with instructions (e5: `query:` / `passage:`, each followed by a space) |
+| `BASELITH_EMBEDDING_PATH`, `BASELITH_RERANK_PATH` | a relative path | when the server mounts the API elsewhere; an absolute URL (`https://…`, `//host/…`) is refused at startup, since it would carry the bearer token to another host |
+| `BASELITH_EMBEDDING_QUERY_PREFIX`, `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | text | models trained with instructions (e5: `query:` / `passage:`, each followed by a space). The query prefix applies to `embed_query`/`embed_queries`, the document prefix to `embed_documents` |
 | `*_CA_BUNDLE`, `*_CLIENT_CERT`, `*_CLIENT_KEY` | PEM paths | a private CA, mutual TLS |
 
 `BASELITH_EMBEDDING_DIM` must be the model's own size: a vector of any other
@@ -77,7 +79,9 @@ top = await rerank.rerank("what is covered?", passages, top_k=5)
 
 Same shape, with `BASELITH_RERANK_*` (`MODEL` defaults to
 `BAAI/bge-reranker-v2-m3`). `BASELITH_RERANK_MAX_CANDIDATES` (default 100) caps
-how many passages are scored: the first N are, the rest are dropped.
+how many passages one `rerank` call scores: the first N are, the rest are
+dropped. The core's own `CrossEncoder` stand-in (`get_reranker()`, below)
+scores *every* pair: past the cap it issues one call per chunk of N, in order.
 
 ## Scoped vector store
 
@@ -89,7 +93,11 @@ await store.upsert("docs", points)
 hits = await store.search("docs", vector, limit=10)
 ```
 
-There is one `AsyncQdrantClient` per process, in **server mode**
+There is one `AsyncQdrantClient` per process, in **server mode**. The client
+library is the optional `[qdrant]` extra and is imported only when the runtime
+opens (an `InferenceConfigError` names the extra when it is missing); importing
+`core.services.inference` never needs it, so a pgvector deployment imports and
+shuts the package down without it
 (`BASELITH_QDRANT_URL`). The embedded `path=` mode is refused, and `:memory:`
 is accepted only by tests. A plugin never receives the client: it receives a
 `ScopedVectorStore`, which takes **logical** collection names and maps them to
@@ -112,7 +120,9 @@ own service instances on it on first use, and lets any thread call
 ordinary blocking functions. It never uses the application's loop (which
 would deadlock a caller already running on it) and never creates a loop per
 call (which would build a throw-away connection pool each time). The
-lifespan closes it at shutdown.
+lifespan closes it at shutdown, off the event loop; a service that fails to
+close is logged and does not keep the others open, and the shutdown never
+raises into the rest of the teardown.
 
 ## Keeping plugins honest
 
@@ -188,12 +198,32 @@ stand-ins (`core.nlp._remote`) with the sentence-transformers surface
 
 - the backend is `remote` and its URL is set, **and**
 - the requested model is the one the server serves (`BASELITH_EMBEDDING_MODEL`,
-  `BASELITH_RERANK_MODEL`), or no local sentence-transformers is installed —
-  then the served model is used and a `remote_model_substituted` warning names
-  both.
+  `BASELITH_RERANK_MODEL`), or no local sentence-transformers is installed.
 
-Otherwise they load the local model exactly as before. The embedding cache and
-its keys are unchanged.
+Otherwise they load the local model exactly as before.
+
+**The embedder never changes the index's geometry silently.** On first use the
+remote embedder checks `BASELITH_EMBEDDING_DIM` against
+`VECTORSTORE_EMBEDDING_DIM` (the size the index is built for) and raises
+`InferenceConfigError` when they differ. When the requested model
+(`VECTORSTORE_EMBEDDING_MODEL`) is not the served one and no local runtime can
+serve it, it raises too — unless
+`BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION=true`, in which case (dimensions
+still matching) the served model is used and a `remote_model_substituted`
+warning names both. A reranker produces scores, not stored vectors, so a
+served reranker still substitutes with that warning.
+
+**Query and document sides.** The stand-in follows sentence-transformers'
+convention: `encode` / `encode_document` embed documents (document prefix),
+`encode_query` — or `encode(..., prompt_name="query")` — embeds queries (query
+prefix). `CachedEmbedder` and `LazyEmbedder` expose `encode_query` as well,
+and the core's search-side call sites (RAG retrieval, the chat pipeline's
+query vector, memory recall, the semantic router, the MCP knowledge-base tool)
+go through `core.nlp.roles.aencode_query`, which uses `encode_query` when the
+embedder has it — a local sentence-transformers ≥ 5 model then applies its own
+`"query"` prompt — and `encode` otherwise. The embedding cache keys on the
+model, the role and the prefix, so a query is never served a document's vector
+and changing a prefix never serves a vector embedded under the old one.
 
 ## An image without torch
 
@@ -242,6 +272,9 @@ compose service or same-namespace Kubernetes Service such as
 is built, unless `ALLOW_INSECURE_KEY=true` accepts the risk for that service.
 Environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`) are ignored by these clients
 (`trust_env=False`), so the token cannot be routed through one.
+
+**Non-JSON bodies.** A `200` whose body is not JSON (a proxy's login page, a
+truncated response) raises `InferenceError` naming the size, not the body.
 
 **Qdrant names.** `BASELITH_QDRANT_URL` and `BASELITH_QDRANT_API_KEY` also bind
 from the unprefixed `QDRANT_URL` and `QDRANT_API_KEY` that the compose files,

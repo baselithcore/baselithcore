@@ -57,3 +57,58 @@ def test_silent_outside_production(monkeypatch) -> None:
     logger = _run(monkeypatch, production=False, trusted=[])
     logger.error.assert_not_called()
     logger.warning.assert_not_called()
+
+
+def test_warns_in_production_when_only_loopback_hosts(monkeypatch) -> None:
+    """The template's loopback allowlist carried into production is a 400 trap."""
+    monkeypatch.delenv("BASELITH_ALLOW_UNVALIDATED_HOST", raising=False)
+    logger = _run(monkeypatch, production=True, trusted=["localhost", "127.0.0.1"])
+    logger.warning.assert_called_once()
+    assert "loopback" in logger.warning.call_args.args[0]
+
+
+def test_loopback_hosts_silent_outside_production(monkeypatch) -> None:
+    logger = _run(monkeypatch, production=False, trusted=["localhost", "127.0.0.1"])
+    logger.warning.assert_not_called()
+
+
+def _template_trusted_hosts() -> list[str]:
+    """The ``TRUSTED_HOSTS`` value ``.env.example`` ships, parsed as the app does."""
+    from pathlib import Path
+
+    from core.config._collections import csv_list
+
+    template = Path(__file__).resolve().parents[4] / ".env.example"
+    for line in template.read_text(encoding="utf-8").splitlines():
+        if line.startswith("TRUSTED_HOSTS="):
+            parsed = csv_list(line.partition("=")[2].strip())
+            assert isinstance(parsed, list)
+            return [str(host) for host in parsed]
+    raise AssertionError("TRUSTED_HOSTS missing from .env.example")
+
+
+@pytest.mark.parametrize(
+    "host", ["localhost:8000", "127.0.0.1:8000", "localhost", "127.0.0.1"]
+)
+def test_template_trusted_hosts_admit_local_requests(host: str) -> None:
+    """``cp .env.example .env`` must not answer every local request with 400."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    app = FastAPI()
+
+    @app.get("/ping")
+    def _ping() -> dict[str, bool]:
+        return {"ok": True}
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_template_trusted_hosts())
+    response = TestClient(app).get("/ping", headers={"Host": host})
+    assert response.status_code == 200
+
+
+def test_template_trusted_hosts_still_reject_foreign_hosts() -> None:
+    """Shipping a non-empty allowlist keeps Host validation on — not ``*``."""
+    hosts = _template_trusted_hosts()
+    assert hosts and "*" not in hosts
+    assert "evil.example" not in hosts

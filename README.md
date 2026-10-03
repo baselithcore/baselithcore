@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="media/full-white-og.png">
-    <source media="(prefers-color-scheme: light)" srcset="media/full-black-og.png">
-    <img alt="BaselithCore Logo" src="media/full-black-og.png" width="500">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/baselithcore/baselithcore/main/media/full-white-og.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/baselithcore/baselithcore/main/media/full-black-og.png">
+    <img alt="BaselithCore Logo" src="https://raw.githubusercontent.com/baselithcore/baselithcore/main/media/full-black-og.png" width="500">
   </picture>
 </p>
 
@@ -13,8 +13,8 @@
 [![CI](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/baselith-core.svg?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Your plugins: any licence](https://img.shields.io/badge/your%20plugins-any%20licence-brightgreen.svg?style=flat-square)](LICENSE.exception)
+[![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/blob/main/LICENSE)
+[![Your plugins: any licence](https://img.shields.io/badge/your%20plugins-any%20licence-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception)
 [![Docs](https://img.shields.io/badge/docs-baselithcore.xyz-0b5394.svg?style=flat-square)](https://docs.baselithcore.xyz)
 
 <p align="center">
@@ -35,11 +35,11 @@ not reconstructed from logs afterwards.
 
 <div align="center">
 
-[**Quick start**](#quick-start) · [**Plugins**](#plugins) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Changelog**](CHANGELOG.md) · [**Contributing**](CONTRIBUTING.md)
+[**Quick start**](#quick-start) · [**Plugins**](#plugins) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Changelog**](https://github.com/baselithcore/baselithcore/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md)
 
 </div>
 
-> **Writing a plugin? You keep your source.** The [plugin exception](LICENSE.exception)
+> **Writing a plugin? You keep your source.** The [plugin exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception)
 > lets any plugin that uses the framework as a library ship under any licence you
 > like, including a closed one. Same terms for everyone.
 
@@ -129,7 +129,7 @@ you: it writes the runtime files, builds and waits for `/health` in one command.
 Optional capabilities (RAG, browser automation, OCR, extra model providers,
 vector backends, …) install as extras — the [installation
 guide](https://docs.baselithcore.xyz/getting-started/installation/) lists them,
-and the [Docker Core guide](mkdocs-site/docs/getting-started/docker-core.md)
+and the [Docker Core guide](https://github.com/baselithcore/baselithcore/blob/main/mkdocs-site/docs/getting-started/docker-core.md)
 covers the checkout-based runtime in full.
 
 ## Plugins
@@ -247,21 +247,21 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 - [**help wanted**](https://github.com/baselithcore/baselithcore/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) — bigger pieces that need an owner
 - [**Discussions**](https://github.com/baselithcore/baselithcore/discussions) — questions, ideas, and what you built
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
+[CONTRIBUTING.md](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
 runs **9,026 tests** behind a **78% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates.
-[GOVERNANCE.md](GOVERNANCE.md) says how decisions get made and what needs a
-proposal before code; [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every
+[GOVERNANCE.md](https://github.com/baselithcore/baselithcore/blob/main/GOVERNANCE.md) says how decisions get made and what needs a
+proposal before code; [CODE_OF_CONDUCT.md](https://github.com/baselithcore/baselithcore/blob/main/CODE_OF_CONDUCT.md) applies to every
 space the project uses. Questions belong in
-[SUPPORT.md](SUPPORT.md)'s channels, vulnerabilities in
-[SECURITY.md](SECURITY.md)'s; release history lives in
-[CHANGELOG.md](CHANGELOG.md).
+[SUPPORT.md](https://github.com/baselithcore/baselithcore/blob/main/SUPPORT.md)'s channels, vulnerabilities in
+[SECURITY.md](https://github.com/baselithcore/baselithcore/blob/main/SECURITY.md)'s; release history lives in
+[CHANGELOG.md](https://github.com/baselithcore/baselithcore/blob/main/CHANGELOG.md).
 
 ## Licence
 
-**AGPL-3.0-only** — see [LICENSE](LICENSE).
-[LICENSE.exception](LICENSE.exception) adds a permission under AGPL section 7:
+**AGPL-3.0-only** — see [LICENSE](https://github.com/baselithcore/baselithcore/blob/main/LICENSE).
+[LICENSE.exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception) adds a permission under AGPL section 7:
 a plugin that uses the framework as a library — rather than patching files under
 `core/` — may be licensed under any terms you choose, including closed ones, and
 section 13 never reaches it. Offered to everyone on identical terms; your plugin

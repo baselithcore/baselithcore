@@ -6,7 +6,7 @@ events — never sees them, so an endpoint registered through the API could
 silently never fire. Select this store with ``WEBHOOK_STORE=postgres``.
 
 Schema ownership: ``webhook_endpoints`` and ``webhook_deliveries`` are created
-by ``migrations/versions/011_webhooks.py`` and by nothing else; this module
+by ``core/db/migrations/versions/011_webhooks.py`` and by nothing else; this module
 runs no DDL. Rows are tenant-scoped under the same row-level-security policy
 as the other tenant tables.
 

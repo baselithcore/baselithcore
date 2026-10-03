@@ -34,6 +34,8 @@ pytestmark = [pytest.mark.unit]
 
 _MIGRATION = (
     Path(__file__).resolve().parents[2]
+    / "core"
+    / "db"
     / "migrations"
     / "versions"
     / "010_system_tenant_rls_exemption.py"

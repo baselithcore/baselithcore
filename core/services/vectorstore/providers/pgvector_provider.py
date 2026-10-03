@@ -29,6 +29,7 @@ from psycopg.rows import dict_row
 from core.config.vectorstore import get_vectorstore_config
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
+from core.services.vectorstore._dimension import EmbeddingDimensionMismatchError
 from core.services.vectorstore.exceptions import VectorStoreError
 
 logger = get_logger(__name__)
@@ -233,7 +234,7 @@ class PgVectorProvider:
         """
         existing = await self._existing_dimension(table)
         if existing is not None and existing != size:
-            raise VectorStoreError(
+            raise EmbeddingDimensionMismatchError(
                 f"pgvector collection table {table} stores vector({existing}) "
                 f"but the configured embedding dimension is {size}. Re-index "
                 f"into a new collection, or set VECTORSTORE_EMBEDDING_DIM="

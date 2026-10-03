@@ -31,7 +31,12 @@ pytestmark = [pytest.mark.integration]
 
 MODULE = "core.webhooks.store_postgres"
 MIGRATION = (
-    Path(__file__).resolve().parents[2] / "migrations" / "versions" / "011_webhooks.py"
+    Path(__file__).resolve().parents[2]
+    / "core"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "011_webhooks.py"
 )
 
 

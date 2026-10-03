@@ -295,6 +295,7 @@ Declared in `core.config.inference`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `BASELITH_EMBEDDING_ALLOW_INSECURE_KEY` | `bool` | `False` | Send the API key over plain http to a host that is not loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). Off by default: the key would cross the network in clear. |
+| `BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION` | `bool` | `False` | Let the served model stand in for a different requested one (VECTORSTORE_EMBEDDING_MODEL) when no local runtime can serve it. Off by default: vectors from another model do not share the index's geometry. Even when on, BASELITH_EMBEDDING_DIM must equal VECTORSTORE_EMBEDDING_DIM; a warning is logged. |
 | `BASELITH_EMBEDDING_API` | `EmbeddingApi` | `tei` | Server protocol: 'tei' (Hugging Face TEI /embed) or 'openai' (/embeddings: OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama /v1). For 'openai' the URL includes /v1. |
 | `BASELITH_EMBEDDING_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
 | `BASELITH_EMBEDDING_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
@@ -997,4 +998,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-649 settings documented.
+650 settings documented.

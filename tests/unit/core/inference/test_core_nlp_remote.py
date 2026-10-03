@@ -44,6 +44,8 @@ def configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         inference, "_rerank", RerankConfig(url="http://tei-rerank", model="m-rerank")
     )
+    # The index is built for the served model's size (dim mismatch fails fast).
+    monkeypatch.setattr(_remote, "_index_dim", lambda: 3)
 
 
 def test_remote_only_with_backend_url_and_matching_model(

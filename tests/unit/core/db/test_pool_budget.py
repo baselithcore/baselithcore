@@ -110,3 +110,22 @@ class TestPreparedStatements:
         assert kwargs["prepare_threshold"] is None
         assert kwargs["autocommit"] is True
         assert kwargs["options"] == "-c statement_timeout=1"
+
+
+class TestBudgetProbeBounds:
+    async def test_budget_is_bounded_by_its_timeout(self, monkeypatch):
+        """A pool that cannot hand out a connection must not stall the boot
+        for a full ``DB_POOL_TIMEOUT``: the check gives up and returns None."""
+        import asyncio
+
+        @asynccontextmanager
+        async def _hanging():
+            await asyncio.sleep(60)
+            yield MagicMock()
+
+        monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", True)
+        monkeypatch.setattr(conn_mod, "get_async_connection", _hanging)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        assert await check_connection_budget(timeout=0.2) is None
+        assert loop.time() - started < 5

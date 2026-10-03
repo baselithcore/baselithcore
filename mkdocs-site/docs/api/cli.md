@@ -142,7 +142,10 @@ deliberately no file on disk.
 directories), infrastructure (LLM provider, Redis, Qdrant, PostgreSQL, GraphDB),
 runtime configuration (telemetry, migrations mode) and plugin readiness
 (plugins, plugin dependencies, plugin frontends). The last three are the ones
-`--core-only` skips.
+`--core-only` skips. `DB Migrations` first loads the packaged Alembic scripts
+and **fails** when they cannot be located or a revision does not load — an
+installation without its migrations cannot create its schema, whatever the
+startup mode says; when they load, it names the head revision.
 
 *Plugin Frontends* reads each manifest's `frontend` block and checks that the
 declared build output is on disk, resolving it the way the Docker installer
@@ -183,7 +186,8 @@ elided):
 │          │                     │                                │ postgres                       │
 │ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
 │ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
-│ ✅ PASS  │ DB Migrations       │ Run during application startup │ For predictable startup,       │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 012_webhook_retention_idx │
+│          │                     │                                │ . For predictable startup,     │
 │          │                     │                                │ prefer false and run: baselith │
 │          │                     │                                │ db migrate                     │
 │ ✅ PASS  │ Plugins             │ 10 plugin(s) found             │                                │
@@ -666,6 +670,12 @@ baselith plugin enable --all        # Bulk enable all
 
 Both commands auto-sync state with `configs/plugins.yaml`.
 
+A plugin shipped inside the installed `baselith-core` wheel (no `./plugins/<name>`
+directory) is toggled by the config entry alone — its code in `site-packages`
+is never renamed or copied. Bundled plugins are opt-in, so on a `pip install`
+`baselith plugin enable <name>` is how one is turned on; restart the server to
+apply it. `--all` acts on `./plugins` only.
+
 ---
 
 ### `plugin delete` - Delete Plugin
@@ -853,16 +863,24 @@ If you run `baselith init` without arguments, the CLI will enter an **Interactiv
 
 **Available Templates**:
 
-The wizard offers exactly what this invocation can scaffold
-(`available_templates()`): the built-in templates, plus every directory under
-`templates/` that actually contains files.
+The wizard and the `--template` choices in `baselith init --help` offer
+exactly what this invocation can scaffold (`available_templates()`): the
+built-in templates, plus every directory under `templates/` that is a project
+starter (a `README.md` and one of `pyproject.toml`, `requirements.txt`,
+`main.py`, `agent.py`). The directory starters are looked up in the checkout
+around the current directory first, then in the installed package
+(`core/cli/scaffold_templates/`, where the wheel carries them), then in the
+checkout the `core` package was imported from (an editable install used from
+any directory).
 
-- `minimal` — built in: one agent, wired to the public API. The only template
-  a `pip install baselith-core` user sees, since `templates/` is not shipped
-  in the wheel.
+- `minimal` — built in: one agent, wired to the public API.
 - `rag-system`, `multi-agent-collab`, `baselith-core-template`,
-  `custom-agent-template`, `plugin-template`, `backstage` — directories under
-  `templates/`, so they need a checkout of this repository.
+  `custom-agent-template` — directories under `templates/` in the
+  repository. A build hook (`build_support/scaffold_templates.py`, wired as the
+  `build_py` command in `pyproject.toml`) copies them into the wheel, so a
+  `pip install baselith-core` offers them too.
+  `plugin-template` and `backstage` live in `templates/` as well but are not
+  project starters: they are neither offered nor shipped.
 
 A template that would write no files is refused (exit code `1`) instead of
 creating an empty project.
@@ -873,9 +891,9 @@ creating an empty project.
     "Created project at …"; `baselith-core` matched neither a built-in
     template nor a directory under `templates/` (the directory is
     `baselith-core-template`). Three of the five choices were dead ends.
-    Scripts pinning `--template full` or `--template chat-only` now get
-    `Unknown template or directory` and a list of what exists — pass
-    `--template minimal`.
+    Scripts pinning `--template full` or `--template chat-only` are now
+    rejected by argument parsing (`invalid choice`), which lists what
+    exists — pass `--template minimal`.
 
 **What `minimal` scaffolds**: a project that depends on `baselith-core`
 (`requires-python = ">=3.12"`, its own `version = "0.1.0"`) and runs as it
@@ -1061,16 +1079,21 @@ baselith db reset
 
 ### `db migrate` - Apply Migrations
 
-Run `alembic upgrade head` against the configured PostgreSQL database.
+Apply the packaged Alembic migrations (`upgrade head`) to the configured
+PostgreSQL database.
 
 ```bash
 baselith db migrate
 baselith db migrate --json
 ```
 
-The command checks that `alembic.ini` is present and that PostgreSQL answers
-before it starts, so an unreachable database fails with the connection error
-rather than a migration traceback. It is the explicit counterpart of
+The command checks that the migration scripts shipped with the installed
+package can be located and that PostgreSQL answers before it starts, so an
+unreachable database fails with the connection error rather than a migration
+traceback. It needs no `alembic.ini` or checkout in the working directory: it
+runs `python -m core.db.migrate` in a child process, which resolves the
+scripts through the package and holds the same advisory lock as the startup
+upgrade, so it cannot race an app worker onto the same DDL. It is the explicit counterpart of
 `DB_MIGRATIONS_ON_STARTUP`: set that to `false` and run this at deploy time for
 a startup that cannot race two processes onto the same schema.
 

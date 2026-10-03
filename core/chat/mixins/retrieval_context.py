@@ -81,7 +81,9 @@ class RetrievalContextMixin:
         """
         if state.query_vector is not None:
             return
-        encoded = await self.service.embedder.encode([state.rerank_query])
+        from core.nlp.roles import aencode_query  # search side: query prefix
+
+        encoded = await aencode_query(self.service.embedder, [state.rerank_query])
         state.query_vector = encoded[0]
 
     async def build_context(self, state: AgentState) -> None:

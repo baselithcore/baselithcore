@@ -79,3 +79,34 @@ async def test_non_http_scopes_pass_through() -> None:
 
     await UnhandledErrorMiddleware(inner)({"type": "lifespan"}, None, None)
     assert seen == ["lifespan"]
+
+
+def test_a_500_is_logged_once_through_the_full_stack(monkeypatch) -> None:
+    """The middleware renders and re-raises; Starlette's ``ServerErrorMiddleware``
+    then calls the very same handler. One failure must be one ERROR line."""
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import core.api.errors as errors
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(errors, "logger", mock_logger)
+
+    app = FastAPI()
+    errors.install_error_handlers(app)
+    app.add_middleware(UnhandledErrorMiddleware)
+
+    @app.get("/boom")
+    def _route() -> None:
+        raise RuntimeError("kaboom")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom")
+    assert response.status_code == 500
+    unhandled = [
+        c
+        for c in mock_logger.error.call_args_list
+        if "Unhandled exception" in str(c.args[0])
+    ]
+    assert len(unhandled) == 1

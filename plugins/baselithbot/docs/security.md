@@ -115,17 +115,19 @@ Summary only — full detail in [computer-use.md](./computer-use.md):
   until a dashboard operator approves/denies (timeout → auto-deny,
   audited). See [approvals.md](./approvals.md).
 - Runtime overlay: dashboard edits to `computer_use`/`stealth` persist to
-  `plugins/baselithbot/.state/runtime_config.json` (git-ignored) and
+  `<state_dir>/runtime_config.json` and
   invalidate the cached agent.
 
 ## 6bis. Encrypted provider keys at rest
 
 [`secret_store.py`](../secret_store.py) persists operator-supplied
-provider API keys in `<state>/provider_keys.enc.json` encrypted with
+provider API keys in `<state_dir>/provider_keys.enc.json` encrypted with
 Fernet. Master key from `BASELITHBOT_SECRET_KEY` env, or auto-generated
-once under `<state>/.secret_key` (mode `0600`). Plaintext is never
-returned by the API — reads surface only `***<last4>` previews. State
-files are excluded from git via `plugins/*/.state/` in `.gitignore`.
+once under `<state_dir>/.secret_key` (mode `0600`). Plaintext is never
+returned by the API — reads surface only `***<last4>` previews. The state
+directory defaults to the per-user `$XDG_DATA_HOME/baselith/baselithbot`
+(created `0700`, override with `BASELITHBOT_STATE_DIR`), never the installed
+package; see [configuration.md](./configuration.md#4a-state-directory).
 
 Channel credentials follow the same rule
 ([`channels/config_store.py`](../channels/config_store.py),
@@ -203,7 +205,7 @@ in the main repo for the full `core.security.ssrf`/`core.security.http` API.
 - [ ] `require_approval_for` populated for privileged capabilities in shared environments
 - [ ] Paired nodes reviewed periodically (`GET /dash/nodes`)
 - [ ] Model prefs updates alerted on (`models.updated` SSE event)
-- [ ] `plugins/baselithbot/.state/` never committed (covered by `.gitignore`)
+- [ ] `<state_dir>/` owner-only (`0700`), on a persistent volume, never committed; no legacy in-package `.state/` left (deprecation warning at boot)
 - [ ] `BASELITHBOT_SECRET_KEY` rotated if `provider_keys.enc.json` leaks
 - [ ] `baselithbot_tool_errors_total{tool="shell_run"}` alert rule configured
 - [ ] `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` unset (or `false`) in production unless an internal webhook/LAN target is explicitly required

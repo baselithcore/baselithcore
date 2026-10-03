@@ -106,6 +106,10 @@ dependencies = [
   "redis[hiredis]>=5.0.7,<6.0",
   "rq>=1.15.0",
   "sentry-sdk[fastapi]>=2.0.0",
+  # The Alembic environment (core/db/migrations/env.py) runs on an async
+  # engine, which needs greenlet; SQLAlchemy 2.x only pulls it in through the
+  # `asyncio` extra, so a plain install could not migrate its database.
+  "sqlalchemy[asyncio]>=2.0.0",
   "sse-starlette>=2.1.0",
   "structlog>=24.1.0",
   "uvicorn[standard]>=0.30.0,<1.0",
@@ -340,6 +344,15 @@ conflicts = [
   ],
 ]
 
+# The `baselith init` starters live in `templates/`, outside every package, so
+# the wheel shipped none of them and a pip install offered only `minimal`.
+# This build_py hook copies the CLI's starters into `core/cli/scaffold_templates`
+# of the build tree (`core.cli.commands.init` looks there); MANIFEST.in puts the
+# hook and `templates/` in the sdist so a wheel built from it gets them too.
+# scripts/check_distribution_artifacts.py asserts them on the built wheel.
+[tool.setuptools]
+cmdclass = { build_py = "build_support.scaffold_templates.BuildPy" }
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["baselith*", "core*", "plugins*"]
@@ -387,6 +400,29 @@ version = {attr = "core._version.__version__"}
     "Dockerfile.sandbox",
     "requirements.sandbox.txt",
 ]
+# The Alembic environment. `core/db/migrations` has no `__init__.py` (its
+# revision modules are not importable names); namespace discovery happens to
+# pick up the `.py` files, but the requirement is stated here so it does not
+# hinge on the discovery mode, and the non-Python template only ships through
+# this entry. Before the move a wheel install had no migrations at all:
+# `baselith db migrate` and the startup upgrade needed a checkout in the cwd.
+# core.db.migration_config locates them through the package;
+# scripts/check_distribution_artifacts.py loads their heads from the installed
+# wheel.
+"core.db" = [
+    "migrations/env.py",
+    "migrations/script.py.mako",
+    "migrations/versions/*.py",
+]
+# Plugin build files that its integrity signature covers (core.plugins.integrity
+# hashes pyproject.toml and requirements*.txt). Not shipping them made the
+# installed copy's digest differ from the signed one, so the plugin failed its
+# integrity check on every wheel install. scripts/check_distribution_artifacts.py
+# verifies every signed plugin against the installed tree.
+"plugins.baselithbot" = [
+    "pyproject.toml",
+    "requirements.txt",
+]
 
 # `ui/dist/**/*` above is a deliberately broad include — it has to be, because
 # the bundle's filenames are content-hashed and cannot be enumerated. That
@@ -404,6 +440,12 @@ version = {attr = "core._version.__version__"}
 [tool.setuptools.exclude-package-data]
 "*" = [
     "ui/dist/**/*.map",
+    # Test files living beside the assets they test (the chat UI's
+    # `static/frontend/js/api.test.mjs` runs under `node --test` in CI). They
+    # are development artifacts, not product; `static/**/*` above would
+    # otherwise sweep them in.
+    "**/*.test.*",
+    "**/*.spec.*",
 ]
 
 [tool.bandit]
@@ -515,7 +557,7 @@ ignore = [
                 # `git`/`python` resolved from PATH is how a dev script is
                 # meant to run; an absolute path would break every venv.
                 "S607"]                          # one-off admin scripts; blocking sleep is fine
-"migrations/**" = ["E402"]      # alembic env import ordering is fixed by the template
+"core/db/migrations/**" = ["E402"]  # alembic env import ordering is fixed by the template
 
 [tool.mypy]
 python_version = "3.12"

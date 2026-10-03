@@ -70,8 +70,9 @@ def test_agent_exposes_its_tool() -> None:
 #: the interactive prompt offered both by name. They are removed rather than
 #: stubbed: a template that produces nothing is worse than one that is not
 #: offered. The richer starters (``rag-system``, ``multi-agent-collab``,
-#: ``baselith-core-template``) are directories under ``templates/`` and are
-#: discovered at runtime, from a checkout of this repository.
+#: ``baselith-core-template``, ``custom-agent-template``) are directories
+#: under ``templates/``, shipped in the wheel as ``core/cli/scaffold_templates``
+#: and discovered at runtime by :func:`templates_root`.
 PROJECT_TEMPLATES = {
     "minimal": {
         "description": "Minimal project: one agent, wired to the public API",
@@ -166,15 +167,15 @@ def _is_project_template(directory: Path) -> bool:
 def available_templates() -> list[str]:
     """Every template this invocation can actually scaffold.
 
-    The built-in ones always work; the directory ones need a checkout of this
-    repository, because ``templates/`` is not shipped in the wheel, so a
-    ``pip install baselith-core`` user sees only the built-ins.
+    The built-in ones always work; the directory ones come from
+    :func:`templates_root` — the package an installed wheel carries, or the
+    ``templates/`` tree of a checkout.
 
     Returns:
         Template names, built-ins first, each of which will produce a project.
     """
     names = list(PROJECT_TEMPLATES)
-    templates_dir = find_project_root() / "templates"
+    templates_dir = templates_root()
     if templates_dir.is_dir():
         names.extend(
             sorted(
@@ -187,6 +188,57 @@ def available_templates() -> list[str]:
             )
         )
     return names
+
+
+#: Where a wheel install carries the directory starters. ``templates/`` sits
+#: outside every package, so ``build_support/scaffold_templates.py`` copies
+#: the CLI's starters here at build time; a checkout has no such directory.
+PACKAGED_TEMPLATES = Path(__file__).resolve().parents[1] / "scaffold_templates"
+#: The ``templates/`` tree of the checkout this ``core`` was imported from
+#: (an editable install); absent — and harmless — under ``site-packages``.
+CHECKOUT_TEMPLATES = Path(__file__).resolve().parents[3] / "templates"
+
+
+def templates_root() -> Path:
+    """The directory the directory templates are read from.
+
+    In order: the checkout around the cwd (a contributor scaffolding from the
+    repository), the starters packaged in an installed wheel, then the
+    checkout this ``core`` package was imported from (an editable install
+    used from any directory). The returned path may not exist — callers then
+    offer the built-in templates only.
+    """
+    in_cwd = find_project_root() / "templates"
+    if in_cwd.is_dir():
+        return in_cwd
+    if PACKAGED_TEMPLATES.is_dir():
+        return PACKAGED_TEMPLATES
+    return CHECKOUT_TEMPLATES
+
+
+def _next_steps(files: dict[str, str]) -> list[str]:
+    """The install and run commands that fit what a template wrote.
+
+    ``baselith run`` starts a server from ``backend.py``, so it is the right
+    next step only for a template that scaffolds one; the panel used to name
+    it unconditionally, then ``pip install -e .`` / ``python -m app.agent``
+    for every template — wrong for a directory starter that has a
+    ``requirements.txt`` and a ``main.py``.
+    """
+    steps: list[str] = []
+    if "pyproject.toml" in files:
+        steps.append("[bold]pip[/bold] install -e .")
+    elif "requirements.txt" in files:
+        steps.append("[bold]pip[/bold] install -r requirements.txt")
+    if "backend.py" in files:
+        steps.append("[bold]baselith[/bold] run")
+    elif "app/agent.py" in files:
+        steps.append("[bold]python[/bold] -m app.agent")
+    elif "main.py" in files:
+        steps.append("[bold]python[/bold] main.py")
+    elif "agent.py" in files:
+        steps.append("[bold]python[/bold] agent.py")
+    return steps
 
 
 def find_project_root() -> Path:
@@ -296,8 +348,7 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         return 1
 
     # 1. Try to find template directory in project root
-    root = find_project_root()
-    templates_dir = root / "templates"
+    templates_dir = templates_root()
 
     template_path = templates_dir / template
 
@@ -309,8 +360,11 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         )
         # Copy files from directory recursively
         for item in template_path.rglob("*"):
+            rel_path = item.relative_to(template_path)
+            # pip byte-compiles the templates it installs; never copy that.
+            if "__pycache__" in rel_path.parts or item.suffix in (".pyc", ".pyo"):
+                continue
             if item.is_file() and item.name != ".DS_Store":
-                rel_path = item.relative_to(template_path)
                 content = item.read_text()
                 files_to_create[str(rel_path)] = content
     else:
@@ -378,18 +432,8 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         except ValueError:
             cd_target = project_path
 
-        # ``baselith run`` starts a server from ``backend.py``, so it is the
-        # right next step only for a template that scaffolds one. The panel
-        # used to name it unconditionally, which sent anyone who took the
-        # minimal template to a command that exits with "backend.py not found".
-        if "backend.py" in files_to_create:
-            last_step = "[bold]baselith[/bold] run"
-        else:
-            last_step = "[bold]python[/bold] -m app.agent"
-
-        next_steps = f"""[bold]cd[/bold] {cd_target}
-[bold]pip[/bold] install -e .
-{last_step}"""
+        steps = [f"[bold]cd[/bold] {cd_target}", *_next_steps(files_to_create)]
+        next_steps = "\n".join(steps)
         print_panel(next_steps, title="Next steps", style="green")
 
         return 0
@@ -416,10 +460,13 @@ def register_parser(
     init_parser.add_argument(
         "project_name", nargs="?", help="The name of your new agentic system project"
     )
+    # Derived from what this install can scaffold, never a hard-coded list:
+    # the old one advertised templates that did not exist.
+    choices = available_templates()
     init_parser.add_argument(
         "--template",
-        choices=["minimal", "full", "chat-only", "rag-system", "baselith-core"],
-        help="Select a starter template (minimal, full, rag-system, etc.)",
+        choices=choices,
+        help=f"Starter template: {', '.join(choices)}",
     )
     return init_parser
 

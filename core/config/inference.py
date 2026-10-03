@@ -10,6 +10,7 @@ development opt-in.
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +26,26 @@ def _strip_url(value: str | None) -> str | None:
     if value is None:
         return None
     value = value.strip().rstrip("/")
+    return value or None
+
+
+def _relative_path(value: str | None) -> str | None:
+    """Refuse a request path that would replace the server URL.
+
+    httpx resolves an absolute (``https://host/x``) or network-path
+    (``//host/x``) reference against ``base_url`` by *discarding* it, so such a
+    path would send the request — and the bearer token checked only against
+    the configured URL — to another host.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or value.startswith("//"):
+        raise ValueError(
+            "path must be relative to the server URL (e.g. '/embed'), "
+            f"not an absolute URL: {value!r}"
+        )
     return value or None
 
 
@@ -120,8 +141,21 @@ class EmbeddingConfig(BaseSettings):
     def _normalize_url(cls, value: str | None) -> str | None:
         return _strip_url(value)
 
+    @field_validator("path")
+    @classmethod
+    def _path_is_relative(cls, value: str | None) -> str | None:
+        return _relative_path(value)
+
     model: str = Field(default="BAAI/bge-m3", description="Embedding model id.")
     dim: int = Field(default=1024, gt=0, description="Vector dimension.")
+    allow_model_substitution: bool = Field(
+        default=False,
+        description="Let the served model stand in for a different requested "
+        "one (VECTORSTORE_EMBEDDING_MODEL) when no local runtime can serve it. "
+        "Off by default: vectors from another model do not share the index's "
+        "geometry. Even when on, BASELITH_EMBEDDING_DIM must equal "
+        "VECTORSTORE_EMBEDDING_DIM; a warning is logged.",
+    )
     batch_size: int = Field(
         default=32, ge=1, le=512, description="Texts per HTTP request."
     )
@@ -209,6 +243,11 @@ class RerankConfig(BaseSettings):
     @classmethod
     def _normalize_url(cls, value: str | None) -> str | None:
         return _strip_url(value)
+
+    @field_validator("path")
+    @classmethod
+    def _path_is_relative(cls, value: str | None) -> str | None:
+        return _relative_path(value)
 
     model: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranker id.")
     max_candidates: int = Field(

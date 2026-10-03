@@ -20,6 +20,7 @@ from .discovery import (
     find_manifest,
     iter_entry_point_plugin_dirs,
     merge_plugin_dirs,
+    with_bundled_plugins,
 )
 from .integrity import verify_plugin_integrity
 from .interface import Plugin
@@ -118,7 +119,8 @@ class PluginLoader:
         if self._discover_cache is not None:
             return self._discover_cache
 
-        plugin_dirs = apply_overlay(self._scan_plugin_dirs(), registered_overlay_dirs())
+        scanned = with_bundled_plugins(self.plugins_dir, self._scan_plugin_dirs())
+        plugin_dirs = apply_overlay(scanned, registered_overlay_dirs())
         self._discover_cache = merge_plugin_dirs(
             plugin_dirs, iter_entry_point_plugin_dirs()
         )

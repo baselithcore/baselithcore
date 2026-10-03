@@ -205,6 +205,14 @@ A purge legitimately removes the chain's oldest links. Verification therefore
 takes the earliest **surviving** record's `prev_hash` as a trusted anchor and
 validates forward, so a retention sweep is never reported as tampering.
 
+The chain links by `seq`, but timestamps are not monotonic in `seq`: an event is
+stamped before its worker wins the write lock, and worker clocks drift. The purge
+therefore deletes only the contiguous `seq` prefix below the **first unexpired
+record** (boundary read and delete in one `BEGIN IMMEDIATE` transaction). An
+expired record that follows a fresh one is kept until the prefix catches up —
+retained longer than the horizon, never shorter — instead of being cut out of the
+middle of the chain, which `verify_chain()` would report as tampering forever.
+
 The sweep runs daily and is started from the lifespan when `AUDIT_ENABLED`,
 `AUDIT_DB_PATH` and `AUDIT_RETENTION_DAYS > 0` are all set. Deployments that
 prefer external orchestration can leave `AUDIT_RETENTION_DAYS=0` and drive

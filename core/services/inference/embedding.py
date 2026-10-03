@@ -92,7 +92,10 @@ class LocalEmbeddingBackend:
 
         def _run() -> list[list[float]]:
             model: Any = load_embedder(self._model_id)
-            vecs = model.encode(
+            # sentence-transformers >= 5 applies the model's own "query"
+            # prompt in encode_query, the local twin of the query prefix.
+            encode = getattr(model, "encode_query", None) if is_query else None
+            vecs = (encode or model.encode)(
                 texts,
                 batch_size=self._batch,
                 normalize_embeddings=True,
@@ -167,7 +170,11 @@ class EmbeddingService:
         return vectors
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed ``texts`` (batched); output order matches input order."""
+        """Embed ``texts`` (batched); output order matches input order.
+
+        ``BASELITH_EMBEDDING_DOCUMENT_PREFIX`` applies; use :meth:`embed_query`
+        / :meth:`embed_queries` for the search side.
+        """
         out: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
             batch = texts[start : start + self._batch_size]
@@ -175,8 +182,16 @@ class EmbeddingService:
         return out
 
     async def embed_query(self, text: str) -> list[float]:
-        """Embed one query string."""
+        """Embed one query string (``BASELITH_EMBEDDING_QUERY_PREFIX`` applies)."""
         return self._checked(await self._backend.embed([text], is_query=True))[0]
+
+    async def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        """Embed several queries (batched; the query prefix applies to each)."""
+        out: list[list[float]] = []
+        for start in range(0, len(texts), self._batch_size):
+            batch = texts[start : start + self._batch_size]
+            out.extend(self._checked(await self._backend.embed(batch, is_query=True)))
+        return out
 
     async def shutdown(self) -> None:
         """Close the backend (called by the lazy registry at shutdown)."""

@@ -92,4 +92,4 @@ the tenant.
 If you need full per-tenant isolation of *every* surface (not just replay),
 that is a deliberate scope decision this plugin does not make today — run
 separate deployments per tenant instead, each with its own dashboard token
-and `.state/` directory.
+and `BASELITHBOT_STATE_DIR`.

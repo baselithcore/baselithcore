@@ -7,6 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from core.lifecycle import wait_for_drain
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from plugins.baselithbot.dashboard.bus import _BUS
@@ -32,22 +33,34 @@ def _frame(event: dict[str, Any]) -> bytes:
 
 
 async def _stream_frames() -> AsyncIterator[bytes]:
-    """Yield SSE frames from the bus, with a keepalive during quiet periods.
+    """Yield SSE frames from the bus until the client leaves or the server drains.
 
     The subscription is advanced through a pending task that survives a
     timeout: ``asyncio.wait_for`` on the generator itself would cancel it
     — and so unsubscribe — on the first idle interval.
+
+    The stream also waits on the core drain signal
+    (:func:`core.lifecycle.wait_for_drain`, set by the first SIGTERM/SIGINT):
+    a dashboard left open would otherwise hold every rolling restart until
+    the graceful-shutdown timeout. The EventSource reconnects on its own,
+    to whichever replica is still serving.
     """
     yield b": connected\n\n"
     events = _BUS.subscribe()
+    drained = asyncio.ensure_future(wait_for_drain())
     pending: asyncio.Future[dict[str, Any]] | None = None
     try:
-        while True:
+        while not drained.done():
             if pending is None:
                 pending = asyncio.ensure_future(anext(events))
-            done, _ = await asyncio.wait({pending}, timeout=_KEEPALIVE_SECONDS)
-            if not done:
-                yield _KEEPALIVE_FRAME
+            done, _ = await asyncio.wait(
+                {pending, drained},
+                timeout=_KEEPALIVE_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if pending not in done:
+                if not done:
+                    yield _KEEPALIVE_FRAME
                 continue
             try:
                 event = pending.result()
@@ -58,6 +71,7 @@ async def _stream_frames() -> AsyncIterator[bytes]:
     except asyncio.CancelledError:
         return
     finally:
+        drained.cancel()
         # Either path runs the bus generator's own ``finally``, which drops
         # this subscriber's queue: cancel the step in flight, or close the
         # generator where it sits suspended between events.

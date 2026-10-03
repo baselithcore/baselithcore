@@ -631,6 +631,22 @@ round-trips are provably independent.
 `min_size` connections (`warm_db_pool`, fail-soft), so the first request
 after a deploy no longer pays TCP+TLS+auth inline.
 
+A warm-up that times out discards the pool: psycopg_pool closes a pool whose
+`open(wait=True)` timed out and cannot reopen it, so keeping it failed every
+later request with `PoolClosed` until a restart, even once PostgreSQL was
+back. The next use now builds a fresh pool.
+
+With PostgreSQL down the boot no longer pays one full `DB_POOL_TIMEOUT` per
+startup step. The health probe (`SELECT 1`) and, after a failed probe, the
+row-level-security posture read are each capped at
+`STARTUP_DB_PROBE_TIMEOUT_S` (10 s); the connection-budget read runs only
+after the probe succeeded, inside the same `system_tenant_scope()`, capped at
+5 s; and the production migration-status check is skipped with a WARNING
+instead of opening another connection. The probe still reports the outage
+(ERROR in production). Startup steps outside the health check — the core
+schema bootstrap, the checkpoint store, plugins with their own pools — still
+wait on their own timeouts.
+
 ### Assorted Hot-Path Trims (0.25)
 
 - **RLS tenant binding memoized per connection**: with `DB_RLS_ENABLED` the

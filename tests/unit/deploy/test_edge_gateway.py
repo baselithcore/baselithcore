@@ -161,6 +161,24 @@ def test_app_containers_run_on_a_read_only_root(service: str) -> None:
     )
 
 
+@pytest.mark.parametrize("service", ["api", "worker"])
+def test_baselithbot_state_is_named_not_found_by_legacy_fallback(service: str) -> None:
+    """The volume is the state dir by ``BASELITHBOT_STATE_DIR``, not by accident.
+
+    Mounted at ``plugins/baselithbot/.state`` with no env, the plugin found it
+    only through its deprecated in-package fallback and warned on every boot.
+    The same named volume now mounts outside the package tree, so existing
+    deployments keep their key and stores.
+    """
+    spec = _services()[service]
+    env = dict(item.split("=", 1) for item in spec["environment"])
+    state_dir = env["BASELITHBOT_STATE_DIR"]
+    assert f"plugin_state:{state_dir}" in [
+        v.split("#")[0].strip() for v in spec["volumes"]
+    ]
+    assert "/plugins/" not in state_dir
+
+
 def test_every_service_rotates_logs_and_caps_tasks() -> None:
     for name, spec in _services().items():
         assert spec.get("logging", {}).get("options", {}).get("max-size"), name

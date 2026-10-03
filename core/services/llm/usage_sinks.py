@@ -43,6 +43,7 @@ logger = get_logger(__name__)
 __all__ = [
     "UsageReport",
     "UsageSink",
+    "drain_usage_sinks",
     "emit_usage_report",
     "register_usage_sink",
     "unregister_usage_sink",
@@ -74,6 +75,10 @@ class UsageReport:
 
 UsageSink = Callable[[UsageReport], "None | Awaitable[None]"]
 _usage_sinks: list[UsageSink] = []
+#: Strong references to the async sinks still running. The event loop holds
+#: tasks only weakly, so without this a ledger write can be collected
+#: mid-flight; it is also what :func:`drain_usage_sinks` awaits at shutdown.
+_pending_sink_tasks: set[asyncio.Future[None]] = set()
 
 
 def register_usage_sink(sink: UsageSink) -> None:
@@ -122,8 +127,10 @@ def _schedule(sink: UsageSink, coro: Awaitable[None]) -> None:
         return
 
     future: asyncio.Future[None] = asyncio.ensure_future(coro, loop=loop)
+    _pending_sink_tasks.add(future)
 
     def _done(done: asyncio.Future[None]) -> None:
+        _pending_sink_tasks.discard(done)
         if done.cancelled():
             return
         exc = done.exception()
@@ -131,6 +138,33 @@ def _schedule(sink: UsageSink, coro: Awaitable[None]) -> None:
             _sink_failed(sink, exc)
 
     future.add_done_callback(_done)
+
+
+async def drain_usage_sinks(timeout: float = 5.0) -> int:
+    """Wait up to ``timeout`` seconds for the async sinks still running.
+
+    Called at application shutdown so a turn billed just before the stop
+    signal still reaches the ledger. What outlives the timeout is cancelled
+    (and counted as a sink failure by nobody: it was abandoned, not broken).
+
+    Args:
+        timeout: Seconds to wait for the pending sink tasks.
+
+    Returns:
+        How many tasks were still running at the deadline and got cancelled.
+    """
+    pending = {task for task in _pending_sink_tasks if not task.done()}
+    if not pending:
+        return 0
+    _, still_running = await asyncio.wait(pending, timeout=timeout)
+    for task in still_running:
+        task.cancel()
+    if still_running:
+        # Let the cancellations land (a sink that swallows its cancellation
+        # is not waited for past one more second).
+        await asyncio.wait(still_running, timeout=1.0)
+        logger.warning("usage sinks abandoned at shutdown", count=len(still_running))
+    return len(still_running)
 
 
 def emit_usage_report(report: UsageReport) -> None:

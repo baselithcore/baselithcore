@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import ssl
 import time
 from pathlib import Path
@@ -176,7 +177,13 @@ class RemoteClient:
                     )
         finally:
             await response.aclose()
-        return httpx.Response(200, content=bytes(body)).json()
+        try:
+            return json.loads(bytes(body))
+        except ValueError as exc:  # JSONDecodeError / UnicodeDecodeError
+            # The body itself is not echoed (it may be a proxy's login page).
+            raise InferenceError(
+                f"POST {path}: response is not valid JSON ({len(body)} bytes)"
+            ) from exc
 
     async def post_json(self, path: str, payload: dict[str, Any]) -> Any:
         """POST ``payload`` and return the decoded JSON body."""

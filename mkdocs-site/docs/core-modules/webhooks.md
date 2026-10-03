@@ -41,7 +41,7 @@ service: `memory` (the default) keeps the in-memory store, `postgres` selects
 `PostgresWebhookStore` (`core/webhooks/store_postgres.py`).
 
 - **Schema.** The `webhook_endpoints` and `webhook_deliveries` tables are
-  created only by `migrations/versions/011_webhooks.py` — the store runs no DDL,
+  created only by `core/db/migrations/versions/011_webhooks.py` — the store runs no DDL,
   so apply the migration first. Both tables carry the `tenant_isolation`
   row-level-security policy, including the system-tenant escape, and are listed
   in `core.db.ddl.RLS_PROTECTED_TABLES` (see

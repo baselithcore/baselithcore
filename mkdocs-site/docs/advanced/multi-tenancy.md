@@ -316,7 +316,7 @@ to, so it fails closed regardless of `strict_tenant_isolation`
 (`core/db/connection.py`). Work that legitimately runs outside a request declares
 itself with [`system_tenant_scope()`](#system-tenant-scope) instead.
 
-**2. The policies.** `migrations/versions/008_row_level_security.py` enables RLS
+**2. The policies.** `core/db/migrations/versions/008_row_level_security.py` enables RLS
 and creates a `tenant_isolation` policy on every tenant-scoped table;
 `009_tool_invocations.py` adds the same policy to the table it creates, and
 `010_system_tenant_rls_exemption.py` widens the predicate across all seven.
@@ -536,7 +536,7 @@ tenant must bind that tenant.
     symmetric in `USING` and `WITH CHECK`. Neither knew about the `system`
     tenant, which did not exist yet.
 
-    `migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
+    `core/db/migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
     — it does not replace the policy. Same name, same permissive policy, same
     `COALESCE(..., 'default')` handling of an unset GUC, still no
     `FORCE ROW LEVEL SECURITY`:

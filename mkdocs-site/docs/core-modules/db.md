@@ -16,6 +16,9 @@ core/db/
 ├── _tenant_binding.py # RLS tenant binding (app.tenant_id) per pooled connection
 ├── documents.py       # Document feedback aggregation helpers
 ├── feedback.py        # Feedback persistence and analytics functions
+├── migrate.py         # `python -m core.db.migrate`: what `baselith db migrate` runs
+├── migration_config.py # Locates the packaged migrations; builds the Alembic Config
+├── migrations/        # Alembic environment: env.py, script.py.mako, versions/
 ├── rls_policy.py      # Core's tenant_isolation policy for plugin-owned tables
 ├── schema.py          # Schema bootstrap via Alembic migrations
 ├── serializers.py     # Source/row (de)serialization helpers
@@ -248,6 +251,31 @@ would turn it into a crash loop. The failure is logged at `error` as
 `core_schema_init_failed`, which is what an operator needs when the first write
 starts returning 500s.
 
+### PostgreSQL down at boot: one probe, not a timeout per step
+
+Every boot step that touches the database used to discover an outage on its
+own, through a pool checkout that waits the full `DB_POOL_TIMEOUT` (30 s by
+default). With PostgreSQL down the checkpoint-store DDL and the health probe
+waited in series, and boot took ~40 s (~70 s with a plugin that created its
+schema in `initialize`) before the app came up degraded.
+
+`core.db.reachability.probe_postgres()` opens **one direct connection** (no
+pool, so no retry loop) bounded by a short connect timeout (`PROBE_TIMEOUT_S`,
+5 s), runs `SELECT 1` and records the outcome. The lifespan runs it once,
+before any schema work, and the later steps reuse it:
+
+| Step | Probe saw the database down |
+| --- | --- |
+| `init_core_schema_best_effort()` | skips Alembic, logs `core_schema_init_skipped` at `error` |
+| checkpoint store | deferred to a background retry (see [Orchestration](orchestration.md)) |
+| startup health check | one cheap re-probe, no pool warm-up or checkout |
+
+Boot with the database down now takes well under a second, and
+`/health/ready` answers 503 until it returns. With the database up nothing
+changes except one extra short-lived connection at boot. The outcome is a
+hint only: `last_postgres_probe()` is `None` in entry points that never probe
+(CLI, workers), and those behave exactly as before.
+
 !!! warning "Before this existed"
     A deployment whose enabled plugins listed Postgres as merely *optional*
     booted healthy with no schema at all, and the first `POST /v1/feedback`
@@ -403,7 +431,7 @@ base_delay=0.5, exponential_base=2.0)` restricted to
 ## Schema Management
 
 Schema is managed through Alembic migrations. `ensure_schema()` runs
-`alembic upgrade head`; `init_db()` wraps it and is a no-op when PostgreSQL
+`alembic upgrade head` against the [packaged migrations](#where-the-migrations-come-from); `init_db()` wraps it and is a no-op when PostgreSQL
 is disabled. `init_db()` additionally runs that call inside
 [`system_tenant_scope()`](#who-runs-the-migrations) — `ensure_schema()` called
 directly does not, so a caller invoking it outside `init_db()` under
@@ -419,8 +447,34 @@ await init_db()
 await ensure_schema()
 ```
 
-Migrations under `migrations/versions/` create the core tables, including
+Migrations under `core/db/migrations/versions/` create the core tables, including
 `tenants`, `chat_feedback`, and `interactions`.
+
+### Where the migrations come from
+
+The Alembic environment ships **inside the package**, so a `pip install
+baselith-core` deployment can migrate from any working directory — no
+checkout, no `alembic.ini` beside the process. Every code path that runs or
+inspects migrations resolves them through `core.db.migration_config`:
+
+| Name | What it does |
+| --- | --- |
+| `migrations_dir()` | The installed `core/db/migrations` directory; raises `MigrationsNotFoundError` when `env.py` or `versions/` is missing |
+| `build_alembic_config()` | An Alembic `Config` whose `script_location` is that directory. It reads no `alembic.ini`, so it does not depend on the cwd |
+| `migration_heads()` | The head revision(s), after loading every revision module — the cheapest proof the scripts are importable |
+
+`schema.upgrade_head()` applies them under the migration advisory lock;
+`ensure_schema()` runs it in an executor, and `python -m core.db.migrate`
+(what `baselith db migrate` spawns) runs it in a child process. The production
+startup check compares the database revision against the same packaged head,
+and `baselith doctor` **fails** its `DB Migrations` check when the scripts
+cannot be located or loaded.
+
+The repository-root `alembic.ini` remains for developers and for the Helm
+migration Job, which run the `alembic` CLI directly: its
+`script_location = %(here)s/core/db/migrations` points at the same directory,
+relative to the ini itself. New revisions still come from `alembic revision`
+at the repository root.
 
 ---
 
@@ -472,12 +526,15 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
     is `DB_POOL_MAX_SIZE × WEB_CONCURRENCY`, not `DB_POOL_MAX_SIZE`. With the
     default of 20 per pool, four workers already claim 80 of PostgreSQL's
     default 100 `max_connections` before the migrations job, the RQ worker or
-    a second replica connect. After warming the pool at startup,
-    `core.db.pool_budget.check_connection_budget()` reads `max_connections`
-    and `superuser_reserved_connections` from the server and logs
-    `db_pool_budget_exceeds_max_connections` (with the per-worker size that
-    would fit) when the budget overflows. It is informational: it never
-    blocks startup and returns `None` when the settings cannot be read.
+    a second replica connect. Once the startup health probe has reached the
+    database, `core.db.pool_budget.check_connection_budget()` reads
+    `max_connections` and `superuser_reserved_connections` from the server and
+    logs `db_pool_budget_exceeds_max_connections` (with the per-worker size
+    that would fit) when the budget overflows. It runs inside
+    `system_tenant_scope()` — with `DB_RLS_ENABLED` an unbound checkout is
+    refused, and the check used to be silently skipped — and gives up after
+    `timeout` seconds (default 5). It is informational: it never blocks
+    startup and returns `None` when the settings cannot be read.
 
 ### PgBouncer
 

@@ -117,12 +117,15 @@ Two env vars gate the dashboard API:
 | `BASELITHBOT_DASHBOARD_ALLOW_INSECURE` | `1` to open writes without a token (local dev only — logs warning).  |
 
 Provider secrets are written **at runtime** — nothing is shipped — to
-`provider_keys.enc.json` inside the plugin's `.state/` directory
-(`plugins/baselithbot/.state/`, created on first use, git-ignored via
-`plugins/*/.state/` and excluded from the wheel). The file is
+`provider_keys.enc.json` inside the plugin's state directory:
+`BASELITHBOT_STATE_DIR` when set, else the per-user
+`$XDG_DATA_HOME/baselith/baselithbot` (`~/.local/share/baselith/baselithbot`
+fallback), created on first use with mode `0700` and never inside the
+installed package. An existing legacy `plugins/baselithbot/.state/` is still
+used, with a deprecation warning. The file is
 Fernet-encrypted with the master key from `BASELITHBOT_SECRET_KEY`; when
 that variable is unset a key is generated once and persisted next to it as
-`.state/.secret_key` (mode `0600`). The dashboard never echoes plaintext —
+`.secret_key` (mode `0600`). The dashboard never echoes plaintext —
 only `***<last4>` previews. Channel credentials get the same treatment,
 including incoming-webhook URLs (`webhook_url`), whose path is the credential.
 

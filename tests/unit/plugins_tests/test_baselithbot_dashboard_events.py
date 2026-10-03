@@ -55,3 +55,50 @@ async def test_close_during_idle_wait_unsubscribes(
     for _ in range(3):
         await asyncio.sleep(0)
     assert fresh_bus._subscribers == set()
+
+
+@pytest.fixture
+def drain_state():
+    from core.lifecycle import drain
+
+    drain._reset_for_tests()
+    yield drain
+    drain._reset_for_tests()
+
+
+async def test_idle_stream_ends_on_the_server_drain_signal(
+    fresh_bus: DashboardEventBus, drain_state, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dashboard left open must not hold a rolling restart until the timeout."""
+    monkeypatch.setattr(events_module, "_KEEPALIVE_SECONDS", 30.0)
+    stream = events_module._stream_frames()
+    await anext(stream)
+    waiting = asyncio.ensure_future(anext(stream))
+    await asyncio.sleep(0.01)
+    assert not waiting.done()
+
+    drain_state.mark_draining()
+
+    # asyncio.wait, not wait_for: a timeout must not cancel the step, because
+    # the generator turns a cancellation into an ordinary end of stream.
+    done, _ = await asyncio.wait({waiting}, timeout=1.0)
+    assert waiting in done, "the stream ignored the drain signal"
+    with pytest.raises(StopAsyncIteration):
+        waiting.result()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert fresh_bus._subscribers == set()
+
+
+async def test_stream_opened_while_draining_ends_at_once(
+    fresh_bus: DashboardEventBus, drain_state
+) -> None:
+    drain_state.mark_draining()
+    stream = events_module._stream_frames()
+    assert await anext(stream) == b": connected\n\n"
+    step = asyncio.ensure_future(anext(stream))
+    done, _ = await asyncio.wait({step}, timeout=1.0)
+    assert step in done, "the stream ignored the drain signal"
+    with pytest.raises(StopAsyncIteration):
+        step.result()
+    assert fresh_bus._subscribers == set()

@@ -139,7 +139,9 @@ class StandardRagHandler(BaseFlowHandler):
         embedder = self.embedder
         if embedder is None:
             raise RuntimeError("Embedder not initialized")
-        query_vector = await embedder.encode(query)
+        from core.nlp.roles import aencode_query  # search side: query prefix
+
+        query_vector = await aencode_query(embedder, query)
         if hasattr(query_vector, "tolist"):
             query_vector = query_vector.tolist()
         from typing import cast

@@ -23,6 +23,7 @@ from core.observability.logging import get_logger
 from core.plugins import PluginState, apply_late_app_hook
 from core.plugins._activation_backoff import ActivationBackoff
 from core.plugins.config_file import plugin_enabled
+from core.plugins.discovery import is_bundled_install_dir
 
 logger = get_logger(__name__)
 
@@ -175,11 +176,15 @@ class PluginRuntimeHooks:
         :func:`core.plugins.config_file.plugin_enabled` — the rule discovery
         already applied — so a block without ``enabled:`` (or no config file
         at all) activates the plugin instead of discovering it and leaving it
-        dormant.
+        dormant. A plugin shipped inside the installed wheel is opt-in: it
+        activates only when the config names it.
         """
         for canonical_name, discovery in discoveries.items():
             if not plugin_enabled(
-                self._configs, discovery.directory_name, canonical_name
+                self._configs,
+                discovery.directory_name,
+                canonical_name,
+                bundled=is_bundled_install_dir(discovery.plugin_dir),
             ):
                 continue
             try:

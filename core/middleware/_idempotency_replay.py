@@ -9,6 +9,9 @@ apart for the module size cap:
 - :class:`BodyFingerprint` wraps ``receive`` and hashes the request body *as
   the application reads it* — one streaming SHA-256, never a second copy of
   the body in memory. The digest is stored beside the captured response.
+- :func:`request_target_digest` hashes the path and query string, stored
+  beside the body digest: a retry that reuses a key against a different query
+  (``?amount=10`` vs ``?amount=99``) is refused with the same ``422``.
 - :func:`drain_body_digest` hashes a retry's body on the replay path, where
   the application never runs, so a retry that reuses a key with a different
   payload is refused (``422``, per ``draft-ietf-httpapi-idempotency-key-header``)
@@ -83,6 +86,18 @@ class BodyFingerprint:
         return self._hash.hexdigest() if self.complete else None
 
 
+def request_target_digest(scope: Scope) -> str:
+    """Hex SHA-256 of the request target: path, ``?``, raw query string.
+
+    The path already selects the storage bucket, but the query string did
+    not: two requests differing only in their query shared one replay.
+    """
+    target = hashlib.sha256(str(scope.get("path", "")).encode("utf-8"))
+    target.update(b"?")
+    target.update(scope.get("query_string", b"") or b"")
+    return target.hexdigest()
+
+
 async def drain_body_digest(receive: Receive) -> str | None:
     """Read the rest of the request body, hashing it; ``None`` on disconnect."""
     fingerprint = BodyFingerprint(receive)
@@ -103,6 +118,9 @@ class StoredResponse:
     #: SHA-256 of the request body that produced it; ``None`` for entries
     #: written before fingerprinting existed or whose body was never read.
     body_sha256: str | None
+    #: SHA-256 of path + query string (:func:`request_target_digest`);
+    #: ``None`` for entries written before the query was fingerprinted.
+    target_sha256: str | None = None
 
 
 def encode_entry(
@@ -110,6 +128,7 @@ def encode_entry(
     headers: list[Any],
     body: bytes,
     body_sha256: str | None,
+    target_sha256: str | None = None,
 ) -> bytes:
     """Serialise a captured response (and its request fingerprint) for Redis."""
     encoded: bytes = orjson.dumps(
@@ -118,6 +137,7 @@ def encode_entry(
             "headers": [[k.decode("latin-1"), v.decode("latin-1")] for k, v in headers],
             "body": base64.b64encode(body).decode("ascii"),
             "body_sha256": body_sha256,
+            "target_sha256": target_sha256,
         }
     )
     return encoded
@@ -128,6 +148,7 @@ def decode_entry(stored: Any) -> StoredResponse | None:
     try:
         payload = orjson.loads(stored)
         digest = payload.get("body_sha256")
+        target = payload.get("target_sha256")
         return StoredResponse(
             status=int(payload["status"]),
             headers=[
@@ -136,6 +157,7 @@ def decode_entry(stored: Any) -> StoredResponse | None:
             ],
             body=base64.b64decode(payload["body"]),
             body_sha256=str(digest) if digest else None,
+            target_sha256=str(target) if target else None,
         )
     # Marker on the ``except`` line itself — the hygiene gate reads only that.
     except Exception:  # silent-ok: corrupt entry = no replay; the request runs
@@ -178,11 +200,25 @@ async def replay_entry(
     receive: Receive,
     send: Send,
 ) -> None:
-    """Replay ``entry`` to a retry — or ``422`` it if its body differs.
+    """Replay ``entry`` to a retry — or ``422`` it if its query or body differs.
 
-    Entries without a fingerprint (older entries, or a handler that never read
-    its body) replay unconditionally, as before.
+    The query string is always compared (it is known without reading the
+    body). Entries without a body fingerprint (older entries, or a handler that
+    never read its body) skip the body comparison, as before; entries written
+    before the target digest existed skip the query comparison.
     """
+    if (
+        entry.target_sha256 is not None
+        and request_target_digest(scope) != entry.target_sha256
+    ):
+        await JSONResponse(
+            status_code=422,
+            content={
+                "detail": "Idempotency-Key was already used with a "
+                "different request target (path or query string)."
+            },
+        )(scope, receive, send)
+        return
     if entry.body_sha256 is not None:
         digest = await drain_body_digest(receive)
         if digest is None:
@@ -213,4 +249,5 @@ __all__ = [
     "encode_entry",
     "negotiate_encoding",
     "replay_entry",
+    "request_target_digest",
 ]

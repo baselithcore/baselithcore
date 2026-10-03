@@ -111,3 +111,19 @@ async def test_async_accessors_run_factory_in_worker_thread() -> None:
         assert await aget_embedder("e") == "model:e"
         assert await aget_reranker("r") == "model:r"
     assert all(name != threading.main_thread().name for name in seen)
+
+
+async def test_lazy_embedder_routes_queries_to_encode_query() -> None:
+    """The search side reaches the wrapped model's ``encode_query``."""
+    from core.nlp.lazy import LazyEmbedder
+
+    class _Model:
+        async def encode(self, sentences: object, **_: object) -> str:
+            return "document"
+
+        async def encode_query(self, sentences: object, **_: object) -> str:
+            return "query"
+
+    lazy = LazyEmbedder(lambda _name: _Model(), None)
+    assert await lazy.encode_query("q") == "query"
+    assert await lazy.encode("d") == "document"
