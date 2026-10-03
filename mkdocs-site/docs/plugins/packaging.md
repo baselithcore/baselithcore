@@ -261,6 +261,12 @@ Two different grammars apply:
 
 - `python_dependencies` entries are standard pip requirement strings (PEP 440):
   bounded ranges (`>=1.0,<2.0`) and compatible-release specifiers (`~=1.24`) are fine.
+  List every third-party library the plugin imports, even one `baselith-core`
+  happens to install today: the core's own dependencies are not part of the
+  plugin contract. `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`
+  and `sse-starlette` left the core dependencies in 0.41 (they live in the
+  `plugin-compat` extra), and a plugin that had relied on them without declaring
+  them stopped importing.
 - `min_core_version`, `max_core_version` and every `plugin_dependencies` constraint are
   parsed by `core/plugins/version.py`: a **full** `MAJOR.MINOR.PATCH` version with at most
   one operator — `==`, `!=`, `>`, `>=`, `<`, `<=`, `^` (same major) or `~` (same

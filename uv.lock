@@ -347,13 +347,9 @@ dependencies = [
     { name = "anthropic" },
     { name = "argcomplete" },
     { name = "cryptography" },
-    { name = "defusedxml" },
-    { name = "email-validator" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
-    { name = "markdown-it-py" },
-    { name = "networkx" },
     { name = "numpy" },
     { name = "ollama" },
     { name = "openai" },
@@ -379,7 +375,6 @@ dependencies = [
     { name = "rq" },
     { name = "sentry-sdk", extra = ["fastapi"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "sse-starlette" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -480,6 +475,13 @@ dev = [
 docs = [
     { name = "zensical" },
 ]
+plugin-compat = [
+    { name = "defusedxml" },
+    { name = "email-validator" },
+    { name = "markdown-it-py" },
+    { name = "networkx" },
+    { name = "sse-starlette" },
+]
 test = [
     { name = "beautifulsoup4" },
     { name = "hypothesis" },
@@ -507,20 +509,16 @@ requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'web'", specifier = ">=4.14.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "deepeval", marker = "extra == 'evaluation'", specifier = ">=2.0.0" },
-    { name = "defusedxml", specifier = ">=0.7.1,<1.0" },
     { name = "docker", marker = "extra == 'sandbox'", specifier = ">=7.0.0" },
     { name = "docling", marker = "extra == 'documents'", specifier = ">=2.130.0,<3" },
-    { name = "email-validator", specifier = ">=2.1.0" },
     { name = "fastapi", specifier = ">=0.140.13,<0.200" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1.16.0,<2.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.20.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "locust", marker = "extra == 'load'", specifier = ">=2.20.0" },
-    { name = "markdown-it-py", specifier = ">=3.0.0,<4.0" },
     { name = "mineru", extras = ["pipeline"], marker = "extra == 'mineru'", specifier = ">=3.4.4,<4" },
     { name = "mss", marker = "extra == 'computer-use'", specifier = ">=9.0.0" },
-    { name = "networkx", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "ollama", specifier = ">=0.6.0,<1.0" },
     { name = "openai", specifier = ">=2.2.0,<3.0" },
@@ -563,7 +561,6 @@ requires-dist = [
     { name = "soupsieve", marker = "extra == 'web'", specifier = ">=2.8.4" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.8.15,<4" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
-    { name = "sse-starlette", specifier = ">=2.1.0" },
     { name = "structlog", specifier = ">=24.1.0" },
     { name = "supermemory", marker = "extra == 'memory'", specifier = ">=0.1.0" },
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.7.0" },
@@ -594,6 +591,13 @@ dev = [
     { name = "types-pyyaml" },
 ]
 docs = [{ name = "zensical", specifier = "==0.0.51" }]
+plugin-compat = [
+    { name = "defusedxml", specifier = ">=0.7.1,<1.0" },
+    { name = "email-validator", specifier = ">=2.1.0" },
+    { name = "markdown-it-py", specifier = ">=3.0.0,<4.0" },
+    { name = "networkx", specifier = ">=3.0" },
+    { name = "sse-starlette", specifier = ">=2.1.0" },
+]
 test = [
     { name = "beautifulsoup4", specifier = ">=4.14.2" },
     { name = "hypothesis", specifier = ">=6.100" },

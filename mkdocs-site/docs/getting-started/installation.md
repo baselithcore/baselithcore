@@ -72,6 +72,7 @@ The remaining extras cover narrower capabilities:
 | `bedrock`      | Anthropic provider served through AWS Bedrock (`anthropic[bedrock]`, `LLM_ANTHROPIC_BACKEND=bedrock`) |
 | `vertex`       | Anthropic provider served through Google Vertex AI (`anthropic[vertex]`, `LLM_ANTHROPIC_BACKEND=vertex`) |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
+| `plugin-compat` | `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`, `sse-starlette`. Core dependencies until 0.41, used by nothing in `core/` or the official plugins. A plugin that imports one should declare it itself; this extra restores the old surface in the meantime |
 
 Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.
 

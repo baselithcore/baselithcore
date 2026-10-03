@@ -37,12 +37,12 @@ classifiers = [
 keywords = ["ai", "agents", "framework"]
 
 dependencies = [
-  # Plugin-ecosystem surface: aiohttp, defusedxml, email-validator (pydantic
-  # `EmailStr`), markdown-it-py, networkx and sse-starlette are consumed by
-  # plugins, not by `core/` itself (core's own SSE path is hand-rolled in
-  # core/middleware/optimization.py). Dropping one is a breaking change for
-  # every plugin that installs `baselith-core` and expects it present — move it
-  # into the owning plugin's extra first.
+  # aiohttp is here for the baselithbot plugin, which ships in this
+  # distribution (plugins/baselithbot/voice). The libraries a third-party
+  # plugin used to get for free — defusedxml, email-validator, markdown-it-py,
+  # networkx, sse-starlette — imported by nothing in core/ or the official
+  # plugins, moved to the `plugin-compat` extra: a plugin declares what it
+  # imports, and every install stopped paying for what none of it uses.
   # <3.9.4: CVE-2024-23334 (static-route path traversal) and
   # CVE-2024-30251 (multipart DoS). The lock resolves far newer; the floor
   # is what a consumer with its own constraints can legally resolve to.
@@ -58,16 +58,12 @@ dependencies = [
   # codebase (we use Fernet/AESGCM/HKDF/Ed25519, never pkcs7_decrypt_*), but the
   # fix is free, so the floor moves rather than entering the accepted-risk register.
   "cryptography>=50.0.0",
-  "defusedxml>=0.7.1,<1.0",
-  "email-validator>=2.1.0",
   # >=0.140.13: earlier releases cap starlette<0.39, pinning consumers to
   # starlette 0.38.x — CVE-2024-47874, CVE-2026-48818, CVE-2026-54283, all
   # fixed in starlette 1.3.1 which only fastapi >=0.140 accepts.
   "fastapi>=0.140.13,<0.200",
   "httpx>=0.27.0,<1.0",
   "jsonschema>=4.23.0",
-  "markdown-it-py>=3.0.0,<4.0",
-  "networkx>=3.0",
   "numpy>=1.24.0",
   "ollama>=0.6.0,<1.0",
   "openai>=2.2.0,<3.0",
@@ -110,7 +106,6 @@ dependencies = [
   # engine, which needs greenlet; SQLAlchemy 2.x only pulls it in through the
   # `asyncio` extra, so a plain install could not migrate its database.
   "sqlalchemy[asyncio]>=2.0.0",
-  "sse-starlette>=2.1.0",
   "structlog>=24.1.0",
   "uvicorn[standard]>=0.30.0,<1.0",
   "rich>=13.7.0",
@@ -267,6 +262,17 @@ computer_use = [
 # stay in [project.optional-dependencies] above: those ARE part of the public
 # contract and a consumer must be able to ask for them by extra.
 [dependency-groups]
+# Libraries [project].dependencies carried for plugins until 0.41, though
+# nothing in core/ or the official plugins imports them. A plugin that relies
+# on one should declare it itself; until it does, install
+# `baselith-core[plugin-compat]` to keep the old surface.
+plugin-compat = [
+  "defusedxml>=0.7.1,<1.0",
+  "email-validator>=2.1.0",
+  "markdown-it-py>=3.0.0,<4.0",
+  "networkx>=3.0",
+  "sse-starlette>=2.1.0",
+]
 # The documentation site's build tool. It was pinned in
 # .github/workflows/docs.yml and nowhere else, so the generator that produces
 # docs.baselithcore.xyz was the one piece of the toolchain no dependency file
