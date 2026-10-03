@@ -307,6 +307,33 @@ for name, loader in (
         print(f"[docker] cached model: {name}")
     except Exception as e:
         print(f"[docker] warning: unable to cache {name}: {e}", file=sys.stderr)
+
+# One copy of the weights, in safetensors form. A repo whose `main` carries
+# only pytorch_model.bin (bge-m3 does) makes transformers fetch the
+# safetensors file from the hub's auto-conversion PR as well, so the cache
+# held both: 2 x 2.27GB, measured on the built image (4.4GB -> 2.3GB after
+# this). With HF_HUB_OFFLINE=1 at runtime only the `main` snapshot is
+# consulted, so the converted file was dead weight and the model loaded
+# through torch.load (pickle). Linking the safetensors into `main`, dropping
+# the pickle and the hub's "no safetensors on main" marker leaves one copy
+# that loads offline without unpickling anything. Verified with
+# `--network none`: SentenceTransformer("BAAI/bge-m3") encodes from it.
+cache = Path(os.environ["HF_HOME"])
+for repo in sorted(cache.glob("models--*")):
+    ref = repo / "refs" / "main"
+    if not ref.is_file():
+        continue
+    main = repo / "snapshots" / ref.read_text().strip()
+    pickled = main / "pytorch_model.bin"
+    converted = [p for p in repo.glob("snapshots/*/model.safetensors") if p.parent != main]
+    if (main / "model.safetensors").exists() or not converted or not pickled.is_symlink():
+        continue
+    (main / "model.safetensors").symlink_to(os.path.relpath(converted[0].resolve(), main))
+    (repo / ".no_exist" / main.name / "model.safetensors").unlink(missing_ok=True)
+    blob = pickled.resolve()
+    pickled.unlink()
+    blob.unlink()
+    print(f"[docker] {repo.name}: kept model.safetensors, dropped pytorch_model.bin")
 PY
 
 # ============================================================

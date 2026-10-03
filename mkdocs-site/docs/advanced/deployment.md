@@ -559,7 +559,18 @@ in-process model load still asked the Hub whether `main` had moved and pulled a
 newer revision if so — untested weights swapped under a running deployment, a
 write into a cache that is read-only in production, and an outbound call the
 egress policy has to allow. The chart's TEI pods download their own models and
-are unaffected. `.dockerignore` now excludes `**/.env` and `**/.env.*`, not
+are unaffected.
+
+The pre-cache step also keeps **one copy of each model's weights**. `BAAI/bge-m3`
+publishes only `pytorch_model.bin` on `main`, so transformers fetched the
+safetensors file from the Hub's auto-conversion pull request as well, and the
+image carried both: 2.27GB twice, 4.4GB of cache measured on a built image.
+Offline, only the `main` snapshot is read, which made the safetensors copy dead
+weight and loaded the model through `torch.load`. The step now links the
+safetensors file into `main` and drops the pickle, leaving 2.3GB that loads
+without unpickling anything (checked with `--network none`).
+
+`.dockerignore` now excludes `**/.env` and `**/.env.*`, not
 only the root copies: `COPY plugins/`, `configs/` and `templates/` take whole
 trees, so a filled-in `plugins/<name>/.env` would otherwise ride into a pushed
 layer.
@@ -1240,6 +1251,38 @@ Before going live, verify every point:
 - [ ] Firewall rules configured (only necessary ports open)
 - [ ] `FORWARDED_ALLOW_IPS` set to the load balancer address (so per-IP rate limiting / admin lockout do not collapse into one bucket behind the proxy)
 - [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
+
+### Data isolation, audit and identity
+
+These stay **off by default** on purpose: each one changes where data is
+written, which database role the app needs, or what a login flow must do, so
+the framework never turns one on behind an operator's back. A deployment that
+needs them switches them on here, and `BASELITH_COMPLIANCE_PROFILE` (with
+`BASELITH_COMPLIANCE_PROFILE_STRICT=true` to fail startup instead of warning)
+makes the app check the set for a named regulatory posture.
+
+- [ ] **Row-level security** for multi-tenant data: `DB_RLS_ENABLED=true` plus a
+  least-privilege runtime role (`database.runtimeRole` in the Helm chart). In
+  production the app refuses to boot when the role would bypass the policies
+  (superuser, `BYPASSRLS`, or table owner). Behind a transaction-mode pooler
+  (PgBouncer `pool_mode = transaction`, `DB_PREPARED_STATEMENTS=false`) also set
+  `DB_RLS_TENANT_SCOPE=transaction`: the session-scoped binding would leak a
+  tenant across pooled backends, so the app refuses that combination. See
+  [Multi-tenancy › Row-Level Security](multi-tenancy.md#defense-in-depth-row-level-security).
+- [ ] **Durable audit trail**: `AUDIT_ENABLED=true` with `AUDIT_CHAIN_HMAC_KEY`
+  set and `AUDIT_CHAIN_REQUIRE_KEY=true`, so the hash chain needs a key an
+  attacker with write access does not have. On Kubernetes keep
+  `AUDIT_LOG_SINK_ENABLED=true` and ship the records through the cluster's log
+  pipeline. A per-pod `AUDIT_DB_PATH` on an `emptyDir` dies with the pod; use it
+  only on a persistent volume with one writer. Retention defaults to 180 days,
+  the AI Act floor. See [Audit trail](../core-modules/audit-trail.md).
+- [ ] **MFA**: `MFA_ENABLED` is a flag plus a TOTP provider
+  (`AuthManager.mfa`). Nothing in the core enforces a second factor on its own,
+  so the login flow you build has to call it. Turning the flag on without that
+  flow protects nothing.
+- [ ] **Outbound traffic**: `networkPolicy.egress.enabled: true` (on in
+  `values-production.yaml`), with your managed datastores listed under
+  `networkPolicy.egress.rules`.
 
 ### Resilience
 

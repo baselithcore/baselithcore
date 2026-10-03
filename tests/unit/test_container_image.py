@@ -205,6 +205,22 @@ def test_project_distribution_is_not_a_second_importable_copy() -> None:
     )
 
 
+def test_model_cache_keeps_one_copy_of_the_weights() -> None:
+    """bge-m3 ships pytorch_model.bin on `main`; transformers also fetched the
+    safetensors from the hub's conversion PR, so the image carried both
+    (2 x 2.27GB). The pre-cache step must leave one, in safetensors form, and
+    the runtime must read the cache offline so `main` is what gets loaded."""
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    precache = text.split("from sentence_transformers import", 1)[1].split("\nPY\n", 1)[
+        0
+    ]
+    assert "symlink_to(" in precache and '"model.safetensors"' in precache
+    assert "pickled.unlink()" in precache and "blob.unlink()" in precache
+    # Without dropping the marker, offline resolution trusts "absent on main".
+    assert '".no_exist"' in precache
+    assert "HF_HUB_OFFLINE=1" in text
+
+
 def test_healthcheck_allows_for_a_slow_cold_start() -> None:
     """Without a start period the retry budget runs during boot."""
     text = DOCKERFILE.read_text(encoding="utf-8")
