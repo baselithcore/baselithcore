@@ -247,6 +247,18 @@ computer_use = [
 
 # ------------------------------------------------------------------
 # Development dependency groups (PEP 735)
+# Libraries [project].dependencies carried for plugins until 0.41, though
+# nothing in core/ or the official plugins imports them. A plugin that relies
+# on one should declare it itself; until it does, install
+# `baselith-core[plugin-compat]` to keep the old surface.
+plugin-compat = [
+  "defusedxml>=0.7.1,<1.0",
+  "email-validator>=2.1.0",
+  "markdown-it-py>=3.0.0,<4.0",
+  "networkx>=3.0",
+  "sse-starlette>=2.1.0",
+]
+
 # ------------------------------------------------------------------
 # NOT extras. `test` and `dev` used to live in [project.optional-dependencies],
 # which meant they were published in the wheel's metadata: `pip install
@@ -263,17 +275,6 @@ computer_use = [
 # stay in [project.optional-dependencies] above: those ARE part of the public
 # contract and a consumer must be able to ask for them by extra.
 [dependency-groups]
-# Libraries [project].dependencies carried for plugins until 0.41, though
-# nothing in core/ or the official plugins imports them. A plugin that relies
-# on one should declare it itself; until it does, install
-# `baselith-core[plugin-compat]` to keep the old surface.
-plugin-compat = [
-  "defusedxml>=0.7.1,<1.0",
-  "email-validator>=2.1.0",
-  "markdown-it-py>=3.0.0,<4.0",
-  "networkx>=3.0",
-  "sse-starlette>=2.1.0",
-]
 # The documentation site's build tool. It was pinned in
 # .github/workflows/docs.yml and nowhere else, so the generator that produces
 # docs.baselithcore.xyz was the one piece of the toolchain no dependency file
@@ -308,6 +309,11 @@ test = [
   # installed ad hoc in the workflow so it is resolved and hashed by uv.lock
   # like everything else the test job runs against.
   "pytest-xdist>=3.8.0",
+  # tests/unit/scripts/test_build_scaffold_templates.py imports the build
+  # hook (build_support/), which subclasses setuptools' build_py. CI installs
+  # only this group into a bare interpreter, where setuptools is absent.
+  # Same floor as the image's build step.
+  "setuptools>=83.0.0",
 ]
 dev = [
   # Everything the test group installs, plus the toolchain.
