@@ -24,7 +24,7 @@ from .discovery import (
 )
 from .integrity import verify_plugin_integrity
 from .interface import Plugin
-from .load_gates import config_gate
+from .load_gates import config_gate, missing_dependency_hint
 from .manifest_model import describe_manifest_failure
 from .overlay import registered_overlay_dirs
 from .plugin_class import PluginClassError, resolve_plugin_class
@@ -357,8 +357,8 @@ class PluginLoader:
             return plugin_instance
 
         except Exception as e:
-            logger.error(f"Failed to load plugin {safe_name}: {e}", exc_info=True)
-
+            hint = missing_dependency_hint(e)
+            logger.error(f"Failed to load plugin {safe_name}: {e}{hint}", exc_info=True)
             # Track failed state
             if self.lifecycle_manager:
                 await self.lifecycle_manager.transition_to_failed(plugin_name, e)

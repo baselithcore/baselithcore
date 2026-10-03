@@ -760,6 +760,24 @@ plugin_dependencies:
   browser_agent: ">=0.1.0"
 ```
 
+#### Libraries the core stopped installing
+
+`defusedxml`, `email-validator`, `markdown-it-py`, `networkx` and
+`sse-starlette` used to be core dependencies although nothing in `core/` or the
+official plugins imported them; they now live in the `plugin-compat` extra. A
+plugin that imported one without declaring it fails to load with
+`ModuleNotFoundError`, and the loader's error line names the remedy:
+
+```text
+Failed to load plugin my_plugin: No module named 'networkx' — 'networkx' is no
+longer installed with baselith-core. Add it to the plugin's python_dependencies,
+or install baselith-core[plugin-compat] to restore the previous set.
+```
+
+`load_gates.missing_dependency_hint(error)` builds that sentence from the
+`MOVED_TO_PLUGIN_COMPAT` table and returns an empty string for any other error,
+so an unrelated import failure is reported exactly as before.
+
 ### Lazy Loading
 
 The system uses [Lazy Loading](../advanced/lazy-loading.md) to optimize startup time.

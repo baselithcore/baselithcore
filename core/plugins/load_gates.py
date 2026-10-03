@@ -100,3 +100,43 @@ def compat_gate(plugin: Plugin, available_versions: dict[str, str]) -> bool:
         return False
     logger.warning(f"Plugin {md.name} compatibility warning: {detail}")
     return True
+
+
+# Five libraries were core dependencies "for plugins" although nothing in the
+# core or the official plugins imported them; they moved to the
+# ``plugin-compat`` extra. A third-party plugin that imported one without
+# declaring it now fails with a bare ModuleNotFoundError, which names a module
+# but not the remedy — missing_dependency_hint supplies it, for those names only.
+
+#: Import name -> distribution name, for the libraries the core stopped
+#: installing by default.
+MOVED_TO_PLUGIN_COMPAT: dict[str, str] = {
+    "defusedxml": "defusedxml",
+    "email_validator": "email-validator",
+    "markdown_it": "markdown-it-py",
+    "networkx": "networkx",
+    "sse_starlette": "sse-starlette",
+}
+
+
+def missing_dependency_hint(error: BaseException) -> str:
+    """Return a remedy to append to a plugin load error, or ``""``.
+
+    Args:
+        error: The exception the plugin raised while its module executed.
+
+    Returns:
+        A sentence naming the ``plugin-compat`` extra and the
+        ``python_dependencies`` manifest field when ``error`` is a missing
+        module the core used to install; an empty string otherwise.
+    """
+    if not isinstance(error, ModuleNotFoundError) or not error.name:
+        return ""
+    distribution = MOVED_TO_PLUGIN_COMPAT.get(error.name.split(".", 1)[0])
+    if distribution is None:
+        return ""
+    return (
+        f" — '{distribution}' is no longer installed with baselith-core. "
+        f"Add it to the plugin's python_dependencies, or install "
+        f"baselith-core[plugin-compat] to restore the previous set."
+    )
