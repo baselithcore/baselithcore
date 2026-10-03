@@ -268,5 +268,10 @@ section 13 never reaches it. Offered to everyone on identical terms; your plugin
 carries the notice described in section 3(c), and [plugin
 packaging](https://docs.baselithcore.xyz/plugins/packaging/) says what it must say.
 
+[NOTICE](https://github.com/baselithcore/baselithcore/blob/main/NOTICE) adds one term under
+AGPL section 7(b): **attribution**. Commercial use is welcome; every copy must keep
+the `NOTICE` file, and a product that shows legal notices (an About, Legal or
+Credits screen) must credit *"Based on BaselithCore by The BaselithCore Authors"*.
+
 ---
-Copyright © 2026 BaselithCore Team.
+Copyright © 2026 The BaselithCore Authors — see [NOTICE](https://github.com/baselithcore/baselithcore/blob/main/NOTICE).

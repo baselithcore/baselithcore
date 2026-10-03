@@ -890,3 +890,11 @@ the strict schema exists to prevent.
     *use* of the framework. Modifying, patching or replacing files under `core/`
     makes a modified framework — governed by AGPL-3.0-only whatever directory it
     ships in.
+
+!!! note "Shipping the framework itself? Keep the attribution"
+    A plugin on its own owes only the §3(c) notice above. If you also convey the
+    framework — a Docker image, a bundled installer, a hosted product — the
+    [NOTICE](https://github.com/baselithcore/baselithcore/blob/main/NOTICE) file's
+    AGPL section 7(b) term applies: keep `NOTICE` in every copy, and if your
+    product shows legal notices (an About, Legal or Credits screen), include
+    *"Based on BaselithCore by The BaselithCore Authors"*.

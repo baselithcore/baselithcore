@@ -15,8 +15,9 @@ license = "AGPL-3.0-only"
 # Explicit rather than relying on the build backend's default LICEN[CS]E*
 # glob: the Plugin Exception only grants its additional permission to a
 # distribution it actually accompanies (LICENSE.exception §5), so the wheel
-# must carry it deterministically, not by convention.
-license-files = ["LICENSE", "LICENSE.exception"]
+# must carry it deterministically, not by convention. NOTICE carries the
+# section 7(b) attribution term, which every copy must preserve.
+license-files = ["LICENSE", "LICENSE.exception", "NOTICE"]
 # `requires-python = ">=3.12"` has no upper cap and CI runs the suite on 3.12,
 # 3.13 and (advisory) 3.14, so the trove list says the same thing: a classifier
 # set that stops at 3.12 makes PyPI's "Programming Language" facet under-report
