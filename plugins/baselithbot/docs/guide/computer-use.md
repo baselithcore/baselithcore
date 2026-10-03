@@ -30,7 +30,7 @@ shell allowlist, filesystem scoping, and human-in-the-loop requirements.
 
 `GET /dash/computer-use` (effective config = boot config + runtime
 overlay), `PUT /dash/computer-use` (🔒) validates, persists the overlay to
-`plugins/baselithbot/.state/runtime_config.json`, **invalidates the cached
+`<state_dir>/runtime_config.json`, **invalidates the cached
 agent** so the next run rebuilds with the new guardrails, and emits
 `computer_use.updated` on the SSE bus.
 

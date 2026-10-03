@@ -198,7 +198,7 @@ class _StatusApp:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [401, 403, 404, 405, 429, 503])
+@pytest.mark.parametrize("status", [401, 403, 404, 405, 409, 429, 503])
 async def test_unit_is_refunded_when_no_work_was_done(monkeypatch, status):
     """A request admitted by quota but answered by an inner guard (or not
     routed at all) must not spend the caller's budget."""
@@ -230,3 +230,103 @@ async def test_refund_failure_never_breaks_the_response(monkeypatch):
     _patch(monkeypatch, enabled=True, user=_USER, quota=q)
     sent = await _run(qm.QuotaMiddleware(_StatusApp(429)))
     assert sent[0]["status"] == 429
+
+
+class _WorkDoneApp:
+    """An inner layer (CostControl) that spent LLM tokens before its 429."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        scope["baselith.work_done"] = True
+        await send({"type": "http.response.start", "status": 429})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
+class _ReplayApp:
+    """The idempotency layer answering a retry from its store: no work ran."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"idempotency-replayed", b"true")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
+@pytest.mark.asyncio
+async def test_429_after_work_was_done_is_not_refunded(monkeypatch):
+    """CostControl sits innermost and answers 429 only *after* the handler
+    spent its token budget: that unit was earned, not refunded."""
+    q = _RefundingQuota()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=q)
+    sent = await _run(qm.QuotaMiddleware(_WorkDoneApp()))
+    assert sent[0]["status"] == 429
+    assert q.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_is_refunded(monkeypatch):
+    q = _RefundingQuota()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=q)
+    sent = await _run(qm.QuotaMiddleware(_ReplayApp()))
+    assert sent[0]["status"] == 200
+    assert q.refunds == [("u1", "t1", q.consumed_at)]
+
+
+@pytest.mark.asyncio
+async def test_store_failure_is_503_with_retry_after(monkeypatch):
+    """A broken quota store is neither an unhandled 500 nor a silent admit."""
+
+    class _Down(_FakeQuota):
+        async def check_and_consume_pair(self, ident, tid, **k):
+            raise ConnectionError("redis down")
+
+    app = _FakeApp()
+    _patch(monkeypatch, enabled=True, user=_USER, quota=_Down())
+    sent = await _run(qm.QuotaMiddleware(app))
+    assert not app.called
+    assert sent[0]["status"] == 503
+    headers = dict(sent[0]["headers"])
+    assert headers[b"retry-after"].isdigit()
+
+
+class _FrozenDatetime:
+    """``datetime`` stand-in whose ``now`` is pinned (keeps the real class API)."""
+
+    def __init__(self, fixed):
+        self._fixed = fixed
+
+    def now(self, tz=None):
+        return self._fixed
+
+    def __getattr__(self, name):
+        from datetime import datetime as _real
+
+        return getattr(_real, name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("window", "expected"),
+    [
+        (QuotaWindow.DAILY, 3 * 3600 + 30 * 60),  # 20:30 -> next midnight
+        (QuotaWindow.MONTHLY, 2 * 86400 + 3 * 3600 + 30 * 60),  # 29 Mar -> 1 Apr
+    ],
+)
+async def test_retry_after_is_derived_from_the_window(monkeypatch, window, expected):
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(
+        qm, "datetime", _FrozenDatetime(datetime(2026, 3, 29, 20, 30, tzinfo=UTC))
+    )
+
+    class _Over(_FakeQuota):
+        async def check_and_consume_pair(self, ident, tid, **k):
+            raise QuotaExceededError(ident, window, 1, 1)
+
+    _patch(monkeypatch, enabled=True, user=_USER, quota=_Over())
+    sent = await _run(qm.QuotaMiddleware(_FakeApp()))
+    assert sent[0]["status"] == 429
+    assert int(dict(sent[0]["headers"])[b"retry-after"]) == expected

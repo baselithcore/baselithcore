@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
@@ -253,3 +254,88 @@ async def test_connect_failure_is_a_connect_error(spec, recorder):
     with pytest.raises(ConnectorConnectError):
         await http.request("GET", "https://api.acme.test/x")
     await http.aclose()
+
+
+# ── Response cap and overall deadline ────────────────────────────────────────
+
+
+async def test_declared_oversize_response_is_refused_before_the_body(spec, recorder):
+    from core.connectors import ConnectorResponseTooLargeError
+
+    body = b"x" * 64
+    rec = recorder(
+        httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
+    )
+    http = _http(replace(spec, max_response_bytes=32), rec)
+    with pytest.raises(ConnectorResponseTooLargeError) as info:
+        await http.request("GET", "https://api.acme.test/big")
+    assert "32" in str(info.value)
+    assert len(rec.requests) == 1  # permanent: never retried
+    assert get_circuit_breaker(f"connector.{spec.name}").state.value == "closed"
+    await http.aclose()
+
+
+async def test_streamed_oversize_response_is_cut_at_the_cap(spec, recorder):
+    from core.connectors import ConnectorResponseTooLargeError
+
+    async def drip() -> AsyncIterator[bytes]:
+        for _ in range(8):
+            yield b"0123456789"
+
+    rec = recorder(httpx.Response(200, stream=_AsyncStream(drip())))
+    http = _http(replace(spec, max_response_bytes=25), rec)
+    with pytest.raises(ConnectorResponseTooLargeError):
+        await http.request("GET", "https://api.acme.test/drip")
+    await http.aclose()
+
+
+async def test_response_at_the_cap_is_delivered_intact(spec, recorder):
+    rec = recorder(httpx.Response(200, json={"k": "v"}))
+    http = _http(replace(spec, max_response_bytes=len(b'{"k":"v"}')), rec)
+    resp = await http.request("GET", "https://api.acme.test/x")
+    assert resp.json() == {"k": "v"} and resp.status_code == 200
+    await http.aclose()
+
+
+async def test_compressed_body_survives_the_capped_read(spec, recorder):
+    import gzip
+
+    raw = gzip.compress(b'{"ok": true}')
+    rec = recorder(
+        httpx.Response(200, content=raw, headers={"Content-Encoding": "gzip"})
+    )
+    http = _http(spec, rec)
+    resp = await http.request("GET", "https://api.acme.test/x")
+    assert resp.json() == {"ok": True}
+    await http.aclose()
+
+
+async def test_overall_deadline_bounds_a_dripping_response(spec, recorder):
+    import asyncio
+
+    async def slow() -> AsyncIterator[bytes]:
+        yield b"a"
+        await asyncio.sleep(5)
+        yield b"b"
+
+    rec = recorder(httpx.Response(200, stream=_AsyncStream(slow())))
+    http = _http(replace(spec, max_attempts=1, timeout_s=0.05, deadline_s=0.05), rec)
+    with pytest.raises(ConnectorTransientError, match="deadline"):
+        await http.request("GET", "https://api.acme.test/slow")
+    await http.aclose()
+
+
+def test_spec_validates_cap_and_deadline(spec):
+    with pytest.raises(ValueError, match="max_response_bytes"):
+        replace(spec, max_response_bytes=0)
+    with pytest.raises(ValueError, match="deadline_s"):
+        replace(spec, deadline_s=spec.timeout_s / 2)
+
+
+class _AsyncStream(httpx.AsyncByteStream):
+    def __init__(self, source):
+        self._source = source
+
+    async def __aiter__(self):
+        async for chunk in self._source:
+            yield chunk

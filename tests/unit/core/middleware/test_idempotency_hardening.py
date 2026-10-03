@@ -254,3 +254,38 @@ async def test_gzip_entry_is_decompressed_for_a_retry_without_gzip() -> None:
     assert b"content-encoding" not in plain_headers
     assert orjson.loads(plain[1]["body"]) == payload
     assert int(plain_headers[b"content-length"]) == len(plain[1]["body"])
+
+
+def test_same_key_different_query_string_is_422() -> None:
+    """The query string is part of the request: ``POST /echo?amount=10`` and
+    ``POST /echo?amount=99`` under one key must not share a replay."""
+    fake = _Redis()
+    client, state = _client(fake)
+    headers = {"Idempotency-Key": "pay-q", **_CRED}
+    r1 = client.post("/echo?amount=10", headers=headers, content=b"{}")
+    r2 = client.post("/echo?amount=99", headers=headers, content=b"{}")
+    r3 = client.post("/echo?amount=10", headers=headers, content=b"{}")
+    assert r1.status_code == 200
+    assert r2.status_code == 422
+    assert r3.status_code == 200
+    assert r3.headers.get("idempotency-replayed") == "true"
+    assert state["count"] == 1
+
+
+def test_query_string_binds_even_when_the_body_is_never_read() -> None:
+    fake = _Redis()
+    client, state = _client(fake)
+    headers = {"Idempotency-Key": "q-nobody", **_CRED}
+    client.post("/nobody?x=1", headers=headers, content=b"a")
+    r2 = client.post("/nobody?x=2", headers=headers, content=b"a")
+    assert r2.status_code == 422
+    assert state["count"] == 1
+
+
+def test_entry_without_a_target_digest_still_replays() -> None:
+    """Entries stored before the query was fingerprinted replay as before."""
+    from core.middleware._idempotency_replay import decode_entry, encode_entry
+
+    entry = decode_entry(encode_entry(200, [], b"{}", None))
+    assert entry is not None
+    assert entry.target_sha256 is None

@@ -51,7 +51,9 @@ def _tenant_segment(tenant_id: str) -> str:
 def secret_names(spec: ConnectorSpec, field: str, tenant_id: str) -> list[str]:
     """Secret names tried for ``field``, most specific first.
 
-    ``CONNECTOR_<NAME>__<TENANT>__<FIELD>`` then ``CONNECTOR_<NAME>__<FIELD>``.
+    ``CONNECTOR_<NAME>__<TENANT>__<FIELD>`` then ``CONNECTOR_<NAME>__<FIELD>``
+    (the latter only when ``spec.allow_global_fallback`` holds, or out of a
+    tenant, where nothing more specific exists).
     Connector and field names are identifiers without ``__`` (enforced by
     their specs) and the tenant segment is encoded losslessly, so distinct
     (connector, tenant, field) triples never map to the same name.
@@ -60,6 +62,8 @@ def secret_names(spec: ConnectorSpec, field: str, tenant_id: str) -> list[str]:
     names = [f"{base}__{field.upper()}"]
     if tenant_id:
         names.insert(0, f"{base}__{_tenant_segment(tenant_id)}__{field.upper()}")
+        if not spec.allow_global_fallback:
+            names.pop()
     return names
 
 

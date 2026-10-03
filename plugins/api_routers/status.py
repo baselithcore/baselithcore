@@ -5,6 +5,7 @@ Provides health checks and system status endpoints used for monitoring
 uptime, synthetic metrics, and service readiness.
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Response
@@ -124,11 +125,12 @@ async def readiness(response: Response) -> dict[str, object]:
     checker = get_health_checker()
 
     async def _check() -> dict[str, bool]:
-        return {
-            "database": await _check_database(),
-            "redis": await _check_redis(),
-            "vectorstore": await _check_vectorstore(),
-        }
+        # Independent probes, concurrently: a cache miss costs the slowest
+        # probe's timeout, not the sum of the three.
+        database, redis, vectorstore = await asyncio.gather(
+            _check_database(), _check_redis(), _check_vectorstore()
+        )
+        return {"database": database, "redis": redis, "vectorstore": vectorstore}
 
     health = await checker.get_status(_check)
     db_ok = health.services.get("database", False)

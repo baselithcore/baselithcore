@@ -52,6 +52,12 @@ WORKDIR /app
 # --- Build-time args ---
 ARG EMBEDDER_MODEL="BAAI/bge-m3"
 ARG RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+# `local` (default): torch, sentence-transformers and the pre-cached models,
+# for plugins that still run a model in-process. `remote`: none of them —
+# embedding and reranking come from the core inference services (TEI over
+# HTTP, core.services.inference), so the API image carries no ML runtime. Any
+# plugin listed in configs/inprocess_ml_allowlist.yaml needs `local`.
+ARG ML_RUNTIME="local"
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -133,6 +139,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # multi-line block (`name==v \` followed by `--hash=...` continuation lines),
 # the CUDA strip is block-aware: a plain `grep -v` on the name line would leave
 # its hash lines behind, glued onto the previous requirement.
+#
+# ML_RUNTIME=remote strips the packages that need torch as well: torch,
+# torchvision and every lock entry that depends on torch directly or
+# transitively (accelerate, docling-ibm-models, sentence-transformers —
+# computed from uv.lock; recompute when the lock changes). The guard after the
+# install fails the build if torch still ends up in the prefix.
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -142,7 +154,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --extra qdrant --extra huggingface --extra rag --extra nlp --extra memory \
         --extra web --extra browser --extra documents \
         --format requirements-txt -o /tmp/requirements.lock.txt \
-    && awk '/^[^ #]/ { skip = ($0 ~ /^(nvidia-|triton|cuda-)/) } !skip' \
+    && case "${ML_RUNTIME}" in \
+         local) strip='^(nvidia-|triton|cuda-)' ;; \
+         remote) strip='^(nvidia-|triton|cuda-|torch==|torchvision==|sentence-transformers==|accelerate==|docling-ibm-models==)' ;; \
+         *) echo "ERROR: ML_RUNTIME must be 'local' or 'remote', got '${ML_RUNTIME}'" >&2; exit 1 ;; \
+       esac \
+    && awk -v strip="$strip" '/^[^ #]/ { skip = ($0 ~ strip) } !skip' \
         /tmp/requirements.lock.txt > /tmp/requirements.image.txt \
     && echo "locked set: $(grep -cE '^[a-zA-Z0-9]' /tmp/requirements.image.txt) packages" \
     && if grep -qE '^(nvidia-|triton|cuda-)' /tmp/requirements.image.txt; then \
@@ -209,17 +226,25 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install "setuptools>=83.0.0" \
-    && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --prefix /install \
-        torch==2.13.0 \
-        torchvision==0.28.0 \
-        --index-url https://download.pytorch.org/whl/cpu \
+    && if [ "${ML_RUNTIME}" = "local" ]; then \
+         PYTHONPATH=/install/lib/python3.12/site-packages \
+         pip install --prefix /install \
+          torch==2.13.0 \
+          torchvision==0.28.0 \
+          --index-url https://download.pytorch.org/whl/cpu; \
+       fi \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        pip install --prefix /install --require-hashes --no-deps \
         -r /tmp/requirements.image.txt \
     && if ls /install/lib/python3.12/site-packages | grep -qE '^(nvidia|cuda)'; then \
          echo "ERROR: CUDA packages installed into a CPU-only image" >&2; \
          ls /install/lib/python3.12/site-packages | grep -E '^(nvidia|cuda)' >&2; \
+         exit 1; \
+       fi \
+    && if [ "${ML_RUNTIME}" = "remote" ] \
+         && ls /install/lib/python3.12/site-packages | grep -qiE '^(torch|sentence_transformers)'; then \
+         echo "ERROR: ML_RUNTIME=remote but an ML runtime is in the image:" >&2; \
+         ls /install/lib/python3.12/site-packages | grep -iE '^(torch|sentence_transformers)' >&2; \
          exit 1; \
        fi
 
@@ -264,7 +289,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # hundred MB from Hugging Face during its startup probe is a cold start that
 # can outlive the probe budget, and it needs egress to huggingface.co from
 # production.
-RUN python - <<'PY'
+#
+# Skipped for ML_RUNTIME=remote (there is nothing to load the models with); the
+# directory is still created because the runtime stage copies it.
+RUN mkdir -p /build/models && [ "${ML_RUNTIME}" = "remote" ] || python - <<'PY'
 import os, sys
 from pathlib import Path
 site = Path("/install") / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
@@ -279,6 +307,36 @@ for name, loader in (
         print(f"[docker] cached model: {name}")
     except Exception as e:
         print(f"[docker] warning: unable to cache {name}: {e}", file=sys.stderr)
+
+# One copy of the weights, in safetensors form. A repo whose `main` carries
+# only pytorch_model.bin (bge-m3 does) makes transformers fetch the
+# safetensors file from the hub's auto-conversion PR as well, so the cache
+# held both: 2 x 2.27GB, measured on the built image (4.4GB -> 2.3GB after
+# this). With HF_HUB_OFFLINE=1 at runtime only the `main` snapshot is
+# consulted, so the converted file was dead weight and the model loaded
+# through torch.load (pickle). Linking the safetensors into `main`, dropping
+# the pickle and the hub's "no safetensors on main" marker leaves one copy
+# that loads offline without unpickling anything. Verified with
+# `--network none`: SentenceTransformer("BAAI/bge-m3") encodes from it.
+cache = Path(os.environ["HF_HOME"])
+for repo in sorted(cache.glob("models--*")):
+    ref = repo / "refs" / "main"
+    if not ref.is_file():
+        continue
+    main = repo / "snapshots" / ref.read_text().strip()
+    pickled = main / "pytorch_model.bin"
+    converted = [p for p in repo.glob("snapshots/*/model.safetensors") if p.parent != main]
+    if (main / "model.safetensors").exists() or not converted:
+        continue
+    # Also covers a cache holding ONLY the converted file: without this link
+    # `main` would have no weights at all and the offline load would fail.
+    (main / "model.safetensors").symlink_to(os.path.relpath(converted[0].resolve(), main))
+    (repo / ".no_exist" / main.name / "model.safetensors").unlink(missing_ok=True)
+    if pickled.is_symlink():
+        blob = pickled.resolve()
+        pickled.unlink()
+        blob.unlink()
+    print(f"[docker] {repo.name}: model.safetensors linked into main; no pickled copy left")
 PY
 
 # ============================================================
@@ -319,6 +377,12 @@ COPY pyproject.toml README.md ./
 COPY baselith/ baselith/
 COPY core/ core/
 COPY plugins/ plugins/
+# The build itself needs these two: `[tool.setuptools] cmdclass` points
+# build_py at build_support/scaffold_templates.py, which copies the `baselith
+# init` starters out of templates/ into the wheel. Without them `pip install .`
+# stopped at "No module named 'build_support'" before building anything.
+COPY build_support/ build_support/
+COPY templates/ templates/
 RUN --mount=type=cache,target=/root/.cache/pip \
     PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --no-deps --prefix /install-app . \
@@ -345,6 +409,13 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/models \
     HUGGINGFACE_HUB_CACHE=/app/models \
     SENTENCE_TRANSFORMERS_HOME=/app/models \
+    # The cache above is the WHOLE model set this image serves. Without this,
+    # every in-process model load still asks the Hub whether `main` moved and
+    # pulls a newer revision if it has: untested weights swapped under a
+    # running deployment, a write into a cache that is read-only in
+    # production, and an outbound call the egress policy has to allow. The
+    # chart's TEI pods download their own models and are not affected.
+    HF_HUB_OFFLINE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     # Thread caps. torch and OpenBLAS size their pools from the number of CPUs
     # they can see, which is the HOST's count — not the container's CPU limit.
@@ -467,10 +538,11 @@ COPY --from=app /install-app /install-app
 # configs/plugins.yaml on every plugin enable/disable, and a plugin may persist
 # state under its own directory (baselithbot's .state/.secret_key).
 COPY --chown=appuser:appuser backend.py ./
-# Alembic config + migration scripts: both `alembic upgrade head` (the
-# pre-deploy Job) and the in-app ensure_schema() fallback resolve them from /app.
+# Alembic config for the pre-deploy Job's `alembic upgrade head`. The scripts
+# themselves live in core/db/migrations (copied with core/ below); alembic.ini
+# points there relative to itself, and the in-app ensure_schema() and
+# `baselith db migrate` locate them through the package, not the cwd.
 COPY --chown=appuser:appuser alembic.ini ./
-COPY --chown=appuser:appuser migrations/ migrations/
 COPY --chown=appuser:appuser baselith/ baselith/
 COPY --chown=appuser:appuser core/ core/
 COPY --chown=appuser:appuser plugins/ plugins/
@@ -488,7 +560,7 @@ COPY --chown=appuser:appuser configs/ configs/
 # Nothing the image runs needs any of it. The API entrypoint is
 # `uvicorn backend:app`, the worker is `baselith queue worker` (a console
 # script from /install-app), and the migration Job runs `alembic upgrade head`
-# against alembic.ini + migrations/, both copied above. Verified by grepping
+# against alembic.ini + core/db/migrations/, both copied above. Verified by grepping
 # core/, backend.py, the compose files and every Helm template for a reference
 # to scripts/ — the only one was this COPY.
 #
@@ -509,8 +581,15 @@ RUN python -m compileall -q --invalidation-mode checked-hash \
     /app/backend.py /app/core /app/plugins
 
 # --- Writable runtime directories ---
-RUN mkdir -p data logs documents qdrant_data \
-    && chown appuser:appuser /app data logs documents qdrant_data
+# state/baselithbot is the mount point of compose.prod.yaml's plugin_state
+# volume (BASELITHBOT_STATE_DIR). It must exist in the image, owned by appuser
+# and 0700: Docker seeds an empty named volume from the image directory it is
+# mounted on, ownership included, and a mount point the image lacks is created
+# root-owned — a fresh volume the plugin could not write its key into.
+RUN mkdir -p data logs documents qdrant_data state/baselithbot \
+    && chown appuser:appuser /app data logs documents qdrant_data \
+        state state/baselithbot \
+    && chmod 0700 state/baselithbot
 
 # --- Debian security updates ---
 # LAST, and the position is the whole point.

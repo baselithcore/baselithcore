@@ -46,6 +46,14 @@ core/chat/
     └── retrieval_context.py
 ```
 
+!!! note "Query-side embeddings"
+    Retrieval embeds the user question through
+    `core.nlp.roles.aencode_query`, which uses the embedder's query prompt
+    (`BASELITH_EMBEDDING_QUERY_PREFIX`) when it has one. Indexed documents
+    use the document prefix, and both roles get separate cache keys, so
+    instruction-tuned embedding models (e5, Qwen3) are queried the way they
+    were trained. See [NLP](nlp.md).
+
 ---
 
 ## ChatService

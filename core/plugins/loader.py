@@ -20,10 +20,11 @@ from .discovery import (
     find_manifest,
     iter_entry_point_plugin_dirs,
     merge_plugin_dirs,
+    with_bundled_plugins,
 )
 from .integrity import verify_plugin_integrity
 from .interface import Plugin
-from .load_gates import config_gate
+from .load_gates import config_gate, missing_dependency_hint
 from .manifest_model import describe_manifest_failure
 from .overlay import registered_overlay_dirs
 from .plugin_class import PluginClassError, resolve_plugin_class
@@ -118,7 +119,8 @@ class PluginLoader:
         if self._discover_cache is not None:
             return self._discover_cache
 
-        plugin_dirs = apply_overlay(self._scan_plugin_dirs(), registered_overlay_dirs())
+        scanned = with_bundled_plugins(self.plugins_dir, self._scan_plugin_dirs())
+        plugin_dirs = apply_overlay(scanned, registered_overlay_dirs())
         self._discover_cache = merge_plugin_dirs(
             plugin_dirs, iter_entry_point_plugin_dirs()
         )
@@ -355,8 +357,8 @@ class PluginLoader:
             return plugin_instance
 
         except Exception as e:
-            logger.error(f"Failed to load plugin {safe_name}: {e}", exc_info=True)
-
+            hint = missing_dependency_hint(e)
+            logger.error(f"Failed to load plugin {safe_name}: {e}{hint}", exc_info=True)
             # Track failed state
             if self.lifecycle_manager:
                 await self.lifecycle_manager.transition_to_failed(plugin_name, e)

@@ -1,4 +1,14 @@
 
+# json-file logs grow without bound by default: a chatty worker or a flood of
+# edge 429s fills the host disk and takes every container with it. Rotated
+# per service (50MB each), referenced below so no service can be added
+# without it.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   # Main service: API Backend
   api:
@@ -29,9 +39,23 @@ services:
       # address is trusted: trusting the whole subnet let any other container
       # on app_net forge a client address or claim https.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
+      # The plugin_state volume below, named explicitly. Mounted inside the
+      # plugin package with no variable, the plugin found it only through its
+      # deprecated in-package fallback and warned on every boot.
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+      # The root filesystem is read-only below, as in the Helm chart. The
+      # bundled baselithbot plugin keeps its secret-store master key, replay
+      # database and workspace registry in BASELITHBOT_STATE_DIR; a named
+      # volume shared with the worker, so both processes read ONE key (two
+      # keys would decrypt nothing of each other's) and it survives a
+      # re-pull. Same volume as when it was mounted at
+      # /app/plugins/baselithbot/.state: only the mount point moved, so an
+      # existing deployment keeps its key and stores. Any other plugin that
+      # writes under /app needs a volume of its own.
+      - plugin_state:/app/state/baselithbot
     networks:
       - app_net
       - obs_net
@@ -47,6 +71,16 @@ services:
       qdrant:
         condition: service_healthy
     init: true
+    # Same posture as the Helm chart (readOnlyRootFilesystem, every
+    # capability dropped): the image tree cannot be rewritten by the process
+    # that runs it. Writable paths are listed explicitly — /tmp, the data
+    # volume and the plugin state volume above; `baselith plugin enable`
+    # (which rewrites configs/plugins.yaml) is a deploy-time change here, as
+    # it is in Kubernetes.
+    read_only: true
+    # Tasks (processes AND threads) the cgroup may hold. Chromium, launched by
+    # the browser agent, forks liberally; a fork bomb from a tool result or a
+    # runaway thread pool is contained at this ceiling instead of at the host's.
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -54,9 +88,17 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          # Tasks (processes AND threads) the cgroup may hold — `pids_limit`
+          # in Compose's own spelling, which it refuses next to a `deploy`
+          # block. Chromium, launched by the browser agent, forks liberally;
+          # a fork bomb from a tool result or a runaway thread pool is
+          # contained here instead of at the host's limit. Every service
+          # below carries one.
+          pids: 1024
           cpus: '1.0'
           memory: 1G
     healthcheck:
@@ -66,11 +108,15 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      # Cold start loads the embedder + reranker before /health answers —
-      # measured at ~100s on a laptop. Without a start period those probes
-      # count as failures and the container is flagged unhealthy while it is
-      # still booting normally.
-      start_period: 150s
+      # Same budget as the image HEALTHCHECK (Dockerfile): the boot imports
+      # torch, loads the cached embedder and reranker, runs the plugin loader
+      # and opens the pools, and on the 1-CPU limit above that regularly
+      # outlasts the 150s this used to say — the container was flagged
+      # unhealthy mid-boot. The first success ends the period early, and
+      # start_interval polls every 5s meanwhile so a fast boot is not held
+      # to the 30s tick (Docker >= 25; ignored by older daemons).
+      start_period: 300s
+      start_interval: 5s
 
   # Cache and Message Queue
   # Graph Database and Cache (Redis compatible)
@@ -108,9 +154,11 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 256
           cpus: '0.8'
           memory: 1G
     healthcheck:
@@ -152,6 +200,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app_net
+    # One backend process per connection (DB_POOL_MAX_SIZE x api/worker
+    # instances) plus the checkpointer, walwriter and friends; 512 leaves room
+    # for max_connections=100 and never for a fork bomb.
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -169,9 +220,11 @@ services:
       - SETGID          # gosu: drop to the postgres group
       - SETUID          # gosu: drop to the postgres user
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: '0.5'
           memory: 512M
     healthcheck:
@@ -215,9 +268,11 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: '0.5'
           memory: 512M
     healthcheck:
@@ -244,9 +299,11 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot   # see the api service
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+      - plugin_state:/app/state/baselithbot   # shared with api, see there
     networks:
       - app_net
       - obs_net
@@ -258,16 +315,28 @@ services:
       qdrant:
         condition: service_healthy
     init: true
+    read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
+    # The image HEALTHCHECK probes http://localhost:8000/health, which this
+    # process never serves (it is an RQ consumer, not uvicorn): inherited, it
+    # flagged the worker `unhealthy` 300s after every start, and a stack
+    # where one container is always red teaches operators to ignore the
+    # column. Disabled rather than replaced — an RQ heartbeat check needs the
+    # queue Redis URL, which the Helm chart leaves to the operator for the
+    # same reason (worker.livenessProbe).
+    healthcheck:
+      disable: true
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 1024
           cpus: '0.8'
           memory: 1G
 
@@ -278,8 +347,14 @@ services:
     # deliberately, together with a re-run of `nginx -t` on nginx.conf.
     image: nginx:1.31.5-alpine
     container_name: baselith-gateway
+    # IPv4 only, on purpose. A bare "80:80" also binds [::]:80, and on a
+    # dual-stack host IPv6 clients reach nginx through docker-proxy with the
+    # bridge gateway as their source address: every IPv6 client then shared
+    # ONE rate-limit bucket (and, until it was removed, passed the private-
+    # range allow-list on /metrics). Put a real IPv6 listener in front, or
+    # run the daemon with userland-proxy off, before publishing on [::].
     ports:
-      - "80:80"
+      - "0.0.0.0:80:80"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/errors:/usr/share/nginx/errors:ro
@@ -309,11 +384,93 @@ services:
       - /var/run
       - /tmp:size=32m,noexec,nosuid
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 128
           cpus: '0.5'
           memory: 256M
+    healthcheck:
+      # The gateway's own liveness (deploy/nginx/nginx.conf serves 204 on
+      # this path itself); a proxied /health would report the backend and
+      # flag nginx unhealthy during every api restart. busybox wget ships in
+      # the alpine image.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/__gateway/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # === Inference services (optional; `--profile inference`) ===
+  # Hugging Face Text Embeddings Inference, one server per model, mirroring
+  # `inference.tei` of the Helm chart: configs/.env.production points
+  # BASELITH_EMBEDDING_URL / BASELITH_RERANK_URL at these two by default, so
+  # the api and worker load no model themselves. Without the profile those
+  # URLs resolve to nothing and the first embedding call fails — point them
+  # at your own servers instead. CPU image, linux/amd64 only; sized from the
+  # same measurements as the chart (bge-m3 holds 6.7Gi at
+  # --max-batch-tokens 4096, the reranker 3.9Gi). No token between the api
+  # and these servers: app_net is a private bridge. The client sends a bearer
+  # over plain HTTP only to loopback or single-label/cluster-internal hosts
+  # (like tei-embed); anything that leaves the host needs TLS.
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    container_name: baselith-tei-embed
+    profiles: ["inference"]
+    command: ["--model-id", "BAAI/bge-m3", "--port", "8080", "--max-batch-tokens", "4096"]
+    environment:
+      - HF_HOME=/data
+      - HUGGINGFACE_HUB_CACHE=/data
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - tei_embed_models:/data
+    networks:
+      - app_net
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          memory: 9G
+
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    container_name: baselith-tei-rerank
+    profiles: ["inference"]
+    # --max-batch-tokens 4096: TEI's start-up warm-up runs one full batch; at
+    # the default 16384 the reranker peaked past 6G and was OOM-killed (k3d
+    # lab), at 4096 it peaks at 7.5G and settles at 4.4G.
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--port", "8080", "--max-batch-tokens", "4096"]
+    environment:
+      - HF_HOME=/data
+      - HUGGINGFACE_HUB_CACHE=/data
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - tei_rerank_models:/data
+    networks:
+      - app_net
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          memory: 9G
 
   # === Observability Stack ===
   jaeger:
@@ -329,7 +486,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    deploy:
+      resources:
+        limits:
+          pids: 256
     restart: unless-stopped
+    logging: *logging
 
   prometheus:
     image: prom/prometheus:v3.5.5
@@ -348,13 +510,21 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    deploy:
+      resources:
+        limits:
+          pids: 256
     restart: unless-stopped
+    logging: *logging
 
 volumes:
   falkordb_data:
   postgres_data:
   qdrant_data:
   prometheus_data:
+  plugin_state:
+  tei_embed_models:
+  tei_rerank_models:
 
 networks:
   app_net:

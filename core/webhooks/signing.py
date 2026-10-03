@@ -113,5 +113,7 @@ def verify_signature(
         if abs(current - ts) > tolerance_seconds:
             return False
     expected = _compute(secret, ts, body)
-    # Constant-time comparison to avoid timing oracles.
-    return hmac.compare_digest(expected, sig)
+    # Constant-time comparison to avoid timing oracles. Bytes, because
+    # ``compare_digest`` raises TypeError on a non-ASCII str — a crafted
+    # header would otherwise turn a clean reject into a 500.
+    return hmac.compare_digest(expected.encode("utf-8"), sig.encode("utf-8"))

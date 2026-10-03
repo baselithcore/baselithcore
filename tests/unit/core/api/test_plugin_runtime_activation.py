@@ -10,6 +10,7 @@ transitive infra deps come up first.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -179,7 +180,12 @@ def _hooks_with_configs(
 
 def _discoveries(*names: str) -> dict[str, Any]:
     return {
-        n: SimpleNamespace(name=n, directory_name=n.replace("-", "_")) for n in names
+        n: SimpleNamespace(
+            name=n,
+            directory_name=n.replace("-", "_"),
+            plugin_dir=Path("plugins") / n.replace("-", "_"),
+        )
+        for n in names
     }
 
 

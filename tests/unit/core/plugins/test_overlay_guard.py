@@ -57,7 +57,7 @@ def _register(
 ) -> list[str]:
     import plugins  # noqa: F401  # the real package first, as in production
 
-    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda: [public_hex])
+    monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     return overlay.register_overlay_packages(
         root, bundled_root=bundled, core_version="1.50.0"
     )

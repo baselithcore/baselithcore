@@ -11,7 +11,7 @@ already keys on ``f"{model_id}:{text}"``; these tests pin the same guarantee
 here so the two cannot drift apart again.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -102,3 +102,13 @@ async def test_batch_path_is_scoped_by_model_too() -> None:
     assert second_model.encoded == ["alpha", "beta"], (
         "the batch path served another model's vectors"
     )
+
+
+async def test_empty_in_memory_cache_is_still_populated() -> None:
+    """An empty ``TTLCache`` is falsy (``__len__`` is 0); treating it as "no
+    cache" meant the in-memory backend never stored a single vector."""
+    model = _Model("m", marker=1.0)
+    embedder = CachedEmbedder(cast(Any, model), cache_backend="memory")
+    await embedder.encode("same")
+    await embedder.encode("same")
+    assert model.encoded == ["same"]

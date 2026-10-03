@@ -335,9 +335,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @staticmethod
     def _default_state_dir() -> str:
         """Return the on-disk directory used for plugin-local state."""
-        from pathlib import Path
+        from plugins.baselithbot.state_paths import resolve_state_dir
 
-        return str(Path(__file__).resolve().parent / ".state")
+        return str(resolve_state_dir())
 
     def _default_prefs_path(self) -> str:
         """Return the on-disk path used to persist model preferences."""

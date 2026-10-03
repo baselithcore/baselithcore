@@ -11,6 +11,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.observability.logging import bind_context
 from core.observability.setup import request_id_ctx
+from core.utils.logsafe import sanitize_log_value
 
 # Accepted shape for a caller-supplied ``X-Request-ID``. Correlation ids in the
 # wild are UUIDs, ULIDs, trace ids or short opaque tokens — a bounded ASCII
@@ -63,9 +64,11 @@ class RequestIdMiddleware:
             await send(message)
 
         try:
+            # The decoded path is caller-controlled and lands in every log
+            # line of the request: single line, bounded.
             with bind_context(
                 request_id=request_id,
-                http_path=scope.get("path", ""),
+                http_path=sanitize_log_value(scope.get("path", ""), max_length=256),
                 http_method=scope.get("method", ""),
             ):
                 await self.app(scope, receive, send_wrapper)

@@ -189,9 +189,11 @@ In order, before anything is offered:
 1. The artifact comes from the release registered for that plugin, over HTTPS,
    by tag `v<version>`.
 2. The recomputed plugin hash equals the manifest's `integrity_sha256`.
-3. `signature_ed25519` verifies against a usable trusted key. Unsigned or
-   unknown-key releases are refused regardless of
-   `BASELITH_REQUIRE_PLUGIN_SIGNATURES`; the update path is always strict.
+3. `signature_ed25519` verifies against a usable trusted key **whose scope
+   covers this plugin** (the trust store's per-key `plugins` list,
+   `load_trust_roots(plugin_name)`). Unsigned or unknown-key releases are
+   refused regardless of `BASELITH_REQUIRE_PLUGIN_SIGNATURES`; the update path
+   is always strict.
 4. The manifest `name` is the plugin being updated and its `version` equals the
    tag.
 5. No downgrade: the version must be strictly greater than the installed one.
@@ -199,6 +201,19 @@ In order, before anything is offered:
    `max_core_version`.
 7. Every `python_dependencies` requirement is already satisfied in the running
    environment.
+
+The trust roots are looked up per plugin everywhere they are used — by the
+checker (`run_check` accepts either one key list or a `plugin name -> keys`
+callable), by the executor before staging, and by the overlay loader — so a
+publisher key scoped to one plugin cannot vouch for another. See
+[Plugin trust store](../advanced/security.md#plugin-trust-store).
+
+**Metadata is size-capped.** Release lists, tags, advisories and `release.json`
+are small JSON documents: every metadata response and the `release.json`
+download are read through a **1 MiB** cap (`MAX_TEXT_FILE_BYTES`), streamed and
+cut off past it rather than buffered, so a compromised or misbehaving API host
+cannot exhaust the checker. Tarballs keep the separate
+`PLUGIN_UPDATE_MAX_ARTIFACT_MB` cap.
 
 The signing key never leaves the maintainers, so a tag pushed by anyone else
 fails rule 3. Keep it off CI runners whose secrets anyone with push access can
@@ -301,7 +316,10 @@ token on a public repository grants nothing extra, and an authenticated client
 gets a much higher rate limit. Without advisory read access the update is still
 reported and `system.error` says the advisories are unavailable. A repository
 that publishes no security advisories answers 404: that is not an error, and
-only release notices appear for it. A 404 never clears a known notice: a
+only release notices appear for it. An advisory whose vulnerable range is
+missing or does not parse, or an installed version that does not parse, cannot
+rule the advisory out, so it is **reported as affecting** and logged as
+`system_update_range_uncertain` — it used to be dropped from the notice. A 404 never clears a known notice: a
 previously reported security state is carried over, and only a successful
 fetch that no longer matches clears it. A saved notice about another repository
 or another installed version is never served (after an upgrade, the first check
@@ -514,6 +532,13 @@ an image upgrade is never undone by an old overlay entry. An operator
 removes such entries with `core.plugins.overlay_prune.prune_stale_overlay`;
 plain directories at the overlay root are reported, never deleted.
 
+An accepted entry is imported from its **resolved** store directory
+(`.store/<name>-<version>/`), not through the `<name>` link. The link is
+switched atomically by an update while the process runs; resolving it once,
+after verification, guarantees that only the tree just verified ever backs a
+lazy submodule import. Each entry is verified against the trust roots scoped
+to its own plugin name.
+
 ## Refusal reasons
 
 | Value | Meaning |
@@ -554,7 +579,9 @@ failure type only; credentials never appear in it.
 ## One-click plugin updates (host installs)
 
 On a host install an operator may let administrators install a newer plugin
-release from a console, and roll it back, instead of pulling the code by hand.
+release, and roll it back — from the host shell with `baselith
+plugin-updater`, or from an external console if one is installed (the core
+ships none) — instead of pulling the code by hand.
 The core itself is never updated this way. The web process only records a
 request: a separate updater process verifies, installs, restarts the API,
 checks its health and rolls back on its own. It is **off by default**
@@ -594,16 +621,23 @@ ones fail, one line per blocker, and keeps showing the manual instructions.
 
 ### What happens during a run
 
-A console plugin and the CLI (`baselith plugin-updater request` /
-`rollback`) create the same run in the run store under
-`UPDATE_APPLY_STATE_DIR`.
+!!! note "The core ships no console"
+    The core creates runs only through the CLI (`baselith plugin-updater
+    request` / `rollback`), and every such run is **pre-approved**: whoever
+    has a shell on the host is trusted, so it goes straight to step 3.
+    Nothing in the core creates a run in `awaiting_approval`, demands an MFA
+    code or asks a second administrator. Steps 1–2 below — and the
+    `awaiting_approval`, `expired` and `denied` states — apply only when an
+    external console (a separate plugin or service) writes runs to the same
+    store under `UPDATE_APPLY_STATE_DIR`, and their MFA and four-eyes rules
+    are that console's, not the core's.
 
-1. **Request.** An administrator asks for version *V*, pinned to the tarball
+1. **Request** (external console only). An administrator asks for version *V*, pinned to the tarball
    SHA-256 they were shown. The console demands a fresh MFA code (an account
    without an enrolled authenticator, and any API key, is refused) and
    re-checks installability on the server. The run starts in
    `awaiting_approval`.
-2. **Approval.** A second administrator approves it with their own MFA code.
+2. **Approval** (external console only). A second administrator approves it with their own MFA code.
    Whether the requester may approve their own request is the console's
    policy (a console enforcing four-eyes refuses it). A request nobody
    approves expires after the console's approval window (`expired`); a
@@ -652,8 +686,9 @@ anything:
   restart the API once, or every run fails `apply_disabled` with "no boot
   report yet — restart the API once with UPDATE_APPLY_ENABLED on".
 - **A schema credentials file that cannot be read.** When
-  `UPDATE_APPLY_SCHEMA_ENV_FILE` is set but missing, the run fails
-  `migration_failed`; it never falls back to the runtime credentials.
+  `UPDATE_APPLY_SCHEMA_ENV_FILE` is set but missing, unreadable or **group- or
+  world-writable** (it must be `0600`), the run fails `migration_failed`; it
+  never falls back to the runtime credentials.
 
 **Worker count.** The health check waits for as many distinct workers as the
 launcher declared. `baselith run --workers N` declares them
@@ -697,10 +732,10 @@ start, so restart it after a change.
 | `UPDATE_APPLY_STABLE_SECONDS` | `20` | How long readiness must hold without a failure (5–300) |
 | `UPDATE_APPLY_KEEP_VERSIONS` | `2` | Store entries kept per plugin (2–10) |
 | `UPDATE_APPLY_SCHEMA_INIT` | `true` | Run `schema-init --plugin <name>` before the restart |
-| `UPDATE_APPLY_SCHEMA_ENV_FILE` | unset | dotenv with the schema owner's database credentials, read only into the `schema-init` environment |
+| `UPDATE_APPLY_SCHEMA_ENV_FILE` | unset | dotenv with the schema owner's database credentials, read only into the `schema-init` environment; refused unless owner-writable only (`0600`) |
 | `UPDATE_APPLY_HEARTBEAT_SECONDS` | `5` | Updater heartbeat period (1–60) |
 | `UPDATE_APPLY_POLL_SECONDS` | `2.0` | How often the updater looks for approved runs (0.2–30) |
-| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request created with the core's default; runs created by `baselith plugin-updater` are pre-approved, and a console plugin sets its own window |
+| `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request. Matters only when an external console creates runs that need approval without setting its own window; runs created by `baselith plugin-updater` (the only creator in the core) are pre-approved and carry no approval expiry |
 
 They come on top of `BASELITH_PLUGIN_OVERLAY_DIR`, the trust store
 (`BASELITH_PLUGIN_TRUST_STORE`), `PLUGIN_UPDATE_SOURCES_FILE` and the other
@@ -767,7 +802,8 @@ an argv run without a shell, given as a JSON array
 (`["sudo","-n","/usr/bin/systemctl","restart","api.service"]`) or a
 comma-separated list (`sudo,-n,/usr/bin/systemctl,restart,api.service`); a
 blank value means none. `UPDATE_APPLY_APPROVAL_TTL_SECONDS` (default 24 h) is
-the expiry of approval requests created without their own window.
+the expiry of approval requests created without their own window — only an
+external console creates such requests; the core's CLI runs are pre-approved.
 
 Settings that fail to load never take the update checker down:
 `PluginUpdateService` logs the error's type and falls back to the defaults,
@@ -960,9 +996,9 @@ terminal state; only the updater process calls it, and it never imports the
    closed. A report listing no active plugin is not the same thing and is
    accepted. All of this happens before touching anything;
 2. reads `UPDATE_APPLY_SCHEMA_ENV_FILE` (the schema owner's credentials; never
-   logged, never stored). When it is set but missing or unreadable the run
-   fails `migration_failed` before anything is downloaded or staged — it
-   never falls back to the runtime credentials;
+   logged, never stored). When it is set but missing, unreadable, or group-
+   or world-writable, the run fails `migration_failed` before anything is
+   downloaded or staged — it never falls back to the runtime credentials;
 3. fetches the signed `release.json` of the release tagged `v<version>` and
    holds it to the tarball SHA-256 pinned on the run when it was requested. A
    different name, version or tarball is `release_changed`; a bad signature or
@@ -980,7 +1016,11 @@ terminal state; only the updater process calls it, and it never imports the
    (`must_stay_active`, the API as it ran before the run, read in step 1), journals
    `migrating` with the previous and new link targets, and runs
    `python -m core.cli plugin schema-init --plugin <name>` with the process
-   environment plus the owner's credentials and `BASELITH_PLUGIN_OVERLAY_DIR`
+   environment — **minus** the names `PLUGIN_UPDATE_GITHUB_TOKEN`,
+   `ADMIN_PASS`, `ADMIN_PASS_HASHED`, `METRICS_PASSWORD` and every
+   `UPDATE_APPLY_*` variable, which a plugin's schema step has no use for —
+   plus the owner's credentials and
+   `BASELITH_PLUGIN_OVERLAY_DIR`
    pointed at a **scratch overlay**: `.store/.staging-<run>-schema-*/` holding
    `.store -> ..`, `<plugin> -> .store/<new entry>` and the other plugins'
    links as they are live. The live link is not touched: the running API

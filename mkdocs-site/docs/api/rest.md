@@ -86,8 +86,8 @@ MCP Streamable HTTP headers `Mcp-Session-Id`, `Mcp-Protocol-Version`,
 **`Idempotency-Key` on mutating requests.** An authenticated `POST`/`PUT`/
 `PATCH`/`DELETE` carrying `Idempotency-Key` has its response stored and replayed
 (with `Idempotency-Replayed: true`) for a retry with the same key and
-credential. The key is bound to the request body: reusing it with a
-**different body** returns `422` rather than the first request's response, and
+credential. The key is bound to the request body and query string: reusing it with a
+**different body** or a **different query string** returns `422` rather than the first request's response, and
 a retry while the original is still running returns `409`. Only requests with a
 credential that authenticates and that match a route are stored; `404`, `405`,
 `5xx` and retryable statuses never are. See
@@ -189,11 +189,26 @@ Authorization, quota and budget failures raised by the guards and middleware:
 | `QuotaExceededError` (usage budget) | 429 | `quota_exceeded` |
 | `BudgetExceededError` (per-request cost budget) | 429 | `budget_exceeded` |
 
+Database outages are infrastructure conditions, not defects:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `psycopg_pool.PoolTimeout` (no connection within `DB_POOL_TIMEOUT`) | 503 | `service_unavailable` |
+| `psycopg.OperationalError` (connection refused, server shut down, query cancelled) | 503 | `service_unavailable` |
+
+Both carry `Retry-After: 5`; the driver's class and message (which can name
+the database host) are logged at WARNING and never returned to the caller.
+
 Request-validation failures return **422** with code `validation_error`,
 `detail` `"Request validation failed."` and the per-field list under `errors`
 (the offending `input` is deliberately dropped, so a submitted secret is never
 echoed back). Uncaught exceptions return **500** with code `internal_error`
-and a generic `detail` — check the logged traceback by `request_id`.
+and a generic `detail` — check the logged traceback by `request_id`. The
+`500` is rendered by `UnhandledErrorMiddleware` inside the request-id,
+security-header and CORS layers, so it carries the `X-Request-ID` header, a
+non-null `request_id` member, the security headers and — for an allowed
+browser origin — `Access-Control-Allow-Origin`, like every other error. See
+[UnhandledErrorMiddleware](../core-modules/middleware.md#unhandlederrormiddleware).
 
 ---
 
@@ -225,10 +240,14 @@ mounted with `WEBHOOKS_ENABLED=true` and has no `/v1` alias.
 Beyond per-minute [rate limiting](../core-modules/auth.md#api-key-hashing),
 identities can carry **persistent usage budgets** per calendar window (daily /
 monthly), enabled with `QUOTAS_ENABLED=true`. When an identity exhausts a
-window, requests return `429` with code `quota_exceeded` until the window resets.
+window, requests return `429` until the window resets, with `Retry-After` set
+to the seconds left in that window (until midnight UTC, or the first of next
+month). An unreachable quota store answers `503` with `Retry-After: 5`.
 Limits default per identity and can be raised per key. A request that is
-admitted but then answered `401`/`403`/`404`/`405`/`429`/`503` does not spend
-a unit. See
+admitted but then answered `401`/`403`/`404`/`405`/`409`/`429`/`503`, or
+answered from the idempotency store (`Idempotency-Replayed`), does not spend
+a unit; a per-request cost-budget `429` (`budget_exceeded`) does, because the
+handler ran first. See
 [Usage Quotas](../core-modules/quotas.md).
 
 ---
@@ -531,7 +550,15 @@ until it recovers. Redis and the vector store are reported but advisory
 neither gates readiness. `vectorstore` is `false` both when the store is
 unreachable and when it answers but the configured collection does not exist
 (the server log says which); a provider without a cheap probe (pgvector)
-reports `true`. Results are cached (~30s).
+reports `true`. The three probes run concurrently, so a cache miss costs the
+slowest probe's timeout rather than the sum of the three. Results are cached
+(~30s).
+
+With PostgreSQL down at boot the app still starts — in well under a second,
+since every boot step reuses one short reachability probe instead of waiting
+out a pool timeout each (see
+[PostgreSQL down at boot](../core-modules/db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
+— and this probe answers 503 until the database returns.
 
 **Response** (200 OK / 503 Service Unavailable):
 
@@ -586,13 +613,28 @@ curl -H "X-API-Key: your-admin-api-key" http://localhost:8000/status
 Exports metrics in Prometheus format.
 
 !!! warning "Authentication Required"
-    Protected by administrator HTTP Basic Auth (`verify_credentials`) while
-    `METRICS_AUTH_REQUIRED=true` (the default), to prevent unauthorized
-    scraping of system metrics. Set it to `false` only when the scrape
-    endpoint is reachable solely from a trusted network.
+    Protected by HTTP Basic Auth while `METRICS_AUTH_REQUIRED=true` (the
+    default), to prevent unauthorized scraping of system metrics. Set it to
+    `false` only when the scrape endpoint is reachable solely from a trusted
+    network.
+
+Two credentials are accepted: the scrape-only pair `METRICS_USERNAME`
+(default `metrics`) / `METRICS_PASSWORD` (default unset), which grants this
+route and nothing else, and the admin pair. Give Prometheus the scrape-only
+one. An empty or blank `METRICS_PASSWORD` is read as **unset**, never as an
+empty password, so an uncommented `METRICS_PASSWORD=` template line does not
+open the endpoint.
+
+Both credentials share the **admin lockout**: the lockout is checked first,
+keyed by `client_bucket(ip)`, and a wrong scrape guess falls through to the
+admin check, which records the failure against the same bucket. A locked-out
+source gets `429` even with the correct scrape password, so the `200`/`429`
+split cannot confirm guesses. The payload is rendered in a worker thread
+(`asyncio.to_thread`), so a scrape — including the per-scrape merge of every
+worker's files under `PROMETHEUS_MULTIPROC_DIR` — never stalls the event loop.
 
 ```bash
-curl -u admin:password http://localhost:8000/metrics
+curl -u metrics:"$METRICS_PASSWORD" http://localhost:8000/metrics
 ```
 
 ---
@@ -728,6 +770,17 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
 !!! note "Reload is REST-only"
     Hot-reload is exposed via this REST API only; there is **no**
     `reload` subcommand under `baselith plugin`.
+
+!!! note "Enabling a plugin that was disabled at boot"
+    `POST /api/plugins/{name}/enable` also runs the plugin's
+    `setup_app_middleware` hook, once per plugin class, so a plugin skipped at
+    boot gets its SPA mount on enable. Middleware cannot join an already
+    started stack: a hook that calls `app.add_middleware(...)` logs a
+    restart-required warning and the response carries
+    `restart_required: true`. The enable is not persisted to
+    `configs/plugins.yaml`, so restarting alone does not finish it: set
+    `enabled: true` for the plugin in the plugin config, then restart. See
+    [Plugins › App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
 
 ### Plugin update checks (`/api/plugins/updates`)
 
@@ -922,10 +975,12 @@ code is the stable contract.
 ## Rate Limiting
 
 Rate limits are enforced per authenticated identity by the `require_*`
-dependencies (`core/middleware/rate_limiter.py`): a Redis-backed fixed window
-of `RATE_LIMIT_WINDOW_SECONDS` (default `60`), with an in-memory fallback when
-Redis is unavailable. With `AUTH_REQUIRED=false` and no API keys configured,
-anonymous traffic on user routes is metered per client IP with the same limit.
+dependencies (`core/middleware/rate_limiter.py`): a Redis-backed sliding window
+of `RATE_LIMIT_WINDOW_SECONDS` (default `60`), with an in-memory fallback
+(capped at 10 000 keys) when Redis is unavailable. With `AUTH_REQUIRED=false`
+and no API keys configured, anonymous traffic on user routes is metered per
+client address with the same limit — an IPv4 address as-is, an IPv6 address
+by its /64, so rotating through one prefix buys no extra budget.
 
 | Setting | Default | Applies to |
 | ------- | ------- | ---------- |

@@ -322,7 +322,7 @@ transport.
 
 Two `conftest.py` files supply the shared fixtures; none of them creates
 database tables — the relational schema is owned by Alembic (`alembic.ini`,
-`migrations/`), unit tests mock their storage, and the integration tests that
+`core/db/migrations/`), unit tests mock their storage, and the integration tests that
 need a live backend (`tests/integration/test_pgvector_integration.py`) use the
 Postgres and Redis services the CI job provides.
 

@@ -53,23 +53,64 @@ class SSEStream:
         await self._queue.put(None)
 
     async def __aiter__(self) -> Any:
-        """Yield SSE frames until the stream closes.
+        """Yield SSE frames until the stream closes or the server drains.
 
         A comment line goes out during quiet periods: intermediaries and client
         idle timeouts drop a connection that says nothing, which on a
         long-lived subscription would look like a server crash.
+
+        On the drain signal (the first SIGTERM/SIGINT, see
+        :mod:`core.lifecycle.drain`) the frames already queued are flushed and
+        the stream ends, so a subscription does not hold a rolling restart
+        until the graceful-shutdown timeout. Ending the stream cancels the work
+        behind it — the transport's normal cancellation signal; the client
+        re-issues the request against another replica.
         """
-        while True:
-            try:
-                message = await asyncio.wait_for(
-                    self._queue.get(), timeout=self._keepalive
+        from core.lifecycle.drain import wait_for_drain
+
+        drained = asyncio.ensure_future(wait_for_drain())
+        getter: asyncio.Future[dict[str, Any] | None] | None = None
+        try:
+            while True:
+                if drained.done():
+                    # A busy stream must not outlive the drain either.
+                    for queued in self._drain_queued():
+                        yield encode_event(queued)
+                    return
+                getter = asyncio.ensure_future(self._queue.get())
+                done, _ = await asyncio.wait(
+                    {getter, drained},
+                    timeout=self._keepalive,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-            except TimeoutError:
-                yield _KEEPALIVE
-                continue
+                if getter not in done:
+                    # Never leave a getter on the queue: cancel it and wait for
+                    # the cancellation to land. If it won the race after all,
+                    # its message is delivered below rather than lost.
+                    getter.cancel()
+                    await asyncio.wait({getter})
+                if getter.cancelled():
+                    if not drained.done():
+                        yield _KEEPALIVE
+                    continue
+                message = getter.result()
+                if message is None:
+                    return
+                yield encode_event(message)
+        finally:
+            drained.cancel()
+            if getter is not None:
+                getter.cancel()  # consumer gone mid-wait: unhook from the queue
+
+    def _drain_queued(self) -> list[dict[str, Any]]:
+        """Messages already queued, up to an end-of-stream marker."""
+        out: list[dict[str, Any]] = []
+        while not self._queue.empty():
+            message = self._queue.get_nowait()
             if message is None:
-                return
-            yield encode_event(message)
+                break
+            out.append(message)
+        return out
 
 
 def wants_stream(message: dict[str, Any]) -> bool:

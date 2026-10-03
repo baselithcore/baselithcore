@@ -35,7 +35,8 @@ core/plugins/
 ├── app_setup.py          # Sync pre-discovery for app-level middleware hooks
 ├── integrity.py          # Hashed surface (V1–V5), canonical manifest digest
 ├── integrity_policy.py   # Verification policy: strict mode, legacy fallback
-├── signing.py            # Ed25519 signatures, trust roots and trust store
+├── signing.py            # Ed25519 signatures and trust roots (re-exports the store)
+├── _trust_store.py       # TrustedKey + trust store file loader (expiry, revocation, plugin scope)
 ├── manifest_rewrite.py   # Comment-preserving manifest writer used by signing
 ├── declarative.py        # SKILL.md declarative skill loader
 ├── skills_service.py     # SkillService — registry-backed catalog + gated activation
@@ -268,12 +269,31 @@ class MyPlugin(Plugin):
 ```
 
 Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
-synchronous and **best-effort**: it AST-scans each plugin to skip those that
+synchronous and **best-effort**. It walks the same plugin set the async loader
+discovers — the `PLUGIN_PLUGINS_PATH` root (with verified overlay entries
+swapped in) plus the plugins installed packages advertise in the
+`baselith.plugins` entry-point group — AST-scans each plugin to skip those that
 don't declare the hook (avoiding heavy import side effects), runs the same
 admission checks as the async loader before `exec_module`, and a failing hook is
 logged without blocking boot. The method is a `classmethod` so it never pays a
 plugin's `__init__` cost. Write middleware as **pure ASGI** (never
 `BaseHTTPMiddleware`).
+
+A plugin the enable-list disables at boot is skipped by this pass, so enabling
+it later at runtime would leave it without its SPA mount. Activation therefore
+calls `apply_late_app_hook(app, plugin)`, which runs the hook once per plugin
+class per app (keyed by module and qualified class name, so two plugins that
+both name their class `Plugin` do not collide): `app.mount(...)` works on the
+running app, while `app.add_middleware(...)` cannot join a started Starlette
+stack. That `RuntimeError` is logged as a restart-required warning,
+activation still completes, and `POST /api/plugins/{name}/enable` answers
+with `restart_required: true`.
+
+A runtime enable is **not persisted**: the endpoint never writes
+`configs/plugins.yaml`, so a restart alone brings the plugin back disabled.
+To finish enabling such a plugin, set `enabled: true` for it in the plugin
+config (`configs/plugins.yaml`, or the file `PLUGIN_CONFIG_PATH` names) and
+restart — its middleware is then added at app construction.
 
 !!! warning "This path imports plugin code before the async loader runs"
     `apply_plugin_app_middleware` executes at app-construction time, so it is
@@ -367,13 +387,44 @@ lifecycle_manager=None)`; the optional `lifecycle_manager` receives state
 transitions.
 
 The application runtime (`core/api/lifespan.py`) builds its loader and its
-`ResourceAnalyzer` on `PLUGIN_PLUGINS_PATH` (`PluginConfig.plugins_path`,
-default `plugins`, resolved against the working directory), the same root
-[marketplace](marketplace.md#configuration) installs write to. Before, the
-runtime hard-coded `plugins/`, so a plugin installed into a custom path was
-never loaded. The middleware pre-discovery above scans `PLUGIN_PLUGINS_PATH`
-only when the variable is set explicitly; otherwise it scans the checkout's own
-`plugins/`, independent of the working directory.
+`ResourceAnalyzer` on `PLUGIN_PLUGINS_PATH` (`PluginConfig.plugins_path`),
+the same root [marketplace](marketplace.md#configuration) installs write to.
+One resolver, `core.config.plugins.resolve_plugins_root`, turns the setting
+into a directory for every reader — the loader, the middleware pre-discovery
+above, the plugin-update service and `baselith plugin-updater`:
+
+- an absolute path is used as given;
+- a relative path (the default is `plugins`) resolves against the working
+  directory when that directory exists — a checkout, or a project with its
+  own `plugins/`;
+- otherwise it falls back to the installed `plugins` package beside `core`,
+  so an app started from any directory still loads the bundled plugins
+  instead of logging `Plugins directory not found: plugins`;
+- when neither exists, the cwd-relative path is kept, so a marketplace
+  install can create it.
+
+Writes resolve differently: `plugin_install_root()` (same module) is where
+`baselith plugin marketplace install` (the `PluginInstaller`) puts a plugin — an
+explicit `PLUGIN_PLUGINS_PATH` as given, else `./plugins` — never the installed
+package, which is replaced on every upgrade and may not be writable.
+
+So that a project's own `./plugins` does not hide the plugins the framework
+ships, every scanner (the loader, the middleware pre-discovery, the
+`ResourceAnalyzer` and `baselith doctor`) also scans the installed
+distribution's bundled `plugins` package as a second, lower-precedence root
+(`core.plugins.discovery.with_bundled_plugins`): a same-named directory under
+the configured root wins, with a warning. The bundled root is added only when
+it lives in `site-packages` and is not the configured root itself — a source
+checkout keeps scanning just its own tree.
+
+Scanning a bundled plugin is not running it: plugins shipped inside the
+installed wheel are **opt-in** (see [Configuration](#configuration)).
+`core.plugins.discovery.is_bundled_install_dir(path)` is the test — true only
+for a directory under the distribution's `plugins` package in `site-packages`,
+whether it is reached as the second root or as the configured root itself (a
+`pip install` started from a directory with no `./plugins`). A source checkout,
+an editable install, the user's own root, an overlay entry and a
+`baselith.plugins` entry-point package are never bundled.
 
 ```python
 from pathlib import Path
@@ -428,12 +479,17 @@ When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
 the package `plugins.<name>` before any plugin module is imported
 (`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
 carry a signature that verifies against the trust store regardless of
-`BASELITH_REQUIRE_PLUGIN_SIGNATURES`, and must pass the newer-than-bundled and
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES` — against the keys whose `plugins` scope
+covers that entry's name (`load_trust_roots(name)`), so a key scoped to other
+plugins cannot vouch for it — and must pass the newer-than-bundled and
 core-bounds rule above. The entry itself may be a symlink into
 `<overlay>/.store/` (a link pointing elsewhere is refused), but a tree with a
 symlink anywhere below it is refused (`core/plugins/_links.py`), since the hash
 walk does not follow links. A rejected entry is logged and the bundled plugin
-loads instead.
+loads instead. An accepted entry's package is registered from the **resolved**
+store directory, not from the link: an update swaps the link atomically while
+the process runs, and only the tree verified at registration may back a later
+lazy submodule import.
 
 `discovery.apply_overlay()` then swaps a registered overlay entry in for its
 bundled namesake, keeping scan order, and appends overlay-only plugins. The
@@ -703,6 +759,24 @@ max_core_version: "1.0.0"
 plugin_dependencies:
   browser_agent: ">=0.1.0"
 ```
+
+#### Libraries the core stopped installing
+
+`defusedxml`, `email-validator`, `markdown-it-py`, `networkx` and
+`sse-starlette` used to be core dependencies although nothing in `core/` or the
+official plugins imported them; they now live in the `plugin-compat` extra. A
+plugin that imported one without declaring it fails to load with
+`ModuleNotFoundError`, and the loader's error line names the remedy:
+
+```text
+Failed to load plugin my_plugin: No module named 'networkx' — 'networkx' is no
+longer installed with baselith-core. Add it to the plugin's python_dependencies,
+or install baselith-core[plugin-compat] to restore the previous set.
+```
+
+`load_gates.missing_dependency_hint(error)` builds that sentence from the
+`MOVED_TO_PLUGIN_COMPAT` table and returns an empty string for any other error,
+so an unrelated import failure is reported exactly as before.
 
 ### Lazy Loading
 
@@ -1017,8 +1091,32 @@ auto-activation and `baselith plugin sync` alike:
 
 | Config file                                  | Plugin runs when                                                  |
 | -------------------------------------------- | ----------------------------------------------------------------- |
-| Missing, empty, unreadable or not a mapping  | Always — every discovered plugin                                  |
+| Missing, empty, unreadable or not a mapping  | It lives in the user's own root (`PLUGIN_PLUGINS_PATH`, `./plugins`, a source checkout) or an entry-point package — never when it is bundled in the installed wheel |
 | Non-empty                                    | It has an entry (name, directory name or `-`/`_` variant) that does not say `enabled: false` |
+
+**Bundled plugins are opt-in.** A plugin shipped inside the installed
+distribution (`plugin_enabled(..., bundled=True)`, decided by
+`is_bundled_install_dir`) runs only when the config names it, so a fresh
+`pip install baselith-core` with no `configs/plugins.yaml` activates none of
+them — no routes, no browser or computer-use agents, and `baselith doctor`
+checks the Python dependencies and frontend builds of enabled plugins only.
+Development checkouts and existing deployments are unchanged: their plugins
+sit in the user's root. Plugins advertised through the `baselith.plugins`
+entry-point group keep the empty-config rule too — installing that wheel is
+the opt-in. Every activation path applies the same rule: lazy discovery and
+resource analysis (`ResourceAnalyzer.discover_plugins`), startup
+auto-activation, `PluginLoader.load_all_plugins`, the `create_app()`
+middleware pre-discovery, `baselith plugin schema-init` and `plugin sync`.
+
+At startup the lifespan logs once, at INFO, which bundled plugins are
+available but not enabled (`announce_disabled_bundled`). Enable one with
+
+```bash
+baselith plugin enable browser_agent   # writes `browser_agent: {enabled: true}`
+```
+
+or the equivalent `configs/plugins.yaml` entry, then restart. Remember that a
+non-empty file also filters the user's own plugins: list those too.
 
 Because a non-empty file excludes every plugin it does not list, the shipped file
 carries an `api_routers` entry: without it the routers that plugin adds at

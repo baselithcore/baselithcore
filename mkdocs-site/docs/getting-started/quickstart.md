@@ -261,6 +261,10 @@ marketplace:
 
 After making changes, restart the server to apply them.
 
+On a `pip install`, the plugins bundled in the wheel are opt-in: none runs
+until this file names it. `baselith plugin enable <name>` writes the entry for
+you (see [Installation › Enabling bundled plugins](installation.md#enabling-bundled-plugins)).
+
 ---
 
 ## 7. Logging and Debugging

@@ -9,6 +9,8 @@ core/nlp/
 ├── spacy_utils.py   # Lazy-loaded spaCy pipeline with fallback
 ├── models.py        # Embedding model loader (sentence-transformers)
 ├── lazy.py          # Async accessors + LazyEmbedder / LazyReranker
+├── roles.py         # query vs document side: aencode_query, cache_key
+├── _remote.py       # TEI-backed stand-ins for the embedder / reranker
 └── rerank.py        # score_pairs: cross-encoder scoring with a device batch size
 ```
 
@@ -74,6 +76,9 @@ embedder = get_embedder("BAAI/bge-m3")
 # CachedEmbedder.encode is a coroutine: the blocking model call is
 # offloaded to the dedicated inference pool, so it must be awaited.
 embeddings = await embedder.encode(["text one", "text two"])
+# The search side: the model's own "query" prompt (sentence-transformers >= 5)
+# or BASELITH_EMBEDDING_QUERY_PREFIX on the remote stand-in.
+query_vec = await embedder.encode_query("what is covered?")
 
 # Load cross-encoder reranker (cached per model name); this is the plain
 # sentence-transformers CrossEncoder, whose predict() is synchronous
@@ -135,10 +140,31 @@ gets the plain `predict(pairs)` call its protocol promises.
 ### Embedding cache & miss coalescing
 
 `CachedEmbedder` fronts the sentence-transformers model with a TTL cache keyed
-by `sha256(f"{model_id}:{text}")` (module-level `_cache_key`): a `RedisTTLCache`
+by `sha256(f"{model_id}:{text}")` for a prompt-less document, and by
+`sha256(f"{model_id}:{role}:{prompt}:{text}")` for a query or a prefixed
+document (`core.nlp.roles.cache_key`): a `RedisTTLCache`
 when `CACHE_BACKEND=redis` (key prefix `<CACHE_REDIS_PREFIX>:embed:<dim>`), else
 an in-process `TTLCache`. If the Redis client fails to build, the embedder logs
-a warning and runs uncached rather than failing.
+a warning and runs uncached rather than failing. (An empty in-process cache is
+still a cache: an earlier build tested it for truthiness, and since an empty
+`TTLCache` has length 0 it never stored a vector.)
+
+The role and the prompt are in the key because the same text embedded as a
+query (with a query prompt/prefix) and as a document are different vectors,
+and because a changed `BASELITH_EMBEDDING_QUERY_PREFIX` must not serve a
+vector embedded under the old one.
+
+### Query and document sides
+
+Asymmetric retrieval models embed the search side differently from the
+indexed side. The core follows sentence-transformers' spelling: `encode` (and
+`encode_document`) for documents, `encode_query` for queries. `CachedEmbedder`,
+`LazyEmbedder` and the remote stand-in all expose `encode_query`; search-side
+call sites (RAG retrieval, the chat pipeline's query vector, memory recall,
+the semantic router, the MCP knowledge-base tool) call
+`core.nlp.roles.aencode_query(embedder, text)`, which uses `encode_query`
+when the embedder's class defines it and `encode` otherwise (custom embedders,
+test doubles), awaiting an async method and offloading a sync one.
 
 The model id is in the key because the Redis prefix only carries the embedding
 **dimension**. Keying on the text alone made two models of the same width share
@@ -151,11 +177,15 @@ falling back to the class name) — so two models that expose neither can still
 collide, and models that carry their card metadata are what to pass.
 
 !!! warning "The two embedding caches must key the same way"
-    `core/services/vectorstore/embedding_cache.py` has always composed
-    `sha256(f"{model_id}:{text}")`, and this one now matches. They are separate
+    `core/services/vectorstore/embedding_cache.py` (the index-time cache)
+    builds its keys with the same `core.nlp.roles.cache_key`, role
+    `document`, the model's document prompt (`BASELITH_EMBEDDING_DOCUMENT_PREFIX`
+    on the remote stand-in, read through `CachedEmbedder.model` and a
+    `LazyEmbedder`) and the dimension folded into the model scope
+    (`model@dim`, since its Redis prefix does not carry it). They are separate
     code paths under separate Redis prefixes, so they never read each other's
-    entries; what they share is the rule, and a deployment is only free of
-    cross-model collisions while both sides follow it. Change one, change both.
+    entries; what they share is the rule. A changed document prefix therefore
+    re-embeds instead of serving vectors cached under the old one.
 
 !!! info "The key format changed — one recompute per cached text"
     Entries written by an older build can no longer be addressed, so they are
@@ -165,8 +195,8 @@ collide, and models that carry their card metadata are what to pass.
 Concurrent misses for the *same single text* (the stampede-prone shape: many
 requests embedding the same query) are coalesced through a
 `LayeredSingleFlight` built via `build_single_flight`, keyed by the same
-`_cache_key` the cache uses — so the lock is scoped per model as well as per
-text, and a popular query is encoded once instead of once per concurrent
+`cache_key` the cache uses — so the lock is scoped per model, role and prompt
+as well as per text, and a popular query is encoded once instead of once per concurrent
 caller. Batch encodes are untouched to preserve model-level batching.
 
 The **cross-worker layer** (one encoder per key across all workers/pods, via a
@@ -223,3 +253,21 @@ tenant, span or budget.
 | `BASELITH_INFERENCE_THREADS` | `min(4, cpu_count // 2)` | Small on purpose: torch and sentence-transformers parallelise internally, so extra threads buy contention rather than throughput. Raise it only with a measurement to justify it. |
 
 The pool is built on first use and shut down at interpreter exit.
+
+## Remote models
+
+With the core inference services configured (`BASELITH_EMBEDDING_BACKEND=remote`
+plus `BASELITH_EMBEDDING_URL`, and the `BASELITH_RERANK_*` pair),
+`get_embedder()` and `get_reranker()` return TEI-backed stand-ins from
+`core.nlp._remote` with the same surface (`encode`,
+`get_sentence_embedding_dimension`, `predict`, plus `encode_query` /
+`encode_document`). They are used when the requested model is the one the
+server serves; otherwise the local model loads as before. With no local
+runtime (an image built with `ML_RUNTIME=remote`) a different served
+*embedding* model is refused with `InferenceConfigError` unless
+`BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION=true`, and the remote embedder
+always requires `BASELITH_EMBEDDING_DIM == VECTORSTORE_EMBEDDING_DIM` — both
+checked on first use, before a vector is written or searched. The reranker
+stand-in scores every pair: past `BASELITH_RERANK_MAX_CANDIDATES` it calls the
+service once per chunk, preserving order. See
+[Inference Services](../advanced/inference-services.md).

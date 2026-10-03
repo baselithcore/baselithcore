@@ -24,7 +24,7 @@ paths-ignore:
   # Alembic migration modules declare `revision`, `down_revision`,
   # `branch_labels` and `depends_on` as module globals that the framework
   # reads reflectively — every one of them reads as an unused global.
-  - migrations/versions
+  - core/db/migrations/versions
 
 # NOTE: no `queries:` key here on purpose. It would apply to every language in
 # the workflow matrix (python, javascript-typescript, actions), and the suite

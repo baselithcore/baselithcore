@@ -1,5 +1,10 @@
-{{- if .Values.migrations.enabled }}
-# Env sources for the pre-deploy migration Job.
+{{- if or .Values.migrations.enabled .Values.database.pluginSchemaInit.enabled }}
+# Env sources for the pre-deploy hook Jobs: migrations, the plugin-schema
+# Job and (through `migrationSecretName`) the runtime-role Job. Rendered when
+# ANY of them is on: gated on `migrations.enabled` alone, a release with the
+# migrations off and the plugin-schema Job on referenced a ConfigMap that was
+# never created, and its hook pod sat in CreateContainerConfigError until
+# activeDeadlineSeconds failed the install.
 #
 # Helm runs pre-install hooks BEFORE it applies the release's ordinary
 # resources, so the Job cannot read the ConfigMap/Secret the app pods read:

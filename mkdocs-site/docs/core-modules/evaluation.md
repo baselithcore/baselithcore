@@ -592,7 +592,7 @@ through it. `tests/golden/cassette.py` is now a re-export shim, so existing
 
 | Symbol | Purpose |
 |---|---|
-| `Cassette` | A named, ordered list of `Turn`s; `load(name, directory=CASSETTE_DIR)` / `save(directory=CASSETTE_DIR)` for the JSON form under `tests/golden/cassettes/` |
+| `Cassette` | A named, ordered list of `Turn`s; `load(name, directory=CASSETTE_DIR)` / `save(directory=CASSETTE_DIR)` for the JSON form; `CASSETTE_DIR` is the cwd-relative `tests/golden/cassettes/` (never the installed package), so pass `directory=` to use another library from any working directory |
 | `Turn` | One round-trip: an `Expect` and the `LLMResult` that answers it |
 | `Expect` | What the turn asserts about the call it answers (below) |
 | `RecordedLLMService` | Replays a cassette into the loop. `supports_messages=True` by default, because that is the path production takes; `assert_exhausted()` fails when the loop finished without playing every recorded turn |

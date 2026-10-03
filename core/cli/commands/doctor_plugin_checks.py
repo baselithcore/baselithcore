@@ -27,16 +27,30 @@ def load_manifest(plugin_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+def plugin_roots() -> list[Path]:
+    """The plugin roots the runtime scans, configured root first.
+
+    ``PLUGIN_PLUGINS_PATH`` as the loader resolves it, plus the installed
+    distribution's bundled ``plugins`` package when that is a separate root
+    (a wheel install used from a project directory). Existing roots only.
+    """
+    from core.config.plugins import PluginConfig
+    from core.plugins.discovery import bundled_plugins_root
+
+    configured = PluginConfig().plugins_path
+    bundled = bundled_plugins_root(configured)
+    roots = [configured] + ([bundled] if bundled is not None else [])
+    return [root for root in roots if root.is_dir()]
+
+
 def local_plugin_dirs() -> list[Path]:
-    """Return visible plugin directories."""
-    plugins_path = Path.cwd() / "plugins"
-    if not plugins_path.exists():
-        return []
-    return [
-        p
-        for p in sorted(plugins_path.iterdir())
-        if p.is_dir() and not p.name.startswith(".") and p.name != "__pycache__"
-    ]
+    """Return visible plugin directories; the configured root wins a name."""
+    seen: dict[str, Path] = {}
+    for root in plugin_roots():
+        for p in sorted(root.iterdir()):
+            if p.is_dir() and not p.name.startswith((".", "_")):
+                seen.setdefault(p.name, p)
+    return [seen[name] for name in sorted(seen)]
 
 
 def is_local_plugin_dir(plugin_dir: Path) -> bool:
@@ -57,10 +71,31 @@ def local_plugins() -> list[Path]:
     return [p for p in local_plugin_dirs() if is_local_plugin_dir(p)]
 
 
+def enabled_plugin_dirs() -> list[Path]:
+    """The visible plugin directories the runtime would actually enable.
+
+    The same rule the loaders apply (:func:`core.plugins.config_file.
+    plugin_enabled`): a plugin shipped inside the installed wheel counts only
+    once ``configs/plugins.yaml`` names it, so a fresh ``pip install`` is not
+    blamed for the dependencies of plugins it never runs.
+    """
+    from core.plugins.config_file import plugin_enabled, read_plugin_configs
+    from core.plugins.discovery import is_bundled_install_dir
+
+    configs = read_plugin_configs()
+    enabled: list[Path] = []
+    for plugin_dir in local_plugin_dirs():
+        manifest = load_manifest(plugin_dir) or {}
+        name = str(manifest.get("name") or plugin_dir.name)
+        bundled = is_bundled_install_dir(plugin_dir)
+        if plugin_enabled(configs, plugin_dir.name, name, bundled=bundled):
+            enabled.append(plugin_dir)
+    return enabled
+
+
 def check_plugins() -> CheckResult:
     """Check if plugins directory exists and local plugins have basic shape."""
-    plugins_path = Path.cwd() / "plugins"
-    if not plugins_path.exists():
+    if not plugin_roots():
         return CheckResult("Plugins", False, "plugins/ directory not found")
     plugins = local_plugins()
     if not plugins:
@@ -90,14 +125,14 @@ def check_plugins() -> CheckResult:
 
 
 def check_plugin_dependencies() -> CheckResult:
-    """Check manifest-declared Python dependencies for local plugins."""
+    """Check manifest-declared Python dependencies of the enabled plugins."""
     try:
         from packaging.requirements import InvalidRequirement, Requirement
     except Exception as e:
         return CheckResult("Plugin Dependencies", False, f"Error: {e}", severity="warn")
     missing: list[str] = []
     invalid: list[str] = []
-    for plugin_dir in local_plugin_dirs():
+    for plugin_dir in enabled_plugin_dirs():
         manifest = load_manifest(plugin_dir)
         if not manifest:
             continue
@@ -160,9 +195,9 @@ def frontend_build_output(plugin_dir: Path, frontend: dict[str, Any]) -> Path:
 
 
 def check_plugin_frontends() -> CheckResult:
-    """Check whether plugins that declare frontend builds have a built dist."""
+    """Check that enabled plugins declaring a frontend build have its dist."""
     missing: list[str] = []
-    for plugin_dir in local_plugin_dirs():
+    for plugin_dir in enabled_plugin_dirs():
         manifest = load_manifest(plugin_dir)
         if not manifest:
             continue
@@ -193,4 +228,5 @@ __all__ = [
     "frontend_build_output",
     "check_plugin_frontends",
     "check_plugins",
+    "enabled_plugin_dirs",
 ]

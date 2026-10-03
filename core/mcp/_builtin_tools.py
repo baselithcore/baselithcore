@@ -25,7 +25,6 @@ the tenant from the ambient request context and hard-sets it on the query.
 from __future__ import annotations
 
 import asyncio
-import inspect
 from typing import Any
 
 from core.config import get_mcp_config
@@ -75,10 +74,10 @@ async def _embed_query(query: str) -> list[float]:
 
         return get_embedder()
 
+    from core.nlp.roles import aencode_query  # search side: query prefix
+
     embedder = await asyncio.to_thread(_load)
-    encoded = embedder.encode([query])
-    if inspect.isawaitable(encoded):
-        encoded = await encoded
+    encoded = await aencode_query(embedder, [query])
     return [float(value) for value in encoded[0]]
 
 

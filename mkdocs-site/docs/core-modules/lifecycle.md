@@ -231,6 +231,11 @@ Measured with uvicorn (`--timeout-graceful-shutdown 8`, one open SSE
 client, SIGTERM): without the hook the shutdown took 8.1 s and logged the
 cancellation; with it, 0.1 s and no error — also under `--workers`. An
 `EventSource` reconnects by itself to whichever worker comes up next.
+The MCP Streamable HTTP stream (`core.mcp.sse.SSEStream`) is the core's own
+consumer: it flushes what is already queued and ends on the drain signal.
 `is_draining()` answers the same question synchronously, and
-`mark_draining()` is safe from any thread. The hook is a no-op off the main
+`mark_draining()` is safe from any thread — including from the signal handler
+itself: the module lock is re-entrant (`threading.RLock`), because a stop
+signal can arrive while the same thread already holds it, and a plain lock
+would deadlock the shutdown. The hook is a no-op off the main
 thread (e.g. under a test client), and installs once.

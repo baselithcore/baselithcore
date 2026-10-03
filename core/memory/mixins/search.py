@@ -7,7 +7,6 @@ active context window (working memory) and historical logs (long-term).
 """
 
 import asyncio
-import inspect
 from typing import Any
 
 from core.memory.types import MemoryItem, MemoryType
@@ -42,10 +41,9 @@ class SearchMixin:
         if embedder is None:
             return None
         try:
-            if inspect.iscoroutinefunction(embedder.encode):
-                vec = await embedder.encode(query)
-            else:
-                vec = await asyncio.to_thread(embedder.encode, query)
+            from core.nlp.roles import aencode_query  # search side: query prompt
+
+            vec = await aencode_query(embedder, query)
             if hasattr(vec, "tolist"):
                 vec = vec.tolist()
             embedding: list[float] | None = vec
@@ -72,7 +70,9 @@ class SearchMixin:
             if query_vector is not None:
                 query_embedding = query_vector
             else:
-                query_embedding = await self.embedder.encode(query)
+                from core.nlp.roles import aencode_query
+
+                query_embedding = await aencode_query(self.embedder, query)
                 if hasattr(query_embedding, "tolist"):
                     query_embedding = query_embedding.tolist()
 

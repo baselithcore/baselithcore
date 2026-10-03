@@ -145,6 +145,38 @@ class TestRetention:
         assert result.ok is True
         assert result.checked == 2
 
+    async def test_purge_never_cuts_a_middle_link(self, sink):
+        """Timestamps are not in ``seq`` order across workers.
+
+        A worker whose clock lags (or whose event was stamped before it won the
+        write lock) appends a row older than its predecessor. Deleting by
+        timestamp alone then removed a link in the middle of the chain, and
+        every later ``verify_chain`` reported permanent tampering.
+        """
+        stale = datetime.now(UTC) - timedelta(days=400)
+        # seq 1-2 expired, seq 3 fresh, seq 4 stamped stale (out of order), 5 fresh.
+        for i in range(5):
+            event = _event(f"o{i}")
+            if i in (0, 1, 3):
+                event.timestamp = stale  # hashed as written: a genuine link
+            await sink.write(event)
+        assert sink.verify_chain().ok is True
+        assert sink.purge_older_than(MIN_RETENTION_DAYS) == 2
+        remaining = [row["seq"] for row in sink.query()]
+        assert sorted(remaining) == [3, 4, 5]
+        result = sink.verify_chain()
+        assert result.ok is True, result
+        assert result.checked == 3
+
+    async def test_purge_of_a_fully_expired_trail_keeps_it_verifiable(self, sink):
+        for i in range(3):
+            await sink.write(_event(f"x{i}"))
+        stale = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+        sink._conn.execute("UPDATE audit_log SET timestamp = ?", (stale,))
+        assert sink.purge_older_than(MIN_RETENTION_DAYS) == 3
+        await sink.write(_event("after"))
+        assert sink.verify_chain().ok is True
+
 
 class TestQuerying:
     async def test_filters_by_type_user_and_tenant(self, sink):
@@ -304,3 +336,16 @@ class TestAuditSetup:
         finally:
             reset_audit_logger()
             reset_audit_config()
+
+
+class TestDurabilityAndPermissions:
+    def test_commits_are_fsynced_and_the_file_is_private(self, tmp_path):
+        import stat
+
+        path = tmp_path / "evidence" / "audit.db"
+        sink = SQLiteAuditSink(path)
+        try:
+            assert sink._conn.execute("PRAGMA synchronous;").fetchone()[0] == 2  # FULL
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        finally:
+            sink.close()

@@ -36,6 +36,16 @@ class TestSignVerify:
             nonce_header=headers[NONCE_HEADER],
         )
 
+    def test_non_ascii_signature_is_rejected_not_a_500(self) -> None:
+        headers = build_signature_headers(BODY, SECRET)
+        assert not verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            "caf\u00e9" * 16,
+            SECRET,
+            nonce_header=headers[NONCE_HEADER],
+        )
+
     def test_nonce_replay_rejected(self) -> None:
         """A captured signed request must not verify twice (single-use nonce)."""
         headers = build_signature_headers(BODY, SECRET)

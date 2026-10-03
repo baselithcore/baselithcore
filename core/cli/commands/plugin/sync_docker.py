@@ -61,7 +61,7 @@ def _enabled_plugin_manifests() -> dict[str, dict[str, Any]]:
     if not plugins_dir.is_dir():
         return manifests
     for plugin_dir in sorted(plugins_dir.iterdir()):
-        if not plugin_dir.is_dir() or not _plugin_enabled(plugin_dir.name):
+        if not plugin_dir.is_dir() or not _plugin_enabled(plugin_dir.name, plugin_dir):
             continue
         manifest_path = _manifest_path(plugin_dir)
         if manifest_path is None:

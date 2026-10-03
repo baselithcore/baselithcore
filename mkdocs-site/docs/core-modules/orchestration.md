@@ -138,9 +138,11 @@ break the tool path. See
     **concurrently**, and post-response memory writes run as a **tracked
     background task** instead of delaying the reply. At most 32 run at once,
     and the backlog (running plus queued) is capped at 1024: past it a new
-    write is dropped with a debug log and counted on the orchestrator's
-    `_memory_writes_dropped`, since memory is best-effort and the request
-    path is not.
+    write is dropped and counted on the orchestrator's
+    `_memory_writes_dropped` and in the Prometheus counter
+    `mas_memory_writes_dropped_total`, with a WARNING at most once a minute
+    per process — memory is best-effort and the request path is not, but a
+    lost turn must be visible.
 
 !!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
     Those background writes are awaited by nobody on the request path, so an
@@ -946,7 +948,7 @@ pre-upgrade effect once — the positional key is the thing that cannot match
 it. The extra lookup costs one round trip per first-time effectful call and
 only matters until the ledger's retention window has passed.
 
-The table is created by `migrations/versions/009_tool_invocations.py`, is
+The table is created by `core/db/migrations/versions/009_tool_invocations.py`, is
 tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
 window, not an audit log. The sweep bounds `created_at` as well as
@@ -1128,7 +1130,15 @@ and the `/approvals` API. Set it to `false` to run without checkpointing:
   `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `sqlite`, `memory`, or
   `auto` (the default: postgres when Postgres storage is enabled, else
   memory). The app lifespan runs the store's idempotent schema init at
-  startup.
+  startup. When the boot reachability probe
+  ([`core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
+  already saw PostgreSQL down, `initialize_default_checkpoint_store()` raises
+  `CheckpointStoreUnavailableError` at once instead of waiting out
+  `DB_POOL_TIMEOUT`; boot continues degraded and a background task
+  (`core.api._recovery_startup`) re-probes with backoff (2 s doubling to 30 s),
+  initializes the store once the database answers, then starts the recovery
+  sweep. `is_default_checkpoint_store_initialized()` reports which state the
+  process is in.
 - The **`sqlite` backend** fills the gap between the other two: `memory`
   loses every run on restart and `postgres` needs a running server.
   `SQLiteCheckpointStore` gives development laptops, air-gapped deployments

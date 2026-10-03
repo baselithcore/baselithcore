@@ -53,7 +53,7 @@ operator-defined job:
 - Programmatically: `POST /dash/crons` (🔒) with a name from
   `GET /dash/crons/catalog`.
 
-Custom jobs persist to `plugins/baselithbot/.state/custom_crons.json` and
+Custom jobs persist to `<state_dir>/custom_crons.json` and
 are restored on the next boot.
 
 ## Voice setup

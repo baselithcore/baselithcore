@@ -107,6 +107,11 @@ services:
       - ALL
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
+    # The image HEALTHCHECK probes http://localhost:8000/health, which an RQ
+    # consumer never serves: inherited, it flagged the worker `unhealthy`
+    # after every start. See compose.prod.yaml for the reasoning.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     deploy:
       resources:

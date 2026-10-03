@@ -30,6 +30,6 @@ encrypted key vault.
 
 Preference changes apply on the **next agent startup** — an in-flight run
 keeps the model it started with. Persistence is atomic
-(`plugins/baselithbot/.state/model_preferences.json`, `.tmp` + `os.replace`)
+(`<state_dir>/model_preferences.json`, `.tmp` + `os.replace`)
 and thread-safe. Provider keys are encrypted at rest — see
 [Security & RBAC](../reference/security.md).

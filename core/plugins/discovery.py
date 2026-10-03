@@ -18,12 +18,16 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import site
+import sysconfig
 from collections.abc import Iterable
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
+from core.config.plugins import installed_plugins_dir
 from core.observability.logging import get_logger
+from core.plugins.config_file import PluginConfigs, plugin_enabled
 from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
@@ -200,6 +204,159 @@ def merge_plugin_dirs(
     return merged
 
 
+def _site_package_roots() -> list[Path]:
+    """Every directory an installed distribution's packages can live in."""
+    roots = [*site.getsitepackages(), site.getusersitepackages()]
+    roots += [sysconfig.get_path("purelib"), sysconfig.get_path("platlib")]
+    return [Path(root) for root in roots if root]
+
+
+def bundled_plugins_root(plugins_dir: Path) -> Path | None:
+    """The installed distribution's ``plugins`` package, as a second root.
+
+    A wheel install reads its bundled plugins from ``site-packages`` while
+    installs write to the project's own ``./plugins`` (see
+    :func:`core.config.plugins.plugin_install_root`); once that directory
+    exists it becomes the configured root and, alone, would hide every
+    plugin the framework ships.
+
+    Args:
+        plugins_dir: The configured root the caller already scans.
+
+    Returns:
+        The bundled package directory, or ``None`` when it *is* the configured
+        root, does not exist, or is a source checkout — there the configured
+        root is the checkout's own tree, and adding it beside an unrelated
+        root would leak the repository's plugins into it.
+    """
+    bundled = _installed_bundle()
+    if bundled is None:
+        return None
+    if plugins_dir.exists() and plugins_dir.resolve() == bundled.resolve():
+        return None
+    return bundled
+
+
+def _installed_bundle() -> Path | None:
+    """The distribution's ``plugins`` package when it lives in site-packages.
+
+    ``None`` in a source checkout or an editable install, where the package is
+    the repository's own tree — the user's root, not a shipped bundle.
+    """
+    bundled = installed_plugins_dir()
+    if not bundled.is_dir():
+        return None
+    resolved = bundled.resolve()
+    installed = any(
+        resolved.is_relative_to(root.resolve()) for root in _site_package_roots()
+    )
+    return bundled if installed else None
+
+
+def is_bundled_install_dir(plugin_dir: Path) -> bool:
+    """Whether ``plugin_dir`` is a plugin shipped inside the installed wheel.
+
+    Such a plugin is opt-in (see
+    :func:`core.plugins.config_file.plugin_enabled`): it runs only when the
+    plugin configuration names it. True only for a directory under the
+    installed distribution's ``plugins`` package in ``site-packages`` — never
+    for the user's own root, a source checkout, an overlay entry or a
+    ``baselith.plugins`` entry-point package.
+
+    Args:
+        plugin_dir: A discovered plugin directory.
+    """
+    bundled = _installed_bundle()
+    if bundled is None:
+        return False
+    try:
+        return plugin_dir.resolve().is_relative_to(bundled.resolve())
+    except OSError:
+        return False
+
+
+def bundled_plugin_dir(name: str) -> Path | None:
+    """The installed wheel's own copy of plugin ``name``, if it ships one.
+
+    Args:
+        name: Directory name, or its ``-``/``_`` variant.
+
+    Returns:
+        The bundled plugin directory, or ``None`` when there is no installed
+        bundle (a source checkout) or it carries no such plugin.
+    """
+    bundled = _installed_bundle()
+    if bundled is None or not name or "/" in name or name.startswith((".", "_")):
+        return None
+    for candidate in dict.fromkeys((name, name.replace("-", "_"))):
+        path = bundled / candidate
+        if path.is_dir() and not path.is_symlink() and has_manifest(path):
+            return path
+    return None
+
+
+#: Bundled plugin names already reported as available-but-disabled.
+_ANNOUNCED_BUNDLED: set[str] = set()
+
+
+def announce_disabled_bundled(
+    configs: PluginConfigs, plugin_dirs: Iterable[Path]
+) -> list[str]:
+    """Log once, at INFO, the bundled plugins the configuration leaves off.
+
+    Args:
+        configs: The plugin configuration the runtime applies.
+        plugin_dirs: The discovered plugin directories.
+
+    Returns:
+        The sorted directory names of the bundled plugins that will not run.
+    """
+    disabled = sorted(
+        {
+            path.name
+            for path in plugin_dirs
+            if is_bundled_install_dir(path)
+            and not plugin_enabled(configs, path.name, path.name, bundled=True)
+        }
+    )
+    fresh = [name for name in disabled if name not in _ANNOUNCED_BUNDLED]
+    if fresh:
+        _ANNOUNCED_BUNDLED.update(fresh)
+        logger.info(
+            "🔌 Bundled plugins are opt-in; available but not enabled: %s. "
+            "Enable one with `baselith plugin enable <name>` or an entry "
+            "'<name>: {enabled: true}' in configs/plugins.yaml.",
+            ", ".join(fresh),
+        )
+    return disabled
+
+
+def with_bundled_plugins(plugins_dir: Path, scanned: list[Path]) -> list[Path]:
+    """Append the bundled plugins to a scan of ``plugins_dir``.
+
+    Args:
+        plugins_dir: The configured root ``scanned`` came from.
+        scanned: Plugin directories found under ``plugins_dir``.
+
+    Returns:
+        ``scanned``, then each bundled plugin whose name it does not already
+        hold — the configured root wins a clash, as it does against an
+        entry-point plugin.
+    """
+    bundled = bundled_plugins_root(plugins_dir)
+    if bundled is None:
+        return scanned
+    shipped = [
+        item
+        for item in sorted(bundled.iterdir())
+        if item.is_dir()
+        and not item.is_symlink()
+        and not item.name.startswith((".", "_"))
+        and ((item / "plugin.py").exists() or (item / "__init__.py").exists())
+    ]
+    return merge_plugin_dirs(scanned, shipped)
+
+
 def apply_overlay(directory_dirs: list[Path], overlay_dirs: list[Path]) -> list[Path]:
     """Replace scanned plugin dirs by same-named verified overlay entries.
 
@@ -219,10 +376,15 @@ def apply_overlay(directory_dirs: list[Path], overlay_dirs: list[Path]) -> list[
 __all__ = [
     "ENTRY_POINT_GROUP",
     "MANIFEST_FILENAMES",
+    "announce_disabled_bundled",
     "apply_overlay",
+    "bundled_plugin_dir",
+    "bundled_plugins_root",
     "find_manifest",
     "has_manifest",
+    "is_bundled_install_dir",
     "is_entry_point_discovery_enabled",
     "iter_entry_point_plugin_dirs",
     "merge_plugin_dirs",
+    "with_bundled_plugins",
 ]

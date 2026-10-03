@@ -91,23 +91,68 @@ return out
 """
 
 
+# Give back a consumed amount without ever minting a counter: ``INCRBY -n``
+# on a key whose window had already expired created a permanent ``-n`` with
+# no TTL (the TTL anchor only fires on a positive first write). A missing key
+# is left missing; an existing one is decremented, floored at zero, and keeps
+# its TTL (DECRBY does not touch it).
+#   KEYS[i] counter    ARGV[i] amount    returns the post-refund values
+REFUND_LUA = """
+local out = {}
+for i = 1, #KEYS do
+  if redis.call('EXISTS', KEYS[i]) == 1 then
+    local v = redis.call('DECRBY', KEYS[i], ARGV[i])
+    if v < 0 then
+      redis.call('SET', KEYS[i], 0, 'KEEPTTL')
+      v = 0
+    end
+    out[#out + 1] = v
+  else
+    out[#out + 1] = 0
+  end
+end
+return out
+"""
+
+
 class InMemoryQuotaStore:
     """Process-local counter store. Counters live until the process exits.
 
-    Window keys embed the period date, so a new period uses a fresh key and the
-    old one simply lingers (bounded pruning is unnecessary for typical key
-    cardinality; use the Redis backend for multi-worker correctness).
+    Window keys embed the period date, so a new period uses a fresh key and
+    the old one lingers until the map hits :attr:`MAX_ENTRIES`, past which
+    the oldest keys (insertion order — the stalest windows) are evicted. Use
+    the Redis backend for multi-worker correctness.
     """
+
+    #: Hard ceiling on the map: one key per identity per window per period
+    #: otherwise grows forever under rotating identities.
+    MAX_ENTRIES: int = 50_000
 
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}
+
+    def _evict(self) -> None:
+        while len(self._counts) > self.MAX_ENTRIES:
+            self._counts.pop(next(iter(self._counts)))
 
     async def get(self, window_key: str) -> int:
         return self._counts.get(window_key, 0)
 
     async def incr(self, window_key: str, amount: int, ttl_seconds: int) -> int:
         self._counts[window_key] = self._counts.get(window_key, 0) + amount
+        self._evict()
         return self._counts[window_key]
+
+    async def refund_many(self, items: Sequence[tuple[str, int]]) -> list[int]:
+        """Decrement existing counters only, floored at zero (see REFUND_LUA)."""
+        out: list[int] = []
+        for key, amount in items:
+            if key not in self._counts:
+                out.append(0)
+                continue
+            self._counts[key] = max(0, self._counts[key] - amount)
+            out.append(self._counts[key])
+        return out
 
     async def get_many(self, window_keys: Sequence[str]) -> list[int]:
         return [self._counts.get(key, 0) for key in window_keys]
@@ -131,6 +176,7 @@ class InMemoryQuotaStore:
         for key, amount, _limit, _ttl in items:
             self._counts[key] = self._counts.get(key, 0) + amount
             values.append(self._counts[key])
+        self._evict()
         return BatchConsumeResult(None, values)
 
 
@@ -141,6 +187,21 @@ class RedisQuotaStore:
         self._redis = redis_client
         self._prefix = prefix
         self._check_and_incr_script: Any = None
+        self._refund_script: Any = None
+
+    async def refund_many(self, items: Sequence[tuple[str, int]]) -> list[int]:
+        """Give back ``(key, amount)`` pairs in one script (see REFUND_LUA)."""
+        if not items:
+            return []
+        if self._refund_script is None:
+            self._refund_script = self._redis.register_script(  # type: ignore[attr-defined]
+                REFUND_LUA
+            )
+        result = await self._refund_script(
+            keys=[self._prefix + key for key, _ in items],
+            args=[amount for _, amount in items],
+        )
+        return [int(value) for value in result]
 
     async def get(self, window_key: str) -> int:
         raw = await self._redis.get(self._prefix + window_key)  # type: ignore[attr-defined]

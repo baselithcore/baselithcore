@@ -6,7 +6,6 @@ import argparse
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
@@ -167,10 +166,12 @@ def cmd_reset(json_output: bool = False) -> int:
 def cmd_migrate(json_output: bool = False) -> int:
     """Apply Alembic migrations to the configured PostgreSQL database."""
     from core.cli.commands.doctor import check_postgres
+    from core.db.migration_config import MigrationsNotFoundError, migrations_dir
 
-    alembic_ini = Path.cwd() / "alembic.ini"
-    if not alembic_ini.exists():
-        message = "alembic.ini not found"
+    try:
+        migrations_dir()
+    except MigrationsNotFoundError as exc:
+        message = str(exc)
         if json_output:
             print(json.dumps({"status": "error", "message": message}))
         else:
@@ -195,13 +196,14 @@ def cmd_migrate(json_output: bool = False) -> int:
                 console.print(f"[dim]{postgres.details}[/dim]")
         return 1
 
-    cmd = [sys.executable, "-m", "alembic", "upgrade", "head"]
+    # The packaged migrations, not `alembic` against a cwd alembic.ini: an
+    # installed deployment has neither the ini nor the scripts beside it.
+    cmd = [sys.executable, "-m", "core.db.migrate"]
     if not json_output:
         print_header("🧱 Database Migrations", "Alembic upgrade head")
 
     result = subprocess.run(
         cmd,
-        cwd=Path.cwd(),
         capture_output=True,
         text=True,
         check=False,

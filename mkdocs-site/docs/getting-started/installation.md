@@ -72,8 +72,34 @@ The remaining extras cover narrower capabilities:
 | `bedrock`      | Anthropic provider served through AWS Bedrock (`anthropic[bedrock]`, `LLM_ANTHROPIC_BACKEND=bedrock`) |
 | `vertex`       | Anthropic provider served through Google Vertex AI (`anthropic[vertex]`, `LLM_ANTHROPIC_BACKEND=vertex`) |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
+| `plugin-compat` | `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`, `sse-starlette`. Core dependencies until 0.41, used by nothing in `core/` or the official plugins. A plugin that imports one should declare it itself; this extra restores the old surface in the meantime |
 
 Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.
+
+#### Enabling bundled plugins
+
+The wheel ships the official plugins (`api_routers`, `browser_agent`,
+`coding_agent`, …), but a plain install runs **none** of them: bundled plugins
+are opt-in, so a fresh install exposes only the core API and `baselith doctor`
+does not ask for their dependencies. The server logs the available ones at
+startup. Turn one on from your project directory:
+
+```bash
+baselith plugin enable api_routers      # writes configs/plugins.yaml
+pip install "baselith-core[browser]"    # plus whatever extras the plugin needs
+baselith doctor                         # checks the enabled plugins' dependencies
+```
+
+or add the entry yourself:
+
+```yaml title="configs/plugins.yaml"
+api_routers:
+  enabled: true
+```
+
+Restart the server to apply it. Plugins you put in your own `./plugins`
+directory (or `PLUGIN_PLUGINS_PATH`) run without a config entry until the file
+names any plugin — see [Plugins › Configuration](../core-modules/plugins.md#configuration).
 
 ### Option B: Clone and Install (Recommended for developers)
 
@@ -171,7 +197,20 @@ MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
 # === Security ===
 SECRET_KEY=your-secret-key-change-in-production
 ALLOW_ORIGINS=["*"]
+TRUSTED_HOSTS=["localhost","127.0.0.1"]
 ```
+
+!!! warning "`TRUSTED_HOSTS` — the `Host` header allowlist"
+    The template ships `TRUSTED_HOSTS=["localhost","127.0.0.1"]`, so a fresh copy
+    answers `http://localhost:8000` and `http://127.0.0.1:8000` and rejects any other
+    `Host` with **`400 Invalid host header`**. Add every name you reach the app by
+    (a LAN IP, a Docker service name such as `backend`, a tunnel hostname) — the
+    port is ignored, and an IPv6 literal like `[::1]` cannot be matched, so use a
+    name. In production **replace** the loopback names with the hostnames your
+    reverse proxy serves (e.g. `["api.example.com"]`): a loopback-only allowlist in
+    production logs a startup WARNING because public traffic would get 400, and an
+    empty one refuses to boot. See
+    [Trusted hosts](../advanced/security.md#host-header-validation).
 
 !!! note "Security Restriction"
     For security reasons, the plugin **publishing** destination is hardcoded to the official marketplace and cannot be overridden by `MARKETPLACE_CENTRAL_URL`.

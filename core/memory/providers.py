@@ -7,7 +7,6 @@ ephemeral in-memory storage for testing and transient state.
 """
 
 import asyncio
-import inspect
 from typing import Any, cast
 from uuid import UUID
 
@@ -307,12 +306,11 @@ class VectorMemoryProvider(MemoryProvider):
                 logger.warning("No embedder configured, cannot perform vector search")
                 return []
 
-            # Generate query vector. Await an async embedder; otherwise offload
-            # the blocking sync encode to a thread so we never stall the loop.
-            if inspect.iscoroutinefunction(embedder.encode):
-                encoded = await embedder.encode(query)
-            else:
-                encoded = await asyncio.to_thread(embedder.encode, query)
+            # Generate the query vector (search side: the query prompt/prefix
+            # applies); a sync embedder is offloaded so the loop never stalls.
+            from core.nlp.roles import aencode_query
+
+            encoded = await aencode_query(embedder, query)
             query_vector = encoded.tolist() if hasattr(encoded, "tolist") else encoded
         assert query_vector is not None
 

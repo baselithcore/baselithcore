@@ -1,5 +1,5 @@
 name: example-plugin
-version: 0.1.0
+version: 0.1.1
 description: Example plugin demonstrating the plugin system
 author: White-Label Team
 tags:
@@ -16,5 +16,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: 85c74bec3347d7faf27794720d155c224ef86d951234fa992fed3267d5973a8b
+integrity_sha256: c04c86a001752fc0c4b7508d4a69492b80ea4f23acfcdc01dd3673e663f119c0
 hash_surface_version: 5

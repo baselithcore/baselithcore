@@ -253,6 +253,15 @@ bucket through Workload Identity, `type: azureblob, env_auth: true, account:
 identity, `credentialsSecret` names a Secret carrying the same
 `RCLONE_CONFIG_OFFSITE_*` variables with the static keys.
 
+With the chart's own Qdrant on (`qdrant.enabled`), the same job also
+snapshots it (`backup.qdrant`, on by default): one snapshot per collection
+through the Qdrant API, packed into `qdrant_<ts>.tar.gz` beside the dump,
+pruned by the same `retentionDays` and uploaded with it. It runs after the
+dump, so a Qdrant outage fails the job without costing the database its dump.
+Restore one collection into a running server by uploading its file from the
+archive to `POST /collections/<name>/snapshots/upload?priority=snapshot`
+(header `api-key`).
+
 The backup runs as its own ServiceAccount (`backup.serviceAccount`) so the
 cloud role that can write the bucket is granted to the backup alone, never to
 the pods that serve requests; the Kubernetes token stays unmounted either way.

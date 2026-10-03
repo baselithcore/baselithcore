@@ -81,3 +81,29 @@ def test_allowlist_entry_without_reason_is_rejected(tmp_path: Path) -> None:
 
 def test_real_repo_is_green() -> None:
     assert guard.check() == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "from sentence_transformers import SentenceTransformer as ST\nx = ST('m')\n",
+        "import sentence_transformers as st\nx = st.SentenceTransformer('m')\n",
+        "from transformers import AutoModel\nm = AutoModel.from_pretrained('x')\n",
+        "from transformers import pipeline as mk\np = mk('text-classification')\n",
+        "import transformers\np = transformers.pipeline('ner')\n",
+        "from qdrant_client import QdrantClient as QC\nc = QC(':memory:')\n",
+    ],
+)
+def test_aliased_and_qualified_forms_are_flagged(tmp_path: Path, body: str) -> None:
+    _write(tmp_path, "plugins/p/mod.py", body)
+    problems = guard.check(tmp_path, tmp_path / "none.yaml")
+    assert len(problems) == 1 and "plugins/p/mod.py" in problems[0]
+
+
+def test_unrelated_pipeline_calls_are_not_flagged(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "plugins/p/mod.py",
+        "pipe = redis.pipeline()\nfrom sklearn.pipeline import pipeline\np = pipeline()\n",
+    )
+    assert guard.check(tmp_path, tmp_path / "none.yaml") == []

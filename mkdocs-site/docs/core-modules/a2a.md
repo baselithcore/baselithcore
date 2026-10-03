@@ -334,8 +334,10 @@ When `BASELITH_A2A_SHARED_SECRET` is set, every outgoing request is signed
 with HMAC-SHA256 over the exact wire bytes (`X-A2A-Timestamp` /
 `X-A2A-Nonce` / `X-A2A-Signature` headers), and the A2A router rejects
 requests with a missing, stale (±300 s skew window), or invalid signature
-with **401** before any processing. Set the same secret on all peers of the
-mesh.
+with **401** before any processing. The comparison is constant-time over
+UTF-8 bytes, so a peer-supplied `X-A2A-Signature` with non-ASCII characters is
+a clean rejection rather than a `TypeError` (and a `500`). Set the same secret
+on all peers of the mesh.
 
 The nonce is bound into the MAC and is **single-use** within the skew window,
 so a captured request cannot be replayed. A nonce-less request — even with a

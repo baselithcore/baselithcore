@@ -208,7 +208,7 @@ def build_executor(config: UpdateApplyConfig) -> tuple[Executor, Path]:
     from core.config.plugin_updates import get_plugin_update_config
     from core.config.plugins import get_plugin_config
     from core.plugins.overlay import OVERLAY_ENV, overlay_root
-    from core.plugins.signing import load_trusted_keys
+    from core.plugins.signing import load_trust_roots
 
     from ..archive import UNPACKED_SIZE_FACTOR
     from ..cache import UpdateCache
@@ -232,8 +232,8 @@ def build_executor(config: UpdateApplyConfig) -> tuple[Executor, Path]:
         else {}
     )
 
-    def trusted_keys() -> list[str]:
-        return [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
+    def trusted_keys(plugin: str) -> list[str]:
+        return load_trust_roots(plugin)
 
     async def probe() -> int:
         return await http_probe(config.health_url)
