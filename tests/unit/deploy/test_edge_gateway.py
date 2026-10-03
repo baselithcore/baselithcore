@@ -17,6 +17,7 @@ import base64
 import hashlib
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -64,44 +65,104 @@ def _add_headers(block: str) -> dict[str, str]:
 # --- security headers on the edge's own responses ---------------------------
 
 
-def test_error_location_repeats_every_server_level_header() -> None:
-    code = _code(_conf())
-    server = _block(code, "\n    server {")
-    errors = _block(server, "location ^~ /__errors/")
-    server_headers = _add_headers(
-        # The server-level set: everything outside the nested locations.
-        re.sub(r"location[^{]*\{.*?\n        \}", "", server, flags=re.S)
+#: Headers only the edge's own error documents carry. Each is set at server
+#: level from a map on $uri that is empty everywhere but /__errors/, so a
+#: proxied response never receives a second CSP and no location needs an
+#: add_header of its own.
+EDGE_PAGE_HEADERS = (
+    "Content-Security-Policy",
+    "Cross-Origin-Opener-Policy",
+    "Cross-Origin-Resource-Policy",
+    "Cache-Control",
+)
+
+
+def _map_entries(code: str, variable: str) -> dict[str, str]:
+    block = _block(code, f"map $uri ${variable}")
+    return dict(re.findall(r"^\s*(\S+)\s+(.+?);\s*$", block, flags=re.M))
+
+
+def test_no_location_declares_its_own_add_header() -> None:
+    """One add_header inside a location cancels every header inherited from
+    the server block, so the edge sets them all at server level and keeps the
+    locations bare (also what Semgrep's header-redefinition rule asks)."""
+    server = _block(_code(_conf()), "\n    server {")
+    blocks = re.findall(
+        r"^ +location\b[^{]*\{.*?\n        \}", server, flags=re.S | re.M
     )
-    assert server_headers, "no server-level add_header found"
-    inherited = _add_headers(errors)
-    for name, value in server_headers.items():
-        assert inherited.get(name) == value, (
-            f"{name} is missing or differs inside /__errors/: declaring one "
-            "add_header in a location drops every inherited header."
+    assert blocks, "no location block found"
+    for location in blocks:
+        assert "add_header" not in location, location.splitlines()[0]
+
+
+def test_error_documents_get_their_own_headers_and_nothing_else_does() -> None:
+    code = _code(_conf())
+    server_headers = _add_headers(_block(code, "\n    server {"))
+    for name in EDGE_PAGE_HEADERS:
+        value = server_headers.get(name, "")
+        assert value.startswith("$"), f"{name} must come from a $uri map"
+        entries = _map_entries(code, value[1:])
+        assert entries.get("default") == '""', (
+            f"{name}: a non-empty default would stamp every proxied response"
         )
-    for extra in (
-        "Content-Security-Policy",
-        "Cross-Origin-Opener-Policy",
-        "Cross-Origin-Resource-Policy",
-        "Cache-Control",
-    ):
-        assert extra in inherited, extra
+        assert any(key.startswith("~^/__errors/") for key in entries), name
+
+
+class _ScriptCollector(HTMLParser):
+    """Every <script> element, parsed rather than matched.
+
+    The browser hashes the exact text between the tags, so the test reads it
+    the way a parser does: tag names in any case, attributes allowed, nothing
+    a regular expression would miss.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.tags = 0
+        self.bodies: list[str] = []
+        self._current: list[str] | None = None
+
+    @classmethod
+    def of(cls, html: str) -> _ScriptCollector:
+        collector = cls()
+        collector.feed(html)
+        collector.close()
+        return collector
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script":
+            self.tags += 1
+            self._current = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current is not None:
+            self._current.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._current is not None:
+            self.bodies.append("".join(self._current))
+            self._current = None
+
+
+def _inline_scripts(html: str) -> list[str]:
+    return _ScriptCollector.of(html).bodies
 
 
 def test_csp_hash_matches_the_inline_script_of_the_outage_page() -> None:
     html = (ERRORS_DIR / "50x.html").read_text(encoding="utf-8")
-    scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+    scripts = _inline_scripts(html)
     assert len(scripts) == 1
     digest = base64.b64encode(hashlib.sha256(scripts[0].encode()).digest()).decode()
-    csp = _add_headers(_block(_code(_conf()), "location ^~ /__errors/"))[
-        "Content-Security-Policy"
-    ]
+    code = _code(_conf())
+    variable = _add_headers(_block(code, "\n    server {"))["Content-Security-Policy"]
+    entries = _map_entries(code, variable[1:])
+    csp = next(v for k, v in entries.items() if k.startswith("~^/__errors/"))
     assert f"'sha256-{digest}'" in csp, (
         "50x.html's inline script changed; the CSP hash in nginx.conf must "
         "be recomputed or the retry logic stops running."
     )
     assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
-    assert not re.search(r"<script", (ERRORS_DIR / "4xx.html").read_text()), (
+    assert not _ScriptCollector.of((ERRORS_DIR / "4xx.html").read_text()).tags, (
         "4xx.html must stay script-free: it carries no hash in the CSP"
     )
 

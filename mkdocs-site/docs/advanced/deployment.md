@@ -1137,8 +1137,8 @@ server {
 The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
 `compose.prod.yaml`) applies the same rules — empty `Connection`
 for non-upgrade requests so `keepalive 32` is actually used, the extended
-streaming location, no `add_header` inside a location other than the
-error-page one (below), the validated
+streaming location, no `add_header` inside any location (the error-page
+headers come from server-level maps, below), the validated
 `X-Request-ID` that is forwarded and logged, and `X-Forwarded-For` set (not
 appended) to the client address — plus three of its own: a `location ~
 ^(/v1)?/chat$` with a 180s read timeout so synchronous chat outlives the LLM
@@ -1166,11 +1166,16 @@ The gateway's own rejections get the same treatment: `413` (from
 as `4xx.problem` (`application/problem+json`, type
 `urn:baselith:error:edge_rejected`) or, for `Accept: text/html`, `4xx.html` —
 they came back as nginx's stock HTML, so an SDK expecting RFC 9457 got a parse
-error on exactly the response that tells it to back off. The error-page
-location repeats the server-level security headers verbatim (one `add_header`
-in a location cancels every inherited one; `tests/unit/deploy` keeps the two
-sets in step) and is the one place the edge sets a CSP, with the SHA-256 of
-`50x.html`'s inline script — edit that script and the hash must change too.
+error on exactly the response that tells it to back off. The error documents
+are also the one place the edge sets a CSP (with the SHA-256 of `50x.html`'s
+inline script — edit that script and the hash must change too), plus COOP,
+CORP and `Cache-Control: no-store`. Those four are declared at server level
+from `map $uri` blocks that are empty everywhere except `/__errors/`: nginx
+sends no header whose value is empty, so a response proxied from the app never
+gets a second CSP, and after the `error_page` internal redirect `$uri` is the
+error document's path. No location carries an `add_header` of its own, because
+one would cancel every header inherited from the server block;
+`tests/unit/deploy` fails if one appears.
 
 **`/metrics` never through the edge.** Prometheus scrapes the `api` service
 directly on `app_net` (`prometheus.yml`: `api:8000`), so nothing legitimate asks
