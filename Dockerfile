@@ -374,6 +374,12 @@ COPY pyproject.toml README.md ./
 COPY baselith/ baselith/
 COPY core/ core/
 COPY plugins/ plugins/
+# The build itself needs these two: `[tool.setuptools] cmdclass` points
+# build_py at build_support/scaffold_templates.py, which copies the `baselith
+# init` starters out of templates/ into the wheel. Without them `pip install .`
+# stopped at "No module named 'build_support'" before building anything.
+COPY build_support/ build_support/
+COPY templates/ templates/
 RUN --mount=type=cache,target=/root/.cache/pip \
     PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --no-deps --prefix /install-app . \

@@ -221,6 +221,23 @@ def test_model_cache_keeps_one_copy_of_the_weights() -> None:
     assert "HF_HUB_OFFLINE=1" in text
 
 
+def test_app_stage_copies_what_the_build_backend_imports() -> None:
+    """`pip install .` runs setuptools with the cmdclass pyproject.toml names;
+    a module it imports that the stage never copied fails the image build
+    before anything is built ("No module named 'build_support'")."""
+    import tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    cmdclass = pyproject["tool"]["setuptools"].get("cmdclass", {})
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    stage = text.split("FROM deps AS app", 1)[1].split("pip install --no-deps", 1)[0]
+    for target in cmdclass.values():
+        package = target.split(".", 1)[0]
+        assert f"COPY {package}/ {package}/" in stage, target
+    # build_support copies the starters out of templates/ into the wheel.
+    assert "COPY templates/ templates/" in stage
+
+
 def test_healthcheck_allows_for_a_slow_cold_start() -> None:
     """Without a start period the retry budget runs during boot."""
     text = DOCKERFILE.read_text(encoding="utf-8")
