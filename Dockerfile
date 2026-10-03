@@ -326,14 +326,17 @@ for repo in sorted(cache.glob("models--*")):
     main = repo / "snapshots" / ref.read_text().strip()
     pickled = main / "pytorch_model.bin"
     converted = [p for p in repo.glob("snapshots/*/model.safetensors") if p.parent != main]
-    if (main / "model.safetensors").exists() or not converted or not pickled.is_symlink():
+    if (main / "model.safetensors").exists() or not converted:
         continue
+    # Also covers a cache holding ONLY the converted file: without this link
+    # `main` would have no weights at all and the offline load would fail.
     (main / "model.safetensors").symlink_to(os.path.relpath(converted[0].resolve(), main))
     (repo / ".no_exist" / main.name / "model.safetensors").unlink(missing_ok=True)
-    blob = pickled.resolve()
-    pickled.unlink()
-    blob.unlink()
-    print(f"[docker] {repo.name}: kept model.safetensors, dropped pytorch_model.bin")
+    if pickled.is_symlink():
+        blob = pickled.resolve()
+        pickled.unlink()
+        blob.unlink()
+    print(f"[docker] {repo.name}: model.safetensors linked into main; no pickled copy left")
 PY
 
 # ============================================================

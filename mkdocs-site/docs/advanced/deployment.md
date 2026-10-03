@@ -568,7 +568,9 @@ image carried both: 2.27GB twice, 4.4GB of cache measured on a built image.
 Offline, only the `main` snapshot is read, which made the safetensors copy dead
 weight and loaded the model through `torch.load`. The step now links the
 safetensors file into `main` and drops the pickle, leaving 2.3GB that loads
-without unpickling anything (checked with `--network none`).
+without unpickling anything (checked with `--network none`). It also covers a
+build where the Hub hands over only the converted file: `main` would then hold
+no weights at all, and the link is what lets the offline load find them.
 
 `.dockerignore` now excludes `**/.env` and `**/.env.*`, not
 only the root copies: `COPY plugins/`, `configs/` and `templates/` take whole
