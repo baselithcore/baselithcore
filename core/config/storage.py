@@ -5,7 +5,7 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote_plus, urlencode, urlsplit
 
 from pydantic import (
@@ -241,23 +241,24 @@ class StorageConfig(BaseSettings):
     # until RLS policies exist AND the app connects as a non-owner (or FORCE RLS)
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
-    # The tenant GUC is bound per *session* and memoized per pooled connection
-    # (see core.db.connection._sync_apply_tenant). Behind a transaction-mode
-    # pooler (PgBouncer `pool_mode = transaction`) consecutive statements of
-    # one checkout can land on different backends, one of them still carrying
-    # another tenant's `app.tenant_id` — the policies then isolate nothing.
-    # `DB_PREPARED_STATEMENTS=false` is the signal this configuration already
-    # carries for "transaction pooler", so RLS plus that flag is refused at
-    # boot unless the operator accepts it here (e.g. PgBouncer in session mode
-    # that merely has prepared statements switched off).
-    db_rls_allow_transaction_pooler: bool = Field(
-        default=False,
-        alias="DB_RLS_ALLOW_TRANSACTION_POOLER",
+    # How `app.tenant_id` is bound on a checkout (see core.db._tenant_binding).
+    # "session": `set_config(..., false)` memoized per pooled connection — one
+    # round-trip only when the tenant changes, correct with direct connections
+    # and session pooling. "transaction": every checkout runs inside one
+    # transaction and binds with `set_config(..., true)`, so the GUC lives
+    # exactly as long as the transaction a transaction-mode pooler (PgBouncer
+    # `pool_mode = transaction`) pins to one backend. `DB_PREPARED_STATEMENTS=
+    # false` is the signal this configuration carries for such a pooler, so RLS
+    # plus that flag is refused at boot unless the scope is "transaction".
+    db_rls_tenant_scope: Literal["session", "transaction"] = Field(
+        default="session",
+        alias="DB_RLS_TENANT_SCOPE",
         description=(
-            "Accept DB_RLS_ENABLED=true together with DB_PREPARED_STATEMENTS="
-            "false. Session-scoped tenant binding is NOT safe behind a "
-            "transaction-mode pooler; set this only when the pooler runs in "
-            "session mode and prepared statements are off for another reason."
+            "How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config "
+            "per session, memoized per pooled connection) or 'transaction' "
+            "(each checkout is one transaction, set_config is "
+            "transaction-local). Use 'transaction' behind a transaction-mode "
+            "pooler such as PgBouncer pool_mode=transaction."
         ),
     )
     # Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared
@@ -287,19 +288,20 @@ class StorageConfig(BaseSettings):
 
         Session-scoped tenant binding needs every statement of a checkout to
         reach the same backend. ``DB_PREPARED_STATEMENTS=false`` declares a
-        transaction-mode pooler, where that does not hold.
+        transaction-mode pooler, where that only holds inside a transaction —
+        which is what the ``transaction`` tenant scope provides.
         """
         if not self.db_rls_enabled or self.db_prepared_statements:
             return None
-        if self.db_rls_allow_transaction_pooler:
+        if self.db_rls_tenant_scope == "transaction":
             return None
         return (
-            "DB_RLS_ENABLED=true with DB_PREPARED_STATEMENTS=false: the tenant "
-            "GUC is bound per session, which a transaction-mode pooler "
-            "(PgBouncer pool_mode=transaction) does not preserve between "
-            "statements, so row-level security would not isolate tenants. Use "
-            "session pooling, or set DB_RLS_ALLOW_TRANSACTION_POOLER=true to "
-            "accept the risk explicitly."
+            "DB_RLS_ENABLED=true with DB_PREPARED_STATEMENTS=false and "
+            "DB_RLS_TENANT_SCOPE=session: the tenant GUC is bound per session, "
+            "which a transaction-mode pooler (PgBouncer pool_mode=transaction) "
+            "does not preserve between statements, so row-level security would "
+            "not isolate tenants. Set DB_RLS_TENANT_SCOPE=transaction, or use "
+            "session pooling."
         )
 
     @property

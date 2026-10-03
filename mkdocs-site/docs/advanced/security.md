@@ -493,7 +493,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ADMIN_USER`               | `admin`      | Username for the Basic-auth admin console and `/metrics` (paired with `ADMIN_PASS` / `ADMIN_PASS_HASHED`). |
 | `METRICS_AUTH_REQUIRED`    | `true`       | Require admin Basic auth on `GET /metrics` (and `/v1/metrics`). Disable only when the endpoint is reachable solely from the scrape network or the scraper sends credentials. |
 | `METRICS_USERNAME` / `METRICS_PASSWORD` | `metrics` / `None` | Scrape-only `/metrics` credential, granting no other route. An empty or blank `METRICS_PASSWORD` is **unset**, never an empty password. It shares the admin lockout: a locked-out source gets `429` even with the right password. See [`GET /metrics`](../api/rest.md#get-metrics-prometheus-metrics). |
-| `DB_RLS_ALLOW_TRANSACTION_POOLER` | `false` | Accept `DB_RLS_ENABLED=true` with `DB_PREPARED_STATEMENTS=false`. Off, that combination is refused at boot in every environment: the tenant GUC is session-scoped and a transaction-mode pooler does not preserve it. See [Database](../core-modules/db.md#rls-and-connection-poolers). |
+| `DB_RLS_TENANT_SCOPE` | `session` | How `DB_RLS_ENABLED` binds `app.tenant_id`: `session` (memoized per pooled connection) or `transaction` (each checkout is one transaction, transaction-local GUC). `DB_RLS_ENABLED=true` with `DB_PREPARED_STATEMENTS=false` and the `session` scope is refused at boot in every environment, because a transaction-mode pooler does not preserve a session GUC. See [Database](../core-modules/db.md#rls-and-connection-poolers). |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
 | `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
@@ -1215,10 +1215,9 @@ ignored and an IPv6 literal (`[::1]`) can never match.
     every environment**, `DB_RLS_ENABLED=true`
     together with `DB_PREPARED_STATEMENTS=false` — the setting that declares a
     transaction-mode pooler, which does not preserve the session-scoped
-    `app.tenant_id` between statements. `DB_RLS_ALLOW_TRANSACTION_POOLER=true`
-    is the explicit acceptance (e.g. PgBouncer in *session* mode with prepared
-    statements off for another reason); `BASELITH_ALLOW_RLS_BYPASS` does not
-    cover it. The pool factory refuses the same combination, so the CLI, the
+    `app.tenant_id` between statements — unless `DB_RLS_TENANT_SCOPE=transaction`,
+    which binds the tenant inside the transaction the pooler pins to one
+    backend. `BASELITH_ALLOW_RLS_BYPASS` does not cover it. The pool factory refuses the same combination, so the CLI, the
     task-queue worker and migration Jobs cannot open a pool with it either.
 
 ---

@@ -597,6 +597,7 @@ print(config.db_user)             # "baselith"          (DB_USER)
 print(config.conninfo)            # "postgresql://..."  (computed)
 print(config.postgres_enabled)    # True                (POSTGRES_ENABLED)
 print(config.db_rls_enabled)      # False               (DB_RLS_ENABLED)
+print(config.db_rls_tenant_scope) # "session"           (DB_RLS_TENANT_SCOPE)
 print(config.rls_pooler_conflict())  # None, or why RLS + DB_PREPARED_STATEMENTS=false is refused
 
 # GraphDB (RedisGraph)
@@ -619,7 +620,7 @@ DB_USER=baselith
 DB_PASSWORD=your-strong-password     # Required in production — stored as SecretStr
 # DATABASE_URL=postgresql://...      # Optional: overrides the discrete DB_* fields
 # DB_RLS_ENABLED=false               # Opt-in: bind app.tenant_id per checkout for Postgres RLS
-# DB_RLS_ALLOW_TRANSACTION_POOLER=false  # Accept RLS with DB_PREPARED_STATEMENTS=false (session-mode pooler only)
+# DB_RLS_TENANT_SCOPE=session        # 'transaction' behind a transaction-mode pooler (PgBouncer)
 
 GRAPH_DB_ENABLED=true
 GRAPH_DB_URL=redis://localhost:6379

@@ -8,13 +8,26 @@ the connection module still steers them.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+
 from psycopg import AsyncConnection, Connection
+
+#: Transaction-local binding: the GUC ends with the transaction, so a
+#: transaction-mode pooler can never hand it to another tenant's statement.
+_SET_TENANT_LOCAL = "SELECT set_config('app.tenant_id', %s, true)"
 
 
 def _rls_enabled() -> bool:
     from core.db import connection
 
     return bool(connection.DB_RLS_ENABLED)
+
+
+def _transaction_scope() -> bool:
+    from core.db import connection
+
+    return connection.DB_RLS_TENANT_SCOPE == "transaction"
 
 
 def _tenant_for_session() -> str:
@@ -105,4 +118,56 @@ async def _async_apply_tenant(connection: AsyncConnection[object]) -> None:
     setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
 
 
-__all__ = ["_async_apply_tenant", "_current_tenant_for_session", "_sync_apply_tenant"]
+@contextmanager
+def bind_tenant(connection: Connection[object]) -> Iterator[None]:
+    """Bind the request tenant for one sync checkout, per ``DB_RLS_TENANT_SCOPE``.
+
+    No-op with RLS off. ``session`` scope applies the memoized session GUC
+    through :mod:`core.db.connection` (the patchable seam). ``transaction``
+    scope wraps the whole checkout in ``connection.transaction()`` and binds
+    with ``set_config(..., true)``: the work commits on a clean exit, rolls
+    back on an exception, and a caller's own ``transaction()`` becomes a
+    savepoint. The session memo is neither read nor written there.
+    """
+    from core.db import connection as seam
+
+    if not _rls_enabled():
+        yield
+        return
+    if not _transaction_scope():
+        seam._sync_apply_tenant(connection)
+        yield
+        return
+    tenant = _tenant_for_session()
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            cursor.execute(_SET_TENANT_LOCAL, (tenant,))
+        yield
+
+
+@asynccontextmanager
+async def bind_tenant_async(connection: AsyncConnection[object]) -> AsyncIterator[None]:
+    """Async counterpart of :func:`bind_tenant`."""
+    from core.db import connection as seam
+
+    if not _rls_enabled():
+        yield
+        return
+    if not _transaction_scope():
+        await seam._async_apply_tenant(connection)
+        yield
+        return
+    tenant = _tenant_for_session()
+    async with connection.transaction():
+        async with connection.cursor() as cursor:
+            await cursor.execute(_SET_TENANT_LOCAL, (tenant,))
+        yield
+
+
+__all__ = [
+    "_async_apply_tenant",
+    "_current_tenant_for_session",
+    "_sync_apply_tenant",
+    "bind_tenant",
+    "bind_tenant_async",
+]

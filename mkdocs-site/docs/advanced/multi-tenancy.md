@@ -381,15 +381,18 @@ the remediation; elsewhere it logs at ERROR.
 `BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out for a deployment that
 knows why (a single-tenant install that wants the GUC and nothing else).
 
-!!! warning "Session pooling only"
-    The tenant GUC is bound per **session**. Behind a transaction-mode pooler
-    (PgBouncer `pool_mode = transaction`) the statements of one checkout can
-    reach different backends, so `DB_RLS_ENABLED=true` with
-    `DB_PREPARED_STATEMENTS=false` (the transaction-pooler setting) is refused
-    at boot in every environment, and by the pool factory itself.
-    `DB_RLS_ALLOW_TRANSACTION_POOLER=true` (default `false`) is the explicit
-    acceptance for a session-mode pooler with prepared statements off. See
-    [Database › RLS and connection poolers](../core-modules/db.md#rls-and-connection-poolers).
+!!! warning "Transaction poolers need the transaction scope"
+    By default the tenant GUC is bound per **session**. Behind a
+    transaction-mode pooler (PgBouncer `pool_mode = transaction`) the
+    statements of one checkout can reach different backends, so
+    `DB_RLS_ENABLED=true` with `DB_PREPARED_STATEMENTS=false` (the
+    transaction-pooler setting) is refused at boot in every environment, and
+    by the pool factory itself, unless `DB_RLS_TENANT_SCOPE=transaction`. That
+    scope makes each checkout one transaction and binds the tenant with a
+    transaction-local `set_config`, which the pooler cannot hand to another
+    tenant. See
+    [Database › RLS and connection poolers](../core-modules/db.md#rls-and-connection-poolers)
+    for its trade-offs.
 
 ##### Provisioning the role
 

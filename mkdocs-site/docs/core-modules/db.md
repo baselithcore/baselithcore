@@ -122,14 +122,34 @@ everything else that scopes by tenant sees the same explicit identity too.
 
 ### RLS and connection poolers
 
-The binding above is **session-scoped** (`set_config(..., false)`) and memoized
-per pooled connection. Behind a transaction-mode pooler (PgBouncer
-`pool_mode = transaction`) consecutive statements of one checkout can land on
-different backends, one of them still carrying another tenant's
-`app.tenant_id` — and the policies then isolate nothing.
+`DB_RLS_TENANT_SCOPE` chooses how the tenant is bound on a checkout:
+
+| `DB_RLS_TENANT_SCOPE` | Binding | Use it with |
+| --- | --- | --- |
+| `session` (default) | `set_config('app.tenant_id', …, false)`, memoized per pooled connection: a round-trip only when the tenant changes | direct connections, or a pooler in **session** mode |
+| `transaction` | every checkout runs inside one `connection.transaction()` and binds with `set_config(…, true)`; the GUC ends with the transaction | a **transaction-mode** pooler (PgBouncer `pool_mode = transaction`) |
+
+The session binding is unsafe behind a transaction-mode pooler: consecutive
+statements of one checkout can land on different backends, one of them still
+carrying another tenant's `app.tenant_id`, and the policies then isolate
+nothing. A transaction is the unit such a pooler pins to one backend, so a
+transaction-local GUC cannot leak.
+
+The transaction scope has two costs to know before turning it on:
+
+- **One checkout is one transaction.** The work commits when the `with` block
+  exits cleanly and rolls back when it raises, and a failed statement aborts
+  the rest of that checkout (`InFailedSqlTransaction`). A caller's own
+  `connection.transaction()` becomes a savepoint, so code that already scoped
+  its writes keeps working.
+- **A long-held checkout is an open transaction.** It counts against
+  `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` (default 60 s) and holds the backend for
+  its whole duration, so do not keep a connection checked out across a slow
+  LLM call or a stream.
+
 `DB_PREPARED_STATEMENTS=false` is the setting this configuration already uses
-to say "transaction pooler", so `DB_RLS_ENABLED=true` together with it is
-refused:
+to say "transaction pooler", so `DB_RLS_ENABLED=true` together with it **and**
+the `session` scope is refused:
 
 - at startup, by `enforce_rls_posture` (`RlsBypassError`), in **every**
   environment and before a connection is opened;
@@ -138,9 +158,7 @@ refused:
   the CLI, the task-queue worker, a migration Job.
 
 The refusal is described by `StorageConfig.rls_pooler_conflict()`, which returns
-the reason or `None`. `DB_RLS_ALLOW_TRANSACTION_POOLER=true` (default `false`)
-accepts the combination explicitly; set it only when the pooler runs in
-**session** mode and prepared statements are off for another reason.
+the reason or `None`. `DB_RLS_TENANT_SCOPE=transaction` resolves it;
 `BASELITH_ALLOW_RLS_BYPASS` does not cover this conflict.
 
 ### Who creates the schema
@@ -493,7 +511,7 @@ DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
 DB_STATEMENT_TIMEOUT_MS=30000      # Server-side cap per statement (0 = unbounded)
 DB_RLS_ENABLED=false               # Bind app.tenant_id per checkout for row-level security — see below
 DB_PREPARED_STATEMENTS=true        # false behind a transaction-mode pooler — see PgBouncer below
-DB_RLS_ALLOW_TRANSACTION_POOLER=false  # accept RLS with DB_PREPARED_STATEMENTS=false — see below
+DB_RLS_TENANT_SCOPE=session       # 'transaction' behind a transaction-mode pooler — see below
 DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
 ```
 
@@ -550,12 +568,12 @@ that mode:
   `idle_in_transaction_session_timeout` is rejected by PgBouncer unless listed
   in `ignore_startup_parameters` — and then silently dropped, so set the
   budgets on the role instead (`ALTER ROLE app SET statement_timeout = '30s'`);
-- the timezone and the RLS `app.tenant_id` binding are session-scoped
-  `set_config` calls memoized per client connection, which a transaction-mode
-  pooler does not pin to one backend. Use session pooling when
-  `DB_RLS_ENABLED=true`: RLS with `DB_PREPARED_STATEMENTS=false` is refused at
-  boot unless `DB_RLS_ALLOW_TRANSACTION_POOLER=true` — see
-  [RLS and connection poolers](#rls-and-connection-poolers).
+- the timezone and, by default, the RLS `app.tenant_id` binding are
+  session-scoped `set_config` calls memoized per client connection, which a
+  transaction-mode pooler does not pin to one backend. With
+  `DB_RLS_ENABLED=true` set `DB_RLS_TENANT_SCOPE=transaction`: RLS with
+  `DB_PREPARED_STATEMENTS=false` and the session scope is refused at boot —
+  see [RLS and connection poolers](#rls-and-connection-poolers).
 
 ### Indexes behind the hot queries
 

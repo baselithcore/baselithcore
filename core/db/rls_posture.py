@@ -257,8 +257,9 @@ async def enforce_rls_posture() -> None:
 
     # A pooling mode that cannot carry the session-scoped tenant GUC is a
     # configuration conflict, not a posture the database can report: refuse
-    # it in every environment, before a single connection is opened. The
-    # explicit acceptance flag is the only way through.
+    # it in every environment, before a single connection is opened.
+    # DB_RLS_TENANT_SCOPE=transaction is the way through: it binds the GUC
+    # inside the transaction the pooler pins to one backend.
     conflict = getattr(storage, "rls_pooler_conflict", lambda: None)()
     if conflict is not None:
         raise RlsBypassError(f"🔒 {conflict}")

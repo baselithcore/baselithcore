@@ -19,6 +19,8 @@ from core.db._tenant_binding import (
     _async_apply_tenant,
     _current_tenant_for_session,
     _sync_apply_tenant,
+    bind_tenant,
+    bind_tenant_async,
 )
 from core.db._tracking import TrackingAsyncCursor, TrackingCursor, _track_db_query
 
@@ -58,6 +60,9 @@ DB_POOL_CHECK = _storage_config.db_pool_check
 # checkout so RLS policies can isolate rows. OFF by default → the apply hook is
 # skipped entirely and the connection path is byte-identical to before.
 DB_RLS_ENABLED = _storage_config.db_rls_enabled
+# "session" (memoized session GUC) or "transaction" (each checkout is one
+# transaction, GUC transaction-local) — see core.db._tenant_binding.bind_tenant.
+DB_RLS_TENANT_SCOPE = _storage_config.db_rls_tenant_scope
 
 logger = get_logger(__name__)
 
@@ -170,9 +175,8 @@ def get_connection() -> Iterator[Connection[object]]:
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         _sync_apply_timezone(connection)
-        if DB_RLS_ENABLED:
-            _sync_apply_tenant(connection)
-        yield connection
+        with bind_tenant(connection):
+            yield connection
 
 
 @contextmanager
@@ -219,9 +223,8 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         await _async_apply_timezone(connection)
-        if DB_RLS_ENABLED:
-            await _async_apply_tenant(connection)
-        yield connection
+        async with bind_tenant_async(connection):
+            yield connection
 
 
 @asynccontextmanager
@@ -320,9 +323,8 @@ def get_read_connection() -> Iterator[Connection[object]]:
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         _sync_apply_timezone(connection)
-        if DB_RLS_ENABLED:
-            _sync_apply_tenant(connection)
-        yield connection
+        with bind_tenant(connection):
+            yield connection
 
 
 @asynccontextmanager
@@ -350,9 +352,8 @@ async def get_async_read_connection() -> AsyncIterator[AsyncConnection[object]]:
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         await _async_apply_timezone(connection)
-        if DB_RLS_ENABLED:
-            await _async_apply_tenant(connection)
-        yield connection
+        async with bind_tenant_async(connection):
+            yield connection
 
 
 def close_pool() -> None:
