@@ -316,7 +316,7 @@ to, so it fails closed regardless of `strict_tenant_isolation`
 (`core/db/connection.py`). Work that legitimately runs outside a request declares
 itself with [`system_tenant_scope()`](#system-tenant-scope) instead.
 
-**2. The policies.** `migrations/versions/008_row_level_security.py` enables RLS
+**2. The policies.** `core/db/migrations/versions/008_row_level_security.py` enables RLS
 and creates a `tenant_isolation` policy on every tenant-scoped table;
 `009_tool_invocations.py` adds the same policy to the table it creates, and
 `010_system_tenant_rls_exemption.py` widens the predicate across all seven.
@@ -380,6 +380,19 @@ startup whenever `DB_RLS_ENABLED` is on — the role's `rolsuper` and
 the remediation; elsewhere it logs at ERROR.
 `BASELITH_ALLOW_RLS_BYPASS=true` is the auditable opt-out for a deployment that
 knows why (a single-tenant install that wants the GUC and nothing else).
+
+!!! warning "Transaction poolers need the transaction scope"
+    By default the tenant GUC is bound per **session**. Behind a
+    transaction-mode pooler (PgBouncer `pool_mode = transaction`) the
+    statements of one checkout can reach different backends, so
+    `DB_RLS_ENABLED=true` with `DB_PREPARED_STATEMENTS=false` (the
+    transaction-pooler setting) is refused at boot in every environment, and
+    by the pool factory itself, unless `DB_RLS_TENANT_SCOPE=transaction`. That
+    scope makes each checkout one transaction and binds the tenant with a
+    transaction-local `set_config`, which the pooler cannot hand to another
+    tenant. See
+    [Database › RLS and connection poolers](../core-modules/db.md#rls-and-connection-poolers)
+    for its trade-offs.
 
 ##### Provisioning the role
 
@@ -473,6 +486,14 @@ A plugin whose rows are keyed by something other than the session tenant — a
 written under; otherwise every read is filtered to nothing and every write is
 refused by the policy's `WITH CHECK`.
 
+`row_tenant_scope` binds only a key the bound identity can derive to — the
+bound tenant, or the bound user's id (the two keys
+`core.context.resolve_plugin_tenant_key` produces). Any other key raises
+`ForeignTenantKeyError` (`core.db.rls_policy`, a `ValueError`), so a plugin
+cannot select another tenant's rows by passing that tenant's id; a reserved id
+that is not the bound tenant still raises `ReservedTenantError`. Outside a
+bound tenant the block runs unchanged.
+
 #### Out-of-request work: `system_tenant_scope()` {#system-tenant-scope}
 
 Not everything that touches Postgres belongs to a tenant. Under RLS an unbound
@@ -518,7 +539,7 @@ tenant must bind that tenant.
     symmetric in `USING` and `WITH CHECK`. Neither knew about the `system`
     tenant, which did not exist yet.
 
-    `migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
+    `core/db/migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
     — it does not replace the policy. Same name, same permissive policy, same
     `COALESCE(..., 'default')` handling of an unset GUC, still no
     `FORCE ROW LEVEL SECURITY`:

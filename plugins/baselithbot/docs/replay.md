@@ -17,7 +17,7 @@ forward/back through the run like a video player.
 ## 2. Storage
 
 - Path: `<state>/replay.sqlite` (default:
-  `plugins/baselithbot/.state/replay.sqlite`, git-ignored).
+  `<state_dir>/replay.sqlite`, git-ignored).
 - WAL journal mode + `synchronous=NORMAL` — safe concurrent writes from
   the async agent loop and dashboard reads.
 - Screenshots: base64 PNG strings produced by the browser agent, stored

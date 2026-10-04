@@ -89,3 +89,21 @@ def test_shipped_config_enables_api_routers(monkeypatch):
     repo_root = Path(__file__).resolve().parents[4]
     configs = read_plugin_configs(repo_root)
     assert plugin_enabled(configs, "api_routers", "api-routers")
+
+
+class TestMissingFileLogLevel:
+    """A fresh install has no config file; only a named missing file warns."""
+
+    def test_default_path_missing_logs_info(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.delenv(PLUGIN_CONFIG_PATH_ENV, raising=False)
+        with caplog.at_level("INFO", logger="core.plugins.config_file"):
+            assert read_plugin_configs(tmp_path) == {}
+        levels = [r.levelname for r in caplog.records if "not found" in r.message]
+        assert levels == ["INFO"]
+
+    def test_explicit_path_missing_warns(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setenv(PLUGIN_CONFIG_PATH_ENV, "configs/custom.yaml")
+        with caplog.at_level("INFO", logger="core.plugins.config_file"):
+            assert read_plugin_configs(tmp_path) == {}
+        levels = [r.levelname for r in caplog.records if "not found" in r.message]
+        assert levels == ["WARNING"]

@@ -142,7 +142,10 @@ deliberately no file on disk.
 directories), infrastructure (LLM provider, Redis, Qdrant, PostgreSQL, GraphDB),
 runtime configuration (telemetry, migrations mode) and plugin readiness
 (plugins, plugin dependencies, plugin frontends). The last three are the ones
-`--core-only` skips.
+`--core-only` skips. `DB Migrations` first loads the packaged Alembic scripts
+and **fails** when they cannot be located or a revision does not load — an
+installation without its migrations cannot create its schema, whatever the
+startup mode says; when they load, it names the head revision.
 
 *Plugin Frontends* reads each manifest's `frontend` block and checks that the
 declared build output is on disk, resolving it the way the Docker installer
@@ -183,7 +186,8 @@ elided):
 │          │                     │                                │ postgres                       │
 │ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
 │ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
-│ ✅ PASS  │ DB Migrations       │ Run during application startup │ For predictable startup,       │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 012_webhook_retention_idx │
+│          │                     │                                │ . For predictable startup,     │
 │          │                     │                                │ prefer false and run: baselith │
 │          │                     │                                │ db migrate                     │
 │ ✅ PASS  │ Plugins             │ 10 plugin(s) found             │                                │
@@ -666,6 +670,12 @@ baselith plugin enable --all        # Bulk enable all
 
 Both commands auto-sync state with `configs/plugins.yaml`.
 
+A plugin shipped inside the installed `baselith-core` wheel (no `./plugins/<name>`
+directory) is toggled by the config entry alone — its code in `site-packages`
+is never renamed or copied. Bundled plugins are opt-in, so on a `pip install`
+`baselith plugin enable <name>` is how one is turned on; restart the server to
+apply it. `--all` acts on `./plugins` only.
+
 ---
 
 ### `plugin delete` - Delete Plugin
@@ -853,16 +863,24 @@ If you run `baselith init` without arguments, the CLI will enter an **Interactiv
 
 **Available Templates**:
 
-The wizard offers exactly what this invocation can scaffold
-(`available_templates()`): the built-in templates, plus every directory under
-`templates/` that actually contains files.
+The wizard and the `--template` choices in `baselith init --help` offer
+exactly what this invocation can scaffold (`available_templates()`): the
+built-in templates, plus every directory under `templates/` that is a project
+starter (a `README.md` and one of `pyproject.toml`, `requirements.txt`,
+`main.py`, `agent.py`). The directory starters are looked up in the checkout
+around the current directory first, then in the installed package
+(`core/cli/scaffold_templates/`, where the wheel carries them), then in the
+checkout the `core` package was imported from (an editable install used from
+any directory).
 
-- `minimal` — built in: one agent, wired to the public API. The only template
-  a `pip install baselith-core` user sees, since `templates/` is not shipped
-  in the wheel.
+- `minimal` — built in: one agent, wired to the public API.
 - `rag-system`, `multi-agent-collab`, `baselith-core-template`,
-  `custom-agent-template`, `plugin-template`, `backstage` — directories under
-  `templates/`, so they need a checkout of this repository.
+  `custom-agent-template` — directories under `templates/` in the
+  repository. A build hook (`build_support/scaffold_templates.py`, wired as the
+  `build_py` command in `pyproject.toml`) copies them into the wheel, so a
+  `pip install baselith-core` offers them too.
+  `plugin-template` and `backstage` live in `templates/` as well but are not
+  project starters: they are neither offered nor shipped.
 
 A template that would write no files is refused (exit code `1`) instead of
 creating an empty project.
@@ -873,17 +891,38 @@ creating an empty project.
     "Created project at …"; `baselith-core` matched neither a built-in
     template nor a directory under `templates/` (the directory is
     `baselith-core-template`). Three of the five choices were dead ends.
-    Scripts pinning `--template full` or `--template chat-only` now get
-    `Unknown template or directory` and a list of what exists — pass
-    `--template minimal`.
+    Scripts pinning `--template full` or `--template chat-only` are now
+    rejected by argument parsing (`invalid choice`), which lists what
+    exists — pass `--template minimal`.
+
+**What every template gets**: after copying the template's files, `init`
+writes the project's `.env` from the development profile — the same one
+[`config env`](#config-env---create-or-normalize-an-env-profile) applies — so
+the printed commands work without editing anything:
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `APP_ENV` | `development` | Undeclared, the environment is treated as production once auth is enforced (the default), and production refuses to start without `TRUSTED_HOSTS`, JWT claim binding and a reachable database |
+| `SECRET_KEY`, `DB_PASSWORD` | `secrets.token_urlsafe(48)` / `(32)` | Generated per project, never a shipped value; `SECRET_KEY` must be at least 32 characters |
+| `HOST`, `PORT`, `TRUSTED_HOSTS` | `127.0.0.1`, `8000`, `["localhost","127.0.0.1","[::1]"]` | Loopback only: a laptop's dev server is not on the LAN, and the Host header is validated |
+| `LLM_PROVIDER`, `LLM_MODEL` | `ollama`, `llama3.2` | The provider that needs no API key, named explicitly as the LLM preflight asks |
+| `DB_*`, `CACHE_REDIS_URL`, `VECTORSTORE_*`, ... | `localhost` | Local services; the server starts without them and reports them on `/health/ready` |
+
+The file is created with mode `0600` and `.gitignore` lists `.env` and
+`data/`; `init` also creates the `data/` directories `baselith doctor` checks.
+No template ships a `.env` or `.env.example` of its own. To regenerate or top
+up the file of an existing project, run `baselith config env` in it: it adds
+the missing keys and never changes a value already set.
 
 **What `minimal` scaffolds**: a project that depends on `baselith-core`
 (`requires-python = ">=3.12"`, its own `version = "0.1.0"`) and runs as it
-stands — `README.md`, `pyproject.toml`, `.env`, `.gitignore`, an `app/`
-package holding `agent.py`, a `tests/` package holding `test_agent.py`, and a
-`.gitkeep` under `plugins/`. `app/agent.py` builds an
-[`Agent`](../core-modules/agent.md) with one tool over the public facade and
-runs it:
+stands — `README.md`, `pyproject.toml`, `.gitignore`, `backend.py` (the
+server `baselith run` serves: `app = create_app()`), a Compose file
+for PostgreSQL, Redis (FalkorDB) and Qdrant on loopback (the database password
+is interpolated from `.env`), an `app/` package holding `agent.py`, a `tests/`
+package holding `test_agent.py`, and a `.gitkeep` under `plugins/`.
+`app/agent.py` builds an [`Agent`](../core-modules/agent.md) with one tool
+over the public facade and runs it:
 
 ```python
 from baselith import Agent
@@ -891,11 +930,23 @@ from baselith import Agent
 agent = Agent(system_prompt="You are a concise assistant.", tools=[current_time])
 ```
 
+The "Next steps" panel prints the commands in the order they work:
+
 ```bash
 cd my-assistant
 pip install -e .
-python -m app.agent
+docker compose up -d        # optional: local services
+ollama pull llama3.2        # LLM_PROVIDER=ollama: a local model, no API key
+baselith run                # then open http://127.0.0.1:8000/health
+python -m app.agent         # ask the agent
 ```
+
+The model comes before the server because `baselith run`'s preflight refuses
+to start while the model `LLM_MODEL` names is missing from Ollama; PostgreSQL,
+Redis and Qdrant are only warned about. `baselith-core-template` prints the
+same sequence with `pip install -r requirements.txt`; `rag-system` and
+`multi-agent-collab` start with `python main.py` (bound to `HOST`/`PORT`);
+`custom-agent-template` with `python agent.py`.
 
 The generated `pyproject.toml` used to carry the framework's own version
 number and pin `fastapi`/`uvicorn`/`pydantic` directly, with no
@@ -1061,16 +1112,21 @@ baselith db reset
 
 ### `db migrate` - Apply Migrations
 
-Run `alembic upgrade head` against the configured PostgreSQL database.
+Apply the packaged Alembic migrations (`upgrade head`) to the configured
+PostgreSQL database.
 
 ```bash
 baselith db migrate
 baselith db migrate --json
 ```
 
-The command checks that `alembic.ini` is present and that PostgreSQL answers
-before it starts, so an unreachable database fails with the connection error
-rather than a migration traceback. It is the explicit counterpart of
+The command checks that the migration scripts shipped with the installed
+package can be located and that PostgreSQL answers before it starts, so an
+unreachable database fails with the connection error rather than a migration
+traceback. It needs no `alembic.ini` or checkout in the working directory: it
+runs `python -m core.db.migrate` in a child process, which resolves the
+scripts through the package and holds the same advisory lock as the startup
+upgrade, so it cannot race an app worker onto the same DDL. It is the explicit counterpart of
 `DB_MIGRATIONS_ON_STARTUP`: set that to `false` and run this at deploy time for
 a startup that cannot race two processes onto the same schema.
 
@@ -1126,7 +1182,9 @@ baselith config env --json
 ```
 
 This is the step `baselith setup` runs first, exposed on its own for the case
-where the env file has drifted and nothing else needs doing. It reports the
+where the env file has drifted and nothing else needs doing. The `dev` profile
+is also what [`init`](#init---initialize-project) writes into a new project's
+`.env`, so running it in a freshly scaffolded project changes nothing. It reports the
 keys it added or changed; a file that already matches the profile is left
 untouched. Generated files are written `0600` — see the note under the
 [`up`](#up---docker-runtime) command.

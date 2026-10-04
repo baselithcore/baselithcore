@@ -27,7 +27,7 @@ to skip hydrating every blob up front).
 ## Storage & retention
 
 Every step of every run — action, reasoning, URL, screenshot, extracted
-data — persists to SQLite (`plugins/baselithbot/.state/replay.sqlite`).
+data — persists to SQLite (`<state_dir>/replay.sqlite`).
 Retention is 14 days by default via a cron job (`replay.prune_history`, see
 [Cron](cron.md)). If `BASELITHBOT_REPLAY_ENCRYPTION_KEY` is set, screenshots
 are encrypted at rest with Fernet and decrypted transparently on read — a

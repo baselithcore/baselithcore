@@ -12,140 +12,16 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Prompt
 
 from core import __version__ as FRAMEWORK_VERSION
+from core.cli.commands.init_setup import finish_project, next_steps
+from core.cli.commands.init_templates import PROJECT_TEMPLATES
 from core.cli.ui import console, print_error, print_panel, print_step, print_success
 
-_AGENT_MODULE = '''"""The project's first agent.
-
-Run it with ``python -m app.agent``. ``Agent.run`` is a coroutine, so it needs
-a running event loop — hence ``asyncio.run`` at the bottom.
-"""
-
-import asyncio
-
-from baselith import Agent
-
-
-async def current_time(timezone: str = "UTC") -> str:
-    """Return the current time in a timezone.
-
-    Args:
-        timezone: IANA timezone name, e.g. "Europe/Rome".
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    return datetime.now(ZoneInfo(timezone)).isoformat()
-
-
-agent = Agent(
-    system_prompt="You are a concise assistant.",
-    tools=[current_time],
-)
-
-
-async def main() -> None:
-    """Ask the agent one question and print the answer."""
-    result = await agent.run("What time is it in Europe/Rome?")
-    print(result.text)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-'''
-
-_AGENT_TEST_MODULE = '''"""The scaffolded agent is importable and declares its tool."""
-
-from app.agent import agent
-
-
-def test_agent_exposes_its_tool() -> None:
-    assert "current_time" in agent.tool_names
-'''
-
-#: Templates the CLI can scaffold without a checkout of this repository.
-#:
-#: ``full`` and ``chat-only`` used to sit here with an empty ``files`` dict.
-#: The scaffolder only checked that ``files`` *was* a dict, so each of them
-#: created an empty directory and then printed "Created project at ..." — and
-#: the interactive prompt offered both by name. They are removed rather than
-#: stubbed: a template that produces nothing is worse than one that is not
-#: offered. The richer starters (``rag-system``, ``multi-agent-collab``,
-#: ``baselith-core-template``) are directories under ``templates/`` and are
-#: discovered at runtime, from a checkout of this repository.
-PROJECT_TEMPLATES = {
-    "minimal": {
-        "description": "Minimal project: one agent, wired to the public API",
-        "files": {
-            "README.md": """# {project_name}
-
-A BaselithCore project.
-
-## Quick start
-
-```bash
-pip install -e .
-python -m app.agent
-```
-
-## Layout
-
-```
-{project_name}/
-├── app/           # Your application code; app/agent.py is the entry point
-├── plugins/       # Your plugins — domain logic belongs here
-├── tests/         # Your tests
-├── .env           # Local configuration
-└── pyproject.toml
-```
-
-The framework is a dependency (`baselith-core`), not a directory inside this
-project. Import it as `baselith`:
-
-```python
-from baselith import Agent
-```
-""",
-            "pyproject.toml": """[project]
-name = "{project_name}"
-version = "0.1.0"
-description = "A BaselithCore project"
-requires-python = ">=3.12"
-dependencies = [
-    "baselith-core>={framework_version}",
-]
-
-[project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "pytest-asyncio"]
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-include = ["app*", "plugins*"]
-""",
-            ".env": """# {project_name} configuration
-
-CORE_LOG_LEVEL=INFO
-CORE_DEBUG=false
-
-LLM_PROVIDER=ollama
-LLM_MODEL=llama3.1:8b
-""",
-            ".gitignore": """__pycache__/
-*.py[cod]
-.venv/
-.env
-.pytest_cache/
-""",
-            "app/__init__.py": '"""Application module."""\n',
-            "app/agent.py": _AGENT_MODULE,
-            "plugins/.gitkeep": "",
-            "tests/__init__.py": '"""Test module."""\n',
-            "tests/test_agent.py": _AGENT_TEST_MODULE,
-        },
-    },
-}
+#: The built-in templates (``minimal``) live in
+#: :mod:`core.cli.commands.init_templates`. The richer starters
+#: (``rag-system``, ``multi-agent-collab``, ``baselith-core-template``,
+#: ``custom-agent-template``) are directories under ``templates/``, shipped in
+#: the wheel as ``core/cli/scaffold_templates`` and discovered at runtime by
+#: :func:`templates_root`.
 
 
 #: A directory under ``templates/`` is a *project* starter when it has a
@@ -166,15 +42,15 @@ def _is_project_template(directory: Path) -> bool:
 def available_templates() -> list[str]:
     """Every template this invocation can actually scaffold.
 
-    The built-in ones always work; the directory ones need a checkout of this
-    repository, because ``templates/`` is not shipped in the wheel, so a
-    ``pip install baselith-core`` user sees only the built-ins.
+    The built-in ones always work; the directory ones come from
+    :func:`templates_root` — the package an installed wheel carries, or the
+    ``templates/`` tree of a checkout.
 
     Returns:
         Template names, built-ins first, each of which will produce a project.
     """
     names = list(PROJECT_TEMPLATES)
-    templates_dir = find_project_root() / "templates"
+    templates_dir = templates_root()
     if templates_dir.is_dir():
         names.extend(
             sorted(
@@ -187,6 +63,32 @@ def available_templates() -> list[str]:
             )
         )
     return names
+
+
+#: Where a wheel install carries the directory starters. ``templates/`` sits
+#: outside every package, so ``build_support/scaffold_templates.py`` copies
+#: the CLI's starters here at build time; a checkout has no such directory.
+PACKAGED_TEMPLATES = Path(__file__).resolve().parents[1] / "scaffold_templates"
+#: The ``templates/`` tree of the checkout this ``core`` was imported from
+#: (an editable install); absent — and harmless — under ``site-packages``.
+CHECKOUT_TEMPLATES = Path(__file__).resolve().parents[3] / "templates"
+
+
+def templates_root() -> Path:
+    """The directory the directory templates are read from.
+
+    In order: the checkout around the cwd (a contributor scaffolding from the
+    repository), the starters packaged in an installed wheel, then the
+    checkout this ``core`` package was imported from (an editable install
+    used from any directory). The returned path may not exist — callers then
+    offer the built-in templates only.
+    """
+    in_cwd = find_project_root() / "templates"
+    if in_cwd.is_dir():
+        return in_cwd
+    if PACKAGED_TEMPLATES.is_dir():
+        return PACKAGED_TEMPLATES
+    return CHECKOUT_TEMPLATES
 
 
 def find_project_root() -> Path:
@@ -296,8 +198,7 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         return 1
 
     # 1. Try to find template directory in project root
-    root = find_project_root()
-    templates_dir = root / "templates"
+    templates_dir = templates_root()
 
     template_path = templates_dir / template
 
@@ -309,8 +210,11 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         )
         # Copy files from directory recursively
         for item in template_path.rglob("*"):
+            rel_path = item.relative_to(template_path)
+            # pip byte-compiles the templates it installs; never copy that.
+            if "__pycache__" in rel_path.parts or item.suffix in (".pyc", ".pyo"):
+                continue
             if item.is_file() and item.name != ".DS_Store":
-                rel_path = item.relative_to(template_path)
                 content = item.read_text()
                 files_to_create[str(rel_path)] = content
     else:
@@ -369,6 +273,11 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
                 full_path.write_text(final_content)
                 progress.advance(task)
 
+        # .env (development profile, secrets generated for this project, 0600),
+        # .gitignore entries and data directories — for every template, so
+        # the printed commands work without a hand-edited config.
+        finish_project(project_path, project_name)
+
         print_success(f"Created project at [bold]{project_path}[/bold]")
 
         # ``project_path`` may have been redirected under ``plugins/`` when run
@@ -378,19 +287,12 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
         except ValueError:
             cd_target = project_path
 
-        # ``baselith run`` starts a server from ``backend.py``, so it is the
-        # right next step only for a template that scaffolds one. The panel
-        # used to name it unconditionally, which sent anyone who took the
-        # minimal template to a command that exits with "backend.py not found".
-        if "backend.py" in files_to_create:
-            last_step = "[bold]baselith[/bold] run"
-        else:
-            last_step = "[bold]python[/bold] -m app.agent"
-
-        next_steps = f"""[bold]cd[/bold] {cd_target}
-[bold]pip[/bold] install -e .
-{last_step}"""
-        print_panel(next_steps, title="Next steps", style="green")
+        steps = [f"[bold]cd[/bold] {cd_target}", *next_steps(files_to_create)]
+        print_panel("\n".join(steps), title="Next steps", style="green")
+        console.print(
+            "[dim].env holds a SECRET_KEY generated for this project "
+            "(mode 0600, git-ignored); APP_ENV=development.[/dim]"
+        )
 
         return 0
 
@@ -416,12 +318,15 @@ def register_parser(
     init_parser.add_argument(
         "project_name", nargs="?", help="The name of your new agentic system project"
     )
+    # Derived from what this install can scaffold, never a hard-coded list:
+    # the old one advertised templates that did not exist.
+    choices = available_templates()
     init_parser.add_argument(
         "--template",
-        choices=["minimal", "full", "chat-only", "rag-system", "baselith-core"],
-        help="Select a starter template (minimal, full, rag-system, etc.)",
+        choices=choices,
+        help=f"Starter template: {', '.join(choices)}",
     )
     return init_parser
 
 
-__all__ = ["register_parser", "run_init"]
+__all__ = ["PROJECT_TEMPLATES", "register_parser", "run_init"]

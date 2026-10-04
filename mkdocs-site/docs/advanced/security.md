@@ -492,6 +492,8 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `API_KEY_REVOCATION_FAIL_MODE` | `closed` | When the shared revocation denylist (Redis) is unreadable: `closed` rejects the key, `open` accepts it on process-local state — which un-revokes keys revoked elsewhere for the outage. |
 | `ADMIN_USER`               | `admin`      | Username for the Basic-auth admin console and `/metrics` (paired with `ADMIN_PASS` / `ADMIN_PASS_HASHED`). |
 | `METRICS_AUTH_REQUIRED`    | `true`       | Require admin Basic auth on `GET /metrics` (and `/v1/metrics`). Disable only when the endpoint is reachable solely from the scrape network or the scraper sends credentials. |
+| `METRICS_USERNAME` / `METRICS_PASSWORD` | `metrics` / `None` | Scrape-only `/metrics` credential, granting no other route. An empty or blank `METRICS_PASSWORD` is **unset**, never an empty password. It shares the admin lockout: a locked-out source gets `429` even with the right password. See [`GET /metrics`](../api/rest.md#get-metrics-prometheus-metrics). |
+| `DB_RLS_TENANT_SCOPE` | `session` | How `DB_RLS_ENABLED` binds `app.tenant_id`: `session` (memoized per pooled connection) or `transaction` (each checkout is one transaction, transaction-local GUC). `DB_RLS_ENABLED=true` with `DB_PREPARED_STATEMENTS=false` and the `session` scope is refused at boot in every environment, because a transaction-mode pooler does not preserve a session GUC. See [Database](../core-modules/db.md#rls-and-connection-poolers). |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
 | `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
@@ -688,7 +690,7 @@ dependency is finally fixed and the entry deleted.
 
     | Query | Why | What still catches it |
     | ----- | --- | --------------------- |
-    | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | operator passwords go through argon2/PBKDF2 in `core/auth`; `SecurityConfig` warns on short API keys |
+    | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | the operator password goes through PBKDF2-SHA256 (`core/middleware/_admin_credentials.py`); `SecurityConfig` warns on short API keys |
     | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
     | `js/clear-text-storage-of-sensitive-data` | the operator console keeps the API key the operator pastes in `sessionStorage`; a client-held bearer credential has no more-secure browser store (httpOnly cookies need a server-side session the console does not have) | the key is write-only in the UI — never read back into the DOM, dropped when the tab closes — and `API_KEYS_SCOPED` bounds what a leaked key can reach |
 
@@ -831,6 +833,7 @@ sources (`core/plugins/signing.py`), merged:
 | `key_id` | ❌ | Operator-facing label, quoted in refusal logs. Defaults to the first 16 hex characters of the key. |
 | `not_after` | ❌ | ISO-8601 instant after which the key stops verifying. Absent or empty means no expiry; a **naive** value is read as UTC. |
 | `revoked` | ❌ | `true` refuses the key immediately, regardless of `not_after`. |
+| `plugins` | ❌ | List of plugin names the key may sign for. Absent or `null` means any plugin. A malformed value is read as an **empty** scope — the key signs for nothing — so a typo cannot widen trust. |
 
 A bare JSON list is accepted in place of the `{"keys": [...]}` wrapper.
 
@@ -848,11 +851,20 @@ store usable in an incident:
   the revoked and expired entries and, on a match, logs that the signature was
   produced by trust store key `leaked-2026`, which is revoked. Revocation doing its
   job reads very differently from tampering.
+- **A scoped key vouches only for its plugins.** A `plugins` scope limits one
+  compromised publisher key to the plugins it publishes. A valid signature from a
+  usable key scoped to *other* plugins is refused and logged as such. The same
+  per-plugin lookup is used by the overlay loader and by the plugin-update
+  checker and executor.
+- **The store must not be shared-writable.** A store file that is group- or
+  world-writable loads **no** keys (ERROR log) until it is owner-writable only
+  (`chmod 0644` or `0600`): anyone who can write it can add a trust root.
 
 The public API is `load_trust_store(path=None)` (every well-formed entry, usable or
-not), `load_trusted_keys()` (env roots merged with the store) and `load_trust_roots()`
-(usable hex keys only — unchanged signature, unchanged behaviour when only the env
-var is set). `TrustedKey.rejection_reason()` returns `"revoked"`,
+not), `load_trusted_keys()` (env roots merged with the store) and
+`load_trust_roots(plugin_name=None)` (usable hex keys only; with a plugin name,
+only the keys whose scope covers it — unchanged behaviour when only the env var is
+set). `TrustedKey.rejection_reason()` returns `"revoked"`,
 `"expired on <timestamp>"` or `None`.
 
 !!! danger "A pre-V5 signature does not cover the manifest"
@@ -994,8 +1006,9 @@ for rate-limited routes while Redis is down.
 
 **Anonymous traffic is metered too.** On deployments that opt out of
 authentication (`AUTH_REQUIRED=false` with no API keys configured), requests
-that pass the anonymous gate are still rate-limited per client IP
-(`default:anonymous:{ip}`) before reaching the route — disabling auth no
+that pass the anonymous gate are still rate-limited per client address
+(`default:anonymous:{client_bucket(ip)}` — IPv6 by its /64, like every other
+IP-keyed control here) before reaching the route — disabling auth no
 longer hands out unmetered LLM invocation to anyone who can reach the port.
 
 **Failed authentication is throttled per source IP.** The per-scope limits above
@@ -1016,6 +1029,10 @@ credential at all is not charged. IPv6 clients are bucketed by their **/64**
 (one subscriber usually holds a whole /64, so keying on the full address
 would hand an attacker 2^64 fresh budgets); IPv4-mapped IPv6 addresses count
 as the embedded IPv4 address. The MCP endpoint charges the same bucket.
+
+The **in-process fallback** map used while Redis is down is capped at 10 000
+keys, oldest evicted first, so an address-rotating client cannot grow it
+without bound within one window.
 
 A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
 SQL-query limits) is rendered as a `429` RFC 9457 problem document
@@ -1165,6 +1182,13 @@ Example:
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
 
+`.env.example` ships `TRUSTED_HOSTS=["localhost","127.0.0.1"]` so a local copy
+of the template works out of the box (any other `Host` gets **400**). A
+production boot whose allowlist holds **only** loopback names logs a WARNING —
+the template value carried over unedited would answer 400 to the public
+hostname. Starlette compares the `Host` up to the first `:`, so the port is
+ignored and an IPv6 literal (`[::1]`) can never match.
+
 !!! danger "Startup check: empty `TRUSTED_HOSTS` in production is fail-closed"
     `core.api.startup_checks._warn_missing_trusted_hosts` — run from
     `warm_auth_singletons()` during lifespan — **refuses to start** the app in
@@ -1187,7 +1211,14 @@ TRUSTED_HOSTS=["api.example.com","admin.example.com"]
     least-privilege role, provisioned by `database.runtimeRole` (Helm) or
     `compose.rls.yaml` — see
     [Multi-Tenancy](multi-tenancy.md#defense-in-depth-row-level-security). With
-    `DB_RLS_ENABLED` off the check is a no-op.
+    `DB_RLS_ENABLED` off the check is a no-op. The same check refuses, **in
+    every environment**, `DB_RLS_ENABLED=true`
+    together with `DB_PREPARED_STATEMENTS=false` — the setting that declares a
+    transaction-mode pooler, which does not preserve the session-scoped
+    `app.tenant_id` between statements — unless `DB_RLS_TENANT_SCOPE=transaction`,
+    which binds the tenant inside the transaction the pooler pins to one
+    backend. `BASELITH_ALLOW_RLS_BYPASS` does not cover it. The pool factory refuses the same combination, so the CLI, the
+    task-queue worker and migration Jobs cannot open a pool with it either.
 
 ---
 

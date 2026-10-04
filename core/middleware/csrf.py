@@ -37,6 +37,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.middleware._security_metrics import SECURITY_EVENTS
 from core.observability.logging import get_logger
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
 
@@ -208,10 +209,13 @@ class CSRFOriginMiddleware:
         # every login/refresh POST 403s. An opaque 403 makes that a
         # multi-hour hunt; logging the mismatch makes the fix obvious (add
         # the origin to ALLOW_ORIGINS).
+        # The Origin is attacker-supplied and this runs before any auth:
+        # single line, bounded, or an anonymous caller forges log entries
+        # and amplifies log volume for free.
         logger.warning(
             "Cross-origin request rejected: %s not in ALLOW_ORIGINS %s "
             "(add the public/proxied origin to ALLOW_ORIGINS)",
-            origin,
+            sanitize_log_value(origin, max_length=256),
             sorted(self.allow_origins),
         )
         return "origin not allowed"

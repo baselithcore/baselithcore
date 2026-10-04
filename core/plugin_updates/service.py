@@ -15,8 +15,9 @@ from core._core_version import CORE_VERSION
 from core._version import __version__ as FRAMEWORK_VERSION
 from core.config.plugin_update_apply import UpdateApplyConfig, get_update_apply_config
 from core.config.plugin_updates import PluginUpdateConfig
+from core.config.plugins import get_plugin_config
 from core.events import get_event_bus
-from core.plugins.signing import load_trusted_keys
+from core.plugins.signing import load_trust_roots
 
 from .announce import AnnouncementGate, build_announcement_gate
 from .apply.eligibility import already_reached, apply_status
@@ -73,7 +74,7 @@ class PluginUpdateService:
     def __init__(
         self,
         config: PluginUpdateConfig,
-        bundled_root: Path = Path("plugins"),
+        bundled_root: Path | None = None,
         gate: AnnouncementGate | None = None,
         *,
         apply_config: UpdateApplyConfig | None = None,
@@ -81,7 +82,13 @@ class PluginUpdateService:
     ) -> None:
         """Create the service; nothing runs until :meth:`start`."""
         self._config = config
-        self._bundled_root = bundled_root
+        # The root the plugin loader scans (PLUGIN_PLUGINS_PATH, resolved),
+        # not a cwd-relative ``plugins`` that misses an installed package.
+        self._bundled_root = (
+            bundled_root
+            if bundled_root is not None
+            else Path(get_plugin_config().plugins_path)
+        )
         self._cache = UpdateCache(config.cache_dir)
         self._gate = (
             gate
@@ -337,14 +344,13 @@ class PluginUpdateService:
             raise RuntimeError("no sources file configured")
         sources = load_sources(sources_file)
         trust = self._config.trust
-        keys = [k.public_key_hex for k in load_trusted_keys() if k.is_usable]
         return await run_check(
             sources,
             installed_versions(self._bundled_root),
             source=source,
             cache=self._cache,
             core_version=FRAMEWORK_VERSION,
-            trusted_keys=keys,
+            trusted_keys=load_trust_roots,
             trust=trust,
         )
 

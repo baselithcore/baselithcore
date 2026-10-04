@@ -9,7 +9,7 @@ The plugin is structured to separate concerns and promote modularity:
 - **`plugin.py`**: The main entry point. Defines `ExamplePlugin` which inherits from `AgentPlugin`, `RouterPlugin`, etc. It orchestrates the components.
 - **`agent.py`**: Contains the agent logic (`ExampleAgent`). This is where the "brains" of your plugin live.
 - **`router.py`**: Contains the API definitions (`create_router`). This is where you define your FastAPI endpoints.
-- **`persistence.py`**: Handles database connections and schema management using the core storage configuration.
+- **`persistence.py`**: Handles database connections and schema management using the core storage configuration. The pool opens lazily on first query; tables are created by `init_schema` at deploy time (`baselith plugin schema-init`), never in `initialize`, so a database outage cannot stall boot.
 - **`handlers.py`**: Defines Flow Handlers for executing business logic triggered by specific system intents.
 - **`memory.py`**: Integration with the core `AgentMemory` system via `ExampleMemory` class.
 - **`models.py`**: Pydantic models for data validation and structure.

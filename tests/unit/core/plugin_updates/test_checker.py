@@ -71,7 +71,9 @@ class _Source:
             raise SourceError("github 503")
         return self.info
 
-    async def download(self, url: str, dest: Path) -> None:
+    async def download(
+        self, url: str, dest: Path, *, max_bytes: int | None = None
+    ) -> None:
         self.downloads += 1
         dest.write_bytes(self.files[url])
 
@@ -459,3 +461,25 @@ async def test_refusal_removes_a_cached_final_tarball(tmp_path: Path) -> None:
     missing = _Source(_info(json_url=None), {})
     assert (await _check(tmp_path, missing, [pub])).refusal is Refusal.ARTIFACT_MISSING
     assert not cached.exists()
+
+
+async def test_run_check_resolves_trust_roots_per_plugin(tmp_path: Path) -> None:
+    """A callable ``trusted_keys`` is asked once per plugin, by name."""
+    from core.plugin_updates.checker import run_check
+
+    asked: list[str] = []
+
+    def roots(plugin: str) -> list[str]:
+        asked.append(plugin)
+        return []
+
+    report = await run_check(
+        {"demo": "o/r", "other": "o/s"},
+        {"demo": "1.1.0", "other": "1.0.0"},
+        source=_Source(None, {}),  # type: ignore[arg-type]
+        cache=UpdateCache(tmp_path / "c"),
+        core_version="1.50.0",
+        trusted_keys=roots,
+    )
+    assert sorted(asked) == ["demo", "other"]
+    assert not any(c.available for c in report.candidates)

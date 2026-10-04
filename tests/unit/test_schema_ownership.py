@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS_DIR = REPO_ROOT / "migrations" / "versions"
+MIGRATIONS_DIR = REPO_ROOT / "core" / "db" / "migrations" / "versions"
 
 #: Modules that self-initialize schema on the shared **Postgres** pool.
 POSTGRES_SELF_INIT_MODULES = (
@@ -114,6 +114,8 @@ def test_no_new_module_self_initializes_postgres_schema() -> None:
     """The self-init list is a closed set: a new entry needs a migration too."""
     suspects: list[str] = []
     for path in sorted((REPO_ROOT / "core").rglob("*.py")):
+        if path.is_relative_to(MIGRATIONS_DIR.parent):
+            continue  # the migrations ARE the owner, not a self-initializer
         text = path.read_text(encoding="utf-8", errors="replace")
         if not _tables_in(text):
             continue

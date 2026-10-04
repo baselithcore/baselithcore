@@ -388,6 +388,13 @@ class QuotaManager(CostBudgetMixin):
         )
         if not plan:
             return
+        refund = getattr(self._store, "refund_many", None)
+        if refund is not None:
+            # One script: decrement only counters that exist, floored at
+            # zero. ``INCRBY -cost`` on a window that had expired in between
+            # minted a permanent negative key with no TTL.
+            await refund([(entry[4], cost) for entry in plan])
+            return
         # ttl 0: never (re)anchor a window's expiry from a refund.
         items = [(entry[4], -cost, 0) for entry in plan]
         if hasattr(self._store, "incr_many"):

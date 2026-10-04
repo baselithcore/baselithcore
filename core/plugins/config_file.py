@@ -55,8 +55,9 @@ def resolve_plugin_config_path(cwd: Path | None = None) -> Path:
 def read_plugin_configs(cwd: Path | None = None) -> PluginConfigs:
     """Read the plugin config file into ``{plugin: block}``.
 
-    Never raises: a missing file is an empty configuration (every discovered
-    plugin runs), an unreadable or malformed one is logged and treated the
+    Never raises: a missing file is an empty configuration (every plugin of
+    the user's root runs; bundled ones stay opt-in — see
+    :func:`plugin_enabled`), an unreadable or malformed one is logged and treated the
     same way, so ``create_app()`` and the lifespan degrade identically.
     """
     try:
@@ -65,7 +66,12 @@ def read_plugin_configs(cwd: Path | None = None) -> PluginConfigs:
         logger.error("❌ Failed to resolve plugin configuration path: %s", exc)
         return {}
     if not path.exists():
-        logger.warning("⚠️ Plugin configuration file not found: %s", path)
+        # No file is the normal state of a fresh install; a path the operator
+        # named explicitly and that is missing is a misconfiguration.
+        if os.environ.get(PLUGIN_CONFIG_PATH_ENV):
+            logger.warning("⚠️ Plugin configuration file not found: %s", path)
+        else:
+            logger.info("Plugin configuration file not found: %s", path)
         return {}
     try:
         with open(path, encoding="utf-8") as handle:
@@ -83,17 +89,32 @@ def read_plugin_configs(cwd: Path | None = None) -> PluginConfigs:
 
 
 def plugin_enabled(
-    configs: PluginConfigs, directory_name: str, plugin_name: str
+    configs: PluginConfigs,
+    directory_name: str,
+    plugin_name: str,
+    *,
+    bundled: bool = False,
 ) -> bool:
     """Apply the enable-list rule every loader shares.
 
-    An empty configuration enables everything. A non-empty one enables only
-    the plugins it names (by directory name, manifest name or their
-    ``-``/``_`` variants), and only when the block does not say
-    ``enabled: false``.
+    A plugin runs only when a non-empty configuration names it (by directory
+    name, manifest name or their ``-``/``_`` variants) and the block does not
+    say ``enabled: false`` — with one exception: an empty configuration
+    enables every plugin of the user's own root (``PLUGIN_PLUGINS_PATH``,
+    ``./plugins``, a source checkout) and every ``baselith.plugins``
+    entry-point package.
+
+    Args:
+        configs: The plugin configuration (``configs/plugins.yaml``).
+        directory_name: The plugin's directory name.
+        plugin_name: The plugin's manifest name.
+        bundled: The plugin ships inside the installed distribution
+            (:func:`core.plugins.discovery.is_bundled_install_dir`). Such a
+            plugin is opt-in: the empty-config exception does not apply, so a
+            fresh ``pip install`` activates none of them.
     """
     if not configs:
-        return True
+        return not bundled
     key = match_config_key(configs, directory_name, plugin_name)
     if key is None:
         return False

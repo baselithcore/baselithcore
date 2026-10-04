@@ -54,4 +54,4 @@ from one plugin mount point (`/baselithbot`).
 - Human-in-the-loop approval available per capability via `require_approval_for`.
 - Every recorded task step persisted to SQLite (`replay.sqlite`) for time-travel debug.
 - Every dashboard write endpoint rate-limited + bearer-token-guarded + logged.
-- State files excluded from git: `plugins/*/.state/` in `.gitignore`.
+- State files live in a per-user directory (`BASELITHBOT_STATE_DIR`, default `$XDG_DATA_HOME/baselith/baselithbot`, `0700`), never in the installed package.

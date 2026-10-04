@@ -55,9 +55,29 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- with $.Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- if and $.Values.topologySpreadConstraints.enabled (gt (int $svc.replicas) 1) }}
+      # Same spread as the api/worker pods, over this server's own labels
+      # (its pods deliberately do not carry the release selector).
+      topologySpreadConstraints:
+        {{- range $key := list "kubernetes.io/hostname" "topology.kubernetes.io/zone" }}
+        {{- if or (eq $key "kubernetes.io/hostname") $.Values.topologySpreadConstraints.zoneAware }}
+        - maxSkew: 1
+          topologyKey: {{ $key }}
+          whenUnsatisfiable: {{ $.Values.topologySpreadConstraints.whenUnsatisfiable | default "ScheduleAnyway" }}
+          matchLabelKeys:
+            - pod-template-hash
+          labelSelector:
+            matchLabels:
+              {{- toYaml $labels | nindent 14 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
       containers:
         - name: tei
-          image: "{{ $tei.image.repository }}:{{ $tei.image.tag }}"
+          image: {{ include "baselithcore.teiImage" $ | quote }}
           imagePullPolicy: {{ $tei.image.pullPolicy }}
           args:
             - --model-id
@@ -78,6 +98,17 @@ spec:
                 secretKeyRef:
                   name: {{ . }}
                   key: {{ $tei.hfTokenSecret.key }}
+            {{- end }}
+            {{- with $tei.apiKeySecret.name }}
+            # The bearer token every request must carry (TEI's --api-key,
+            # read from the environment so it never shows in `ps` / the pod
+            # spec). The app reads the same Secret key, see
+            # `baselithcore.inferenceEnv`.
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: {{ $tei.apiKeySecret.key | quote }}
             {{- end }}
           ports:
             - name: http
@@ -137,9 +168,32 @@ spec:
       targetPort: http
   selector:
     {{- toYaml $labels | nindent 4 }}
+{{- if and $tei.podDisruptionBudget.enabled (gt (int $svc.replicas) 1) }}
+---
+# Only above one replica: a budget over a single pod denies every voluntary
+# eviction, and a node drain hangs on the model server.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "baselithcore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tei-{{ $kind }}
+spec:
+  maxUnavailable: {{ $tei.podDisruptionBudget.maxUnavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- toYaml $labels | nindent 6 }}
+{{- end }}
 {{- if $.Values.networkPolicy.enabled }}
 ---
-# Only this release's API and worker pods may call the model server.
+# Only this release's API and worker pods may call the model server, and the
+# model server itself reaches nothing but DNS and the public internet on 443
+# (the Hub download): never cloud metadata, never the private ranges — the
+# same carve-outs as the app's `internetHttps` preset. A pod that serves
+# arbitrary model weights to every chat turn is exactly the pod a supply-chain
+# compromise would land in.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -150,7 +204,11 @@ spec:
   podSelector:
     matchLabels:
       {{- toYaml $labels | nindent 6 }}
-  policyTypes: [Ingress]
+  policyTypes:
+    - Ingress
+    {{- if $tei.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
   ingress:
     - from:
         - podSelector:
@@ -159,6 +217,35 @@ spec:
       ports:
         - protocol: TCP
           port: {{ $tei.port }}
+  {{- if $tei.networkPolicy.egress.enabled }}
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- with $tei.networkPolicy.egress.rules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

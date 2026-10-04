@@ -6,7 +6,6 @@ Provides embedder and reranker model loading with caching.
 
 from __future__ import annotations
 
-import hashlib
 import time
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
@@ -28,6 +27,8 @@ if TYPE_CHECKING:
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.cache.single_flight import LayeredSingleFlight, build_single_flight
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
+from core.nlp import _remote  # TEI-backed stand-ins when BASELITH_*_URL is set
+from core.nlp.roles import DOCUMENT, QUERY, cache_key, model_encoder, model_prompt
 from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
@@ -52,26 +53,6 @@ def _model_name(model: Any) -> str:
         if isinstance(candidate, str) and candidate:
             return candidate
     return type(model).__name__
-
-
-def _cache_key(text: str, model_id: str) -> str:
-    """Cache key scoped to both the text and the model that embedded it.
-
-    Keying on the text alone made two models of the same width share every
-    entry — the Redis prefix only carries the embedding *dimension*, and 384 is
-    the common case — so one model's vector could be returned for a query the
-    other embedded, which corrupts every similarity score computed from it. The
-    sibling cache in :mod:`core.services.vectorstore.embedding_cache` keys the
-    same way; keep the two in step.
-
-    Args:
-        text: Text being embedded.
-        model_id: Identifier of the model producing the vector.
-
-    Returns:
-        Hex digest to use as the cache key.
-    """
-    return hashlib.sha256(f"{model_id}:{text}".encode()).hexdigest()
 
 
 def _token_usage_enabled() -> bool:
@@ -223,7 +204,7 @@ class CachedEmbedder:
         self.model = model
         self._cache = cache
         #: Resolved once: every cache key is scoped by it, so two models of the
-        #: same width cannot answer for each other (see :func:`_cache_key`).
+        #: same width cannot answer for each other (see :func:`core.nlp.roles.cache_key`).
         self._model_id = _model_name(model)
 
         if self._cache is None:
@@ -241,7 +222,7 @@ class CachedEmbedder:
                 logger.warning(f"[embedder] Failed to initialize cache: {e}")
 
         # Coalesces concurrent misses for the same single text (keyed by the
-        # same `_cache_key` the cache uses, so the lock is scoped per model as
+        # same `cache_key` the cache uses, so the lock is scoped per model as
         # well as per text) so a popular query is encoded once instead of once
         # per concurrent caller.
         #
@@ -266,6 +247,19 @@ class CachedEmbedder:
     async def encode(
         self, sentences: str | list[str], **kwargs: Any
     ) -> list[float] | np.ndarray | list[np.ndarray]:
+        """Embed the indexed (document) side; see :meth:`_embed`."""
+        return await self._embed(sentences, DOCUMENT, **kwargs)
+
+    async def encode_query(
+        self, sentences: str | list[str], **kwargs: Any
+    ) -> list[float] | np.ndarray | list[np.ndarray]:
+        """Embed the search side: the model's ``encode_query`` when it has one
+        (query prompt / ``BASELITH_EMBEDDING_QUERY_PREFIX``), cached apart."""
+        return await self._embed(sentences, QUERY, **kwargs)
+
+    async def _embed(
+        self, sentences: str | list[str], role: str, **kwargs: Any
+    ) -> list[float] | np.ndarray | list[np.ndarray]:
         """
         Encode sentences to embeddings with caching (async).
 
@@ -278,6 +272,7 @@ class CachedEmbedder:
 
         Args:
             sentences: Text or list of texts to encode
+            role: :data:`~core.nlp.roles.QUERY` or ``DOCUMENT``.
             **kwargs: Additional arguments for SentenceTransformer.encode
 
         Returns:
@@ -299,7 +294,7 @@ class CachedEmbedder:
             },
         ) as span:
             try:
-                return await self._encode(sentences, encoded_texts, **kwargs)
+                return await self._encode(sentences, encoded_texts, role, **kwargs)
             finally:
                 elapsed = time.perf_counter() - started
                 tokens = await _count_input_tokens(self.model, encoded_texts)
@@ -312,7 +307,11 @@ class CachedEmbedder:
                 _record_embedding_metrics(model_name, tokens, elapsed)
 
     async def _encode(
-        self, sentences: str | list[str], encoded_texts: list[str], **kwargs: Any
+        self,
+        sentences: str | list[str],
+        encoded_texts: list[str],
+        role: str,
+        **kwargs: Any,
     ) -> list[float] | np.ndarray | list[np.ndarray]:
         """Cache lookup + model inference for :meth:`encode`.
 
@@ -321,24 +320,28 @@ class CachedEmbedder:
             encoded_texts: Out-parameter; every text actually sent to the model
                 is appended, so the caller can attribute token usage to the
                 real inference rather than to the cache hits.
+            role: Query or document side (picks the model method and the
+                cache scope, see :func:`core.nlp.roles.cache_key`).
             **kwargs: Passed through to ``SentenceTransformer.encode``.
 
         Returns:
             Embedding(s) as numpy array(s).
         """
-        # Passthrough if cache disabled
-        if not self._cache:
+        model_encode = model_encoder(self.model, role)
+        # Passthrough if cache disabled (`is None`: an empty TTLCache is falsy)
+        if self._cache is None:
             encoded_texts.extend(
                 [sentences] if isinstance(sentences, str) else list(sentences)
             )
             # Blocking encode offloaded to the dedicated inference pool.
-            return await run_inference(lambda: self.model.encode(sentences, **kwargs))
+            return await run_inference(lambda: model_encode(sentences, **kwargs))
 
         is_single = isinstance(sentences, str)
         inputs: list[str] = [sentences] if is_single else list(sentences)  # type: ignore[list-item]
 
         # 1. Identify hashes
-        hashes: list[str] = [_cache_key(text, self._model_id) for text in inputs]
+        prompt = model_prompt(self.model, role)
+        hashes = [cache_key(t, self._model_id, role, prompt) for t in inputs]
 
         # 2. Check cache
         results: list[Any] = [None] * len(inputs)
@@ -373,9 +376,7 @@ class CachedEmbedder:
             async def _encode_and_fill() -> Any:
                 encoded_texts.extend(missing_texts)
                 emb = (
-                    await run_inference(
-                        lambda: self.model.encode(missing_texts, **kwargs)
-                    )
+                    await run_inference(lambda: model_encode(missing_texts, **kwargs))
                 )[0]
                 await self._store_embeddings([(hashes[real_idx], emb)])
                 return emb
@@ -394,7 +395,7 @@ class CachedEmbedder:
             encoded_texts.extend(missing_texts)
             # Blocking model call on the dedicated inference pool.
             embeddings = await run_inference(
-                lambda: self.model.encode(missing_texts, **kwargs)
+                lambda: model_encode(missing_texts, **kwargs)
             )
 
             # 4. Update cache
@@ -406,13 +407,8 @@ class CachedEmbedder:
 
             await self._store_embeddings(cache_updates)
 
-        # 5. Format Output
-        #
-        # The return type genuinely depends on two runtime flags, so the casts
-        # below are the honest spelling. They replace a `final_results: Any`
-        # plus two `# type: ignore[return-value]` comments, which silenced the
-        # wrong error code anyway: the ignores claimed a return-value mismatch
-        # while mypy was reporting `no-any-return`.
+        # 5. Format Output. The return type genuinely depends on two runtime
+        # flags, so the casts below are the honest spelling.
         final_results: np.ndarray | list[Any] = results
 
         if kwargs.get("convert_to_numpy", True):
@@ -451,13 +447,14 @@ def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     """
     vs_config = get_vectorstore_config()
     storage_config = get_storage_config()
-
-    _require_sentence_transformers()
-
     actual_model_name = model_name or vs_config.embedding_model
-    sentence_transformer, _ = _model_classes()
-    assert sentence_transformer is not None
-    base_model = sentence_transformer(actual_model_name)
+    if _remote.use_remote_embedder(actual_model_name):  # core EmbeddingService
+        base_model: Any = _remote.RemoteEmbeddingModel()
+    else:
+        _require_sentence_transformers()
+        sentence_transformer, _ = _model_classes()
+        assert sentence_transformer is not None
+        base_model = sentence_transformer(actual_model_name)
 
     return CachedEmbedder(
         base_model,
@@ -479,9 +476,10 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     Returns:
         CrossEncoder instance
     """
-    chat_config = get_chat_config()
+    actual_model_name = model_name or get_chat_config().reranker_model
+    if _remote.use_remote_reranker(actual_model_name):
+        return cast("CrossEncoder", _remote.RemoteCrossEncoder())
     _require_sentence_transformers()
-    actual_model_name = model_name or chat_config.reranker_model
     _, cross_encoder = _model_classes()
     assert cross_encoder is not None
     # sentence-transformers ships no py.typed, so the constructor is `Any`.

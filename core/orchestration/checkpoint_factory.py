@@ -16,6 +16,7 @@ orchestrator runs without checkpointing.
 
 from __future__ import annotations
 
+import sys
 import threading
 
 from core.observability.logging import get_logger
@@ -98,12 +99,44 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
         return _store
 
 
+class CheckpointStoreUnavailableError(RuntimeError):
+    """The store's database was down at the last reachability probe."""
+
+
+def _needs_postgres(store: CheckpointStore) -> bool:
+    # Read from sys.modules: a memory/SQLite deployment never imports the
+    # Postgres store (or psycopg) just to answer "no".
+    module = sys.modules.get("core.orchestration.checkpoint_postgres")
+    return module is not None and isinstance(store, module.PostgresCheckpointStore)
+
+
+def is_default_checkpoint_store_initialized() -> bool:
+    """Whether the shared store's async initialization has completed."""
+    return _initialized
+
+
 async def initialize_default_checkpoint_store() -> CheckpointStore | None:
-    """Resolve the store and run its async initialization (idempotent DDL)."""
+    """Resolve the store and run its async initialization (idempotent DDL).
+
+    Raises:
+        CheckpointStoreUnavailableError: The store lives in PostgreSQL and the
+            most recent :func:`core.db.reachability.probe_postgres` saw it
+            down. Raised immediately, instead of waiting a full
+            ``DB_POOL_TIMEOUT`` on the pool; the store stays uninitialized so
+            a later call (after a successful probe) completes it.
+    """
     global _initialized
     store = get_default_checkpoint_store()
     if store is None or _initialized:
         return store
+    if _needs_postgres(store):
+        from core.db.reachability import postgres_known_unreachable
+
+        if postgres_known_unreachable():
+            raise CheckpointStoreUnavailableError(
+                "PostgreSQL was unreachable at the last probe; "
+                "checkpoint schema not initialized yet"
+            )
     initialize = getattr(store, "initialize", None)
     if callable(initialize):
         await initialize()
@@ -121,7 +154,9 @@ def reset_default_checkpoint_store() -> None:
 
 
 __all__ = [
+    "CheckpointStoreUnavailableError",
     "get_default_checkpoint_store",
     "initialize_default_checkpoint_store",
+    "is_default_checkpoint_store_initialized",
     "reset_default_checkpoint_store",
 ]

@@ -94,10 +94,11 @@ clean `git push` accepted.
 | `OpenAPI Drift Gate` | the app importable | the committed spec equals what `create_app()` serves |
 | `Client SDKs` | npm and a Python install | the hand-written clients build, type-check and test |
 | `Eval Regression Gate`, `Red-Team Gate`, `Bias Examination Gate` | the eval corpora replayed | agent-flow contracts, adversarial cases, bias examination. The corpus *ratchet* is a hook; replaying the suites is not |
-| `Package Smoke Test` | a built wheel and sdist | the distribution contains what it claims |
+| `Package Smoke Test` | a built wheel and sdist, Postgres (pgvector), Redis | the distribution contains what it claims; then the wheel alone, installed into a clean venv with only its declared dependencies, imports, runs `baselith --help` and `baselith db migrate`, boots, and answers `/health` and `/health/ready` with 200 ([`scripts/smoke_installed_wheel.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/smoke_installed_wheel.py)) |
 | `BaselithBot UI Build` | `npm ci` | the committed `ui/dist/` equals a clean rebuild |
 | `Container Image Build` | Docker, multi-arch | the image builds on amd64 and arm64 |
-| `Python Tests` | Postgres, Redis, Qdrant | the suite, on every supported Python (3.12 only on pull requests into `develop`), with the coverage gate |
+| `Python Tests` | minutes, every supported Python | the suite with psycopg mocked and no service containers, on every supported Python (3.12 only on pull requests into `develop`), with the coverage gate |
+| `Integration Tests` | Postgres (pgvector), Redis, Qdrant | `tests/integration/` against real backends on Python 3.12, after `python -m core.db.migrate`: the Postgres stores, row-level security, pgvector, the Redis event stream, the Qdrant provider and the migration upgrade path. A skip fails the job |
 | `Frontend JS Tests` | node | the shipped SSE client |
 | `Helm Chart` | kubeconform | the chart renders to valid Kubernetes objects |
 | `Workflow Lint (zizmor)` | — | the workflow definitions themselves |

@@ -23,7 +23,12 @@ from pydantic import BaseModel
 from core.agent import Agent
 from core.orchestration.tool_output import unwrap_untrusted
 from core.services.llm.messages import ToolResultBlock
-from tests.golden.cassette import Cassette, CassetteMismatch, RecordedLLMService
+from tests.golden.cassette import (
+    CASSETTE_DIR,
+    Cassette,
+    CassetteMismatch,
+    RecordedLLMService,
+)
 
 
 def _results_of(call: dict) -> list[ToolResultBlock]:
@@ -153,7 +158,7 @@ async def test_a_failing_tool_comes_back_flagged(golden_llm) -> None:
 async def test_a_service_without_the_message_api_gets_a_transcript(golden_llm) -> None:
     """The legacy path is still live, and still pinned end to end."""
     svc = RecordedLLMService(
-        Cassette.load("agent_tool_loop_legacy"), supports_messages=False
+        Cassette.load("agent_tool_loop_legacy", CASSETTE_DIR), supports_messages=False
     )
     agent = Agent(tools=[lookup_capital], llm_service=svc)
 
@@ -178,7 +183,7 @@ async def test_cassette_drift_fails_loudly(golden_llm) -> None:
 async def test_unplayed_turns_are_reported() -> None:
     from tests.golden.cassette import Cassette, RecordedLLMService
 
-    svc = RecordedLLMService(Cassette.load("agent_tool_loop"))
+    svc = RecordedLLMService(Cassette.load("agent_tool_loop", CASSETTE_DIR))
     agent = Agent(llm_service=svc)  # no tools: the first turn's tool call is ignored
 
     with pytest.raises(CassetteMismatch, match="tools offered"):

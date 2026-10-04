@@ -354,10 +354,45 @@ class SafeLogger:
         self._logger.exception(self._format(msg, **kwargs), *args)
 
 
+def _install_library_defaults() -> None:
+    """Route structlog through stdlib ``logging`` until someone configures it.
+
+    Unconfigured structlog prints every event, debug included, straight to
+    stdout — so merely importing the framework (``import baselith``) used to
+    write log lines into the host program's output. A library must leave
+    output to the application: this routes events through stdlib logging,
+    whose levels and handlers then apply (with nothing configured, only
+    WARNING and above reach stderr via ``logging.lastResort``). It installs
+    nothing when structlog is already configured, and the application's own
+    :func:`configure_logging` (or ``structlog.configure``) replaces it later;
+    ``cache_logger_on_first_use=False`` lets loggers created before that pick
+    up the real configuration.
+    """
+    if structlog.is_configured():
+        return
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.format_exc_info,
+            redact_sensitive,
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=False,
+    )
+
+
 @lru_cache(maxsize=128)
 def get_logger(name: str | None = None) -> Any:
     """
     Retrieve a logger instance for a given module.
+
+    Until the application configures logging, events go through stdlib
+    ``logging`` (see :func:`_install_library_defaults`), so importing the
+    framework never prints.
 
     Args:
         name: Typically `__name__`. Defaults to 'app' if not provided.
@@ -366,6 +401,7 @@ def get_logger(name: str | None = None) -> Any:
         A structlog BoundLogger or a SafeLogger wrapper depending on availability.
     """
     if STRUCTLOG_AVAILABLE:
+        _install_library_defaults()
         return structlog.get_logger(name or "app")
     return SafeLogger(logging.getLogger(name or "app"))
 

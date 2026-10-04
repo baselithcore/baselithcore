@@ -104,7 +104,17 @@ class ConnectorSpec:
         actions: Actions it exposes (``action`` capability).
         allowed_hosts: Egress allowlist fed to the SSRF policy. ``None``
             allows any public host; prefer an explicit set.
-        timeout_s: Per-request timeout.
+        allow_global_fallback: Whether a tenant without its own credentials
+            falls back to the deployment-wide ``CONNECTOR_<NAME>__<FIELD>``
+            secret. Off, a tenant acts only through its own account.
+        timeout_s: httpx per-phase timeout (connect, read, write, pool).
+        deadline_s: Overall bound on one attempt, headers and body included.
+            A per-phase read timeout never fires on a body that drips a byte
+            at a time; this does. Must be at least ``timeout_s``.
+        max_response_bytes: Largest response body accepted; a larger one
+            is cut off and reported as :class:`ConnectorResponseTooLargeError`
+            without being buffered. Connector output reaches agents, so a
+            hostile or broken provider must not be able to exhaust a worker.
         max_attempts: Attempts per request, retries included.
         retry_base_delay: First backoff delay when the server gives none.
         retry_max_delay: Upper bound on any backoff, ``Retry-After`` included.
@@ -119,7 +129,10 @@ class ConnectorSpec:
     credentials: tuple[CredentialField, ...] = ()
     actions: tuple[ActionSpec, ...] = ()
     allowed_hosts: frozenset[str] | None = None
+    allow_global_fallback: bool = True
     timeout_s: float = 30.0
+    deadline_s: float = 120.0
+    max_response_bytes: int = 8 * 1024 * 1024
     max_attempts: int = 3
     retry_base_delay: float = 0.5
     retry_max_delay: float = 30.0
@@ -134,6 +147,10 @@ class ConnectorSpec:
             )
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
+        if self.max_response_bytes < 1:
+            raise ValueError("max_response_bytes must be >= 1")
+        if self.deadline_s < self.timeout_s:
+            raise ValueError("deadline_s must be >= timeout_s")
         action_names = [a.name for a in self.actions]
         if len(set(action_names)) != len(action_names):
             raise ValueError(f"connector {self.name!r}: duplicate action names")

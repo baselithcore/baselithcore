@@ -15,8 +15,9 @@ license = "AGPL-3.0-only"
 # Explicit rather than relying on the build backend's default LICEN[CS]E*
 # glob: the Plugin Exception only grants its additional permission to a
 # distribution it actually accompanies (LICENSE.exception §5), so the wheel
-# must carry it deterministically, not by convention.
-license-files = ["LICENSE", "LICENSE.exception"]
+# must carry it deterministically, not by convention. NOTICE carries the
+# section 7(b) attribution term, which every copy must preserve.
+license-files = ["LICENSE", "LICENSE.exception", "NOTICE"]
 # `requires-python = ">=3.12"` has no upper cap and CI runs the suite on 3.12,
 # 3.13 and (advisory) 3.14, so the trove list says the same thing: a classifier
 # set that stops at 3.12 makes PyPI's "Programming Language" facet under-report
@@ -37,19 +38,18 @@ classifiers = [
 keywords = ["ai", "agents", "framework"]
 
 dependencies = [
-  # Plugin-ecosystem surface: aiohttp, defusedxml, email-validator (pydantic
-  # `EmailStr`), markdown-it-py, networkx and sse-starlette are consumed by
-  # plugins, not by `core/` itself (core's own SSE path is hand-rolled in
-  # core/middleware/optimization.py). Dropping one is a breaking change for
-  # every plugin that installs `baselith-core` and expects it present — move it
-  # into the owning plugin's extra first.
+  # aiohttp is here for the baselithbot plugin, which ships in this
+  # distribution (plugins/baselithbot/voice). The libraries a third-party
+  # plugin used to get for free — defusedxml, email-validator, markdown-it-py,
+  # networkx, sse-starlette — imported by nothing in core/ or the official
+  # plugins, moved to the `plugin-compat` extra: a plugin declares what it
+  # imports, and every install stopped paying for what none of it uses.
   # <3.9.4: CVE-2024-23334 (static-route path traversal) and
   # CVE-2024-30251 (multipart DoS). The lock resolves far newer; the floor
   # is what a consumer with its own constraints can legally resolve to.
   "aiohttp>=3.9.4",
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
-  "argon2-cffi>=23.1.0",
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
   # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
   # plugin (Fernet secret store).
@@ -59,16 +59,12 @@ dependencies = [
   # codebase (we use Fernet/AESGCM/HKDF/Ed25519, never pkcs7_decrypt_*), but the
   # fix is free, so the floor moves rather than entering the accepted-risk register.
   "cryptography>=50.0.0",
-  "defusedxml>=0.7.1,<1.0",
-  "email-validator>=2.1.0",
   # >=0.140.13: earlier releases cap starlette<0.39, pinning consumers to
   # starlette 0.38.x — CVE-2024-47874, CVE-2026-48818, CVE-2026-54283, all
   # fixed in starlette 1.3.1 which only fastapi >=0.140 accepts.
   "fastapi>=0.140.13,<0.200",
   "httpx>=0.27.0,<1.0",
   "jsonschema>=4.23.0",
-  "markdown-it-py>=3.0.0,<4.0",
-  "networkx>=3.0",
   "numpy>=1.24.0",
   "ollama>=0.6.0,<1.0",
   "openai>=2.2.0,<3.0",
@@ -107,7 +103,10 @@ dependencies = [
   "redis[hiredis]>=5.0.7,<6.0",
   "rq>=1.15.0",
   "sentry-sdk[fastapi]>=2.0.0",
-  "sse-starlette>=2.1.0",
+  # The Alembic environment (core/db/migrations/env.py) runs on an async
+  # engine, which needs greenlet; SQLAlchemy 2.x only pulls it in through the
+  # `asyncio` extra, so a plain install could not migrate its database.
+  "sqlalchemy[asyncio]>=2.0.0",
   "structlog>=24.1.0",
   "uvicorn[standard]>=0.30.0,<1.0",
   "rich>=13.7.0",
@@ -139,7 +138,7 @@ browser = [
 documents = [
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
+  "pypdf>=6.19.0",  # <6.19.0: CVE-2026-102993..103000 (eight HIGH); <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "python-docx>=1.2.0,<2",
   # Floors, not `==`: these parse untrusted documents, so an exact pin blocks
   # any future upstream security release from reaching an install. No advisory
@@ -248,6 +247,18 @@ computer_use = [
 
 # ------------------------------------------------------------------
 # Development dependency groups (PEP 735)
+# Libraries [project].dependencies carried for plugins until 0.41, though
+# nothing in core/ or the official plugins imports them. A plugin that relies
+# on one should declare it itself; until it does, install
+# `baselith-core[plugin-compat]` to keep the old surface.
+plugin-compat = [
+  "defusedxml>=0.7.1,<1.0",
+  "email-validator>=2.1.0",
+  "markdown-it-py>=3.0.0,<4.0",
+  "networkx>=3.0",
+  "sse-starlette>=2.1.0",
+]
+
 # ------------------------------------------------------------------
 # NOT extras. `test` and `dev` used to live in [project.optional-dependencies],
 # which meant they were published in the wheel's metadata: `pip install
@@ -281,7 +292,7 @@ test = [
   "soupsieve>=2.8.4",
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
+  "pypdf>=6.19.0",  # <6.19.0: CVE-2026-102993..103000 (eight HIGH); <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -298,6 +309,11 @@ test = [
   # installed ad hoc in the workflow so it is resolved and hashed by uv.lock
   # like everything else the test job runs against.
   "pytest-xdist>=3.8.0",
+  # tests/unit/scripts/test_build_scaffold_templates.py imports the build
+  # hook (build_support/), which subclasses setuptools' build_py. CI installs
+  # only this group into a bare interpreter, where setuptools is absent.
+  # Same floor as the image's build step.
+  "setuptools>=83.0.0",
 ]
 dev = [
   # Everything the test group installs, plus the toolchain.
@@ -340,6 +356,15 @@ conflicts = [
     { extra = "mineru" },
   ],
 ]
+
+# The `baselith init` starters live in `templates/`, outside every package, so
+# the wheel shipped none of them and a pip install offered only `minimal`.
+# This build_py hook copies the CLI's starters into `core/cli/scaffold_templates`
+# of the build tree (`core.cli.commands.init` looks there); MANIFEST.in puts the
+# hook and `templates/` in the sdist so a wheel built from it gets them too.
+# scripts/check_distribution_artifacts.py asserts them on the built wheel.
+[tool.setuptools]
+cmdclass = { build_py = "build_support.scaffold_templates.BuildPy" }
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -388,6 +413,29 @@ version = {attr = "core._version.__version__"}
     "Dockerfile.sandbox",
     "requirements.sandbox.txt",
 ]
+# The Alembic environment. `core/db/migrations` has no `__init__.py` (its
+# revision modules are not importable names); namespace discovery happens to
+# pick up the `.py` files, but the requirement is stated here so it does not
+# hinge on the discovery mode, and the non-Python template only ships through
+# this entry. Before the move a wheel install had no migrations at all:
+# `baselith db migrate` and the startup upgrade needed a checkout in the cwd.
+# core.db.migration_config locates them through the package;
+# scripts/check_distribution_artifacts.py loads their heads from the installed
+# wheel.
+"core.db" = [
+    "migrations/env.py",
+    "migrations/script.py.mako",
+    "migrations/versions/*.py",
+]
+# Plugin build files that its integrity signature covers (core.plugins.integrity
+# hashes pyproject.toml and requirements*.txt). Not shipping them made the
+# installed copy's digest differ from the signed one, so the plugin failed its
+# integrity check on every wheel install. scripts/check_distribution_artifacts.py
+# verifies every signed plugin against the installed tree.
+"plugins.baselithbot" = [
+    "pyproject.toml",
+    "requirements.txt",
+]
 
 # `ui/dist/**/*` above is a deliberately broad include — it has to be, because
 # the bundle's filenames are content-hashed and cannot be enumerated. That
@@ -405,6 +453,12 @@ version = {attr = "core._version.__version__"}
 [tool.setuptools.exclude-package-data]
 "*" = [
     "ui/dist/**/*.map",
+    # Test files living beside the assets they test (the chat UI's
+    # `static/frontend/js/api.test.mjs` runs under `node --test` in CI). They
+    # are development artifacts, not product; `static/**/*` above would
+    # otherwise sweep them in.
+    "**/*.test.*",
+    "**/*.spec.*",
 ]
 
 [tool.bandit]
@@ -516,7 +570,7 @@ ignore = [
                 # `git`/`python` resolved from PATH is how a dev script is
                 # meant to run; an absolute path would break every venv.
                 "S607"]                          # one-off admin scripts; blocking sleep is fine
-"migrations/**" = ["E402"]      # alembic env import ordering is fixed by the template
+"core/db/migrations/**" = ["E402"]  # alembic env import ordering is fixed by the template
 
 [tool.mypy]
 python_version = "3.12"

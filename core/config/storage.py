@@ -5,7 +5,7 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote_plus, urlencode, urlsplit
 
 from pydantic import (
@@ -241,6 +241,26 @@ class StorageConfig(BaseSettings):
     # until RLS policies exist AND the app connects as a non-owner (or FORCE RLS)
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
+    # How `app.tenant_id` is bound on a checkout (see core.db._tenant_binding).
+    # "session": `set_config(..., false)` memoized per pooled connection — one
+    # round-trip only when the tenant changes, correct with direct connections
+    # and session pooling. "transaction": every checkout runs inside one
+    # transaction and binds with `set_config(..., true)`, so the GUC lives
+    # exactly as long as the transaction a transaction-mode pooler (PgBouncer
+    # `pool_mode = transaction`) pins to one backend. `DB_PREPARED_STATEMENTS=
+    # false` is the signal this configuration carries for such a pooler, so RLS
+    # plus that flag is refused at boot unless the scope is "transaction".
+    db_rls_tenant_scope: Literal["session", "transaction"] = Field(
+        default="session",
+        alias="DB_RLS_TENANT_SCOPE",
+        description=(
+            "How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config "
+            "per session, memoized per pooled connection) or 'transaction' "
+            "(each checkout is one transaction, set_config is "
+            "transaction-local). Use 'transaction' behind a transaction-mode "
+            "pooler such as PgBouncer pool_mode=transaction."
+        ),
+    )
     # Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared
     # pool at first use. `None` (the default) means "decide from the
     # environment": allowed outside production, refused in production, where the
@@ -261,6 +281,27 @@ class StorageConfig(BaseSettings):
             f"-c statement_timeout={self.db_statement_timeout_ms} "
             "-c idle_in_transaction_session_timeout="
             f"{self.db_idle_in_transaction_timeout_ms}"
+        )
+
+    def rls_pooler_conflict(self) -> str | None:
+        """Why RLS cannot be trusted with this pooling setup, or ``None``.
+
+        Session-scoped tenant binding needs every statement of a checkout to
+        reach the same backend. ``DB_PREPARED_STATEMENTS=false`` declares a
+        transaction-mode pooler, where that only holds inside a transaction —
+        which is what the ``transaction`` tenant scope provides.
+        """
+        if not self.db_rls_enabled or self.db_prepared_statements:
+            return None
+        if self.db_rls_tenant_scope == "transaction":
+            return None
+        return (
+            "DB_RLS_ENABLED=true with DB_PREPARED_STATEMENTS=false and "
+            "DB_RLS_TENANT_SCOPE=session: the tenant GUC is bound per session, "
+            "which a transaction-mode pooler (PgBouncer pool_mode=transaction) "
+            "does not preserve between statements, so row-level security would "
+            "not isolate tenants. Set DB_RLS_TENANT_SCOPE=transaction, or use "
+            "session pooling."
         )
 
     @property

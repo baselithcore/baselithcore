@@ -110,7 +110,8 @@ def test_network_policy_admits_only_this_releases_pods_to_tei() -> None:
             rule["from"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]
             == "baselithcore"
         )
-        assert pol["spec"]["policyTypes"] == ["Ingress"]
+        # Egress is restricted too (test_helm_chart_perimeter covers the rules).
+        assert pol["spec"]["policyTypes"] == ["Ingress", "Egress"]
 
 
 def test_hf_token_comes_from_an_existing_secret() -> None:
@@ -138,3 +139,36 @@ def test_schema_rejects_a_privileged_port_and_unknown_keys() -> None:
             timeout=120,
         )
         assert res.returncode != 0, bad
+
+
+QDRANT = ("--set", "qdrant.enabled=true")
+
+
+def test_release_qdrant_is_off_by_default() -> None:
+    assert not _by_kind(render(), "StatefulSet")
+
+
+def test_release_qdrant_is_keyed_private_and_wired() -> None:
+    out = render(*QDRANT, "--set", "inference.qdrant.url=http://shared:6333")
+    (sts,) = _by_kind(out, "StatefulSet")
+    name = sts["metadata"]["name"]
+    assert name == "release-baselithcore-qdrant"
+    (c,) = containers(sts)
+    assert c["image"].endswith("-unprivileged")
+    assert c["securityContext"]["readOnlyRootFilesystem"] is True
+    key = {e["name"]: e for e in c["env"]}["QDRANT__SERVICE__API_KEY"]
+    assert key["valueFrom"]["secretKeyRef"]["key"] == "BASELITH_QDRANT_API_KEY"
+    # its own policy, rendered even with networkPolicy off: customer data
+    (pol,) = [
+        p for p in _by_kind(out, "NetworkPolicy") if p["metadata"]["name"] == name
+    ]
+    assert (
+        pol["spec"]["ingress"][0]["from"][0]["podSelector"]["matchLabels"][
+            "app.kubernetes.io/name"
+        ]
+        == "baselithcore"
+    )
+    # the release's own Qdrant wins over an inference.qdrant.url
+    data = _config(out)
+    assert data["BASELITH_QDRANT_URL"] == f"http://{name}:6333"
+    assert data["VECTORSTORE_HOST"] == name

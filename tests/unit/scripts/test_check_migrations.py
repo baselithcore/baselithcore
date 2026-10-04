@@ -201,8 +201,10 @@ class TestAllowMarker:
 class TestRepositoryIsClean:
     def test_shipped_migrations_pass_the_gate(self):
         """Every existing drop lives in downgrade(), so the gate starts green."""
-        assert scan(REPO_ROOT / "migrations") == []
+        assert scan(REPO_ROOT / "core" / "db" / "migrations") == []
 
     def test_the_scan_actually_saw_the_migrations(self):
-        versions = list((REPO_ROOT / "migrations" / "versions").glob("*.py"))
+        versions = list(
+            (REPO_ROOT / "core" / "db" / "migrations" / "versions").glob("*.py")
+        )
         assert len(versions) >= 5  # guard against a silently empty scan

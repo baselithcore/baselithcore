@@ -57,7 +57,7 @@ Full safety model: [Security & RBAC](security.md). Approval semantics:
 Dashboard writes to `computer_use` and `stealth` — from the
 [Computer Use](../guide/computer-use.md) and [Stealth](../guide/stealth.md)
 pages — persist through `RuntimeConfigStore` to
-`plugins/baselithbot/.state/runtime_config.json` (atomic write,
+`<state_dir>/runtime_config.json` (atomic write,
 `threading.Lock`). The overlay merges on top of the boot config whenever
 `effective_computer_use_config()` / `effective_stealth_config()` are
 evaluated, and every change invalidates the cached agent so the next run
@@ -70,15 +70,18 @@ rebuilds with the fresh guardrails.
 | `GET /dash/stealth` | Read effective Stealth config. |
 | `PUT /dash/stealth` | Validate + persist + invalidate + SSE `stealth.updated`. |
 
-Overlay files are excluded from git via `plugins/*/.state/` in
-`.gitignore`.
+Overlay files live in `<state_dir>`: `BASELITHBOT_STATE_DIR` when set,
+else an existing legacy `plugins/baselithbot/.state/` (deprecated, warns),
+else `$XDG_DATA_HOME/baselith/baselithbot` (`~/.local/share/...` fallback),
+created `0700`. Never inside the installed package.
 
 ## Environment variables
 
 | Env var | Purpose |
 |---|---|
 | `BASELITHBOT_DASHBOARD_TOKEN` | Bearer token for dashboard write endpoints. Unset = open dev mode (one-shot warning). Generate: `openssl rand -hex 32`. |
-| `BASELITHBOT_SECRET_KEY` | Fernet master key encrypting provider API keys at rest. Unset = auto-generated once under `<state>/.secret_key` (mode `0600`). |
+| `BASELITHBOT_STATE_DIR` | Directory for all plugin state. Unset = per-user `$XDG_DATA_HOME/baselith/baselithbot`. |
+| `BASELITHBOT_SECRET_KEY` | Fernet master key encrypting provider API keys at rest. Unset = auto-generated once under `<state_dir>/.secret_key` (mode `0600`). |
 | `BASELITHBOT_REPLAY_ENCRYPTION_KEY` | Optional Fernet key encrypting replay screenshots at rest. |
 | `ELEVENLABS_API_KEY` | Optional; enables the ElevenLabs voice provider. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | LLM + Vision providers, resolved through `core.config.services`. |
@@ -90,7 +93,7 @@ are never echoed back plaintext — reads return a masked preview
 
 ## Model preferences (persisted JSON)
 
-Persisted to `plugins/baselithbot/.state/model_preferences.json` via
+Persisted to `<state_dir>/model_preferences.json` via
 `ModelPreferenceStore`. Defaults: LLM provider `ollama`/`llama3.2`, vision
 `openai`/`gpt-4o`, temperature `0.7`. Writes are bounded to a known-provider
 catalog so an endpoint cannot smuggle an arbitrary string downstream. Full

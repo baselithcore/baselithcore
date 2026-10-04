@@ -36,9 +36,10 @@ Design notes:
   by an inner guard is frozen under a key. Deterministic client errors of a
   real route (``400``/``409``/``422``) are still cached.
 - **Payload-bound**: the SHA-256 of the request body (hashed while the app
-  streams it in, never buffered twice) is stored with the response; a retry
-  reusing the key with a *different* body gets ``422`` instead of the first
-  body's response (``draft-ietf-httpapi-idempotency-key-header``).
+  streams it in, never buffered twice) and of the request target (path + query
+  string) are stored with the response; a retry reusing the key with a
+  *different* body or query gets ``422`` instead of the first request's
+  response (``draft-ietf-httpapi-idempotency-key-header``).
 - **Lock kept alive**: the in-flight lock (TTL capped at 300 s) is refreshed
   while the handler runs, so a long handler cannot lose it to a duplicate.
 - **Encoding-safe replay**: compression runs inside this layer, so a stored
@@ -70,6 +71,7 @@ from core.middleware._idempotency_replay import (
     decode_entry,
     encode_entry,
     replay_entry,
+    request_target_digest,
 )
 from core.middleware._idempotency_store import (
     MAX_LOCK_TTL,
@@ -353,6 +355,7 @@ class IdempotencyMiddleware:
             "chunks": [],
             "size": 0,
             "cacheable": True,
+            "stored": False,
         }
         fingerprint = BodyFingerprint(receive)
 
@@ -419,7 +422,7 @@ class IdempotencyMiddleware:
             # that has seen the complete response is guaranteed a replay on
             # its next retry.
             full_body = b"".join(state["chunks"])
-            await self._store(
+            state["stored"] = await self._store(
                 storage_key,
                 lock_key,
                 state["status"],
@@ -427,6 +430,7 @@ class IdempotencyMiddleware:
                 full_body,
                 ttl=ttl,
                 body_sha256=fingerprint.digest,
+                target_sha256=request_target_digest(scope),
             )
             await send(message)
 
@@ -435,15 +439,20 @@ class IdempotencyMiddleware:
         )
         try:
             await self.app(scope, fingerprint, capture)
-        except Exception:
+        except BaseException:
+            # ``BaseException``: a client disconnect or a worker shutdown
+            # arrives as ``CancelledError``, which ``except Exception`` let
+            # through — leaving the lock for up to MAX_LOCK_TTL at exactly the
+            # moment the client retries (and gets 409 for it).
             await self._release(lock_key)
             raise
         finally:
             keepalive.cancel()
-        # If the response was never cached (streamed, oversized, a 5xx, or a
-        # retryable 4xx), drop the lock so a genuine retry isn't blocked for the
-        # full TTL.
-        if not state["cacheable"]:
+        # Unless the response was persisted (which drops the lock in the same
+        # pipeline), release it: streamed, oversized, a 5xx, a retryable 4xx,
+        # a handler that never answered, or a store write that failed — none
+        # of these may block a genuine retry for the full TTL.
+        if not state["stored"]:
             await self._release(lock_key)
 
     async def _store(
@@ -456,13 +465,15 @@ class IdempotencyMiddleware:
         *,
         ttl: int | None = None,
         body_sha256: str | None = None,
-    ) -> None:
+        target_sha256: str | None = None,
+    ) -> bool:
+        """Persist the entry and drop the lock; ``False`` when nothing was stored."""
         ttl = ttl or self.ttl_seconds
         try:
             # orjson emits bytes — Redis accepts them directly, and decoding
             # replayed entries accepts bytes and str alike, so entries written
             # by the previous stdlib-json code still parse.
-            payload = encode_entry(status, headers, body, body_sha256)
+            payload = encode_entry(status, headers, body, body_sha256, target_sha256)
             # Store the response and drop the in-flight lock in a single round
             # trip (pipeline) rather than two sequential SET + DEL calls.
             if hasattr(self._redis, "pipeline"):
@@ -473,8 +484,10 @@ class IdempotencyMiddleware:
             else:  # client without pipeline support (e.g. a test double)
                 await self._redis.set(storage_key, payload, ex=ttl)
                 await self._release(lock_key)
-        except Exception:  # pragma: no cover - storage best-effort
+        except Exception:
             logger.warning("Idempotency store failed for %s", storage_key)
+            return False
+        return True
 
     async def _release(self, lock_key: str) -> None:
         try:

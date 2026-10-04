@@ -31,7 +31,6 @@ REPO_ROOTS = (
     "plugins",
     "scripts",
     "tests",
-    "migrations",
     "examples",
     "configs",
     "deploy",

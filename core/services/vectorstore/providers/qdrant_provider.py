@@ -21,7 +21,14 @@ from qdrant_client.models import (
 from core.observability.logging import get_logger
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.resilience.retry import retry
+from core.services.vectorstore._dimension import (
+    EmbeddingDimensionMismatchError,
+    assert_qdrant_dimension,
+)
 from core.services.vectorstore.exceptions import VectorStoreError
+from core.services.vectorstore.providers._qdrant_queries import (
+    is_missing_collection as _is_missing_collection,
+)
 
 logger = get_logger(__name__)
 
@@ -29,21 +36,6 @@ logger = get_logger(__name__)
 # (tenant isolation, per-document operations). Without keyword payload
 # indexes Qdrant degrades to scanning as collections grow.
 _INDEXED_PAYLOAD_FIELDS = ("tenant_id", "document_id")
-
-
-def _is_missing_collection(exc: Exception) -> bool:
-    """True when an exception signals a not-yet-created Qdrant collection.
-
-    Qdrant answers a read against an unknown collection with HTTP 404
-    (``Not found: Collection ... doesn't exist!``). That is a permanent,
-    non-transient condition — retrying never helps — and semantically means
-    "no data", so a read should treat it as an empty result rather than an
-    error worth logging and retrying.
-    """
-    if getattr(exc, "status_code", None) == 404:
-        return True
-    text = str(exc).lower()
-    return "doesn't exist" in text or "not found: collection" in text
 
 
 class QdrantProvider:
@@ -133,8 +125,9 @@ class QdrantProvider:
             # Check if collection already exists to avoid 409 Conflict
             if await self.collection_exists(collection_name):
                 logger.info(f"Collection '{collection_name}' already exists.")
-                # Upgrade path: collections created before payload indexes
-                # were introduced get them on the next startup.
+                # Width must match the config (never auto-dropped); then the
+                # upgrade path adds payload indexes older collections lack.
+                await assert_qdrant_dimension(self.client, collection_name, vector_size)
                 await self._ensure_payload_indexes(collection_name)
                 return
 
@@ -150,6 +143,8 @@ class QdrantProvider:
             logger.info(
                 f"Created collection '{collection_name}' with size {vector_size}"
             )
+        except EmbeddingDimensionMismatchError:
+            raise
         except Exception as e:
             # Handle possible race condition
             if "already exists" in str(e).lower() or "409" in str(e):

@@ -22,7 +22,7 @@ from dotenv import dotenv_values
 from core.config.plugin_update_apply import UpdateApplyConfig
 
 from ..models import ReleaseInfo
-from ..sources import GitHubReleaseSource, SourceError
+from ..sources import MAX_TEXT_FILE_BYTES, GitHubReleaseSource, SourceError
 
 logger = logging.getLogger(__name__)
 
@@ -80,16 +80,48 @@ class SchemaEnvError(Exception):
     """The configured schema owner env file cannot be read (message holds no path)."""
 
 
+#: Never handed to a plugin's ``schema-init``: the updater's own credentials
+#: and the operator secrets a schema step has no use for. The owner file adds
+#: back exactly what the step needs.
+_WITHHELD_FROM_SCHEMA_INIT = frozenset(
+    {
+        "PLUGIN_UPDATE_GITHUB_TOKEN",
+        "ADMIN_PASS",
+        "ADMIN_PASS_HASHED",
+        "METRICS_PASSWORD",
+    }
+)
+_WITHHELD_PREFIXES = ("UPDATE_APPLY_",)
+
+
+def _shared_mode(path: Path) -> bool:
+    """True when ``path`` is writable by its group or by everyone."""
+    return bool(path.stat().st_mode & 0o022)
+
+
 def schema_env(config: UpdateApplyConfig) -> dict[str, str]:
     """The environment of ``schema-init``: ours plus the owner credentials file.
 
+    The updater's own token and the operator passwords are withheld (see
+    :data:`_WITHHELD_FROM_SCHEMA_INIT`); the owner file must be private.
+
     Raises:
-        SchemaEnvError: ``schema_env_file`` is configured but missing or
-            unreadable; never fall back to the runtime credentials silently.
+        SchemaEnvError: ``schema_env_file`` is configured but missing,
+            unreadable, or group/world-writable; never fall back to the
+            runtime credentials silently.
     """
-    env = dict(os.environ)
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in _WITHHELD_FROM_SCHEMA_INIT and not k.startswith(_WITHHELD_PREFIXES)
+    }
     if config.schema_env_file is not None:
         try:
+            if _shared_mode(config.schema_env_file):
+                raise SchemaEnvError(
+                    "the schema owner env file (UPDATE_APPLY_SCHEMA_ENV_FILE) is "
+                    "group- or world-writable; it must be 0600"
+                )
             text = config.schema_env_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise SchemaEnvError(
@@ -135,7 +167,9 @@ class GitHubReleaseFetcher:
             raise SourceError("release has no release.json asset")
         with tempfile.TemporaryDirectory(prefix="plugin-release-") as tmp:
             dest = Path(tmp) / "release.json"
-            await self._source.download(info.release_json_url, dest)
+            await self._source.download(
+                info.release_json_url, dest, max_bytes=MAX_TEXT_FILE_BYTES
+            )
             return dest.read_bytes()
 
     async def tarball(self, plugin: str, version: str, dest: Path) -> None:

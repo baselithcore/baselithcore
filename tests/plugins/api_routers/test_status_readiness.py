@@ -14,9 +14,9 @@ class _FakeResponse:
 @pytest.fixture(autouse=True)
 def _fresh_health_cache():
     # Readiness caches results in a process-wide checker; clear between tests.
-    status.get_health_checker().invalidate()
+    status.reset_readiness_cache()
     yield
-    status.get_health_checker().invalidate()
+    status.reset_readiness_cache()
 
 
 async def test_liveness_is_cheap_and_unconditional():

@@ -14,6 +14,14 @@ from core.observability.metric_context import (
     TenantLabeledCounter,
 )
 
+# === Billing observers ===
+USAGE_SINK_FAILURES_TOTAL = Counter(
+    "mas_usage_sink_failures_total",
+    "Billed-turn reports a registered usage sink failed to accept "
+    "(a lost ledger write, surfaced per sink).",
+    ["sink"],
+)
+
 # === Chat Metrics ===
 CHAT_REQUESTS_TOTAL = Counter(
     "mas_chat_requests_total",
@@ -169,6 +177,13 @@ AGENT_TOOL_CALLS_TOTAL = Counter(
     "Total number of tool calls by agents.",
     ["agent_type", "tool_name"],
 )
+# Emitted from core.orchestration.mixins._memory_write when the background
+# memory-write backlog is full and a turn is not persisted.
+MEMORY_WRITES_DROPPED_TOTAL = Counter(
+    "mas_memory_writes_dropped_total",
+    "Post-response memory writes dropped because the background backlog was "
+    "full (the turn is not persisted to memory).",
+)
 
 # === Guardrail Metrics ===
 # Emitted from core.orchestration.guard_pipeline (request in/out guards) and
@@ -291,6 +306,7 @@ __all__ = [
     # Agent
     "AGENT_STEPS_TOTAL",
     "AGENT_TOOL_CALLS_TOTAL",
+    "MEMORY_WRITES_DROPPED_TOTAL",
     # Auth
     "AUTH_REQUESTS_TOTAL",
     "AUTH_TOKEN_VALIDATION_SECONDS",

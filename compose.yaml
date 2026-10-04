@@ -107,6 +107,11 @@ services:
       - ALL
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
+    # The image HEALTHCHECK probes http://localhost:8000/health, which an RQ
+    # consumer never serves: inherited, it flagged the worker `unhealthy`
+    # after every start. See compose.prod.yaml for the reasoning.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     deploy:
       resources:
@@ -201,7 +206,7 @@ services:
 
   # === Qdrant (Vector Store) ===
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     container_name: baselith-core-qdrant
     ports:
       - '127.0.0.1:6333:6333'

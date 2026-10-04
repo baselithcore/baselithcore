@@ -13,6 +13,7 @@ from core.cli.commands.doctor_llm import (
     check_llm_fallback_chain,
     check_llm_local_endpoints,
 )
+from core.cli.commands.doctor_migrations import check_migrations_mode
 from core.cli.ui import Timer, console, print_header, print_timing
 
 _ENV_CONFIG_MARKERS = checks._ENV_CONFIG_MARKERS
@@ -23,7 +24,6 @@ check_data_dirs = checks.check_data_dirs
 check_docker = checks.check_docker
 check_core_dependencies = checks.check_core_dependencies
 check_telemetry = checks.check_telemetry
-check_migrations_mode = checks.check_migrations_mode
 check_plugins = plugin_checks.check_plugins
 check_plugin_dependencies = plugin_checks.check_plugin_dependencies
 check_plugin_frontends = plugin_checks.check_plugin_frontends

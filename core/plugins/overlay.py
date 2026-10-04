@@ -108,10 +108,11 @@ def verify_overlay_entry(entry: Path, trusted_keys: Sequence[str]) -> str | None
     return None
 
 
-def _trusted_public_keys() -> list[str]:
-    from core.plugins.signing import load_trusted_keys
+def _trusted_public_keys(plugin_name: str) -> list[str]:
+    """Usable trust roots whose scope covers ``plugin_name``."""
+    from core.plugins.signing import load_trust_roots
 
-    return [key.public_key_hex for key in load_trusted_keys() if key.is_usable]
+    return load_trust_roots(plugin_name)
 
 
 def _running_core_version() -> str:
@@ -144,14 +145,13 @@ def register_overlay_packages(
     base = root if root is not None else overlay_root()
     if base is None:
         return sorted(_REGISTERED)
-    keys = _trusted_public_keys()
     bundled = bundled_root if bundled_root is not None else default_bundled_root()
     running = core_version or _running_core_version()
     for entry in candidate_overlay_dirs(base):
         if entry.name in _REGISTERED:
             continue
         try:
-            reason = verify_overlay_entry(entry, keys)
+            reason = verify_overlay_entry(entry, _trusted_public_keys(entry.name))
             if reason is None:
                 reason = overlay_refusal(entry, bundled, running)
         except Exception as exc:  # one malformed entry never blocks the rest
@@ -170,7 +170,10 @@ def register_overlay_packages(
                 reason,
             )
             continue
-        ensure_parent_packages(entry.name, entry)
+        # Import from the resolved store directory, not the link: the link is
+        # swapped atomically by an update while this process runs, and only
+        # the tree verified above may ever back a lazy submodule import.
+        ensure_parent_packages(entry.name, entry.resolve())
         _REGISTERED[entry.name] = entry
     return sorted(_REGISTERED)
 

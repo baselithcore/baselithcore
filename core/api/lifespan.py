@@ -18,8 +18,6 @@ from core.api.startup_checks import (
     run_startup_health_checks,
     start_regulatory_subsystems,
     start_retention_scheduler,
-    stop_regulatory_subsystems,
-    stop_retention_scheduler,
     warm_auth_singletons,
     warm_memory_embedder,
 )
@@ -27,7 +25,7 @@ from core.config import get_app_config, get_storage_config
 from core.observability.logging import get_logger
 from core.plugins import PluginLoader, PluginRegistry
 from core.plugins.config_file import read_plugin_configs
-from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
+from core.services.bootstrap import ensure_startup_bootstrap
 
 logger = get_logger(__name__)
 
@@ -167,6 +165,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         core_resources_initialized = set()
 
+        if get_storage_config().postgres_enabled:
+            # One bounded probe whose outcome the later DB steps (core schema,
+            # checkpoint store, health checks) reuse: a database that is down
+            # costs boot seconds, not a DB_POOL_TIMEOUT per step.
+            from core.db.reachability import probe_postgres
+
+            if not await probe_postgres():
+                logger.warning(
+                    "🗄️ PostgreSQL unreachable at boot: starting degraded "
+                    "(readiness reports it; DB steps retry lazily)."
+                )
+
         if "postgres" in required_resources:
             logger.info("🗄️ Initializing Postgres (required by plugins)...")
             core_storage: Any = await lazy_registry.get_or_create("postgres")
@@ -297,13 +307,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # entry-point group) into discovery, so a plugin shipped as a wheel is
     # visible to the lazy-import path and not only to an explicit
     # ``load_all_plugins`` call. The directory scan still wins on a name clash.
+    candidate_dirs = plugin_loader.discover_plugins()
     discoveries = (
-        analyzer.discover_plugins(
-            plugin_configs, extra_dirs=plugin_loader.discover_plugins()
-        )
+        analyzer.discover_plugins(plugin_configs, extra_dirs=candidate_dirs)
         if analyzer
         else {}
     )
+    # Plugins shipped inside the installed wheel are opt-in: say which ones a
+    # fresh install leaves off and how to turn one on.
+    from core.plugins.discovery import announce_disabled_bundled
+
+    announce_disabled_bundled(plugin_configs, candidate_dirs)
     for plugin_name, discovery in discoveries.items():
         plugin_registry.register_discovered_plugin(discovery)
         await lifecycle_manager.transition_to_discovered(
@@ -398,102 +412,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Opt-in runtime services (run-events bridge, prompt sync): each is
     # env-gated and fail-open — see core.api._runtime_services.
-    from core.api._runtime_services import (
-        close_shared_clients,
-        drain_orchestrator,
-        start_runtime_services,
-        stop_runtime_services,
-    )
+    from core.api._runtime_services import start_runtime_services
 
     await start_runtime_services(app)
 
     try:
         yield
     finally:
-        logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
+        # Ordered, isolated teardown: one failing step no longer skips the
+        # pool drains and the telemetry flush after it (core.api._shutdown).
+        from core.api._shutdown import shutdown_application
 
-        await stop_runtime_services(app)
-        await drain_orchestrator()
-
-        # Cancel fire-and-forget startup tasks (bootstrap, recovery sweep):
-        # a hung sweep would otherwise live until SIGKILL.
-        for background_task in list(_BACKGROUND_TASKS):
-            background_task.cancel()
-        if _BACKGROUND_TASKS:
-            await asyncio.gather(*_BACKGROUND_TASKS, return_exceptions=True)
-            _BACKGROUND_TASKS.clear()
-
-        await stop_retention_scheduler(app)
-        await stop_regulatory_subsystems(app)
-
-        if hasattr(app.state, "plugin_registry"):
-            logger.info("🔌 Shutdown plugin system...")
-            for plugin in app.state.plugin_registry.get_all():
-                try:
-                    await plugin.shutdown()
-                except Exception as e:
-                    logger.error(
-                        f"Error shutting down plugin {plugin.metadata.name}: {e}"
-                    )
-
-        try:
-            from core.di.lazy_registry import get_lazy_registry
-
-            lazy_registry = get_lazy_registry()
-            await lazy_registry.shutdown_all()
-        except ImportError:
-            pass
-
-        await close_shared_clients()
-
-        from core.services.inference import shutdown_sync_inference
-
-        # Blocking in-thread join: keep it off the event loop.
-        await asyncio.to_thread(shutdown_sync_inference)
-
-        try:
-            from core.middleware.security import get_security_manager
-
-            await get_security_manager().rate_limiter.close()
-        except Exception as e:
-            logger.error(f"Error closing rate limiter Redis connection: {e}")
-
-        try:
-            from core.observability.otel import shutdown_telemetry
-
-            shutdown_telemetry()
-        except Exception as e:
-            logger.debug("OpenTelemetry shutdown skipped: %s", e)
-
-        await bootstrapper.shutdown()
-
-        # Drain shared connection pools explicitly instead of relying on GC —
-        # in-flight work is already done (uvicorn drains requests before
-        # running lifespan shutdown), so this is safe and makes rolling
-        # deploys release DB/Redis server-side resources promptly.
-        try:
-            from core.db.connection import close_async_pool
-
-            await close_async_pool()
-        except Exception as e:
-            logger.debug("Postgres pool close skipped: %s", e)
-
-        try:
-            from core.cache.redis_cache import close_redis_pools
-
-            await close_redis_pools()
-        except Exception as e:
-            logger.debug("Redis pool close skipped: %s", e)
-
-        try:
-            # The synchronous pools (graph, A2A nonce ledger, AP2 replay guard,
-            # sync limiter, scratchpad) are a separate registry from the async
-            # ones and would otherwise keep their server-side connections until
-            # Redis timed them out.
-            from core.cache.redis_sync import close_sync_redis_pools
-
-            close_sync_redis_pools()
-        except Exception as e:
-            logger.debug("Sync Redis pool close skipped: %s", e)
-
-        logger.info("✅ FastAPI backend stopped successfully.")
+        await shutdown_application(app, _BACKGROUND_TASKS)

@@ -261,6 +261,12 @@ Two different grammars apply:
 
 - `python_dependencies` entries are standard pip requirement strings (PEP 440):
   bounded ranges (`>=1.0,<2.0`) and compatible-release specifiers (`~=1.24`) are fine.
+  List every third-party library the plugin imports, even one `baselith-core`
+  happens to install today: the core's own dependencies are not part of the
+  plugin contract. `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`
+  and `sse-starlette` left the core dependencies in 0.41 (they live in the
+  `plugin-compat` extra), and a plugin that had relied on them without declaring
+  them stopped importing.
 - `min_core_version`, `max_core_version` and every `plugin_dependencies` constraint are
   parsed by `core/plugins/version.py`: a **full** `MAJOR.MINOR.PATCH` version with at most
   one operator — `==`, `!=`, `>`, `>=`, `<`, `<=`, `^` (same major) or `~` (same
@@ -884,3 +890,11 @@ the strict schema exists to prevent.
     *use* of the framework. Modifying, patching or replacing files under `core/`
     makes a modified framework — governed by AGPL-3.0-only whatever directory it
     ships in.
+
+!!! note "Shipping the framework itself? Keep the attribution"
+    A plugin on its own owes only the §3(c) notice above. If you also convey the
+    framework — a Docker image, a bundled installer, a hosted product — the
+    [NOTICE](https://github.com/baselithcore/baselithcore/blob/main/NOTICE) file's
+    AGPL section 7(b) term applies: keep `NOTICE` in every copy, and if your
+    product shows legal notices (an About, Legal or Credits screen), include
+    *"Based on BaselithCore by The BaselithCore Authors"*.

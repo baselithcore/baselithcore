@@ -12,13 +12,35 @@ Two directions, because a distribution can be wrong in both:
   exists only to be asserted on. ``[tool.setuptools.packages.find] exclude``
   keeps them out; this asserts it on the built artifact, because a pattern that
   silently stops matching is how they shipped in the first place.
+
+Member names are not enough, so the wheel is also unpacked and checked the
+way an install will use it:
+
+* every shipped plugin that declares ``integrity_sha256`` must verify against
+  its INSTALLED copy. A signature covers build files (``pyproject.toml``,
+  ``requirements*.txt``) that package discovery does not ship by itself; a
+  plugin missing one fails its integrity check on every ``pip install``.
+* the Alembic migrations must be locatable inside the package and load into a
+  single-head revision graph, with every revision the repository has. Before
+  they moved into ``core/db/migrations`` they were not in the wheel at all.
+* every ``baselith init`` starter must arrive, file for file, under
+  ``core/cli/scaffold_templates``. ``templates/`` is outside every package,
+  so a ``pip install`` used to offer only the built-in ``minimal`` template;
+  ``build_support/scaffold_templates.py`` copies them in at build time.
+
+Requires PyYAML and Alembic (both runtime dependencies of the package).
 """
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import json
 import sys
 import tarfile
+import tempfile
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,8 +70,12 @@ SANDBOX_FILES = (
     "core/services/sandbox/Dockerfile.sandbox",
     "core/services/sandbox/requirements.sandbox.txt",
 )
+# The Alembic environment. ``core.db.migration_config`` resolves it through
+# the package; without it no installed deployment can create its schema.
+MIGRATIONS_LOCATION = "core/db/migrations"
+MIGRATION_FILES = (f"{MIGRATIONS_LOCATION}/env.py",)
 #: Every member both artifacts must carry.
-REQUIRED_FILES = PLUGIN_FILES + SANDBOX_FILES
+REQUIRED_FILES = PLUGIN_FILES + SANDBOX_FILES + MIGRATION_FILES
 # Wheel-only: the sdist is the source archive and may legitimately carry the
 # fixtures (installing from it re-runs the backend, which applies the same
 # `exclude`). The wheel is what `pip install baselith-core` unpacks verbatim.
@@ -63,6 +89,10 @@ FORBIDDEN_WHEEL_PREFIXES = (
 # dashboard and expose its original TypeScript sources, and because `hidden`
 # strips the sourceMappingURL comment nothing would ever even request them.
 FORBIDDEN_WHEEL_SUFFIXES = (".map",)
+# Test files kept beside the code they test (``static/frontend/js/api.test.mjs``
+# runs under ``node --test``). Development artifacts, not product.
+FORBIDDEN_WHEEL_INFIXES = (".test.", ".spec.")
+_MANIFEST_NAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
 
 
 def _sdist_has_members(path: Path) -> list[str]:
@@ -113,6 +143,196 @@ def _wheel_has_source_maps(path: Path) -> list[str]:
         ]
 
 
+def _wheel_has_test_files(path: Path) -> list[str]:
+    """Return wheel members that are colocated test files."""
+    with zipfile.ZipFile(path) as archive:
+        return [
+            name
+            for name in archive.namelist()
+            if any(
+                infix in name.rsplit("/", 1)[-1] for infix in FORBIDDEN_WHEEL_INFIXES
+            )
+        ]
+
+
+@contextlib.contextmanager
+def unpacked_wheel(path: Path) -> Iterator[Path]:
+    """Unpack ``path`` into a temporary directory removed on exit.
+
+    A wheel is a zip of the installed tree, so its unpacked root is what
+    ``pip install`` puts in ``site-packages`` — without resolving a single
+    dependency, which keeps the check fast and offline.
+    """
+    with tempfile.TemporaryDirectory(prefix="wheel-check-") as tmp:
+        root = Path(tmp).resolve()
+        with zipfile.ZipFile(path) as archive:
+            for member in archive.infolist():
+                # Refuse a member that would land outside the scratch root.
+                if not (root / member.filename).resolve().is_relative_to(root):
+                    raise ValueError(f"{path.name}: unsafe member {member.filename}")
+                archive.extract(member, root)
+        yield root
+
+
+def _declared_hash(manifest: Path) -> str | None:
+    import yaml
+
+    text = manifest.read_text(encoding="utf-8")
+    data = json.loads(text) if manifest.suffix == ".json" else yaml.safe_load(text)
+    if not isinstance(data, dict):
+        return None
+    value = data.get("integrity_sha256")
+    return str(value) if value else None
+
+
+def check_installed_plugins(root: Path, *, label: str) -> list[str]:
+    """Verify every signed plugin in an installed tree against its manifest.
+
+    The hasher is the ``core/plugins/integrity.py`` shipped in that same tree,
+    loaded by file path, so the check exercises exactly what the installed
+    loader will run.
+
+    Args:
+        root: The installed (unpacked) tree.
+        label: Artifact name used in the messages.
+
+    Returns:
+        One message per plugin whose installed copy does not verify.
+    """
+    integrity_path = root / "core" / "plugins" / "integrity.py"
+    spec = importlib.util.spec_from_file_location("_shipped_integrity", integrity_path)
+    if spec is None or spec.loader is None or not integrity_path.is_file():
+        return [f"{label}: core/plugins/integrity.py is missing"]
+    integrity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(integrity)
+
+    violations: list[str] = []
+    for plugin_dir in sorted(p for p in (root / "plugins").glob("*") if p.is_dir()):
+        manifest = next(
+            (plugin_dir / n for n in _MANIFEST_NAMES if (plugin_dir / n).is_file()),
+            None,
+        )
+        declared = _declared_hash(manifest) if manifest is not None else None
+        if declared is None:
+            continue
+        actual = integrity.compute_plugin_hash(plugin_dir)
+        if actual.lower() != declared.lower():
+            violations.append(
+                f"{label}: plugin {plugin_dir.name} fails its integrity check as "
+                f"installed (manifest {declared}, installed tree {actual}). A file "
+                "its signature covers is not shipped — add it to "
+                "[tool.setuptools.package-data] in pyproject.toml — or, if "
+                "scripts/check_plugin_integrity.py also reports drift, the plugin "
+                "needs re-signing."
+            )
+    return violations
+
+
+def _revision_files(location: Path) -> set[str]:
+    return {path.name for path in (location / "versions").glob("*.py")}
+
+
+def check_installed_migrations(
+    root: Path, source_root: Path, *, label: str
+) -> list[str]:
+    """Verify the installed Alembic migrations are complete and loadable.
+
+    Args:
+        root: The installed (unpacked) tree.
+        source_root: The repository the artifact was built from.
+        label: Artifact name used in the messages.
+
+    Returns:
+        Messages for a missing environment, revisions the install lacks, or a
+        revision graph that does not load into exactly one head.
+    """
+    location = root / MIGRATIONS_LOCATION
+    if not (location / "env.py").is_file():
+        return [
+            f"{label}: {MIGRATIONS_LOCATION} is not shipped — restore its "
+            "`core.db` entry under [tool.setuptools.package-data]."
+        ]
+    violations = [
+        f"{label}: missing migration {MIGRATIONS_LOCATION}/versions/{name}"
+        for name in sorted(
+            _revision_files(source_root / MIGRATIONS_LOCATION)
+            - _revision_files(location)
+        )
+    ]
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config()
+    config.set_main_option("script_location", str(location).replace("%", "%%"))
+    try:
+        heads = ScriptDirectory.from_config(config).get_heads()
+    except Exception as exc:  # any load failure is the finding itself
+        return [*violations, f"{label}: migrations fail to load: {exc}"]
+    if len(heads) != 1:
+        violations.append(
+            f"{label}: migrations resolve to {len(heads)} head(s) "
+            f"({', '.join(heads) or 'none'}), expected exactly one."
+        )
+    return violations
+
+
+def _scaffold_hook() -> tuple[tuple[str, ...], str]:
+    """The starter list and target the build hook uses, loaded by path."""
+    path = REPO_ROOT / "build_support" / "scaffold_templates.py"
+    spec = importlib.util.spec_from_file_location("_scaffold_hook", path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.SCAFFOLD_TEMPLATES), str(module.PACKAGE_TARGET)
+
+
+def check_installed_scaffold_templates(
+    root: Path,
+    source_root: Path,
+    names: tuple[str, ...],
+    *,
+    label: str,
+    target: str = "core/cli/scaffold_templates",
+) -> list[str]:
+    """Verify every ``baselith init`` starter is installed file for file.
+
+    Args:
+        root: The installed (unpacked) tree.
+        source_root: The repository the artifact was built from.
+        names: The starter directories the wheel must carry.
+        label: Artifact name used in the messages.
+        target: Where the starters sit inside the installed tree.
+
+    Returns:
+        One message per missing starter or missing file.
+    """
+    violations: list[str] = []
+    for name in names:
+        installed = root / target / name
+        if not installed.is_dir():
+            violations.append(
+                f"{label}: scaffold template {name} is not shipped under "
+                f"{target} — check the build_py cmdclass in pyproject.toml "
+                "and MANIFEST.in."
+            )
+            continue
+        source = source_root / "templates" / name
+        for path in sorted(source.rglob("*")):
+            rel = path.relative_to(source)
+            if not path.is_file() or "__pycache__" in rel.parts:
+                continue
+            if path.name == ".DS_Store" or path.suffix in (".pyc", ".pyo"):
+                continue
+            if not (installed / rel).is_file():
+                violations.append(
+                    f"{label}: scaffold template file missing: "
+                    f"{target}/{name}/{rel.as_posix()}"
+                )
+    return violations
+
+
 def main() -> int:
     """CLI entrypoint."""
     wheel_files = sorted(DIST_DIR.glob("*.whl"))
@@ -150,6 +370,25 @@ def main() -> int:
                 "them — they exist to be uploaded to an error tracker, not "
                 "shipped. Restore the `ui/dist/**/*.map` entry under "
                 "[tool.setuptools.exclude-package-data] in pyproject.toml."
+            )
+
+        test_files = _wheel_has_test_files(wheel)
+        if test_files:
+            violations.append(
+                f"{wheel.name}: ships test files: {_preview(test_files)}. Restore "
+                "the `**/*.test.*` / `**/*.spec.*` entries under "
+                "[tool.setuptools.exclude-package-data] in pyproject.toml."
+            )
+        with unpacked_wheel(wheel) as installed:
+            violations.extend(check_installed_plugins(installed, label=wheel.name))
+            violations.extend(
+                check_installed_migrations(installed, REPO_ROOT, label=wheel.name)
+            )
+            names, target = _scaffold_hook()
+            violations.extend(
+                check_installed_scaffold_templates(
+                    installed, REPO_ROOT, names, label=wheel.name, target=target
+                )
             )
 
     for sdist in sdist_files:

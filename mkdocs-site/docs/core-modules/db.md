@@ -12,9 +12,13 @@ classes here.
 ```txt
 core/db/
 ├── connection.py     # Sync + async connection / cursor helpers and pool management
-├── session_setup.py  # Per-checkout session setup: timezone + RLS tenant binding
+├── session_setup.py  # Per-checkout session setup: timezone + system_tenant_scope
+├── _tenant_binding.py # RLS tenant binding (app.tenant_id) per pooled connection
 ├── documents.py       # Document feedback aggregation helpers
 ├── feedback.py        # Feedback persistence and analytics functions
+├── migrate.py         # `python -m core.db.migrate`: what `baselith db migrate` runs
+├── migration_config.py # Locates the packaged migrations; builds the Alembic Config
+├── migrations/        # Alembic environment: env.py, script.py.mako, versions/
 ├── rls_policy.py      # Core's tenant_isolation policy for plugin-owned tables
 ├── schema.py          # Schema bootstrap via Alembic migrations
 ├── serializers.py     # Source/row (de)serialization helpers
@@ -26,7 +30,12 @@ timezone-apply helpers and, now, `system_tenant_scope()` — split out purely to
 keep `connection.py` under the file-size cap. `connection.py` re-exports every
 name (`APP_TIMEZONE_NAME`, `SYSTEM_TENANT_ID`, `system_tenant_scope`, plus the
 private `_sync_apply_timezone`/`_async_apply_timezone`), so existing imports
-and test monkeypatches against `core.db.connection.<name>` are unaffected.
+and test monkeypatches against `core.db.connection.<name>` are unaffected. The
+RLS tenant-binding helpers (`_current_tenant_for_session`,
+`_sync_apply_tenant`, `_async_apply_tenant`) moved to `_tenant_binding.py` for
+the same reason and are re-exported from `connection.py` the same way;
+`core.db.connection.DB_RLS_ENABLED` is still the one switch they read, at call
+time.
 
 ---
 
@@ -111,6 +120,47 @@ if the body raises — a plain `contextmanager`, so it works in both sync and
 async code. Because it binds the tenant *context* (not just the DB session),
 everything else that scopes by tenant sees the same explicit identity too.
 
+### RLS and connection poolers
+
+`DB_RLS_TENANT_SCOPE` chooses how the tenant is bound on a checkout:
+
+| `DB_RLS_TENANT_SCOPE` | Binding | Use it with |
+| --- | --- | --- |
+| `session` (default) | `set_config('app.tenant_id', …, false)`, memoized per pooled connection: a round-trip only when the tenant changes | direct connections, or a pooler in **session** mode |
+| `transaction` | every checkout runs inside one `connection.transaction()` and binds with `set_config(…, true)`; the GUC ends with the transaction | a **transaction-mode** pooler (PgBouncer `pool_mode = transaction`) |
+
+The session binding is unsafe behind a transaction-mode pooler: consecutive
+statements of one checkout can land on different backends, one of them still
+carrying another tenant's `app.tenant_id`, and the policies then isolate
+nothing. A transaction is the unit such a pooler pins to one backend, so a
+transaction-local GUC cannot leak.
+
+The transaction scope has two costs to know before turning it on:
+
+- **One checkout is one transaction.** The work commits when the `with` block
+  exits cleanly and rolls back when it raises, and a failed statement aborts
+  the rest of that checkout (`InFailedSqlTransaction`). A caller's own
+  `connection.transaction()` becomes a savepoint, so code that already scoped
+  its writes keeps working.
+- **A long-held checkout is an open transaction.** It counts against
+  `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` (default 60 s) and holds the backend for
+  its whole duration, so do not keep a connection checked out across a slow
+  LLM call or a stream.
+
+`DB_PREPARED_STATEMENTS=false` is the setting this configuration already uses
+to say "transaction pooler", so `DB_RLS_ENABLED=true` together with it **and**
+the `session` scope is refused:
+
+- at startup, by `enforce_rls_posture` (`RlsBypassError`), in **every**
+  environment and before a connection is opened;
+- when a pool is first built (`RuntimeError: Refusing to open the database
+  pool: …`) — the backstop for entry points that never run the startup checks:
+  the CLI, the task-queue worker, a migration Job.
+
+The refusal is described by `StorageConfig.rls_pooler_conflict()`, which returns
+the reason or `None`. `DB_RLS_TENANT_SCOPE=transaction` resolves it;
+`BASELITH_ALLOW_RLS_BYPASS` does not cover this conflict.
+
 ### Who creates the schema
 
 `core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
@@ -145,6 +195,10 @@ A plugin table with a `tenant_id` column is built by the plugin's
 `core.db.rls_policy.tenant_isolation_ddl(tables)`: the same `tenant_isolation`
 predicate as migration 010, owner-guarded and idempotent. `row_tenant_scope(key)`
 binds the key a plugin writes rows under when that is not the session tenant.
+It only binds a key the bound identity derives to — the tenant, or the user id
+under personal tenancy; any other key raises `ForeignTenantKeyError` (a
+`ValueError`, exported from `core.db.rls_policy`), so a plugin cannot reach
+another tenant's rows by passing its id.
 See [Plugin tables](../advanced/multi-tenancy.md#plugin-table-policies).
 
 ### Is row-level security actually enforced?
@@ -214,6 +268,31 @@ and the database is down" was a degraded boot before; making the fallback fatal
 would turn it into a crash loop. The failure is logged at `error` as
 `core_schema_init_failed`, which is what an operator needs when the first write
 starts returning 500s.
+
+### PostgreSQL down at boot: one probe, not a timeout per step
+
+Every boot step that touches the database used to discover an outage on its
+own, through a pool checkout that waits the full `DB_POOL_TIMEOUT` (30 s by
+default). With PostgreSQL down the checkpoint-store DDL and the health probe
+waited in series, and boot took ~40 s (~70 s with a plugin that created its
+schema in `initialize`) before the app came up degraded.
+
+`core.db.reachability.probe_postgres()` opens **one direct connection** (no
+pool, so no retry loop) bounded by a short connect timeout (`PROBE_TIMEOUT_S`,
+5 s), runs `SELECT 1` and records the outcome. The lifespan runs it once,
+before any schema work, and the later steps reuse it:
+
+| Step | Probe saw the database down |
+| --- | --- |
+| `init_core_schema_best_effort()` | skips Alembic, logs `core_schema_init_skipped` at `error` |
+| checkpoint store | deferred to a background retry (see [Orchestration](orchestration.md)) |
+| startup health check | one cheap re-probe, no pool warm-up or checkout |
+
+Boot with the database down now takes well under a second, and
+`/health/ready` answers 503 until it returns. With the database up nothing
+changes except one extra short-lived connection at boot. The outcome is a
+hint only: `last_postgres_probe()` is `None` in entry points that never probe
+(CLI, workers), and those behave exactly as before.
 
 !!! warning "Before this existed"
     A deployment whose enabled plugins listed Postgres as merely *optional*
@@ -370,7 +449,7 @@ base_delay=0.5, exponential_base=2.0)` restricted to
 ## Schema Management
 
 Schema is managed through Alembic migrations. `ensure_schema()` runs
-`alembic upgrade head`; `init_db()` wraps it and is a no-op when PostgreSQL
+`alembic upgrade head` against the [packaged migrations](#where-the-migrations-come-from); `init_db()` wraps it and is a no-op when PostgreSQL
 is disabled. `init_db()` additionally runs that call inside
 [`system_tenant_scope()`](#who-runs-the-migrations) — `ensure_schema()` called
 directly does not, so a caller invoking it outside `init_db()` under
@@ -386,8 +465,34 @@ await init_db()
 await ensure_schema()
 ```
 
-Migrations under `migrations/versions/` create the core tables, including
+Migrations under `core/db/migrations/versions/` create the core tables, including
 `tenants`, `chat_feedback`, and `interactions`.
+
+### Where the migrations come from
+
+The Alembic environment ships **inside the package**, so a `pip install
+baselith-core` deployment can migrate from any working directory — no
+checkout, no `alembic.ini` beside the process. Every code path that runs or
+inspects migrations resolves them through `core.db.migration_config`:
+
+| Name | What it does |
+| --- | --- |
+| `migrations_dir()` | The installed `core/db/migrations` directory; raises `MigrationsNotFoundError` when `env.py` or `versions/` is missing |
+| `build_alembic_config()` | An Alembic `Config` whose `script_location` is that directory. It reads no `alembic.ini`, so it does not depend on the cwd |
+| `migration_heads()` | The head revision(s), after loading every revision module — the cheapest proof the scripts are importable |
+
+`schema.upgrade_head()` applies them under the migration advisory lock;
+`ensure_schema()` runs it in an executor, and `python -m core.db.migrate`
+(what `baselith db migrate` spawns) runs it in a child process. The production
+startup check compares the database revision against the same packaged head,
+and `baselith doctor` **fails** its `DB Migrations` check when the scripts
+cannot be located or loaded.
+
+The repository-root `alembic.ini` remains for developers and for the Helm
+migration Job, which run the `alembic` CLI directly: its
+`script_location = %(here)s/core/db/migrations` points at the same directory,
+relative to the ini itself. New revisions still come from `alembic revision`
+at the repository root.
 
 ---
 
@@ -405,6 +510,8 @@ DB_POOL_MAX_SIZE=20                # Maximum connections in pool
 DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
 DB_STATEMENT_TIMEOUT_MS=30000      # Server-side cap per statement (0 = unbounded)
 DB_RLS_ENABLED=false               # Bind app.tenant_id per checkout for row-level security — see below
+DB_PREPARED_STATEMENTS=true        # false behind a transaction-mode pooler — see PgBouncer below
+DB_RLS_TENANT_SCOPE=session       # 'transaction' behind a transaction-mode pooler — see below
 DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
 ```
 
@@ -437,12 +544,15 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
     is `DB_POOL_MAX_SIZE × WEB_CONCURRENCY`, not `DB_POOL_MAX_SIZE`. With the
     default of 20 per pool, four workers already claim 80 of PostgreSQL's
     default 100 `max_connections` before the migrations job, the RQ worker or
-    a second replica connect. After warming the pool at startup,
-    `core.db.pool_budget.check_connection_budget()` reads `max_connections`
-    and `superuser_reserved_connections` from the server and logs
-    `db_pool_budget_exceeds_max_connections` (with the per-worker size that
-    would fit) when the budget overflows. It is informational: it never
-    blocks startup and returns `None` when the settings cannot be read.
+    a second replica connect. Once the startup health probe has reached the
+    database, `core.db.pool_budget.check_connection_budget()` reads
+    `max_connections` and `superuser_reserved_connections` from the server and
+    logs `db_pool_budget_exceeds_max_connections` (with the per-worker size
+    that would fit) when the budget overflows. It runs inside
+    `system_tenant_scope()` — with `DB_RLS_ENABLED` an unbound checkout is
+    refused, and the check used to be silently skipped — and gives up after
+    `timeout` seconds (default 5). It is informational: it never blocks
+    startup and returns `None` when the settings cannot be read.
 
 ### PgBouncer
 
@@ -458,10 +568,12 @@ that mode:
   `idle_in_transaction_session_timeout` is rejected by PgBouncer unless listed
   in `ignore_startup_parameters` — and then silently dropped, so set the
   budgets on the role instead (`ALTER ROLE app SET statement_timeout = '30s'`);
-- the timezone and the RLS `app.tenant_id` binding are session-scoped
-  `set_config` calls memoized per client connection, which a transaction-mode
-  pooler does not pin to one backend. Use session pooling when
-  `DB_RLS_ENABLED=true`.
+- the timezone and, by default, the RLS `app.tenant_id` binding are
+  session-scoped `set_config` calls memoized per client connection, which a
+  transaction-mode pooler does not pin to one backend. With
+  `DB_RLS_ENABLED=true` set `DB_RLS_TENANT_SCOPE=transaction`: RLS with
+  `DB_PREPARED_STATEMENTS=false` and the session scope is refused at boot —
+  see [RLS and connection poolers](#rls-and-connection-poolers).
 
 ### Indexes behind the hot queries
 

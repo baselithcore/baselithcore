@@ -24,6 +24,7 @@ from core.di.lazy_registry import get_lazy_registry
 embeddings = await get_lazy_registry().get_or_create("embedding")
 vectors = await embeddings.embed_documents(["first", "second"])
 query = await embeddings.embed_query("what is covered?")
+queries = await embeddings.embed_queries(["first?", "second?"])
 embeddings.model, embeddings.dim   # "BAAI/bge-m3", 1024
 ```
 
@@ -40,14 +41,33 @@ shutdown.
 | `BASELITH_EMBEDDING_DIM` | `1024` | vector size |
 | `BASELITH_EMBEDDING_BATCH_SIZE` | `32` | texts per HTTP request |
 | `BASELITH_EMBEDDING_TIMEOUT` | `60` | per-request timeout, seconds |
-| `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx, 429, timeout |
+| `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx and timeouts (429 only with `RETRY_RATE_LIMITED`) |
 | `BASELITH_EMBEDDING_API_KEY` | — | optional bearer token |
+| `BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION` | `false` | let the served model stand in for a different requested one (see [The core's own models](#the-cores-own-models)) |
 
 The `remote` backend posts `{"inputs": [...]}` to TEI's `/embed` over one
-shared `httpx.AsyncClient`, retries 5xx, 429, timeouts and connection errors
-with exponential backoff, and fails at once on any other 4xx. The `local`
+shared `httpx.AsyncClient`, retries 5xx, timeouts and connection errors
+with exponential backoff within a total time budget, and fails at once on
+any other 4xx (see [Client hardening](#client-hardening)). The `local`
 backend is a development opt-in: sentence-transformers, loaded lazily as one
 singleton per process.
+
+### Model servers you do not run
+
+The `remote` backend speaks more than TEI, so the services can call
+inference that already exists on someone's own GPUs:
+
+| Variable | Values | Server |
+| --- | --- | --- |
+| `BASELITH_EMBEDDING_API` | `tei` (default), `openai` | `openai`: `/embeddings` of OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama — URL includes `/v1` |
+| `BASELITH_RERANK_API` | `tei` (default), `cohere`, `nim` | `cohere`: `/rerank` with `documents`/`top_n` (Cohere, Jina, vLLM, Infinity); `nim`: NIM `/ranking` |
+| `BASELITH_EMBEDDING_PATH`, `BASELITH_RERANK_PATH` | a relative path | when the server mounts the API elsewhere; an absolute URL (`https://…`, `//host/…`) is refused at startup, since it would carry the bearer token to another host |
+| `BASELITH_EMBEDDING_QUERY_PREFIX`, `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | text | models trained with instructions (e5: `query:` / `passage:`, each followed by a space). The query prefix applies to `embed_query`/`embed_queries`, the document prefix to `embed_documents` |
+| `*_CA_BUNDLE`, `*_CLIENT_CERT`, `*_CLIENT_KEY` | PEM paths | a private CA, mutual TLS |
+
+`BASELITH_EMBEDDING_DIM` must be the model's own size: a vector of any other
+size is refused on the first call, before it reaches a collection. Changing
+the embedding model means re-indexing — vectors of two models do not compare.
 
 ## RerankService
 
@@ -59,7 +79,9 @@ top = await rerank.rerank("what is covered?", passages, top_k=5)
 
 Same shape, with `BASELITH_RERANK_*` (`MODEL` defaults to
 `BAAI/bge-reranker-v2-m3`). `BASELITH_RERANK_MAX_CANDIDATES` (default 100) caps
-how many passages are scored: the first N are, the rest are dropped.
+how many passages one `rerank` call scores: the first N are, the rest are
+dropped. The core's own `CrossEncoder` stand-in (`get_reranker()`, below)
+scores *every* pair: past the cap it issues one call per chunk of N, in order.
 
 ## Scoped vector store
 
@@ -71,7 +93,11 @@ await store.upsert("docs", points)
 hits = await store.search("docs", vector, limit=10)
 ```
 
-There is one `AsyncQdrantClient` per process, in **server mode**
+There is one `AsyncQdrantClient` per process, in **server mode**. The client
+library is the optional `[qdrant]` extra and is imported only when the runtime
+opens (an `InferenceConfigError` names the extra when it is missing); importing
+`core.services.inference` never needs it, so a pgvector deployment imports and
+shuts the package down without it
 (`BASELITH_QDRANT_URL`). The embedded `path=` mode is refused, and `:memory:`
 is accepted only by tests. A plugin never receives the client: it receives a
 `ScopedVectorStore`, which takes **logical** collection names and maps them to
@@ -94,7 +120,9 @@ own service instances on it on first use, and lets any thread call
 ordinary blocking functions. It never uses the application's loop (which
 would deadlock a caller already running on it) and never creates a loop per
 call (which would build a throw-away connection pool each time). The
-lifespan closes it at shutdown.
+lifespan closes it at shutdown, off the event loop; a service that fails to
+close is logged and does not keep the others open, and the shutdown never
+raises into the rest of the teardown.
 
 ## Keeping plugins honest
 
@@ -139,7 +167,10 @@ you can point at servers you already run.
   cache on a PVC (`persistence.enabled`, default) so a restart does not
   download 2+ GiB again. The first start is slow; the startup probe waits up to
   15 minutes.
-- The CPU image is `linux/amd64` only and slow. For real rerank latency use a
+- Memory is sized from the measured warm-up peak: TEI's start-up runs one full
+  `--max-batch-tokens` batch, so both servers default to 4096 tokens (embedding
+  7/9 GiB, rerank 5/9 GiB). A limit under the peak never becomes ready.
+- `cpu-<ver>` is `linux/amd64` only (ARM nodes need `cpu-arm64-<ver>`) and slow. For real rerank latency use a
   GPU image with `nvidia.com/gpu` in `resources` and a `nodeSelector`.
 - Database-style egress policies (`networkPolicy.egress.enabled`) must allow the
   model servers: the `sameNamespace` preset does when they live in the release
@@ -147,3 +178,110 @@ you can point at servers you already run.
 - A plugin that still loads its own models (see
   `configs/inprocess_ml_allowlist.yaml`) keeps the old memory footprint until it
   migrates; size the API pod's `resources` for the plugin set you actually run.
+
+With `qdrant.enabled` the chart also deploys a Qdrant of the release's own: a
+StatefulSet (`qdrant/qdrant:<ver>-unprivileged`, non-root, read-only root
+filesystem) on its own volume, with `BASELITH_QDRANT_API_KEY` from the release
+Secret as its API key and a NetworkPolicy admitting only the release's pods;
+`BASELITH_QDRANT_URL` and `VECTORSTORE_HOST` then point at it. That is the
+isolating choice when several tenants share a cluster: Qdrant's API key is
+global and its JWT tokens name collections up front, so one server for many
+deployments would put all their vectors behind one key.
+
+## The core's own models
+
+The embedder and reranker the core itself uses — retrieval, memory, the chat
+pipeline, `core.services.retrieval.Reranker` — go through the same services.
+`core.nlp.models.get_embedder()` and `get_reranker()` return TEI-backed
+stand-ins (`core.nlp._remote`) with the sentence-transformers surface
+(`encode`, `get_sentence_embedding_dimension`, `predict`) when:
+
+- the backend is `remote` and its URL is set, **and**
+- the requested model is the one the server serves (`BASELITH_EMBEDDING_MODEL`,
+  `BASELITH_RERANK_MODEL`), or no local sentence-transformers is installed.
+
+Otherwise they load the local model exactly as before.
+
+**The embedder never changes the index's geometry silently.** On first use the
+remote embedder checks `BASELITH_EMBEDDING_DIM` against
+`VECTORSTORE_EMBEDDING_DIM` (the size the index is built for) and raises
+`InferenceConfigError` when they differ. When the requested model
+(`VECTORSTORE_EMBEDDING_MODEL`) is not the served one and no local runtime can
+serve it, it raises too — unless
+`BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION=true`, in which case (dimensions
+still matching) the served model is used and a `remote_model_substituted`
+warning names both. A reranker produces scores, not stored vectors, so a
+served reranker still substitutes with that warning.
+
+**Query and document sides.** The stand-in follows sentence-transformers'
+convention: `encode` / `encode_document` embed documents (document prefix),
+`encode_query` — or `encode(..., prompt_name="query")` — embeds queries (query
+prefix). `CachedEmbedder` and `LazyEmbedder` expose `encode_query` as well,
+and the core's search-side call sites (RAG retrieval, the chat pipeline's
+query vector, memory recall, the semantic router, the MCP knowledge-base tool)
+go through `core.nlp.roles.aencode_query`, which uses `encode_query` when the
+embedder has it — a local sentence-transformers ≥ 5 model then applies its own
+`"query"` prompt — and `encode` otherwise. The embedding cache keys on the
+model, the role and the prefix, so a query is never served a document's vector
+and changing a prefix never serves a vector embedded under the old one.
+
+## An image without torch
+
+The `Dockerfile` takes `--build-arg ML_RUNTIME=remote`. It skips torch,
+sentence-transformers, FlagEmbedding and accelerate and the model pre-cache,
+and fails the build if any other requirement pulls torch in. The default stays
+`local`.
+
+```bash
+docker build --build-arg ML_RUNTIME=remote -t baselith:remote .
+```
+
+Measured on the same tree, with only `auth` and `wikigen` enabled and the
+inference services configured: the `remote` image is 7.9 GB against 13.1 GB, and
+the API process (one worker) holds about 250 MB RSS after startup, where an
+in-process BGE-M3 plus reranker cost 2.8 GB. A plugin listed in
+`configs/inprocess_ml_allowlist.yaml` cannot run on this image: disable it, or
+build `local`.
+
+## Client hardening
+
+The embedding and rerank clients (`core/services/inference/_http.py`) bound
+every call and guard the bearer token. Each knob exists once per service, under
+`BASELITH_EMBEDDING_*` and `BASELITH_RERANK_*`:
+
+| Variable suffix | Default | Meaning |
+| --- | --- | --- |
+| `MAX_TOTAL_SECONDS` | `50` | Budget for one call, retries and backoff included. Each attempt's timeout is clamped to what is left, so the call fails before the edge proxy's read timeout (nginx/ingress default 60 s) instead of surfacing to the user as a `504`. |
+| `MAX_RESPONSE_BYTES` | `67108864` (64 MiB) | Largest response body accepted. A larger declared `Content-Length` is refused before reading; otherwise the body is streamed and cut off past the cap. Minimum `1024`. |
+| `RETRY_RATE_LIMITED` | `false` | Retry on HTTP `429`. Off by default: TEI answers `429` when its queue is full, and more requests from the interactive path only lengthen the backlog. Enable it for batch indexing jobs. |
+| `ALLOW_INSECURE_KEY` | `false` | Send `API_KEY` over plain `http` to a host that may be public. |
+
+**Retries.** Timeouts, connection errors and `408`/`425`/`500`/`502`/`503`/`504`
+are retried with exponential backoff until `MAX_RETRIES` or
+`MAX_TOTAL_SECONDS` runs out, whichever comes first. `429` is retried only
+with `RETRY_RATE_LIMITED=true`. Any other `4xx` fails at once, and the upstream
+error body is never echoed into the raised `InferenceError` (a TEI error text
+can name model paths or internal hosts).
+
+**Where the key may travel.** With `API_KEY` set, the client is built only when
+the URL is `https`, or plain `http` to a host that cannot be on the public
+internet: loopback (`localhost`, `127.0.0.1`, `::1`), a single-label name (a
+compose service or same-namespace Kubernetes Service such as
+`http://tei-embed:8080`), or a cluster-local name ending in `.svc` or
+`.cluster.local`. Anything else raises `InferenceConfigError` when the service
+is built, unless `ALLOW_INSECURE_KEY=true` accepts the risk for that service.
+Environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`) are ignored by these clients
+(`trust_env=False`), so the token cannot be routed through one.
+
+**Non-JSON bodies.** A `200` whose body is not JSON (a proxy's login page, a
+truncated response) raises `InferenceError` naming the size, not the body.
+
+**Qdrant names.** `BASELITH_QDRANT_URL` and `BASELITH_QDRANT_API_KEY` also bind
+from the unprefixed `QDRANT_URL` and `QDRANT_API_KEY` that the compose files,
+the Helm chart and `configs/.env.*` already set for the vector store. The
+prefixed names remain for an inference-only Qdrant and win when both are set.
+
+For the Helm side — the shared TEI bearer token (`inference.tei.apiKeySecret`),
+the image digest pin, the TEI egress policy and disruption budget — and for
+the compose `inference` profile, see
+[Deployment › Inference model servers](deployment.md#inference-model-servers).

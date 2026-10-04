@@ -48,6 +48,84 @@ def _build_recovery_lock() -> Any | None:
         return None
 
 
+#: Backoff for re-initializing the store after a boot with PostgreSQL down.
+_RETRY_INITIAL_DELAY_S = 2.0
+_RETRY_MAX_DELAY_S = 30.0
+
+
+def _register(
+    task: asyncio.Task[Any], background_tasks: set[asyncio.Task[Any]]
+) -> None:
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+
+
+def _schedule_recovery_sweep(
+    checkpoint_store: Any, background_tasks: set[asyncio.Task[Any]]
+) -> None:
+    """Start the recovery sweep loop when ``checkpoint_resume_on_startup``."""
+    from core.config.orchestration import get_orchestration_config
+
+    config = get_orchestration_config()
+    if not config.checkpoint_resume_on_startup:
+        return
+
+    async def _recover() -> None:
+        from core.chat import chat_service
+        from core.orchestration.recovery import recovery_sweep_loop
+
+        logger.info(
+            "🧬 Crash recovery sweeps every %.0fs "
+            "(resume after %.0fs idle, fail after %.0fs)",
+            config.recovery_sweep_interval_seconds,
+            config.recovery_resume_after_seconds,
+            config.recovery_stale_after_seconds,
+        )
+        await recovery_sweep_loop(
+            chat_service.agent,
+            checkpoint_store,
+            interval_seconds=config.recovery_sweep_interval_seconds,
+            stale_after_seconds=config.recovery_stale_after_seconds,
+            resume_after_seconds=config.recovery_resume_after_seconds,
+            lock_factory=_build_recovery_lock,
+        )
+
+    _register(asyncio.create_task(_recover()), background_tasks)
+
+
+async def _initialize_when_database_returns(
+    background_tasks: set[asyncio.Task[Any]],
+) -> None:
+    """Re-probe PostgreSQL with backoff; initialize the store once it answers.
+
+    Runs as a background task so boot never waits on a database that is down.
+    Cancelled with the other startup tasks at shutdown.
+    """
+    from core.db.reachability import probe_postgres
+    from core.orchestration.checkpoint_factory import (
+        CheckpointStoreUnavailableError,
+        initialize_default_checkpoint_store,
+    )
+
+    delay = _RETRY_INITIAL_DELAY_S
+    while True:
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, _RETRY_MAX_DELAY_S)
+        if not await probe_postgres():
+            continue
+        try:
+            checkpoint_store = await initialize_default_checkpoint_store()
+        except CheckpointStoreUnavailableError:
+            continue
+        except Exception as exc:
+            logger.warning("Checkpoint store initialization retry failed: %s", exc)
+            continue
+        logger.info("🧬 Checkpoint store ready after PostgreSQL recovered")
+        if checkpoint_store is not None:
+            _schedule_recovery_sweep(checkpoint_store, background_tasks)
+        return
+
+
 async def start_checkpoint_recovery(
     background_tasks: set[asyncio.Task[Any]],
 ) -> None:
@@ -63,46 +141,36 @@ async def start_checkpoint_recovery(
     sweep left every post-startup wedge to the next restart — a ``running``
     checkpoint that stopped making progress stayed invisible to liveness
     probes, which only ever see that the process still answers HTTP.
+
+    With a Postgres-backed store and the boot reachability probe already
+    failed, initialization does not wait out ``DB_POOL_TIMEOUT``: boot goes
+    on degraded and a background task initializes the store (and starts the
+    sweep) once PostgreSQL answers again.
     """
     try:
         from core.orchestration.checkpoint_factory import (
+            CheckpointStoreUnavailableError,
             initialize_default_checkpoint_store,
         )
 
-        checkpoint_store = await initialize_default_checkpoint_store()
+        try:
+            checkpoint_store = await initialize_default_checkpoint_store()
+        except CheckpointStoreUnavailableError:
+            logger.warning(
+                "🧬 Checkpoint store deferred: PostgreSQL unreachable at boot; "
+                "retrying in the background"
+            )
+            _register(
+                asyncio.create_task(
+                    _initialize_when_database_returns(background_tasks)
+                ),
+                background_tasks,
+            )
+            return
         if checkpoint_store is None:
             return
         logger.info("🧬 Checkpoint store ready (durable runs + /approvals)")
-
-        from core.config.orchestration import get_orchestration_config
-
-        config = get_orchestration_config()
-        if not config.checkpoint_resume_on_startup:
-            return
-
-        async def _recover() -> None:
-            from core.chat import chat_service
-            from core.orchestration.recovery import recovery_sweep_loop
-
-            logger.info(
-                "🧬 Crash recovery sweeps every %.0fs "
-                "(resume after %.0fs idle, fail after %.0fs)",
-                config.recovery_sweep_interval_seconds,
-                config.recovery_resume_after_seconds,
-                config.recovery_stale_after_seconds,
-            )
-            await recovery_sweep_loop(
-                chat_service.agent,
-                checkpoint_store,
-                interval_seconds=config.recovery_sweep_interval_seconds,
-                stale_after_seconds=config.recovery_stale_after_seconds,
-                resume_after_seconds=config.recovery_resume_after_seconds,
-                lock_factory=_build_recovery_lock,
-            )
-
-        recovery_task = asyncio.create_task(_recover())
-        background_tasks.add(recovery_task)
-        recovery_task.add_done_callback(background_tasks.discard)
+        _schedule_recovery_sweep(checkpoint_store, background_tasks)
     except Exception as exc:
         logger.warning("Checkpoint store initialization failed: %s", exc)
 

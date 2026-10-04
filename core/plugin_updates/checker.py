@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +40,10 @@ from .models import (
 from .provenance import check_plugin_provenance
 from .signed_assets import verify_signed_assets
 from .sources import GitHubReleaseSource, SourceError, is_commit_sha
+
+#: Trust roots for :func:`run_check`: one list for every plugin, or a lookup
+#: by plugin name that honours the trust store's per-key ``plugins`` scope.
+TrustRoots = Sequence[str] | Callable[[str], Sequence[str]]
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +275,7 @@ async def run_check(
     source: GitHubReleaseSource,
     cache: UpdateCache,
     core_version: str,
-    trusted_keys: Sequence[str],
+    trusted_keys: TrustRoots,
     trust: TrustMode = "signed",
 ) -> CheckReport:
     """Check every plugin that has both a source and an installed version.
@@ -281,10 +285,15 @@ async def run_check(
     (:func:`~.provenance.check_plugin_provenance`). In both modes an
     available release's signed assets are verified into
     ``UpdateCandidate.signed_assets``.
+
+    ``trusted_keys`` is either one key list for every plugin or a callable
+    returning the keys that may vouch for a given plugin name — the store's
+    per-key ``plugins`` scope (:func:`core.plugins.signing.load_trust_roots`).
     """
     gate = asyncio.Semaphore(_CONCURRENCY)
 
     async def one(name: str) -> UpdateCandidate:
+        keys = trusted_keys(name) if callable(trusted_keys) else trusted_keys
         async with gate:
             if trust == "provenance":
                 cand = await check_plugin_provenance(
@@ -295,7 +304,7 @@ async def run_check(
                     core_version=core_version,
                 )
                 return await _with_signed_assets(
-                    cand, source, cache, core_version, trusted_keys
+                    cand, source, cache, core_version, keys
                 )
             return await check_plugin(
                 name,
@@ -304,7 +313,7 @@ async def run_check(
                 source=source,
                 cache=cache,
                 core_version=core_version,
-                trusted_keys=trusted_keys,
+                trusted_keys=keys,
             )
 
     names = sorted(set(sources) & set(installed))

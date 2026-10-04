@@ -38,9 +38,10 @@ def parse_advisory(entry: Any) -> list[Advisory]:
     for vuln in vulns:
         if not isinstance(vuln, dict):
             continue
-        rng = _text(vuln.get("vulnerable_version_range"))
-        if rng is None:
-            continue
+        # A vulnerability without a range is kept with an empty one: the
+        # matcher then reports it as affecting (uncertain) instead of the
+        # advisory vanishing from the notice.
+        rng = _text(vuln.get("vulnerable_version_range")) or ""
         found.append(
             Advisory(
                 ghsa_id=ghsa,

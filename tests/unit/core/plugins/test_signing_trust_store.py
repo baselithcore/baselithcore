@@ -275,3 +275,77 @@ def test_enforcement_refuses_when_nothing_is_configured(
     with caplog.at_level(logging.ERROR, logger="core.plugins.signing"):
         assert enforce_plugin_signature("demo", HASH, "ab" * 32) is False
     assert "trust root" in caplog.text.lower()
+
+
+# ── Per-plugin scope ─────────────────────────────────────────────────────────
+
+
+def test_scoped_key_is_a_root_only_for_its_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, public = generate_keypair_hex()
+    store = _write_store(
+        tmp_path,
+        {
+            "key_id": "acme",
+            "public_key_hex": public,
+            "plugins": ["acme_crm", "acme_pay"],
+        },
+    )
+    monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
+
+    key = load_trust_store()[0]
+    assert key.plugins == ("acme_crm", "acme_pay")
+    assert key.covers("acme_crm") and not key.covers("other")
+    assert key.covers(None)  # a caller that cannot name the plugin narrows nothing
+    assert load_trust_roots("acme_pay") == [public]
+    assert load_trust_roots("other") == []
+    assert load_trust_roots() == [public]
+
+
+def test_unscoped_key_covers_every_plugin() -> None:
+    key = TrustedKey(key_id="k", public_key_hex="a" * 64)
+    assert key.plugins is None and key.covers("anything")
+
+
+def test_malformed_scope_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _, public = generate_keypair_hex()
+    store = _write_store(tmp_path, {"public_key_hex": public, "plugins": "acme_crm"})
+    monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
+    with caplog.at_level(logging.ERROR):
+        key = load_trust_store()[0]
+    assert key.plugins == () and not key.covers("acme_crm")
+    assert "malformed plugins scope" in caplog.text
+
+
+def test_enforcement_refuses_a_key_scoped_to_other_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    private, public = generate_keypair_hex()
+    store = _write_store(
+        tmp_path, {"key_id": "acme", "public_key_hex": public, "plugins": ["acme_crm"]}
+    )
+    monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
+    monkeypatch.setenv("BASELITH_REQUIRE_PLUGIN_SIGNATURES", "true")
+    signature = sign_plugin_hash(HASH, private)
+
+    assert enforce_plugin_signature("acme_crm", HASH, signature) is True
+    with caplog.at_level(logging.ERROR):
+        assert enforce_plugin_signature("payments", HASH, signature) is False
+    assert "scoped to other plugins" in caplog.text and "acme" in caplog.text
+
+
+def test_group_or_world_writable_store_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _, public = generate_keypair_hex()
+    store = _write_store(tmp_path, {"public_key_hex": public})
+    store.chmod(0o666)
+    monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
+    with caplog.at_level(logging.ERROR):
+        assert load_trust_store() == []
+    assert "writable" in caplog.text
+    store.chmod(0o644)
+    assert [k.public_key_hex for k in load_trust_store()] == [public]

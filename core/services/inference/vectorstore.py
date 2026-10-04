@@ -7,19 +7,23 @@ Plugins never see the raw client: they get a :class:`ScopedVectorStore` bound
 to ``(tenant, plugin)``. Every method takes a *logical* collection name and
 maps it to ``<tenant>.<plugin>.<name>`` itself, so a plugin cannot address
 another tenant's (or another plugin's) data.
+
+``qdrant_client`` is the optional ``[qdrant]`` extra, so it is imported only
+when :meth:`QdrantRuntime.open` builds a client — never at module import,
+which the lifespan shutdown and the pgvector deployments reach.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from qdrant_client import AsyncQdrantClient
-
 from core.config.inference import QdrantServerConfig, get_qdrant_server_config
 from core.services.inference.errors import InferenceConfigError
 from core.services.inference.scope import scope_prefix, scoped_name
 
 if TYPE_CHECKING:
+    from qdrant_client import AsyncQdrantClient
+
     from core.plugins.interface import Plugin
 
 MEMORY_LOCATION = ":memory:"
@@ -37,6 +41,13 @@ class QdrantRuntime:
     ) -> QdrantRuntime:
         """Connect to the Qdrant server named by ``config``."""
         cfg = config or get_qdrant_server_config()
+        try:
+            from qdrant_client import AsyncQdrantClient
+        except ImportError as exc:
+            raise InferenceConfigError(
+                "the core vector store needs qdrant-client: install "
+                "'baselith-core[qdrant]'."
+            ) from exc
         if cfg.url is None:
             raise InferenceConfigError(
                 "BASELITH_QDRANT_URL is required: the core vector store talks to "

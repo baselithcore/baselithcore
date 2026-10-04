@@ -24,7 +24,7 @@ templates/types), `POST /dash/agents` (🔒, create),
 ## Notes
 
 Custom agents persist to
-`plugins/baselithbot/.state/custom_agents.json` and are restored
+`<state_dir>/custom_agents.json` and are restored
 (`bootstrap()`) on plugin startup, the same pattern used by
 [Cron](cron.md)'s custom jobs. The `baselithbot_agent_route` MCP tool uses
 the same `AgentRegistry` to dispatch programmatically.

@@ -35,6 +35,7 @@ from .security import (
     verify_admin_password_async,
 )
 from .tenant import TenantMiddleware
+from .unhandled_error import UnhandledErrorMiddleware
 
 __all__ = [
     # Cost Control
@@ -73,4 +74,6 @@ __all__ = [
     "QuotaMiddleware",
     # HTTP RED metrics
     "HTTPMetricsMiddleware",
+    # Catch-all 500 inside the observability layers
+    "UnhandledErrorMiddleware",
 ]

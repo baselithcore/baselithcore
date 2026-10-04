@@ -138,8 +138,24 @@ async def delete_by_filter_impl(
         raise VectorStoreError(f"Delete by filter failed: {e}") from e
 
 
+def is_missing_collection(exc: Exception) -> bool:
+    """True when an exception signals a not-yet-created Qdrant collection.
+
+    Qdrant answers a read against an unknown collection with HTTP 404
+    (``Not found: Collection ... doesn't exist!``). That is a permanent,
+    non-transient condition — retrying never helps — and semantically means
+    "no data", so a read should treat it as an empty result rather than an
+    error worth logging and retrying.
+    """
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    text = str(exc).lower()
+    return "doesn't exist" in text or "not found: collection" in text
+
+
 __all__ = [
     "delete_by_filter_impl",
+    "is_missing_collection",
     "merge_tenant_filter",
     "query_points_groups_impl",
     "query_points_impl",

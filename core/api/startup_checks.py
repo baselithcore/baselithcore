@@ -8,10 +8,18 @@ eager construction of the auth/security singletons. Extracted from
 
 from __future__ import annotations
 
-from typing import Any
-
 import redis.asyncio as redis
 
+from core.api._regulatory_startup import (
+    check_compliance_profile,
+    register_consent_provider,
+    start_post_market_sweep,
+    start_regulatory_subsystems,
+    start_retention_scheduler,
+    stop_post_market_sweep,
+    stop_regulatory_subsystems,
+    stop_retention_scheduler,
+)
 from core.config import get_storage_config
 from core.config.environment import is_production_env
 from core.observability.logging import get_logger
@@ -84,6 +92,16 @@ def _warn_missing_trusted_hosts() -> None:
         if not is_production_env():
             return
         trusted = getattr(get_security_config(), "trusted_hosts", None)
+        if trusted and set(trusted) <= _LOOPBACK_HOSTS:
+            # The .env.example value, carried into production unedited: every
+            # request addressed to the public hostname would answer 400.
+            logger.warning(
+                "🛡️ TRUSTED_HOSTS lists only loopback names (%s) in production: "
+                "requests addressed to this deployment's public hostname get "
+                "400 Invalid host header. Set it to the hostnames your proxy "
+                "serves.",
+                ", ".join(sorted(trusted)),
+            )
         if trusted:
             return
         message = (
@@ -100,6 +118,10 @@ def _warn_missing_trusted_hosts() -> None:
         raise
     except Exception:  # pragma: no cover - advisory only
         logger.debug("Trusted-host check skipped", exc_info=True)
+
+
+#: Hostnames the shipped ``.env.example`` allows so a local copy works as-is.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]", "::1"})
 
 
 class UnvalidatedHostConfigError(RuntimeError):
@@ -187,20 +209,90 @@ class UnboundJWTConfigError(RuntimeError):
     """Production refused to start with an unbound JWT trust perimeter."""
 
 
-async def warm_db_pool() -> None:
+#: Upper bound on each startup database wait (health probe, RLS posture read
+#: after a failed probe). Without it every step waited a full DB_POOL_TIMEOUT
+#: in series, so a boot with PostgreSQL down took minutes, not seconds.
+STARTUP_DB_PROBE_TIMEOUT_S = 10.0
+
+
+async def warm_db_pool() -> bool:
     """Open the async DB pool during startup instead of on the first request.
 
     Without this the first caller after a deploy pays TCP+TLS+auth for
     ``min_size`` connections inline. Fail-soft: on failure the lazy open on
     first use still covers requests. No-op when PostgreSQL is disabled.
+
+    Returns:
+        Whether the pool reports itself warm. ``True`` does not prove the
+        database answers (a pool opened lazily earlier counts as warm), which
+        is why :func:`run_startup_health_checks` probes before trusting it.
     """
     from core.db.connection import warm_async_pool
-    from core.db.pool_budget import check_connection_budget
 
     if await warm_async_pool():
         logger.info("🔌 DB pool warmed (min_size connections ready).")
+        return True
+    return False
+
+
+async def _probe_postgres() -> bool:
+    """Warm, ping and size-check PostgreSQL; ``True`` when it answered.
+
+    Startup has no request and therefore no tenant. With ``DB_RLS_ENABLED``
+    the session binding refuses to invent one, so every checkout here declares
+    itself as system work — otherwise a healthy database is reported
+    unreachable, and the connection-budget read was silently refused. Each
+    wait is bounded by :data:`STARTUP_DB_PROBE_TIMEOUT_S`; the budget read only
+    runs once the ping proved the database answers.
+    """
+    import asyncio
+
+    from core.db import reachability
+    from core.db.connection import get_async_connection, system_tenant_scope
+    from core.db.pool_budget import check_connection_budget
+
+    # The boot probe already saw the database down: one cheap direct re-probe
+    # instead of a pool warm-up plus a checkout that each wait out a timeout.
+    if reachability.postgres_known_unreachable():
+        if not await reachability.probe_postgres():
+            raise ConnectionError("PostgreSQL unreachable (startup probe)")
+
+    # Warm the pool first: the health-check checkout then reuses a warmed
+    # connection, and the first real request after a deploy doesn't pay
+    # TCP+TLS+auth for min_size connections inline.
+    await warm_db_pool()
+    with system_tenant_scope():
+        async with asyncio.timeout(STARTUP_DB_PROBE_TIMEOUT_S):
+            async with get_async_connection() as conn:
+                await conn.execute("SELECT 1")
+        logger.info("✅ Startup health check: PostgreSQL OK")
         # Pool size x workers vs the server's max_connections; warns only.
         await check_connection_budget()
+    return True
+
+
+async def _enforce_rls_posture(postgres_reachable: bool) -> None:
+    """Run the RLS posture check; bounded when the database did not answer.
+
+    A posture that defeats RLS still raises (it is a misconfiguration, not an
+    outage). When the probe already failed, the read is capped so an
+    unreachable database costs one more bounded wait, not a DB_POOL_TIMEOUT.
+    """
+    import asyncio
+
+    from core.db.rls_posture import enforce_rls_posture
+
+    if postgres_reachable:
+        await enforce_rls_posture()
+        return
+    try:
+        async with asyncio.timeout(STARTUP_DB_PROBE_TIMEOUT_S):
+            await enforce_rls_posture()
+    except TimeoutError:
+        logger.warning(
+            "Row-level-security posture check skipped (database unreachable); "
+            "tenant isolation at the database has not been verified."
+        )
 
 
 async def run_startup_health_checks() -> None:
@@ -216,22 +308,10 @@ async def run_startup_health_checks() -> None:
     is_production = is_production_env()
     log_fn = logger.error if is_production else logger.warning
 
+    postgres_reachable = False
     if POSTGRES_ENABLED:
         try:
-            from core.db.connection import get_async_connection, system_tenant_scope
-
-            # Warm the pool first: the health-check checkout then reuses a
-            # warmed connection, and the first real request after a deploy
-            # doesn't pay TCP+TLS+auth for min_size connections inline.
-            await warm_db_pool()
-            # Startup has no request and therefore no tenant. With
-            # DB_RLS_ENABLED the session binding refuses to invent one, so
-            # this probe declares itself as system work — otherwise a healthy
-            # database is reported unreachable (at ERROR level in production).
-            with system_tenant_scope():
-                async with get_async_connection() as conn:
-                    await conn.execute("SELECT 1")
-            logger.info("✅ Startup health check: PostgreSQL OK")
+            postgres_reachable = await _probe_postgres()
         except Exception as exc:
             log_fn(
                 "Startup health check FAILED — PostgreSQL unreachable: %s",
@@ -242,9 +322,7 @@ async def run_startup_health_checks() -> None:
         # row-level security is a security misconfiguration, not an
         # infrastructure blip, and must not be swallowed by the handler that
         # reports an unreachable database.
-        from core.db.rls_posture import enforce_rls_posture
-
-        await enforce_rls_posture()
+        await _enforce_rls_posture(postgres_reachable)
 
     if CACHE_REDIS_URL:
         try:
@@ -258,18 +336,21 @@ async def run_startup_health_checks() -> None:
                 type(exc).__name__,
             )
 
-    if is_production and POSTGRES_ENABLED:
+    if is_production and POSTGRES_ENABLED and not postgres_reachable:
+        logger.warning("Could not verify migration status: PostgreSQL unreachable")
+    elif is_production and POSTGRES_ENABLED:
         try:
             import asyncio as _asyncio
 
-            from alembic.config import Config as AlembicConfig
             from alembic.runtime.migration import MigrationContext
             from alembic.script import ScriptDirectory
+
+            from core.db.migration_config import build_alembic_config
 
             def _check_migrations() -> tuple[str, str]:
                 from sqlalchemy import create_engine
 
-                alembic_cfg = AlembicConfig("alembic.ini")
+                alembic_cfg = build_alembic_config()
                 script = ScriptDirectory.from_config(alembic_cfg)
                 head_rev: str = script.get_current_head() or "unknown"
 
@@ -319,164 +400,6 @@ async def run_startup_health_checks() -> None:
     from core.services.llm.preflight import run_llm_preflight
 
     await run_llm_preflight()
-
-
-def start_retention_scheduler(app: Any) -> None:
-    """Start the background DSR retention sweep when configured (Art. 5(1)(e)).
-
-    Opt-in: runs only when ``PRIVACY_ENABLED`` and ``PRIVACY_RETENTION_DAYS > 0``.
-    Stores the scheduler on ``app.state.retention_scheduler`` (``None`` when not
-    started) so :func:`stop_retention_scheduler` can tear it down. Best-effort —
-    a failure here must never block startup.
-    """
-    app.state.retention_scheduler = None
-    try:
-        from core.config.privacy import get_privacy_config
-
-        privacy = get_privacy_config()
-        if not (privacy.enabled and privacy.retention_days > 0):
-            return
-
-        from core.privacy.scheduler import RetentionScheduler
-
-        scheduler = RetentionScheduler(privacy.retention_days * 86400)
-        scheduler.start()
-        app.state.retention_scheduler = scheduler
-        logger.info(
-            "🗓️ Retention scheduler started (horizon=%dd).", privacy.retention_days
-        )
-    except Exception as exc:
-        logger.warning("Retention scheduler setup failed: %s", exc)
-
-
-async def stop_retention_scheduler(app: Any) -> None:
-    """Stop the retention scheduler if one was started. Best-effort."""
-    scheduler = getattr(app.state, "retention_scheduler", None)
-    if scheduler is None:
-        return
-    try:
-        await scheduler.stop()
-    except Exception as exc:
-        logger.warning("Retention scheduler shutdown failed: %s", exc)
-
-
-def start_post_market_sweep(app: Any) -> None:
-    """Start the daily governance review sweep when configured.
-
-    Covers the three recurring obligations at once: the Art. 9(1) risk-file
-    review, the Art. 72(1) post-market review, and the GDPR Art. 35(11) DPIA
-    review plus any Art. 36(1) prior consultation still outstanding.
-
-    Opt-in: runs only when ``COMPLIANCE_ENABLED`` and
-    ``COMPLIANCE_POST_MARKET_SWEEP_ENABLED``. Best-effort — never blocks
-    startup.
-    """
-    app.state.post_market_scheduler = None
-    try:
-        from core.config.compliance import get_compliance_config
-
-        config = get_compliance_config()
-        if not (config.enabled and config.post_market_sweep_enabled):
-            return
-
-        from core.compliance.review_sweep import ComplianceReviewScheduler
-
-        scheduler = ComplianceReviewScheduler()
-        scheduler.start()
-        app.state.post_market_scheduler = scheduler
-        logger.info(
-            "📋 Compliance review sweep started (AI Act Art. 9/72, GDPR Art. 35)."
-        )
-    except Exception as exc:
-        logger.warning("Compliance review sweep setup failed: %s", exc)
-
-
-async def stop_post_market_sweep(app: Any) -> None:
-    """Stop the governance review sweep if one was started. Best-effort."""
-    scheduler = getattr(app.state, "post_market_scheduler", None)
-    if scheduler is None:
-        return
-    try:
-        await scheduler.stop()
-    except Exception as exc:
-        logger.warning("Compliance review sweep shutdown failed: %s", exc)
-
-
-def check_compliance_profile(app: Any) -> None:
-    """Check the declared regulatory posture against the running configuration.
-
-    Reports every gap (or fails startup when
-    ``BASELITH_COMPLIANCE_PROFILE_STRICT`` is set) but never flips a setting on
-    by itself — see :mod:`core.compliance.profile`. No-op unless
-    ``BASELITH_COMPLIANCE_PROFILE`` names a profile.
-    """
-    app.state.compliance_profile = None
-    try:
-        from core.compliance.profile import enforce_profile
-
-        app.state.compliance_profile = enforce_profile()
-    except Exception as exc:
-        # A strict-mode violation must stop startup; anything else is
-        # best-effort and must not block it.
-        if type(exc).__name__ == "ComplianceProfileError":
-            raise
-        logger.warning("Compliance profile check skipped: %s", exc)
-
-
-def register_consent_provider() -> None:
-    """Attach the Art. 7 consent log to the data-subject registry.
-
-    Consent records *are* personal data. Without this registration a
-    subject-access export (Art. 15/20) or an erasure (Art. 17) would silently
-    omit them — the request would look complete while leaving a store
-    untouched, which is the failure mode the DSR framework exists to prevent.
-
-    Opt-in with the rest of the privacy subsystem (``PRIVACY_ENABLED``).
-    Idempotent because the registry is keyed by provider name: a second call
-    replaces the entry with the *current* consent service rather than leaving a
-    stale one behind after a reconfiguration. Best-effort — a failure here must
-    never block startup.
-    """
-    try:
-        from core.config.privacy import get_privacy_config
-
-        if not get_privacy_config().enabled:
-            return
-
-        from core.privacy import get_consent_service, register_data_provider
-
-        register_data_provider(get_consent_service())
-        logger.info("🔏 Consent log registered as a DSR provider (GDPR Art. 7).")
-    except Exception as exc:
-        logger.warning("Consent DSR provider registration failed: %s", exc)
-
-
-def start_regulatory_subsystems(app: Any) -> None:
-    """Bring up the regulatory subsystems, in the order they depend on.
-
-    1. the durable audit trail — first, so every later startup step is already
-       covered by it (AI Act Art. 12/19, NIS2 Art. 21(2)(b), GDPR Art. 5(2));
-    2. the compliance-profile check, which may fail startup in strict mode;
-    3. the Art. 72 post-market review sweep;
-    4. the consent log, attached to the DSR registry so Art. 15/17 requests
-       actually reach it.
-
-    Each step is individually opt-in and no-ops when its flag is unset.
-    """
-    from core.observability.audit_setup import start_audit_trail
-
-    start_audit_trail(app)
-    check_compliance_profile(app)
-    start_post_market_sweep(app)
-    register_consent_provider()
-
-
-async def stop_regulatory_subsystems(app: Any) -> None:
-    """Tear the regulatory subsystems down, in reverse order. Best-effort."""
-    from core.observability.audit_setup import stop_audit_trail
-
-    await stop_post_market_sweep(app)
-    await stop_audit_trail(app)
 
 
 __all__ = [

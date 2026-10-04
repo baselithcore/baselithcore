@@ -46,6 +46,12 @@ FULL_PYTHONS: tuple[str, ...] = ("3.12", "3.13")
 #: A pull request into develop runs the floor only; the promotion to main
 #: runs the rest.
 SCOPED_PYTHONS: tuple[str, ...] = ("3.12",)
+#: Job names a green run must carry to vouch for a tree: every Python leg of
+#: the suite, plus the real-backend integration job beside it.
+VERIFYING_JOBS: tuple[str, ...] = (
+    *(f"Python Tests ({v})" for v in FULL_PYTHONS),
+    "Integration Tests",
+)
 
 #: The pipeline's own definition. A change here runs everything, so the new
 #: plan is exercised by the run that introduces it.
@@ -206,13 +212,14 @@ def tree_verified(repo: str, sha: str) -> bool:
         # A run's `pull_requests` is emptied once the pull request merges, so
         # it cannot say which pull request a run belonged to. What matters is
         # the plan it ran, and only `full` has every Python leg: a green run
-        # carrying all of them passed every gate on this tree.
+        # carrying all of them (and the integration job) passed every gate on
+        # this tree.
         def ran_full(run_id: int) -> bool:
             jobs = json.loads(
                 _run(*api, f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
             )["jobs"]
             passed = {j["name"] for j in jobs if j.get("conclusion") == "success"}
-            return all(f"Python Tests ({v})" in passed for v in FULL_PYTHONS)
+            return all(name in passed for name in VERIFYING_JOBS)
 
         if not any(ran_full(run["id"]) for run in runs):
             print(f"no green full CI run for #{pr['number']} at {head[:12]}")

@@ -30,6 +30,7 @@ from core.connectors.errors import (
     ConnectorNotFoundError,
     ConnectorRateLimitedError,
     ConnectorRequestError,
+    ConnectorResponseTooLargeError,
     ConnectorTransientError,
     ConnectorUnavailableError,
 )
@@ -86,6 +87,7 @@ __all__ = [
     "ConnectorNotFoundError",
     "ConnectorRateLimitedError",
     "ConnectorRequestError",
+    "ConnectorResponseTooLargeError",
     "ConnectorTransientError",
     "ConnectorUnavailableError",
     # Protocols and base

@@ -127,3 +127,25 @@ async def test_create_connector_explicit_tenant_and_registry():
 async def test_create_unknown_connector_is_a_config_error():
     with pytest.raises(ConnectorConfigError, match="nope"):
         await create_connector("nope", resolver=StaticCredentialResolver({}))
+
+
+def test_open_egress_spec_is_warned_about_in_production(monkeypatch, caplog):
+    import logging
+
+    from core.connectors import registry as registry_module
+
+    monkeypatch.setattr(registry_module, "is_production_env", lambda: True)
+    with caplog.at_level(logging.WARNING):
+        get_connector_registry().register_connector(Mailer)
+    assert "allowed_hosts" in caplog.text and "mailer" in caplog.text
+
+
+def test_open_egress_spec_is_silent_outside_production(monkeypatch, caplog):
+    import logging
+
+    from core.connectors import registry as registry_module
+
+    monkeypatch.setattr(registry_module, "is_production_env", lambda: False)
+    with caplog.at_level(logging.WARNING):
+        get_connector_registry().register_connector(Mailer)
+    assert "allowed_hosts" not in caplog.text

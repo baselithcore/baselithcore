@@ -106,7 +106,9 @@ class Router:
             List[RouteResult]: Ranked agent candidates.
         """
         # 1. Generate query vector
-        vectors = await self.embedder.encode([request.query])
+        from core.nlp.roles import aencode_query  # search side: query prefix
+
+        vectors = await aencode_query(self.embedder, [request.query])
         query_vector = list(next(iter(vectors)))
 
         # 2. Retrieve candidates from vector store (Tool-to-Agent Retrieval)

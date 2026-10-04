@@ -1114,8 +1114,13 @@ def my_ledger(report: UsageReport) -> None:
     report.usage      # Usage: input, output, cache_read, cache_write tokens
     report.batch      # True when billed at the batch rate
     report.requests   # calls it stands for (a batch job's metered entries)
+    report.tenant_id  # tenant bound when the turn ran, None outside one
+
+async def my_async_ledger(report: UsageReport) -> None:
+    ...                # I/O-bound sinks may be coroutines
 
 register_usage_sink(my_ledger)   # idempotent
+register_usage_sink(my_async_ledger)
 unregister_usage_sink(my_ledger)
 ```
 
@@ -1123,9 +1128,25 @@ One report is delivered per billed turn, from `record_usage_cost` — the same
 point, and the same record, the tenant cost ledger books — so a ledger built on
 it agrees with the core's own. `report_external_usage` delivers one too. Sinks
 run in the caller's context (the bound identity and plugin are visible), are
-resolved at call time, and are best-effort: what they raise is swallowed. A turn
-with an empty record (a cache hit, a call the provider never answered) is not
-delivered.
+resolved at call time, and are best-effort: they never block or fail the call.
+The bound tenant is stamped on the report as `tenant_id` before delivery (a
+report built with it already set keeps it), so a sink that hands the record to
+another task or process does not lose it. A sink that does I/O is an
+`async def`: its coroutine is scheduled on the running loop, not awaited
+inline, so the turn is never held up by the ledger (with no running loop — a
+sync script — it runs to completion in place). The module holds a strong
+reference to every pending sink task (the loop only holds them weakly), and
+the application lifespan awaits them at shutdown with
+`await drain_usage_sinks(timeout=5.0)` (from `core.services.llm.usage_sinks`):
+a turn billed just before the stop signal still reaches the ledger, and a sink
+still running at the deadline is cancelled and logged.
+
+A failing sink is **not** silent: a lost ledger write is a billing gap nobody
+else would notice, so each failure, sync or async, is logged at `WARNING` and
+counted in `mas_usage_sink_failures_total{sink}`, labelled with the sink's
+qualified name (never its `repr`, which would carry an address). Alert on any
+increase. A turn with an empty record (a cache hit, a call the provider never
+answered) is not delivered.
 
 #### Reporting usage measured outside the funnel
 
@@ -1328,6 +1349,18 @@ core/services/vectorstore/
     at `create_collection`; the extension must be installable in the target
     database (`CREATE EXTENSION vector`).
 
+!!! warning "Existing collection width is checked, never auto-dropped"
+    `create_collection` is idempotent and leaves an existing collection alone,
+    so a changed embedding model or `VECTORSTORE_EMBEDDING_DIM` used to surface
+    only later, as failing upserts or meaningless scores. Both providers now
+    compare the live width (Qdrant collection params; the pgvector column's
+    `vector(n)`) with the configured one at setup and raise
+    `EmbeddingDimensionMismatchError` (a `VectorStoreError`) naming both sizes
+    and the fix: set `VECTORSTORE_EMBEDDING_DIM` back to the stored width, or
+    point `VECTORSTORE_COLLECTION_NAME` at a new collection and re-index. The
+    collection is never dropped for you. When the vector store is a required
+    resource the boot fails with that message.
+
 !!! warning "pgvector: filtered searches and `hnsw.iterative_scan`"
     An HNSW index scan visits `ef_search` candidates and applies the `WHERE`
     clause *afterwards*. Every tenant-scoped search carries one
@@ -1357,9 +1390,13 @@ core/services/vectorstore/
     plaintext traffic.
 
 !!! info "Embedding Cache"
-    The embedding cache keys are scoped by **model identifier** to prevent
-    cross-model collisions. Switching the `VECTORSTORE_EMBEDDING_MODEL` env var
-    automatically invalidates stale cache entries. Cached embeddings now **expire**
+    The embedding cache keys are scoped by **model identifier, embedding
+    dimension and document prompt** (`core.nlp.roles.cache_key`, role
+    `document`) to prevent stale or cross-model hits. Switching
+    `VECTORSTORE_EMBEDDING_MODEL`, `VECTORSTORE_EMBEDDING_DIM` or
+    `BASELITH_EMBEDDING_DOCUMENT_PREFIX` addresses new entries; the old ones
+    expire on their TTL. Upgrading to this key format re-embeds each cached
+    chunk once. Cached embeddings now **expire**
     after `VectorStoreConfig.embedding_cache_ttl` (default 7 days, env
     `EMBEDDING_CACHE_TTL`); the backing `RedisCache` applies this as its
     `default_ttl`, so cache keys never accumulate unbounded.
@@ -2331,5 +2368,12 @@ VOICE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 `core.services.inference` provides `EmbeddingService`, `RerankService` and a
 tenant-scoped `ScopedVectorStore` over one server-mode Qdrant client, plus a
 blocking bridge for synchronous plugins. Plugins call these instead of loading
-models or opening Qdrant clients themselves. See
+models or opening Qdrant clients themselves. The wire protocol is pluggable
+(`core/services/inference/_protocols.py`): TEI by default, or an
+OpenAI-compatible `/embeddings` and a Cohere- or NIM-style rerank for a
+customer's own servers. `EmbeddingService` refuses vectors whose size differs
+from the configured `dim` before they reach a collection. See
 [Inference Services](../advanced/inference-services.md).
+
+`core.services.retrieval.Reranker` follows the same rule: with the rerank
+service configured it scores through TEI instead of loading a CrossEncoder.

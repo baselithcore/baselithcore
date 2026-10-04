@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from scripts import ci_plan
-from scripts.ci_plan import FLAGS, FULL_PYTHONS, SCOPED_PYTHONS, decide
+from scripts.ci_plan import FLAGS, FULL_PYTHONS, SCOPED_PYTHONS, VERIFYING_JOBS, decide
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -145,9 +145,7 @@ PR = {
     "merged_at": "2026-09-26T00:00:00Z",
     "head": {"sha": "head"},
 }
-FULL_JOBS = [
-    {"name": f"Python Tests ({v})", "conclusion": "success"} for v in FULL_PYTHONS
-]
+FULL_JOBS = [{"name": name, "conclusion": "success"} for name in VERIFYING_JOBS]
 
 
 def _api(pulls=(PR,), trees=None, runs=({"id": 1},), jobs=FULL_JOBS):
@@ -195,6 +193,20 @@ def test_a_scoped_run_is_not_a_verification(monkeypatch) -> None:
         {"name": f"Python Tests ({SCOPED_PYTHONS[0]})", "conclusion": "success"}
     ]
     assert not _verified(monkeypatch, jobs=scoped_jobs)
+
+
+def test_a_run_without_the_integration_job_is_not_a_verification(monkeypatch) -> None:
+    """Every Python leg green but the real-backend suite missing vouches for nothing."""
+    jobs = [j for j in FULL_JOBS if j["name"] != "Integration Tests"]
+    assert not _verified(monkeypatch, jobs=jobs)
+
+
+def test_verifying_jobs_name_real_workflow_jobs() -> None:
+    """A renamed job would make every push to main fall back to `full`."""
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    names = {str(job.get("name", "")) for job in jobs.values()}
+    assert "Integration Tests" in names
+    assert "Python Tests (${{ matrix.python-version }})" in names
 
 
 def test_no_green_run_is_not_verified(monkeypatch) -> None:

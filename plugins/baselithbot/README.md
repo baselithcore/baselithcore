@@ -250,7 +250,7 @@ baselithbot:
 
 `computer_use` and `stealth` fields mutate live from the dashboard
 (`PUT /baselithbot/dash/computer-use`, `PUT /baselithbot/dash/stealth`).
-Overrides persist to `.state/runtime_config.json` and invalidate the
+Overrides persist to `<state_dir>/runtime_config.json` and invalidate the
 cached agent so the next run rebuilds with the new policy.
 
 ### Environment variables

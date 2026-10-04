@@ -18,6 +18,18 @@ os.environ.setdefault("BASELITHBOT_INBOUND_INSECURE", "1")
 
 
 @pytest.fixture(autouse=True)
+def _isolated_baselithbot_state(tmp_path_factory, monkeypatch):
+    """Keep every plugin built without ``state_dir`` out of the real home.
+
+    The default state directory is per-user (``~/.local/share``); a test that
+    constructs ``BaselithbotPlugin()`` must not write keys and stores there.
+    """
+    monkeypatch.setenv(
+        "BASELITHBOT_STATE_DIR", str(tmp_path_factory.mktemp("baselithbot_state"))
+    )
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_http_pool():
     """Isolate the module-global shared httpx pool between tests.
 

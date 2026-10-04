@@ -322,8 +322,15 @@ The registry/auth URLs may be overridden (e.g. for local mirrors), but the
 publish endpoint always targets `OFFICIAL_MARKETPLACE_URL`.
 
 `PLUGIN_PLUGINS_PATH` is also the directory the runtime loads plugins from, so
-a plugin installed there is picked up on the next start — see
-[Plugins › PluginLoader](plugins.md#pluginloader).
+a plugin installed there is picked up on the next start. Installs resolve it
+through `core.config.plugins.plugin_install_root()`, which **never writes into
+the installed package**: an explicit `PLUGIN_PLUGINS_PATH` is used as given (a
+relative value against the working directory, created if missing); unset, the
+target is `./plugins` under the working directory, created on first install.
+Reading is broader — with no `./plugins` the runtime falls back to the bundled
+`plugins` package in `site-packages` — and once `./plugins` exists the loader
+scans it *and* the bundled package, the project's copy winning a name clash.
+See [Plugins › PluginLoader](plugins.md#pluginloader).
 
 !!! warning "Registry URL scheme + SSRF"
     The registry feeds the installer, so two guards apply. **Transport**:

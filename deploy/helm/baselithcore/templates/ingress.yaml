@@ -35,3 +35,94 @@ spec:
           {{- end }}
     {{- end }}
 {{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.guards.enabled }}
+{{- $guards := .Values.ingress.guards -}}
+{{- if ne .Values.ingress.className "nginx" }}
+{{- fail (printf "ingress.guards needs ingress.className=nginx (ingress-nginx annotations); got %q. Another controller ignores the annotations and the guards would silently do nothing — port the two rules below to its own rate-limit and allow-list primitives instead." .Values.ingress.className) }}
+{{- end }}
+{{- $fullName := include "baselithcore.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- if $guards.metrics.enabled }}
+---
+# /metrics never through the public Ingress. Prometheus scrapes the pods via
+# the ServiceMonitor (pod IP, in-cluster); the app also demands Basic-auth on
+# the path — but the edge should not offer the endpoint to the internet at
+# all, which is what the compose stack's nginx.conf does and a single
+# `path: /` rule cannot. ingress-nginx answers 403 to every source outside
+# `allowSourceRange`, before the request reaches a pod.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-metrics-guard
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingress-guard
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: {{ $guards.metrics.allowSourceRange | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range $path := list "/metrics" "/v1/metrics" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- if $guards.auth.enabled }}
+---
+# The credential-stuffing targets, throttled per client IP in the controller
+# (limit-rps, burst = rps x multiplier, 503 beyond it) before a guess costs
+# the app a PBKDF2 slot. The main Ingress's annotations do not apply to a
+# second object, so the ones a console upload or a slow login needs are
+# repeated here with the same values.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-auth-guard
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingress-guard
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: {{ $guards.auth.rps | quote }}
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ $guards.auth.burstMultiplier | quote }}
+    {{- range $key := list "nginx.ingress.kubernetes.io/proxy-body-size" "nginx.ingress.kubernetes.io/proxy-read-timeout" "nginx.ingress.kubernetes.io/proxy-send-timeout" }}
+    {{- with index $.Values.ingress.annotations $key }}
+    {{ $key }}: {{ . | quote }}
+    {{- end }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range $path := $guards.auth.paths }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

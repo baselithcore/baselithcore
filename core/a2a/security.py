@@ -408,7 +408,11 @@ def verify_signature(
         nonce=nonce_header,
         peer=peer_header,
     )
-    if not hmac.compare_digest(expected, signature_header):
+    # Bytes: ``compare_digest`` raises TypeError on a non-ASCII str, and the
+    # header is peer-supplied.
+    if not hmac.compare_digest(
+        expected.encode("utf-8"), signature_header.encode("utf-8")
+    ):
         return False
     if nonce_header:
         # After the MAC checks out: a forged nonce can't reach this point, so

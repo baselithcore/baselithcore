@@ -34,6 +34,8 @@ pytestmark = [pytest.mark.unit]
 
 _MIGRATION = (
     Path(__file__).resolve().parents[2]
+    / "core"
+    / "db"
     / "migrations"
     / "versions"
     / "010_system_tenant_rls_exemption.py"
@@ -98,12 +100,16 @@ def test_scope_is_a_no_op_for_the_bound_tenant() -> None:
 
 
 def test_scope_binds_a_differing_key_and_restores() -> None:
+    from core.context import reset_user_context, set_user_context
+
     token = set_tenant_context("org-1")
+    user = set_user_context("u-1")  # the per-user key under personal tenancy
     try:
         with row_tenant_scope("u-1"):
             assert get_current_tenant_id() == "u-1"
         assert get_current_tenant_id() == "org-1"
     finally:
+        reset_user_context(user)
         reset_tenant_context(token)
 
 
@@ -122,3 +128,21 @@ def test_system_scope_itself_passes_through() -> None:
 
     with system_tenant_scope(), row_tenant_scope("system"):
         assert get_current_tenant_id() == "system"
+
+
+def test_scope_binds_only_a_key_derived_from_the_principal() -> None:
+    """The per-user key must be the bound user's id, never a caller's string."""
+    from core.context import reset_user_context, set_user_context
+    from core.db.rls_policy import ForeignTenantKeyError
+
+    token = set_tenant_context("org-1")
+    user = set_user_context("u-1")
+    try:
+        with row_tenant_scope("u-1"):
+            assert get_current_tenant_id() == "u-1"
+        with pytest.raises(ForeignTenantKeyError), row_tenant_scope("u-2"):
+            pass
+        assert get_current_tenant_id() == "org-1"
+    finally:
+        reset_user_context(user)
+        reset_tenant_context(token)

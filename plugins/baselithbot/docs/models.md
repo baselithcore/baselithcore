@@ -5,7 +5,7 @@
 `ModelPreferences` ([`model_config.py`](../model_config.py)) are the
 operator-chosen `(provider, model)` pair plus optional failover chain.
 Persisted atomically (`.tmp` + `os.replace`) to
-`plugins/baselithbot/.state/model_preferences.json`.
+`<state_dir>/model_preferences.json`.
 
 ## 1. Supported providers
 
@@ -53,8 +53,8 @@ Persisted atomically (`.tmp` + `os.replace`) to
   stay in env vars under `core.config.services`.
 - Writes bounded to catalog (`KNOWN_PROVIDERS` / `KNOWN_VISION_PROVIDERS`);
   unknown provider → 422.
-- Persistence atomic (`.tmp` + `os.replace`), restricted to plugin-owned
-  `.state/` directory; no cross-plugin writes.
+- Persistence atomic (`.tmp` + `os.replace`), restricted to the plugin's
+  state directory (`<state_dir>`); no cross-plugin writes.
 - Thread-safe via `threading.Lock`.
 
 ## 4. Dashboard endpoints

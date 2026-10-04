@@ -92,6 +92,17 @@ Tampering, an unknown key id, or a malformed/unsupported-version token raise
 
 ---
 
+## Credential digests
+
+`core.security.digest.credential_digest(data)` returns the hex SHA-256 of an
+opaque credential. API keys, JWTs and session tokens are indexed and cached by
+this digest, so the raw value never becomes a dictionary key, a cache entry or
+a rate-limit bucket name. SHA-256 fits because the inputs are random tokens,
+not human-chosen passwords, and the lookup runs on every authenticated request.
+
+It is not password storage. The operator credential goes through
+PBKDF2-SHA256 in `core/middleware/_admin_credentials.py`.
+
 ## SSRF Protection
 
 Any URL the framework fetches on the server's behalf — a webhook target, an

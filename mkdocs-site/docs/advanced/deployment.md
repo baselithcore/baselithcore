@@ -117,6 +117,13 @@ start — for something nothing touches until a request arrives.
 The `compose.prod.yaml` file defines the entire infrastructure, including reverse proxy and observability.
 
 ```yaml title="compose.prod.yaml"
+# Rotated json-file logs (5 x 10MB per service), referenced by every service.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   # Main service: API Backend
   api:
@@ -141,16 +148,25 @@ services:
       # rate limits / admin lockout see the real client, not nginx — and no
       # other container on app_net can forge one.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+      # Root filesystem is read-only (below): the baselithbot plugin keeps its
+      # secret-store key and state here, on a volume shared with the worker.
+      - plugin_state:/app/state/baselithbot
     networks:
       - app_net
       - obs_net
     depends_on:
-      - falkordb
-      - postgres
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     init: true
+    read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -158,9 +174,11 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 1024     # processes AND threads; Chromium forks liberally
           cpus: '1.0'
           memory: 1G
     healthcheck:
@@ -170,11 +188,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      # Cold start loads the embedder + reranker before /health answers —
-      # measured at ~100s on a laptop. Without a start period those probes
-      # count as failures and the container is flagged unhealthy while it is
-      # still booting normally.
-      start_period: 150s
+      # Same budget as the image HEALTHCHECK: on the 1-CPU limit the boot
+      # regularly outlasted the 150s this used to say. start_interval polls
+      # every 5s meanwhile (Docker >= 25; ignored by older daemons).
+      start_period: 300s
+      start_interval: 5s
 
   # Cache and Message Queue
   # Graph Database and Cache (Redis compatible)
@@ -223,7 +241,7 @@ services:
   # REQUIRED API key: Qdrant ships unauthenticated. The app sends the same
   # value as QDRANT_API_KEY (configs/.env.production).
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     environment:
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
 
@@ -290,9 +308,11 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
+      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+      - plugin_state:/app/state/baselithbot   # shared with api
     networks:
       - app_net
       - obs_net
@@ -302,6 +322,7 @@ services:
       falkordb:
         condition: service_healthy
     init: true
+    read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -309,9 +330,15 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
+    # The image HEALTHCHECK probes :8000/health, which an RQ consumer never
+    # serves: inherited, it flagged the worker unhealthy after every start.
+    healthcheck:
+      disable: true
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 1024
           cpus: '0.8'
           memory: 1G
 
@@ -320,7 +347,10 @@ services:
     image: nginx:1.31.5-alpine
     container_name: baselith-gateway
     ports:
-      - "80:80"
+      # IPv4 only: a bare "80:80" also binds [::]:80, and IPv6 clients then
+      # arrive through docker-proxy from the bridge gateway — one shared
+      # rate-limit bucket for all of them.
+      - "0.0.0.0:80:80"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/errors:/usr/share/nginx/errors:ro
@@ -348,11 +378,22 @@ services:
       - /var/run
       - /tmp:size=32m,noexec,nosuid
     restart: unless-stopped
+    logging: *logging
     deploy:
       resources:
         limits:
+          pids: 128
           cpus: '0.5'
           memory: 256M
+    healthcheck:
+      # The gateway's own liveness: nginx answers 204 on this path itself.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/__gateway/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional TEI model servers (`--profile inference`): see
+  # "Inference model servers" below.
 
   # === Observability Stack ===
   jaeger:
@@ -392,7 +433,11 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
+  qdrant_data:
   prometheus_data:
+  plugin_state:
+  tei_embed_models:
+  tei_rerank_models:
 
 networks:
   app_net:
@@ -409,6 +454,8 @@ networks:
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime reads both `APP_ENV` and `ENVIRONMENT` (`APP_ENV` wins) to activate production-only checks consistently. The aliases `prod`, `prd` and `live` now resolve to `production` too, and an environment name the framework does not recognise is treated as production — see [Environment naming](#environment-naming).
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
+    The `api` and `worker` containers run with a **read-only root filesystem** too, the posture the Helm chart already had: writable paths are `/tmp`, the `./data` volume and the named `plugin_state` volume mounted at `/app/state/baselithbot` and named by `BASELITHBOT_STATE_DIR`, which both services share so they read one secret-store master key. (It used to be mounted at `/app/plugins/baselithbot/.state`, which the plugin only found through its deprecated in-package fallback; the volume is the same, so an existing deployment keeps its key and stores across the move. The image creates the mount point owned by `appuser` with mode `0700`, so a fresh volume is writable.) Any other plugin that writes under `/app` needs a volume of its own, and `baselith plugin enable` (which rewrites `configs/plugins.yaml`) becomes a deploy-time change, as in Kubernetes. Every service logs through the `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`), so a chatty worker or a flood of edge `429`s cannot fill the host disk, and carries a `pids` limit under `deploy.resources.limits` (1024 for `api`/`worker`, 512 for Postgres, Qdrant and the TEI servers, 256 for FalkorDB, Jaeger and Prometheus, 128 for the gateway) so a fork bomb from a tool result stops at the cgroup. The `worker` disables the inherited image `HEALTHCHECK` (`healthcheck: disable: true`) — it probes `:8000/health`, which an RQ consumer never serves, and flagged the worker unhealthy after every start; `compose.yaml` does the same. The `api` start period is `300s` with `start_interval: 5s`.
+    The gateway publishes `0.0.0.0:80:80` — **IPv4 only**. A bare `"80:80"` also binds `[::]:80`, and on a dual-stack host IPv6 clients reach nginx through `docker-proxy` with the bridge gateway as their source address, so every IPv6 client shared one rate-limit bucket. Put a real IPv6 listener in front, or run the daemon with `userland-proxy` off, before publishing on `[::]`. Its own healthcheck probes `/__gateway/healthz`, which nginx answers `204` itself, so a backend restart does not flag the gateway unhealthy.
     JSON logs are selected by `LOG_JSON` (default `true`), which the `api` and `worker` services set explicitly; the older `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` are deprecated and have no effect — see [Production Configuration](#production-configuration).
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and **does not trust any caller by default**: it sends `X-Forwarded-For: $remote_addr` (never appending to a client-supplied chain) and its own `$scheme` / `$server_port` as `X-Forwarded-Proto` / `-Port`. Behind a load balancer, name it in `deploy/nginx/nginx.conf` — uncomment `set_real_ip_from <LB CIDR>` and add the same CIDR to the `geo $realip_remote_addr $from_trusted_lb` block: `realip` then recovers the client address from the LB's `X-Forwarded-For`, and the LB's `X-Forwarded-Proto` / `-Port` are honoured, but only on connections whose TCP peer is the LB. Never list a range untrusted clients can connect from.
@@ -416,6 +463,44 @@ networks:
     Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files, `ollama/ollama:0.33.2` in the default stack and `nginx:1.31.5-alpine` for the production gateway — a `latest`/`alpine` re-pull must not silently change the data plane, the local LLM runtime or the edge. Both stacks carry healthchecks for Qdrant (TCP connect probe — the image ships no curl), and `api`/`worker` gate on `condition: service_healthy` rather than `service_started`. In the production stack the `api` service used the bare list form of `depends_on`, which waits only for the container to be *created*, so it could take its first requests against a Postgres still running `initdb`; it now gates on health like the worker always did.
 
     **Data-tier authentication is mandatory in `compose.prod.yaml`.** `REDIS_PASSWORD` and `QDRANT_API_KEY` are required like `DB_PASSWORD`: `docker compose config` refuses to interpolate the stack without them. `REDIS_PASSWORD` arms `--requirepass` on FalkorDB and is embedded in `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` by `configs/.env.production` (so use a URL-safe value — `openssl rand -hex 32` — or percent-encode it); `QDRANT_API_KEY` becomes the server's `QDRANT__SERVICE__API_KEY` and the key the app sends. Without them any container on `app_net` — and any host process through the loopback publish — had full read/write access to the cache, the RQ queue (pickled jobs the worker executes), the graph, the rate-limit counters and every vector collection. The FalkorDB healthcheck authenticates through `REDISCLI_AUTH` rather than a `-a` flag. In the single-host `compose.yaml` stack both stay optional: unset, the URLs read `redis://:@…` and the key is empty, which the clients treat as "no credentials". Both compose files pass the Redis password through the FalkorDB image's `REDIS_ARGS` environment variable — the image entrypoint ignores a `command:` override, so `REDIS_ARGS` is the only way to add flags while the graph module keeps loading (the default stack also sets `--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru` there). When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379` — in the default stack the service is named `redis` but carries a `falkordb` network alias, so the same URL works.
+
+### Inference model servers
+
+`compose.prod.yaml` carries two optional Hugging Face Text Embeddings Inference
+servers behind the `inference` profile, mirroring the chart's `inference.tei`:
+`tei-embed` (`BAAI/bge-m3`, `--max-batch-tokens 4096`, 9G memory limit) and
+`tei-rerank` (`BAAI/bge-reranker-v2-m3`, `--max-batch-tokens 4096`, 9G), both
+`ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4` (`linux/amd64` only),
+read-only, every capability dropped, models cached in the
+`tei_embed_models` / `tei_rerank_models` volumes. `configs/.env.production`
+points the core inference services at them by default:
+
+```bash
+BASELITH_EMBEDDING_URL=${BASELITH_EMBEDDING_URL:-http://tei-embed:8080}
+BASELITH_RERANK_URL=${BASELITH_RERANK_URL:-http://tei-rerank:8080}
+BASELITH_QDRANT_URL=${BASELITH_QDRANT_URL:-http://${QDRANT_HOST:-qdrant}:6333}
+BASELITH_QDRANT_API_KEY=${QDRANT_API_KEY:-}
+```
+
+Start them with `docker compose -f compose.prod.yaml --profile inference up -d`.
+Without the profile those URLs resolve to nothing and the first embedding call
+fails — point them at your own servers instead. No bearer token is configured
+between the API and these servers in compose (they share the private
+`app_net`); a server reached across the network needs `https`, see
+[Inference Services › Client hardening](inference-services.md#client-hardening).
+
+On Kubernetes, `inference.tei` in the Helm chart (0.9.1) adds four values:
+
+| Value | Default | Effect |
+|---|---|---|
+| `inference.tei.apiKeySecret.name` / `.key` | `""` / `TEI_API_KEY` | Bearer token the model servers demand. The same Secret key is read into TEI's `API_KEY` and into the API and worker pods' `BASELITH_EMBEDDING_API_KEY` / `BASELITH_RERANK_API_KEY`, so the two cannot drift. Without it, only the NetworkPolicy (which exists only with `networkPolicy.enabled`) stands between the model servers and every pod in the cluster |
+| `inference.tei.image.digest` | `""` | `sha256:` digest that replaces the tag, as `image.digest` does for the app; anything else fails the render |
+| `inference.tei.networkPolicy.egress.enabled` / `.rules` | `true` / `[]` | Deny-by-default egress for the TEI pods: DNS plus TCP/443 to the internet (the Hub download) with cloud metadata and the private ranges carved out, like the app's `internetHttps` preset. A private model mirror goes under `rules`. Rendered only with `networkPolicy.enabled` |
+| `inference.tei.podDisruptionBudget.enabled` / `.maxUnavailable` | `true` / `1` | Disruption budget per model server, rendered only above one replica (a budget over one pod hangs every node drain) |
+
+The TEI pods also inherit `priorityClassName` and, above one replica, the
+release's `topologySpreadConstraints`. See
+[Kubernetes (Helm)](kubernetes.md#what-the-chart-provides).
 
 ### Container Image Build
 
@@ -467,6 +552,30 @@ so their per-architecture wheel hashes are not in it — and the lock's
 requirement is then already satisfied. Rebuilding the same commit with this
 change produced the same 11.6GB image and an identical `docker history` layer
 for layer; the difference is that the bytes are now verified.
+
+The runtime stage sets **`HF_HUB_OFFLINE=1`**. The pre-cached models under
+`/app/models` are the whole model set the image serves; without it every
+in-process model load still asked the Hub whether `main` had moved and pulled a
+newer revision if so — untested weights swapped under a running deployment, a
+write into a cache that is read-only in production, and an outbound call the
+egress policy has to allow. The chart's TEI pods download their own models and
+are unaffected.
+
+The pre-cache step also keeps **one copy of each model's weights**. `BAAI/bge-m3`
+publishes only `pytorch_model.bin` on `main`, so transformers fetched the
+safetensors file from the Hub's auto-conversion pull request as well, and the
+image carried both: 2.27GB twice, 4.4GB of cache measured on a built image.
+Offline, only the `main` snapshot is read, which made the safetensors copy dead
+weight and loaded the model through `torch.load`. The step now links the
+safetensors file into `main` and drops the pickle, leaving 2.3GB that loads
+without unpickling anything (checked with `--network none`). It also covers a
+build where the Hub hands over only the converted file: `main` would then hold
+no weights at all, and the link is what lets the offline load find them.
+
+`.dockerignore` now excludes `**/.env` and `**/.env.*`, not
+only the root copies: `COPY plugins/`, `configs/` and `templates/` take whole
+trees, so a filled-in `plugins/<name>/.env` would otherwise ride into a pushed
+layer.
 
 #### What the layer rewrite changed
 
@@ -549,7 +658,14 @@ all interpreted. It also keeps a per-platform layer cache in the registry
 reuses the dependency, model and browser layers instead of rebuilding them.
 
 Signing and the provenance attestation run against the **index** digest, which
-is what a puller of the tag resolves — not against either platform digest.
+is what a puller of the tag resolves. `cosign sign --recursive` signs the
+per-platform manifests as well as the index, because a verifier that resolves
+the tag to its platform image (an admission controller on a single-arch node)
+found no signature on an index-only signing. Before signing, the job reads the
+index back by digest and fails unless it references exactly the two platform
+digests the run built — the tag is a mutable pointer, and anything that
+re-pushed it between `create` and `inspect` would otherwise hand the signing
+step a foreign index.
 
 Three things the pipeline gained once it was turned back on by default:
 
@@ -638,8 +754,15 @@ variables, so the three entry points behave alike behind one proxy.
   default `172.28.0.10`, inside `APP_NET_SUBNET`, default `172.28.0.0/24`) and
   trusts only that address — not the whole subnet, where any other container
   could forge the header; the Helm chart exposes the
-  same knob as `forwardedAllowIps` (set it to the ingress controller's pod
-  CIDR).
+  same knob as `forwardedAllowIps`. Narrow it to the ingress controller's own
+  pods (their node range or a dedicated node pool), **not** the cluster's pod
+  CIDR: the whole pod network is every pod in the cluster, and any of them
+  could then forge `X-Forwarded-For` (pick its rate-limit bucket, dodge the
+  admin lockout) or claim `https`. The `10.244.0.0/16` placeholder in
+  `values-production.yaml` is flannel/kindnet's default; on Calico, EKS or GKE
+  it matches nothing, every client collapses into one bucket and nothing logs
+  it — check with `kubectl get pods -n ingress-nginx -o wide` that the
+  controller's addresses fall inside the value.
 - **`--no-server-header`** — drop the `Server: uvicorn` banner. The bundled
   nginx replaces it at the edge, but a pod behind a cloud LB / ingress that
   passes upstream headers through would otherwise advertise the exact server
@@ -1016,12 +1139,14 @@ server {
 The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
 `compose.prod.yaml`) applies the same rules — empty `Connection`
 for non-upgrade requests so `keepalive 32` is actually used, the extended
-streaming location, no `add_header` inside a location, the validated
+streaming location, no `add_header` inside any location (the error-page
+headers come from server-level maps, below), the validated
 `X-Request-ID` that is forwarded and logged, and `X-Forwarded-For` set (not
 appended) to the client address — plus three of its own: a `location ~
 ^(/v1)?/chat$` with a 180s read timeout so synchronous chat outlives the LLM
 timeout instead of turning into a 504 at 60s, `/metrics` **and** `/v1/metrics`
-restricted to private networks, and the trusted-LB `realip` block described
+denied at the edge (`deny all`, a `403` for every source), and the trusted-LB
+`realip` block described
 in [The production stack](#the-production-stack). It is checked with
 `nginx -t` inside the pinned `nginx:1.31.5-alpine` image.
 
@@ -1038,6 +1163,29 @@ front of the stack (a load balancer, Nginx Proxy Manager, openresty) serves its
 own default page unless it is given the same `error_page 502 503 504`
 directive and a copy of these files.
 
+The gateway's own rejections get the same treatment: `413` (from
+`client_max_body_size`) and `429` (from `limit_req` / `limit_conn`) are served
+as `4xx.problem` (`application/problem+json`, type
+`urn:baselith:error:edge_rejected`) or, for `Accept: text/html`, `4xx.html` —
+they came back as nginx's stock HTML, so an SDK expecting RFC 9457 got a parse
+error on exactly the response that tells it to back off. The error documents
+are also the one place the edge sets a CSP (with the SHA-256 of `50x.html`'s
+inline script — edit that script and the hash must change too), plus COOP,
+CORP and `Cache-Control: no-store`. Those four are declared at server level
+from `map $uri` blocks that are empty everywhere except `/__errors/`: nginx
+sends no header whose value is empty, so a response proxied from the app never
+gets a second CSP, and after the `error_page` internal redirect `$uri` is the
+error document's path. No location carries an `add_header` of its own, because
+one would cancel every header inherited from the server block;
+`tests/unit/deploy` fails if one appears.
+
+**`/metrics` never through the edge.** Prometheus scrapes the `api` service
+directly on `app_net` (`prometheus.yml`: `api:8000`), so nothing legitimate asks
+the gateway for it. The private-range allow-list that used to sit there
+admitted the Docker bridge gateway — the source address of every client
+arriving through `docker-proxy` — and served no scraper. The app still demands
+its own credential on the path.
+
 It also sheds floods at the edge, keyed on `$binary_remote_addr` (the client
 address after `realip`, so a caller cannot choose its bucket), before a
 request costs the app a worker, a quota lookup or a Redis round trip:
@@ -1050,8 +1198,9 @@ request costs the app a worker, a quota lookup or a Redis round trip:
 | `stream_conn` | the streaming location (`/chat/stream`, `/runs/{id}/events`, `/mcp`, the baselithbot dashboard feed, and `/v1` aliases) | 16 concurrent streams per client | `429` |
 
 Streams are exempt from `limit_req` — one stream is one request that lives for
-minutes, so its cost is concurrency, which `limit_conn` caps. `/health` and
-`/metrics` carry no request-rate limit (probes and scrapes must not be shed).
+minutes, so its cost is concurrency, which `limit_conn` caps. `/health`
+carries no request-rate limit (probes must not be shed), and
+`/__gateway/healthz` is answered `204` by nginx itself.
 These are a coarse first line; the app's per-key and per-tenant quotas and its
 failed-auth throttle remain the precise layer behind them. Raise the numbers
 if many clients share one address (a corporate NAT) — a dashboard SPA fetches
@@ -1110,6 +1259,38 @@ Before going live, verify every point:
 - [ ] `FORWARDED_ALLOW_IPS` set to the load balancer address (so per-IP rate limiting / admin lockout do not collapse into one bucket behind the proxy)
 - [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
 
+### Data isolation, audit and identity
+
+These stay **off by default** on purpose: each one changes where data is
+written, which database role the app needs, or what a login flow must do, so
+the framework never turns one on behind an operator's back. A deployment that
+needs them switches them on here, and `BASELITH_COMPLIANCE_PROFILE` (with
+`BASELITH_COMPLIANCE_PROFILE_STRICT=true` to fail startup instead of warning)
+makes the app check the set for a named regulatory posture.
+
+- [ ] **Row-level security** for multi-tenant data: `DB_RLS_ENABLED=true` plus a
+  least-privilege runtime role (`database.runtimeRole` in the Helm chart). In
+  production the app refuses to boot when the role would bypass the policies
+  (superuser, `BYPASSRLS`, or table owner). Behind a transaction-mode pooler
+  (PgBouncer `pool_mode = transaction`, `DB_PREPARED_STATEMENTS=false`) also set
+  `DB_RLS_TENANT_SCOPE=transaction`: the session-scoped binding would leak a
+  tenant across pooled backends, so the app refuses that combination. See
+  [Multi-tenancy › Row-Level Security](multi-tenancy.md#defense-in-depth-row-level-security).
+- [ ] **Durable audit trail**: `AUDIT_ENABLED=true` with `AUDIT_CHAIN_HMAC_KEY`
+  set and `AUDIT_CHAIN_REQUIRE_KEY=true`, so the hash chain needs a key an
+  attacker with write access does not have. On Kubernetes keep
+  `AUDIT_LOG_SINK_ENABLED=true` and ship the records through the cluster's log
+  pipeline. A per-pod `AUDIT_DB_PATH` on an `emptyDir` dies with the pod; use it
+  only on a persistent volume with one writer. Retention defaults to 180 days,
+  the AI Act floor. See [Audit trail](../core-modules/audit-trail.md).
+- [ ] **MFA**: `MFA_ENABLED` is a flag plus a TOTP provider
+  (`AuthManager.mfa`). Nothing in the core enforces a second factor on its own,
+  so the login flow you build has to call it. Turning the flag on without that
+  flow protects nothing.
+- [ ] **Outbound traffic**: `networkPolicy.egress.enabled: true` (on in
+  `values-production.yaml`), with your managed datastores listed under
+  `networkPolicy.egress.rules`.
+
 ### Resilience
 
 - [ ] Health checks configured for each service
@@ -1120,7 +1301,7 @@ Before going live, verify every point:
 - [ ] Log rotation configured
 - [ ] Circuit breakers enabled (LLM, VectorStore)
 - [ ] Retry policies configured (LLM, VectorStore, Database)
-- [ ] Run `alembic upgrade head` before first deploy — migration status is checked at startup and logged as ERROR if outdated
+- [ ] Run `baselith db migrate` (or `alembic upgrade head` from a checkout) before first deploy — the migrations ship inside the package, so a `pip install` deployment needs no checkout; migration status is checked at startup and logged as ERROR if outdated
 
 ### Performance
 

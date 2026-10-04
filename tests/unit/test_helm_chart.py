@@ -405,12 +405,18 @@ class TestRuntimeRoleJob:
             assert "value" not in env[name], name
 
     def test_the_runtime_password_defaults_to_the_app_credential(self) -> None:
-        """Provisioning and connecting must not be able to disagree."""
+        """Provisioning and connecting must not be able to disagree.
+
+        Same DB_PASSWORD the app reads — through the hook-scoped copy of the
+        Secret (migrations-env.yaml): the release Secret itself is an ordinary
+        resource Helm applies only after its hooks, so a first install that
+        referenced it hung for the whole deadline.
+        """
         container = self._job()["spec"]["template"]["spec"]["containers"][0]
         env = {item["name"]: item for item in container["env"]}
         ref = env["RUNTIME_PASSWORD"]["valueFrom"]["secretKeyRef"]
         assert ref["key"] == "DB_PASSWORD"
-        assert ref["name"] == "release-baselithcore-secrets"
+        assert ref["name"] == "release-baselithcore-migrate-secrets"
 
     def test_refuses_to_render_without_an_admin_credential(self) -> None:
         """CREATE ROLE is owner work: the app's own role cannot bootstrap
