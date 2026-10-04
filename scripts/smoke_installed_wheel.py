@@ -31,17 +31,16 @@ Exit 0 when every requested check passes, 1 at the first failure.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKS: tuple[str, ...] = ("import", "cli", "migrate", "boot")
@@ -76,9 +75,9 @@ def check_import(root: Path = REPO_ROOT) -> str:
 
     module = importlib.import_module("baselith")
     assert_outside(str(module.__file__), root)
-    namespace: dict[str, Any] = {}
-    exec("from baselith import *", namespace)  # noqa: S102  # nosec B102
-    missing = sorted(set(module.__all__) - set(namespace))
+    # What `from baselith import *` does: resolve each `__all__` name as an
+    # attribute, which runs the facade's lazy `__getattr__` for every one.
+    missing = sorted(name for name in module.__all__ if not hasattr(module, name))
     if missing:
         raise SmokeError(f"`from baselith import *` did not bind {missing}")
     core = importlib.import_module("core")
@@ -116,12 +115,21 @@ Fetch = Callable[[str], tuple[int, bytes]]
 
 
 def fetch(url: str) -> tuple[int, bytes]:
-    """GET ``url``; return status and body, including for 4xx/5xx answers."""
+    """GET a plain-HTTP ``url``; return status and body, 4xx/5xx included.
+
+    Only ``http://`` is accepted, so no other scheme handler (``file://``,
+    ``ftp://``) can be reached through this function.
+    """
+    parts = urlsplit(url)
+    if parts.scheme != "http" or not parts.hostname:
+        raise ValueError(f"fetch only speaks plain HTTP, got {url!r}")
+    conn = http.client.HTTPConnection(parts.hostname, parts.port or 80, timeout=10)
     try:
-        with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310  # nosec B310
-            return int(resp.status), resp.read()
-    except urllib.error.HTTPError as exc:
-        return int(exc.code), exc.read()
+        conn.request("GET", parts.path or "/")
+        resp = conn.getresponse()
+        return int(resp.status), resp.read()
+    finally:
+        conn.close()
 
 
 def wait_for(
@@ -144,7 +152,7 @@ def wait_for(
             raise SmokeError(f"the server exited before {url} answered")
         try:
             last = get(url)
-        except (OSError, urllib.error.URLError) as exc:
+        except (OSError, http.client.HTTPException) as exc:
             last = (0, str(exc).encode())
         if last[0] == 200:
             return last
