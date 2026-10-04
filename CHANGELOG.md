@@ -7,6 +7,53 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.41.0](https://github.com/baselithcore/baselithcore/compare/v0.40.2...v0.41.0) (2026-10-01)
+
+
+### Bug Fixes
+
+* **chart:** the plugin-schema Job reads the release's plugin set ([b103aa4](https://github.com/baselithcore/baselithcore/commit/b103aa4a89d21694285353a82bd109151625603a))
+* **ci:** stub torch in the import-isolation control; register pip's vendored urllib3 ([e1c3d28](https://github.com/baselithcore/baselithcore/commit/e1c3d28dafc75af19241231d67d29ec22f4b3a61))
+* **observability:** serialize audit chain appends across processes ([9bb6e21](https://github.com/baselithcore/baselithcore/commit/9bb6e2138903081775831753d2fd4151798248a9))
+* **plugin_updates:** custom upgrade instructions on a host allow one-click plugin updates ([83bf851](https://github.com/baselithcore/baselithcore/commit/83bf85151845e22ff22981589b3d2e6e210dfc47))
+* **plugin-updates:** keep known security state when advisories endpoint ([5a1e44e](https://github.com/baselithcore/baselithcore/commit/5a1e44ea928e6e3d3f37eab714cb8830bf435831))
+* **plugin-updates:** treat 404 from advisories endpoint as no advisories ([bf4f627](https://github.com/baselithcore/baselithcore/commit/bf4f6279d0f0976a013576210b6f96c86b465ca4))
+* **security:** 0600 lock files, bump pyjwt and urllib3; regenerate OpenAPI ([73d6285](https://github.com/baselithcore/baselithcore/commit/73d62850ffa8d5314be05d1779620dff91ca471a))
+
+
+### Features
+
+* **chart:** database.pluginSchemaInit.extraEnv, env for the schema Job only ([5e9c599](https://github.com/baselithcore/baselithcore/commit/5e9c599b812f54d8ed6fdec6439360d8973e33be))
+* **core:** add connectors contract with SSRF-guarded HTTP, credentials, ([dd46e60](https://github.com/baselithcore/baselithcore/commit/dd46e60cd257a364377abe1f6d73442ca941fa4b))
+* **core:** billed-usage sink for spend ledgers, drain signal for long-lived streams ([4d7f8dc](https://github.com/baselithcore/baselithcore/commit/4d7f8dca75855fe6fd08734f71283cc7d92776e1))
+* **db:** core.db.rls_policy - core's tenant_isolation policy for plugin tables ([c389d98](https://github.com/baselithcore/baselithcore/commit/c389d986c5a7dad413a780fa7e6d0b9872d4d164))
+* **deploy:** serve a self-contained 5xx page from the edge gateway ([f9d2ba7](https://github.com/baselithcore/baselithcore/commit/f9d2ba7cb21525d49a6f76fa628cc795f62f4ca0))
+* **helm:** inference endpoints and optional TEI model servers — chart 0.9.0 ([2ae8418](https://github.com/baselithcore/baselithcore/commit/2ae8418cf80e7ea305c855611cccf68357829d43))
+* **inference:** out-of-process inference services with an in-process ML guard ([1d0037e](https://github.com/baselithcore/baselithcore/commit/1d0037ef4af7c2c56a78ed283df391f24d8dbab1))
+* **metrics:** scrape-only credential for /metrics, backup failure alert ([85a4016](https://github.com/baselithcore/baselithcore/commit/85a4016da96aca424f1363f8906778569afde566))
+* **plugin_updates:** one-click plugin updates for host installs ([21a1db1](https://github.com/baselithcore/baselithcore/commit/21a1db1297ebfb4a40148ed76ae1a2ff202d2169))
+* **plugin-updates:** add provenance trust mode and upgrade instructions ([af018c0](https://github.com/baselithcore/baselithcore/commit/af018c083cfa679c3b029fd69ec9cfefe4723789))
+* **plugin-updates:** add signed per-file release manifest ([c1ee2e9](https://github.com/baselithcore/baselithcore/commit/c1ee2e98aea605d1d4e701b8becb23df1c668115))
+* **plugin-updates:** add signed plugin update checker with overlay load ([c485547](https://github.com/baselithcore/baselithcore/commit/c48554712ddb0b095aa85ec0b4107e8de9989f8b))
+* **plugin-updates:** reference public core release via CORE_VERSION and ([c947af1](https://github.com/baselithcore/baselithcore/commit/c947af121197f1d9034ebebfb1a298d22bb57a0a))
+* **rls:** plugin activation runs as the system tenant; chart for pre-made roles ([c67f637](https://github.com/baselithcore/baselithcore/commit/c67f637097992398cc79612a05a5fbf8f9a5ea3f))
+
+
+# [0.40.2](https://github.com/baselithcore/baselithcore/compare/v0.40.1...v0.40.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **world_model:** StatePredictor no longer needs an LLM to be constructed ([eea702a](https://github.com/baselithcore/baselithcore/commit/eea702a9da3bdfa72ad12c6ed7b6b1f9136ea690))
+
+
+# [0.40.1](https://github.com/baselithcore/baselithcore/compare/v0.40.0...v0.40.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **privacy:** an erasure a provider could not perform is reported failed, never as zero records ([cb561f5](https://github.com/baselithcore/baselithcore/commit/cb561f5af8293ccbbb192913178e6812cef08817))
+
 # [0.40.0](https://github.com/baselithcore/baselithcore/compare/v0.39.0...v0.40.0) (2026-09-26)
 
 

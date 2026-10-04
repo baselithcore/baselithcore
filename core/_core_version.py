@@ -10,4 +10,4 @@ tree contains. The system update notice compares ``CORE_VERSION`` (never the
 distribution version) with the public core's releases and security advisories.
 """
 
-CORE_VERSION = "0.40.2"
+CORE_VERSION = "0.41.0"
