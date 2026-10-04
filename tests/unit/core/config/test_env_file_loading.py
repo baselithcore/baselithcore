@@ -131,6 +131,12 @@ class TestEnvFileIsReadOnce:
         assert env_module.read_trusted_env_file(link) is None
         assert not env_module.is_trusted_env_file(link)
 
+    def test_fifo_is_refused_without_blocking(self, tmp_path: Path) -> None:
+        fifo = tmp_path / ".env"
+        os.mkfifo(fifo, 0o600)
+        # A blocking open would hang here until a writer appears.
+        assert env_module.read_trusted_env_file(fifo) is None
+
     def test_directory_is_refused(self, tmp_path: Path) -> None:
         (tmp_path / ".env").mkdir()
         assert env_module.read_trusted_env_file(tmp_path / ".env") is None

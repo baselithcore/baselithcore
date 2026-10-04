@@ -99,7 +99,15 @@ def read_trusted_env_file(path: Path) -> str | None:
     Returns:
         The file's text, or ``None`` when it is missing or refused.
     """
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    # O_NONBLOCK: opening a FIFO for reading would otherwise block until a
+    # writer appears, hanging every import of core.config before the
+    # regular-file check below could refuse it. No effect on regular files.
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
