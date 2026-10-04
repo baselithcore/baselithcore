@@ -125,18 +125,28 @@ class TestOnlyWorkingTemplatesAreOffered:
 @pytest.mark.parametrize(
     ("files", "expected"),
     [
-        (PROJECT_TEMPLATES["minimal"]["files"], ["install -e .", "-m app.agent"]),
-        ({"requirements.txt": "", "main.py": ""}, ["-r requirements.txt", "main.py"]),
+        (
+            PROJECT_TEMPLATES["minimal"]["files"],
+            ["install -e .", "compose up -d", "pull llama3.2", "run", "-m app.agent"],
+        ),
+        (
+            {"requirements.txt": "", "main.py": ""},
+            ["-r requirements.txt", "pull llama3.2", "main.py"],
+        ),
         ({"requirements.txt": "", "README.md": ""}, ["-r requirements.txt"]),
-        ({"pyproject.toml": "", "backend.py": ""}, ["install -e .", "run"]),
+        (
+            {"pyproject.toml": "", "backend.py": ""},
+            ["install -e .", "pull llama3.2", "run"],
+        ),
+        ({"agent.py": ""}, ["agent.py"]),
     ],
 )
 def test_next_steps_fit_the_template(
     files: dict[str, str], expected: list[str]
 ) -> None:
-    from core.cli.commands.init import _next_steps
+    from core.cli.commands.init_setup import next_steps
 
-    steps = _next_steps(files)
+    steps = next_steps(files)
     assert len(steps) == len(expected)
     for step, fragment in zip(steps, expected, strict=True):
         assert fragment in step

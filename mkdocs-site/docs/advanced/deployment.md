@@ -241,7 +241,7 @@ services:
   # REQUIRED API key: Qdrant ships unauthenticated. The app sends the same
   # value as QDRANT_API_KEY (configs/.env.production).
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     environment:
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
 

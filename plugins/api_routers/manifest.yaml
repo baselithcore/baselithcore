@@ -1,5 +1,5 @@
 name: api-routers
-version: 0.1.1
+version: 0.1.2
 description: Opt-in HTTP routers mounted through the plugin contract - prompt catalog,
   WebSocket chat, async runs, and feature-gated webhooks, privacy (DSR), compliance,
   approvals and run controls. The core chat and admin routers are mounted by the app
@@ -19,5 +19,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: 93d6e4f8faf830a6878dd3124e104c3352778da91d1979d669b58a94c38228b7
+integrity_sha256: bd25b3ef494039d2f0c685db92a6763f45cbbecfa15e95167196e8c0527c16e8
 hash_surface_version: 5

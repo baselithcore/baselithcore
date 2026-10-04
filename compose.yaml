@@ -206,7 +206,7 @@ services:
 
   # === Qdrant (Vector Store) ===
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     container_name: baselith-core-qdrant
     ports:
       - '127.0.0.1:6333:6333'

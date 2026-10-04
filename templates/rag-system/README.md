@@ -4,32 +4,28 @@ A complete Retrieval-Augmented Generation (RAG) system template.
 
 ## Features
 
-- **Document Ingestion**: Ingest PDF, TXT, MD files into vector store
+- **Document Ingestion**: Ingest text into the vector store
 - **Semantic Search**: Query-based retrieval with configurable relevance
-- **LLM Integration**: OpenAI, Ollama, Azure OpenAI support
-- **Memory**: Conversation history and context management
+- **LLM Integration**: any provider the framework supports (Ollama by default)
 - **API**: FastAPI REST endpoints for all operations
 
 ## Quick Start
 
 ```bash
-# Copy template
-cp -r templates/rag-system my-rag-project
+baselith init my-rag-project --template rag-system
 cd my-rag-project
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Start services
-docker-compose up -d
-
-# Run the application
-python main.py
+docker compose up -d    # Qdrant and Redis on localhost
+ollama pull llama3.2    # the model LLM_MODEL names
+python main.py          # API on http://127.0.0.1:8000 — try /health and /docs
 ```
+
+`baselith init` generated `.env` for local development: `APP_ENV=development`,
+a random `SECRET_KEY` for this project only (file mode 0600, ignored by git),
+loopback-only `HOST`/`PORT` (which `main.py` binds), the Qdrant and Redis
+endpoints on localhost, and `LLM_PROVIDER=ollama`, the provider that needs no
+API key. The server starts without Qdrant or the model; `/ingest` and `/query`
+answer 503 until they are reachable.
 
 ## Architecture
 
@@ -52,28 +48,14 @@ python main.py
 
 ## Configuration
 
-Edit `config.yaml`:
+Everything is read from `.env` by the framework's settings classes:
 
-```yaml
-llm:
-  provider: ollama  # or openai, azure
-  model: llama3.1:8b
-  temperature: 0.7
-
-vectorstore:
-  provider: qdrant
-  collection: documents
-  embedding_model: all-MiniLM-L6-v2
-
-ingestion:
-  chunk_size: 512
-  chunk_overlap: 50
-  supported_formats: [pdf, txt, md, docx]
-
-retrieval:
-  top_k: 5
-  score_threshold: 0.7
-```
+| Setting | Development value | Purpose |
+|---------|-------------------|---------|
+| `LLM_PROVIDER` / `LLM_MODEL` | `ollama` / `llama3.2` | Answer generation; set `LLM_API_KEY` for a hosted provider |
+| `VECTORSTORE_QDRANT_HOST` / `VECTORSTORE_PORT` | `localhost` / `6333` | Qdrant endpoint |
+| `VECTORSTORE_COLLECTION_NAME` | `documents` (default) | Collection used when a request names none |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | Where `python main.py` listens |
 
 ## API Endpoints
 
@@ -82,5 +64,3 @@ retrieval:
 | `/health` | GET | Health check |
 | `/ingest` | POST | Upload documents |
 | `/query` | POST | Query the knowledge base |
-| `/collections` | GET | List collections |
-| `/documents` | GET | List ingested documents |

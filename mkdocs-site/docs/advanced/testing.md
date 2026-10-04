@@ -324,7 +324,8 @@ Two `conftest.py` files supply the shared fixtures; none of them creates
 database tables — the relational schema is owned by Alembic (`alembic.ini`,
 `core/db/migrations/`), unit tests mock their storage, and the integration tests that
 need a live backend (`tests/integration/test_pgvector_integration.py`) use the
-Postgres and Redis services the CI job provides.
+Postgres, Redis and Qdrant services the `integration_test` CI job provides — see
+[Real-backend integration run](#real-backend-integration-run).
 
 **`tests/conftest.py`** (every test):
 
@@ -872,9 +873,11 @@ green.
 ### GitHub Actions
 
 Tests run in the `python_test` job of `.github/workflows/ci.yml` on a Python
-3.12 / 3.13 matrix (3.14 advisory, `continue-on-error`), with Postgres 16 and
-Redis 7 as service containers. Dependencies come from the lock file, not a fresh
-resolution.
+3.12 / 3.13 matrix (3.14 runs nightly, advisory, in `nightly.yml`). The job
+starts **no** service containers: `BASELITH_TEST_REAL_DB` is unset, so
+`tests/conftest.py` mocks psycopg, and the real-backend cases skip. The suite
+was verified green with ports 5432 and 6379 refused. Dependencies come from the
+lock file, not a fresh resolution.
 
 The `needs:` list is load-bearing: a gate that nothing depends on is advisory, so
 every blocking gate is wired into the test → release path structurally rather
@@ -889,49 +892,92 @@ it would make every push to `main` skip `python_test`.
 python_test:
   name: Python Tests (${{ matrix.python-version }})
   runs-on: ubuntu-latest
-  needs: [architecture_boundaries, docs_consistency, type_check, type_check_plugins,
-          type_check_core_strict, security_scan, package_smoke, evals, red_team,
-          fairness, zizmor, helm_lint, ui_build]
+  needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke,
+          evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+  if: ${{ !cancelled() && !failure() && needs.changes.outputs.python == 'true' }}
   strategy:
     fail-fast: false
     matrix:
-      python-version: ['3.12', '3.13']
-      experimental: [false]
-      include:
-        # 3.14 runs advisory until every upstream dep publishes wheels
-        - python-version: '3.14'
-          experimental: true
-  continue-on-error: ${{ matrix.experimental }}
-  services:
-    postgres:
-      image: postgres:16-alpine
-    redis:
-      image: redis:7-alpine
+      python-version: ${{ fromJSON(needs.changes.outputs.python_versions) }}
   steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install uv
-      run: pip install uv==0.12.0
+    - uses: astral-sh/setup-uv@v7  # uv 0.12.0
     - name: Run Tests
       run: |
-        uv export --frozen --extra test --no-emit-project \
+        uv export --frozen --no-default-groups --group test --no-emit-project \
           --format requirements-txt -o /tmp/requirements-test.txt
         uv pip install --system --no-config --require-hashes \
           -r /tmp/requirements-test.txt
         uv pip install --system --no-deps -e .
         pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
-    - name: Upload coverage reports to Codecov
-      if: matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./coverage.xml
 ```
 
-The job runs `pytest -n auto` (pytest-xdist) on top of the `pytest.ini`
+`python_test` runs `pytest -n auto` (pytest-xdist) on top of the `pytest.ini`
 defaults, so the 78 % branch gate applies in CI exactly as it does locally.
+
+### Real-backend integration run
+
+The `integration_test` job (`Integration Tests`) runs `tests/integration/` plus
+`tests/core/skill_evolution/test_store_postgres.py` on Python 3.12 against real
+service containers — `pgvector/pgvector:0.8.1-pg16`, `redis:7-alpine` and
+`qdrant/qdrant:v1.19.1`, each pinned by digest — after applying the packaged
+migrations with `python -m core.db.migrate`. It runs beside `python_test`, and
+`release` waits on both.
+
+| Variable | Effect |
+| --- | --- |
+| `BASELITH_TEST_REAL_DB=1` | `tests/conftest.py` leaves psycopg unmocked; the Postgres cases run |
+| `BASELITH_TEST_REAL_REDIS=1`, `BASELITH_TEST_REDIS_URL` | the Redis event-stream cases run against that URL |
+| `BASELITH_TEST_REAL_QDRANT=1` | the Qdrant provider cases run against `VECTORSTORE_HOST`:`VECTORSTORE_PORT` |
+| `BASELITH_TEST_INTEGRATION_STRICT=1` | a skip under `tests/integration/` is reported as a failure (`tests/integration/conftest.py`): with every backend up, a skip means broken wiring |
+
+`tests/integration/test_migration_upgrade.py` replays the production upgrade
+path. For every revision below head it upgrades a scratch database to that
+revision, inserts one row into every core table that exists there, upgrades to
+head, and asserts the rows survive and the schema (columns, indexes,
+constraints, RLS policies) equals a database that went straight to head. It also
+runs `head → base → head`, and statically requires every revision's
+`downgrade()` to do something or carry a comment saying why it does not. A new
+table must get a row in its `SEEDS` table, or the module fails.
+
+Reproduce the job locally on ports that do not collide with a running stack:
+
+```bash
+docker run -d --name it-pg -e POSTGRES_DB=test_db -e POSTGRES_USER=baselith \
+  -e POSTGRES_PASSWORD=password -p 55433:5432 pgvector/pgvector:0.8.1-pg16
+docker run -d --name it-redis -p 56380:6379 redis:7-alpine
+docker run -d --name it-qdrant -p 56334:6333 qdrant/qdrant:v1.19.1
+
+export BASELITH_TEST_REAL_DB=1 BASELITH_TEST_REAL_REDIS=1 BASELITH_TEST_REAL_QDRANT=1 \
+  BASELITH_TEST_INTEGRATION_STRICT=1 BASELITH_TEST_REDIS_URL=redis://localhost:56380/0 \
+  DB_HOST=localhost DB_PORT=55433 DB_NAME=test_db DB_USER=baselith DB_PASSWORD=password \
+  VECTORSTORE_HOST=localhost VECTORSTORE_PORT=56334
+python -m core.db.migrate
+pytest tests/integration tests/core/skill_evolution/test_store_postgres.py -m "not slow" --no-cov
+```
+
+### Installed-wheel smoke test
+
+`package_smoke` first validates the wheel's contents against the lock-installed
+runtime set. That cannot catch a dependency the code imports but
+`pyproject.toml` does not declare, so the job then installs the wheel alone into
+a fresh venv with plain `pip` — no lock, no hashes — and runs
+`scripts/smoke_installed_wheel.py` from a temporary directory: `import baselith`
+and `from baselith import *` (from site-packages, never the checkout),
+`baselith --help`, `baselith db migrate` against a pgvector service, and an
+uvicorn boot of `core.api.factory:create_app` that must answer `/health` and
+`/health/ready` with 200 and the database and Redis up. Run it locally the same
+way:
+
+```bash
+python -m build --wheel && python -m venv /tmp/v && /tmp/v/bin/pip install dist/*.whl
+APP_ENV=development SECRET_KEY=$(openssl rand -hex 32) DB_HOST=localhost DB_PORT=55433 \
+  DB_NAME=test_db DB_USER=baselith DB_PASSWORD=password \
+  /tmp/v/bin/python scripts/smoke_installed_wheel.py
+```
 
 ---
 

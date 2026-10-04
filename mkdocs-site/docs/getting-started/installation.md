@@ -34,7 +34,25 @@ This guide walks you through installing and configuring the framework.
 
 ```bash
 pip install baselith-core
+baselith init myapp           # scaffold a project, with its own .env
+cd myapp
+pip install -e .
+ollama pull llama3.2          # the local model the generated .env names
+baselith run                  # http://127.0.0.1:8000/health
 ```
+
+`baselith init` writes a development `.env` into the project (mode `0600`,
+git-ignored): `APP_ENV=development`, a `SECRET_KEY` and `DB_PASSWORD`
+generated for that project, loopback-only `HOST` and `TRUSTED_HOSTS`, and
+`LLM_PROVIDER=ollama`, the provider that needs no API key. Without it a bare
+install refuses to start: an undeclared environment is treated as production
+once authentication is enforced, and production requires `SECRET_KEY`,
+`TRUSTED_HOSTS` and an explicit `LLM_PROVIDER`. Settings are read from the
+`.env` in the directory you start the server from. PostgreSQL, Redis and Qdrant
+are optional for a first run — the generated Compose file starts them
+on localhost. See [`baselith init`](../api/cli.md#init---initialize-project)
+for every template and the full list of generated keys; for a hosted model set
+`LLM_PROVIDER`, `LLM_MODEL` and `LLM_API_KEY` in `.env`.
 
 Install optional capabilities as needed:
 

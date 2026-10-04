@@ -106,3 +106,21 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     def add_tool(self, tool: callable) -> None:
         """Add a tool to the agent."""
         self.tools.append(tool)
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def _demo() -> None:
+        """Start the agent, ask it one thing, stop it.
+
+        With no ``llm_service`` the agent answers from its development
+        fallback, so this runs without a model; inject the framework's LLM
+        service (``core.services.llm.get_llm_service()``) for real answers.
+        """
+        agent = MyAgent(agent_id="my-agent")
+        await agent.startup()
+        print(await agent.execute("Hello!"))
+        await agent.shutdown()
+
+    asyncio.run(_demo())

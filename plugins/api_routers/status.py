@@ -7,13 +7,14 @@ uptime, synthetic metrics, and service readiness.
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Depends, Response
 
 from core.config import get_app_config, get_vectorstore_config
 from core.middleware import require_admin
 from core.observability import telemetry
-from core.observability.health import get_health_checker
+from core.observability.health import CachedHealthCheck
 from core.services.indexing import get_indexing_service
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,11 @@ async def health_check() -> dict[str, str]:
 
 
 async def _check_database() -> bool:
-    """Return ``True`` if a trivial query against Postgres succeeds."""
+    """Return ``True`` if a trivial query against Postgres succeeds.
+
+    Unbounded here — a pool checkout against an unreachable server waits the
+    full ``DB_POOL_TIMEOUT``; :func:`readiness` applies the probe deadline.
+    """
     try:
         from core.db.connection import get_async_connection
 
@@ -103,6 +108,68 @@ async def _check_redis() -> bool:
                 pass
 
 
+_readiness_checker: CachedHealthCheck | None = None
+_readiness_lock = asyncio.Lock()
+#: Probes still running past their deadline, by dependency name.
+_inflight: dict[str, asyncio.Task[bool]] = {}
+
+
+def get_readiness_checker() -> CachedHealthCheck:
+    """The cache behind ``/health/ready``, sized by ``HEALTH_READY_CACHE_TTL``."""
+    global _readiness_checker
+    if _readiness_checker is None:
+        _readiness_checker = CachedHealthCheck(
+            cache_ttl=get_app_config().health_ready_cache_ttl
+        )
+    return _readiness_checker
+
+
+def reset_readiness_cache() -> None:
+    """Drop the cached outcome and re-read the TTL (tests, config reloads).
+
+    The lock is replaced too: once contended, an ``asyncio.Lock`` is bound to
+    the event loop it waited on.
+    """
+    global _readiness_checker, _readiness_lock
+    _readiness_checker = None
+    _readiness_lock = asyncio.Lock()
+    for task in _inflight.values():
+        task.cancel()
+    _inflight.clear()
+
+
+def _forget(name: str, task: asyncio.Task[bool]) -> None:
+    if _inflight.get(name) is task:
+        del _inflight[name]
+    if not task.cancelled():
+        task.exception()  # retrieved, so asyncio does not log it as lost
+
+
+async def _bounded(name: str, probe: Callable[[], Awaitable[bool]]) -> bool:
+    """Run ``probe`` under the readiness deadline; a probe still running counts as down.
+
+    The probe is waited on, never cancelled: psycopg answers a cancellation
+    with a server-side cancel request that itself waits on the dead server, so
+    cancelling would not shorten the wait. A probe that overruns keeps running
+    in the background and the next refresh waits on *it* rather than stacking
+    a second checkout onto the pool.
+    """
+    timeout = get_app_config().health_ready_probe_timeout
+    task = _inflight.get(name)
+    if task is None:
+        task = asyncio.ensure_future(probe())
+        _inflight[name] = task
+        task.add_done_callback(lambda t: _forget(name, t))
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        logger.warning("Readiness %s check still pending after %.1fs", name, timeout)
+        return False
+    try:
+        return task.result()
+    except (Exception, asyncio.CancelledError):
+        return False
+
+
 @router.get(
     "/health/ready",
     responses={
@@ -118,21 +185,29 @@ async def readiness(response: Response) -> dict[str, object]:
     """Readiness probe — checks critical dependencies (no auth).
 
     Returns HTTP 503 when the database is unreachable so Kubernetes removes the
-    pod from Service endpoints (traffic draining) until it recovers. Redis is
-    reported but advisory: the framework degrades to in-memory fallbacks, so it
-    does not gate readiness. Results are cached (~30s) to bound probe overhead.
+    pod from Service endpoints (traffic draining) until it recovers. Redis and
+    the vector store are reported but advisory: the framework degrades without
+    them, so they do not gate readiness.
+
+    Each check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung
+    dependency yields a prompt 503 rather than a probe the kubelet times out.
+    The outcome — failure included — is cached for ``HEALTH_READY_CACHE_TTL``
+    seconds, and concurrent callers during a refresh wait for the one check in
+    flight instead of each starting their own.
     """
-    checker = get_health_checker()
 
     async def _check() -> dict[str, bool]:
-        # Independent probes, concurrently: a cache miss costs the slowest
-        # probe's timeout, not the sum of the three.
+        # Independent probes, concurrently: a cache miss costs one deadline,
+        # not the sum of the three.
         database, redis, vectorstore = await asyncio.gather(
-            _check_database(), _check_redis(), _check_vectorstore()
+            _bounded("database", _check_database),
+            _bounded("redis", _check_redis),
+            _bounded("vectorstore", _check_vectorstore),
         )
         return {"database": database, "redis": redis, "vectorstore": vectorstore}
 
-    health = await checker.get_status(_check)
+    async with _readiness_lock:
+        health = await get_readiness_checker().get_status(_check)
     db_ok = health.services.get("database", False)
     response.status_code = 200 if db_ok else 503
     return {

@@ -5,13 +5,18 @@ Template for creating custom agents with tools, prompts, and memory.
 ## Quick Start
 
 ```bash
-# 1. Copy the template
-cp -r templates/custom-agent-template plugins/my-agent
-
-# 2. Customize
-cd plugins/my-agent
+baselith init my-agent --template custom-agent-template
+cd my-agent
+python agent.py         # starts the agent and answers one message
+python -m pytest tests  # the template's tests
 # Edit agent.py, tools.py, and prompts/
 ```
+
+`baselith init` generated `.env` for local development (`APP_ENV=development`,
+a random `SECRET_KEY` for this project only, file mode 0600, ignored by git,
+and `LLM_PROVIDER=ollama`, the provider that needs no API key). Run from the
+root of a BaselithCore project, `baselith init` places the agent under
+`plugins/` instead.
 
 ## Structure
 

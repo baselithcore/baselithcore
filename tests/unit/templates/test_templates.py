@@ -27,25 +27,22 @@ class TestRAGSystemTemplate:
         required_files = [
             "main.py",
             "README.md",
-            "config.yaml",
             "docker-compose.yml",
             "requirements.txt",
-            ".env.example",
         ]
         for file_name in required_files:
             file_path = rag_system_path / file_name
             assert file_path.exists(), f"Missing file: {file_name}"
 
-    def test_config_yaml_structure(self, rag_system_path):
-        """Test config.yaml has required sections."""
-        config_path = rag_system_path / "config.yaml"
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
+    def test_configuration_comes_from_generated_env(self, rag_system_path):
+        """`baselith init` writes the project's .env; the template ships none.
 
-        assert "llm" in config
-        assert "vectorstore" in config
-        assert "ingestion" in config
-        assert "retrieval" in config
+        A template-level ``.env.example`` or ``config.yaml`` would be a second,
+        unread source of settings drifting from the generated ``.env``.
+        """
+        assert not (rag_system_path / ".env.example").exists()
+        assert not (rag_system_path / "config.yaml").exists()
+        assert not (rag_system_path / ".env").exists()
 
     def test_docker_compose_services(self, rag_system_path):
         """Test docker-compose.yml has required services."""

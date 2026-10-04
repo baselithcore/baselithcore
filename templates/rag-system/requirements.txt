@@ -1,9 +1,3 @@
-fastapi>=0.115.0
-uvicorn>=0.30.0
-pydantic>=2.9.0
-pydantic-settings>=2.0.0
-pyyaml>=6.0
-python-multipart
-qdrant-client>=1.15.1
-sentence-transformers>=2.7.0
-baselith-core
+# The framework brings FastAPI, uvicorn, pydantic and PyYAML; the extras add
+# the Qdrant client and the sentence-transformers embedder.
+baselith-core[qdrant,rag]>={framework_version}

@@ -6,6 +6,7 @@ Demonstrates collaborative agent patterns: Researcher, Writer, Reviewer.
 
 import asyncio
 import yaml
+from contextlib import asynccontextmanager
 from core.observability.logging import get_logger
 from pathlib import Path
 from typing import Optional, Any, Dict, List
@@ -327,7 +328,7 @@ class TaskResponse(BaseModel):
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     print("🚀 Multi-Agent Collaboration system starting...")
-    await orchestrator.initialize()
+    await orchestrator.startup()
     yield
     await orchestrator.shutdown()
     print("👋 Multi-Agent Collaboration system shutting down...")
@@ -385,4 +386,9 @@ async def list_agents():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)  # nosec B104
+    # HOST/PORT from .env (127.0.0.1:8000 in the development profile
+    # `baselith init` writes): a laptop's dev server stays off the LAN.
+    from core.config import get_app_config
+
+    _app_config = get_app_config()
+    uvicorn.run(app, host=_app_config.host, port=_app_config.port)

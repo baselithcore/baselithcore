@@ -28,8 +28,7 @@ async def test_readiness_probes_run_concurrently() -> None:
 
         return run
 
-    checker = status_mod.get_health_checker()
-    checker._cached_status = None
+    status_mod.reset_readiness_cache()
     with (
         patch.object(status_mod, "_check_database", _probe("db")),
         patch.object(status_mod, "_check_redis", _probe("redis")),

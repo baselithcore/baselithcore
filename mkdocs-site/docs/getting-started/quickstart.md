@@ -19,6 +19,13 @@ This guide helps you launch BaselithCore in minutes.
 baselith run
 ```
 
+Run it from a project created with `baselith init` (or a checkout with a
+`.env`): settings are read from the `.env` in the current directory. A fresh
+`baselith init` project needs one step first, `ollama pull llama3.2`, because
+the startup preflight refuses to serve while the configured model is missing;
+PostgreSQL, Redis and Qdrant are reported but not required — `/health` answers
+without them and `/health/ready` lists what is down.
+
 The system will start with a **Premium Startup Dashboard** showing host, port, active workers, and direct links to API documentation.
 
 - **API**: `http://localhost:8000`

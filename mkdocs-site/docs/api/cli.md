@@ -895,13 +895,34 @@ creating an empty project.
     rejected by argument parsing (`invalid choice`), which lists what
     exists — pass `--template minimal`.
 
+**What every template gets**: after copying the template's files, `init`
+writes the project's `.env` from the development profile — the same one
+[`config env`](#config-env---create-or-normalize-an-env-profile) applies — so
+the printed commands work without editing anything:
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `APP_ENV` | `development` | Undeclared, the environment is treated as production once auth is enforced (the default), and production refuses to start without `TRUSTED_HOSTS`, JWT claim binding and a reachable database |
+| `SECRET_KEY`, `DB_PASSWORD` | `secrets.token_urlsafe(48)` / `(32)` | Generated per project, never a shipped value; `SECRET_KEY` must be at least 32 characters |
+| `HOST`, `PORT`, `TRUSTED_HOSTS` | `127.0.0.1`, `8000`, `["localhost","127.0.0.1","[::1]"]` | Loopback only: a laptop's dev server is not on the LAN, and the Host header is validated |
+| `LLM_PROVIDER`, `LLM_MODEL` | `ollama`, `llama3.2` | The provider that needs no API key, named explicitly as the LLM preflight asks |
+| `DB_*`, `CACHE_REDIS_URL`, `VECTORSTORE_*`, ... | `localhost` | Local services; the server starts without them and reports them on `/health/ready` |
+
+The file is created with mode `0600` and `.gitignore` lists `.env` and
+`data/`; `init` also creates the `data/` directories `baselith doctor` checks.
+No template ships a `.env` or `.env.example` of its own. To regenerate or top
+up the file of an existing project, run `baselith config env` in it: it adds
+the missing keys and never changes a value already set.
+
 **What `minimal` scaffolds**: a project that depends on `baselith-core`
 (`requires-python = ">=3.12"`, its own `version = "0.1.0"`) and runs as it
-stands — `README.md`, `pyproject.toml`, `.env`, `.gitignore`, an `app/`
-package holding `agent.py`, a `tests/` package holding `test_agent.py`, and a
-`.gitkeep` under `plugins/`. `app/agent.py` builds an
-[`Agent`](../core-modules/agent.md) with one tool over the public facade and
-runs it:
+stands — `README.md`, `pyproject.toml`, `.gitignore`, `backend.py` (the
+server `baselith run` serves: `app = create_app()`), a Compose file
+for PostgreSQL, Redis (FalkorDB) and Qdrant on loopback (the database password
+is interpolated from `.env`), an `app/` package holding `agent.py`, a `tests/`
+package holding `test_agent.py`, and a `.gitkeep` under `plugins/`.
+`app/agent.py` builds an [`Agent`](../core-modules/agent.md) with one tool
+over the public facade and runs it:
 
 ```python
 from baselith import Agent
@@ -909,11 +930,23 @@ from baselith import Agent
 agent = Agent(system_prompt="You are a concise assistant.", tools=[current_time])
 ```
 
+The "Next steps" panel prints the commands in the order they work:
+
 ```bash
 cd my-assistant
 pip install -e .
-python -m app.agent
+docker compose up -d        # optional: local services
+ollama pull llama3.2        # LLM_PROVIDER=ollama: a local model, no API key
+baselith run                # then open http://127.0.0.1:8000/health
+python -m app.agent         # ask the agent
 ```
+
+The model comes before the server because `baselith run`'s preflight refuses
+to start while the model `LLM_MODEL` names is missing from Ollama; PostgreSQL,
+Redis and Qdrant are only warned about. `baselith-core-template` prints the
+same sequence with `pip install -r requirements.txt`; `rag-system` and
+`multi-agent-collab` start with `python main.py` (bound to `HOST`/`PORT`);
+`custom-agent-template` with `python agent.py`.
 
 The generated `pyproject.toml` used to carry the framework's own version
 number and pin `fastapi`/`uvicorn`/`pydantic` directly, with no
@@ -1149,7 +1182,9 @@ baselith config env --json
 ```
 
 This is the step `baselith setup` runs first, exposed on its own for the case
-where the env file has drifted and nothing else needs doing. It reports the
+where the env file has drifted and nothing else needs doing. The `dev` profile
+is also what [`init`](#init---initialize-project) writes into a new project's
+`.env`, so running it in a freshly scaffolded project changes nothing. It reports the
 keys it added or changed; a file that already matches the profile is left
 untouched. Generated files are written `0600` — see the note under the
 [`up`](#up---docker-runtime) command.

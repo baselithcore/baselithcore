@@ -1,29 +1,29 @@
 """
-RAG System - Complete Retrieval-Augmented Generation Application.
+RAG System - Retrieval-Augmented Generation on BaselithCore services.
 
-A production-ready RAG system with document ingestion, semantic search,
-and LLM-powered response generation.
+Ingests text into the framework's vector store (Qdrant by default) and answers
+questions from the retrieved passages with the configured LLM. Every setting
+comes from ``.env`` (``LLM_PROVIDER``, ``LLM_MODEL``, ``VECTORSTORE_*``,
+``HOST``/``PORT``), which ``baselith init`` generated for local development.
+
+The services are built on first use, so the server starts — and ``/health``
+answers — before Qdrant or the model is reachable; ``/ingest`` and ``/query``
+report the failure instead.
 """
 
-import yaml
-import asyncio
-from core.observability.logging import get_logger
-from pathlib import Path
-from typing import Optional, Any, Dict, List
+from __future__ import annotations
+
+import uuid
 from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
-# Baselith-Core Imports
-from core.lifecycle import LifecycleMixin, AgentState, AgentError, FrameworkErrorCode
-from core.orchestration.protocols import AgentProtocol
-from core.context import tenant_context
-from core.config import get_llm_config, get_vectorstore_config
-from core.di import DependencyContainer
-from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
-
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from core.config import get_app_config, get_llm_config, get_vectorstore_config
+from core.models.domain import Document
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -32,219 +32,141 @@ logger = get_logger(__name__)
 # Models
 # ============================================================================
 
+
+class IngestRequest(BaseModel):
+    """Text to add to the knowledge base."""
+
+    content: str = Field(..., min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    collection: str | None = Field(None, description="Target collection")
+
+
 class QueryRequest(BaseModel):
-    """Query request model."""
+    """A question for the knowledge base."""
+
     query: str = Field(..., min_length=1, description="The user query")
-    collection: Optional[str] = Field(None, description="Target collection")
-    top_k: Optional[int] = Field(None, ge=1, le=20, description="Number of results")
-    stream: bool = Field(False, description="Enable streaming response")
+    collection: str | None = Field(None, description="Target collection")
+    top_k: int = Field(5, ge=1, le=20, description="Passages to retrieve")
 
 
 class QueryResponse(BaseModel):
-    """Query response model."""
+    """The answer and the passages it was built from."""
+
     answer: str
-    sources: list[dict]
-    tokens_used: int = 0
-
-
-class IngestRequest(BaseModel):
-    """Document ingestion request."""
-    content: str
-    metadata: dict = {}
-    collection: Optional[str] = None
-
-
-class Document(BaseModel):
-    """Document model."""
-    id: str
-    content: str
-    metadata: dict
-    score: float = 0.0
+    sources: list[dict[str, Any]]
 
 
 # ============================================================================
-# RAG Components
+# RAG pipeline
 # ============================================================================
 
-class RAGSystem(LifecycleMixin, AgentProtocol):
-    """Main RAG system orchestrating all components."""
-    
-    def __init__(self, agent_id: str):
-        super().__init__()
-        self.agent_id = agent_id
-        self.llm: Optional[LLMServiceProtocol] = None
-        self.vectorstore: Optional[VectorStoreProtocol] = None
-    
-    async def _do_startup(self) -> None:
-        """
-        Dogma II: DI First & Dogma III: Async Everything.
-        Resolve dependencies and initialize services.
-        """
-        logger.info(f"🚀 RAG System {self.agent_id} starting up...")
-        
-        container = DependencyContainer()
-        
-        try:
-            self.llm = container.resolve(LLMServiceProtocol)
-            self.vectorstore = container.resolve(VectorStoreProtocol)
-            
-            # Additional startup logic for services if needed
-            if isinstance(self.llm, LifecycleMixin):
-                await self.llm.initialize()
-            if isinstance(self.vectorstore, LifecycleMixin):
-                await self.vectorstore.initialize()
-                
-        except Exception as e:
-            logger.error(f"Failed to initialize RAG components: {e}")
-            raise AgentError(
-                f"Dependency resolution failed: {e}",
-                code=FrameworkErrorCode.AGENT_STARTUP_FAILED
-            )
 
-    async def _do_shutdown(self) -> None:
-        """Shutdown RAG resources."""
-        logger.info(f"🛑 RAG System {self.agent_id} shutting down...")
-        if isinstance(self.llm, LifecycleMixin):
-            await self.llm.shutdown()
-        if isinstance(self.vectorstore, LifecycleMixin):
-            await self.vectorstore.shutdown()
+class RAGSystem:
+    """Ingest and answer, on the framework's embedder, vector store and LLM."""
 
-    async def ingest(
-        self, 
-        content: str, 
-        metadata: dict = None,
-        collection: str = "default"
-    ) -> dict:
-        """Ingest a document using the vector store protocol."""
-        if self.state != AgentState.READY:
-            raise AgentError("RAG System not ready", code=FrameworkErrorCode.AGENT_NOT_READY)
+    async def ingest(self, request: IngestRequest) -> dict[str, Any]:
+        """Embed and index one document."""
+        from core.services.vectorstore import get_vectorstore_service
 
-        metadata = metadata or {}
-        # In real implementation, splitting would be handled by a service or utility
-        # For the template, we assume the vectorstore or an ingestion service handles it
-        
-        try:
-            # This is a simplified call - real protocol might vary
-            doc_id = await self.vectorstore.add(
-                content=content,
-                metadata=metadata,
-                collection=collection
-            )
-            
-            return {
-                "status": "success",
-                "document_id": doc_id,
-            }
-        except Exception as e:
-            raise AgentError(f"Ingestion failed: {e}", code=FrameworkErrorCode.PROVIDER_ERROR)
-    
-    async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> Any:
-        """
-        AgentProtocol implementation for querying the RAG system.
-        """
-        if self.state != AgentState.READY:
-            raise AgentError("RAG System not ready", code=FrameworkErrorCode.AGENT_NOT_READY)
+        document = Document(
+            id=str(uuid.uuid4()), content=request.content, metadata=request.metadata
+        )
+        indexed = await get_vectorstore_service().index(
+            [document], collection_name=request.collection
+        )
+        return {"status": "success", "document_id": document.id, "indexed": indexed}
 
-        context = context or {}
-        collection = context.get("collection", "default")
-        top_k = context.get("top_k", 5)
-        
-        # Dogma VII: Ensure we are in a tenant context
-        async with tenant_context(context.get("tenant_id", "default-tenant")):
-            try:
-                # 1. Retrieve relevant documents
-                docs = await self.vectorstore.search(
-                    query=input,
-                    collection=collection,
-                    limit=top_k
-                )
-                
-                # 2. Build context for LLM
-                context_str = "\n\n".join([d.content for d in docs])
-                
-                # 3. Generate response
-                prompt = f"Using the following context, answer the query: {input}\n\nContext:\n{context_str}"
-                answer = await self.llm.generate(prompt)
-                
-                return answer
-                
-            except Exception as e:
-                raise AgentError(
-                    f"Execution failed: {e}",
-                    code=FrameworkErrorCode.AGENT_EXECUTION_FAILED
-                )
+    async def query(self, request: QueryRequest) -> QueryResponse:
+        """Retrieve the closest passages and answer from them."""
+        from core.nlp.models import get_embedder
+        from core.services.llm import get_llm_service
+        from core.services.vectorstore import get_vectorstore_service
+
+        vector = await get_embedder().encode_query(request.query)
+        results = await get_vectorstore_service().search(
+            query_vector=list(vector),  # type: ignore[arg-type]
+            k=request.top_k,
+            collection_name=request.collection,
+            query_text=request.query,
+        )
+        context = "\n\n".join(result.document.content for result in results)
+        prompt = (
+            "Answer the question using only the context below. If the context "
+            "does not contain the answer, say so.\n\n"
+            f"Context:\n{context}\n\nQuestion: {request.query}"
+        )
+        answer = await get_llm_service().generate_response(prompt)
+        return QueryResponse(
+            answer=answer,
+            sources=[
+                {
+                    "id": result.document.id,
+                    "score": result.score,
+                    "metadata": result.document.metadata,
+                }
+                for result in results
+            ],
+        )
 
 
 # ============================================================================
 # FastAPI Application
 # ============================================================================
 
-rag = RAGSystem(agent_id="rag-system-01")
+rag = RAGSystem()
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
-    logger.info("🚀 Starting Baselith RAG Application...")
-    
-    # Load configs to ensure they are valid
-    _ = get_llm_config()
-    _ = get_vectorstore_config()
-    
-    await rag.initialize()
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Validate the configuration at startup; services connect on first use."""
+    llm = get_llm_config()
+    vectorstore = get_vectorstore_config()
+    logger.info(
+        "RAG system starting: llm=%s/%s vectorstore=%s",
+        llm.provider,
+        llm.model,
+        vectorstore.provider,
+    )
     yield
-    await rag.shutdown()
-    logger.info("👋 RAG Application shut down.")
+    logger.info("RAG system stopped")
 
 
 app = FastAPI(
     title="Baselith RAG System",
-    description="Production-ready RAG application powered by BaselithCore",
-    version="1.0.0",
+    description="Retrieval-Augmented Generation powered by BaselithCore",
+    version="0.1.0",
     lifespan=lifespan,
 )
 
 
 @app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "agent_state": rag.state,
-        "agent_id": rag.agent_id
-    }
+async def health() -> dict[str, str]:
+    """Liveness: the process is up (services are checked on use)."""
+    return {"status": "healthy"}
 
 
 @app.post("/ingest")
-async def ingest(request: IngestRequest):
+async def ingest(request: IngestRequest) -> dict[str, Any]:
     """Ingest a document into the knowledge base."""
     try:
-        return await rag.ingest(
-            content=request.content,
-            metadata=request.metadata,
-            collection=request.collection or "default",
-        )
-    except AgentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+        return await rag.ingest(request)
+    except Exception as exc:
+        logger.exception("Ingestion failed")
+        raise HTTPException(
+            status_code=503, detail=f"Ingestion failed: {type(exc).__name__}"
+        ) from exc
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
+async def query(request: QueryRequest) -> QueryResponse:
     """Query the knowledge base."""
     try:
-        answer = await rag.execute(
-            input=request.query,
-            context={
-                "collection": request.collection or "default",
-                "top_k": request.top_k or 5
-            }
-        )
-        return QueryResponse(answer=answer, sources=[])
-    except AgentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+        return await rag.query(request)
+    except Exception as exc:
+        logger.exception("Query failed")
+        raise HTTPException(
+            status_code=503, detail=f"Query failed: {type(exc).__name__}"
+        ) from exc
 
 
 # ============================================================================
@@ -252,4 +174,7 @@ async def query(request: QueryRequest):
 # ============================================================================
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # HOST/PORT from .env (127.0.0.1:8000 in the development profile
+    # `baselith init` writes): a laptop's dev server stays off the LAN.
+    _app_config = get_app_config()
+    uvicorn.run(app, host=_app_config.host, port=_app_config.port)

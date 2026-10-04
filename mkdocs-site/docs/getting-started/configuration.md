@@ -101,6 +101,8 @@ Declared in `core.config.app`.
 | `FEEDBACK_POSITIVE_WEIGHT` | `float` | `0.05` |  |
 | `FEEDBACK_SCORE_MIN_TOTAL` | `int` | `3` |  |
 | `FEEDBACK_SUMMARY_CACHE_TTL` | `float` | `60.0` | TTL (seconds) of the in-process document feedback rollup cache. The rollup scans up to feedback_analytics_doc_scan_limit rows and aggregates them in Python on *every* RAG request when FEEDBACK_BOOST_ENABLED is on, so it is cached briefly rather than recomputed per request. Set to 0 to disable caching and always recompute. |
+| `HEALTH_READY_CACHE_TTL` | `int` | `5` | Seconds a /health/ready outcome — success or failure — is reused. Concurrent probes during a refresh share one check. Lower means faster recovery reporting, higher means fewer dependency round-trips. |
+| `HEALTH_READY_PROBE_TIMEOUT` | `float` | `2.0` | Deadline in seconds for each dependency check behind /health/ready (database, Redis, vector store). A check that has not answered by then counts as down, so an unreachable database yields a prompt 503 instead of a probe that waits out DB_POOL_TIMEOUT and is killed by the kubelet. Keep it below the probe's timeoutSeconds. |
 | `HOST` | `str` | `0.0.0.0` | Network interface to bind the application server to. |
 | `INDEX_BOOTSTRAP_BACKGROUND` | `bool` | `True` | Perform indexing and initialization as a background task. |
 | `INDEX_BOOTSTRAP_ENABLED` | `bool` | `True` |  |
@@ -998,4 +1000,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-650 settings documented.
+652 settings documented.

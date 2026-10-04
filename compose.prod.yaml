@@ -245,7 +245,7 @@ services:
   # Point QDRANT_HOST at a managed instance to use one instead; this service
   # is then surplus and can be left out of `up` by naming the others.
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     container_name: baselith-qdrant
     # REQUIRED API key: Qdrant ships with no authentication, so any container
     # on app_net could read, overwrite or drop every collection (the RAG
