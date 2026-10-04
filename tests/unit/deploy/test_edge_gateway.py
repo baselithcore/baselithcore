@@ -307,7 +307,19 @@ def test_env_files_are_excluded_from_every_copied_tree() -> None:
 def test_release_signs_recursively_and_checks_the_index_it_built() -> None:
     text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert "cosign sign --recursive" in text
-    assert "does not reference" in text, (
-        "the index digest is read back through a mutable tag; the step must "
-        "verify it references both platform digests this run pushed"
+    # The index digest is read back through a mutable tag, so the step must
+    # verify the index is exactly what this run's two build legs pushed. Each
+    # leg pushes an image index (image + attestation manifest) and
+    # `imagetools create` flattens its sources: the merged index lists the
+    # legs' children, never the legs' own digests, so the check compares
+    # against the children (v0.42.0 shipped unsigned because it did not).
+    assert "imagetools inspect --raw" in text
+    assert ".manifests[].digest" in text, (
+        "the expected set must be built from each leg's children"
+    )
+    assert '"${EXPECTED}" != "${ACTUAL}"' in text, (
+        "the merged index must hold exactly the legs' children"
+    )
+    assert "Manifest.Manifests}}{{.Digest}}" not in text, (
+        "comparing leg digests with the flattened index can never pass"
     )
