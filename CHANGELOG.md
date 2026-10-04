@@ -7,6 +7,43 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.42.0](https://github.com/baselithcore/baselithcore/compare/v0.41.0...v0.42.0) (2026-10-04)
+
+
+### Bug Fixes
+
+* **compose:** rerank TEI survives its warm-up; batch budget on both servers ([1858452](https://github.com/baselithcore/baselithcore/commit/18584521b7ca2f3b19ef9118663b69140faf90f3))
+* **config:** check the .env descriptor that is parsed, refuse symlinks ([3fef8f5](https://github.com/baselithcore/baselithcore/commit/3fef8f5e067dd4f23ed32eb80b075f2b3ff3f5e3))
+* **config:** load a working-directory .env only when this user owns it ([c03b39a](https://github.com/baselithcore/baselithcore/commit/c03b39acd1991fd3c30327bc97de773615ec9678))
+* **config:** never block importing core.config on a FIFO .env ([dbfacd8](https://github.com/baselithcore/baselithcore/commit/dbfacd89f0bb8ba53969ecef6758123a02e1018f))
+* **deps:** publish plugin-compat as an extra; setuptools in the test group ([9101c9f](https://github.com/baselithcore/baselithcore/commit/9101c9fa43b5db6f2df397785ad0eb5b4c8a2a49)), closes [#104](https://github.com/baselithcore/baselithcore/issues/104)
+* **deps:** pypdf 6.19.0 for eight HIGH advisories ([a2a3e3f](https://github.com/baselithcore/baselithcore/commit/a2a3e3feb9a87071122b1144608dce991eab6eed))
+* **dist:** make a pip-installed baselith-core work outside the repository ([e62b516](https://github.com/baselithcore/baselithcore/commit/e62b5162e313cefbbaa2af52b6a6e796643b9510))
+* **helm:** rerank TEI never became ready — size it from the warm-up peak ([5f5fbe1](https://github.com/baselithcore/baselithcore/commit/5f5fbe142797915ba5e9b0d4b81df75842c21cb0))
+* **helm:** size the TEI pods from measured memory ([6551314](https://github.com/baselithcore/baselithcore/commit/655131499ffa6d5148993160185d63c2d0917153))
+* **image:** copy build_support and templates into the app stage ([9913baa](https://github.com/baselithcore/baselithcore/commit/9913baab078788f4030123bbcb32f94ea9b21caa))
+* **image:** copy the build hook into the app stage; link converted-only weights into main ([d8f6e57](https://github.com/baselithcore/baselithcore/commit/d8f6e57c843cf4e5efee46b12e8b66e3884dbe06)), closes [#104](https://github.com/baselithcore/baselithcore/issues/104)
+* **plugins:** name the plugin-compat extra when a plugin misses a library the core no longer installs ([d4f2a04](https://github.com/baselithcore/baselithcore/commit/d4f2a04ac251f114a52555ab24c74ddd5b1cde77))
+* **security:** drop exec and urllib from the installed-wheel smoke ([609af8c](https://github.com/baselithcore/baselithcore/commit/609af8c88b941385544698870ebc5a138b720f40)), closes [#104](https://github.com/baselithcore/baselithcore/issues/104)
+* **security:** harden metrics, quotas, RLS, plugin updates, connectors, inference and the deploy perimeter ([64a4f66](https://github.com/baselithcore/baselithcore/commit/64a4f665b4f93646156cdb0f0075f3d40106eb02))
+* **security:** set the edge error-page headers from $uri maps; parse HTML in the CSP test ([3fc29e9](https://github.com/baselithcore/baselithcore/commit/3fc29e9cfc5f1e2c6b1be16d104208c028f009cd))
+
+
+### Features
+
+* **core:** core.nlp goes remote with the inference services; ML_RUNTIME=remote image ([9fa49f9](https://github.com/baselithcore/baselithcore/commit/9fa49f9bee720f6a13ad10faf69fcb3009b8ce1e))
+* **db:** transaction-scoped RLS tenant binding for transaction poolers ([07cee3e](https://github.com/baselithcore/baselithcore/commit/07cee3ee6e98ae20ae0ce2b1b42c2b2a5c756920))
+* **helm:** a Qdrant of the release's own — chart 0.10.0 ([dacdb4e](https://github.com/baselithcore/baselithcore/commit/dacdb4e4fb276780ce9b536599be258dcc3379d4))
+* **helm:** snapshot the release's Qdrant in the nightly backup — chart 0.10.1 ([fa08b55](https://github.com/baselithcore/baselithcore/commit/fa08b553aa7974e15767bc466333d46f7db9beef))
+* **inference:** call the customer's own GPUs directly — OpenAI, Cohere, NIM, mTLS ([3f70600](https://github.com/baselithcore/baselithcore/commit/3f7060040a6b45312665d417d922f9673281a785))
+* **plugins:** run setup_app_middleware late when a plugin is enabled ([564930b](https://github.com/baselithcore/baselithcore/commit/564930b93615ec72f1178e0fea2d6379016ed654))
+* real-database CI, a wheel smoke that resolves like a user, and a first run that works ([efc542e](https://github.com/baselithcore/baselithcore/commit/efc542ea882ad8afb34bdab66e23afe971be7c34))
+
+
+### Performance Improvements
+
+* **image:** keep one copy of the model weights; production checklist for isolation and audit ([cc66695](https://github.com/baselithcore/baselithcore/commit/cc66695ae90961d5f924caa039a084173733ffbe))
+
 # [0.41.0](https://github.com/baselithcore/baselithcore/compare/v0.40.2...v0.41.0) (2026-10-01)
 
 
