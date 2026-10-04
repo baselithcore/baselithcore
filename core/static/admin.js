@@ -7,8 +7,9 @@ async function reindexDocs() {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
-    const data = await res.json();
-    alert('Reindexing complete ✅ New files: ' + data.new_files_indexed);
+    // 202 Accepted: the run continues in the background; /admin/status
+    // reports its progress (indexing.running / last_new_documents).
+    alert('Reindexing started ✅ — refresh the status to follow its progress.');
     await loadData();
   } catch (err) {
     console.error('[admin] Failed to reindex documents:', err);

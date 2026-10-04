@@ -82,7 +82,7 @@ def is_infra_resource(resource_id: str) -> bool:
     Manifest ``required_resources``/``optional_resources`` lists mix genuine
     infra (``postgres``, ``redis``, ``llm``, ``qdrant``, ``graph``) with
     dependency pins (``fastapi>=0.110.0``) and config toggles/env flags
-    (``AURA_PERSISTENCE``, ``BASELITH_PITWALL_ENABLED``). Only the former should
+    (``NOTES_PERSISTENCE``, ``BASELITH_FEATURE_ENABLED``). Only the former should
     become ``Resource`` entities / ``dependsOn`` edges — the rest would pollute
     the catalog graph with meaningless nodes. This keeps a lowercase, versionless,
     non-env-flag token.
@@ -90,7 +90,7 @@ def is_infra_resource(resource_id: str) -> bool:
     raw = (resource_id or "").strip()
     if not raw or _VERSION_OP.search(raw) or "." in raw:
         return False
-    # ENV-style flag/toggle (all-caps and/or SNAKE_CASE): AURA_PERSISTENCE.
+    # ENV-style flag/toggle (all-caps and/or SNAKE_CASE): NOTES_PERSISTENCE.
     if raw.upper() == raw and ("_" in raw or len(raw) > 4):
         return False
     return True

@@ -83,8 +83,11 @@ def _parse_retry_after(value: str | None) -> float | None:
 
 def _decode_body(response: httpx.Response) -> Any:
     """Best-effort JSON decode, falling back to text."""
-    ctype = response.headers.get("content-type", "")
-    if "application/json" in ctype:
+    ctype = response.headers.get("content-type", "").lower()
+    # ``application/json`` and every ``+json`` structured suffix — above all the
+    # RFC 9457 ``application/problem+json`` the server answers errors with,
+    # which a plain ``"application/json" in ctype`` test does not match.
+    if "application/json" in ctype or "+json" in ctype:
         try:
             return response.json()
         except Exception:

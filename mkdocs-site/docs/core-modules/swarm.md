@@ -345,6 +345,14 @@ siblings and re-raises, rather than leaving orphaned tasks running as a bare
 the `budget_context` `ContextVar` when each task is created), so once the request
 budget is exhausted no sibling can make progress and the whole batch aborts.
 
+A batch started **outside** an orchestrated request used to have no budget at
+all. It now gets one by default: `Colony(loop_limits=...)` — left at its
+default — binds a single budget built from the orchestrator's `LoopLimits()`
+for the duration of `execute_batch`, shared by every sub-task exactly like a
+request's (so a breach aborts the batch the same way). An ambient budget always
+wins; `loop_limits=LoopLimits(...)` sets the caps, `loop_limits=None` disables
+the default (`batch_limits` in `core/swarm/colony_ops.py`).
+
 ### Handoff — structured task transfer
 
 `request_help()` finds a helper; `handoff()` goes further — it reassigns the task

@@ -309,6 +309,11 @@ runtime gates as the parallel executor before it runs:
   `category="read_only"` explicitly for side-effect-free tools; pass
   `AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)` where headless
   side-effect execution is intentional.
+  The default category is a `str` equal to `"destructive"` that every consumer
+  treats exactly as the plain value; `ToolDefinition.category_declared` is
+  `False` for it and `True` once an author writes a category down — which is
+  what the typed `Agent`'s standalone guard keys on
+  ([Agent › Safe defaults](agent.md#safe-defaults-for-a-standalone-run)).
 - **Budget gate** — each invocation is recorded against the request
   `LoopBudget` tool-call cap (explicit `loop_budget` argument, else the
   ambient budget from `budget_context`). At the cap `BudgetExceededError`

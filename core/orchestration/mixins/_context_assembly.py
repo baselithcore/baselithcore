@@ -107,8 +107,8 @@ async def inject_memory_context(
                 else get_context(max_tokens=context_tokens)
             )
 
-        # Flatten for prompt context
-        context["memory_context"] = "\n".join([f"- {m.content}" for m in memories])
+        # Flatten for prompt context, marked as untrusted background data.
+        context["memory_context"] = render_memory_context(memories)
 
         # Context Folding integration: recent conversation history, possibly folded.
         context["recent_history"] = recent_history
@@ -122,6 +122,45 @@ async def inject_memory_context(
         context["memory_manager"] = memory_manager
     except Exception as e:
         logger.warning(f"Memory recall failed: {e}")
+
+
+#: Envelope ``tool`` attribute for recalled memories.
+MEMORY_CONTEXT_SOURCE = "memory_recall"
+
+
+def render_memory_context(memories: list[Any]) -> str:
+    """Render recalled memories as one untrusted, scanned background block.
+
+    A memory is whatever an earlier turn, an ingested document or a tool
+    result put into the store — content the operator never wrote. Inserted
+    as plain ``- {content}`` lines it read exactly like the prompt around it,
+    so a poisoned memory could issue instructions on every later request that
+    recalled it. Each memory is scanned for indirect prompt injection
+    (:func:`~core.guardrails.indirect.scan_external_content`, sanitized under
+    the ``BASELITH_SANITIZE_EXTERNAL_CONTENT`` policy) and the bullet list is
+    sealed in the untrusted envelope
+    (:func:`~core.orchestration.tool_output.wrap_untrusted`), which escapes
+    any envelope marker inside the text. A model told about the envelope (see
+    :data:`~core.orchestration.tool_output.UNTRUSTED_OUTPUT_SYSTEM_RULE`)
+    reads it as data, never as instructions.
+
+    Args:
+        memories: Recalled memory items exposing ``content``.
+
+    Returns:
+        The enveloped bullet list, or ``""`` when nothing was recalled (so a
+        consumer's "no memories" check keeps working).
+    """
+    if not memories:
+        return ""
+    from core.guardrails.indirect import scan_external_content
+    from core.orchestration.tool_output import wrap_untrusted
+
+    lines = [
+        f"- {scan_external_content(str(m.content), source=MEMORY_CONTEXT_SOURCE)}"
+        for m in memories
+    ]
+    return wrap_untrusted("\n".join(lines), source=MEMORY_CONTEXT_SOURCE)
 
 
 def _record_context_allocation(

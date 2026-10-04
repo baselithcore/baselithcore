@@ -414,6 +414,42 @@ def audit_emit(
     task.add_done_callback(_pending_tasks.discard)
 
 
+async def flush_pending_audit_events(timeout: float = 3.0) -> int:
+    """Wait, bounded, for the writes :func:`audit_emit` scheduled on this loop.
+
+    A fire-and-forget emission is only a task until its sink write finishes;
+    a shutdown that closes the pools first, or simply ends the loop, loses it.
+    The lifespan teardown awaits this before the pools close.
+
+    Args:
+        timeout: Upper bound, in seconds, on the whole wait.
+
+    Returns:
+        How many emissions were still unfinished when the wait ended (and
+        were cancelled); ``0`` means every pending event reached its sinks.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return 0
+    pending = [t for t in _pending_tasks if not t.done() and t.get_loop() is loop]
+    if not pending:
+        return 0
+    _done, still_pending = await asyncio.wait(pending, timeout=timeout)
+    for task in still_pending:
+        task.cancel()
+    if still_pending:
+        # Let the cancellations land (and their done callbacks drop the
+        # references) without trusting a sink to honour them promptly.
+        await asyncio.wait(still_pending, timeout=0.1)
+        logger.warning(
+            "audit_flush_incomplete pending=%d timeout_s=%s",
+            len(still_pending),
+            timeout,
+        )
+    return len(still_pending)
+
+
 __all__ = [
     "AuditEvent",
     "AuditEventType",
@@ -422,6 +458,7 @@ __all__ = [
     "FileAuditSink",
     "LoggerAuditSink",
     "audit_emit",
+    "flush_pending_audit_events",
     "get_audit_logger",
     "reset_audit_logger",
     "set_audit_logger",

@@ -11,8 +11,10 @@ class ApiRoutersPlugin(Plugin):
     The core data/admin routers (chat, feedback, tenant, …) are mounted by the
     app factory. Newer, opt-in routers are exposed here via the RouterPlugin
     mounting path (``get_routers``) so they attach at startup without the app
-    factory taking a ``core -> plugins`` import. Currently this mounts the
-    webhook management API when ``WEBHOOKS_ENABLED`` is set.
+    factory taking a ``core -> plugins`` import: prompts, the WebSocket chat
+    channel, the async-agent API, and — behind their feature flags — webhooks,
+    privacy, compliance, approvals and runs. Every API router is served under
+    ``/v1`` and, deprecated, at its unprefixed path (:mod:`core.api.versioning`).
     """
 
     async def initialize(self, config: dict) -> None:
@@ -45,7 +47,18 @@ class ApiRoutersPlugin(Plugin):
         return ""
 
     def get_routers(self) -> list[Any]:
-        """Expose opt-in routers. Empty unless their feature flag is enabled."""
+        """Expose the plugin's routers, the API ones versioned.
+
+        Every API router is returned twice (see :mod:`core.api.versioning`):
+        under ``/v1`` and, marked deprecated, at its historical unprefixed
+        path. The WebSocket channel is not versioned.
+        """
+        from core.api.versioning import versioned_routers
+
+        # WebSocket chat channel: authenticates at the handshake with the
+        # same credentials as the REST chat surface. Not versioned.
+        from plugins.api_routers.chat_ws import router as chat_ws_router
+
         routers: list[Any] = []
 
         # Prompt-catalog admin surface: reads are always useful (local
@@ -54,12 +67,6 @@ class ApiRoutersPlugin(Plugin):
         from plugins.api_routers.prompts import router as prompts_router
 
         routers.append(prompts_router)
-
-        # WebSocket chat channel: authenticates at the handshake with the
-        # same credentials as the REST chat surface.
-        from plugins.api_routers.chat_ws import router as chat_ws_router
-
-        routers.append(chat_ws_router)
 
         from core.config.webhooks import get_webhook_config
 
@@ -97,4 +104,4 @@ class ApiRoutersPlugin(Plugin):
         from plugins.api_routers.async_runs import router as async_runs_router
 
         routers.append(async_runs_router)
-        return routers
+        return [chat_ws_router, *versioned_routers(routers)]

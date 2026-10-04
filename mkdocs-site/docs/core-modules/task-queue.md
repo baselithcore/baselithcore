@@ -312,14 +312,14 @@ The `api-routers` plugin exposes it over HTTP (authenticated via
 
 | Method & path | Response |
 | ------------- | -------- |
-| `POST /agent/async` — body `{"query": "...", "conversation_id": null}` | `202` with `{"task_id": ..., "status_url": "/agent/status/{task_id}"}`; `503` when the queue is unavailable |
+| `POST /agent/async` — body `{"query": "...", "conversation_id": null}` | `202` with `{"task_id": ..., "status_url": "/v1/agent/status/{task_id}"}` and the same URL in `Location` (unprefixed when `API_V1_ENABLED=false`); `503` when the queue is unavailable |
 | `GET /agent/status/{task_id}` | The TaskTracker record (`status`, `progress`, `result`, `tenant_id`, ...); `404` for an unknown task id **or one enqueued by another tenant** (indistinguishable by design), `503` when the tracker is unreachable |
 
 ```bash
 curl -X POST http://localhost:8000/agent/async \
   -H "Content-Type: application/json" \
   -d '{"query": "Summarize the Q3 incident reports"}'
-# {"task_id": "…", "status_url": "/agent/status/…"}
+# {"task_id": "…", "status_url": "/v1/agent/status/…"}
 ```
 
 Lifecycle on the worker:
@@ -339,6 +339,27 @@ is capped at 8000 characters at the API boundary. See
 [Webhooks](webhooks.md) for subscribing to the terminal events.
 
 ---
+
+## Running Workers
+
+`start_worker(concurrency=N)` (what `baselith queue worker --concurrency N`
+calls) runs one worker in the calling process when `N == 1`. With `N > 1` the
+calling process becomes a `WorkerSupervisor` over `N` child workers:
+
+- **Stop signals reach every worker.** Kubernetes signals PID 1 only; the
+  supervisor forwards SIGTERM/SIGINT to each child, where RQ runs its warm
+  shutdown (a second signal is RQ's cold shutdown). It then joins them for at
+  most `stop_timeout` (100 s, inside the chart's 120 s worker grace),
+  terminates what is still running and finally kills it, so the pod always
+  exits instead of hanging until SIGKILL.
+- **A dead worker is replaced.** A child that exits while the supervisor is
+  not stopping is restarted, with per-slot exponential backoff (1 s doubling
+  to 60 s; a child that ran for at least a minute restarts at once), logged as
+  `rq_worker_child_exited`.
+- **Bounded Redis connects.** Each worker's connection carries the
+  task-queue `socket_connect_timeout` and `health_check_interval`. Its
+  `socket_timeout` is left to RQ, which raises it to `dequeue_timeout + 10` so
+  the blocking dequeue (BLPOP) is never cut short.
 
 ## Worker Monitoring
 
@@ -531,6 +552,8 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 | `default_retry_delay`       | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `60` | Base delay before the first retry (s); later retries back off exponentially — see [Retry Configuration](#retry-configuration) |
 | `max_connections`           | `TASK_QUEUE_MAX_CONNECTIONS` | `50` | Broker connection-pool ceiling; the pool is blocking, so at the ceiling a caller waits up to 5 s for a free connection instead of failing with "Too many connections" |
 | `health_check_interval`     | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `30.0` | Idle-connection health check (s) |
+| `socket_timeout`            | `TASK_QUEUE_SOCKET_TIMEOUT` | `10.0` | Per-command read deadline (s) on the enqueue-side pool, so a Redis that accepts and stops answering cannot hang an enqueue while it holds a pooled connection. Not applied to the worker: its blocking dequeue opens its own connection, which a read deadline would cut short — never hand `get_queue_redis_connection()` to a `Worker` |
+| `socket_connect_timeout`    | `TASK_QUEUE_SOCKET_CONNECT_TIMEOUT` | `2.0` | TCP connect deadline (s) for a new task-queue connection |
 | `dlq_retention_seconds`     | `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `604800` | DLQ record TTL (s); `0` keeps records forever |
 | `dlq_replay_allowed_modules` | `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `["core.", "plugins."]` | Module prefixes a dead-lettered job may be replayed from; empty refuses every replay |
 

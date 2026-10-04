@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from core.api.versioning import V1_PREFIX, api_v1_enabled
 from core.context import get_current_tenant_id
 from core.middleware import require_user
+from core.models.chat import MAX_ID_LENGTH
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +35,7 @@ class AsyncRunRequest(BaseModel):
     """Submission payload for an async agent run."""
 
     query: str = Field(..., min_length=1, max_length=8000)
-    conversation_id: str | None = None
+    conversation_id: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
 
 
 def _enqueue(query: str, conversation_id: str | None) -> str:
@@ -49,15 +51,35 @@ def _tracker():
     return get_task_tracker()
 
 
+def status_path(task_id: str, root_path: str = "") -> str:
+    """Where a run's status is polled: the versioned path when ``/v1`` is on.
+
+    Args:
+        task_id: The queued task.
+        root_path: The ASGI ``root_path`` the app is mounted under (behind a
+            path-prefixing proxy), so the URL resolves from the client.
+    """
+    base = V1_PREFIX if api_v1_enabled() else ""
+    return f"{root_path}{base}/agent/status/{task_id}"
+
+
 @router.post("/async", status_code=202)
-async def submit_async_run(req: AsyncRunRequest) -> dict:
-    """Enqueue an agent run; returns the task id to poll (or subscribe)."""
+async def submit_async_run(
+    req: AsyncRunRequest, request: Request, response: Response
+) -> dict:
+    """Enqueue an agent run; returns the task id to poll (or subscribe).
+
+    ``202 Accepted`` with the poll URL both in the body (``status_url``) and in
+    the ``Location`` header.
+    """
     try:
         task_id = await asyncio.to_thread(_enqueue, req.query, req.conversation_id)
     except Exception as exc:
         logger.warning("async_run_enqueue_failed error=%s", exc)
         raise HTTPException(status_code=503, detail="task queue unavailable") from exc
-    return {"task_id": task_id, "status_url": f"/agent/status/{task_id}"}
+    url = status_path(task_id, str(request.scope.get("root_path") or ""))
+    response.headers["Location"] = url
+    return {"task_id": task_id, "status_url": url}
 
 
 @router.get("/status/{task_id}")

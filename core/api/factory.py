@@ -20,7 +20,13 @@ from core._version import __version__
 from core.a2a.agent_card import AgentCapabilities, AgentCard
 from core.a2a.router import create_wellknown_router
 from core.api.lifespan import lifespan
+from core.api.versioning import (
+    api_v1_enabled,
+    legacy_include_kwargs,
+    versioned_routers,
+)
 from core.config import AppConfig, get_app_config, get_security_config
+from core.middleware.api_deprecation import APIDeprecationMiddleware
 from core.middleware.cost_control import CostControlMiddleware
 from core.middleware.csrf import CSRFOriginMiddleware
 from core.middleware.http_metrics import HTTPMetricsMiddleware
@@ -306,6 +312,10 @@ def create_app() -> FastAPI:
             "Retry-After",
             "X-Request-ID",
             "Mcp-Session-Id",
+            # RFC 9745 / 5829: a browser client must be able to see that the
+            # unprefixed path it calls is deprecated, and where to move.
+            "Deprecation",
+            "Link",
         ],
         # How long a browser may cache a preflight answer. Starlette's default
         # is 600s, so a dashboard doing credentialed JSON calls re-asks OPTIONS
@@ -330,6 +340,12 @@ def create_app() -> FastAPI:
     # stack can emit — TrustedHost 400s, CSRF 403s, 413s and CORS preflights —
     # not just on responses that reach the routes.
     app.add_middleware(SecurityHeadersMiddleware)
+
+    # === Deprecation signal for the unprefixed API paths ===
+    # Reads the flag the marker dependency sets on the scope (see
+    # core.api.versioning), so it only touches responses a deprecated
+    # (unprefixed copy of a /v1) route produced.
+    app.add_middleware(APIDeprecationMiddleware)
 
     # === Request ID middleware to correlate logs/metrics ===
     # Registered outside CORS and every guard, so every response — CORS
@@ -383,17 +399,24 @@ def create_app() -> FastAPI:
         app.include_router(create_root_redirect_router(_root_redirect))
 
     # === Routers ===
-    app.include_router(chat.router)
-    app.include_router(index.router)
+    # API routers are served under /v1 and, deprecated, at their historical
+    # unprefixed path (core.api.versioning). Operational routers — metrics,
+    # status/health probes, the console, admin — keep one unprefixed path.
+    v1_enabled = api_v1_enabled()
+    legacy = legacy_include_kwargs()
+    app.include_router(chat.router, **legacy)
+    app.include_router(index.router, **legacy)
     app.include_router(metrics.router)
     app.include_router(status.router)
     app.include_router(console.router)
 
     # === Plugin Management API ===
     # Registered first: plugin_management_router's /{plugin_name} would swallow /updates.
-    app.include_router(plugin_updates_router)
+    plugin_api_routers = [plugin_updates_router]
     if plugin_management_router:
-        app.include_router(plugin_management_router)
+        plugin_api_routers.append(plugin_management_router)
+    for router in versioned_routers(plugin_api_routers):
+        app.include_router(router)
 
     # === Backstage Exporter API ===
     app.include_router(backstage_exporter_router)
@@ -419,18 +442,19 @@ def create_app() -> FastAPI:
         app.include_router(create_mcp_http_router(mcp_server))
 
     if ENABLE_FEEDBACK:
-        app.include_router(feedback.router)
+        app.include_router(feedback.router, **legacy)
         app.include_router(admin_router)
 
     app.include_router(tenant_router)
 
-    # === Versioned API aliases (additive) ===
-    # Mount the data routers a second time under /v1 while keeping the original
-    # unprefixed paths live, so existing clients are unaffected and new clients
-    # can pin to a stable version. HTML/admin/discovery routers stay unprefixed.
-    import os
-
-    if os.getenv("API_V1_ENABLED", "true").strip().lower() in ("1", "true", "yes"):
+    # === Versioned API (/v1) ===
+    # The data routers a second time under /v1, the stable contract new
+    # clients (and both SDKs) pin to. The unprefixed copies above stay live,
+    # marked deprecated. The plugin-mounted API routers (compliance, approvals,
+    # runs, webhooks, privacy, prompts, agent) get the same treatment from the
+    # api_routers plugin. metrics/status/tenants keep their historical /v1
+    # aliases (not deprecated at the root: probes and nginx address them).
+    if v1_enabled:
         app.include_router(chat.router, prefix="/v1")
         app.include_router(index.router, prefix="/v1")
         app.include_router(metrics.router, prefix="/v1")

@@ -1346,9 +1346,13 @@ baselith queue worker --concurrency 4
 
 **Parameters**:
 
-- `--concurrency`: Number of worker **processes** to run (default: 1). One
-  runs in the foreground process; the rest are child processes, joined on
-  shutdown.
+- `--concurrency`: Number of worker **processes** to run (default: 1). With
+  1 the worker runs in the foreground process. With more, the foreground
+  process supervises that many child workers: it forwards SIGTERM/SIGINT to
+  them (an orchestrator signals PID 1 only), waits up to 100 s for their warm
+  shutdown before terminating them, and restarts a child that exits
+  unexpectedly, with exponential backoff (1 s doubling to 60 s; a child that
+  ran for a minute restarts at once).
 
 Workers started this way are tenant-aware (they restore `tenant_id`/`user_id`
 context before running a job), record terminal failures to the dead-letter

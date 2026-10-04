@@ -183,6 +183,24 @@ describe('chat', () => {
     await expect(iter.next()).rejects.toBeInstanceOf(ChatStreamError);
   });
 
+  it('exposes code and requestId from a JSON error payload, ignoring ids and keepalives', async () => {
+    const c = clientWith(() =>
+      sseResponse([
+        'id: 1\ndata: partial\n\n',
+        ': keepalive\n\n',
+        'id: 2\nevent: error\ndata: {"code":"stream_failed","detail":"stream failed","request_id":"req-9"}\n\n',
+        'id: 3\nevent: done\ndata: [DONE]\n\n',
+      ])
+    );
+    const iter = c.chatStream('q')[Symbol.asyncIterator]();
+    await expect(iter.next()).resolves.toEqual({ done: false, value: 'partial' });
+    const err = await iter.next().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ChatStreamError);
+    expect((err as ChatStreamError).message).toBe('stream failed');
+    expect((err as ChatStreamError).code).toBe('stream_failed');
+    expect((err as ChatStreamError).requestId).toBe('req-9');
+  });
+
   it('merges a CRLF line split exactly at the \\r/\\n boundary (regression)', async () => {
     // A chunk boundary between "\r" and its "\n" must not fragment one
     // logical `data:` block into two.
@@ -235,6 +253,29 @@ describe('error mapping', () => {
       await expect(c.chat('q')).rejects.toBeInstanceOf(ctor as never);
     });
   }
+
+  it('parses an application/problem+json body (code, detail, request id)', async () => {
+    const c = clientWith(
+      () =>
+        new Response(
+          JSON.stringify({
+            type: 'urn:baselith:error:not_found',
+            title: 'Not Found',
+            status: 404,
+            detail: 'nope',
+            code: 'not_found',
+            request_id: 'rid-1',
+          }),
+          { status: 404, headers: { 'content-type': 'application/problem+json' } }
+        ),
+      { maxRetries: 0 }
+    );
+    const err = await c.chat('q').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect((err as NotFoundError).code).toBe('not_found');
+    expect((err as NotFoundError).requestId).toBe('rid-1');
+    expect((err as NotFoundError).message).toContain('nope');
+  });
 
   it('parses the envelope code and request id', async () => {
     const c = clientWith(

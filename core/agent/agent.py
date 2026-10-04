@@ -38,7 +38,6 @@ message API still works: the history is flattened into a prompt for it.
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -47,6 +46,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
+from core.agent._safety import DEFAULT, collect_tools, resolve_loop_limits
 from core.agent._tool_dispatch import (
     build_tool_specs,
     gate_context,
@@ -71,6 +71,7 @@ from core.services.llm.tool_calling import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from core.orchestration.checkpoint import CheckpointManager
+    from core.orchestration.limits import LoopLimits
 
 logger = get_logger(__name__)
 
@@ -135,15 +136,16 @@ class Agent[OutputT]:
             :class:`~core.orchestration.autonomy.AutonomyPolicy`. When set,
             tools whose category needs approval at the active autonomy level
             are gated through the enforcement chokepoint, and a run with no
-            approval channel pauses with ``ApprovalPendingError``. Unlike
-            :class:`~core.reasoning.react.ReActAgent` — which manufactures a
-            SUPERVISED policy when given none — this defaults to ``None`` and
-            leaves the approval gate inert: there is no ambient policy to
-            inherit here, and defaulting to one would start demanding approval
-            for every effectful tool of every existing typed agent, with no
-            channel to approve on. Every other control at the chokepoint
-            (contract, plugin capability, budget, rate limit, hooks, audit)
-            applies either way.
+            approval channel pauses with ``ApprovalPendingError``. **Left at
+            its default**, the agent refuses tools explicitly declared
+            ``category="destructive"`` — the model gets an error result naming
+            the opt-in — and every other tool, including every plain callable
+            and every tool left at the default category, runs exactly as
+            before (there is no channel to approve on, so demanding approval
+            for every effectful tool would break every existing typed agent). ``None`` is the explicit
+            opt-out: no guard, the approval gate inert, the pre-guard
+            behaviour. Every other control at the chokepoint (contract, plugin
+            capability, budget, rate limit, hooks, audit) applies either way.
         tool_ledger: :class:`~core.orchestration.idempotency.ToolLedger` to
             record effectful calls in. Defaults to the process-wide ledger
             (:mod:`core.orchestration.ledger_factory`), which is durable when
@@ -160,6 +162,17 @@ class Agent[OutputT]:
             cap, which is how the loop behaved before: a tool that never
             returned pinned the agent, since nothing else in the typed loop
             carries a deadline.
+        loop_limits: Caps for the run when no ``LoopBudget`` is ambient (an
+            ``Agent.run`` outside an orchestrated request). Left at its
+            default, the run gets the orchestrator's own defaults —
+            ``budget_usd``, ``max_tool_calls``, and the
+            ``ORCHESTRATOR_LOOP_MAX_TOKENS`` / ``ORCHESTRATOR_LOOP_MAX_SECONDS``
+            settings — with the iteration cap widened to ``max_iterations``;
+            breaching one raises ``BudgetExceededError``. An explicit
+            :class:`~core.orchestration.limits.LoopLimits` replaces those caps;
+            ``None`` disables the default budget (bounded by
+            ``max_iterations`` alone, the pre-default behaviour). An ambient
+            budget always wins and is never doubled.
     """
 
     def __init__(
@@ -173,9 +186,10 @@ class Agent[OutputT]:
         max_iterations: int = 6,
         task_category: str | None = None,
         llm_service: Any | None = None,
-        autonomy_policy: Any | None = None,
+        autonomy_policy: Any | None = DEFAULT,
         tool_ledger: ToolLedger | None = None,
         tool_timeout: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+        loop_limits: LoopLimits | None = DEFAULT,
     ) -> None:
         self.model = model
         self.output_type = output_type
@@ -187,20 +201,11 @@ class Agent[OutputT]:
         self._llm_service = llm_service
         # Read back by ``_tool_dispatch.gate_context``, which also honours the
         # same attribute set directly on an instance by a host.
-        self._autonomy_policy = autonomy_policy
+        self._guard_destructive = autonomy_policy is DEFAULT
+        self._autonomy_policy = None if autonomy_policy is DEFAULT else autonomy_policy
+        self._loop_limits = loop_limits
         self._tool_ledger = tool_ledger
-        self._tools: dict[str, ToolDefinition] = {}
-        for tool in tools:
-            definition = (
-                tool
-                if isinstance(tool, ToolDefinition)
-                else ToolDefinition(
-                    name=tool.__name__,
-                    fn=tool,
-                    description=inspect.getdoc(tool) or tool.__name__,
-                )
-            )
-            self._tools[definition.name] = definition
+        self._tools: dict[str, ToolDefinition] = collect_tools(tools)
 
     # -- internals ---------------------------------------------------------
 
@@ -316,12 +321,27 @@ class Agent[OutputT]:
         Raises:
             AgentOutputValidationError: ``output_type`` never satisfied.
             RuntimeError: ``max_iterations`` exhausted before a final answer.
-            BudgetExceededError: An ambient ``LoopBudget`` cap was hit.
+            BudgetExceededError: A ``LoopBudget`` cap was hit — the ambient
+                one, or the run's default (see ``loop_limits``).
             ApprovalPendingError: A tool needs a human decision that is not
                 available yet; the run pauses durably. Only reachable when the
                 agent was given an ``autonomy_policy``; without one the
                 approval gate is inert (see the constructor).
         """
+        from core.orchestration.budget_context import standalone_budget
+
+        limits = resolve_loop_limits(self._loop_limits, self.max_iterations)
+        with standalone_budget(limits):
+            return await self._run(prompt, run_id=run_id, checkpoint=checkpoint)
+
+    async def _run(
+        self,
+        prompt: str,
+        *,
+        run_id: str | None,
+        checkpoint: CheckpointManager | None,
+    ) -> AgentResult[OutputT]:
+        """Body of :meth:`run`, with the run's budget already bound."""
         from core.orchestration.enforcement import enforce_iteration
 
         service = self._service()

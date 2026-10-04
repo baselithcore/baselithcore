@@ -68,8 +68,10 @@ function parseRetryAfter(value: string | null): number | undefined {
 }
 
 async function decodeBody(res: Response): Promise<unknown> {
-  const ctype = res.headers.get('content-type') ?? '';
-  if (ctype.includes('application/json')) {
+  const ctype = (res.headers.get('content-type') ?? '').toLowerCase();
+  // `application/json` and every `+json` structured suffix — above all the
+  // RFC 9457 `application/problem+json` the server answers errors with.
+  if (ctype.includes('application/json') || ctype.includes('+json')) {
     try {
       return await res.json();
     } catch {
@@ -84,13 +86,40 @@ async function decodeBody(res: Response): Promise<unknown> {
  *
  * The server has already committed to a 200 response by the time a provider
  * read fails, so the only way to report it is in-band (see
- * `plugins/api_routers/chat.py`'s `SSE_ERROR_EVENT`). The message is
+ * `plugins/api_routers/chat.py`'s `sse_error_event`). The message is
  * deliberately generic — the server never puts provider detail on the wire.
+ * Current servers send a JSON payload whose `code` and `requestId` (quote it
+ * when reporting the failure) are exposed here; older servers sent the bare
+ * text `stream failed`, which still parses (both `undefined`).
  */
 export class ChatStreamError extends Error {
-  constructor(message = 'stream failed') {
+  readonly code?: string;
+  readonly requestId?: string;
+
+  constructor(message = 'stream failed', opts: { code?: string; requestId?: string } = {}) {
     super(message);
     this.name = new.target.name;
+    this.code = opts.code;
+    this.requestId = opts.requestId;
+  }
+
+  /** Build from an `event: error` payload: a JSON object or legacy text. */
+  static fromEventData(data: string): ChatStreamError {
+    if (data.trimStart().startsWith('{')) {
+      try {
+        const payload = JSON.parse(data) as Record<string, unknown>;
+        if (payload && typeof payload === 'object') {
+          const detail = payload.detail ?? payload.message ?? 'stream failed';
+          return new ChatStreamError(String(detail), {
+            code: typeof payload.code === 'string' ? payload.code : undefined,
+            requestId: typeof payload.request_id === 'string' ? payload.request_id : undefined,
+          });
+        }
+      } catch {
+        // fall through: not JSON, treat as legacy text
+      }
+    }
+    return new ChatStreamError(data || 'stream failed');
   }
 }
 
@@ -187,13 +216,13 @@ async function* decodeSseStream(
   for await (const raw of rawChunks) {
     for (const event of sse.feed(raw)) {
       if (event.event === 'done') return;
-      if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
+      if (event.event === 'error') throw ChatStreamError.fromEventData(event.data);
       yield event.data;
     }
   }
   for (const event of sse.flush()) {
     if (event.event === 'done') return;
-    if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
+    if (event.event === 'error') throw ChatStreamError.fromEventData(event.data);
     yield event.data;
   }
 }

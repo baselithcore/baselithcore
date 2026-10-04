@@ -2,7 +2,7 @@
 
 Deletes every row scoped to a tenant across **all** public tables that carry a
 ``tenant_id`` column — core (``interactions``/``feedback``) and any plugin store
-(BOP, pitwall, red_agent, …). The table set is discovered dynamically from
+(any plugin's own tables). The table set is discovered dynamically from
 ``information_schema`` so no hand-maintained list can drift out of date.
 
 Foreign keys are handled by a **fixpoint** loop: a table whose delete fails

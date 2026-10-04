@@ -125,10 +125,9 @@ ingress:
 # plugin loading BGE-M3 plus a reranker in-process sits at 3.0-3.7Gi steady,
 # peaks at 3.1-4.5Gi under request load, and has touched 5.3Gi on a boot that
 # downloaded the models. Plugins that use the core embedding/rerank services
-# (`inference` below) load no model: an API pod with only auth + wikigen idles
+# (`inference` below) load no model: an API pod with only such plugins idles
 # near 0.7Gi (measured with ps rss, 1 worker). Plugins that still load their
-# own models (agent_jira, docheck, red_agent — see
-# configs/inprocess_ml_allowlist.yaml) keep the old numbers until migrated.
+# own models (see configs/inprocess_ml_allowlist.yaml) keep the old numbers until migrated.
 resources:
   requests:
     # requests.cpu is not only a scheduling reservation: it is the HPA's
@@ -244,9 +243,17 @@ tmpVolumes:
   enabled: true
   sizeLimit: 256Mi
 
-# Graceful shutdown: must exceed core.resilience GracefulShutdown timeout so
-# in-flight requests drain before SIGKILL.
-terminationGracePeriodSeconds: 45
+# Graceful shutdown budget. Kubernetes counts the preStop hook against this
+# grace, then sends SIGTERM; uvicorn drains HTTP (GRACEFUL_SHUTDOWN_TIMEOUT)
+# and only then runs the lifespan teardown, which has its own deadline
+# (core.api._shutdown.TEARDOWN_BUDGET_S) with the usage-ledger, audit,
+# telemetry and pool flushes reserved inside it. SIGKILL lands at the grace:
+#
+#   terminationGracePeriodSeconds >= preStop (5) + drain (30) + teardown (40)
+#   80                            >= 75, plus a 5s margin for process exit
+#
+# Raise this whenever you raise config.GRACEFUL_SHUTDOWN_TIMEOUT.
+terminationGracePeriodSeconds: 80
 
 # Host header sent on the three probes. TRUSTED_HOSTS mounts Starlette's
 # TrustedHostMiddleware, which 400s any request whose Host it does not know —
@@ -434,7 +441,7 @@ worker:
 # Off by default, and off means *nothing is instrumented*: no TracerProvider,
 # no FastAPI/HTTPX/Redis auto-instrumentation, therefore no HTTP, database or
 # client spans anywhere — including in-process consumers such as the
-# BaselithControl "Traces" tab, which then correctly reports that the SDK is
+# an admin console's "Traces" tab, which then correctly reports that the SDK is
 # not active and shows an empty list. Turning tracing on is this block; it is
 # not something the app infers from having the SDK installed.
 telemetry:
@@ -976,9 +983,9 @@ networkPolicy:
   enabled: false
   # Extra ports this release's own pods may reach on each other, on top of
   # containerPort. A plugin that runs a single-instance side process and has
-  # every replica forward to it needs one: dbview elects one owner of its Node
-  # child cluster-wide, and the other replicas dial it on 43117
-  # (DBVIEW_INTERNAL_PORT). Without the port here those replicas answer 404 for
+  # every replica forward to it needs one: such a plugin elects one owner of its
+  # child process cluster-wide, and the other replicas dial it on that port
+  # (e.g. 43117). Without the port here those replicas answer 404 for
   # the console while the leader's replica serves it.
   #   selfIngressPorts: [43117]
   selfIngressPorts: []

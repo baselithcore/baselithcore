@@ -48,11 +48,11 @@ Input to the agent. Rejects unknown fields (`extra="forbid"`).
 | Field | Type | Notes |
 | ----- | ---- | ----- |
 | `query` | `str` | Required, 1–8000 chars |
-| `conversation_id` | `str \| None` | Conversation/session id |
+| `conversation_id` | `str \| None` | Conversation/session id, ≤ `MAX_ID_LENGTH` (128) chars |
 | `stream` | `bool \| None` | Compatibility flag; use `/chat/stream` |
 | `rag_only` | `bool` | Restrict to retrieval-only answers |
-| `kb_label` | `str \| None` | Knowledge-base label filter |
-| `tenant_id` | `str \| None` | Tenant override |
+| `kb_label` | `str \| None` | Knowledge-base label filter, ≤ 128 chars |
+| `tenant_id` | `str \| None` | Tenant override, ≤ 128 chars |
 | `max_response_tokens` | `int \| None` | Upper bound, 1–16000 |
 
 ### `ChatResponse`
@@ -65,7 +65,11 @@ Agent output (`extra="allow"`): `answer` (str), optional `metadata`, `sources`
 Feedback on a generated answer (`extra="ignore"` — unexpected keys are
 dropped rather than persisted):
 `query` (1–8000), `answer` (1–32000), `feedback` (`positive`|`negative`),
-optional `conversation_id`, `sources`, and `comment`.
+optional `conversation_id` (≤ 128), `sources`, and `comment`.
+
+`MAX_ID_LENGTH` (128) is the shared bound on caller-supplied identifiers; the
+API routers reuse it for the async-run `conversation_id`, the tenant-creation
+`id` and the `/approvals` `tenant_id` filter.
 
 ### `FeedbackDocumentReference`
 

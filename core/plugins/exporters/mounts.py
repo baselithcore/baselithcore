@@ -2,8 +2,8 @@
 
 Some plugins do not register FastAPI routers on the host app; instead they
 ``app.mount(MOUNT_PATH, get_app())`` a self-contained FastAPI/Starlette
-sub-application (the established sub-app-mount pattern used by e.g. wikigen,
-docheck, agent_jira, baselithbrain).  Those routes live in a *separate* ASGI
+sub-application (the established sub-app-mount pattern used by several
+plugins).  Those routes live in a *separate* ASGI
 app and therefore never appear in the host ``/openapi.json`` nor in
 ``plugin.get_routers()`` — so the router-based API-entity path in
 :mod:`.api_definition` cannot see them and the plugin exports with **no**
@@ -39,7 +39,7 @@ class SubAppApi:
     Attributes:
         plugin_name: The mount ``name`` — set to the owning plugin's registry
             name by the sub-app-mount pattern.
-        mount_path: Host path the sub-app is mounted at (e.g. ``/wikigen``),
+        mount_path: Host path the sub-app is mounted at (e.g. ``/wiki``),
             trailing slash stripped.
         openapi: The sub-app's OpenAPI document (self-contained: its own
             ``paths`` and ``components``).
@@ -96,8 +96,8 @@ def build_subapp_api_definition(
 ) -> str:
     """Serialise a mounted sub-app's OpenAPI, re-prefixing paths with the mount.
 
-    A sub-app mounted at ``/wikigen`` reports its paths relative to the mount
-    (``/api/pages``); at the host they are served at ``/wikigen/api/pages``.
+    A sub-app mounted at ``/wiki`` reports its paths relative to the mount
+    (``/api/pages``); at the host they are served at ``/wiki/api/pages``.
     Re-prefixing keeps the embedded contract addressable.  The sub-app's
     ``components`` are self-contained, so they are copied wholesale (no pruning
     needed).  Returns the document serialised as canonical JSON, ready to embed

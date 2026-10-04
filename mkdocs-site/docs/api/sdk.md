@@ -105,7 +105,10 @@ Every API failure raises a subclass of `BaselithAPIError`, each carrying
 - `request_id` — the `request_id` member, else the `X-Request-ID` header
 
 The legacy `{"error": {...}}` envelope and FastAPI's bare `{"detail": ...}`
-shape are still recognised for older servers.
+shape are still recognised for older servers. Both clients decode the body for
+`application/json` **and** any `+json` media type — earlier releases matched
+only `application/json`, so the server's `application/problem+json` errors
+were left as raw text and `code` / `request_id` came back empty.
 
 | Exception             | When                                |
 | --------------------- | ----------------------------------- |
@@ -143,11 +146,15 @@ try:
     for chunk in client.chat_stream("Tell me a story"):
         print(chunk, end="")
 except ChatStreamError as e:
-    print("\nstream failed:", e)
+    print("\nstream failed:", e, e.code, e.request_id)
 ```
 
 `ChatStreamError` subclasses `BaselithError`, so an `except BaselithError`
-already catches it. The TypeScript client throws its own `ChatStreamError`
+already catches it. Current servers send the error as JSON; the client exposes
+its `code` (`"stream_failed"`) and `request_id` — the id to quote when
+reporting the failure — and still accepts the bare `stream failed` text older
+servers sent (both attributes are then `None`). `id:` fields on events are
+ignored. The TypeScript client throws its own `ChatStreamError`
 (exported from `baselith-sdk`) in the same situation:
 
 ```typescript
@@ -158,7 +165,7 @@ try {
     process.stdout.write(chunk);
   }
 } catch (err) {
-  if (err instanceof ChatStreamError) console.error("stream failed:", err.message);
+  if (err instanceof ChatStreamError) console.error("stream failed:", err.message, err.code, err.requestId);
   else throw err;
 }
 ```

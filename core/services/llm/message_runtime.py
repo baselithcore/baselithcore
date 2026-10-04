@@ -28,11 +28,15 @@ from typing import TYPE_CHECKING, Any, cast
 from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._accounting import account_turn, record_usage_cost
 from core.services.llm._deadline import await_within_deadline
-from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
+from core.services.llm._telemetry import (
+    gen_ai_provider_for,
+    report_tokens_to_middleware,
+)
 from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.errors import (
     RETRYABLE_ERRORS,
@@ -235,7 +239,7 @@ async def generate_messages(
     tracer = get_tracer("llm-service")
     span_attributes: dict[str, Any] = {
         "gen_ai.operation.name": "chat",
-        "gen_ai.system": gen_ai_system(service.config.provider),
+        **provider_attributes(gen_ai_provider_for(service.config)),
         "gen_ai.request.model": resolved_model,
         "gen_ai.baselith.native_tools": True,
         "gen_ai.baselith.message_api": True,

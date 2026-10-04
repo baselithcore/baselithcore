@@ -20,6 +20,50 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _scan_part(part: Any, source: str) -> Any:
+    """Scan one content part's text, returning a copy when there is any."""
+    from core.guardrails import scan_external_content
+
+    if not isinstance(part, dict):
+        return part
+    scanned = dict(part)
+    text = part.get("text")
+    if isinstance(text, str):
+        scanned["text"] = scan_external_content(text, source=source)
+    resource = part.get("resource")
+    # An embedded resource carries its text one level down.
+    if isinstance(resource, dict) and isinstance(resource.get("text"), str):
+        scanned["resource"] = {
+            **resource,
+            "text": scan_external_content(resource["text"], source=source),
+        }
+    return scanned
+
+
+def scan_content_parts(parts: Any, *, source: str) -> Any:
+    """Scan every text-bearing part of an MCP ``content``/``contents`` list.
+
+    Only a lone text item used to be scanned, so a server that answered with
+    two text parts — or a text part beside an image — handed its text to the
+    model unscanned. Every ``text`` field is now scanned with
+    :func:`~core.guardrails.scan_external_content` (and sanitized under the
+    ``BASELITH_SANITIZE_EXTERNAL_CONTENT`` policy), including the text of an
+    embedded ``resource`` part. Binary parts (``image``, ``audio``, ``blob``)
+    pass through untouched. The input is never mutated.
+
+    Args:
+        parts: The ``content`` (tool result) or ``contents`` (resource read)
+            list; anything that is not a list is returned unchanged.
+        source: Origin label recorded with any finding.
+
+    Returns:
+        A new list with scanned text, or ``parts`` itself when not a list.
+    """
+    if not isinstance(parts, list):
+        return parts
+    return [_scan_part(part, source) for part in parts]
+
+
 class OperationsMixin:
     """Tool and resource calls over whichever transport is connected."""
 
@@ -97,15 +141,14 @@ class OperationsMixin:
         if not content:
             return None
 
+        # External MCP servers are untrusted: every text part is scanned for
+        # indirect prompt injection before it enters the agent's context
+        # (sanitized under BASELITH_SANITIZE_EXTERNAL_CONTENT, on by default).
+        content = scan_content_parts(content, source=f"mcp_tool:{name}")
+
         # Return text content if single item
         if len(content) == 1 and content[0].get("type") == "text":
             text = content[0].get("text", "")
-            # External MCP servers are untrusted: scan tool output for indirect
-            # prompt injection before it enters the agent's context. Log-only by
-            # default (additive); sanitizes when BASELITH_SANITIZE_EXTERNAL_CONTENT.
-            from core.guardrails import scan_external_content
-
-            text = scan_external_content(text, source=f"mcp_tool:{name}")
             # Try to parse as JSON
             try:
                 return json.loads(text)
@@ -169,7 +212,9 @@ class OperationsMixin:
         self._ensure_connected()
 
         response = await self._send_request("resources/read", {"uri": uri})
-        contents = response.get("contents", [])
+        contents = scan_content_parts(
+            response.get("contents", []), source=f"mcp_resource:{uri}"
+        )
 
         if contents and len(contents) == 1:
             return contents[0].get("text")

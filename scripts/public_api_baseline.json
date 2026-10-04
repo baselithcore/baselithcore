@@ -788,6 +788,7 @@
       "Perspective"
     ],
     "core.middleware": [
+      "APIDeprecationMiddleware",
       "BudgetExceededError",
       "CSRFOriginMiddleware",
       "CostControlMiddleware",
@@ -861,6 +862,7 @@
       "metrics",
       "openinference_enabled",
       "openinference_llm_attributes",
+      "provider_attributes",
       "register_span_sink",
       "setup_telemetry",
       "shutdown_telemetry",

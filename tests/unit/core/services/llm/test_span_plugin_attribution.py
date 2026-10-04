@@ -46,9 +46,9 @@ def _clean_context() -> Any:
 
 
 def test_span_names_the_bound_plugin() -> None:
-    token = set_plugin_context("aura")
+    token = set_plugin_context("notes")
     try:
-        assert attributes()[PLUGIN_KEY] == "aura"
+        assert attributes()[PLUGIN_KEY] == "notes"
     finally:
         reset_plugin_context(token)
 
@@ -60,7 +60,7 @@ def test_key_is_absent_outside_any_plugin() -> None:
 
 def test_semconv_attributes_are_untouched() -> None:
     """The addition is additive: nothing a GenAI backend reads may move."""
-    token = set_plugin_context("wikigen")
+    token = set_plugin_context("wiki_pages")
     try:
         bag = attributes()
     finally:
@@ -68,7 +68,9 @@ def test_semconv_attributes_are_untouched() -> None:
 
     assert bag["gen_ai.operation.name"] == "chat"
     assert bag["gen_ai.request.model"] == "gpt-4o-mini"
-    assert bag["gen_ai.system"]
+    assert bag["gen_ai.provider.name"]
+    # Deprecated key kept for one window, always equal to its replacement.
+    assert bag["gen_ai.system"] == bag["gen_ai.provider.name"]
 
 
 def test_a_failing_context_lookup_does_not_fail_the_call(

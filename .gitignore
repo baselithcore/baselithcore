@@ -59,12 +59,6 @@ EXTERNAL/
 # NEVER commit real credentials
 .env
 .env.*
-# These plugins are maintained and committed in their dedicated repositories.
-/plugins/wikigen/
-/plugins/auth/
-/plugins/baselithcontrol/
-/plugins/docheck/
-/plugins/e2etestplugin/
 /plugins/.pnpm-store/
 plugins/*/.state/
 !.env.example

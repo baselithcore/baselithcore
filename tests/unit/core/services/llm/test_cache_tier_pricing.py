@@ -264,9 +264,11 @@ class TestTheSpanReportsTheBucketsSeparately:
 
         set_usage_span_attributes(span, CACHED_TURN)
 
-        # 200, not 20 200: gen_ai.usage.input_tokens means fresh input, the
-        # way every provider reports it.
-        assert attributes["gen_ai.usage.input_tokens"] == 200
+        # 20 200, not 200: per the GenAI semconv, gen_ai.usage.input_tokens is
+        # the whole prompt *including* cached tokens, and the cache attribute
+        # reports the subset. Pricing still reads the separate buckets.
+        assert attributes["gen_ai.usage.input_tokens"] == 20_200
         assert attributes["gen_ai.usage.output_tokens"] == 500
-        assert attributes["gen_ai.usage.cache_read_tokens"] == 20_000
-        assert "gen_ai.usage.cache_write_tokens" not in attributes
+        assert attributes["gen_ai.usage.cache_read.input_tokens"] == 20_000
+        assert "gen_ai.usage.cache_write.input_tokens" not in attributes
+        assert "gen_ai.usage.cache_read_tokens" not in attributes

@@ -33,11 +33,20 @@ def get_queue_redis_connection() -> Redis:
         # Bound the connection pool so the queue can't exhaust Redis under load.
         # Blocking pool: at the cap an enqueue waits briefly for a released
         # connection instead of failing at once with "Too many connections".
+        # Socket deadlines bound each command: a Redis that accepts the
+        # connection and then stops answering would otherwise hang the caller
+        # (often an HTTP request enqueueing a job) while it holds a pooled
+        # connection. Safe for this pool because it is enqueue-side only — RQ
+        # workers dequeue with a blocking BLPOP on a connection of their own
+        # (core.task_queue.worker), which a read deadline would cut short. Do
+        # not hand this connection to a Worker.
         pool = BlockingConnectionPool.from_url(
             url,
             max_connections=config.max_connections,
             timeout=_POOL_WAIT_SECONDS,
             health_check_interval=config.health_check_interval,
+            socket_timeout=config.socket_timeout,
+            socket_connect_timeout=config.socket_connect_timeout,
         )
         _redis_conn = Redis(connection_pool=pool)
     return _redis_conn

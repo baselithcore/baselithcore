@@ -269,6 +269,33 @@ would turn it into a crash loop. The failure is logged at `error` as
 `core_schema_init_failed`, which is what an operator needs when the first write
 starts returning 500s.
 
+### Schema revision check at startup (`DB_SCHEMA_CHECK`)
+
+After the health probes, `core.api._schema_check.check_schema_revision()`
+compares the database's Alembic revision with the packaged head:
+
+| `DB_SCHEMA_CHECK` | Behind the head |
+| ----------------- | --------------- |
+| `strict` | startup aborts with `SchemaRevisionMismatchError`, naming the current and head revisions and the fix (`baselith db migrate`) |
+| `warn` | logged at `error`, startup continues |
+| `off` | not compared |
+| unset | `strict` when `APP_ENV=production`, `off` elsewhere |
+
+A replica that serves code expecting a column the database lacks fails on the
+first request that touches it, long after the rollout reported healthy, so
+production refuses to start. Deployments that roll out first and migrate out
+of band afterwards set `DB_SCHEMA_CHECK=warn` explicitly.
+
+A database **ahead** of the packaged head — stamped with a revision this
+package does not know, because a newer image already migrated it — only warns,
+in every mode. That is a rollback or an old pod restarting mid rolling deploy,
+not a stale schema, and refusing to start would make the rollback impossible.
+
+A check that cannot *run* — PostgreSQL unreachable, the revision unreadable —
+only warns, in every mode: an unreachable database is an outage the app rides
+out degraded, and refusing to boot on it would turn a database blip into a
+fleet-wide crash loop that the readiness probe already reports more precisely.
+
 ### PostgreSQL down at boot: one probe, not a timeout per step
 
 Every boot step that touches the database used to discover an outage on its
@@ -513,6 +540,12 @@ DB_RLS_ENABLED=false               # Bind app.tenant_id per checkout for row-lev
 DB_PREPARED_STATEMENTS=true        # false behind a transaction-mode pooler — see PgBouncer below
 DB_RLS_TENANT_SCOPE=session       # 'transaction' behind a transaction-mode pooler — see below
 DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
+DB_CONNECT_TIMEOUT=10              # libpq connect deadline in seconds (0 = wait for the OS)
+DB_TCP_KEEPALIVES_IDLE=30          # Idle seconds before the first keepalive probe (0 = OS default)
+DB_TCP_KEEPALIVES_INTERVAL=10      # Seconds between unanswered probes
+DB_TCP_KEEPALIVES_COUNT=3          # Unanswered probes before the connection is dead
+DB_TCP_USER_TIMEOUT_MS=60000       # Unacknowledged-data deadline (Linux; 0 = OS default)
+DB_SCHEMA_CHECK=                   # strict | warn | off; unset = strict in production — see below
 ```
 
 Feedback aggregation (read by `core/db/documents.py` at import time):
@@ -538,6 +571,29 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
       autocommit mode, so only explicit transactions are affected.
 
     Set either to `0` to hand the decision back to the server defaults.
+
+!!! info "Transport budgets"
+    The server-side budgets above do nothing for a database that stops
+    answering at the network level. `StorageConfig.conninfo` (and
+    `replica_conninfo`) therefore append libpq transport parameters to every
+    DSN they hand out — the pools, the startup schema check, Alembic and the
+    CLI all read it:
+
+    - `connect_timeout` (`DB_CONNECT_TIMEOUT`, default 10 s) — a connect to a
+      blackholed host fails instead of waiting out the OS TCP timeout, which is
+      minutes. `PGCONNECT_TIMEOUT` in the environment wins when set.
+    - `keepalives=1` with `keepalives_idle` / `keepalives_interval` /
+      `keepalives_count` (30 s / 10 s / 3) — a pooled connection whose peer
+      vanished (failover, NAT or load-balancer idle expiry) is detected in
+      about a minute instead of the OS default of two hours.
+    - `tcp_user_timeout` (`DB_TCP_USER_TIMEOUT_MS`, default 60 000 ms, Linux)
+      — a write to such a peer gives up instead of retransmitting for up to
+      ~15 minutes. Keep it at or above `idle + interval × count`.
+
+    They are merged, never forced: a parameter an explicit `DATABASE_URL` or
+    `DB_REPLICA_URL` already names — URL or `key=value` form — keeps its
+    value, and the rest of the DSN is preserved byte for byte. `0` leaves a
+    knob to libpq and the operating system.
 
 !!! warning "Pool size is per worker"
     Every uvicorn worker is its own process with its own pool, so peak demand

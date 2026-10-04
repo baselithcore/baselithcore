@@ -95,7 +95,8 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
     # Verify
     assert response.status_code == 200
     assert response.text == (
-        "data: Hello\n\ndata:  World\n\n" + chat_router_module.SSE_DONE_EVENT
+        "id: 1\ndata: Hello\n\nid: 2\ndata:  World\n\nid: 3\n"
+        + chat_router_module.SSE_DONE_EVENT
     )
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["x-accel-buffering"] == "no"

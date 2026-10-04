@@ -17,6 +17,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.config._pg_conninfo import merge_conninfo
+from core.config._pg_conninfo import transport_params as _transport_params
 from core.config.environment import is_production_env
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -213,6 +215,45 @@ class StorageConfig(BaseSettings):
     db_idle_in_transaction_timeout_ms: int = Field(
         default=60_000, alias="DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", ge=0
     )
+    # Client-side transport budgets, merged into every DSN this class hands
+    # out (see core.config._pg_conninfo); a parameter an explicit
+    # DATABASE_URL already names wins. 0 leaves that knob to libpq / the OS.
+    db_connect_timeout: int = Field(
+        default=10,
+        alias="DB_CONNECT_TIMEOUT",
+        ge=0,
+        description="libpq connect_timeout in seconds: a blackholed database "
+        "fails the connect instead of waiting out the OS TCP timeout.",
+    )
+    db_tcp_keepalives_idle: int = Field(
+        default=30,
+        alias="DB_TCP_KEEPALIVES_IDLE",
+        ge=0,
+        description="Idle seconds before the first TCP keepalive probe, so a "
+        "pooled connection whose peer vanished is detected.",
+    )
+    db_tcp_keepalives_interval: int = Field(
+        default=10, alias="DB_TCP_KEEPALIVES_INTERVAL", ge=0
+    )
+    db_tcp_keepalives_count: int = Field(
+        default=3, alias="DB_TCP_KEEPALIVES_COUNT", ge=0
+    )
+    db_tcp_user_timeout_ms: int = Field(
+        default=60_000,
+        alias="DB_TCP_USER_TIMEOUT_MS",
+        ge=0,
+        description="libpq tcp_user_timeout (Linux): how long sent data may "
+        "stay unacknowledged before the connection is dropped.",
+    )
+    # Startup comparison of the schema revision against the packaged head
+    # (core.api._schema_check). Unset: strict in production, skipped elsewhere.
+    db_schema_check: Literal["strict", "warn", "off"] | None = Field(
+        default=None,
+        alias="DB_SCHEMA_CHECK",
+        description="Startup schema-revision check: 'strict' refuses to start "
+        "when the database is behind the packaged migration head, 'warn' logs "
+        "it, 'off' skips it. Unset means strict in production, off elsewhere.",
+    )
     db_prepared_statements: bool = Field(
         default=True,
         alias="DB_PREPARED_STATEMENTS",
@@ -326,7 +367,7 @@ class StorageConfig(BaseSettings):
         property for the same reason.
         """
         if self.database_url:
-            return self.database_url
+            return merge_conninfo(self.database_url, self.transport_params)
 
         user = quote_plus(self.db_user or "")
         _pw = self.db_password.get_secret_value() if self.db_password else ""
@@ -338,6 +379,7 @@ class StorageConfig(BaseSettings):
         query_params = {}
         if self.db_ssl_mode:
             query_params["sslmode"] = self.db_ssl_mode
+        query_params.update(self.transport_params)
         query = f"?{urlencode(query_params)}" if query_params else ""
 
         return f"postgresql://{user}{password_fragment}@{host}:{port}/{self.db_name}{query}"
@@ -345,7 +387,20 @@ class StorageConfig(BaseSettings):
     @property
     def replica_conninfo(self) -> str | None:
         """Read-replica connection string, or ``None`` if no replica is set."""
-        return self.db_replica_url or None
+        if not self.db_replica_url:
+            return None
+        return merge_conninfo(self.db_replica_url, self.transport_params)
+
+    @property
+    def transport_params(self) -> dict[str, str]:
+        """libpq connect-timeout / keepalive parameters from the settings."""
+        return _transport_params(
+            connect_timeout=self.db_connect_timeout,
+            keepalives_idle=self.db_tcp_keepalives_idle,
+            keepalives_interval=self.db_tcp_keepalives_interval,
+            keepalives_count=self.db_tcp_keepalives_count,
+            tcp_user_timeout_ms=self.db_tcp_user_timeout_ms,
+        )
 
     # === GraphDB ===
     graph_db_enabled: bool = Field(default=True, alias="GRAPH_DB_ENABLED")

@@ -8,8 +8,9 @@ such as creating and listing tenants. Protected by admin credentials.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from core.models.chat import MAX_ID_LENGTH
 from core.services.tenant import (
     DEFAULT_TENANT_PAGE_SIZE,
     MAX_TENANT_PAGE_SIZE,
@@ -29,8 +30,8 @@ router = APIRouter(prefix="/admin/tenants", tags=["admin", "tenants"])
 class CreateTenantRequest(BaseModel):
     """Payload for creating a new tenant."""
 
-    id: str
-    name: str
+    id: str = Field(..., min_length=1, max_length=MAX_ID_LENGTH)
+    name: str = Field(..., min_length=1, max_length=256)
 
 
 @router.get("", response_model=list[Tenant])

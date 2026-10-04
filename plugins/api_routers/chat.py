@@ -11,14 +11,20 @@ to tell a finished stream from a dropped connection. Two more things were
 missing and are enforced here: the generator stops as soon as the client is
 gone (a closed tab kept the upstream LLM call running and billing), and the
 whole response is bounded by ``CHAT_STREAM_TIMEOUT_SECONDS``.
+
+Every event carries a monotonically increasing ``id:`` (per response, from
+``1``) and a quiet stream sends a ``: keepalive`` comment every
+``SSE_HEARTBEAT_SECONDS``. There is no replay: a chat completion is not
+re-playable from an event index, so ``Last-Event-ID`` is ignored and a client
+that lost the connection re-sends the request.
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any, AsyncIterator
 
+import orjson
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 
@@ -27,7 +33,15 @@ from core.config import get_app_config
 from core.middleware import require_user
 from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
+from core.observability.setup import request_id_ctx
 from core.transparency import TransparencyService, get_transparency_service
+from plugins.api_routers._sse import (
+    DEFAULT_HEARTBEAT_SECONDS,
+    HEARTBEAT,
+    KEEPALIVE_FRAME,
+    HeartbeatSource,
+    heartbeat_seconds,
+)
 
 logger = get_logger(__name__)
 
@@ -50,9 +64,27 @@ SSE_DONE_EVENT = "event: done\ndata: [DONE]\n\n"
 
 # In-band failure notice. Response headers are long gone by the time a provider
 # read fails mid-stream, so a 200 that simply stops is indistinguishable from a
-# dropped socket. The payload is deliberately fixed: the exception text can carry
-# provider detail, prompt fragments or credentials, and it is already in the log.
-SSE_ERROR_EVENT = "event: error\ndata: stream failed\n\n"
+# dropped socket. The payload is a fixed JSON object — a stable ``code``, the
+# fixed ``detail`` and the ``request_id`` an operator greps the log for: the
+# exception text can carry provider detail, prompt fragments or credentials,
+# and it is already in the log, keyed by that request id.
+SSE_ERROR_CODE = "stream_failed"
+SSE_ERROR_DETAIL = "stream failed"
+
+
+def sse_error_payload(request_id: str | None = None) -> str:
+    """The JSON ``data:`` of the in-band ``event: error`` frame."""
+    rid = request_id if request_id is not None else request_id_ctx.get(None)
+    return orjson.dumps(
+        {"code": SSE_ERROR_CODE, "detail": SSE_ERROR_DETAIL, "request_id": rid}
+    ).decode()
+
+
+def sse_error_event(event_id: int | None = None, request_id: str | None = None) -> str:
+    """Render the in-band ``event: error`` frame."""
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{id_line}event: error\ndata: {sse_error_payload(request_id)}\n\n"
+
 
 # Fallback when the app config predates CHAT_STREAM_TIMEOUT_SECONDS (legacy
 # test doubles stub the config with a partial namespace).
@@ -164,7 +196,7 @@ async def bounded_stream(
                 logger.debug("chat_stream_source_close_failed", exc_info=True)
 
 
-def sse_frame(chunk: str) -> str:
+def sse_frame(chunk: str, event_id: int | None = None) -> str:
     """Render one model chunk as a single SSE event.
 
     A ``data:`` field cannot contain a raw newline, so a multi-line chunk
@@ -173,18 +205,28 @@ def sse_frame(chunk: str) -> str:
 
     Args:
         chunk: The text produced by the model.
+        event_id: The event's ``id:`` field, when the stream numbers events.
 
     Returns:
         The wire-format event, terminated by the blank line SSE requires.
     """
     normalised = chunk.replace("\r\n", "\n").replace("\r", "\n")
-    return "".join(f"data: {line}\n" for line in normalised.split("\n")) + "\n"
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    data = "".join(f"data: {line}\n" for line in normalised.split("\n"))
+    return id_line + data + "\n"
+
+
+def sse_done_event(event_id: int | None = None) -> str:
+    """Render the terminal ``event: done`` frame."""
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    return id_line + SSE_DONE_EVENT
 
 
 async def sse_stream(
     request: Any,
     source: AsyncIterator[str],
     timeout_seconds: float,
+    heartbeat_interval: float = DEFAULT_HEARTBEAT_SECONDS,
 ) -> AsyncIterator[str]:
     """Frame a chat stream as SSE, bounded by the client and by the clock.
 
@@ -192,20 +234,26 @@ async def sse_stream(
     client has disconnected, when ``timeout_seconds`` of wall clock elapse, or
     when ``source`` raises (an ``event: error`` frame goes out first), and
     closes ``source`` on the way out so the upstream generator (and the LLM
-    call behind it) is released rather than left running.
+    call behind it) is released rather than left running. While the source is
+    quiet, a ``: keepalive`` comment goes out every ``heartbeat_interval``
+    seconds (and the client is re-checked), without cancelling the pending
+    read.
 
     Args:
         request: Anything exposing ``await is_disconnected()`` (a Starlette
             ``Request`` in production).
         source: The chunk stream, already byte-capped by ``bounded_stream``.
         timeout_seconds: Wall-clock budget for the whole response.
+        heartbeat_interval: Silence budget before a keepalive comment.
 
     Yields:
-        SSE-framed events, always ending with ``SSE_DONE_EVENT`` — preceded by
-        ``SSE_ERROR_EVENT`` when the source failed.
+        SSE-framed events numbered with ``id:`` from 1, always ending with the
+        ``event: done`` frame — preceded by ``event: error`` when the source
+        failed — plus ``: keepalive`` comments during quiet periods.
     """
     deadline = time.monotonic() + timeout_seconds
-    iterator = source.__aiter__()
+    reader = HeartbeatSource(source, heartbeat_interval)
+    event_id = 0
     try:
         while True:
             if await request.is_disconnected():
@@ -219,16 +267,15 @@ async def sse_stream(
                 )
                 break
             try:
-                chunk = await asyncio.wait_for(iterator.__anext__(), remaining)
+                chunk = await reader.next(remaining)
             except StopAsyncIteration:
                 break
-            except TimeoutError:
-                logger.warning(
-                    "chat_stream_timeout",
-                    extra={"timeout_seconds": timeout_seconds},
-                )
-                break
-            yield sse_frame(chunk)
+            if chunk is HEARTBEAT:
+                if deadline - time.monotonic() > 0:
+                    yield KEEPALIVE_FRAME
+                continue
+            event_id += 1
+            yield sse_frame(chunk, event_id)
     except Exception:
         # Broad on purpose: whatever the provider, the retry wrapper or
         # bounded_stream raises, the client is already receiving a 200 and the
@@ -236,20 +283,15 @@ async def sse_stream(
         # BaseException and deliberately passes through — that is the client
         # going away, not a failure to report.
         logger.error("chat_stream_failed", exc_info=True)
-        yield SSE_ERROR_EVENT
+        event_id += 1
+        yield sse_error_event(event_id)
     finally:
         # Release the upstream generator (and the LLM call behind it) on every
-        # exit path. A source already finished, cancelled by the timeout above,
-        # or mid-``athrow`` can raise from ``aclose``; that must not replace the
-        # response we are in the middle of writing, so it is logged, not raised.
-        aclose = getattr(iterator, "aclose", None)
-        if aclose is not None:
-            try:
-                await aclose()
-            except Exception:
-                logger.debug("chat_stream_source_close_failed", exc_info=True)
+        # exit path: the pending read is cancelled first, then the source is
+        # closed; neither may replace the response we are writing.
+        await reader.aclose()
 
-    yield SSE_DONE_EVENT
+    yield sse_done_event(event_id + 1)
 
 
 @router.post("/chat/stream", response_class=SSEResponse)
@@ -283,6 +325,7 @@ async def chat_stream(req: ChatRequest, request: Request) -> SSEResponse:
             request,
             bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
             timeout_seconds,
+            heartbeat_seconds(),
         ),
         headers=headers,
     )

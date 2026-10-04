@@ -7,7 +7,7 @@ dashboards and system monitoring. Protected by HTTP Basic Authentication.
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -119,14 +119,20 @@ def admin_status(_user: str = Depends(verify_credentials)) -> dict[str, object]:
     return system_status(_user)
 
 
-@router.post("/admin/reindex")
+@router.post("/admin/reindex", status_code=status.HTTP_202_ACCEPTED)
 async def admin_reindex(
+    request: Request,
+    response: Response,
     _user: str = Depends(verify_credentials),
 ) -> dict[str, object]:
-    """Run the incremental ``/reindex`` for the dashboard (Basic Auth)."""
+    """Schedule the incremental ``/reindex`` for the dashboard (Basic Auth).
+
+    Same ``202`` + ``status_url`` contract as ``POST /reindex``; the dashboard
+    polls ``GET /admin/status`` (which embeds the indexing state).
+    """
     from plugins.api_routers.index import reindex
 
-    return await reindex()
+    return await reindex(request, response)
 
 
 # ---------------------------------------------------------------------------

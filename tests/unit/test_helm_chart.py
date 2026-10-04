@@ -449,7 +449,7 @@ class TestSelfIngressPorts:
     """A plugin's single-instance side process is reachable only if the policy
     says so.
 
-    dbview elects one owner of its Node child for the whole cluster and has
+    A plugin can elect one owner of its Node child for the whole cluster and has
     every other replica forward to it. With `networkPolicy.enabled` and nothing
     but `containerPort` allowed between the release's own pods, those forwards
     are dropped and the console 404s from whichever replica lost the election —

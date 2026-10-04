@@ -357,6 +357,13 @@ class AppConfig(BaseSettings):
     chat_stream_timeout_seconds: float = Field(
         default=300.0, alias="CHAT_STREAM_TIMEOUT_SECONDS", gt=0
     )
+    # Silence budget of an HTTP SSE stream (``/chat/stream``,
+    # ``/runs/{id}/events``): after this long without an event a
+    # ``: keepalive`` comment frame goes out, so proxy and client idle timeouts
+    # do not drop a stream that is merely waiting on a slow model or tool.
+    sse_heartbeat_seconds: float = Field(
+        default=15.0, alias="SSE_HEARTBEAT_SECONDS", gt=0
+    )
 
     # CHAT_GUARDRAILS_*: read only by the opt-in core/chat RAG pipeline
     # (core/chat/guardrails.py, RagWorkflowHandler). The guards every request

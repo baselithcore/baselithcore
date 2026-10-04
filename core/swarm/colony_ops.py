@@ -14,9 +14,36 @@ from core.observability.logging import get_logger
 from core.swarm.types import AgentStatus, MessageType, SwarmMessage, Task
 
 if TYPE_CHECKING:
-    pass
+    from core.orchestration.limits import LoopLimits
 
 logger = get_logger(__name__)
+
+
+def batch_limits(loop_limits: LoopLimits | None) -> LoopLimits | None:
+    """The caps a :meth:`Colony.execute_batch` binds when nothing is ambient.
+
+    A batch started outside an orchestrated request had no budget at all:
+    its sub-agents were bounded by nothing but their own loops. Left at the
+    default (:data:`~core.orchestration.budget_context.DEFAULT_LIMITS`), the
+    batch shares one built from the orchestrator's dollar, token and
+    wall-clock caps (iteration and tool-call counters are lifted, since every
+    sub-agent's ticks land on the one shared budget — see
+    :func:`core.agent._safety.shared_loop_limits`), bound as the ambient budget
+    so every sub-agent's LLM call is charged to it — and a breach aborts the
+    batch exactly as an orchestrated one does. An explicit ``LoopLimits``
+    replaces the caps; ``None`` binds none. An ambient budget always wins (see
+    :func:`~core.orchestration.budget_context.standalone_budget`).
+
+    Args:
+        loop_limits: The colony's ``loop_limits`` argument.
+
+    Returns:
+        The ``LoopLimits`` to bind, or ``None``.
+    """
+    from core.agent._safety import shared_loop_limits
+    from core.orchestration.budget_context import DEFAULT_LIMITS
+
+    return shared_loop_limits() if loop_limits is DEFAULT_LIMITS else loop_limits
 
 
 class ColonyOpsMixin:

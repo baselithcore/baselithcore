@@ -186,7 +186,10 @@ class TestStorageConfig:
         url = "postgresql://override:pass@host:1234/overridedb"
         with patch.dict(os.environ, {"DATABASE_URL": url}):
             config = StorageConfig()
-            assert config.conninfo == url
+            # The explicit DSN is kept; only absent transport defaults
+            # (connect_timeout, keepalives) are appended.
+            assert config.conninfo.startswith(url + "?")
+            assert "connect_timeout=" in config.conninfo
 
 
 class TestSecurityConfig:

@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Depends, Response
 
 from core.config import get_app_config, get_vectorstore_config
+from core.lifecycle.drain import is_draining
 from core.middleware import require_admin
 from core.observability import telemetry
 from core.observability.health import CachedHealthCheck
@@ -175,8 +176,9 @@ async def _bounded(name: str, probe: Callable[[], Awaitable[bool]]) -> bool:
     responses={
         503: {
             "description": (
-                "Not ready: the database is unreachable; the pod should be "
-                "removed from Service endpoints until it recovers."
+                "Not ready: the process is draining after a stop signal, or "
+                "the database is unreachable; the pod should be removed from "
+                "Service endpoints."
             )
         }
     },
@@ -194,7 +196,15 @@ async def readiness(response: Response) -> dict[str, object]:
     The outcome — failure included — is cached for ``HEALTH_READY_CACHE_TTL``
     seconds, and concurrent callers during a refresh wait for the one check in
     flight instead of each starting their own.
+
+    Once the process has received SIGTERM/SIGINT (:func:`is_draining`) it
+    answers 503 at once, without touching the cache or the dependencies: a
+    draining pod must leave the endpoints even while its database is fine,
+    or the proxy keeps routing new requests to a server that is closing.
     """
+    if is_draining():
+        response.status_code = 503
+        return {"status": "draining", "services": {}, "cached": False}
 
     async def _check() -> dict[str, bool]:
         # Independent probes, concurrently: a cache miss costs one deadline,

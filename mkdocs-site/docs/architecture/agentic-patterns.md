@@ -176,6 +176,17 @@ safe_output = output.filtered_output
     [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy)
     and [Guardrails › Content Moderation](../core-modules/guardrails.md#content-moderation).
 
+!!! note "Retrieved documents and recalled memories are data, not instructions"
+    The RAG handler scans every retrieved chunk with `scan_external_content`
+    and wraps it in the same untrusted envelope used for tool output
+    (`wrap_untrusted`, tool name `document_retrieval`); the `Source [id]:`
+    label stays outside the envelope so answers can still cite it. The
+    system prompt carries `RAG_CONTEXT_IS_DATA_RULE`. Recalled memories are
+    scanned too and injected as one `memory_recall` envelope. A poisoned
+    document or memory therefore reaches the model as quoted data, never as
+    an instruction. See
+    [Orchestration › Untrusted-output envelope](../core-modules/orchestration.md#untrusted-output-envelope).
+
 ---
 
 ### Goals
@@ -367,6 +378,11 @@ print(result.unassigned)  # [task_ids with no capable agent]
 - **Pheromone**: Indirect communication via virtual signals that decay over time
 - **Team Formation**: Dynamic team assembly for complex tasks
 - **Batch Execution**: `execute_batch()` allocates all tasks via auction, then runs them concurrently with `asyncio.gather`
+
+A colony with no ambient `LoopBudget` binds one for the whole batch
+(`Colony(loop_limits=...)`, defaulting to the orchestrator's `LoopLimits()`),
+so every task in `execute_batch` draws from one shared cap. Pass
+`loop_limits=None` to opt out.
 
 ---
 
@@ -995,6 +1011,7 @@ live under `core/` and stay out of the way of plugin code.
 | Conversation history on `/chat` and `/chat/stream` (loaded before orchestration as `history_text`, recorded after a real answer, keyed per user; the default `qa_docs` prompt opens with `Conversation so far:`) | `core/services/chat/utils/conversation.py`, `core/orchestration/handlers/rag.py` | `load_history`, `record_turn`, `recording_stream`, `conversation_key`, `build_rag_user_prompt(..., history=)` | [Chat & RAG](../core-modules/chat.md#conversation-history) |
 | Run promotion into the eval corpus (scrubbed, fail-closed) + fine-tuning scrub gate | `core/evaluation/promotion.py`, `scripts/promote_run.py`, `core/learning/auto_finetuning.py` | `promote_run`, `scrub_text`, `PromotionError`, `samples_dropped_poisoned` | [Evaluation](../core-modules/evaluation.md#promoting-production-runs-promotionpy) |
 | Distillation → retrieval (strategy patterns as few-shot examples; loop priming) (library API — not wired by default) | `core/skill_evolution/distillation.py`, `core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
+| Safe defaults for a standalone `Agent`/`Crew`/`GroupChat`/`Colony` (tools *declared* `category="destructive"` refused unless an `AutonomyPolicy` is given; an undeclared category behaves as before; a default `LoopBudget` bound when none is ambient, never doubled) | `core/agent/_safety.py`, `core/orchestration/budget_context.py`, `core/reasoning/react_types.py` | `destructive_denial`, `standalone_budget`, `ToolDefinition.category_declared`, `Agent(autonomy_policy=, loop_limits=)` | [Agent API](../core-modules/agent.md#safe-defaults-for-a-standalone-run) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
 | Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
 | Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |

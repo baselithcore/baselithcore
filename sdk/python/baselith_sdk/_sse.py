@@ -9,6 +9,7 @@ comment lines, stops at ``event: done`` and raises :class:`ChatStreamError` on
 
 from __future__ import annotations
 
+import json
 from typing import AsyncIterator, Iterator
 
 from .errors import BaselithError
@@ -19,13 +20,46 @@ class ChatStreamError(BaselithError):
 
     The server has already committed to a ``200`` response by the time a
     provider read fails, so the only way to report it is in-band (see
-    ``plugins/api_routers/chat.py::SSE_ERROR_EVENT``). ``message`` is
+    ``plugins/api_routers/chat.py::sse_error_event``). ``message`` is
     deliberately generic — the server never puts provider detail on the wire.
+    Current servers send a JSON payload, whose ``code`` and ``request_id``
+    (quote it when reporting the failure) are exposed here; older servers sent
+    the bare text ``stream failed``, which still parses (both are ``None``).
     """
 
-    def __init__(self, message: str = "stream failed") -> None:
+    def __init__(
+        self,
+        message: str = "stream failed",
+        *,
+        code: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
+        self.code = code
+        self.request_id = request_id
+
+    def __str__(self) -> str:
+        rid = f" (request_id={self.request_id})" if self.request_id else ""
+        return f"{self.message}{rid}"
+
+    @classmethod
+    def from_event_data(cls, data: str) -> ChatStreamError:
+        """Build from an ``event: error`` payload: JSON object or legacy text."""
+        try:
+            payload = json.loads(data) if data.lstrip().startswith("{") else None
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            return cls(data or "stream failed")
+        detail = payload.get("detail") or payload.get("message") or "stream failed"
+        code = payload.get("code")
+        rid = payload.get("request_id")
+        return cls(
+            str(detail),
+            code=str(code) if code is not None else None,
+            request_id=str(rid) if rid is not None else None,
+        )
 
 
 class _SSEEvent:
@@ -120,7 +154,7 @@ def _handle_sse_event(event: _SSEEvent) -> str:
     if event.event == "done":
         raise _StreamDone
     if event.event == "error":
-        raise ChatStreamError(event.data or "stream failed")
+        raise ChatStreamError.from_event_data(event.data)
     return event.data
 
 

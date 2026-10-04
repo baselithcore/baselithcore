@@ -57,7 +57,92 @@ class TestListPending:
     def test_empty_when_no_paused_runs(self, client):
         resp = client.get("/approvals")
         assert resp.status_code == 200
-        assert resp.json() == {"pending": [], "count": 0}
+        assert resp.json() == {
+            "pending": [],
+            "count": 0,
+            "next_cursor": None,
+            "has_more": False,
+        }
+
+    def test_pages_with_a_cursor(self, client, store):
+        import anyio
+
+        async def seed():
+            for i in range(5):
+                await _paused_run(store, run_id=f"run-{i}")
+            running = Checkpoint(run_id="crashed", query="q")  # status running
+            await store.save(running)
+
+        anyio.run(seed)
+        seen: list[str] = []
+        cursor = None
+        for _ in range(10):
+            params = {"limit": 2, **({"cursor": cursor} if cursor else {})}
+            body = client.get("/approvals", params=params).json()
+            assert body["count"] <= 2
+            seen += [e["run_id"] for e in body["pending"]]
+            cursor = body["next_cursor"]
+            if not body["has_more"]:
+                break
+        # Every paused run exactly once; the running checkpoint never listed.
+        assert sorted(seen) == [f"run-{i}" for i in range(5)]
+
+    def test_limit_is_capped_and_cursor_validated(self, client):
+        assert client.get("/approvals", params={"limit": 201}).status_code == 422
+        assert client.get("/approvals", params={"limit": 0}).status_code == 422
+        assert client.get("/approvals", params={"cursor": "!!"}).status_code == 400
+
+    def test_running_rows_cost_no_loads(self, client, store, monkeypatch):
+        """Only pending runs are listed, and only the page is loaded."""
+        import anyio
+
+        async def seed():
+            for i in range(50):
+                await store.save(Checkpoint(run_id=f"busy-{i}", query="q"))
+            for i in range(3):
+                await _paused_run(store, run_id=f"run-{i}")
+
+        anyio.run(seed)
+        loads = 0
+        real_load = store.load
+
+        async def counting_load(run_id):
+            nonlocal loads
+            loads += 1
+            return await real_load(run_id)
+
+        monkeypatch.setattr(store, "load", counting_load)
+        body = client.get("/approvals", params={"limit": 2}).json()
+        assert len(body["pending"]) == 2
+        assert loads == 2
+        assert body["has_more"] is True and body["next_cursor"]
+
+    def test_a_decision_between_pages_skips_nothing(self, client, store):
+        """Keyset cursor: a run leaving the listing never shifts the next page."""
+        import anyio
+
+        async def seed():
+            for i in range(4):
+                checkpoint = await _paused_run(store, run_id=f"run-{i}")
+                checkpoint.updated_at = 1000.0 + i
+                await store.save(checkpoint)
+
+        anyio.run(seed)
+        first = client.get("/approvals", params={"limit": 2}).json()
+        first_ids = [e["run_id"] for e in first["pending"]]
+
+        async def decide_first():
+            checkpoint = await store.load(first_ids[0])
+            checkpoint.status = "running"  # decided and resumed
+            await store.save(checkpoint)
+
+        anyio.run(decide_first)
+        second = client.get(
+            "/approvals", params={"limit": 2, "cursor": first["next_cursor"]}
+        ).json()
+        seen = first_ids + [e["run_id"] for e in second["pending"]]
+        assert sorted(seen) == [f"run-{i}" for i in range(4)]
+        assert second["has_more"] is False
 
     def test_503_when_checkpointing_disabled(self, monkeypatch):
         monkeypatch.setattr(

@@ -109,6 +109,28 @@ appended once when an agent has tools.
     let a crafted payload place text outside every envelope under a forged `tool=`
     attribute. Double-wrapping is the safe outcome, so calling it twice nests.
 
+### Retrieved documents and recalled memories are enveloped
+
+The built-in RAG handlers (`qa_docs`, streaming and not) now scan every
+retrieved chunk and wrap it in the untrusted envelope, and `RAG_SYSTEM_PROMPT`
+says the context is data, not instructions. `context["memory_context"]` is now
+one enveloped, scanned bullet list instead of plain `- …` lines. Code that
+parsed either string must strip the envelope (`unwrap_untrusted`) first; see
+[Orchestration › Streaming pipeline](../core-modules/orchestration.md#streaming-pipeline).
+MCP results now scan **every** text part, not only a lone text item.
+
+### A standalone `Agent` refuses declared-destructive tools and has a budget
+
+Outside an orchestrated request, a typed `Agent` (and so a `Crew`) now refuses
+a tool explicitly declared `category="destructive"` unless it was given an
+`autonomy_policy`; plain callables and tools left at the default category run
+as before. Pass `autonomy_policy=None` to restore the old behaviour. The same
+runs — and `GroupChat`, and a swarm `Colony.execute_batch` — now bind a default
+`LoopBudget` (the orchestrator's `LoopLimits()` caps) when none is ambient;
+pass `loop_limits=None` (`budget=None` for `GroupChat`) to opt out. Tools whose
+schema fits the strict dialect are sent with `strict=True`. Details:
+[Agent › Safe defaults for a standalone run](../core-modules/agent.md#safe-defaults-for-a-standalone-run).
+
 ---
 
 ## Supply chain
@@ -175,6 +197,62 @@ The stream is now also bounded by `CHAT_STREAM_TIMEOUT_SECONDS` (default
 LLM call instead of leaving it running.
 
 See [REST API › `POST /chat/stream`](../api/rest.md#post-chatstream-sse-streaming).
+
+### SSE streams carry ids, heartbeats and a JSON error payload
+
+`POST /chat/stream` and `GET /runs/{run_id}/events` now prefix every event
+with an `id:` line and send a `: keepalive` comment every
+`SSE_HEARTBEAT_SECONDS` (default `15`) of silence; the run feed also stops as
+soon as the client disconnects. The chat stream's `event: error` data is now
+JSON — `{"code": "stream_failed", "detail": "stream failed", "request_id": "…"}`
+— instead of the bare text `stream failed`.
+
+**What can break:** a hand-written SSE parser that treats every line as data,
+or matches `data: stream failed` literally. Ignore lines starting with `:` and
+unknown fields (`id:`), and read the error payload as JSON. Both SDKs (which
+now expose the error's `code` and `request_id`) and the operator console
+already do.
+
+### Every API router is versioned; the unprefixed paths are deprecated
+
+`/compliance`, `/approvals`, `/runs`, `/webhooks`, `/privacy`, `/prompts`,
+`/agent` and `/api/plugins` are now also served under `/v1`, like `/chat`,
+`/index`, `/reindex` and `/feedback` already were. The unprefixed copies keep
+working but are `deprecated` in OpenAPI and answer with
+`Deprecation: @1791072000` and `Link: </v1/…>; rel="successor-version"`.
+`POST /agent/async` returns a `/v1` `status_url` and a `Location` header.
+Probes, `/metrics`, `/status` and `/admin/*` are unchanged.
+**Action:** move clients to `/v1/...` (the SDKs already use it). See
+[REST API › API Versioning](../api/rest.md#api-versioning).
+
+### `POST /reindex` and `POST /admin/reindex` answer `202`
+
+Reindexing now runs in the background: the response is `202` with
+`{"status": "scheduled", "mode": "incremental", "status_url": "/v1/index/status"}`
+and a `Location` header, instead of `200` with `new_files_indexed` after the
+whole pass. **Action:** poll `status_url` until `running` is `false`; the count
+is `last_new_documents`. `POST /index/bootstrap` likewise answers `202` with a
+`status_url`.
+
+### List endpoints are cursor-paginated
+
+The compliance, webhooks, prompts, approvals and run-history list endpoints
+accept `limit` (`1..200`, default `50`) and `cursor`, and answer `next_cursor`
+and `has_more` beside the existing list key; `count` is the size of the page.
+**What can break:** a client that expected the whole collection in one body —
+it now gets the first 50 items; follow `next_cursor`. A `limit` above 200 on
+`GET /webhooks/deliveries` is now a `422` instead of being clamped. See
+[REST API › Pagination](../api/rest.md#pagination).
+
+### Middleware refusals are problem documents; payloads are bounded
+
+The `429` budget breach, the plugin-activation `503`, the CSRF `403` and the
+idempotency `400`/`409`/`422` are now `application/problem+json` with a
+stable `code` and `request_id`, instead of `{"detail": ...}` /
+`{"error", "message"}`; a budget breach no longer echoes the configured
+thresholds. Identifiers (`conversation_id`, `kb_label`, `tenant_id`, tenant
+`id`) are capped at 128 characters, and webhook, compliance and prompt payloads
+carry explicit length / item-count bounds — oversized input is a `422`.
 
 ### A2A: `/.well-known/agent-card.json` is the canonical discovery path
 

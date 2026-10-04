@@ -114,3 +114,24 @@ class TaskQueueConfig(BaseSettings):
     # Connection pool settings
     max_connections: int = 50  # cap connections on the shared queue Redis pool
     health_check_interval: float = 30.0  # idle-connection health-check seconds
+    # Socket deadlines for the enqueue-side pool (producers, monitor, status,
+    # dead-letter queue). Without them a Redis that accepts the TCP connection
+    # but stops answering hangs the caller — an HTTP request enqueueing a job —
+    # forever while it holds a pooled connection. The worker's blocking dequeue
+    # opens its own connection (core.task_queue.worker), so these never cut a
+    # long BLPOP short.
+    socket_timeout: float = Field(
+        default=10.0,
+        gt=0.0,
+        description=(
+            "Per-operation read deadline, in seconds, on the enqueue-side "
+            "task-queue Redis pool. Not applied to the worker's blocking "
+            "dequeue connection."
+        ),
+    )
+    socket_connect_timeout: float = Field(
+        default=2.0,
+        gt=0.0,
+        description="TCP connect deadline, in seconds, for a new task-queue "
+        "Redis connection.",
+    )

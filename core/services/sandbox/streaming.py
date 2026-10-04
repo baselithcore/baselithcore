@@ -9,16 +9,26 @@ output, terminated by ``{"stream": "exit", "exit_code": int,
 
 The Docker backend attaches to the container's demuxed output stream from a
 worker thread (mirroring the service's to-thread pattern for blocking
-docker-py calls) and forwards chunks through an ``asyncio.Queue``. The sbx
-CLI has no streaming primitive, so its backend degrades to
+docker-py calls) and forwards chunks through a *bounded* ``asyncio.Queue``.
+The output is untrusted, so two limits apply: the queue holds at most
+:data:`STREAM_QUEUE_MAXSIZE` frames and the reader blocks (backpressure on the
+container's pipe) while the client is slow, and at most
+:data:`MAX_STREAM_OUTPUT_BYTES` of output are forwarded — the rest is dropped
+behind one truncation marker. When the consumer goes away (client disconnect,
+cancellation, ``aclose``) the container is killed and the reader released,
+so an abandoned stream cannot keep a container or a worker thread alive.
+The sbx CLI has no streaming primitive, so its backend degrades to
 run-to-completion and emits the collected output as single frames.
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from concurrent.futures import CancelledError as FutureCancelledError
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
@@ -31,6 +41,15 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 StreamFrame = dict[str, Any]
+
+#: Frames buffered between the reader thread and the consumer. A full queue
+#: blocks the reader, which stops draining the container's output pipe.
+STREAM_QUEUE_MAXSIZE = 256
+#: Output bytes (stdout + stderr, decoded) forwarded per execution; anything
+#: past it is dropped behind a single truncation marker.
+MAX_STREAM_OUTPUT_BYTES = 8 * 1024 * 1024
+#: How often a blocked reader re-checks whether the consumer has gone away.
+_PUT_POLL_S = 0.25
 
 
 def _exit_frame(exit_code: int, compute_seconds: float, rate: float) -> StreamFrame:
@@ -69,7 +88,7 @@ async def stream_docker_execution(
     mounts: dict[str, str] | None,
     envs: dict[str, str] | None,
     rate: float,
-) -> AsyncIterator[StreamFrame]:
+) -> AsyncGenerator[StreamFrame, None]:
     """Stream a Docker sandbox execution incrementally.
 
     Runs the blocking docker-py attach loop in a worker thread and forwards
@@ -100,13 +119,69 @@ async def stream_docker_execution(
     await service.docker_factory.ensure_image()
 
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[StreamFrame | None] = asyncio.Queue()
+    queue: asyncio.Queue[StreamFrame | None] = asyncio.Queue(
+        maxsize=STREAM_QUEUE_MAXSIZE
+    )
     docker_mounts = _build_docker_mounts(mounts)
     state: dict[str, Any] = {"container": None}
+    stop = threading.Event()
+    budget = {"remaining": MAX_STREAM_OUTPUT_BYTES, "truncated": False}
     start_time = time.time()
 
-    def _put(frame: StreamFrame | None) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, frame)
+    def _put(frame: StreamFrame | None) -> bool:
+        """Hand a frame to the consumer, blocking while the queue is full.
+
+        Returns:
+            False once the consumer has gone away; the frame is dropped.
+        """
+        if stop.is_set():
+            return False
+        try:
+            future = asyncio.run_coroutine_threadsafe(queue.put(frame), loop)
+        except RuntimeError:  # loop closed under us
+            return False
+        # One put per frame, waited on in slices: re-submitting after a
+        # timeout could enqueue the same frame twice.
+        while True:
+            try:
+                future.result(timeout=_PUT_POLL_S)
+                return True
+            except FutureTimeoutError:
+                if stop.is_set():
+                    future.cancel()
+                    return False
+            except (FutureCancelledError, RuntimeError):  # loop went away
+                return False
+
+    def _put_output(stream_name: str, chunk: bytes) -> None:
+        if budget["truncated"]:
+            return  # keep draining the pipe, forward nothing
+        text = chunk.decode("utf-8", "replace")
+        size = len(text.encode("utf-8"))
+        if size > budget["remaining"]:
+            head = text.encode("utf-8")[: budget["remaining"]].decode("utf-8", "ignore")
+            budget["truncated"] = True
+            budget["remaining"] = 0
+            if head:
+                _put({"stream": stream_name, "data": head})
+            _put(
+                {
+                    "stream": "stderr",
+                    "data": (
+                        f"[output truncated: more than {MAX_STREAM_OUTPUT_BYTES} bytes]"
+                    ),
+                    "truncated": True,
+                }
+            )
+            return
+        budget["remaining"] -= size
+        _put({"stream": stream_name, "data": text})
+
+    def _kill(container: Any) -> None:
+        try:
+            container.kill()
+        except Exception as e:
+            logger.warning(f"Failed to kill sandbox container: {e}")
 
     def _reader() -> None:
         """Blocking attach loop executed in a worker thread."""
@@ -121,24 +196,21 @@ async def stream_docker_execution(
                 **build_sandbox_runtime_kwargs(),
             )
             state["container"] = container
+            if stop.is_set():  # consumer left while the container started
+                _kill(container)
+                return
             stream = container.attach(
                 stdout=True, stderr=True, stream=True, logs=True, demux=True
             )
             for out_chunk, err_chunk in stream:
+                if stop.is_set():
+                    break
                 if out_chunk:
-                    _put(
-                        {
-                            "stream": "stdout",
-                            "data": out_chunk.decode("utf-8", "replace"),
-                        }
-                    )
+                    _put_output("stdout", out_chunk)
                 if err_chunk:
-                    _put(
-                        {
-                            "stream": "stderr",
-                            "data": err_chunk.decode("utf-8", "replace"),
-                        }
-                    )
+                    _put_output("stderr", err_chunk)
+            if stop.is_set():
+                return
             result = container.wait(timeout=timeout)
             exit_code = int(result.get("StatusCode", 1))
             _put(_exit_frame(exit_code, time.time() - start_time, rate))
@@ -156,38 +228,56 @@ async def stream_docker_execution(
 
     reader = loop.run_in_executor(None, _reader)
     deadline = start_time + timeout
-    timed_out = False
-    while True:
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            timed_out = True
-            break
-        try:
-            frame = await asyncio.wait_for(queue.get(), timeout=remaining)
-        except TimeoutError:
-            timed_out = True
-            break
-        if frame is None:
-            break
-        yield frame
-
-    if not timed_out:
-        # The sentinel is the reader's last act, so this resolves promptly;
-        # it surfaces any unexpected executor failure instead of hiding it.
-        await reader
-
-    if timed_out:
-        container = state.get("container")
-        if container is not None:
+    finished = False
+    try:
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break  # timed out
             try:
-                await loop.run_in_executor(None, lambda: container.kill())
-            except Exception as e:
-                logger.warning(f"Failed to kill timed-out sandbox container: {e}")
-        yield {
-            "stream": "stderr",
-            "data": f"Execution timed out after {timeout}s; container killed",
-        }
-        yield _exit_frame(-1, float(timeout), rate)
+                frame = await asyncio.wait_for(queue.get(), timeout=remaining)
+            except TimeoutError:
+                break
+            if frame is None:
+                finished = True
+                break
+            yield frame
+
+        if finished:
+            # The sentinel is the reader's last act, so this resolves promptly;
+            # it surfaces any unexpected executor failure instead of hiding it.
+            await reader
+        else:
+            stop.set()
+            container = state.get("container")
+            if container is not None:
+                await loop.run_in_executor(None, _kill, container)
+            yield {
+                "stream": "stderr",
+                "data": f"Execution timed out after {timeout}s; container killed",
+            }
+            yield _exit_frame(-1, float(timeout), rate)
+            finished = True
+    finally:
+        if not finished:
+            # The consumer left mid-stream (disconnect, cancellation, aclose):
+            # release a reader blocked on the full queue and kill the
+            # container so it does not run on unobserved. The reader's own
+            # finally then removes it.
+            stop.set()
+            container = state.get("container")
+            if container is not None:
+                _kill_in_background(loop, _kill, container)
+
+
+def _kill_in_background(
+    loop: asyncio.AbstractEventLoop, kill: Any, container: Any
+) -> None:
+    """Kill without awaiting: a cancelled generator must not block on Docker."""
+    try:
+        loop.run_in_executor(None, kill, container)
+    except RuntimeError:  # loop shutting down: kill inline
+        kill(container)
 
 
 async def stream_sbx_execution(
@@ -198,7 +288,7 @@ async def stream_sbx_execution(
     mounts: dict[str, str] | None,
     envs: dict[str, str] | None,
     rate: float,
-) -> AsyncIterator[StreamFrame]:
+) -> AsyncGenerator[StreamFrame, None]:
     """Degraded streaming fallback for the sbx provider.
 
     The sbx CLI client has no streaming primitive, so the execution runs to

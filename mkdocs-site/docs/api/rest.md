@@ -55,17 +55,43 @@ the admin router plugin is absent; it does not grant access. See the
 
 ## API Versioning
 
-The data routers (chat, indexing, metrics, status, feedback, tenant) are also
-mounted under a **`/v1`** prefix, in addition to their unprefixed paths:
+Every API router is mounted under a **`/v1`** prefix — the stable contract to
+pin clients to (both SDKs already do) — and, for backward compatibility, at
+its historical unprefixed path:
 
 ```text
-POST /chat        # unversioned (kept for backward compatibility)
-POST /v1/chat     # versioned alias — pin new clients here
+POST /v1/chat     # versioned — pin clients here
+POST /chat        # unprefixed — still served, deprecated
 ```
 
-Both resolve to the same handler, so versioning is **additive** and breaks no
-existing client. Set `API_V1_ENABLED=false` to disable the aliases. HTML/admin,
-plugin-management, Backstage, and discovery routes are not versioned.
+Versioned: chat (`/chat`, `/chat/stream`), indexing (`/index/*`, `/reindex`),
+feedback, the plugin-management API (`/api/plugins/*`), and the routers the
+`api_routers` plugin mounts — `/compliance`, `/approvals`, `/runs`,
+`/webhooks`, `/privacy`, `/prompts` and `/agent`.
+
+The unprefixed copies are **deprecated**: their operations carry
+`deprecated: true` in the OpenAPI document, and every response they produce —
+errors included — carries the runtime signal:
+
+```http
+Deprecation: @1791072000
+Link: </v1/chat>; rel="successor-version"
+```
+
+`Deprecation` ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745)) is the
+date the unprefixed path was deprecated (2026-10-04); the `Link`
+([RFC 5829](https://www.rfc-editor.org/rfc/rfc5829) `successor-version`) names
+the `/v1` path to move to. Both headers are CORS-exposed. No removal date is
+set yet; a `Sunset` header will announce one.
+
+Not versioned (one unprefixed path, never deprecated): health and readiness
+probes, `/metrics`, `/status`, `/admin/*`, the console, Backstage, discovery
+(`/.well-known/*`), MCP and the WebSocket channel (`/chat/ws`) — probes,
+Prometheus, nginx and the Helm chart address them directly. `/metrics`,
+`/status` and `/admin/tenants` keep their historical `/v1` aliases.
+
+Set `API_V1_ENABLED=false` to disable the `/v1` copies; the unprefixed paths
+are then the only ones and are not marked deprecated.
 
 ---
 
@@ -93,10 +119,11 @@ credential that authenticates and that match a route are stored; `404`, `405`,
 `5xx` and retryable statuses never are. See
 [IdempotencyMiddleware](../core-modules/middleware.md#idempotencymiddleware).
 
-Four response headers are **exposed** to the calling script, since a browser
+Six response headers are **exposed** to the calling script, since a browser
 cannot read any other: `X-Request-ID` (the correlation id to quote in a bug
-report), `Idempotency-Replayed`, `Retry-After`, and `Mcp-Session-Id` (how an
-MCP browser client learns its session id from the `initialize` response).
+report), `Idempotency-Replayed`, `Retry-After`, `Mcp-Session-Id` (how an
+MCP browser client learns its session id from the `initialize` response), and
+`Deprecation` / `Link` (the [deprecated-path signal](#api-versioning)).
 
 A preflight answer stays cacheable in the browser for **7200 seconds**. The
 framework default is Starlette's 600s, at which a dashboard making
@@ -199,6 +226,22 @@ Database outages are infrastructure conditions, not defects:
 Both carry `Retry-After: 5`; the driver's class and message (which can name
 the database host) are logged at WARNING and never returned to the caller.
 
+Refusals answered by a middleware layer before any route runs are problem
+documents too — same media type, `request_id` and `instance`:
+
+| Layer | Status | `code` |
+|---|---|---|
+| `CostControlMiddleware` (per-request budget; `Retry-After` when the breach carries a hint) | 429 | `budget_exceeded` |
+| `PluginActivationMiddleware` (plugin failed to activate / not ready; `Retry-After` during the backoff) | 503 | `plugin_unavailable` |
+| `CSRFOriginMiddleware` (cross-site state-changing request) | 403 | `csrf_origin_rejected` |
+| `IdempotencyMiddleware` — key too long | 400 | `idempotency_key_invalid` |
+| `IdempotencyMiddleware` — same key still in flight | 409 | `idempotency_key_in_flight` |
+| `IdempotencyMiddleware` — same key, different body or query | 422 | `idempotency_key_mismatch` |
+
+A budget breach never names the configured thresholds: `detail` is the fixed
+`"Request budget exceeded for this deployment."` whether the middleware or the
+exception handler answers it; the limits are in the operator log.
+
 Request-validation failures return **422** with code `validation_error`,
 `detail` `"Request validation failed."` and the per-field list under `errors`
 (the offending `input` is deliberately dropped, so a submitted secret is never
@@ -214,24 +257,50 @@ browser origin — `Access-Control-Allow-Origin`, like every other error. See
 
 ## Pagination
 
-Pagination is per endpoint — there is no global scheme:
+The list endpoints of the API routers share one **cursor** contract
+(`core.api.pagination.page_params` + `paginated`):
+
+- Query: `limit` — `1..200`, default `50` (the bounds are in the OpenAPI
+  schema; out of range is a `422`) — and `cursor`, the opaque `next_cursor` of
+  the previous page.
+- Body: the endpoint's historical list key (`systems`, `endpoints`,
+  `history`, …) holding **this page**, `count` (items in this page),
+  `next_cursor` (`null` on the last page) and `has_more`. A client that
+  ignores the two new members keeps working; it just sees the first page.
+
+```bash
+GET /v1/webhooks/deliveries?limit=50
+# → { "deliveries": [...], "count": 50, "next_cursor": "eyJvZmZzZXQiOjUwfQ", "has_more": true }
+GET /v1/webhooks/deliveries?limit=50&cursor=eyJvZmZzZXQiOjUwfQ
+```
+
+| Endpoint | List key | Notes |
+| -------- | -------- | ----- |
+| `GET /webhooks`, `GET /webhooks/deliveries` | `endpoints`, `deliveries` | |
+| `GET /compliance/systems`, `/pending-registration` | `systems` | |
+| `GET /compliance/documentation`, `/fria`, `/dpia` | `documents`, `assessments` | |
+| `GET /compliance/ropa`, `/automated-decisions` | `activities` | `in_scope` counts the whole registry |
+| `GET /compliance/post-market`, `/risk-management`, `/instructions` | `plans`, `files`, `instructions` | |
+| `GET /prompts` | `prompts` | sorted by name; `total` counts every prompt |
+| `GET /runs/{run_id}/history` | `history` | |
+| `GET /approvals` | `pending` | newest first; keyset cursor on `(updated_at, run_id)` |
+
+`GET /approvals` lists only runs whose status is `awaiting_approval` (crash
+recovery rows are never scanned) and loads only the page's checkpoints,
+concurrently. Its cursor is a keyset, so a decision landing between two page
+fetches — which removes that run from the listing — never makes the next page
+skip or repeat an entry. The listing covers the 500 most recent pending runs;
+a fuller backlog logs `approvals_listing_window_full`.
+
+Cursors are **opaque** — do not parse or construct them; the server may change
+the encoding. An invalid cursor returns `400`. Older operator surfaces keep
+their own scheme:
 
 | Endpoint | Scheme |
 | -------- | ------ |
-| `GET /webhooks/deliveries` | Opaque cursor: `limit` (default 50, clamped to 200) + `cursor`; the page carries `deliveries`, `next_cursor` and `has_more` |
 | `GET /admin/tenants` | `limit` (default 100, max 500) + `offset` |
 | `GET /admin/dlq` | `limit` (default 50, max 500) + `offset` |
 | `GET /feedbacks` | `limit` only (default 50, max 200), newest first |
-
-```bash
-GET /webhooks/deliveries?limit=50
-# → { "deliveries": [...], "next_cursor": "eyJvZmZzZXQiOjUwfQ", "has_more": true }
-GET /webhooks/deliveries?limit=50&cursor=eyJvZmZzZXQiOjUwfQ
-```
-
-Cursors are **opaque** — do not parse or construct them; the server may change
-the encoding. An invalid cursor returns `400`. The webhooks router is only
-mounted with `WEBHOOKS_ENABLED=true` and has no `/v1` alias.
 
 ---
 
@@ -376,6 +445,8 @@ Streaming response useful for long answers displayed progressively.
 - **Per-chunk size**: hard-capped at **64 KB**. Oversized chunks are split transparently.
 - **Wall clock**: `CHAT_STREAM_TIMEOUT_SECONDS` (default `300.0`) bounds the whole response; on expiry the stream is closed cleanly with its terminal `event: done` frame rather than dropped mid-token.
 - **Client disconnect**: the generator stops as soon as the client is gone, releasing the upstream LLM call instead of leaving it running (and billing).
+- **Heartbeat**: while the model is quiet a `: keepalive` comment frame goes out every `SSE_HEARTBEAT_SECONDS` (default `15`), so a proxy or client idle timeout does not drop a stream that is merely waiting; the client is re-checked on every heartbeat. Comment frames are ignored by every SSE consumer, both SDKs included.
+- **Identifiers**: `conversation_id`, `kb_label` and `tenant_id` are capped at 128 characters (`422` beyond).
 - **`max_response_tokens`** (optional request field, `1–16000`): client-side upper bound on the number of response tokens. Useful to enforce stricter budgets per request.
 
 **Request**:
@@ -393,33 +464,48 @@ The endpoint streams the answer as **Server-Sent Events**
 (`Cache-Control: no-cache`, `X-Accel-Buffering: no`). One `data:` frame per
 model chunk — a chunk containing newlines becomes one `data:` line per line —
 and a terminal `event: done` that lets a client tell "the model finished" apart
-from "the connection died":
+from "the connection died". Every event carries an `id:`, numbered from `1`
+per response:
 
 ```text
+id: 1
 data: Once upon a time...
 
+: keepalive
+
+id: 2
 data: and they lived happily ever after.
 
+id: 3
 event: done
 data: [DONE]
 
 ```
+
+There is no replay: a completion cannot be resumed from an event index, so a
+`Last-Event-ID` is ignored and a client that lost the connection re-sends the
+request. The ids exist so a client can tell exactly which events it received.
 
 If the stream fails mid-flight, an `event: error` frame goes out before the
-terminal event:
+terminal event. Its `data:` is a JSON object with a stable `code`, a fixed
+`detail` and the request's `request_id` (the same value as the
+`X-Request-ID` response header):
 
 ```text
+id: 2
 event: error
-data: stream failed
+data: {"code":"stream_failed","detail":"stream failed","request_id":"…"}
 
+id: 3
 event: done
 data: [DONE]
 
 ```
 
-The error payload is deliberately fixed — the exception text can carry provider
+The payload is deliberately fixed — the exception text can carry provider
 detail, prompt fragments or credentials, and it is already in the server log
-under `chat_stream_failed`.
+under `chat_stream_failed`, keyed by that `request_id`. Servers before this
+change sent the bare text `stream failed`; both SDKs accept either form.
 
 ---
 
@@ -511,10 +597,13 @@ curl -X POST http://localhost:8000/agent/async \
   -H "x-api-key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"query": "Summarize the Q3 incident reports"}'
-# 202 → {"task_id": "…", "status_url": "/agent/status/…"}
+# 202 → {"task_id": "…", "status_url": "/v1/agent/status/…"}
+#       Location: /v1/agent/status/…
 ```
 
-Body: `query` (1–8000 chars, required) and optional `conversation_id`. A queue
+Body: `query` (1–8000 chars, required) and optional `conversation_id` (≤128
+chars). The poll URL is returned both as `status_url` and in the `Location`
+header, under `/v1` (unprefixed when `API_V1_ENABLED=false`). A queue
 outage surfaces as `503`, never a hang.
 
 ### `GET /agent/status/{task_id}` - Async Run Status
@@ -559,6 +648,12 @@ since every boot step reuses one short reachability probe instead of waiting
 out a pool timeout each (see
 [PostgreSQL down at boot](../core-modules/db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
 — and this probe answers 503 until the database returns.
+
+Once the process has received SIGTERM/SIGINT it answers **503** with
+`{"status": "draining", "services": {}, "cached": false}` immediately — no
+dependency check, cached result ignored — so the pod leaves the Service
+endpoints while uvicorn finishes in-flight requests, even though its database
+is fine. The plugin-less fallback route behaves the same way.
 
 **Response** (200 OK / 503 Service Unavailable):
 
@@ -671,8 +766,9 @@ curl -u admin:password http://localhost:8000/admin/status
 
 ### `POST /admin/reindex` - Reindex from the dashboard
 
-Runs the same incremental reindex as [`POST /reindex`](#post-reindex) (same
-`409` while a job runs, same response) behind Basic Auth. It is a
+Schedules the same incremental reindex as [`POST /reindex`](#post-reindex)
+(same `202` + `status_url`, same `409` while a job runs) behind Basic Auth; the
+dashboard then refreshes `GET /admin/status` to follow it. It is a
 state-changing request, so a browser `POST` from another site is refused by
 the CSRF guard (`403`); a same-origin `POST` from the dashboard passes.
 
@@ -704,13 +800,23 @@ requires admin or job credentials (`require_admin_or_job`).
 
 ### `GET /index/status`
 
-Current status of the background indexing engine, including
-`bootstrap_enabled` and a derived `state` (`running` / `idle`).
+Current status of the background indexing engine — `running`, `mode`,
+`error`, `last_completed`, `last_new_documents` (files indexed by the last
+finished run), `bootstrap_enabled` and a derived `state` (`running` /
+`idle`). This is the `status_url` both triggers below point at.
+
+Both triggers are **asynchronous**: they start the run in the background and
+answer `202 Accepted` immediately, with the poll URL in the body
+(`status_url`) and the `Location` header (under `/v1` unless
+`API_V1_ENABLED=false`). They share one task slot, so a trigger while any
+indexing run is in progress returns `409`.
 
 ### `POST /index/bootstrap`
 
-Schedule a full or incremental bootstrap. Returns `503` if bootstrapping is
-disabled by config, `409` if an indexing job is already running.
+Schedule a full or incremental bootstrap. Returns `202` with the bootstrapper
+status plus `status: "scheduled"`, `mode` and `status_url`; `503` if
+bootstrapping is disabled by config, `409` if an indexing job is already
+running.
 
 ```bash
 curl -X POST -H "X-API-Key: your-admin-or-job-api-key" \
@@ -719,8 +825,18 @@ curl -X POST -H "X-API-Key: your-admin-or-job-api-key" \
 
 ### `POST /reindex`
 
-Synchronous incremental reindex of local documents. Returns the number of
-newly indexed files; `409` if a job is already running.
+Incremental reindex of local documents, run in the background (it used to
+run inside the request, holding a worker slot — and racing proxy timeouts —
+for the whole pass). Works even when `INDEX_BOOTSTRAP_ENABLED` is off.
+
+```bash
+curl -X POST -H "X-API-Key: $BASELITH_API_KEY" http://localhost:8000/v1/reindex
+# 202 → {"status": "scheduled", "mode": "incremental", "status_url": "/v1/index/status"}
+#       Location: /v1/index/status
+```
+
+Poll `status_url` until `running` is `false`; `last_new_documents` then holds
+the count the old synchronous response returned as `new_files_indexed`.
 
 ---
 

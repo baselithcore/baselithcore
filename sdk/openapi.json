@@ -244,6 +244,7 @@
           "conversation_id": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -272,6 +273,7 @@
           "conversation_id": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -283,6 +285,7 @@
           "kb_label": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -331,6 +334,7 @@
           "tenant_id": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -394,10 +398,14 @@
         "description": "Payload for creating a new tenant.",
         "properties": {
           "id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Id",
             "type": "string"
           },
           "name": {
+            "maxLength": 256,
+            "minLength": 1,
             "title": "Name",
             "type": "string"
           }
@@ -415,6 +423,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 2000,
                 "type": "string"
               },
               {
@@ -426,20 +435,31 @@
           "event_types": {
             "description": "Event types to subscribe to; ['*'] for all",
             "items": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Event Types",
             "type": "array"
           },
           "headers": {
             "additionalProperties": {
+              "maxLength": 4096,
               "type": "string"
+            },
+            "maxProperties": 20,
+            "propertyNames": {
+              "maxLength": 256,
+              "minLength": 1
             },
             "title": "Headers",
             "type": "object"
           },
           "url": {
             "description": "HTTPS endpoint that will receive events",
+            "maxLength": 2048,
+            "minLength": 1,
             "title": "Url",
             "type": "string"
           }
@@ -476,6 +496,7 @@
           "monitoring_plan_id": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -487,6 +508,7 @@
           "provider_contact": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -498,6 +520,7 @@
           "risk_file_id": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -507,6 +530,7 @@
             "title": "Risk File Id"
           },
           "system_id": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "System Id",
             "type": "string"
@@ -578,6 +602,7 @@
         "description": "Move a registered system to a new lifecycle stage.",
         "properties": {
           "stage": {
+            "maxLength": 100,
             "minLength": 1,
             "title": "Stage",
             "type": "string"
@@ -594,10 +619,12 @@
         "properties": {
           "context": {
             "additionalProperties": true,
+            "maxProperties": 50,
             "title": "Context",
             "type": "object"
           },
           "metric": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Metric",
             "type": "string"
@@ -960,8 +987,11 @@
           },
           "labels": {
             "items": {
+              "maxLength": 100,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Labels",
             "type": "array"
           },
@@ -973,8 +1003,11 @@
           },
           "variables": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 200,
             "title": "Variables",
             "type": "array"
           },
@@ -1097,27 +1130,37 @@
           },
           "annex_iii_areas": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Annex Iii Areas",
             "type": "array"
           },
           "art6_derogations": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Art6 Derogations",
             "type": "array"
           },
           "deployers": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Deployers",
             "type": "array"
           },
           "description": {
             "default": "",
+            "maxLength": 10000,
             "title": "Description",
             "type": "string"
           },
@@ -1133,13 +1176,17 @@
           },
           "human_oversight_contacts": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Human Oversight Contacts",
             "type": "array"
           },
           "intended_purpose": {
             "default": "",
+            "maxLength": 10000,
             "title": "Intended Purpose",
             "type": "string"
           },
@@ -1155,19 +1202,26 @@
           },
           "member_states": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Member States",
             "type": "array"
           },
           "models": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Models",
             "type": "array"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -1179,14 +1233,18 @@
           },
           "prohibited_practices": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Prohibited Practices",
             "type": "array"
           },
           "provider_name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -1197,11 +1255,13 @@
           },
           "role": {
             "default": "provider",
+            "maxLength": 100,
             "title": "Role",
             "type": "string"
           },
           "version": {
             "default": "0.0.0",
+            "maxLength": 100,
             "title": "Version",
             "type": "string"
           }
@@ -2351,10 +2411,10 @@
     },
     "/admin/reindex": {
       "post": {
-        "description": "Run the incremental ``/reindex`` for the dashboard (Basic Auth).",
+        "description": "Schedule the incremental ``/reindex`` for the dashboard (Basic Auth).\n\nSame ``202`` + ``status_url`` contract as ``POST /reindex``; the dashboard\npolls ``GET /admin/status`` (which embeds the indexing state).",
         "operationId": "admin_reindex_admin_reindex_post",
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -2526,7 +2586,8 @@
     },
     "/agent/async": {
       "post": {
-        "description": "Enqueue an agent run; returns the task id to poll (or subscribe).",
+        "deprecated": true,
+        "description": "Enqueue an agent run; returns the task id to poll (or subscribe).\n\n``202 Accepted`` with the poll URL both in the body (``status_url``) and in\nthe ``Location`` header.",
         "operationId": "submit_async_run_agent_async_post",
         "requestBody": {
           "content": {
@@ -2567,6 +2628,7 @@
     },
     "/agent/status/{task_id}": {
       "get": {
+        "deprecated": true,
         "description": "Current TaskTracker record for the run.\n\n404 when the id is unknown *or* belongs to another tenant \u2014 the two are\ndeliberately indistinguishable.",
         "operationId": "async_run_status_agent_status__task_id__get",
         "parameters": [
@@ -2819,6 +2881,7 @@
     },
     "/api/plugins/": {
       "get": {
+        "deprecated": true,
         "description": "List all plugins with their current state.\n\nReturns:\n    List of plugins with metadata and state information",
         "operationId": "list_plugins_api_plugins__get",
         "responses": {
@@ -2862,6 +2925,7 @@
     },
     "/api/plugins/metrics/all": {
       "get": {
+        "deprecated": true,
         "description": "Get metrics for all tracked plugins.\n\nReturns:\n    Dictionary mapping plugin names to their metrics",
         "operationId": "get_all_metrics_api_plugins_metrics_all_get",
         "responses": {
@@ -2886,6 +2950,7 @@
     },
     "/api/plugins/metrics/system/overview": {
       "get": {
+        "deprecated": true,
         "description": "Get system-wide plugin metrics.\n\nReturns:\n    Aggregated metrics across all plugins",
         "operationId": "get_system_metrics_api_plugins_metrics_system_overview_get",
         "responses": {
@@ -2910,6 +2975,7 @@
     },
     "/api/plugins/metrics/system/performance": {
       "get": {
+        "deprecated": true,
         "description": "Get performance summary for all plugins.\n\nReturns:\n    Performance statistics (load times, reload times, error rates)",
         "operationId": "get_performance_metrics_api_plugins_metrics_system_performance_get",
         "responses": {
@@ -2934,6 +3000,7 @@
     },
     "/api/plugins/metrics/system/reset": {
       "delete": {
+        "deprecated": true,
         "description": "Reset all plugin metrics.\n\nReturns:\n    Success message",
         "operationId": "reset_all_metrics_api_plugins_metrics_system_reset_delete",
         "responses": {
@@ -2958,6 +3025,7 @@
     },
     "/api/plugins/metrics/{plugin_name}": {
       "delete": {
+        "deprecated": true,
         "description": "Reset metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Success message",
         "operationId": "reset_plugin_metrics_api_plugins_metrics__plugin_name__delete",
         "parameters": [
@@ -3001,6 +3069,7 @@
         ]
       },
       "get": {
+        "deprecated": true,
         "description": "Get detailed metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin metrics including timing, errors, state history",
         "operationId": "get_plugin_metrics_api_plugins_metrics__plugin_name__get",
         "parameters": [
@@ -3046,6 +3115,7 @@
     },
     "/api/plugins/reload-all": {
       "post": {
+        "deprecated": true,
         "description": "Reload all active plugins.\n\nReturns:\n    Dictionary mapping plugin names to reload status",
         "operationId": "reload_all_plugins_api_plugins_reload_all_post",
         "responses": {
@@ -3070,6 +3140,7 @@
     },
     "/api/plugins/status/overview": {
       "get": {
+        "deprecated": true,
         "description": "Get overview of plugin system status.\n\nReturns:\n    Lifecycle summary and dependency graph",
         "operationId": "get_plugin_status_api_plugins_status_overview_get",
         "responses": {
@@ -3092,6 +3163,7 @@
     },
     "/api/plugins/updates": {
       "get": {
+        "deprecated": true,
         "description": "Return the last saved check report (no network access).",
         "operationId": "get_updates_api_plugins_updates_get",
         "responses": {
@@ -3114,6 +3186,7 @@
     },
     "/api/plugins/updates/check": {
       "post": {
+        "deprecated": true,
         "description": "Run an update check now (throttled per process) and return the report.",
         "operationId": "check_updates_api_plugins_updates_check_post",
         "responses": {
@@ -3136,6 +3209,7 @@
     },
     "/api/plugins/{plugin_name}": {
       "get": {
+        "deprecated": true,
         "description": "Get detailed information about a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin details including state, metadata, and dependencies",
         "operationId": "get_plugin_info_api_plugins__plugin_name__get",
         "parameters": [
@@ -3181,6 +3255,7 @@
     },
     "/api/plugins/{plugin_name}/dependents": {
       "get": {
+        "deprecated": true,
         "description": "Get list of plugins that depend on this plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    List of dependent plugin names",
         "operationId": "get_plugin_dependents_api_plugins__plugin_name__dependents_get",
         "parameters": [
@@ -3226,6 +3301,7 @@
     },
     "/api/plugins/{plugin_name}/disable": {
       "post": {
+        "deprecated": true,
         "description": "Disable an active plugin.\n\nArgs:\n    plugin_name: Name of the plugin to disable\n\nReturns:\n    Action response with success status",
         "operationId": "disable_plugin_api_plugins__plugin_name__disable_post",
         "parameters": [
@@ -3269,6 +3345,7 @@
     },
     "/api/plugins/{plugin_name}/enable": {
       "post": {
+        "deprecated": true,
         "description": "Enable a disabled plugin for this process (not persisted to config).\n\nArgs:\n    plugin_name: Name of the plugin to enable\n    request: Enable request with optional configuration\n\nReturns:\n    Action response; ``restart_required`` flags pending app middleware.",
         "operationId": "enable_plugin_api_plugins__plugin_name__enable_post",
         "parameters": [
@@ -3322,6 +3399,7 @@
     },
     "/api/plugins/{plugin_name}/reload": {
       "post": {
+        "deprecated": true,
         "description": "Reload a plugin (hot-reload).\n\nArgs:\n    plugin_name: Name of the plugin to reload\n    request: Reload request with optional new configuration\n\nReturns:\n    Action response with success status",
         "operationId": "reload_plugin_api_plugins__plugin_name__reload_post",
         "parameters": [
@@ -3375,7 +3453,8 @@
     },
     "/approvals": {
       "get": {
-        "description": "List runs durably paused awaiting a reviewer decision.",
+        "deprecated": true,
+        "description": "List runs durably paused awaiting a reviewer decision (cursor-paginated).\n\nNewest first. The cursor is a keyset on ``(updated_at, run_id)``, so a\ndecision landing between two page fetches (which removes that run from\nthe listing) never makes the next page skip or repeat an entry. The\nlisting covers the :data:`_LISTING_WINDOW` most recent pending runs.",
         "operationId": "list_pending_approvals_approvals_get",
         "parameters": [
           {
@@ -3385,6 +3464,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
@@ -3392,6 +3472,45 @@
                 }
               ],
               "title": "Tenant Id"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -3432,6 +3551,7 @@
     },
     "/approvals/{run_id}/decision": {
       "post": {
+        "deprecated": true,
         "description": "Record an approve/deny decision on a paused run.\n\nThe decision is consumed by the approval gate on the next resume: the run\ncontinues (approved) or aborts with a denial (denied).\n\nThe reviewer is the **authenticated** admin the Basic Auth dependency\nestablished, not anything the request body claims: an approval is a human\ntaking responsibility for a side effect the policy refused to let the\nagent take alone, and an identity the caller typed is not evidence of who\nthat human was.",
         "operationId": "decide_approvals__run_id__decision_post",
         "parameters": [
@@ -3492,6 +3612,7 @@
     },
     "/approvals/{run_id}/resume": {
       "post": {
+        "deprecated": true,
         "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.",
         "operationId": "resume_approvals__run_id__resume_post",
         "parameters": [
@@ -3542,6 +3663,7 @@
     },
     "/chat": {
       "post": {
+        "deprecated": true,
         "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
         "operationId": "chat_chat_post",
         "requestBody": {
@@ -3579,6 +3701,7 @@
     },
     "/chat/stream": {
       "post": {
+        "deprecated": true,
         "description": "Stream the agent response as Server-Sent Events.\n\nEmits one ``data:`` frame per model chunk and a final ``event: done``.\nThe response is cut short \u2014 cleanly \u2014 when the client disconnects or when\n``CHAT_STREAM_TIMEOUT_SECONDS`` elapses.",
         "operationId": "chat_stream_chat_stream_post",
         "requestBody": {
@@ -3618,6 +3741,7 @@
     },
     "/compliance/audit/verify": {
       "get": {
+        "deprecated": true,
         "description": "Verify the audit trail's hash chain (AI Act Art. 12 evidence integrity).",
         "operationId": "verify_audit_chain_compliance_audit_verify_get",
         "responses": {
@@ -3642,6 +3766,7 @@
     },
     "/compliance/automated-decisions": {
       "get": {
+        "deprecated": true,
         "description": "List Art. 22 decision-making activities and their safeguard posture.",
         "operationId": "list_automated_decisions_compliance_automated_decisions_get",
         "parameters": [
@@ -3653,6 +3778,45 @@
               "default": false,
               "title": "Non Compliant Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -3689,6 +3853,7 @@
     },
     "/compliance/automated-decisions/{activity_id}/subject-information": {
       "get": {
+        "deprecated": true,
         "description": "The Art. 15(1)(h) disclosure to hand a data subject on request.",
         "operationId": "subject_information_compliance_automated_decisions__activity_id__subject_information_get",
         "parameters": [
@@ -3735,6 +3900,7 @@
     },
     "/compliance/documentation": {
       "get": {
+        "deprecated": true,
         "description": "List Annex IV technical documentation, with the missing sections named.",
         "operationId": "list_documentation_compliance_documentation_get",
         "parameters": [
@@ -3762,6 +3928,45 @@
               "default": false,
               "title": "Incomplete Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -3797,6 +4002,7 @@
     },
     "/compliance/documentation/draft": {
       "post": {
+        "deprecated": true,
         "description": "Draft an Annex IV document from a registered system's known facts.",
         "operationId": "draft_documentation_compliance_documentation_draft_post",
         "parameters": [
@@ -3842,6 +4048,7 @@
     },
     "/compliance/dpia": {
       "get": {
+        "deprecated": true,
         "description": "List DPIAs. ``blocked_only`` returns those that may not start processing.",
         "operationId": "list_dpia_compliance_dpia_get",
         "parameters": [
@@ -3863,6 +4070,45 @@
               "default": false,
               "title": "Blocked Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -3899,6 +4145,7 @@
     },
     "/compliance/dpia/{assessment_id}/complete": {
       "post": {
+        "deprecated": true,
         "description": "Mark a DPIA complete, refusing while Art. 35(7) elements are missing.\n\nCompleting does not by itself unlock processing: with a high residual risk,\nArt. 36(1) prior consultation is still owed and ``may_start_processing``\nstays false.",
         "operationId": "complete_dpia_compliance_dpia__assessment_id__complete_post",
         "parameters": [
@@ -3945,6 +4192,7 @@
     },
     "/compliance/dpia/{assessment_id}/prior-consultation": {
       "post": {
+        "deprecated": true,
         "description": "Record the Art. 36(1) consultation of the supervisory authority.",
         "operationId": "record_prior_consultation_compliance_dpia__assessment_id__prior_consultation_post",
         "parameters": [
@@ -3991,6 +4239,7 @@
     },
     "/compliance/fria": {
       "get": {
+        "deprecated": true,
         "description": "List Art. 27 FRIAs, with the missing statutory elements named.",
         "operationId": "list_fria_compliance_fria_get",
         "parameters": [
@@ -4018,6 +4267,45 @@
               "default": false,
               "title": "Incomplete Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4053,6 +4341,7 @@
     },
     "/compliance/instructions": {
       "get": {
+        "deprecated": true,
         "description": "List Art. 13 instructions, with the missing elements named.",
         "operationId": "list_instructions_compliance_instructions_get",
         "parameters": [
@@ -4080,6 +4369,45 @@
               "default": false,
               "title": "Incomplete Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4116,6 +4444,7 @@
     },
     "/compliance/instructions/draft": {
       "post": {
+        "deprecated": true,
         "description": "Draft Art. 13 instructions from the registry, risk file and Art. 72 plan.",
         "operationId": "draft_instructions_endpoint_compliance_instructions_draft_post",
         "requestBody": {
@@ -4161,6 +4490,7 @@
     },
     "/compliance/instructions/{instructions_id}": {
       "get": {
+        "deprecated": true,
         "description": "Fetch one set of instructions, rendered for the deployer.",
         "operationId": "get_instructions_compliance_instructions__instructions_id__get",
         "parameters": [
@@ -4207,6 +4537,7 @@
     },
     "/compliance/instructions/{instructions_id}/issue": {
       "post": {
+        "deprecated": true,
         "description": "Mark instructions as issued to deployers.\n\nRefused while Art. 13(3) elements are missing: instructions that omit the\nlimitations or the oversight measures leave the deployer unable to perform\nits own Art. 26 duties.",
         "operationId": "issue_instructions_compliance_instructions__instructions_id__issue_post",
         "parameters": [
@@ -4253,8 +4584,50 @@
     },
     "/compliance/pending-registration": {
       "get": {
+        "deprecated": true,
         "description": "Systems owing an Art. 49 EU-database registration that has not happened.",
         "operationId": "pending_registration_compliance_pending_registration_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4267,6 +4640,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Pending Registration",
@@ -4277,6 +4660,7 @@
     },
     "/compliance/post-market": {
       "get": {
+        "deprecated": true,
         "description": "List Art. 72 monitoring plans, flagging overdue reviews.",
         "operationId": "list_post_market_compliance_post_market_get",
         "parameters": [
@@ -4294,6 +4678,45 @@
                 }
               ],
               "title": "System Id"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4329,6 +4752,7 @@
     },
     "/compliance/post-market/{plan_id}/observe": {
       "post": {
+        "deprecated": true,
         "description": "Record a production measurement against a plan and evaluate its threshold.",
         "operationId": "record_observation_compliance_post_market__plan_id__observe_post",
         "parameters": [
@@ -4384,6 +4808,7 @@
     },
     "/compliance/post-market/{plan_id}/review": {
       "post": {
+        "deprecated": true,
         "description": "Record a plan review, resetting the Art. 72(1) cadence.",
         "operationId": "review_plan_compliance_post_market__plan_id__review_post",
         "parameters": [
@@ -4429,6 +4854,7 @@
     },
     "/compliance/profile": {
       "get": {
+        "deprecated": true,
         "description": "Check the running configuration against the declared profile.\n\nRead-only: reports gaps with the article behind each, and never switches a\nsubsystem on.",
         "operationId": "compliance_profile_compliance_profile_get",
         "responses": {
@@ -4453,6 +4879,7 @@
     },
     "/compliance/risk-management": {
       "get": {
+        "deprecated": true,
         "description": "List Art. 9 risk files, with missing elements and open risks named.",
         "operationId": "list_risk_files_compliance_risk_management_get",
         "parameters": [
@@ -4480,6 +4907,45 @@
               "default": false,
               "title": "Incomplete Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4516,6 +4982,7 @@
     },
     "/compliance/risk-management/{file_id}": {
       "get": {
+        "deprecated": true,
         "description": "Fetch one Art. 9 risk file, rendered as Annex IV section 5.",
         "operationId": "get_risk_file_compliance_risk_management__file_id__get",
         "parameters": [
@@ -4562,6 +5029,7 @@
     },
     "/compliance/risk-management/{file_id}/review": {
       "post": {
+        "deprecated": true,
         "description": "Record an Art. 9(1) systematic review.\n\nRefused while risks remain open \u2014 a review signed over untreated,\nunverified or unaccepted risks records something that did not happen.",
         "operationId": "review_risk_file_compliance_risk_management__file_id__review_post",
         "parameters": [
@@ -4608,6 +5076,7 @@
     },
     "/compliance/ropa": {
       "get": {
+        "deprecated": true,
         "description": "List the GDPR Art. 30 register, with the missing elements named.",
         "operationId": "list_ropa_compliance_ropa_get",
         "parameters": [
@@ -4619,6 +5088,45 @@
               "default": false,
               "title": "Incomplete Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4654,6 +5162,7 @@
     },
     "/compliance/summary": {
       "get": {
+        "deprecated": true,
         "description": "Inventory roll-up: counts by category, and the open Art. 49 duties.",
         "operationId": "inventory_summary_compliance_summary_get",
         "responses": {
@@ -4678,6 +5187,7 @@
     },
     "/compliance/systems": {
       "get": {
+        "deprecated": true,
         "description": "List registered AI systems, optionally filtered by risk category.",
         "operationId": "list_systems_compliance_systems_get",
         "parameters": [
@@ -4695,6 +5205,45 @@
                 }
               ],
               "title": "Risk Category"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -4728,6 +5277,7 @@
         ]
       },
       "post": {
+        "deprecated": true,
         "description": "Register a system: screens Art. 5, derives the Art. 6 risk category.\n\nA declared prohibited practice yields a ``PROHIBITED`` record rather than a\nrejection \u2014 inventorying a banned system is a prerequisite to retiring it.\nSet ``COMPLIANCE_BLOCK_PROHIBITED_PRACTICES`` to refuse instead.",
         "operationId": "register_system_compliance_systems_post",
         "requestBody": {
@@ -4772,6 +5322,7 @@
     },
     "/compliance/systems/{system_id}": {
       "get": {
+        "deprecated": true,
         "description": "Fetch one registered system with the obligations its category carries.",
         "operationId": "get_system_compliance_systems__system_id__get",
         "parameters": [
@@ -4817,6 +5368,7 @@
     },
     "/compliance/systems/{system_id}/lifecycle": {
       "post": {
+        "deprecated": true,
         "description": "Move a system to a new lifecycle stage, stamping the relevant date.",
         "operationId": "advance_lifecycle_compliance_systems__system_id__lifecycle_post",
         "parameters": [
@@ -4872,6 +5424,7 @@
     },
     "/compliance/systems/{system_id}/reclassify": {
       "post": {
+        "deprecated": true,
         "description": "Re-derive the Art. 6 category after the system's facts changed.",
         "operationId": "reclassify_system_compliance_systems__system_id__reclassify_post",
         "parameters": [
@@ -4990,6 +5543,7 @@
     },
     "/feedback": {
       "post": {
+        "deprecated": true,
         "description": "Records a feedback (positive|negative) for a generated response.\n- Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).",
         "operationId": "feedback_feedback_post",
         "requestBody": {
@@ -5036,6 +5590,7 @@
     },
     "/feedbacks": {
       "get": {
+        "deprecated": true,
         "description": "Returns the most recent feedback entries for the caller's tenant.\n- If `feedback` is specified, filters by type ('positive' or 'negative').\n- Always bounded: omitting `limit` returns the default page, never the\n  whole table (an unset limit used to translate into no SQL ``LIMIT``).",
         "operationId": "list_feedbacks_feedbacks_get",
         "parameters": [
@@ -5137,7 +5692,7 @@
     },
     "/health/ready": {
       "get": {
-        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.",
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.\n\nOnce the process has received SIGTERM/SIGINT (:func:`is_draining`) it\nanswers 503 at once, without touching the cache or the dependencies: a\ndraining pod must leave the endpoints even while its database is fine,\nor the proxy keeps routing new requests to a server that is closing.",
         "operationId": "readiness_health_ready_get",
         "responses": {
           "200": {
@@ -5153,7 +5708,7 @@
             "description": "Successful Response"
           },
           "503": {
-            "description": "Not ready: the database is unreachable; the pod should be removed from Service endpoints until it recovers."
+            "description": "Not ready: the process is draining after a stop signal, or the database is unreachable; the pod should be removed from Service endpoints."
           }
         },
         "summary": "Readiness",
@@ -5164,6 +5719,8 @@
     },
     "/index/bootstrap": {
       "post": {
+        "deprecated": true,
+        "description": "Schedule a bootstrap indexing run; poll ``status_url`` for the outcome.",
         "operationId": "trigger_bootstrap_index_bootstrap_post",
         "parameters": [
           {
@@ -5178,7 +5735,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -5209,6 +5766,7 @@
     },
     "/index/status": {
       "get": {
+        "deprecated": true,
         "description": "Retrieve the current status of the background indexing engine.",
         "operationId": "index_status_index_status_get",
         "responses": {
@@ -5258,6 +5816,7 @@
     },
     "/privacy/erase": {
       "post": {
+        "deprecated": true,
         "description": "Erase all data held for a subject (right to erasure).",
         "operationId": "erase_subject_privacy_erase_post",
         "requestBody": {
@@ -5302,6 +5861,7 @@
     },
     "/privacy/export": {
       "post": {
+        "deprecated": true,
         "description": "Export all data held for a subject (right to access / portability).",
         "operationId": "export_subject_privacy_export_post",
         "requestBody": {
@@ -5346,6 +5906,7 @@
     },
     "/privacy/providers": {
       "get": {
+        "deprecated": true,
         "description": "List the registered data providers (requires ``privacy:manage``).",
         "operationId": "list_providers_privacy_providers_get",
         "responses": {
@@ -5370,6 +5931,7 @@
     },
     "/privacy/retention/sweep": {
       "post": {
+        "deprecated": true,
         "description": "Purge records older than the horizon across retention-aware providers.",
         "operationId": "retention_sweep_privacy_retention_sweep_post",
         "requestBody": {
@@ -5414,8 +5976,50 @@
     },
     "/prompts": {
       "get": {
-        "description": "List registered prompts with their versions and labels.",
+        "deprecated": true,
+        "description": "List registered prompts with their versions and labels.\n\nPaginated over the sorted prompt names; ``total`` counts every prompt,\n``count`` the ones on this page.",
         "operationId": "list_prompts_prompts_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5428,6 +6032,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -5443,6 +6057,7 @@
     },
     "/prompts/{name}/labels/{label}": {
       "post": {
+        "deprecated": true,
         "description": "Point ``label`` at an existing version of ``name`` (durable promote).",
         "operationId": "promote_label_prompts__name__labels__label__post",
         "parameters": [
@@ -5512,6 +6127,7 @@
     },
     "/prompts/{name}/versions": {
       "post": {
+        "deprecated": true,
         "description": "Register (and persist) a new version of ``name``.",
         "operationId": "register_version_prompts__name__versions_post",
         "parameters": [
@@ -5572,10 +6188,11 @@
     },
     "/reindex": {
       "post": {
-        "description": "Performs an incremental indexing of local documents (synchronous operation).\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)",
+        "deprecated": true,
+        "description": "Start an incremental indexing of local documents in the background.\n\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)\n\nAnswers ``202`` immediately; ``GET /index/status`` reports progress and,\nonce done, ``last_completed`` and ``last_new_documents``.",
         "operationId": "reindex_reindex_post",
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -5596,7 +6213,8 @@
     },
     "/runs/{run_id}/events": {
       "get": {
-        "description": "Stream a run's structured events as Server-Sent Events.\n\nFrames are ``event: <type>`` + ``data: <AgentEvent JSON>``; the stream\ncloses after a terminal event (final answer, error, or durable approval\npause). Subscribe **before** starting/resuming the run \u2014 events are\nfan-out only, not replayed (the checkpoint trajectory is the durable\nrecord).",
+        "deprecated": true,
+        "description": "Stream a run's structured events as Server-Sent Events.\n\nFrames are ``id: <AgentEvent.id>`` + ``event: <type>`` + ``data:\n<AgentEvent JSON>``; the stream closes after a terminal event (final\nanswer, error, or durable approval pause) or as soon as the client\ndisconnects. A quiet run gets a ``: keepalive`` comment every\n``SSE_HEARTBEAT_SECONDS``.\n\nSubscribe **before** starting/resuming the run \u2014 events are fan-out only,\nnot replayed: the event store keeps no history to resume from, so a\n``Last-Event-ID`` sent on reconnect is accepted but cannot rewind the\nfeed. The checkpoint trajectory (``GET /runs/{run_id}/history``) is the\ndurable record a reconnecting client catches up from.",
         "operationId": "run_events_runs__run_id__events_get",
         "parameters": [
           {
@@ -5642,6 +6260,7 @@
     },
     "/runs/{run_id}/fork": {
       "post": {
+        "deprecated": true,
         "description": "Fork a run from its state at a version into a fresh resumable run.\n\nThe fork keeps the recorded steps up to that version, so resuming it\nreplays them without re-executing side effects and continues live from\nthe fork point.",
         "operationId": "fork_runs__run_id__fork_post",
         "parameters": [
@@ -5702,7 +6321,8 @@
     },
     "/runs/{run_id}/history": {
       "get": {
-        "description": "Version-ascending snapshot summaries for a run.\n\nEmpty history for a known run means snapshots are not being recorded\n(``ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`` is off).",
+        "deprecated": true,
+        "description": "Version-ascending snapshot summaries for a run (cursor-paginated).\n\nEmpty history for a known run means snapshots are not being recorded\n(``ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`` is off).",
         "operationId": "state_history_runs__run_id__history_get",
         "parameters": [
           {
@@ -5712,6 +6332,45 @@
             "schema": {
               "title": "Run Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
             }
           }
         ],
@@ -5752,6 +6411,7 @@
     },
     "/runs/{run_id}/history/{version}": {
       "get": {
+        "deprecated": true,
         "description": "The full checkpoint state exactly as recorded at ``version``.",
         "operationId": "state_at_version_runs__run_id__history__version__get",
         "parameters": [
@@ -5950,6 +6610,831 @@
         ]
       }
     },
+    "/v1/agent/async": {
+      "post": {
+        "description": "Enqueue an agent run; returns the task id to poll (or subscribe).\n\n``202 Accepted`` with the poll URL both in the body (``status_url``) and in\nthe ``Location`` header.",
+        "operationId": "submit_async_run_v1_agent_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AsyncRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Async Run V1 Agent Async Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Async Run"
+      }
+    },
+    "/v1/agent/status/{task_id}": {
+      "get": {
+        "description": "Current TaskTracker record for the run.\n\n404 when the id is unknown *or* belongs to another tenant \u2014 the two are\ndeliberately indistinguishable.",
+        "operationId": "async_run_status_v1_agent_status__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Async Run Status V1 Agent Status  Task Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Async Run Status"
+      }
+    },
+    "/v1/api/plugins/": {
+      "get": {
+        "description": "List all plugins with their current state.\n\nReturns:\n    List of plugins with metadata and state information",
+        "operationId": "list_plugins_v1_api_plugins__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Plugins",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/metrics/all": {
+      "get": {
+        "description": "Get metrics for all tracked plugins.\n\nReturns:\n    Dictionary mapping plugin names to their metrics",
+        "operationId": "get_all_metrics_v1_api_plugins_metrics_all_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get All Metrics V1 Api Plugins Metrics All Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get All Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/metrics/system/overview": {
+      "get": {
+        "description": "Get system-wide plugin metrics.\n\nReturns:\n    Aggregated metrics across all plugins",
+        "operationId": "get_system_metrics_v1_api_plugins_metrics_system_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get System Metrics V1 Api Plugins Metrics System Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/metrics/system/performance": {
+      "get": {
+        "description": "Get performance summary for all plugins.\n\nReturns:\n    Performance statistics (load times, reload times, error rates)",
+        "operationId": "get_performance_metrics_v1_api_plugins_metrics_system_performance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Performance Metrics V1 Api Plugins Metrics System Performance Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Performance Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/metrics/system/reset": {
+      "delete": {
+        "description": "Reset all plugin metrics.\n\nReturns:\n    Success message",
+        "operationId": "reset_all_metrics_v1_api_plugins_metrics_system_reset_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset All Metrics V1 Api Plugins Metrics System Reset Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset All Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/metrics/{plugin_name}": {
+      "delete": {
+        "description": "Reset metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Success message",
+        "operationId": "reset_plugin_metrics_v1_api_plugins_metrics__plugin_name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Plugin Metrics V1 Api Plugins Metrics  Plugin Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Plugin Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      },
+      "get": {
+        "description": "Get detailed metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin metrics including timing, errors, state history",
+        "operationId": "get_plugin_metrics_v1_api_plugins_metrics__plugin_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Metrics V1 Api Plugins Metrics  Plugin Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Metrics",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/reload-all": {
+      "post": {
+        "description": "Reload all active plugins.\n\nReturns:\n    Dictionary mapping plugin names to reload status",
+        "operationId": "reload_all_plugins_v1_api_plugins_reload_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reload All Plugins V1 Api Plugins Reload All Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reload All Plugins",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/status/overview": {
+      "get": {
+        "description": "Get overview of plugin system status.\n\nReturns:\n    Lifecycle summary and dependency graph",
+        "operationId": "get_plugin_status_v1_api_plugins_status_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Plugin Status",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/updates": {
+      "get": {
+        "description": "Return the last saved check report (no network access).",
+        "operationId": "get_updates_v1_api_plugins_updates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUpdatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Updates",
+        "tags": [
+          "Plugin Updates"
+        ]
+      }
+    },
+    "/v1/api/plugins/updates/check": {
+      "post": {
+        "description": "Run an update check now (throttled per process) and return the report.",
+        "operationId": "check_updates_v1_api_plugins_updates_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Updates",
+        "tags": [
+          "Plugin Updates"
+        ]
+      }
+    },
+    "/v1/api/plugins/{plugin_name}": {
+      "get": {
+        "description": "Get detailed information about a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin details including state, metadata, and dependencies",
+        "operationId": "get_plugin_info_v1_api_plugins__plugin_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Info V1 Api Plugins  Plugin Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Info",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/{plugin_name}/dependents": {
+      "get": {
+        "description": "Get list of plugins that depend on this plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    List of dependent plugin names",
+        "operationId": "get_plugin_dependents_v1_api_plugins__plugin_name__dependents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Dependents V1 Api Plugins  Plugin Name  Dependents Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Dependents",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/{plugin_name}/disable": {
+      "post": {
+        "description": "Disable an active plugin.\n\nArgs:\n    plugin_name: Name of the plugin to disable\n\nReturns:\n    Action response with success status",
+        "operationId": "disable_plugin_v1_api_plugins__plugin_name__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disable Plugin",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/{plugin_name}/enable": {
+      "post": {
+        "description": "Enable a disabled plugin for this process (not persisted to config).\n\nArgs:\n    plugin_name: Name of the plugin to enable\n    request: Enable request with optional configuration\n\nReturns:\n    Action response; ``restart_required`` flags pending app middleware.",
+        "operationId": "enable_plugin_v1_api_plugins__plugin_name__enable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginEnableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enable Plugin",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/api/plugins/{plugin_name}/reload": {
+      "post": {
+        "description": "Reload a plugin (hot-reload).\n\nArgs:\n    plugin_name: Name of the plugin to reload\n    request: Reload request with optional new configuration\n\nReturns:\n    Action response with success status",
+        "operationId": "reload_plugin_v1_api_plugins__plugin_name__reload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginReloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reload Plugin",
+        "tags": [
+          "Plugin Management"
+        ]
+      }
+    },
+    "/v1/approvals": {
+      "get": {
+        "description": "List runs durably paused awaiting a reviewer decision (cursor-paginated).\n\nNewest first. The cursor is a keyset on ``(updated_at, run_id)``, so a\ndecision landing between two page fetches (which removes that run from\nthe listing) never makes the next page skip or repeat an entry. The\nlisting covers the :data:`_LISTING_WINDOW` most recent pending runs.",
+        "operationId": "list_pending_approvals_v1_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Pending Approvals V1 Approvals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Pending Approvals",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/approvals/{run_id}/decision": {
+      "post": {
+        "description": "Record an approve/deny decision on a paused run.\n\nThe decision is consumed by the approval gate on the next resume: the run\ncontinues (approved) or aborts with a denial (denied).\n\nThe reviewer is the **authenticated** admin the Basic Auth dependency\nestablished, not anything the request body claims: an approval is a human\ntaking responsibility for a side effect the policy refused to let the\nagent take alone, and an identity the caller typed is not evidence of who\nthat human was.",
+        "operationId": "decide_v1_approvals__run_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide V1 Approvals  Run Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Decide",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/approvals/{run_id}/resume": {
+      "post": {
+        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.",
+        "operationId": "resume_v1_approvals__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resume V1 Approvals  Run Id  Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Resume",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/v1/chat": {
       "post": {
         "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
@@ -6024,6 +7509,1707 @@
           }
         },
         "summary": "Chat Stream"
+      }
+    },
+    "/v1/compliance/audit/verify": {
+      "get": {
+        "description": "Verify the audit trail's hash chain (AI Act Art. 12 evidence integrity).",
+        "operationId": "verify_audit_chain_v1_compliance_audit_verify_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify Audit Chain V1 Compliance Audit Verify Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Audit Chain",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/automated-decisions": {
+      "get": {
+        "description": "List Art. 22 decision-making activities and their safeguard posture.",
+        "operationId": "list_automated_decisions_v1_compliance_automated_decisions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "non_compliant_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Non Compliant Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Automated Decisions V1 Compliance Automated Decisions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Automated Decisions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/automated-decisions/{activity_id}/subject-information": {
+      "get": {
+        "description": "The Art. 15(1)(h) disclosure to hand a data subject on request.",
+        "operationId": "subject_information_v1_compliance_automated_decisions__activity_id__subject_information_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "activity_id",
+            "required": true,
+            "schema": {
+              "title": "Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Subject Information V1 Compliance Automated Decisions  Activity Id  Subject Information Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subject Information",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/documentation": {
+      "get": {
+        "description": "List Annex IV technical documentation, with the missing sections named.",
+        "operationId": "list_documentation_v1_compliance_documentation_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Documentation V1 Compliance Documentation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documentation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/documentation/draft": {
+      "post": {
+        "description": "Draft an Annex IV document from a registered system's known facts.",
+        "operationId": "draft_documentation_v1_compliance_documentation_draft_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Documentation V1 Compliance Documentation Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Documentation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/dpia": {
+      "get": {
+        "description": "List DPIAs. ``blocked_only`` returns those that may not start processing.",
+        "operationId": "list_dpia_v1_compliance_dpia_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blocked_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Blocked Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Dpia V1 Compliance Dpia Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dpia",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/dpia/{assessment_id}/complete": {
+      "post": {
+        "description": "Mark a DPIA complete, refusing while Art. 35(7) elements are missing.\n\nCompleting does not by itself unlock processing: with a high residual risk,\nArt. 36(1) prior consultation is still owed and ``may_start_processing``\nstays false.",
+        "operationId": "complete_dpia_v1_compliance_dpia__assessment_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Complete Dpia V1 Compliance Dpia  Assessment Id  Complete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Dpia",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/dpia/{assessment_id}/prior-consultation": {
+      "post": {
+        "description": "Record the Art. 36(1) consultation of the supervisory authority.",
+        "operationId": "record_prior_consultation_v1_compliance_dpia__assessment_id__prior_consultation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Prior Consultation V1 Compliance Dpia  Assessment Id  Prior Consultation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Prior Consultation",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/fria": {
+      "get": {
+        "description": "List Art. 27 FRIAs, with the missing statutory elements named.",
+        "operationId": "list_fria_v1_compliance_fria_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Fria V1 Compliance Fria Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fria",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/instructions": {
+      "get": {
+        "description": "List Art. 13 instructions, with the missing elements named.",
+        "operationId": "list_instructions_v1_compliance_instructions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Instructions V1 Compliance Instructions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/instructions/draft": {
+      "post": {
+        "description": "Draft Art. 13 instructions from the registry, risk file and Art. 72 plan.",
+        "operationId": "draft_instructions_endpoint_v1_compliance_instructions_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftInstructionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Instructions Endpoint V1 Compliance Instructions Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Instructions Endpoint",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/instructions/{instructions_id}": {
+      "get": {
+        "description": "Fetch one set of instructions, rendered for the deployer.",
+        "operationId": "get_instructions_v1_compliance_instructions__instructions_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instructions_id",
+            "required": true,
+            "schema": {
+              "title": "Instructions Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Instructions V1 Compliance Instructions  Instructions Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/instructions/{instructions_id}/issue": {
+      "post": {
+        "description": "Mark instructions as issued to deployers.\n\nRefused while Art. 13(3) elements are missing: instructions that omit the\nlimitations or the oversight measures leave the deployer unable to perform\nits own Art. 26 duties.",
+        "operationId": "issue_instructions_v1_compliance_instructions__instructions_id__issue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instructions_id",
+            "required": true,
+            "schema": {
+              "title": "Instructions Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Issue Instructions V1 Compliance Instructions  Instructions Id  Issue Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Instructions",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/pending-registration": {
+      "get": {
+        "description": "Systems owing an Art. 49 EU-database registration that has not happened.",
+        "operationId": "pending_registration_v1_compliance_pending_registration_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pending Registration V1 Compliance Pending Registration Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pending Registration",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/post-market": {
+      "get": {
+        "description": "List Art. 72 monitoring plans, flagging overdue reviews.",
+        "operationId": "list_post_market_v1_compliance_post_market_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Post Market V1 Compliance Post Market Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Post Market",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/post-market/{plan_id}/observe": {
+      "post": {
+        "description": "Record a production measurement against a plan and evaluate its threshold.",
+        "operationId": "record_observation_v1_compliance_post_market__plan_id__observe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Observation V1 Compliance Post Market  Plan Id  Observe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Observation",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/post-market/{plan_id}/review": {
+      "post": {
+        "description": "Record a plan review, resetting the Art. 72(1) cadence.",
+        "operationId": "review_plan_v1_compliance_post_market__plan_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Plan V1 Compliance Post Market  Plan Id  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Plan",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/profile": {
+      "get": {
+        "description": "Check the running configuration against the declared profile.\n\nRead-only: reports gaps with the article behind each, and never switches a\nsubsystem on.",
+        "operationId": "compliance_profile_v1_compliance_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Compliance Profile V1 Compliance Profile Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Compliance Profile",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/risk-management": {
+      "get": {
+        "description": "List Art. 9 risk files, with missing elements and open risks named.",
+        "operationId": "list_risk_files_v1_compliance_risk_management_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "system_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Risk Files V1 Compliance Risk Management Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Risk Files",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/risk-management/{file_id}": {
+      "get": {
+        "description": "Fetch one Art. 9 risk file, rendered as Annex IV section 5.",
+        "operationId": "get_risk_file_v1_compliance_risk_management__file_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Risk File V1 Compliance Risk Management  File Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Risk File",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/risk-management/{file_id}/review": {
+      "post": {
+        "description": "Record an Art. 9(1) systematic review.\n\nRefused while risks remain open \u2014 a review signed over untreated,\nunverified or unaccepted risks records something that did not happen.",
+        "operationId": "review_risk_file_v1_compliance_risk_management__file_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Risk File V1 Compliance Risk Management  File Id  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Risk File",
+        "tags": [
+          "compliance",
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/ropa": {
+      "get": {
+        "description": "List the GDPR Art. 30 register, with the missing elements named.",
+        "operationId": "list_ropa_v1_compliance_ropa_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "incomplete_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Ropa V1 Compliance Ropa Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ropa",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/summary": {
+      "get": {
+        "description": "Inventory roll-up: counts by category, and the open Art. 49 duties.",
+        "operationId": "inventory_summary_v1_compliance_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Inventory Summary V1 Compliance Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Inventory Summary",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/systems": {
+      "get": {
+        "description": "List registered AI systems, optionally filtered by risk category.",
+        "operationId": "list_systems_v1_compliance_systems_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "risk_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk Category"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Systems V1 Compliance Systems Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Systems",
+        "tags": [
+          "compliance"
+        ]
+      },
+      "post": {
+        "description": "Register a system: screens Art. 5, derives the Art. 6 risk category.\n\nA declared prohibited practice yields a ``PROHIBITED`` record rather than a\nrejection \u2014 inventorying a banned system is a prerequisite to retiring it.\nSet ``COMPLIANCE_BLOCK_PROHIBITED_PRACTICES`` to refuse instead.",
+        "operationId": "register_system_v1_compliance_systems_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterSystemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register System V1 Compliance Systems Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register System",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/systems/{system_id}": {
+      "get": {
+        "description": "Fetch one registered system with the obligations its category carries.",
+        "operationId": "get_system_v1_compliance_systems__system_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get System V1 Compliance Systems  System Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get System",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/systems/{system_id}/lifecycle": {
+      "post": {
+        "description": "Move a system to a new lifecycle stage, stamping the relevant date.",
+        "operationId": "advance_lifecycle_v1_compliance_systems__system_id__lifecycle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Advance Lifecycle V1 Compliance Systems  System Id  Lifecycle Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance Lifecycle",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/systems/{system_id}/reclassify": {
+      "post": {
+        "description": "Re-derive the Art. 6 category after the system's facts changed.",
+        "operationId": "reclassify_system_v1_compliance_systems__system_id__reclassify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_id",
+            "required": true,
+            "schema": {
+              "title": "System Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reclassify System V1 Compliance Systems  System Id  Reclassify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reclassify System",
+        "tags": [
+          "compliance"
+        ]
       }
     },
     "/v1/feedback": {
@@ -6175,7 +9361,7 @@
     },
     "/v1/health/ready": {
       "get": {
-        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.",
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.\n\nOnce the process has received SIGTERM/SIGINT (:func:`is_draining`) it\nanswers 503 at once, without touching the cache or the dependencies: a\ndraining pod must leave the endpoints even while its database is fine,\nor the proxy keeps routing new requests to a server that is closing.",
         "operationId": "readiness_v1_health_ready_get",
         "responses": {
           "200": {
@@ -6191,7 +9377,7 @@
             "description": "Successful Response"
           },
           "503": {
-            "description": "Not ready: the database is unreachable; the pod should be removed from Service endpoints until it recovers."
+            "description": "Not ready: the process is draining after a stop signal, or the database is unreachable; the pod should be removed from Service endpoints."
           }
         },
         "summary": "Readiness",
@@ -6202,6 +9388,7 @@
     },
     "/v1/index/bootstrap": {
       "post": {
+        "description": "Schedule a bootstrap indexing run; poll ``status_url`` for the outcome.",
         "operationId": "trigger_bootstrap_v1_index_bootstrap_post",
         "parameters": [
           {
@@ -6216,7 +9403,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -6294,12 +9481,377 @@
         ]
       }
     },
-    "/v1/reindex": {
+    "/v1/privacy/erase": {
       "post": {
-        "description": "Performs an incremental indexing of local documents (synchronous operation).\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)",
-        "operationId": "reindex_v1_reindex_post",
+        "description": "Erase all data held for a subject (right to erasure).",
+        "operationId": "erase_subject_v1_privacy_erase_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Erase Subject V1 Privacy Erase Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Erase Subject",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/privacy/export": {
+      "post": {
+        "description": "Export all data held for a subject (right to access / portability).",
+        "operationId": "export_subject_v1_privacy_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Subject V1 Privacy Export Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Subject",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/privacy/providers": {
+      "get": {
+        "description": "List the registered data providers (requires ``privacy:manage``).",
+        "operationId": "list_providers_v1_privacy_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Providers V1 Privacy Providers Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Providers",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/privacy/retention/sweep": {
+      "post": {
+        "description": "Purge records older than the horizon across retention-aware providers.",
+        "operationId": "retention_sweep_v1_privacy_retention_sweep_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retention Sweep V1 Privacy Retention Sweep Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retention Sweep",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/prompts": {
+      "get": {
+        "description": "List registered prompts with their versions and labels.\n\nPaginated over the sorted prompt names; ``total`` counts every prompt,\n``count`` the ones on this page.",
+        "operationId": "list_prompts_v1_prompts_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Prompts V1 Prompts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Prompts",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/v1/prompts/{name}/labels/{label}": {
+      "post": {
+        "description": "Point ``label`` at an existing version of ``name`` (durable promote).",
+        "operationId": "promote_label_v1_prompts__name__labels__label__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Promote Label V1 Prompts  Name  Labels  Label  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Promote Label",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/v1/prompts/{name}/versions": {
+      "post": {
+        "description": "Register (and persist) a new version of ``name``.",
+        "operationId": "register_version_v1_prompts__name__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptVersionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Version V1 Prompts  Name  Versions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Register Version",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/v1/reindex": {
+      "post": {
+        "description": "Start an incremental indexing of local documents in the background.\n\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)\n\nAnswers ``202`` immediately; ``GET /index/status`` reports progress and,\nonce done, ``last_completed`` and ``last_new_documents``.",
+        "operationId": "reindex_v1_reindex_post",
+        "responses": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -6315,6 +9867,260 @@
         "summary": "Reindex",
         "tags": [
           "indexing"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/events": {
+      "get": {
+        "description": "Stream a run's structured events as Server-Sent Events.\n\nFrames are ``id: <AgentEvent.id>`` + ``event: <type>`` + ``data:\n<AgentEvent JSON>``; the stream closes after a terminal event (final\nanswer, error, or durable approval pause) or as soon as the client\ndisconnects. A quiet run gets a ``: keepalive`` comment every\n``SSE_HEARTBEAT_SECONDS``.\n\nSubscribe **before** starting/resuming the run \u2014 events are fan-out only,\nnot replayed: the event store keeps no history to resume from, so a\n``Last-Event-ID`` sent on reconnect is accepted but cannot rewind the\nfeed. The checkpoint trajectory (``GET /runs/{run_id}/history``) is the\ndurable record a reconnecting client catches up from.",
+        "operationId": "run_events_v1_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Run Events",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/fork": {
+      "post": {
+        "description": "Fork a run from its state at a version into a fresh resumable run.\n\nThe fork keeps the recorded steps up to that version, so resuming it\nreplays them without re-executing side effects and continues live from\nthe fork point.",
+        "operationId": "fork_v1_runs__run_id__fork_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Fork V1 Runs  Run Id  Fork Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Fork",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/history": {
+      "get": {
+        "description": "Version-ascending snapshot summaries for a run (cursor-paginated).\n\nEmpty history for a known run means snapshots are not being recorded\n(``ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`` is off).",
+        "operationId": "state_history_v1_runs__run_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response State History V1 Runs  Run Id  History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "State History",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/history/{version}": {
+      "get": {
+        "description": "The full checkpoint state exactly as recorded at ``version``.",
+        "operationId": "state_at_version_v1_runs__run_id__history__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response State At Version V1 Runs  Run Id  History  Version  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "State At Version",
+        "tags": [
+          "runs"
         ]
       }
     },
@@ -6342,10 +10148,332 @@
         ]
       }
     },
+    "/v1/webhooks": {
+      "get": {
+        "description": "List webhook endpoints for the tenant, cursor-paginated (``webhooks:read``).",
+        "operationId": "list_webhooks_v1_webhooks_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Webhooks V1 Webhooks Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Webhooks",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Register a webhook endpoint (requires ``webhooks:write``).",
+        "operationId": "create_webhook_v1_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWebhookResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/deliveries": {
+      "get": {
+        "description": "List delivery records for the tenant, cursor-paginated (``webhooks:read``).\n\nReturns ``deliveries`` plus an opaque ``next_cursor`` (and ``has_more``) to\nfetch the following page; pass it back as the ``cursor`` query parameter.",
+        "operationId": "list_deliveries_v1_webhooks_deliveries_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Deliveries V1 Webhooks Deliveries Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Deliveries",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/deliveries/{delivery_id}/replay": {
+      "post": {
+        "description": "Re-attempt a failed delivery (requires ``webhooks:write``).",
+        "operationId": "replay_delivery_v1_webhooks_deliveries__delivery_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Replay Delivery V1 Webhooks Deliveries  Delivery Id  Replay Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Delivery",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/{endpoint_id}": {
+      "delete": {
+        "description": "Delete a webhook endpoint (requires ``webhooks:write``).",
+        "operationId": "delete_webhook_v1_webhooks__endpoint_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Webhook V1 Webhooks  Endpoint Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/webhooks": {
       "get": {
-        "description": "List webhook endpoints for the tenant (requires ``webhooks:read``).",
+        "deprecated": true,
+        "description": "List webhook endpoints for the tenant, cursor-paginated (``webhooks:read``).",
         "operationId": "list_webhooks_webhooks_get",
+        "parameters": [
+          {
+            "description": "Page size (default 50, max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `next_cursor` from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `next_cursor` from the previous page.",
+              "title": "Cursor"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6358,6 +10486,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Webhooks",
@@ -6366,6 +10504,7 @@
         ]
       },
       "post": {
+        "deprecated": true,
         "description": "Register a webhook endpoint (requires ``webhooks:write``).",
         "operationId": "create_webhook_webhooks_post",
         "requestBody": {
@@ -6408,32 +10547,46 @@
     },
     "/webhooks/deliveries": {
       "get": {
+        "deprecated": true,
         "description": "List delivery records for the tenant, cursor-paginated (``webhooks:read``).\n\nReturns ``deliveries`` plus an opaque ``next_cursor`` (and ``has_more``) to\nfetch the following page; pass it back as the ``cursor`` query parameter.",
         "operationId": "list_deliveries_webhooks_deliveries_get",
         "parameters": [
           {
+            "description": "Page size (default 50, max 200).",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 50,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (default 50, max 200).",
+              "title": "Limit"
             }
           },
           {
+            "description": "Opaque `next_cursor` from the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Opaque `next_cursor` from the previous page.",
               "title": "Cursor"
             }
           }
@@ -6470,6 +10623,7 @@
     },
     "/webhooks/deliveries/{delivery_id}/replay": {
       "post": {
+        "deprecated": true,
         "description": "Re-attempt a failed delivery (requires ``webhooks:write``).",
         "operationId": "replay_delivery_webhooks_deliveries__delivery_id__replay_post",
         "parameters": [
@@ -6515,6 +10669,7 @@
     },
     "/webhooks/{endpoint_id}": {
       "delete": {
+        "deprecated": true,
         "description": "Delete a webhook endpoint (requires ``webhooks:write``).",
         "operationId": "delete_webhook_webhooks__endpoint_id__delete",
         "parameters": [

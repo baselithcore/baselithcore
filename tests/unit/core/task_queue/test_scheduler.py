@@ -276,9 +276,7 @@ class TestAmbientJobMetadata:
     deployment default.
     """
 
-    def _bind(
-        self, monkeypatch, plugin="baselith_world", policy=("ollama", "llama3.2")
-    ):
+    def _bind(self, monkeypatch, plugin="world_sim", policy=("ollama", "llama3.2")):
         from core.services.llm.policy import PluginLLMPolicy
         from core.task_queue import scheduler as sched
 
@@ -302,7 +300,7 @@ class TestAmbientJobMetadata:
         scheduler.enqueue(dummy_task, "arg")
 
         meta = mock_get_queue.return_value.enqueue.call_args[1]["meta"]
-        assert meta["plugin"] == "baselith_world"
+        assert meta["plugin"] == "world_sim"
         assert meta["tenant_id"] == "acme"
         assert meta["llm_policy"] == {"provider": "ollama", "model": "llama3.2"}
 
@@ -313,7 +311,7 @@ class TestAmbientJobMetadata:
         scheduler.enqueue_in(dummy_task, 5, "arg")
 
         meta = mock_get_queue.return_value.enqueue_at.call_args[1]["meta"]
-        assert meta["plugin"] == "baselith_world"
+        assert meta["plugin"] == "world_sim"
         assert meta["llm_policy"]["provider"] == "ollama"
 
     def test_explicit_meta_wins(self, monkeypatch, scheduler, mock_get_queue):
@@ -323,7 +321,7 @@ class TestAmbientJobMetadata:
 
         meta = mock_get_queue.return_value.enqueue.call_args[1]["meta"]
         assert meta["tenant_id"] == "explicit"
-        assert meta["plugin"] == "baselith_world"
+        assert meta["plugin"] == "world_sim"
 
     def test_unattributed_calls_stamp_nothing_extra(
         self, monkeypatch, scheduler, mock_get_queue

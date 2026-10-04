@@ -94,6 +94,14 @@ class OrchestrationConfig(BaseSettings):
         description="Progress-silence threshold after which a 'running' "
         "checkpoint is marked failed by the stale-run sweep.",
     )
+    recovery_stale_sweep_enabled: bool = Field(
+        default=True,
+        description="With checkpoint_resume_on_startup off, still sweep every "
+        "recovery_sweep_interval_seconds and mark 'running' checkpoints silent "
+        "for recovery_stale_after_seconds as failed, so runs orphaned by a "
+        "crash are visible instead of 'running' forever. Nothing is resumed. "
+        "With resume on, the recovery cycle already includes this sweep.",
+    )
     recovery_resume_after_seconds: float = Field(
         default=300.0,
         gt=0,

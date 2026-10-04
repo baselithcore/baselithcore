@@ -273,6 +273,21 @@ prompt reads `Conversation so far:`, then `Context:`, `Question:` and `Answer:`;
 without it the first block is omitted. The retrieved context stays the only
 source of facts, and retrieval runs on the raw query.
 
+!!! warning "Retrieved chunks are untrusted data"
+    Anyone who can get a document into the knowledge base can write text the
+    model reads, so retrieved chunks no longer reach the prompt as plain
+    `Source [id]: content` lines. `render_rag_context` (`handlers/rag.py`)
+    scans each chunk with `scan_external_content` — findings logged with the
+    document id, flagged content sanitized under
+    `BASELITH_SANITIZE_EXTERNAL_CONTENT` (on by default) — and seals it in the
+    same `<untrusted_tool_output tool="document_retrieval">` envelope tool
+    output uses (`wrap_untrusted`, which escapes any envelope marker inside
+    the text, so a chunk cannot close its envelope and write outside it). The
+    `Source [id]:` label stays outside the envelope, scrubbed of markers, so
+    answers can still cite it. `RAG_SYSTEM_PROMPT` now carries
+    `RAG_CONTEXT_IS_DATA_RULE`: the enveloped text is reference data, never
+    instructions. Both RAG paths share the renderer and the prompt.
+
 !!! note "Sources ride on the context, not the stream"
     The stream chunk protocol carries text only, so the streaming RAG handler
     exposes its citations by mutating the orchestration context —
@@ -686,6 +701,15 @@ recent history — and `context_share()` reports it as a fraction of the tokens
 the request actually spent. `inject_memory_context` records it automatically;
 the value rides on every `LoopBudgetSnapshot`, so it reaches callers in the
 reply's `budget` field with no extra wiring.
+
+**Recalled memories are marked as untrusted.** A memory is whatever an earlier
+turn, an ingested document or a tool result stored — content the operator
+never wrote. `context["memory_context"]` used to be plain `- {content}` lines;
+`render_memory_context` (`mixins/_context_assembly.py`) now scans each memory
+with `scan_external_content` and seals the bullet list in one
+`<untrusted_tool_output tool="memory_recall">` envelope, so a consumer that puts
+it in a prompt next to `UNTRUSTED_OUTPUT_SYSTEM_RULE` gets background data the
+model will not obey. An empty recall is still `""`.
 
 ```python
 snap = budget.snapshot()
@@ -1176,6 +1200,17 @@ replay from the store, so recovery is idempotent). Runs paused
 API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
 as a background task at app startup (default off).
 
+**Orphans are failed even with resume off.** Auto resume stays opt-in because
+re-entering a run repeats LLM calls and side effects. With it off, the startup
+wiring runs `stale_sweep_loop` (`core/api/_recovery_startup.py`) instead: every
+`ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` it calls `sweep_stale_runs` and
+marks a `running` checkpoint whose last progress is older than
+`ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` (default 1800 s) as `failed`, with
+a `stale: no progress for …` error. Nothing is re-entered, and a run still
+executing on another worker keeps bumping its heartbeat, so it is left alone.
+Before this, a run interrupted by a crash stayed `running` forever. Set
+`ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED=false` to restore that.
+
 **One sweep per fleet, not per worker.** With `WEB_CONCURRENCY > 1` (or
 multiple replicas) every worker runs the startup sweep, and an unguarded sweep
 re-entered the same interrupted runs once per worker — duplicate agent
@@ -1319,9 +1354,13 @@ Lifecycle events flow whenever the run is addressable by id — a checkpoint
 store is **not** required (without one you get `run_started` + `final`/`error`;
 tool-step events come from `run_step`, i.e. with checkpointing on). Over HTTP,
 `GET /runs/{run_id}/events` serves the same stream as SSE frames
-(`event: <type>` / `data: <AgentEvent JSON>`) and closes after a terminal
-event. Subscribe before starting/resuming the run: events are fan-out only,
-never replayed — the checkpoint trajectory remains the durable record.
+(`id: <AgentEvent.id>` / `event: <type>` / `data: <AgentEvent JSON>`) and
+closes after a terminal event or as soon as the client disconnects; a quiet
+run gets a `: keepalive` comment every `SSE_HEARTBEAT_SECONDS` (default 15).
+Subscribe before starting/resuming the run: events are fan-out only, never
+replayed — the event stream keeps no history, so a reconnecting client's
+`Last-Event-ID` cannot rewind it; catch up from `GET /runs/{run_id}/history`
+(cursor-paginated), the durable record.
 
 The consumer's lifetime bounds the run. If the iterator stops **before** a
 terminal event — the SSE client disconnected, or the generator was

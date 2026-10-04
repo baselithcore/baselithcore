@@ -13,7 +13,8 @@ class TestReplicaConfig:
 
     def test_replica_conninfo_set(self):
         cfg = StorageConfig(DB_REPLICA_URL="postgresql://r/db")
-        assert cfg.replica_conninfo == "postgresql://r/db"
+        assert cfg.replica_conninfo is not None
+        assert cfg.replica_conninfo.startswith("postgresql://r/db?")
 
 
 class TestReadRoutingFallback:

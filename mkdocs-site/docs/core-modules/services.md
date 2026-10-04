@@ -574,7 +574,9 @@ LoopBudget and cost-control middleware — callers own their own budgets.
 Every LLM call (plain, structured, streaming) emits the OTel Gen AI
 semantic-convention Prometheus metrics `gen_ai_client_token_usage`
 (input/output histograms) and `gen_ai_client_operation_duration_seconds`,
-labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
+labeled by `gen_ai_provider_name` (formerly `gen_ai_system` — see
+[the deprecation notes](observability-module.md#genai-semantic-conventions-genai_semconvpy))
+and `gen_ai_request_model` — standard dashboards
 light up without bespoke queries. Calls to models in the pricing table also
 emit `gen_ai_client_cost_usd_total` (estimated USD, extension metric — no
 semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
@@ -2045,7 +2047,17 @@ async for frame in sandbox.execute_code_stream("print('hi')"):
   path; **on timeout the container is killed** and the exit frame reports
   `exit_code == -1` with `compute_seconds == timeout`.
 - The Docker backend attaches to the container's demuxed output from a worker
-  thread; the **sbx CLI has no streaming primitive**, so that backend
+  thread. The output is untrusted, so it is **bounded**: the hand-off queue
+  holds at most `STREAM_QUEUE_MAXSIZE` (256) frames and the reader blocks while
+  the consumer is slow (backpressure on the container's pipe), and at most
+  `MAX_STREAM_OUTPUT_BYTES` (8 MiB) are forwarded — the rest is dropped behind
+  one stderr frame carrying `"truncated": true`, while the container still
+  runs to its exit frame.
+- **A consumer that leaves kills the container.** Client disconnect,
+  cancellation or `aclose()` releases the reader thread and kills the
+  container, which the reader then removes — an abandoned stream no longer
+  keeps either alive until the timeout.
+- The **sbx CLI has no streaming primitive**, so that backend
   degrades to run-to-completion and emits the collected output as single
   stdout/stderr frames before the exit frame.
 - With a `budget=`, the cost is charged just before the exit frame is
@@ -2241,6 +2253,19 @@ The indexing state (document fingerprints) is persisted to Redis under `baselith
 Documents that are no longer present in any active source are automatically deleted from the vector store at the end of each indexing run.
 
 ---
+
+### Background runs: `IndexBootstrapper`
+
+`core/services/bootstrap.py` owns the one in-process indexing task slot the
+HTTP surface shares. `schedule()` is the startup/bootstrap path (honours
+`INDEX_BOOTSTRAP_ENABLED` and the change-detection shortcut);
+`schedule_manual(mode)` is the operator path behind `POST /reindex` and
+`POST /admin/reindex` — it ignores both, because an operator asked, but uses
+the same slot, so it never overlaps a bootstrap and returns `False` (the routes
+answer `409`) while one runs. Both start the run as a background task and
+return at once; `status()` reports `running`, `mode`, `error`,
+`last_completed` and `last_new_documents` (files indexed by the last finished
+run), which is what `GET /index/status` — the routes' `status_url` — serves.
 
 ## Human-in-the-Loop
 

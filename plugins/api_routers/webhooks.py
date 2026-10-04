@@ -11,12 +11,12 @@ Mounted only when ``WEBHOOKS_ENABLED`` is set, so it adds no surface by default.
 from __future__ import annotations
 
 import secrets as _secrets
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
-from core.api.pagination import PaginationError, paginate_sequence
+from core.api.pagination import PageParams, page_params, paginated
 from core.auth.manager import AuthManager
 from core.auth.types import AuthUser
 from core.context import get_current_tenant_id
@@ -41,16 +41,32 @@ def _enforce(request: Request, scope: str) -> AuthUser:
     return user
 
 
+#: Payload bounds. A subscription is stored and its headers are replayed on
+#: every delivery, so an unbounded payload is a per-row storage and per-event
+#: egress amplifier.
+_EventType = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+_HeaderName = Annotated[str, StringConstraints(min_length=1, max_length=256)]
+_HeaderValue = Annotated[str, StringConstraints(max_length=4096)]
+
+
 class CreateWebhookRequest(BaseModel):
     """Payload to register a webhook endpoint."""
 
-    url: str = Field(..., description="HTTPS endpoint that will receive events")
-    event_types: list[str] = Field(
+    url: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description="HTTPS endpoint that will receive events",
+    )
+    event_types: list[_EventType] = Field(
         default_factory=lambda: ["*"],
+        max_length=100,
         description="Event types to subscribe to; ['*'] for all",
     )
-    description: str | None = None
-    headers: dict[str, str] = Field(default_factory=dict)
+    description: str | None = Field(default=None, max_length=2000)
+    headers: dict[_HeaderName, _HeaderValue] = Field(
+        default_factory=dict, max_length=20
+    )
 
     @field_validator("headers")
     @classmethod
@@ -112,12 +128,14 @@ async def create_webhook(
 
 
 @router.get("")
-async def list_webhooks(request: Request) -> dict[str, Any]:
-    """List webhook endpoints for the tenant (requires ``webhooks:read``)."""
+async def list_webhooks(
+    request: Request, page: PageParams = Depends(page_params)
+) -> dict[str, Any]:
+    """List webhook endpoints for the tenant, cursor-paginated (``webhooks:read``)."""
     _enforce(request, "webhooks:read")
     service = get_webhook_service()
     endpoints = await service.list_endpoints(get_current_tenant_id())
-    return {"endpoints": [e.redacted() for e in endpoints]}
+    return paginated(endpoints, page, key="endpoints", serialize=lambda e: e.redacted())
 
 
 @router.delete("/{endpoint_id}")
@@ -137,7 +155,7 @@ async def delete_webhook(request: Request, endpoint_id: str) -> dict[str, Any]:
 
 @router.get("/deliveries")
 async def list_deliveries(
-    request: Request, limit: int = 50, cursor: str | None = None
+    request: Request, page: PageParams = Depends(page_params)
 ) -> dict[str, Any]:
     """List delivery records for the tenant, cursor-paginated (``webhooks:read``).
 
@@ -148,20 +166,12 @@ async def list_deliveries(
     service = get_webhook_service()
     # The store retains a bounded window; paginate over it with an opaque cursor.
     records = await service.store.list_deliveries(get_current_tenant_id(), limit=1000)
-    try:
-        # Paginate the records themselves and serialise only the page: dumping
-        # the whole retained window (up to 1000 records) per request did
-        # O(window) work to return O(limit) items.
-        page = paginate_sequence(records, limit=limit, cursor=cursor)
-    except PaginationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
-    return {
-        "deliveries": [d.model_dump() for d in page.items],
-        "next_cursor": page.next_cursor,
-        "has_more": page.has_more,
-    }
+    # Paginate the records themselves and serialise only the page: dumping
+    # the whole retained window (up to 1000 records) per request did
+    # O(window) work to return O(limit) items.
+    return paginated(
+        records, page, key="deliveries", serialize=lambda d: d.model_dump()
+    )
 
 
 @router.post("/deliveries/{delivery_id}/replay")

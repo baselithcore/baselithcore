@@ -33,6 +33,8 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from core.agent._safety import destructive_denial
+from core.agent._strict_tools import strict_tool_parameters
 from core.observability.logging import get_logger
 from core.orchestration.idempotency import (
     ToolCallInFlight,
@@ -89,6 +91,9 @@ def build_tool_specs(
     It was invisible before: the fact that decides whether a call needs human
     approval was not surfaced to whatever renders or reviews the tool list.
 
+    A spec is ``strict`` only when its schema fits the strict dialect
+    (:func:`~core.agent._strict_tools.strict_tool_parameters`).
+
     Args:
         tools: The agent's tools, keyed by name.
 
@@ -105,11 +110,15 @@ def build_tool_specs(
             parameters = tool.json_schema()
         except Exception:  # pragma: no cover - uninspectable callable
             parameters = infer_tool_parameters(tool)
+        strict_parameters = strict_tool_parameters(
+            parameters, inferred=tool.parameters is None
+        )
         specs.append(
             LLMToolSpec(
                 name=tool.name,
                 description=tool.description,
-                parameters=parameters,
+                parameters=strict_parameters or parameters,
+                strict=strict_parameters is not None,
                 annotations={
                     "readOnlyHint": category == "read_only",
                     "destructiveHint": category == "destructive",
@@ -332,6 +341,11 @@ async def prepare_tool_call(
         # consume an approval, a rate-limit slot, a budget entry or a ledger
         # claim for work that was never going to run.
         return None, _runtime_error(invalid)
+
+    # Before the chokepoint: a refused call must not consume a budget entry.
+    refused = destructive_denial(agent, definition)
+    if refused is not None:
+        return None, _runtime_error(refused)
 
     denial = await _gate(definition, call, context)
     if denial is not None:

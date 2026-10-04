@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 from core.services.llm._accounting import record_usage_cost
-from core.services.llm._telemetry import gen_ai_system, record_genai_metrics
+from core.services.llm._telemetry import gen_ai_provider_for, record_genai_metrics
 from core.services.llm.model_capabilities import default_max_tokens
 from core.services.llm.rate_limit import acquire_llm_call_slot
 from core.services.llm.usage import Usage
@@ -186,7 +186,7 @@ async def _meter_batch_job(
     if not metered:
         return
 
-    system = gen_ai_system(getattr(service.config, "provider", None))
+    system = gen_ai_provider_for(service.config)
     total = Usage()
     for usage in metered:
         # Per entry, because each entry is one call: an aggregate observation

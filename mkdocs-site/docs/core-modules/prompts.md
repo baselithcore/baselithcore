@@ -226,7 +226,11 @@ changing the registry's synchronous contract:
 - A per-replica **refresh loop** periodically imports versions and labels
   written elsewhere, so every replica converges within the refresh interval
   (default `30.0` s). The refresh is fail-open: a backend error logs
-  (`prompt_sync_refresh_failed`) and the next tick retries.
+  (`prompt_sync_refresh_failed`) and the next tick retries. One row the local
+  store rejects is skipped and logged (`prompt_sync_version_skipped`,
+  `prompt_sync_label_skipped`) while the rest still import, and an error
+  escaping a tick is logged (`prompt_sync_tick_failed`) without ending the
+  loop.
 
 `push_label` validates that `name@version` is registered locally and raises
 `PromptNotFoundError` otherwise — a label can never point at a version the

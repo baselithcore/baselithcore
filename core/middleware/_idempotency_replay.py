@@ -31,11 +31,34 @@ from dataclasses import dataclass
 from typing import Any
 
 import orjson
-from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from core.auth import AuthUser
 from core.middleware._auth_memo import resolve_user
+
+
+async def idempotency_problem(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    status_code: int,
+    code: str,
+    detail: str,
+) -> None:
+    """Refuse an idempotent request with an RFC 9457 problem document.
+
+    Same shape, media type and ``request_id`` member as every other API error,
+    so a client's error parser does not need a special case for this layer.
+    """
+    # Lazy: core.api.errors imports from core.middleware (circular at import).
+    from core.api.errors import problem_response
+
+    await problem_response(
+        status_code=status_code,
+        code=code,
+        detail=detail,
+        instance=scope.get("path") or None,
+    )(scope, receive, send)
 
 
 async def credential_verified(scope: Scope) -> bool:
@@ -211,26 +234,30 @@ async def replay_entry(
         entry.target_sha256 is not None
         and request_target_digest(scope) != entry.target_sha256
     ):
-        await JSONResponse(
+        await idempotency_problem(
+            scope,
+            receive,
+            send,
             status_code=422,
-            content={
-                "detail": "Idempotency-Key was already used with a "
-                "different request target (path or query string)."
-            },
-        )(scope, receive, send)
+            code="idempotency_key_mismatch",
+            detail="Idempotency-Key was already used with a "
+            "different request target (path or query string).",
+        )
         return
     if entry.body_sha256 is not None:
         digest = await drain_body_digest(receive)
         if digest is None:
             return  # client went away mid-body; nobody to answer
         if digest != entry.body_sha256:
-            await JSONResponse(
+            await idempotency_problem(
+                scope,
+                receive,
+                send,
                 status_code=422,
-                content={
-                    "detail": "Idempotency-Key was already used with a "
-                    "different request body."
-                },
-            )(scope, receive, send)
+                code="idempotency_key_mismatch",
+                detail="Idempotency-Key was already used with a "
+                "different request body.",
+            )
             return
     headers, body = negotiate_encoding(entry, accept_encoding)
     headers.append((b"idempotency-replayed", b"true"))

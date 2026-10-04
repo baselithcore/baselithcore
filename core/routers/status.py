@@ -4,6 +4,7 @@ import sys
 
 from fastapi import Response
 
+from core.lifecycle.drain import is_draining
 from core.utils.optional_import import optional_router
 
 _status, router = optional_router("plugins.api_routers.status")
@@ -18,6 +19,11 @@ else:
 
     @router.get("/health/ready")
     async def readiness(response: Response) -> dict[str, object]:
+        # No dependency checks without the plugin, but a draining process
+        # must still leave the Service endpoints (503) once SIGTERM arrives.
+        if is_draining():
+            response.status_code = 503
+            return {"status": "draining", "services": {}, "cached": False}
         response.status_code = 200
         return {"status": "ready", "services": {}, "cached": False}
 

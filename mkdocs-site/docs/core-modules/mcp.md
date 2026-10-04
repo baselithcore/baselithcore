@@ -599,7 +599,9 @@ subscriptions share one channel and the client must demultiplex them.
 
 Registering a tool, resource, template or prompt — or removing a tool with
 `server.unregister_tool(name)`, which returns whether the tool existed —
-announces the matching `list_changed` to the streams that opted in; `notify_resource_updated(uri)`
+announces the matching `list_changed` to the streams that opted in (the send
+is a background task the server holds a reference to until it finishes; a
+failed send is logged as `mcp_list_changed_announce_failed`); `notify_resource_updated(uri)`
 announces a content change to the streams watching that URI. When the server
 ends a subscription it answers the listen request with an empty result, so the
 client can tell a graceful close from a dropped transport.
@@ -953,7 +955,12 @@ awaited response are dropped, so neither can be mistaken for a result.
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
 sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
-See [Guardrails](guardrails.md).
+**Every** text part is scanned (`scan_content_parts` in
+`core/mcp/client_operations.py`): a multi-part `tools/call` result, the text of
+an embedded `resource` part, and the `contents` of `resources/read`. Only a
+lone text item used to be scanned, so text beside an image — or a second text
+part — reached the model unscanned. Binary parts (`image`, `audio`, `blob`)
+pass through untouched. See [Guardrails](guardrails.md).
 
 ### SSRF guard (Streamable HTTP transport)
 

@@ -12,20 +12,36 @@ Two layers are provided:
   custom (e.g. keyset) pagination.
 * :func:`paginate_sequence` — offset-style pagination over a materialized
   sequence, suitable for in-memory stores; returns a :class:`CursorPage`.
+
+And one HTTP layer, so every list endpoint speaks the same contract:
+
+* :func:`page_params` — a FastAPI dependency declaring ``limit``
+  (``ge=1, le=MAX_LIMIT`` — the cap is visible in the OpenAPI schema) and
+  ``cursor``.
+* :func:`paginated` — renders a page as ``{<key>: [...], "count": <items in
+  this page>, "next_cursor": <token or null>, "has_more": <bool>}`` and maps a
+  bad cursor to a ``400`` problem document. The list key and ``count`` keep the
+  shape the unpaginated endpoints had, so a client that ignores the two new
+  members still works — it just sees the first page.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Annotated, Any
 
 import orjson
+from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+#: Upper bound on an incoming cursor token. Real cursors are a few dozen bytes;
+#: the bound keeps a multi-kilobyte query parameter out of the decoder.
+MAX_CURSOR_LENGTH = 512
 
 
 class PaginationError(ValueError):
@@ -101,3 +117,82 @@ def paginate_sequence(
     return CursorPage(
         items=window, next_cursor=next_cursor, has_more=has_more, limit=eff_limit
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PageParams:
+    """The ``limit`` / ``cursor`` pair a list endpoint was called with."""
+
+    limit: int | None = None
+    cursor: str | None = None
+
+
+def page_params(
+    limit: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            le=MAX_LIMIT,
+            description=f"Page size (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).",
+        ),
+    ] = None,
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=MAX_CURSOR_LENGTH,
+            description="Opaque `next_cursor` from the previous page.",
+        ),
+    ] = None,
+) -> PageParams:
+    """FastAPI dependency: the standard pagination query parameters."""
+    return PageParams(limit=limit, cursor=cursor)
+
+
+def _identity(item: Any) -> Any:
+    return item
+
+
+def paginated(
+    items: Sequence[Any],
+    page: PageParams,
+    *,
+    key: str,
+    serialize: Callable[[Any], Any] = _identity,
+) -> dict[str, Any]:
+    """Render one page of ``items`` in the standard list-response shape.
+
+    Only the page is serialised — never the whole collection.
+
+    Raises:
+        HTTPException: ``400`` when the cursor is malformed.
+    """
+    try:
+        result = paginate_sequence(items, limit=page.limit, cursor=page.cursor)
+    except PaginationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        key: [serialize(item) for item in result.items],
+        "count": len(result.items),
+        "next_cursor": result.next_cursor,
+        "has_more": result.has_more,
+    }
+
+
+def cursor_offset(page: PageParams) -> int:
+    """The offset a :func:`paginate_sequence` cursor encodes (``0`` without one).
+
+    For endpoints that page over ids and fetch rows only for the page.
+
+    Raises:
+        HTTPException: ``400`` when the cursor is malformed.
+    """
+    if not page.cursor:
+        return 0
+    try:
+        data = decode_cursor(page.cursor)
+    except PaginationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    offset = data.get("offset", 0)
+    if not isinstance(offset, int) or offset < 0:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor")
+    return offset
