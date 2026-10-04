@@ -9,6 +9,7 @@ want of the ``SECRET_KEY`` sitting in it.
 
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 
@@ -115,3 +116,50 @@ class TestUntrustedEnvFile:
         monkeypatch.setattr(env_module, "_env_loaded", False)
         env_module.load_project_env()
         assert "BASELITH_TEST_ENV_UNTRUSTED" not in os.environ
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symlinks and descriptors")
+class TestEnvFileIsReadOnce:
+    """The file checked is the file parsed: no symlink, no second open."""
+
+    def test_symlink_is_refused(self, tmp_path: Path) -> None:
+        target = tmp_path / "real.env"
+        target.write_text("X=1\n")
+        target.chmod(0o600)
+        link = tmp_path / ".env"
+        link.symlink_to(target)
+        assert env_module.read_trusted_env_file(link) is None
+        assert not env_module.is_trusted_env_file(link)
+
+    def test_directory_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").mkdir()
+        assert env_module.read_trusted_env_file(tmp_path / ".env") is None
+
+    def test_values_come_from_the_checked_descriptor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BASELITH_TEST_ENV_FD", raising=False)
+        path = tmp_path / ".env"
+        path.write_text("BASELITH_TEST_ENV_FD=checked\n")
+        path.chmod(0o600)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(env_module, "PROJECT_ENV_FILE", path)
+        monkeypatch.setattr(env_module, "_env_loaded", False)
+        opened: list[str] = []
+        real_load = env_module.load_dotenv
+
+        def spy(
+            dotenv_path: str | None = None,
+            stream: io.StringIO | None = None,
+            override: bool = False,
+        ) -> bool:
+            opened.append("path" if dotenv_path is not None else "stream")
+            return real_load(dotenv_path, stream=stream, override=override)
+
+        monkeypatch.setattr(env_module, "load_dotenv", spy)
+        try:
+            env_module.load_project_env()
+            assert os.environ["BASELITH_TEST_ENV_FD"] == "checked"
+            assert opened == ["stream"]
+        finally:
+            os.environ.pop("BASELITH_TEST_ENV_FD", None)

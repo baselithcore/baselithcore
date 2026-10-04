@@ -23,6 +23,7 @@ Two files are candidates, loaded in this order (first value wins):
 treats a missing env file as "no overrides").
 """
 
+import io
 import logging
 import os
 import stat
@@ -69,34 +70,64 @@ def load_project_env() -> None:
     if _env_loaded:
         return
     for candidate in env_file_candidates():
-        if is_trusted_env_file(candidate):
-            load_dotenv(candidate, override=False)
+        content = read_trusted_env_file(candidate)
+        if content:
+            load_dotenv(stream=io.StringIO(content), override=False)
     _env_loaded = True
 
 
-def is_trusted_env_file(path: Path) -> bool:
-    """Whether ``path`` may feed settings into this process.
+#: Upper bound on a ``.env`` read; a settings file is a few KiB.
+_MAX_ENV_FILE_BYTES = 1 << 20
+
+
+def read_trusted_env_file(path: Path) -> str | None:
+    """Read ``path`` if it may feed settings into this process.
 
     The working directory is a trusted input (``./plugins`` and
     ``configs/plugins.yaml`` are read from it too), but a ``.env`` another
     local user can write is not: it could point the plugin path, the database
-    or the LLM endpoint elsewhere. On POSIX the file must belong to the
-    process's effective user (or root, as in container images) and must not
-    be group- or world-writable — the same fail-closed rule as the plugin
-    trust store. A missing file is trivially fine; a refused one is logged.
+    or the LLM endpoint elsewhere. On POSIX the file is opened once with
+    ``O_NOFOLLOW`` (a symlink is refused) and checked on the open descriptor,
+    so the file inspected is the file parsed: it must be a regular file owned
+    by the effective user (or root, as in container images) and not group- or
+    world-writable — the plugin trust store's fail-closed rule. A refused file
+    is logged and skipped.
 
     Args:
         path: A candidate from :func:`env_file_candidates`.
 
     Returns:
-        ``True`` when the file is absent or safe to load.
+        The file's text, or ``None`` when it is missing or refused.
     """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        info = path.stat()
+        fd = os.open(path, flags)
     except FileNotFoundError:
-        return True
+        return None
     except OSError as exc:
-        logger.warning("Not loading %s: cannot stat it (%s)", path, exc)
+        # ELOOP is how O_NOFOLLOW reports a symlink.
+        logger.warning("Not loading %s: cannot open it safely (%s)", path, exc)
+        return None
+    try:
+        if not _descriptor_is_trusted(path, fd):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            data = handle.read(_MAX_ENV_FILE_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(data) > _MAX_ENV_FILE_BYTES:
+        logger.warning(
+            "Not loading %s: larger than %d bytes", path, _MAX_ENV_FILE_BYTES
+        )
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _descriptor_is_trusted(path: Path, fd: int) -> bool:
+    """Apply the file-type, ownership and mode rule to an open descriptor."""
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        logger.warning("Not loading %s: not a regular file", path)
         return False
     if os.name != "posix":
         return True
@@ -116,6 +147,20 @@ def is_trusted_env_file(path: Path) -> bool:
     return True
 
 
+def is_trusted_env_file(path: Path) -> bool:
+    """Whether ``path`` is absent or would be loaded by :func:`load_project_env`.
+
+    Args:
+        path: A candidate from :func:`env_file_candidates`.
+
+    Returns:
+        ``True`` when the file is missing or passes :func:`read_trusted_env_file`.
+    """
+    if not os.path.lexists(path):
+        return True
+    return read_trusted_env_file(path) is not None
+
+
 # Loaded at import time on purpose: core.config.__init__ imports this module
 # first, guaranteeing the environment is populated before any BaseSettings
 # class (some of which instantiate at import, e.g. evaluation_config).
@@ -127,4 +172,5 @@ __all__ = [
     "env_file_candidates",
     "is_trusted_env_file",
     "load_project_env",
+    "read_trusted_env_file",
 ]
