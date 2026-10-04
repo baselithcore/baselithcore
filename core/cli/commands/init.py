@@ -31,12 +31,30 @@ from core.cli.ui import console, print_error, print_panel, print_step, print_suc
 #: template hands the operator a directory ``baselith run`` cannot start.
 _PROJECT_MARKERS = ("pyproject.toml", "requirements.txt", "main.py", "agent.py")
 
+#: Suffix of a template source that is rendered under its name without it.
+#: Dependency manifests carrying ``{framework_version}`` are not valid PEP 508
+#: until rendered, and GitHub's dependency graph parses every
+#: ``requirements.txt`` it finds in the repository — so the starters keep
+#: them as ``requirements.txt.tmpl`` and ``init`` writes ``requirements.txt``.
+TEMPLATE_SUFFIX = ".tmpl"
+
+
+def rendered_name(rel_path: Path) -> Path:
+    """The path a template source is written to in the new project."""
+    if rel_path.suffix == TEMPLATE_SUFFIX:
+        return rel_path.with_suffix("")
+    return rel_path
+
 
 def _is_project_template(directory: Path) -> bool:
     """Whether a ``templates/`` directory scaffolds a runnable project."""
     if not (directory / "README.md").is_file():
         return False
-    return any((directory / marker).is_file() for marker in _PROJECT_MARKERS)
+    return any(
+        (directory / marker).is_file()
+        or (directory / f"{marker}{TEMPLATE_SUFFIX}").is_file()
+        for marker in _PROJECT_MARKERS
+    )
 
 
 def available_templates() -> list[str]:
@@ -216,7 +234,7 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
                 continue
             if item.is_file() and item.name != ".DS_Store":
                 content = item.read_text()
-                files_to_create[str(rel_path)] = content
+                files_to_create[str(rendered_name(rel_path))] = content
     else:
         # 2. Fallback to hardcoded templates
         template_data = PROJECT_TEMPLATES.get(template)

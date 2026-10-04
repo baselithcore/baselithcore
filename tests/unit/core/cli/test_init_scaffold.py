@@ -214,3 +214,27 @@ def test_the_scaffolded_agent_declares_its_tool(project: Path) -> None:
     spec.loader.exec_module(module)
 
     assert "current_time" in module.agent.tool_names
+
+
+@pytest.mark.parametrize(
+    "template", ["baselith-core-template", "multi-agent-collab", "rag-system"]
+)
+def test_the_requirements_template_is_rendered(
+    template: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``requirements.txt.tmpl`` becomes a concrete ``requirements.txt``."""
+    from packaging.requirements import Requirement
+
+    monkeypatch.chdir(tmp_path)
+    assert run_init(project_name="demo", template=template) == 0
+    project = tmp_path / "demo"
+
+    assert not list(project.rglob("*.tmpl"))
+    lines = [
+        line
+        for line in (project / "requirements.txt").read_text().splitlines()
+        if line and not line.startswith("#")
+    ]
+    framework = [Requirement(line) for line in lines if "baselith-core" in line]
+    assert framework, lines
+    assert all(str(req.specifier) == f">={FRAMEWORK_VERSION}" for req in framework)

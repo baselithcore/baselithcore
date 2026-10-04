@@ -28,7 +28,7 @@ class TestRAGSystemTemplate:
             "main.py",
             "README.md",
             "docker-compose.yml",
-            "requirements.txt",
+            "requirements.txt.tmpl",
         ]
         for file_name in required_files:
             file_path = rag_system_path / file_name
@@ -87,7 +87,7 @@ class TestMultiAgentCollabTemplate:
             "main.py",
             "README.md",
             "config.yaml",
-            "requirements.txt",
+            "requirements.txt.tmpl",
         ]
         for file_name in required_files:
             file_path = collab_path / file_name

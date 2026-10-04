@@ -866,7 +866,7 @@ If you run `baselith init` without arguments, the CLI will enter an **Interactiv
 The wizard and the `--template` choices in `baselith init --help` offer
 exactly what this invocation can scaffold (`available_templates()`): the
 built-in templates, plus every directory under `templates/` that is a project
-starter (a `README.md` and one of `pyproject.toml`, `requirements.txt`,
+starter (a `README.md` and one of `pyproject.toml`, `requirements.txt` (or its `.tmpl` source),
 `main.py`, `agent.py`). The directory starters are looked up in the checkout
 around the current directory first, then in the installed package
 (`core/cli/scaffold_templates/`, where the wheel carries them), then in the
@@ -884,6 +884,17 @@ any directory).
 
 A template that would write no files is refused (exit code `1`) instead of
 creating an empty project.
+
+**Rendering**: `init` replaces `{project_name}` and `{framework_version}` in
+every file it copies, and writes a file whose name ends in `.tmpl` without
+that suffix. The directory starters keep their dependency list as
+`requirements.txt.tmpl` (`baselith-core>={framework_version}`), which the new
+project receives as `requirements.txt` pinned to the installed framework
+version (`baselith-core>=<version>`). A checked-in manifest carrying an
+unrendered placeholder is not a valid PEP 508 requirement and breaks tools
+that parse every `requirements.txt` in a repository, such as GitHub's
+dependency graph; `tests/unit/templates/test_manifests.py` requires every
+`requirements*.txt` and `pyproject.toml` under `templates/` to parse as is.
 
 !!! warning "`full`, `chat-only` and `baselith-core` are gone"
     The prompt used to offer a hardcoded five. `full` and `chat-only` carried
