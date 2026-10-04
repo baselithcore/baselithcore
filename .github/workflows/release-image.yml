@@ -396,16 +396,29 @@ jobs:
             --format '{{json .Manifest.Digest}}' | tr -d '"')"
           # Read back through the tag, which is a mutable pointer: anything
           # that re-pushed the tag between `create` and `inspect` would hand
-          # the signing step a foreign index. The index we sign must be the
-          # one made of exactly the two platform digests this run built.
-          MANIFESTS="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
-            --format '{{range .Manifest.Manifests}}{{.Digest}} {{end}}')"
-          for want in "${AMD64_DIGEST}" "${ARM64_DIGEST}"; do
-            case " ${MANIFESTS} " in
-              *" ${want} "*) ;;
-              *) echo "index ${DIGEST} does not reference ${want}: the tag moved under us" >&2; exit 1 ;;
-            esac
-          done
+          # the signing step a foreign index. The index we sign must be made
+          # of exactly what the two build legs pushed.
+          #
+          # Each leg pushes an image INDEX, not a bare manifest: provenance and
+          # SBOM attestations ride along as an attestation manifest beside the
+          # platform image. `imagetools create` flattens its sources, so the
+          # merged index lists the legs' children (image + attestation
+          # manifests), never the legs' own index digests. Expected set = the
+          # children of each leg when it is an index, the digest itself when
+          # it is a plain manifest; the merged index must hold exactly that set.
+          children() {
+            docker buildx imagetools inspect --raw "${IMAGE}@$1" \
+              | jq -r --arg self "$1" \
+                  'if (.manifests | type) == "array" then .manifests[].digest else $self end'
+          }
+          EXPECTED="$( { children "${AMD64_DIGEST}"; children "${ARM64_DIGEST}"; } | sort -u)"
+          ACTUAL="$(children "${DIGEST}" | sort -u)"
+          if [ -z "${EXPECTED}" ] || [ "${EXPECTED}" != "${ACTUAL}" ]; then
+            echo "index ${DIGEST} is not the one this run built: the tag moved under us" >&2
+            echo "expected:" >&2; echo "${EXPECTED}" >&2
+            echo "actual:" >&2; echo "${ACTUAL}" >&2
+            exit 1
+          fi
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
       - name: Sign image (keyless / Sigstore OIDC)
         env:
