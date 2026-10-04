@@ -7,6 +7,13 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+## [0.42.1](https://github.com/baselithcore/baselithcore/compare/v0.42.0...v0.42.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **templates:** ship starter requirements as .tmpl so they are valid manifests ([8d0c93c](https://github.com/baselithcore/baselithcore/commit/8d0c93c73076e20e27d4943a827f29ab643a2790))
+
 # [0.42.0](https://github.com/baselithcore/baselithcore/compare/v0.41.0...v0.42.0) (2026-10-04)
 
 
