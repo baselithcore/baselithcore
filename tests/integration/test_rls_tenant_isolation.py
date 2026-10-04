@@ -47,6 +47,8 @@ def _migration_010() -> Any:
 
     path = (
         Path(__file__).resolve().parents[2]
+        / "core"
+        / "db"
         / "migrations"
         / "versions"
         / "010_system_tenant_rls_exemption.py"

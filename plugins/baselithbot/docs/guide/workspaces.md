@@ -23,5 +23,5 @@ A `default` workspace is auto-created on first boot if none exists.
 
 Workspaces are also the discovery root for `workspace`-scoped
 [skills](skills.md) — `WorkspaceManager` persists to
-`plugins/baselithbot/.state/workspaces.json`. The `baselithbot_workspace_create`
+`<state_dir>/workspaces.json`. The `baselithbot_workspace_create`
 / `_list` / `_activate` / `_destroy` MCP tools operate on the same registry.

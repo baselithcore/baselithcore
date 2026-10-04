@@ -57,3 +57,67 @@ async def test_initialize_is_idempotent(monkeypatch):
 async def test_initialize_disabled_returns_none(monkeypatch):
     monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "false")
     assert await factory.initialize_default_checkpoint_store() is None
+
+
+class _FakePostgresStore:
+    """Stands in for PostgresCheckpointStore without a database."""
+
+    def __init__(self, **_kwargs: object) -> None:
+        self.initialize_calls = 0
+
+    async def initialize(self) -> None:
+        self.initialize_calls += 1
+
+
+@pytest.fixture
+def _postgres_store(monkeypatch):
+    from core.db import reachability
+    from core.orchestration import checkpoint_postgres
+
+    monkeypatch.setattr(
+        checkpoint_postgres, "PostgresCheckpointStore", _FakePostgresStore
+    )
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "postgres")
+    reachability.reset_postgres_probe()
+    yield
+    reachability.reset_postgres_probe()
+
+
+async def test_postgres_store_init_fails_fast_when_the_probe_saw_the_db_down(
+    _postgres_store,
+):
+    from core.db import reachability
+
+    reachability._last_outcome = False
+    with pytest.raises(factory.CheckpointStoreUnavailableError):
+        await factory.initialize_default_checkpoint_store()
+    store = factory.get_default_checkpoint_store()
+    assert store.initialize_calls == 0
+    assert factory.is_default_checkpoint_store_initialized() is False
+
+    # The database came back: the next attempt initializes the same store.
+    reachability._last_outcome = True
+    assert await factory.initialize_default_checkpoint_store() is store
+    assert store.initialize_calls == 1
+    assert factory.is_default_checkpoint_store_initialized() is True
+
+
+async def test_postgres_store_init_unchanged_when_never_probed(_postgres_store):
+    store = await factory.initialize_default_checkpoint_store()
+    assert store.initialize_calls == 1
+
+
+async def test_memory_store_ignores_the_probe(monkeypatch):
+    from core.db import reachability
+
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "memory")
+    reachability._last_outcome = False
+    try:
+        assert isinstance(
+            await factory.initialize_default_checkpoint_store(),
+            InMemoryCheckpointStore,
+        )
+    finally:
+        reachability.reset_postgres_probe()

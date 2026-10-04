@@ -101,7 +101,9 @@ Summary — full detail in [Computer Use](../guide/computer-use.md) and
   available key is refused rather than served. See
   [Replay](../guide/replay.md).
 
-State files (`plugins/baselithbot/.state/`) are excluded from git.
+State files live in `<state_dir>` (`BASELITHBOT_STATE_DIR`, default
+`$XDG_DATA_HOME/baselith/baselithbot`, created `0700`), outside the
+installed package and the repository.
 
 ## 8. Secret redaction
 
@@ -142,6 +144,6 @@ either way, and rotates independently of any such session.
 - [ ] `allow_shell` / `allow_filesystem` disabled unless explicitly required
 - [ ] `require_approval_for` populated for privileged capabilities in shared environments
 - [ ] Paired nodes reviewed periodically (`GET /dash/nodes`)
-- [ ] `plugins/baselithbot/.state/` never committed
+- [ ] `<state_dir>/` never committed
 - [ ] `BASELITHBOT_SECRET_KEY` rotated if `provider_keys.enc.json` leaks
 - [ ] `baselithbot_tool_errors_total{tool="shell_run"}` alert rule configured

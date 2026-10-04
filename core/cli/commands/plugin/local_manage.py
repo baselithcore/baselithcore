@@ -13,15 +13,21 @@ from core.cli.ui import print_error, print_success
 from .local_shared import PLUGINS_CONFIG_PATH, console
 
 
-def _sync_config_enabled(plugin_name: str, enabled: bool) -> None:
-    """Sync a plugin's enabled state in configs/plugins.yaml."""
+def _sync_config_enabled(plugin_name: str, enabled: bool) -> bool:
+    """Sync a plugin's enabled state in configs/plugins.yaml.
+
+    Returns:
+        Whether the file now records the state.
+    """
     config: dict[str, Any] = {}
     if PLUGINS_CONFIG_PATH.exists():
         try:
             with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception:
-            return
+            return False
+    if not isinstance(config, dict):
+        return False
 
     if plugin_name not in config:
         config[plugin_name] = {}
@@ -37,7 +43,33 @@ def _sync_config_enabled(plugin_name: str, enabled: bool) -> None:
                 config, f, default_flow_style=False, allow_unicode=True, sort_keys=False
             )
     except Exception:
-        pass
+        return False
+    return True
+
+
+def _toggle_bundled(plugin_name: str, enabled: bool) -> int | None:
+    """Enable/disable a plugin shipped inside the installed wheel.
+
+    Bundled plugins are opt-in and live in ``site-packages``: toggling one
+    writes ``configs/plugins.yaml`` and never touches its code.
+
+    Returns:
+        The exit code, or ``None`` when no bundled plugin has that name.
+    """
+    from core.plugins.discovery import bundled_plugin_dir
+
+    plugin_dir = bundled_plugin_dir(plugin_name)
+    if plugin_dir is None:
+        return None
+    verb = "enabled" if enabled else "disabled"
+    if not _sync_config_enabled(plugin_dir.name, enabled):
+        print_error(f"Could not update {PLUGINS_CONFIG_PATH}; plugin not {verb}.")
+        return 1
+    print_success(
+        f"Bundled plugin '{plugin_dir.name}' {verb} in {PLUGINS_CONFIG_PATH}; "
+        "restart the server to apply."
+    )
+    return 0
 
 
 def delete_local_plugin(plugin_name: str, force: bool = False) -> int:
@@ -86,6 +118,9 @@ def disable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
     plugin_dir = Path("plugins") / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
+        bundled = _toggle_bundled(plugin_name, False)
+        if bundled is not None:
+            return bundled
         print_error(f"Local plugin '{plugin_name}' not found.")
         return 1
 
@@ -135,6 +170,9 @@ def enable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
     plugin_dir = Path("plugins") / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
+        bundled = _toggle_bundled(plugin_name, True)
+        if bundled is not None:
+            return bundled
         print_error(f"Local plugin '{plugin_name}' not found.")
         return 1
 

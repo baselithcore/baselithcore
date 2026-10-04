@@ -24,7 +24,7 @@ POSTGRES_ENABLED = _storage_config.postgres_enabled
 # that under multi-worker boot (``WEB_CONCURRENCY>1``) only ONE process migrates
 # at a time. The losers block until the leader finishes, then run ``upgrade head``
 # as a no-op (already at head). Without this, N workers race the same DDL and a
-# loser can crash-loop on ``lock_timeout`` (see migrations/env.py). The constant
+# loser can crash-loop on ``lock_timeout`` (see core/db/migrations/env.py). The constant
 # is arbitrary but must stay stable across releases so old and new workers
 # contend on the same lock during a rolling deploy.
 _MIGRATION_ADVISORY_LOCK_KEY: Final[int] = 0x6273_6C74_6D67_7274  # "bsltmgrt"
@@ -76,28 +76,37 @@ def _migration_leader_lock() -> Iterator[None]:
                 conn.close()
 
 
+def upgrade_head() -> None:
+    """Apply every pending packaged migration, holding the leader lock.
+
+    The Alembic configuration is built from the installed package, not the
+    working directory: a wheel install has no ``alembic.ini`` or
+    ``migrations/`` next to the process. The cross-process advisory lock is
+    held across the whole upgrade, so a multi-worker boot — or
+    ``baselith db migrate`` run while the app is starting — cannot race the
+    same DDL.
+
+    Raises:
+        MigrationsNotFoundError: The installation lacks the migration scripts.
+    """
+    from alembic import command
+
+    from core.db.migration_config import build_alembic_config
+
+    alembic_cfg = build_alembic_config()
+    with _migration_leader_lock():
+        command.upgrade(alembic_cfg, "head")
+
+
 async def ensure_schema() -> None:
     """
     Ensures that the database schema is up-to-date by running Alembic migrations.
     This runs synchronously in an executor because Alembic's core is synchronous.
     """
     import asyncio
-    import os
-
-    from alembic import command
-    from alembic.config import Config
-
-    def run_upgrade() -> None:
-        # Get absolute path to alembic.ini
-        alembic_ini_path = os.path.join(os.getcwd(), "alembic.ini")
-        alembic_cfg = Config(alembic_ini_path)
-        # Hold the cross-process advisory lock across the whole upgrade so
-        # multi-worker boot cannot race the same DDL.
-        with _migration_leader_lock():
-            command.upgrade(alembic_cfg, "head")
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, run_upgrade)
+    await loop.run_in_executor(None, upgrade_head)
 
 
 async def init_db() -> None:
@@ -163,9 +172,21 @@ async def init_core_schema_best_effort() -> bool:
     ``error`` — the schema being absent is exactly what an operator needs to see
     when the first write starts returning 500s.
 
+    When the boot reachability probe (:mod:`core.db.reachability`) already
+    saw the database down, Alembic is not attempted: its connect carries no
+    timeout of its own, so a black-holed host would stall boot here.
+
     Returns:
         Whether the initialization completed.
     """
+    from core.db.reachability import postgres_known_unreachable
+
+    if postgres_known_unreachable():
+        logger.error(
+            "core_schema_init_skipped",
+            extra={"reason": "PostgreSQL unreachable at the startup probe"},
+        )
+        return False
     try:
         await init_db()
     except Exception as exc:

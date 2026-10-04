@@ -16,6 +16,7 @@ Informational only — it never blocks startup and never raises.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from core.config.concurrency import get_web_concurrency
@@ -23,7 +24,7 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["ConnectionBudget", "check_connection_budget"]
+__all__ = ["DEFAULT_BUDGET_TIMEOUT_S", "ConnectionBudget", "check_connection_budget"]
 
 _LIMITS_SQL = (
     "SELECT current_setting('max_connections')::int, "
@@ -63,8 +64,24 @@ class ConnectionBudget:
         return self.demand > self.available
 
 
-async def check_connection_budget() -> ConnectionBudget | None:
+#: Upper bound on the startup budget read. The check is informational: a pool
+#: that cannot hand out a connection quickly must not stall the boot for a
+#: full ``DB_POOL_TIMEOUT``.
+DEFAULT_BUDGET_TIMEOUT_S = 5.0
+
+
+async def check_connection_budget(
+    timeout: float = DEFAULT_BUDGET_TIMEOUT_S,
+) -> ConnectionBudget | None:
     """Compare the pool budget with the server limit and warn on overflow.
+
+    Call it inside :func:`core.db.connection.system_tenant_scope` at startup:
+    with ``DB_RLS_ENABLED`` an unbound checkout is refused, and the check
+    would silently never run.
+
+    Args:
+        timeout: Seconds to wait for the connection and the read before
+            giving up (the result is then ``None``).
 
     Returns:
         The computed budget, or ``None`` when the limits could not be read
@@ -76,10 +93,11 @@ async def check_connection_budget() -> ConnectionBudget | None:
     if not connection.POSTGRES_ENABLED:
         return None
     try:
-        async with connection.get_async_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(_LIMITS_SQL)
-                row = await cur.fetchone()
+        async with asyncio.timeout(timeout):
+            async with connection.get_async_connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(_LIMITS_SQL)
+                    row = await cur.fetchone()
     except Exception as exc:  # informational check, must not fail startup
         logger.debug("db_connection_budget_unavailable", extra={"error": str(exc)})
         return None

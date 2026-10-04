@@ -103,15 +103,25 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
             },
         ]
 
-    async def initialize(self, config: dict[str, Any]) -> None:
-        """Initialize the plugin."""
-        await super().initialize(config)
+    async def init_schema(self, config: dict[str, Any] | None = None) -> None:
+        """Create the example tables (deploy time: ``baselith plugin schema-init``).
 
-        # Initialize persistence
-        from .persistence import ensure_schema, init_pool
+        Schema work never runs in :meth:`initialize`: that runs in the serving
+        process at boot, as a role that should own no tables, and with the
+        database down it held boot for a full pool timeout.
+        """
+        from .persistence import ensure_schema
 
-        await init_pool()
         await ensure_schema()
+
+    async def initialize(self, config: dict[str, Any]) -> None:
+        """Initialize the plugin.
+
+        No database work here: the persistence pool opens lazily on the first
+        query, so a PostgreSQL outage degrades this plugin's routes instead of
+        stalling the whole boot.
+        """
+        await super().initialize(config)
 
         # Custom initialization logic here
         print(f"✅ Example plugin initialized with config: {config}")

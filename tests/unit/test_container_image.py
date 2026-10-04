@@ -79,8 +79,13 @@ def test_image_strips_cuda_from_the_cpu_only_build() -> None:
     assert "--index-url https://download.pytorch.org/whl/cpu" in text
 
     # The strip is block-aware (awk) since the export carries hashes: each
-    # requirement spans a name line plus `--hash=` continuation lines.
-    filter_match = re.search(r"skip = \(\$0 ~ /([^/]+)/\)", text)
+    # requirement spans a name line plus `--hash=` continuation lines. The
+    # pattern is chosen per ML_RUNTIME and handed to awk as `strip`; the
+    # `local` arm is the CPU-only build this test is about.
+    assert "skip = ($0 ~ strip)" in text, (
+        "The export no longer filters the locked set through the strip pattern."
+    )
+    filter_match = re.search(r"local\) strip='([^']+)'", text)
     assert filter_match is not None, (
         "The export no longer filters the GPU stack out of the locked set."
     )
@@ -198,6 +203,39 @@ def test_project_distribution_is_not_a_second_importable_copy() -> None:
         "`baselith plugin enable` writes configs/plugins.yaml, so the CLI run "
         "from the wrong directory edits a tree the API never reads."
     )
+
+
+def test_model_cache_keeps_one_copy_of_the_weights() -> None:
+    """bge-m3 ships pytorch_model.bin on `main`; transformers also fetched the
+    safetensors from the hub's conversion PR, so the image carried both
+    (2 x 2.27GB). The pre-cache step must leave one, in safetensors form, and
+    the runtime must read the cache offline so `main` is what gets loaded."""
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    precache = text.split("from sentence_transformers import", 1)[1].split("\nPY\n", 1)[
+        0
+    ]
+    assert "symlink_to(" in precache and '"model.safetensors"' in precache
+    assert "pickled.unlink()" in precache and "blob.unlink()" in precache
+    # Without dropping the marker, offline resolution trusts "absent on main".
+    assert '".no_exist"' in precache
+    assert "HF_HUB_OFFLINE=1" in text
+
+
+def test_app_stage_copies_what_the_build_backend_imports() -> None:
+    """`pip install .` runs setuptools with the cmdclass pyproject.toml names;
+    a module it imports that the stage never copied fails the image build
+    before anything is built ("No module named 'build_support'")."""
+    import tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    cmdclass = pyproject["tool"]["setuptools"].get("cmdclass", {})
+    text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
+    stage = text.split("FROM deps AS app", 1)[1].split("pip install --no-deps", 1)[0]
+    for target in cmdclass.values():
+        package = target.split(".", 1)[0]
+        assert f"COPY {package}/ {package}/" in stage, target
+    # build_support copies the starters out of templates/ into the wheel.
+    assert "COPY templates/ templates/" in stage
 
 
 def test_healthcheck_allows_for_a_slow_cold_start() -> None:

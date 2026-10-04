@@ -165,6 +165,32 @@ class AppConfig(BaseSettings):
         default=0.0, alias="SENTRY_PROFILES_SAMPLE_RATE", ge=0.0, le=1.0
     )
 
+    # === Readiness probe (/health/ready) ===
+    health_ready_probe_timeout: float = Field(
+        default=2.0,
+        alias="HEALTH_READY_PROBE_TIMEOUT",
+        gt=0.0,
+        le=30.0,
+        description=(
+            "Deadline in seconds for each dependency check behind /health/ready "
+            "(database, Redis, vector store). A check that has not answered by "
+            "then counts as down, so an unreachable database yields a prompt 503 "
+            "instead of a probe that waits out DB_POOL_TIMEOUT and is killed by "
+            "the kubelet. Keep it below the probe's timeoutSeconds."
+        ),
+    )
+    health_ready_cache_ttl: int = Field(
+        default=5,
+        alias="HEALTH_READY_CACHE_TTL",
+        ge=0,
+        le=300,
+        description=(
+            "Seconds a /health/ready outcome — success or failure — is reused. "
+            "Concurrent probes during a refresh share one check. Lower means "
+            "faster recovery reporting, higher means fewer dependency round-trips."
+        ),
+    )
+
     # === Feature Flags ===
     # Include test cases generation in the project planner agent.
     project_planner_enable_test_cases: bool = Field(

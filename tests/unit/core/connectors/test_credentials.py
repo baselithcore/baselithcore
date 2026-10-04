@@ -131,3 +131,14 @@ def test_connector_names_cannot_contain_the_separator(name):
 def test_credential_field_names_are_identifiers(field):
     with pytest.raises(ValueError):
         CredentialField(field)
+
+
+def test_global_fallback_can_be_switched_off_per_spec():
+    from dataclasses import replace
+
+    strict = replace(SPEC, allow_global_fallback=False)
+    assert secret_names(strict, "api_key", "acme") == [
+        "CONNECTOR_ACME_CRM__ACME__API_KEY"
+    ]
+    # Out of a tenant there is nothing more specific than the global name.
+    assert secret_names(strict, "api_key", "") == ["CONNECTOR_ACME_CRM__API_KEY"]

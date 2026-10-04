@@ -321,3 +321,38 @@ async def test_release_by_tag_raises_on_server_error() -> None:
     src = _source(lambda req: httpx.Response(500))
     with pytest.raises(SourceError):
         await src.release_by_tag("demo", "o/r", "v1.2.0")
+
+
+# ── Metadata responses are capped like downloads ─────────────────────────────
+
+
+async def test_json_metadata_over_the_cap_is_refused() -> None:
+    from core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
+
+    big = b"[" + b"1," * (MAX_TEXT_FILE_BYTES // 2) + b"1]"
+    src = _source(lambda r: httpx.Response(200, content=big))
+    with pytest.raises(SourceError, match="larger than"):
+        await src.latest_release("demo", "o/r")
+
+
+async def test_declared_oversize_metadata_is_refused_before_the_body() -> None:
+    from core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
+
+    src = _source(
+        lambda r: httpx.Response(
+            200, content=b"[]", headers={"Content-Length": str(MAX_TEXT_FILE_BYTES + 1)}
+        )
+    )
+    with pytest.raises(SourceError, match="larger than"):
+        await src.latest_release("demo", "o/r")
+
+
+async def test_download_accepts_a_tighter_per_call_cap(tmp_path: Path) -> None:
+    from core.plugin_updates.sources import SourceError
+
+    src = _source(lambda r: httpx.Response(200, content=b"x" * 100))
+    with pytest.raises(SourceError, match="larger than 10"):
+        await src.download(
+            "https://api.github.com/a/1/json", tmp_path / "f", max_bytes=10
+        )
+    assert not (tmp_path / "f").exists()

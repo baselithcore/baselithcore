@@ -10,6 +10,7 @@ Flagged — a *call* (AST, so docstrings and comments never trip it) to any of::
 
     SentenceTransformer  CrossEncoder  BGEM3FlagModel  FlagReranker
     DocumentConverter    QdrantClient  AsyncQdrantClient
+    transformers.AutoModel*  transformers.pipeline   (resolved through imports)
 
 anywhere under ``plugins/`` outside test and build trees. A plugin that still
 needs one (a vendored engine not yet migrated) is listed in
@@ -70,25 +71,83 @@ class Violation:
     name: str
 
 
-def _call_name(node: ast.Call) -> str | None:
-    func = node.func
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
+#: Module-qualified constructors: flagged only when the call resolves to the
+#: named module through an import, so ``redis.pipeline()`` or a local
+#: ``pipeline`` never trips the gate.
+FORBIDDEN_QUALIFIED: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("transformers", "AutoModel"),
+        ("transformers", "AutoModelForSequenceClassification"),
+        ("transformers", "AutoModelForCausalLM"),
+        ("transformers", "pipeline"),
+    }
+)
+_QUALIFIED_MODULES = frozenset(module for module, _ in FORBIDDEN_QUALIFIED)
+
+
+class _Imports:
+    """What the file's import statements bind each local name to."""
+
+    def __init__(self, tree: ast.AST) -> None:
+        #: local name -> module it aliases (``import transformers as tf``)
+        self.modules: dict[str, str] = {}
+        #: local name -> (module, attribute) (``from x import Y as Z``)
+        self.names: dict[str, tuple[str, str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.modules[alias.asname or alias.name.split(".")[0]] = alias.name
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                for alias in node.names:
+                    self.names[alias.asname or alias.name] = (node.module, alias.name)
+
+    def resolve(self, func: ast.expr) -> tuple[str | None, str] | None:
+        """``(module, attribute)`` the callee resolves to, or ``None``."""
+        if isinstance(func, ast.Name):
+            if func.id in self.names:
+                return self.names[func.id]
+            return (None, func.id)
+        if isinstance(func, ast.Attribute):
+            base = func.value
+            if func.attr == "from_pretrained":
+                # ``AutoModel.from_pretrained(...)``: the loader classmethod is
+                # the constructor; resolve the class it hangs off.
+                return self.resolve(base)
+            if isinstance(base, ast.Name) and base.id in self.modules:
+                return (self.modules[base.id], func.attr)
+            return (None, func.attr)
+        return None
+
+
+def _forbidden_name(node: ast.Call, imports: _Imports) -> str | None:
+    resolved = imports.resolve(node.func)
+    if resolved is None:
+        return None
+    module, attr = resolved
+    if attr in FORBIDDEN_CALLS:
+        return attr
+    root = (module or "").split(".")[0]
+    if root in _QUALIFIED_MODULES and (root, attr) in FORBIDDEN_QUALIFIED:
+        return f"{root}.{attr}"
     return None
 
 
 def scan_file(path: Path, rel: str) -> list[Violation]:
-    """Forbidden calls in one Python file (unparseable files are skipped)."""
+    """Forbidden calls in one Python file (unparseable files are skipped).
+
+    Import aliases are resolved, so ``from sentence_transformers import
+    SentenceTransformer as ST; ST()`` and ``import transformers as t;
+    t.pipeline()`` are both flagged.
+    """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError, OSError):
         return []
+    imports = _Imports(tree)
     return [
         Violation(rel, node.lineno, name)
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and (name := _call_name(node)) in FORBIDDEN_CALLS
+        if isinstance(node, ast.Call) and (name := _forbidden_name(node, imports))
     ]
 
 

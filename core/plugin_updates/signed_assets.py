@@ -29,7 +29,7 @@ from .release_manifest import (
     parse_files,
     verify_release_manifest,
 )
-from .sources import GitHubReleaseSource, SourceError
+from .sources import MAX_TEXT_FILE_BYTES, GitHubReleaseSource, SourceError
 
 
 def _refused(refusal: Refusal, detail: str = "") -> SignedAssets:
@@ -119,7 +119,9 @@ async def _verify(
     tmp_dir = Path(tempfile.mkdtemp(prefix=".dl-", dir=final.parent))
     try:
         meta_path = tmp_dir / "release.json"
-        await source.download(latest.release_json_url, meta_path)
+        await source.download(
+            latest.release_json_url, meta_path, max_bytes=MAX_TEXT_FILE_BYTES
+        )
         try:
             meta = load_release_json(meta_path.read_bytes())
         except ReleaseManifestError as exc:

@@ -36,14 +36,16 @@ A collaborative baselith-core demonstrating agent orchestration patterns.
 ## Quick Start
 
 ```bash
-# Copy template
-cp -r templates/baselith-core-collab my-agent-project
+baselith init my-agent-project --template multi-agent-collab
 cd my-agent-project
-
-# Install and run
 pip install -r requirements.txt
-python main.py
+python main.py          # API on http://127.0.0.1:8000 — try /health and /agents
 ```
+
+`baselith init` generated `.env` for local development: `APP_ENV=development`,
+a random `SECRET_KEY` for this project only (file mode 0600, ignored by git),
+loopback-only `HOST`/`PORT` (which `main.py` binds) and `LLM_PROVIDER=ollama`,
+the provider that needs no API key.
 
 ## Agent Configuration
 

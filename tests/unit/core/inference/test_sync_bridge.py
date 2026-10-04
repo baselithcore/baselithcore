@@ -67,3 +67,38 @@ def test_close_is_idempotent_and_loop_restarts() -> None:
     b.close()
     b.close()
     assert not any(t.name == "baselith-inference" for t in threading.enumerate())
+
+
+class _Closable:
+    def __init__(self, fail: bool) -> None:
+        self.fail = fail
+        self.closed = False
+
+    async def shutdown(self) -> None:
+        self.closed = True
+        if self.fail:
+            raise RuntimeError("boom")
+
+
+def test_one_failing_service_does_not_leave_the_others_open() -> None:
+    b = SyncInference()
+    b.run(_noop())  # start the loop
+    broken, rerank, qdrant = _Closable(True), _Closable(False), _Closable(False)
+    vars(b).update(_embedding=broken, _rerank=rerank, _qdrant=qdrant)
+    b.close()
+    assert broken.closed and rerank.closed and qdrant.closed
+    assert not any(t.name == "baselith-inference" for t in threading.enumerate())
+
+
+async def _noop() -> None:
+    return None
+
+
+async def test_async_shutdown_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.services.inference import sync_bridge
+
+    def _boom() -> None:
+        raise RuntimeError("bridge exploded")
+
+    monkeypatch.setattr(sync_bridge, "shutdown_sync_inference", _boom)
+    await sync_bridge.ashutdown_sync_inference()  # logged, not raised

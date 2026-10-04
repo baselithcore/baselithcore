@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "BaselithCore Helm values",
-  "description": "Validated by Helm on install/upgrade/template/lint. The point is to turn the failure modes this chart has learned about into errors at render time rather than at 3am: a mistyped key silently ignored, a quantity written as a number, an enum spelled wrong. `additionalProperties: false` is deliberate — an unknown top-level key is almost always a typo, and Helm would otherwise accept it without a word.",
+  "description": "Validated by Helm on install/upgrade/template/lint. The point is to turn the failure modes this chart has learned about into errors at render time rather than at 3am: a mistyped key silently ignored, a quantity written as a number, an enum spelled wrong. `additionalProperties: false` is deliberate \u2014 an unknown top-level key is almost always a typo, and Helm would otherwise accept it without a word.",
   "type": "object",
   "additionalProperties": false,
   "definitions": {
@@ -91,7 +91,7 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 0,
-      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended — no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place — so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
+      "description": "0 is a deliberate state, not a mistake: it is how a deployment is suspended \u2014 no pod serving, everything else (volumes, Secret, database, backup CronJob) left in place \u2014 so `worker.replicaCount` has always allowed it and this one now agrees. Pair it with autoscaling.enabled=false, or the HPA scales straight back up."
     },
     "revisionHistoryLimit": {
       "type": "integer",
@@ -248,6 +248,53 @@
         },
         "tls": {
           "type": "array"
+        },
+        "guards": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "ingress-nginx only: a /metrics deny Ingress and a per-IP rate-limited Ingress over the auth paths, rendered beside the main one.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "allowSourceRange": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^/"
+                  }
+                },
+                "rps": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "burstMultiplier": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -459,7 +506,7 @@
     "telemetry": {
       "type": "object",
       "additionalProperties": false,
-      "description": "OpenTelemetry traces/metrics. `enabled: false` installs no providers and no auto-instrumentation, so no spans exist at all — not even for in-process consumers such as the control-plane trace viewer.",
+      "description": "OpenTelemetry traces/metrics. `enabled: false` installs no providers and no auto-instrumentation, so no spans exist at all \u2014 not even for in-process consumers such as the control-plane trace viewer.",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -525,6 +572,9 @@
           }
         }
       }
+    },
+    "seedResources": {
+      "$ref": "#/definitions/resources"
     },
     "plugins": {
       "type": "object",
@@ -596,7 +646,7 @@
         },
         "labels": {
           "$ref": "#/definitions/labelMap",
-          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated — check the Prometheus resource's ruleSelector before concluding the alerts are broken."
+          "description": "kube-prometheus-stack selects PrometheusRule objects by label (commonly `release: <stack release>`). Without the label the object is created, accepted, and never evaluated \u2014 check the Prometheus resource's ruleSelector before concluding the alerts are broken."
         },
         "interval": {
           "oneOf": [
@@ -629,7 +679,7 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 1,
-              "description": "Fraction of LLM calls answered by a fallback stage rather than the configured primary. These requests SUCCEED, so no error-based alert covers them: a chain quietly carrying production traffic — often onto a local model on the host itself — is the failure mode. Keep it low."
+              "description": "Fraction of LLM calls answered by a fallback stage rather than the configured primary. These requests SUCCEED, so no error-based alert covers them: a chain quietly carrying production traffic \u2014 often onto a local model on the host itself \u2014 is the failure mode. Keep it low."
             },
             "httpSlowRatio": {
               "type": "number",
@@ -758,7 +808,8 @@
               "type": "string"
             },
             "image": {
-              "type": "string"
+              "type": "string",
+              "description": "Pin by content with repo:tag@sha256:<64 hex> once the digest is known."
             },
             "adminSecret": {
               "type": "object",
@@ -869,7 +920,8 @@
         },
         "image": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Pin by content with repo:tag@sha256:<64 hex> once the digest is known; a tag is a mutable pointer."
         },
         "retentionDays": {
           "type": "integer",
@@ -994,6 +1046,22 @@
               }
             }
           }
+        },
+        "qdrant": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
         }
       }
     },
@@ -1039,6 +1107,11 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(sha256:[a-f0-9]{64})?$",
+                  "description": "Empty, or a full sha256 digest; wins over tag."
+                },
                 "pullPolicy": {
                   "type": "string",
                   "enum": ["Always", "IfNotPresent", "Never"]
@@ -1049,6 +1122,49 @@
               "type": "integer",
               "minimum": 1024,
               "maximum": 65535
+            },
+            "apiKeySecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "networkPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "egress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "rules": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            },
+            "podDisruptionBudget": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "maxUnavailable": {
+                  "type": ["integer", "string"]
+                }
+              }
             },
             "hfTokenSecret": {
               "type": "object",
@@ -1152,6 +1268,57 @@
                   "type": "array"
                 }
               }
+            }
+          }
+        }
+      }
+    },
+    "qdrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "type": "object"
+            },
+            "limits": {
+              "type": "object"
             }
           }
         }

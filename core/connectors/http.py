@@ -26,6 +26,7 @@ the call safe with ``idempotent=True``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from typing import Any
 
@@ -36,6 +37,7 @@ from core.connectors.errors import (
     ConnectorEgressError,
     ConnectorError,
     ConnectorRateLimitedError,
+    ConnectorResponseTooLargeError,
     ConnectorTransientError,
     ConnectorUnavailableError,
     error_for_response,
@@ -160,7 +162,13 @@ class ConnectorHttp:
         """
         name = self._spec.name
         try:
-            response = await self.client.request(method, url, **kwargs)
+            async with asyncio.timeout(self._spec.deadline_s):
+                response = await self._read_capped(method, url, **kwargs)
+        except TimeoutError as exc:
+            raise ConnectorTransientError(
+                name,
+                f"no complete response within the {self._spec.deadline_s}s deadline",
+            ) from exc
         except SsrfError as exc:
             return ConnectorEgressError(name, redact(str(exc), self._secrets))
         except _NOT_SENT as exc:
@@ -169,12 +177,53 @@ class ConnectorHttp:
         except httpx.TransportError as exc:
             detail = redact(str(exc).strip() or type(exc).__name__, self._secrets)
             raise ConnectorTransientError(name, detail) from exc
+        if isinstance(response, ConnectorError):
+            return response
         error = error_for_response(name, response, self._secrets)
         if error is None:
             return response
         if type(error) is ConnectorTransientError:
             raise error
         return error
+
+    async def _read_capped(
+        self, method: str, url: str, **kwargs: Any
+    ) -> httpx.Response | ConnectorResponseTooLargeError:
+        """Send and read the body through the cap; never buffers past it.
+
+        The body is streamed and assembled into a plain buffered
+        ``httpx.Response`` the callers can use as usual; ``Content-Encoding``
+        and ``Content-Length`` are dropped from the copy because the chunks
+        were decoded on the way in.
+        """
+        cap = self._spec.max_response_bytes
+        too_large = ConnectorResponseTooLargeError(
+            self._spec.name, f"response body exceeds {cap} bytes"
+        )
+        request = self.client.build_request(method, url, **kwargs)
+        response = await self.client.send(request, stream=True)
+        try:
+            declared = response.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > cap:
+                return too_large
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                body += chunk
+                if len(body) > cap:
+                    return too_large
+        finally:
+            await response.aclose()
+        headers = [
+            (k, v)
+            for k, v in response.headers.multi_items()
+            if k.lower() not in ("content-encoding", "content-length")
+        ]
+        return httpx.Response(
+            response.status_code,
+            headers=headers,
+            content=bytes(body),
+            request=request,
+        )
 
     async def aclose(self) -> None:
         """Close the client if this instance created it."""

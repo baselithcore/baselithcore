@@ -10,6 +10,7 @@ caller's tenant first.
 from __future__ import annotations
 
 import builtins
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,9 @@ from core.connectors.errors import ConnectorConfigError
 from core.connectors.protocols import Connector
 from core.connectors.types import ConnectorCapability, ConnectorSpec
 from core.registries import BaseRegistry
+from core.utils.runtime_env import is_production_env
+
+logger = logging.getLogger(__name__)
 
 ConnectorFactory = Callable[..., Connector]
 
@@ -69,6 +73,16 @@ class ConnectorRegistry(BaseRegistry[ConnectorEntry]):
                     "callable with a 'spec: ConnectorSpec' attribute"
                 )
             entry = ConnectorEntry(spec=spec, factory=item, owner=owner)
+        if entry.spec.allowed_hosts is None and is_production_env():
+            # Any public host is reachable through the SSRF guard; a connector
+            # that talks to one vendor should say which. Loud, not fatal: the
+            # guard still blocks internal addresses.
+            logger.warning(
+                "connector %s (owner=%s) declares no allowed_hosts: any public "
+                "host is reachable; declare ConnectorSpec.allowed_hosts.",
+                entry.spec.name,
+                entry.owner,
+            )
         self.register(entry, overwrite=overwrite)
         return entry
 

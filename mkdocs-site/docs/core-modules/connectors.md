@@ -128,6 +128,8 @@ adds:
     - it never reaches an internal address;
     - it applies `timeout_s`, `max_attempts`, `retry_base_delay` and
     `retry_max_delay` from the spec;
+    - it bounds each attempt by `deadline_s` and each response body by
+    `max_response_bytes` (see [Response limits](#response-limits));
     - it redacts the connector's secret credentials from every error message.
 - **`credential(name)`** unwraps a credential when it is needed.
   `missing_credentials()` lists the required ones that are not set.
@@ -158,9 +160,26 @@ Every failure is a `ConnectorError`, and its message is already redacted:
 | `ConnectorConnectError` | the connection was never established | yes |
 | `ConnectorRateLimitedError` | 429 (`.retry_after` from `Retry-After`) | yes, after the server's delay |
 | `ConnectorUnavailableError` | circuit breaker open, so the call was not attempted | no |
+| `ConnectorResponseTooLargeError` | response body larger than `max_response_bytes` | no — the same call returns the same body |
 
 `ConnectorConnectError` and `ConnectorRateLimitedError` are both subclasses of
-`ConnectorTransientError`.
+`ConnectorTransientError`. An attempt that does not complete within
+`deadline_s` is a `ConnectorTransientError` too.
+
+### Response limits
+
+Connector output reaches agents, so a hostile or broken provider must not be
+able to exhaust a worker. Three `ConnectorSpec` fields bound one attempt:
+
+| Field | Default | Bound |
+|---|---|---|
+| `timeout_s` | `30.0` | httpx per-phase timeout (connect, read, write, pool) |
+| `deadline_s` | `120.0` | The whole attempt, headers and body included. A per-phase read timeout never fires on a body that drips one byte at a time; this does. Must be at least `timeout_s`. |
+| `max_response_bytes` | `8 * 1024 * 1024` (8 MiB) | The response body. A declared `Content-Length` above it is refused before reading; otherwise the body is streamed and cut off past the cap, never buffered. Must be at least `1`. |
+
+The body is assembled into an ordinary buffered `httpx.Response`, so connector
+code reads it as before; `Content-Encoding` and `Content-Length` are dropped
+from that copy because the chunks were already decoded.
 
 Only a genuine outage counts against the circuit breaker
 (`connector.<name>`), meaning transport errors, timeouts, 408 and 5xx. A 404,
@@ -198,6 +217,12 @@ CONNECTOR_<NAME>__<FIELD>             # deployment-wide
 
 So `CONNECTOR_TICKETS__API_TOKEN` configures every tenant, and
 `CONNECTOR_TICKETS__ACME__API_TOKEN` overrides it for tenant `acme`.
+
+The deployment-wide fallback is controlled by `ConnectorSpec.allow_global_fallback`
+(default `True`). Set it to `False` for a connector that must act only through
+each tenant's own account: inside a tenant only the per-tenant name is tried,
+and a tenant without its own credentials reads as unconfigured. Out of a tenant
+the deployment-wide name is still the only one there is.
 
 The connector name and the field name are upper-cased. Both are identifiers
 with single underscores only, since `__` is the separator. The tenant id is
@@ -303,6 +328,10 @@ The machinery enforces what it can. The rest is on the connector author:
   verbatim into the agent's context and to MCP clients. Map the vendor's
   response to the fields the caller needs instead of echoing it.
   `ActionResult.error` is redacted by `invoke_action`, but `data` is not.
+- **Declare `allowed_hosts`.** With `allowed_hosts=None` any public host is
+  reachable (the SSRF guard still blocks internal addresses); in production
+  the registry logs a WARNING naming the connector and its owner at
+  registration.
 - **Per-tenant secret names are dynamic**, so a plugin's
   `permissions.secrets` allowlist cannot list them one by one on a
   multi-tenant deployment. List the deployment-wide names, and know that the

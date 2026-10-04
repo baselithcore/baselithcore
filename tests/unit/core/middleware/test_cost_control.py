@@ -220,3 +220,27 @@ async def test_budget_exceeded_handler_renders_429_problem_document():
     assert body["code"] == "budget_exceeded"
     assert body["type"] == "urn:baselith:error:budget_exceeded"
     assert "51/50" in body["detail"]
+
+
+@pytest.mark.asyncio
+async def test_budget_429_marks_the_scope_as_work_done():
+    """The 429 comes *after* the handler spent its budget: the outer quota
+    layer must not refund it as "no work was done"."""
+    controller = CostController(agent_max_tokens=1)
+
+    async def app(scope, receive, send):
+        controller.track_tokens(5)
+
+    middleware = CostControlMiddleware(app, controller=controller)
+    scope = {"type": "http", "method": "POST", "path": "/chat", "headers": []}
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, receive, send)
+    assert sent[0]["status"] == 429
+    assert scope["baselith.work_done"] is True

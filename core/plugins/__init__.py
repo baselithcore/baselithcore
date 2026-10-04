@@ -28,6 +28,7 @@ if TYPE_CHECKING:  # pragma: no cover - the eager view, for type checkers
         set_hot_reload_controller,
     )
     from .app_setup import (
+        apply_late_app_hook,
         apply_plugin_app_middleware,
     )
     from .config_validation import (
@@ -184,6 +185,7 @@ _EXPORTS: Final[dict[str, str]] = {
     "SkillService": "skills_service",
     "VENDOR_EXTENSION_PREFIX": "manifest_model",
     "VersionConstraint": "version",
+    "apply_late_app_hook": "app_setup",
     "apply_plugin_app_middleware": "app_setup",
     "backstage_exporter_router": "exporters",
     "check_plugin_compatibility": "version",
@@ -278,6 +280,7 @@ __all__ = [
     "load_plugin_dotenv",
     # App-level middleware composition
     "apply_plugin_app_middleware",
+    "apply_late_app_hook",
     # Phase 3: Metrics & Monitoring
     "PluginMetricsCollector",
     "get_metrics_collector",

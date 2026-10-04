@@ -100,6 +100,7 @@ async def _load_enabled(
         plugin_enabled,
         read_plugin_configs,
     )
+    from core.plugins.discovery import is_bundled_install_dir
     from core.plugins.loader import PluginLoader
     from core.plugins.registry import PluginRegistry
 
@@ -125,7 +126,9 @@ async def _load_enabled(
             continue
         # The enable-list matches on the directory name too, which is not
         # always the registry name (`coding_agent` registers as `coding-agent`).
-        if not plugin_enabled(configs, plugin_dir.name, name):
+        if not plugin_enabled(
+            configs, plugin_dir.name, name, bundled=is_bundled_install_dir(plugin_dir)
+        ):
             continue
         # An empty enable-list enables everything and names no block, so there
         # is simply no config to pass — not a reason to skip the plugin.

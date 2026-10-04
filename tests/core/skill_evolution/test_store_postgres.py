@@ -1,8 +1,8 @@
 """Integration tests for PostgresPatternStore.
 
 Requires a real Postgres (``BASELITH_TEST_REAL_DB=1`` + Docker Postgres
-up); psycopg is globally mocked in unit runs and CI never sets the flag,
-so these skip everywhere except an explicit local integration run.
+up); psycopg is globally mocked in unit runs, so these skip there and run in
+the CI ``integration_test`` job, which sets the flag.
 """
 
 from __future__ import annotations

@@ -424,24 +424,6 @@ def check_telemetry() -> CheckResult:
     )
 
 
-def check_migrations_mode() -> CheckResult:
-    """Explain whether database migrations are automatic or explicit."""
-    value = (env_value("DB_MIGRATIONS_ON_STARTUP", "true") or "true").lower()
-    if value in {"1", "true", "yes", "on"}:
-        return CheckResult(
-            "DB Migrations",
-            True,
-            "Run during application startup",
-            "For predictable startup, prefer false and run: baselith db migrate",
-        )
-    return CheckResult(
-        "DB Migrations",
-        True,
-        "Startup migrations disabled",
-        "Run manually after DB changes: baselith db migrate",
-    )
-
-
 def apply_fixes() -> list[str]:
     """Apply safe local fixes only."""
     fixed: list[str] = []
@@ -463,6 +445,7 @@ def apply_fixes() -> list[str]:
 
 def run_checks() -> list[CheckResult]:
     """Run all doctor checks in display order."""
+    from core.cli.commands.doctor_migrations import check_migrations_mode
     from core.cli.commands.doctor_plugin_checks import (
         check_plugin_dependencies,
         check_plugin_frontends,

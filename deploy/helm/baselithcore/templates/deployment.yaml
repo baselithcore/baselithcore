@@ -104,6 +104,7 @@ spec:
             - name: TRUSTED_HOSTS
               value: {{ include "baselithcore.trustedHostsWithPodIP" . | quote }}
             {{- end }}
+            {{- include "baselithcore.inferenceEnv" . | trim | nindent 12 }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

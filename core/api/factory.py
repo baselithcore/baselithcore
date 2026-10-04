@@ -36,6 +36,7 @@ from core.middleware.security import (
     require_user,
 )
 from core.middleware.tenant import TenantMiddleware
+from core.middleware.unhandled_error import UnhandledErrorMiddleware
 from core.observability.logging import ensure_configured
 from core.plugin_updates.api import router as plugin_updates_router
 from core.plugins import apply_plugin_app_middleware, backstage_exporter_router
@@ -177,9 +178,11 @@ def create_app() -> FastAPI:
     )
 
     # NOTE on ordering: Starlette executes middleware in REVERSE registration
-    # order (last added = outermost). Request-ID and the body-size limit are
-    # therefore registered LAST, at the end of this factory, so they wrap
-    # every other layer.
+    # order (last added = outermost). The observability layers (HTTPMetrics,
+    # RequestId, SecurityHeaders) are therefore registered LAST, at the end of
+    # this factory, so they wrap every other layer; the body-size limit sits
+    # just inside CORS, outer to every guard that would otherwise read the
+    # body. ``test_middleware_order`` pins the resulting sequence.
 
     # === Cost Control Middleware (Phase 1) ===
     app.add_middleware(CostControlMiddleware)
@@ -237,8 +240,10 @@ def create_app() -> FastAPI:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
     # === Request body size limit (DoS protection) ===
-    # Registered second-to-last = second-outermost: oversized bodies are
-    # rejected before any other middleware (auth, quotas, gzip) does work.
+    # Registered outer to every guard and stateful layer: oversized bodies are
+    # rejected before any of them (auth, quotas, gzip) does work. Inner only
+    # to the catch-all, CORS and the observability layers, which never read
+    # the body.
     # ``getattr`` keeps the factory compatible with legacy test doubles that
     # stub ``get_security_config`` with a partial namespace; falls back to a
     # 10 MiB default that matches the config.
@@ -246,6 +251,13 @@ def create_app() -> FastAPI:
         RequestSizeLimitMiddleware,
         max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
     )
+    # === Catch-all 500 (pure ASGI) ===
+    # Inside CORS, SecurityHeaders and RequestId, outer to everything that can
+    # raise: an unhandled exception is rendered as problem+json *with* the
+    # request id, the security headers and the CORS grant, then re-raised so
+    # Starlette's own ServerErrorMiddleware still propagates it to the server.
+    app.add_middleware(UnhandledErrorMiddleware)
+
     # === CORS (outer to every perimeter guard, inner to SecurityHeaders) ===
     # Registered after the guards = OUTER to all of them. A browser can only
     # read a response it is allowed to read: with CORS inside the guards, a

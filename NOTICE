@@ -1,0 +1,46 @@
+BaselithCore
+Copyright (c) 2026 The BaselithCore Authors
+
+"The BaselithCore Authors" means the individuals who hold copyright in this
+work: its principal author, Gippo <baselith.ai@gmail.com>, and every
+contributor credited for a contribution in the project's version-control
+history. Each keeps the copyright in their own contribution.
+
+BaselithCore is licensed under the GNU Affero General Public License, version
+3.0 only (see LICENSE), with the additional permission for plugins set out in
+LICENSE.exception, and with the additional term below.
+
+===============================================================================
+ADDITIONAL TERM UNDER AGPL SECTION 7(b) — AUTHOR ATTRIBUTION
+===============================================================================
+
+As section 7(b) of the AGPL allows, the following author attribution is a term
+of the license of this work, and of every copy or modified version of it:
+
+  (a) PRESERVE THIS FILE. Every copy of the work, or of a modified version of
+      it, that you convey in source or object form, or make available to users
+      over a computer network under AGPL section 13, must carry this NOTICE
+      file unaltered, except that you may add your own notices to it.
+
+  (b) ATTRIBUTE IN THE LEGAL NOTICES. If a work that contains the Framework,
+      or a modified version of it, displays Appropriate Legal Notices (AGPL
+      section 0) — for example an "About", "Legal" or "Credits" screen or
+      page — those notices must include the following attribution, or a
+      substantially equivalent one:
+
+          Based on BaselithCore by The BaselithCore Authors,
+          licensed under AGPL-3.0-only — https://github.com/baselithcore/baselithcore
+
+  (c) NO ENDORSEMENT. This attribution credits authorship. It does not grant
+      any right in the BaselithCore name or logo, and it does not let you
+      suggest that The BaselithCore Authors endorse your product or a modified
+      version.
+
+We also ask — as a request, not a license condition — that a product built on
+BaselithCore mention it in its documentation.
+
+"Framework" has the meaning given in LICENSE.exception. A Plugin conveyed
+under LICENSE.exception owes the notice of that file's section 3(c), not the
+attribution in (b), unless it also conveys the Framework.
+
+Commercial licensing enquiries: baselith.ai@gmail.com

@@ -18,8 +18,8 @@ The fix has two halves and needs both:
 
 :func:`csv_list` still accepts a JSON array, because deployments configured
 against the previous behaviour have one in their environment (``.env.example``
-itself ships ``TRUSTED_HOSTS=["app.example.com"]``) and ``NoDecode`` would
-otherwise hand them ``['["app.example.com"]']``.
+itself ships ``TRUSTED_HOSTS=["localhost","127.0.0.1"]``) and ``NoDecode``
+would otherwise hand them ``['["localhost","127.0.0.1"]']``.
 """
 
 from __future__ import annotations

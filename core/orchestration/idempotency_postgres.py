@@ -25,7 +25,7 @@ holding it. :meth:`PostgresToolLedger.lookup` is for the operator surface
 round trips *and* a race.
 
 Schema ownership: ``tool_invocations`` is created by
-``migrations/versions/009_tool_invocations.py`` and by nothing else. This module
+``core/db/migrations/versions/009_tool_invocations.py`` and by nothing else. This module
 runs no DDL — the policy in :mod:`core.db.ddl` is that Alembic owns every table,
 and a table introduced after that policy has no legacy self-init path to keep.
 A deployment that has not run migrations therefore sees an ordinary "relation

@@ -43,12 +43,31 @@ def _write_env_file(path: Path, text: str) -> None:
     os.chmod(path, _ENV_FILE_MODE)
 
 
+#: The local-development profile: what ``baselith config env`` merges into an
+#: existing ``.env`` and what ``baselith init`` writes into a new project's.
+#: Every key here is one a fresh install needs to *start* on a laptop:
+#:
+#: * ``APP_ENV=development`` — an undeclared environment is assumed to be
+#:   production as soon as auth is enforced (the default), and production
+#:   refuses to boot without a ``TRUSTED_HOSTS`` perimeter, JWT claim binding
+#:   and a reachable, password-protected database.
+#: * ``TRUSTED_HOSTS`` / ``HOST`` — validate the Host header for the loopback
+#:   names and bind loopback only, so a laptop's dev server is not on the LAN.
+#: * ``LLM_PROVIDER=ollama`` — the one provider that needs no API key. Naming
+#:   it explicitly is what the LLM preflight asks for; ``LLM_MODEL`` matches
+#:   the package default so ``ollama pull`` hints line up.
+#:
+#: ``SECRET_KEY`` and ``DB_PASSWORD`` are not here: they are generated fresh
+#: (``secrets.token_urlsafe``) for every file, never shipped as a value.
 DEV_DEFAULTS = {
     "APP_ENV": "development",
     "CORE_DEBUG": "true",
-    "CORE_PLUGIN_DIR": "./plugins",
     "CORE_DATA_DIR": "./data",
-    "CORE_DOCUMENTS_DIR": "./documents",
+    "HOST": "127.0.0.1",
+    "PORT": "8000",
+    "TRUSTED_HOSTS": '["localhost","127.0.0.1","[::1]"]',
+    "LLM_PROVIDER": "ollama",
+    "LLM_MODEL": "llama3.2",
     "POSTGRES_ENABLED": "true",
     "DB_HOST": "localhost",
     "DB_PORT": "5432",
@@ -132,17 +151,39 @@ DOCKER_CORE_DEFAULTS = {
 }
 
 
-def ensure_dev_env(env_path: Path | None = None) -> list[str]:
-    """Ensure the root ``.env`` has portable developer defaults."""
+def ensure_dev_env(
+    env_path: Path | None = None, *, seed: str | None = None
+) -> list[str]:
+    """Ensure a ``.env`` has portable developer defaults.
+
+    Adds every :data:`DEV_DEFAULTS` key the file lacks (or leaves blank) and
+    replaces a blank or placeholder ``SECRET_KEY``/``DB_PASSWORD`` with a
+    freshly generated one. A value the file already sets is never changed, so
+    running it again is a no-op.
+
+    Args:
+        env_path: The file to create or normalize; ``./.env`` by default.
+        seed: Text a *new* file starts from. ``None`` copies the working
+            directory's ``.env.example`` (or ``configs/.env.base``) — the
+            behaviour a repository checkout wants — and an explicit seed is
+            how ``baselith init`` keeps a checkout's template out of a new
+            project.
+
+    Returns:
+        The keys that were added or generated.
+    """
     path = env_path or Path.cwd() / ".env"
     if not path.exists():
-        source = Path.cwd() / ".env.example"
-        if not source.exists():
-            source = Path.cwd() / "configs" / ".env.base"
-        if source.exists():
-            _write_env_file(path, source.read_text(encoding="utf-8"))
+        if seed is not None:
+            _write_env_file(path, seed)
         else:
-            _write_env_file(path, "")
+            source = Path.cwd() / ".env.example"
+            if not source.exists():
+                source = Path.cwd() / "configs" / ".env.base"
+            if source.exists():
+                _write_env_file(path, source.read_text(encoding="utf-8"))
+            else:
+                _write_env_file(path, "")
 
     lines = path.read_text(encoding="utf-8").splitlines()
     values = _parse_env(lines)
@@ -173,6 +214,33 @@ def ensure_dev_env(env_path: Path | None = None) -> list[str]:
     if changed:
         _write_env_file(path, "\n".join(lines).rstrip() + "\n")
     return changed
+
+
+def write_project_env(
+    path: Path, header: str = "", *, force: bool = False
+) -> list[str]:
+    """Write a new project's ``.env`` from the development profile.
+
+    The same profile ``baselith config env`` applies (:func:`ensure_dev_env`),
+    starting from *header* instead of a checkout's ``.env.example``.
+
+    Args:
+        path: The ``.env`` to create; written ``0600``.
+        header: Comment block the file starts with.
+        force: Replace an existing file. Without it an existing ``.env`` is
+            refused: it may hold the only copy of a credential.
+
+    Returns:
+        The keys written.
+
+    Raises:
+        FileExistsError: *path* exists and *force* is false.
+    """
+    if path.exists():
+        if not force:
+            raise FileExistsError(f"{path} already exists; refusing to overwrite it")
+        path.unlink()
+    return ensure_dev_env(path, seed=header)
 
 
 def ensure_docker_core_env(env_path: Path | None = None) -> list[str]:
@@ -285,4 +353,10 @@ def _set_env_value(lines: list[str], key: str, value: str) -> tuple[list[str], b
     return updated, replaced
 
 
-__all__ = ["ensure_dev_env", "ensure_docker_core_env", "set_docker_core_image"]
+__all__ = [
+    "DEV_DEFAULTS",
+    "ensure_dev_env",
+    "ensure_docker_core_env",
+    "set_docker_core_image",
+    "write_project_env",
+]

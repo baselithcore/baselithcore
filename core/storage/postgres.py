@@ -80,7 +80,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
 
         Skipped when ``DB_RUNTIME_DDL`` is off (the production default): the
         ``interactions``/``feedback`` schema is owned by
-        ``migrations/versions/001_initial_schema.py`` and applied by the
+        ``core/db/migrations/versions/001_initial_schema.py`` and applied by the
         migrations job, so the runtime role needs no DDL rights.
         """
         if skip_runtime_ddl("interaction storage", "interactions, feedback"):

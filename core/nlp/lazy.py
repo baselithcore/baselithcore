@@ -140,6 +140,16 @@ class LazyEmbedder(_LazyModel):
             return await model.encode(*args, **kwargs)
         return await run_inference(lambda: model.encode(*args, **kwargs))
 
+    async def encode_query(self, sentences: Any, **kwargs: Any) -> Any:
+        """Embed the search side with the underlying model (loaded if needed).
+
+        Delegates to :func:`core.nlp.roles.aencode_query`, so the model's own
+        ``encode_query`` is used when it has one and ``encode`` otherwise.
+        """
+        from core.nlp.roles import aencode_query
+
+        return await aencode_query(await self.aload(), sentences, **kwargs)
+
 
 class LazyReranker(_LazyModel):
     """Cross-encoder stand-in whose model is built on the first ``predict``.

@@ -25,7 +25,12 @@ ensure_configured()
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # ``disable_existing_loggers`` defaults to True, which would set
+    # ``disabled = True`` on every logger that already exists in the process.
+    # Alembic runs inside the app here (plugin load, CLI, tests), not in a
+    # fresh interpreter, so the default silences the whole application's
+    # logging for the rest of the process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = None
 

@@ -86,7 +86,7 @@ services:
     restart: unless-stopped
 
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.1
     ports:
       - '127.0.0.1:${BASELITH_QDRANT_PORT:-6333}:6333'
     volumes:

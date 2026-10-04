@@ -12,8 +12,13 @@ from typing import Any, Protocol
 import httpx
 
 from core.config.inference import RerankConfig, get_rerank_config
-from core.services.inference._http import RemoteClient
-from core.services.inference.errors import InferenceConfigError, InferenceError
+from core.services.inference._http import RemoteClient, tls_context
+from core.services.inference._protocols import (
+    RERANK_PATHS,
+    parse_scores,
+    rerank_payload,
+)
+from core.services.inference.errors import InferenceConfigError
 
 
 class RerankBackend(Protocol):
@@ -25,7 +30,7 @@ class RerankBackend(Protocol):
 
 
 class RemoteRerankBackend:
-    """TEI ``/rerank`` client; returns scores in input order."""
+    """HTTP client for the configured rerank protocol; scores in input order."""
 
     def __init__(
         self,
@@ -44,27 +49,22 @@ class RemoteRerankBackend:
             max_retries=config.max_retries,
             backoff_base=config.backoff_base,
             api_key=config.api_key.get_secret_value() if config.api_key else None,
+            max_total_seconds=config.max_total_seconds,
+            max_response_bytes=config.max_response_bytes,
+            retry_rate_limited=config.retry_rate_limited,
+            allow_insecure_key=config.allow_insecure_key,
+            verify=tls_context(config.ca_bundle, config.client_cert, config.client_key),
             transport=transport,
         )
+        self._api = config.api
+        self._model = config.model
+        self._path = config.path or RERANK_PATHS[config.api]
 
     async def score(self, query: str, texts: list[str]) -> list[float]:
         body = await self._http.post_json(
-            "/rerank",
-            {"query": query, "texts": texts, "raw_scores": False, "truncate": True},
+            self._path, rerank_payload(self._api, self._model, query, texts)
         )
-        if not isinstance(body, list):
-            raise InferenceError("/rerank returned a non-list body")
-        scores = [0.0] * len(texts)
-        seen = 0
-        for row in body:
-            idx = int(row["index"])
-            if not 0 <= idx < len(texts):
-                raise InferenceError(f"/rerank returned out-of-range index {idx}")
-            scores[idx] = float(row["score"])
-            seen += 1
-        if seen != len(texts):
-            raise InferenceError(f"/rerank scored {seen} of {len(texts)} texts")
-        return scores
+        return parse_scores(self._api, body, len(texts))
 
     async def aclose(self) -> None:
         await self._http.aclose()

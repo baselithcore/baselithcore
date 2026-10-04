@@ -6,8 +6,8 @@ Run with: ``python -m pytest --import-mode=importlib plugins/example-plugin/test
 
 The plugin package is loaded through ``PluginLoader`` (the directory name
 contains a hyphen, so it is not importable with a plain ``import`` statement).
-``initialize`` is skipped at load time because the example plugin opens a
-PostgreSQL pool in ``initialize()``; the initialization test patches that out.
+``initialize`` is skipped at load time; it does no database work (the pool
+opens lazily and the schema is created by ``init_schema`` at deploy time).
 """
 
 from pathlib import Path
@@ -134,3 +134,40 @@ async def test_plugin_registration(monkeypatch: pytest.MonkeyPatch):
 
     assert "example-plugin" in registry
     assert registry.get("example-plugin") is plugin
+
+
+async def test_initialize_does_no_database_work(monkeypatch: pytest.MonkeyPatch):
+    """Serving-process init must not block boot on the database.
+
+    Schema work is deploy-time (``init_schema`` / ``baselith plugin
+    schema-init``); the pool opens lazily on first use. With PostgreSQL down,
+    a schema step in ``initialize`` held boot for a full pool timeout.
+    """
+    plugin = await _load_plugin()
+    persistence = __import__(
+        f"{type(plugin).__module__.rsplit('.', 1)[0]}.persistence",
+        fromlist=["init_pool", "ensure_schema"],
+    )
+    init_pool = AsyncMock()
+    ensure_schema = AsyncMock()
+    monkeypatch.setattr(persistence, "init_pool", init_pool)
+    monkeypatch.setattr(persistence, "ensure_schema", ensure_schema)
+
+    await plugin.initialize({})
+
+    init_pool.assert_not_awaited()
+    ensure_schema.assert_not_awaited()
+
+
+async def test_init_schema_creates_the_tables(monkeypatch: pytest.MonkeyPatch):
+    plugin = await _load_plugin()
+    persistence = __import__(
+        f"{type(plugin).__module__.rsplit('.', 1)[0]}.persistence",
+        fromlist=["ensure_schema"],
+    )
+    ensure_schema = AsyncMock()
+    monkeypatch.setattr(persistence, "ensure_schema", ensure_schema)
+
+    await plugin.init_schema({})
+
+    ensure_schema.assert_awaited_once()

@@ -211,6 +211,14 @@ core/utils/
     blocked the event loop with a sync embedder or raised `TypeError` inside a
     broad `except` — silently degrading recall to keyword search.
 
+!!! note "Queries are embedded as queries"
+    The search side (`_embed_query`, the provider search paths) embeds the
+    query text through `core.nlp.roles.aencode_query`. It calls the
+    embedder's `encode_query` when the embedder defines one, so
+    `BASELITH_EMBEDDING_QUERY_PREFIX` applies to queries and the document
+    prefix applies only to stored items. Embedders without `encode_query`
+    keep the plain `encode` behaviour. See [NLP](nlp.md).
+
 ---
 
 ## AgentMemory

@@ -165,9 +165,11 @@ def test_affects_ranges() -> None:
     assert not affects(adv(">= 1.0.0, < 1.0.4"), "0.9.0")
     assert affects(adv("= 1.2.3"), "1.2.3")
     assert not affects(adv("= 1.2.3"), "1.2.4")
-    assert not affects(adv("garbage ~~"), "1.0.0")
-    assert not affects(adv(""), "1.0.0")
-    assert not affects(adv("< 2.0.0"), "not-a-version")
+    # Unreadable range or version: the advisory cannot be ruled out, so it
+    # counts (uncertain) rather than silently vanishing from the notice.
+    assert affects(adv("garbage ~~"), "1.0.0")
+    assert affects(adv(""), "1.0.0")
+    assert affects(adv("< 2.0.0"), "not-a-version")
 
 
 def test_old_cache_json_loads_without_system() -> None:
@@ -231,3 +233,12 @@ async def test_no_carry_over_after_upgrade() -> None:
         "1.16.0", "o/r", source=_source(REL, adv_status=503), previous=prior
     )
     assert not res.security and res.advisories == [] and not res.available
+
+
+def test_advisory_without_a_range_is_kept_not_dropped() -> None:
+    from core.plugin_updates._advisories import parse_advisory
+
+    entry = _adv("GHSA-9", "high", "")
+    entry["vulnerabilities"][0]["vulnerable_version_range"] = None
+    advs = parse_advisory(entry)
+    assert [a.ghsa_id for a in advs] == ["GHSA-9"] and advs[0].vulnerable_range == ""

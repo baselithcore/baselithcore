@@ -7,7 +7,8 @@ not human-chosen passwords, and the lookup runs on every authenticated
 request, where a password KDF would add latency and buy nothing.
 
 Password *storage* is a different problem and lives elsewhere — see
-``core/auth`` for the argon2/bcrypt paths that handle operator credentials.
+``core/middleware/_admin_credentials.py`` for the PBKDF2 path that handles
+the operator credential.
 """
 
 from __future__ import annotations

@@ -681,6 +681,14 @@ periods so intermediaries do not drop a long-lived stream.
 `notifications/cancelled` on this transport. A client that disconnects has its
 work cancelled rather than left running.
 
+**Streams end on the drain signal.** A `subscriptions/listen` stream only ends
+when the client leaves, so it races its queue against
+[`wait_for_drain()`](lifecycle.md): on the first `SIGTERM`/`SIGINT` the frames
+already queued are flushed and the stream ends, instead of holding a rolling
+restart until uvicorn's `--timeout-graceful-shutdown` cancels it. The work
+behind the stream is cancelled as for a disconnect; the client re-issues the
+request against the next replica.
+
 ---
 
 ## Structure

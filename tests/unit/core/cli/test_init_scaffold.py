@@ -58,6 +58,99 @@ class TestOnlyWorkingTemplatesAreOffered:
         assert run_init(project_name="demo", template="baselith-core") == 1
         assert not (tmp_path / "demo").exists()
 
+    def test_help_offers_exactly_the_available_templates(self) -> None:
+        import argparse
+
+        from core.cli.commands.init import register_parser
+
+        parser = argparse.ArgumentParser()
+        init = register_parser(parser.add_subparsers(), argparse.HelpFormatter)
+        action = next(a for a in init._actions if a.dest == "template")
+        assert list(action.choices or []) == available_templates()
+        for dead in ("full", "chat-only", "baselith-core"):
+            assert dead not in (action.choices or [])
+
+    def test_checkout_templates_found_outside_the_checkout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from core.cli.commands.init import templates_root
+
+        checkout_templates = Path(__file__).resolve().parents[4] / "templates"
+        monkeypatch.chdir(tmp_path)
+        assert templates_root() == checkout_templates
+        assert "rag-system" in available_templates()
+
+    def test_wheel_install_finds_the_packaged_templates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wheel ships the starters inside the package, not as ``templates/``."""
+        from core.cli.commands import init
+
+        packaged = tmp_path / "site" / "core" / "cli" / "scaffold_templates"
+        (packaged / "rag-system").mkdir(parents=True)
+        (packaged / "rag-system" / "README.md").write_text("# {project_name}\n")
+        (packaged / "rag-system" / "main.py").write_text("print('hi')\n")
+        # pip byte-compiles every .py it installs, templates included.
+        (packaged / "rag-system" / "__pycache__").mkdir()
+        (packaged / "rag-system" / "__pycache__" / "main.cpython-312.pyc").write_bytes(
+            b"\xcb\x0d\x0d\x0a"
+        )
+        monkeypatch.setattr(init, "PACKAGED_TEMPLATES", packaged)
+        monkeypatch.setattr(init, "CHECKOUT_TEMPLATES", tmp_path / "absent")
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+
+        assert init.templates_root() == packaged
+        assert init.available_templates() == ["minimal", "rag-system"]
+        assert run_init(project_name="demo", template="rag-system") == 0
+        assert (work / "demo" / "README.md").read_text() == "# demo\n"
+        assert not (work / "demo" / "__pycache__").exists()
+
+    def test_a_checkout_in_the_cwd_wins_over_the_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from core.cli.commands import init
+
+        packaged = tmp_path / "pkg"
+        packaged.mkdir()
+        (tmp_path / "core").mkdir()
+        (tmp_path / "templates").mkdir()
+        monkeypatch.setattr(init, "PACKAGED_TEMPLATES", packaged)
+        monkeypatch.chdir(tmp_path)
+
+        assert init.templates_root() == tmp_path / "templates"
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        (
+            PROJECT_TEMPLATES["minimal"]["files"],
+            ["install -e .", "compose up -d", "pull llama3.2", "run", "-m app.agent"],
+        ),
+        (
+            {"requirements.txt": "", "main.py": ""},
+            ["-r requirements.txt", "pull llama3.2", "main.py"],
+        ),
+        ({"requirements.txt": "", "README.md": ""}, ["-r requirements.txt"]),
+        (
+            {"pyproject.toml": "", "backend.py": ""},
+            ["install -e .", "pull llama3.2", "run"],
+        ),
+        ({"agent.py": ""}, ["agent.py"]),
+    ],
+)
+def test_next_steps_fit_the_template(
+    files: dict[str, str], expected: list[str]
+) -> None:
+    from core.cli.commands.init_setup import next_steps
+
+    steps = next_steps(files)
+    assert len(steps) == len(expected)
+    for step, fragment in zip(steps, expected, strict=True):
+        assert fragment in step
+
 
 class TestGeneratedProject:
     def test_it_depends_on_the_framework(self, project: Path) -> None:

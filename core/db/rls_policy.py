@@ -34,6 +34,7 @@ from contextlib import contextmanager
 from core.db.session_setup import SYSTEM_TENANT_ID
 
 __all__ = [
+    "ForeignTenantKeyError",
     "TENANT_POLICY_NAME",
     "TENANT_POLICY_PREDICATE",
     "row_tenant_scope",
@@ -106,6 +107,10 @@ def tenant_isolation_ddl(tables: Iterable[str]) -> str:
     return "".join(_table_ddl(name) for name in names)
 
 
+class ForeignTenantKeyError(ValueError):
+    """``row_tenant_scope`` was handed a key no bound identity derives to."""
+
+
 @contextmanager
 def row_tenant_scope(tenant_key: str) -> Iterator[None]:
     """Make database work in this block run under *tenant_key*.
@@ -128,10 +133,16 @@ def row_tenant_scope(tenant_key: str) -> Iterator[None]:
     Raises:
         core.context.ReservedTenantError: *tenant_key* is a reserved id that is
             not the currently bound tenant.
+        ForeignTenantKeyError: *tenant_key* is neither the bound tenant nor
+            the bound user's id — the only two keys
+            :func:`core.context.resolve_plugin_tenant_key` can produce. A
+            plugin cannot pick another tenant's rows by passing its id.
     """
     from core.context import (
         bind_principal_tenant,
+        get_current_user_id,
         get_tenant_or_default,
+        is_reserved_tenant,
         reset_tenant_context,
         tenant_is_bound,
     )
@@ -139,6 +150,11 @@ def row_tenant_scope(tenant_key: str) -> Iterator[None]:
     if not tenant_is_bound() or tenant_key == get_tenant_or_default():
         yield
         return
+    if not is_reserved_tenant(tenant_key) and tenant_key != get_current_user_id():
+        raise ForeignTenantKeyError(
+            "row_tenant_scope only binds a key derived from the bound identity "
+            "(the tenant, or the user id under personal tenancy)"
+        )
     token = bind_principal_tenant(tenant_key)
     try:
         yield

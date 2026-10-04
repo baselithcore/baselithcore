@@ -143,7 +143,8 @@ async def test_bearer_header_sent() -> None:
         return httpx.Response(200, json=[[0.0, 0.0, 0.0]])
 
     svc = EmbeddingService.from_config(
-        _emb_cfg(api_key="s3cret"), transport=httpx.MockTransport(handler)
+        _emb_cfg(url="https://tei", api_key="s3cret"),
+        transport=httpx.MockTransport(handler),
     )
     await svc.embed_query("x")
     assert got["auth"] == "Bearer s3cret"
@@ -178,3 +179,130 @@ async def test_rerank_incomplete_scores_raise() -> None:
     )
     with pytest.raises(InferenceError, match="scored 1 of 2"):
         await svc.rerank("q", ["a", "b"], top_k=2)
+
+
+# ── Transport hardening ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "url", ["http://tei.internal:8080", "http://api.example.com", "http://10.0.0.5:80"]
+)
+def test_bearer_over_plain_http_to_a_possibly_public_host_is_refused(url: str) -> None:
+    with pytest.raises(InferenceConfigError, match="https"):
+        EmbeddingService.from_config(_emb_cfg(url=url, api_key="s3cret"))
+    with pytest.raises(InferenceConfigError, match="https"):
+        RerankService.from_config(_rr_cfg(url=url, api_key="s3cret"))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://tei",
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://[::1]:80",
+        "http://tei-embed:8080",  # compose service / same-namespace Service
+        "http://rel-tei-embed.ml.svc:80",  # chart: <release>-tei-embed.<ns>.svc
+        "http://rel-tei-rerank.ml.svc.cluster.local",
+    ],
+)
+def test_bearer_over_https_loopback_or_cluster_internal_is_accepted(url: str) -> None:
+    svc = EmbeddingService.from_config(_emb_cfg(url=url, api_key="s3cret"))
+    assert svc is not None
+
+
+def test_insecure_key_is_an_explicit_opt_out() -> None:
+    cfg = _emb_cfg(
+        url="http://api.example.com", api_key="s3cret", allow_insecure_key=True
+    )
+    assert EmbeddingService.from_config(cfg) is not None
+    assert EmbeddingConfig().allow_insecure_key is False
+
+
+def test_plain_http_without_a_key_is_still_fine() -> None:
+    EmbeddingService.from_config(_emb_cfg(url="http://tei"))
+
+
+def test_environment_proxies_are_ignored() -> None:
+    svc = EmbeddingService.from_config(
+        _emb_cfg(), transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    )
+    assert svc._backend._http._client.trust_env is False  # type: ignore[attr-defined]
+
+
+async def test_429_is_not_retried_by_default() -> None:
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, text="queue full")
+
+    svc = EmbeddingService.from_config(
+        _emb_cfg(), transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(InferenceError, match="429"):
+        await svc.embed_query("x")
+    assert calls["n"] == 1
+
+
+async def test_429_retry_is_an_explicit_opt_in() -> None:
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, json=[[1.0, 0.0, 0.0]])
+
+    svc = EmbeddingService.from_config(
+        _emb_cfg(retry_rate_limited=True), transport=httpx.MockTransport(handler)
+    )
+    assert await svc.embed_query("x") == [1.0, 0.0, 0.0]
+    assert calls["n"] == 2
+
+
+async def test_upstream_body_is_not_echoed_into_the_error() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text="internal path /srv/models/leak")
+
+    svc = EmbeddingService.from_config(
+        _emb_cfg(), transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(InferenceError) as info:
+        await svc.embed_query("x")
+    assert "400" in str(info.value) and "leak" not in str(info.value)
+
+
+async def test_oversize_response_is_refused() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[[0.123456] * 400])
+
+    svc = EmbeddingService.from_config(
+        _emb_cfg(max_response_bytes=1024), transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(InferenceError, match="larger than 1024"):
+        await svc.embed_query("x")
+
+
+async def test_retries_stop_at_the_total_budget() -> None:
+    import asyncio
+
+    calls = {"n": 0}
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        await asyncio.sleep(0.03)
+        return httpx.Response(503)
+
+    svc = EmbeddingService.from_config(
+        _emb_cfg(max_retries=10, timeout=5.0, max_total_seconds=0.05),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(InferenceError, match="budget"):
+        await svc.embed_query("x")
+    assert 1 <= calls["n"] <= 3
+
+
+def test_retry_budget_default_stays_under_the_edge_timeout() -> None:
+    assert EmbeddingConfig().max_total_seconds < 60
+    assert RerankConfig().max_total_seconds < 60

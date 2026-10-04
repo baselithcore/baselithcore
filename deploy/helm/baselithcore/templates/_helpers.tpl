@@ -246,12 +246,28 @@ In-cluster URL of a chart-deployed TEI server. `kind` is "embed" or "rerank".
 {{- end -}}
 
 {{/*
+Name of the release's own Qdrant (StatefulSet, Service, NetworkPolicy).
+*/}}
+{{- define "baselithcore.qdrantName" -}}
+{{- printf "%s-qdrant" (include "baselithcore.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
 Inference endpoints for the ConfigMap (api and worker consume it via envFrom).
 A key already in `.Values.config` wins, so an operator can point at their own
 servers by hand without turning the chart's TEI off first.
 */}}
 {{- define "baselithcore.inferenceConfigData" -}}
-{{- if and .Values.inference.qdrant.url (not (hasKey .Values.config "BASELITH_QDRANT_URL")) }}
+{{- if .Values.qdrant.enabled }}
+{{- $qhost := include "baselithcore.qdrantName" . }}
+{{- if not (hasKey .Values.config "BASELITH_QDRANT_URL") }}
+BASELITH_QDRANT_URL: {{ printf "http://%s:6333" $qhost | quote }}
+{{- end }}
+{{- if not (hasKey .Values.config "VECTORSTORE_HOST") }}
+VECTORSTORE_HOST: {{ $qhost | quote }}
+{{- end }}
+{{- end }}
+{{- if and (not .Values.qdrant.enabled) .Values.inference.qdrant.url (not (hasKey .Values.config "BASELITH_QDRANT_URL")) }}
 BASELITH_QDRANT_URL: {{ .Values.inference.qdrant.url | quote }}
 {{- end }}
 {{- if .Values.inference.tei.enabled }}
@@ -260,6 +276,41 @@ BASELITH_EMBEDDING_URL: {{ printf "http://%s:80" (include "baselithcore.teiName"
 {{- end }}
 {{- if not (hasKey .Values.config "BASELITH_RERANK_URL") }}
 BASELITH_RERANK_URL: {{ printf "http://%s:80" (include "baselithcore.teiName" (dict "root" . "kind" "rerank")) | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Image reference of a chart-deployed TEI server: digest wins over tag, like
+`baselithcore.image`.
+*/}}
+{{- define "baselithcore.teiImage" -}}
+{{- $image := .Values.inference.tei.image -}}
+{{- if $image.digest -}}
+{{- if not (hasPrefix "sha256:" $image.digest) -}}
+{{- fail (printf "inference.tei.image.digest must be a full digest starting with 'sha256:'; got %q" $image.digest) -}}
+{{- end -}}
+{{- printf "%s@%s" $image.repository $image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $image.repository $image.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Container env the api and worker pods need to authenticate to the chart's
+TEI servers. Empty unless `inference.tei.apiKeySecret.name` is set; the same
+Secret key feeds TEI's own API_KEY (tei.yaml), so the two cannot drift.
+Rendered as `env` entries, which win over the envFrom ConfigMap/Secret.
+*/}}
+{{- define "baselithcore.inferenceEnv" -}}
+{{- $tei := .Values.inference.tei -}}
+{{- if and $tei.enabled $tei.apiKeySecret.name }}
+{{- range $var := list "BASELITH_EMBEDDING_API_KEY" "BASELITH_RERANK_API_KEY" }}
+- name: {{ $var }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $tei.apiKeySecret.name | quote }}
+      key: {{ $tei.apiKeySecret.key | quote }}
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -344,6 +395,8 @@ initContainers:
     imagePullPolicy: {{ .Values.image.pullPolicy }}
     securityContext:
       {{- toYaml .Values.securityContext | nindent 6 }}
+    resources:
+      {{- toYaml .Values.seedResources | nindent 6 }}
     command:
       - sh
       - -c

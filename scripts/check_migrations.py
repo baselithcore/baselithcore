@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Destructive-migration gate for ``migrations/versions/``.
+"""Destructive-migration gate for ``core/db/migrations/versions/``.
 
 ``DROP TABLE`` and ``DROP COLUMN`` inside ``upgrade()`` are irreversible the
 moment the migration runs: the rows are gone before anyone notices the mistake,
@@ -42,7 +42,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Default tree to scan, relative to the repository root.
-MIGRATIONS_DIR = REPO_ROOT / "migrations"
+MIGRATIONS_DIR = REPO_ROOT / "core" / "db" / "migrations"
 
 #: Opt-out marker. A reason should follow it.
 ALLOW_MARKER = "migration-guard: allow-drop"

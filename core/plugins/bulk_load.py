@@ -14,6 +14,8 @@ from core.observability.logging import get_logger
 from core.plugins.init_scope import plugin_init_scope
 from core.utils.logsafe import sanitize_log_value
 
+from .config_file import plugin_enabled
+from .discovery import is_bundled_install_dir
 from .integrity import enforce_signing_policy
 from .interface import Plugin
 from .load_gates import compat_gate, config_gate
@@ -38,9 +40,6 @@ async def _instantiate_all(
     instantiated: dict[str, Plugin] = {}
     configs_by_name: dict[str, dict[str, Any]] = {}
 
-    # If configs are provided, we only load plugins listed there.
-    filter_by_config = len(configs) > 0
-
     for plugin_dir in plugin_dirs:
         # One broken plugin must never abort the tree. Everything in the body
         # can raise on hostile input — ``discover_plugin`` reads a manifest,
@@ -52,7 +51,6 @@ async def _instantiate_all(
                 loader,
                 plugin_dir,
                 configs,
-                filter_by_config=filter_by_config,
                 instantiated=instantiated,
                 configs_by_name=configs_by_name,
             )
@@ -72,7 +70,6 @@ async def _instantiate_one(
     plugin_dir: Any,
     configs: dict[str, dict[str, Any]],
     *,
-    filter_by_config: bool,
     instantiated: dict[str, Plugin],
     configs_by_name: dict[str, dict[str, Any]],
 ) -> None:
@@ -86,18 +83,21 @@ async def _instantiate_one(
     discovery = loader.resource_analyzer.discover_plugin(plugin_dir)
     plugin_name = discovery.name if discovery else plugin_dir.name
     safe_name = sanitize_log_value(plugin_name)
-    config_key = None
-
-    if filter_by_config:
-        config_key = loader.match_config_key(configs, plugin_dir.name, plugin_name)
-        if config_key is None:
-            logger.debug(f"Skipping plugin {safe_name} (not in config)")
-            return
-
-        plugin_config = configs[config_key]
-        if not plugin_config.get("enabled", True):
-            logger.info(f"Skipping disabled plugin {safe_name}")
-            return
+    # The shared enable-list rule; a plugin shipped inside the installed
+    # wheel is opt-in even when the config is empty.
+    if not plugin_enabled(
+        configs,
+        plugin_dir.name,
+        plugin_name,
+        bundled=is_bundled_install_dir(plugin_dir),
+    ):
+        logger.debug(f"Skipping plugin {safe_name} (not enabled)")
+        return
+    config_key = (
+        loader.match_config_key(configs, plugin_dir.name, plugin_name)
+        if configs
+        else None
+    )
 
     plugin = await loader.load_plugin(plugin_dir, initialize=False)
     if plugin:

@@ -75,3 +75,18 @@ def test_off_the_main_thread_it_is_a_no_op() -> None:
     thread.start()
     thread.join()
     assert result == [False]
+
+
+def test_marking_while_the_module_lock_is_held_does_not_deadlock() -> None:
+    """A signal can land while ``_event_for`` holds the lock on this thread."""
+    done = threading.Event()
+
+    def inner() -> None:
+        with drain._lock:
+            drain.mark_draining()  # re-entrant: a plain Lock would hang here
+        done.set()
+
+    worker = threading.Thread(target=inner, daemon=True)
+    worker.start()
+    assert done.wait(timeout=2), "mark_draining deadlocked under the module lock"
+    assert drain.is_draining()

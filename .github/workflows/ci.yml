@@ -75,7 +75,7 @@ concurrency:
 # hosted runners are free for it, ephemeral (a fresh VM per job, so nothing a
 # previous job — or an unreviewed fork pull request — left behind survives),
 # and they ship everything this file assumes rather than installs: Docker for
-# the `python_test` services and the `image_build` assertions, the GH CLI for
+# the `integration_test` and `package_smoke` services and the `image_build` assertions, the GH CLI for
 # `release` and `Plan`, and a `python3` on PATH for `Plan`.
 #
 # Do not point a job at a self-hosted runner. GitHub's own guidance is to never
@@ -820,6 +820,30 @@ jobs:
     timeout-minutes: 20
     needs: [changes, quality_gates]
     if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
+    # The installed-wheel smoke step migrates a real database and boots the app
+    # against it. Images pinned by digest, the tag kept for readability; the
+    # pgvector image is the one integration_test and the compose stack use.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+        env:
+          POSTGRES_DB: smoke_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baselith -d smoke_db"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -844,8 +868,59 @@ jobs:
           export SOURCE_DATE_EPOCH
           echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
           python -m build --no-isolation
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The validator unpacks the wheel and checks it the way an install uses
+      # it: signed plugins verify against their installed copy (PyYAML) and the
+      # packaged migrations load into one head (Alembic). Both are runtime
+      # dependencies, installed from the lock with hashes, not floating.
+      - name: Install locked runtime dependencies
+        run: |
+          uv export --frozen --no-default-groups --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-runtime.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-runtime.txt
       - name: Validate distribution artifacts
         run: python scripts/check_distribution_artifacts.py
+      # Everything above installed the wheel's dependencies from the lock, so
+      # a module the code imports but pyproject.toml never declares was always
+      # there — greenlet, reached only through sqlalchemy[asyncio], shipped
+      # missing exactly that way and broke `baselith db migrate` on a plain
+      # `pip install`. This step installs the wheel the way a user does: a
+      # fresh venv, pip resolving the declared requirements and nothing else.
+      #
+      # Deliberately NOT from the lock and NOT hash-pinned: the question is
+      # what a user's resolver produces today. If an upstream release turns
+      # this red on an untouched tree, users are broken by it too — the signal
+      # is the point, and the fix is a floor or a cap in pyproject.toml.
+      - name: Install the wheel into a clean venv (declared deps only)
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/python -m pip install --no-cache-dir dist/*.whl
+      # import + star import, `baselith --help`, `baselith db migrate` against
+      # the pgvector service, then boot the app under uvicorn and require
+      # /health and /health/ready to answer 200 with the database and Redis
+      # up. The script leaves the checkout first, so nothing resolves from it.
+      - name: Smoke-test the installed wheel
+        env:
+          APP_ENV: development
+          POSTGRES_ENABLED: "true"
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_NAME: smoke_db
+          DB_USER: baselith
+          DB_PASSWORD: password
+          REDIS_URL: redis://127.0.0.1:6379/0
+          CACHE_REDIS_URL: redis://127.0.0.1:6379/1
+          QUEUE_REDIS_URL: redis://127.0.0.1:6379/2
+        run: |
+          SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          export SECRET_KEY
+          /tmp/wheel-venv/bin/python scripts/smoke_installed_wheel.py --require-redis
 
   # ============================================================
   # 🧪 TEST
@@ -938,19 +1013,13 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJSON(needs.changes.outputs.python_versions) }}
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: test_db
-          POSTGRES_USER: baselith
-          POSTGRES_PASSWORD: password
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
+    # No service containers. This run never set BASELITH_TEST_REAL_DB, so
+    # tests/conftest.py mocked psycopg and nothing could reach the Postgres it
+    # used to start (no DB_PASSWORD either); the Redis it started was touched
+    # only by tests that also pass against a refused connection — the whole
+    # suite was verified green with 5432/6379 refused. Real backends are the
+    # `integration_test` job's, below. The localhost URLs stay so a stray
+    # connection is refused at once instead of waiting on DNS for `postgres`.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -994,11 +1063,129 @@ jobs:
           pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.12'
+        # Reporting, not gating: the 78% floor is enforced by pytest in the
+        # step above. `fail_ci_if_error: false` covers Codecov's own API
+        # answers, not the action crashing on the network — a `read
+        # ECONNRESET` while fetching the uploader failed this job on PR #104
+        # after all 11349 tests had passed.
+        continue-on-error: true
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.xml
           fail_ci_if_error: false
+
+  integration_test:
+    # The suite under tests/integration/ against REAL backends: the Postgres
+    # stores (tool ledger, webhooks, skill-evolution patterns), row-level
+    # security under a least-privilege role, pgvector, the Redis event
+    # stream, the Qdrant provider, and the migration upgrade path from every
+    # earlier revision with rows in the tables. python_test runs the same
+    # files with psycopg mocked, where every one of these cases skips.
+    #
+    # BASELITH_TEST_INTEGRATION_STRICT turns a skip under tests/integration/
+    # into a failure (tests/integration/conftest.py): with every backend
+    # started here, a skip means a broken service definition or env wiring,
+    # and the job must not go green while testing nothing.
+    #
+    # One Python: what this job adds is the backends, not the interpreter
+    # matrix, which python_test already covers. Its needs are kept short so it
+    # runs beside python_test instead of after the whole gate chain; `release`
+    # waits on both.
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [changes, quality_gates]
+    if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
+    # Pinned by digest, tag kept for readability. pgvector because the
+    # pgvector provider and the compose stack need the extension; Qdrant
+    # matches the server the Helm chart deploys (values.yaml).
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baselith -d test_db"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      qdrant:
+        # No health-cmd: the image ships neither curl nor wget. The first
+        # step polls /readyz from the runner instead.
+        image: qdrant/qdrant:v1.19.1@sha256:12364fe851b9f17356fc88189fc06d1b521262e04659ec7345975b00c9246a10
+        ports:
+          - 6333:6333
+    env:
+      BASELITH_TEST_REAL_DB: "1"
+      BASELITH_TEST_REAL_REDIS: "1"
+      BASELITH_TEST_REAL_QDRANT: "1"
+      BASELITH_TEST_INTEGRATION_STRICT: "1"
+      BASELITH_TEST_REDIS_URL: redis://localhost:6379/0
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: test_db
+      DB_USER: baselith
+      DB_PASSWORD: password
+      REDIS_URL: redis://localhost:6379/0
+      CACHE_REDIS_URL: redis://localhost:6379/1
+      QUEUE_REDIS_URL: redis://localhost:6379/2
+      VECTORSTORE_HOST: localhost
+      VECTORSTORE_PORT: "6333"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked test dependencies
+        # Same install as python_test: the locked set with hashes, then the
+        # project without deps.
+        run: |
+          uv export --frozen --no-default-groups --group test --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-test.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-test.txt
+          uv pip install --system --no-deps -e .
+      - name: Wait for Qdrant
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:6333/readyz && exit 0
+            sleep 2
+          done
+          echo "::error::Qdrant did not become ready on :6333"
+          exit 1
+      - name: Apply migrations
+        # What an operator runs before the first boot; the suite then works
+        # on the schema the packaged migrations produce, not on tables each
+        # test creates for itself.
+        run: python -m core.db.migrate
+      - name: Run integration suite
+        # tests/core/skill_evolution/test_store_postgres.py is the one
+        # real-database module outside tests/integration/. --no-cov: the
+        # coverage floor belongs to python_test's full run.
+        run: |
+          pytest tests/integration tests/core/skill_evolution/test_store_postgres.py \
+            -m "not slow" --no-cov -q -rs
 
   # ============================================================
   # 🏗️ BUILD
@@ -1294,8 +1481,9 @@ jobs:
     # In `release` mode every gate was skipped because a green pull-request
     # run already passed them on this exact tree; in `full` mode they all ran
     # and python_test waited on them. Either way, nothing upstream may have
-    # failed.
-    needs: [changes, python_test]
+    # failed. integration_test runs beside python_test rather than below it,
+    # so it is named here explicitly.
+    needs: [changes, python_test, integration_test]
     if: ${{ !cancelled() && !failure() && github.ref == 'refs/heads/main' }}
     permissions:
       contents: write

@@ -136,13 +136,15 @@ def test_perimeter_guards_outer_to_stateful_layers():
 #: Outermost -> innermost. Each layer is here for a reason the next one cannot
 #: serve: metrics must see the true end-to-end latency; every response needs a
 #: request id; CSP/HSTS must reach even a preflight; CORS must wrap the guards
-#: so a browser can read their rejections; and the guards themselves run cheap
-#: header compares before anything stateful.
+#: so a browser can read their rejections; the catch-all 500 must be stamped
+#: by all of those, so it sits just inside CORS; and the guards themselves run
+#: cheap header compares before anything stateful.
 EXPECTED_PERIMETER = [
     "HTTPMetricsMiddleware",
     "RequestIdMiddleware",
     "SecurityHeadersMiddleware",
     "CORSMiddleware",
+    "UnhandledErrorMiddleware",
     "RequestSizeLimitMiddleware",
     "TrustedHostMiddleware",
     "CSRFOriginMiddleware",

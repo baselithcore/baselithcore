@@ -19,7 +19,7 @@ The `core/config` module is the **foundation** of BaselithCore's runtime behavio
 **Core Capabilities**:
 
 1. **Lazy Loading** - Configuration objects created only when first accessed, improving startup time
-1. **Single `.env` Parse** - Importing `core.config` loads the repository `.env` into `os.environ` exactly once (`core.config.env.load_project_env`, `override=False` so real env vars win). Config classes no longer declare `env_file`, removing 20+ redundant file parses (~230ms → ~7ms to instantiate all settings classes)
+1. **Single `.env` Parse** - Importing `core.config` loads the `.env` files into `os.environ` exactly once (`core.config.env.load_project_env`, `override=False` so real env vars win): first the `.env` of the **current working directory** — the project being run, and under `pip install` the only one that exists — then the `.env` at the root of the checkout `core` was imported from, when that is a different file. A key set in both keeps the working directory's value. The working directory is a trusted input — `./plugins` and `configs/plugins.yaml` come from it too — so run the framework from your own project directory. A `.env` is opened once, without following symlinks and without blocking (a FIFO cannot stall the import), and checked on the open descriptor, so the file inspected is the file parsed: it must be a regular file and, on POSIX, belong to the running user (or root) and not be group- or world-writable; a symlinked or otherwise refused file is skipped with a warning, because another local user could point the plugin path, the database or the LLM endpoint elsewhere. `baselith init` writes it with mode `0600`. Config classes no longer declare `env_file`, removing 20+ redundant file parses (~230ms → ~7ms to instantiate all settings classes)
 1. **Singleton Pattern** - Same config instance shared across the application, ensuring consistency
 1. **Startup Validation** - Pydantic catches misconfigurations before deployment, preventing runtime failures
 1. **Secret Management** - Built-in protection against accidental exposure in logs or error messages
@@ -195,8 +195,8 @@ non-empty strings:
 
 The JSON form is still accepted on purpose: deployments configured against the
 previous behaviour have one in their environment (`.env.example` itself ships
-`TRUSTED_HOSTS=["app.example.com"]`), and `NoDecode` would otherwise hand them
-the single-element list `['["app.example.com"]']`.
+`TRUSTED_HOSTS=["localhost","127.0.0.1"]`), and `NoDecode` would otherwise hand
+them the single-element list `['["localhost","127.0.0.1"]']`.
 
 !!! warning "`csv_list` splits on a literal comma"
     A value that legitimately contains a comma cannot be expressed in the CSV
@@ -597,6 +597,8 @@ print(config.db_user)             # "baselith"          (DB_USER)
 print(config.conninfo)            # "postgresql://..."  (computed)
 print(config.postgres_enabled)    # True                (POSTGRES_ENABLED)
 print(config.db_rls_enabled)      # False               (DB_RLS_ENABLED)
+print(config.db_rls_tenant_scope) # "session"           (DB_RLS_TENANT_SCOPE)
+print(config.rls_pooler_conflict())  # None, or why RLS + DB_PREPARED_STATEMENTS=false is refused
 
 # GraphDB (RedisGraph)
 print(config.graph_db_url)        # "redis://localhost:6379"  (GRAPH_DB_URL)
@@ -618,6 +620,7 @@ DB_USER=baselith
 DB_PASSWORD=your-strong-password     # Required in production — stored as SecretStr
 # DATABASE_URL=postgresql://...      # Optional: overrides the discrete DB_* fields
 # DB_RLS_ENABLED=false               # Opt-in: bind app.tenant_id per checkout for Postgres RLS
+# DB_RLS_TENANT_SCOPE=session        # 'transaction' behind a transaction-mode pooler (PgBouncer)
 
 GRAPH_DB_ENABLED=true
 GRAPH_DB_URL=redis://localhost:6379
@@ -805,7 +808,7 @@ CROSS_ORIGIN_OPENER_POLICY=same-origin-allow-popups   # COOP header; empty omits
 CROSS_ORIGIN_RESOURCE_POLICY=same-origin              # CORP header; same-site for split subdomains, empty omits
 METRICS_AUTH_REQUIRED=true           # Basic auth on /metrics
 METRICS_USERNAME=metrics             # Scrape-only credential for /metrics
-METRICS_PASSWORD=                    # SecretStr; unset = only the admin credential opens /metrics
+METRICS_PASSWORD=                    # SecretStr; unset (or empty/blank) = only the admin credential opens /metrics
 ```
 
 `METRICS_USERNAME` / `METRICS_PASSWORD` are a **scrape-only** credential: the
@@ -814,7 +817,11 @@ consults them. Give Prometheus this pair rather than the admin credential — a
 ServiceMonitor's `basicAuth` Secret is readable by the monitoring operator in
 another namespace, and the admin pair would open `/admin` to whoever reads it.
 The admin credential still opens `/metrics`, so existing scrapers keep working;
-with `METRICS_PASSWORD` unset it is the only way in.
+with `METRICS_PASSWORD` unset it is the only way in. An empty or blank
+`METRICS_PASSWORD` is normalised to unset by a `mode="before"` validator — an
+empty `SecretStr` would otherwise be a valid password the route accepts. Both
+credentials share the admin lockout; see
+[`GET /metrics`](../api/rest.md#get-metrics-prometheus-metrics).
 
 The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
 stuffing per source IP: rejected authentication attempts (counted on
@@ -1346,4 +1353,13 @@ updates off. See
 `core.config.inference` holds the settings of the embedding, rerank and Qdrant
 services: `BASELITH_EMBEDDING_*`, `BASELITH_RERANK_*` and `BASELITH_QDRANT_*`.
 `remote` (Hugging Face TEI) is the default backend; `local` is a development
-opt-in. See [Inference Services](../advanced/inference-services.md).
+opt-in. The Qdrant URL and key also bind from the unprefixed `QDRANT_URL` /
+`QDRANT_API_KEY` that every deploy file already sets for the vector store
+(`AliasChoices`; the prefixed name wins when both are set). The embedding and
+rerank clients carry four hardening knobs each — `MAX_TOTAL_SECONDS`,
+`MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. Calling a
+model server that is not TEI, such as a customer's own GPUs, uses `API`
+(embedding `tei` | `openai`; rerank `tei` | `cohere` | `nim`), `PATH`, the
+embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, and `CA_BUNDLE` / `CLIENT_CERT` /
+`CLIENT_KEY` for a private CA or mutual TLS. See
+[Inference Services](../advanced/inference-services.md).

@@ -18,6 +18,7 @@ from core.context import get_current_tenant_id
 from core.models.domain import Document, SearchResult
 from core.observability.logging import get_logger
 from core.optimization.caching import RedisCache
+from core.services.vectorstore._dimension import EmbeddingDimensionMismatchError
 from core.services.vectorstore.embedding_cache import (
     EmbedderProtocol,
 )
@@ -121,6 +122,8 @@ class VectorStoreService:
                 collection_name=collection_name, vector_size=vector_size, **kwargs
             )
             logger.info(f"Created collection '{collection_name}'")
+        except EmbeddingDimensionMismatchError:
+            raise  # already actionable; keep its type for callers
         except Exception as e:
             logger.error(f"Failed to create collection: {e}")
             raise VectorStoreError(f"Collection creation failed: {e}") from e

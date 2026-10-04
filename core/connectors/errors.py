@@ -67,6 +67,14 @@ class ConnectorEgressError(ConnectorError):
     """The SSRF policy refused the target host or address."""
 
 
+class ConnectorResponseTooLargeError(ConnectorError):
+    """The response body exceeded ``ConnectorSpec.max_response_bytes``.
+
+    Permanent for this request: the same call returns the same body, and a
+    retry would only pay for the bytes again.
+    """
+
+
 class ConnectorTransientError(ConnectorError):
     """A failure worth retrying: transport error, timeout, 408, 5xx."""
 
@@ -152,6 +160,7 @@ __all__ = [
     "ConnectorNotFoundError",
     "ConnectorRateLimitedError",
     "ConnectorRequestError",
+    "ConnectorResponseTooLargeError",
     "ConnectorTransientError",
     "ConnectorUnavailableError",
     "error_for_response",

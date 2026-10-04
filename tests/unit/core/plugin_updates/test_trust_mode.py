@@ -57,16 +57,19 @@ async def test_service_passes_the_mode_and_reads_keys_in_both_modes(
         seen.update(kw)
         return CheckReport(checked_at=datetime.now(UTC), candidates=[])
 
-    def keys() -> list[object]:
+    def keys(plugin: str | None = None) -> list[object]:
         loaded.append(True)
         return []
 
     monkeypatch.setattr(svc_mod, "run_check", fake)
-    monkeypatch.setattr(svc_mod, "load_trusted_keys", keys)
+    monkeypatch.setattr(svc_mod, "load_trust_roots", keys)
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path, trust), bundled_root=tmp_path)
     await svc.check_now()
     assert seen["trust"] == trust
-    assert loaded  # both modes verify signed assets
+    # The roots are resolved per plugin, so the service hands run_check the
+    # lookup rather than one list; both modes go through it.
+    assert seen["trusted_keys"] is keys
+    assert seen["trusted_keys"]("demo") == [] and loaded
 
 
 def _saved(trust: str | None) -> CheckReport:

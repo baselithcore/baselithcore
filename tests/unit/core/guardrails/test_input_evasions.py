@@ -220,9 +220,30 @@ class TestViews:
 
 
 class TestPerformance:
-    """Linear regexes and capped decoding: 100 KB stays well under a second."""
+    """Linear regexes and capped decoding: cost grows with the input, no faster.
 
-    BOUND_S = 1.0
+    The property is *linearity*, so that is what is measured: CPU time for the
+    full 100 KB against a tenth of it, best of three each. Linear code gives a
+    ratio near 10 (measured 8-10 for every payload below); a super-linear
+    pattern — the ReDoS this guards against — gives ~100 or worse. An absolute
+    wall-clock bound measured the CI runner instead: under ``pytest -n auto``
+    with coverage tracing it failed at 1.2-1.4 s for code that takes ~0.08 s
+    alone. ``process_time`` ignores time spent descheduled by sibling workers.
+    """
+
+    #: Linear ~10, quadratic ~100: far from both noise and the failure.
+    MAX_RATIO = 30.0
+    #: Catastrophe guard only: an order of magnitude above a traced CI run.
+    CPU_CEILING_S = 15.0
+
+    @staticmethod
+    def _cpu_best_of_three(guard: InputGuard, payload: str) -> float:
+        timings = []
+        for _ in range(3):
+            started = time.process_time()
+            guard.validate(payload)
+            timings.append(time.process_time() - started)
+        return min(timings)
 
     @pytest.fixture
     def big_guard(self) -> InputGuard:
@@ -241,10 +262,14 @@ class TestPerformance:
         ],
         ids=["prose", "base64", "fullwidth-zw", "spaced", "hex", "percent", "cjk"],
     )
-    def test_100kb_under_bound(self, big_guard: InputGuard, payload: str) -> None:
-        started = time.perf_counter()
-        big_guard.validate(payload)
-        assert time.perf_counter() - started < self.BOUND_S
+    def test_100kb_scales_linearly(self, big_guard: InputGuard, payload: str) -> None:
+        tenth = self._cpu_best_of_three(big_guard, payload[: len(payload) // 10])
+        full = self._cpu_best_of_three(big_guard, payload)
+        assert full < self.CPU_CEILING_S
+        # A tenth so fast the clock cannot resolve it says nothing about the
+        # slope; the ceiling above still applies.
+        if tenth >= 0.005:
+            assert full / tenth < self.MAX_RATIO, (full, tenth)
 
 
 class TestValidateAsyncDeprecated:

@@ -187,7 +187,7 @@ class SecurityManager(AdminLockoutMixin):
                 # an auth-disabled deployment must not hand out unmetered
                 # LLM invocation to anyone who can reach the port.
                 await self.rate_limiter.check(
-                    f"default:anonymous:{client_ip}",
+                    f"default:anonymous:{client_bucket(client_ip)}",
                     limit_per_minute,
                     self.config.rate_limit_window_seconds,
                 )
@@ -277,7 +277,7 @@ class SecurityManager(AdminLockoutMixin):
             identifier = f"{tenant}:{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"
-            identifier = f"{tenant}:{role}:{client_host}"
+            identifier = f"{tenant}:{role}:{client_bucket(client_host)}"
 
         await self.rate_limiter.check(
             identifier, limit_per_minute, self.config.rate_limit_window_seconds

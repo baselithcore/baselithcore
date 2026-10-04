@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from core.middleware.security import require_admin
 from core.utils.logsafe import sanitize_log_value
 
+from .app_setup import plugin_restart_required
 from .hotreload import HotReloadController
 from .lifecycle import PluginState
 from .metrics import get_metrics_collector
@@ -45,6 +46,11 @@ class PluginActionResponse(BaseModel):
     message: str
     plugin_name: str
     state: str | None = None
+    restart_required: bool = Field(
+        default=False,
+        description="Enabled, but its app middleware cannot join the running "
+        "app: set `enabled: true` in the plugin config and restart.",
+    )
 
 
 class PluginListResponse(BaseModel):
@@ -201,15 +207,14 @@ async def get_plugin_info(plugin_name: str) -> dict[str, Any]:
 async def enable_plugin(
     plugin_name: str, request: PluginEnableRequest, http_request: Request
 ) -> PluginActionResponse:
-    """
-    Enable a disabled plugin.
+    """Enable a disabled plugin for this process (not persisted to config).
 
     Args:
         plugin_name: Name of the plugin to enable
         request: Enable request with optional configuration
 
     Returns:
-        Action response with success status
+        Action response; ``restart_required`` flags pending app middleware.
     """
     controller = get_controller()
     client = http_request.client.host if http_request.client else "unknown"
@@ -218,18 +223,22 @@ async def enable_plugin(
 
     success = await controller.enable_plugin(plugin_name, request.config)
 
-    state = controller.lifecycle.get_state(controller.resolve_plugin_name(plugin_name))
+    canonical = controller.resolve_plugin_name(plugin_name)
+    state = controller.lifecycle.get_state(canonical)
+    restart_required = success and plugin_restart_required(http_request.app, canonical)
     logger.info(
-        "AUDIT | PLUGIN | enable result plugin=%r success=%s from=%s",
-        safe_name,
-        success,
-        client,
+        "AUDIT | PLUGIN | enable result plugin=%r success=%s from=%s restart=%s",
+        *(safe_name, success, client, restart_required),
     )
+    outcome = "enabled successfully" if success else "failed to enable"
+    if restart_required:
+        outcome = "enabled; set `enabled: true` in its config and restart to finish"
     return PluginActionResponse(
         success=success,
-        message=f"Plugin '{plugin_name}' {'enabled successfully' if success else 'failed to enable'}",
+        message=f"Plugin '{plugin_name}' {outcome}",
         plugin_name=plugin_name,
         state=state.value if state else None,
+        restart_required=restart_required,
     )
 
 

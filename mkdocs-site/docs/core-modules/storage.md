@@ -141,6 +141,8 @@ for the `tenant_id` backfill). The indexes it ensures on `interactions`:
     production default. `interactions`/`feedback`, their `tenant_id`
     columns and the tenant indexes are owned by migrations 002b and 007;
     see [Who creates the schema](db.md#who-creates-the-schema).
+    The migration scripts ship inside the package, under
+    `core/db/migrations/versions/`, so a wheel install can apply them too.
 
 | Index | Columns | Serves |
 |-------|---------|--------|

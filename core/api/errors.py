@@ -75,6 +75,9 @@ _ERROR_MAP: list[tuple[type[BaselithError], int, str]] = [
 _DEFAULT_STATUS = 500
 _DEFAULT_CODE = "internal_error"
 
+#: Attribute set on an exception once the catch-all handler has logged it.
+_LOGGED_MARKER = "_baselith_unhandled_logged"
+
 #: Stable machine codes for common HTTPException statuses.
 _HTTP_CODE_BY_STATUS: dict[int, str] = {
     400: "bad_request",
@@ -350,10 +353,25 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
     The detail is intentionally generic to avoid leaking internals; the
     ``request_id`` lets operators correlate it with the logged traceback.
+
+    Called twice for one failure in the full stack:
+    :class:`~core.middleware.unhandled_error.UnhandledErrorMiddleware` renders
+    and re-raises, then Starlette's ``ServerErrorMiddleware`` invokes the same
+    handler (and discards the response, one having already started). The
+    exception object is marked on the first pass so the traceback is logged
+    exactly once.
     """
-    logger.error(
-        "Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc
-    )
+    if not getattr(exc, _LOGGED_MARKER, False):
+        logger.error(
+            "Unhandled exception on %s %s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
+        try:
+            setattr(exc, _LOGGED_MARKER, True)
+        except (AttributeError, TypeError):  # slotted/immutable exception type
+            pass
     # Omit ``error_type`` entirely: exposing ``exc.__class__.__name__`` to an
     # anonymous caller fingerprints the internal stack (``psycopg.errors.*``,
     # ``redis.exceptions.*``, …). The class + traceback stay in the log line.
@@ -363,6 +381,52 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         detail="Internal server error.",
         instance=request.url.path,
     )
+
+
+#: Seconds a client is told to wait after a database outage answer (``503``).
+DATABASE_RETRY_AFTER_SECONDS = 5
+
+
+async def database_unavailable_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    """Render a database outage as ``503`` with ``Retry-After``, not a ``500``.
+
+    ``psycopg_pool.PoolTimeout`` (no connection within ``DB_POOL_TIMEOUT``) and
+    ``psycopg.OperationalError`` (connection refused, server shut down, query
+    cancelled) are infrastructure conditions, not bugs: a client should back
+    off and retry, and an alert on the 5xx rate should read "dependency down"
+    rather than "code broken". The class name and the server's message stay in
+    the log; neither reaches the caller.
+    """
+    logger.warning(
+        "Database unavailable on %s %s: %s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
+    return problem_response(
+        status_code=503,
+        code="service_unavailable",
+        detail="The database is temporarily unavailable. Retry later.",
+        instance=request.url.path,
+        headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
+    )
+
+
+def _install_database_handler(app: FastAPI) -> None:
+    """Map the psycopg outage family to :func:`database_unavailable_handler`.
+
+    ``PoolTimeout`` subclasses ``psycopg.OperationalError``, so one
+    registration covers both. Imported here rather than at module scope so the
+    error module stays cheap to import; a build without psycopg simply keeps
+    the generic 500.
+    """
+    try:
+        from psycopg import OperationalError
+    except ImportError:  # pragma: no cover - psycopg is a core dependency
+        return
+    app.add_exception_handler(OperationalError, database_unavailable_handler)
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -392,6 +456,7 @@ def install_error_handlers(app: FastAPI) -> None:
         RequestValidationError,
         validation_exception_handler,  # type: ignore[arg-type]
     )
+    _install_database_handler(app)
     app.add_exception_handler(Exception, unhandled_exception_handler)
     logger.debug("RFC 9457 problem+json error handlers installed.")
 
@@ -399,7 +464,9 @@ def install_error_handlers(app: FastAPI) -> None:
 __all__ = [
     "PROBLEM_JSON_MEDIA_TYPE",
     "baselith_exception_handler",
+    "DATABASE_RETRY_AFTER_SECONDS",
     "budget_exceeded_handler",
+    "database_unavailable_handler",
     "error_envelope",
     "http_exception_handler",
     "install_error_handlers",

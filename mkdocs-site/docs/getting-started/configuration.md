@@ -101,6 +101,8 @@ Declared in `core.config.app`.
 | `FEEDBACK_POSITIVE_WEIGHT` | `float` | `0.05` |  |
 | `FEEDBACK_SCORE_MIN_TOTAL` | `int` | `3` |  |
 | `FEEDBACK_SUMMARY_CACHE_TTL` | `float` | `60.0` | TTL (seconds) of the in-process document feedback rollup cache. The rollup scans up to feedback_analytics_doc_scan_limit rows and aggregates them in Python on *every* RAG request when FEEDBACK_BOOST_ENABLED is on, so it is cached briefly rather than recomputed per request. Set to 0 to disable caching and always recompute. |
+| `HEALTH_READY_CACHE_TTL` | `int` | `5` | Seconds a /health/ready outcome — success or failure — is reused. Concurrent probes during a refresh share one check. Lower means faster recovery reporting, higher means fewer dependency round-trips. |
+| `HEALTH_READY_PROBE_TIMEOUT` | `float` | `2.0` | Deadline in seconds for each dependency check behind /health/ready (database, Redis, vector store). A check that has not answered by then counts as down, so an unreachable database yields a prompt 503 instead of a probe that waits out DB_POOL_TIMEOUT and is killed by the kubelet. Keep it below the probe's timeoutSeconds. |
 | `HOST` | `str` | `0.0.0.0` | Network interface to bind the application server to. |
 | `INDEX_BOOTSTRAP_BACKGROUND` | `bool` | `True` | Perform indexing and initialization as a background task. |
 | `INDEX_BOOTSTRAP_ENABLED` | `bool` | `True` |  |
@@ -294,27 +296,48 @@ Declared in `core.config.inference`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `BASELITH_EMBEDDING_ALLOW_INSECURE_KEY` | `bool` | `False` | Send the API key over plain http to a host that is not loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). Off by default: the key would cross the network in clear. |
+| `BASELITH_EMBEDDING_ALLOW_MODEL_SUBSTITUTION` | `bool` | `False` | Let the served model stand in for a different requested one (VECTORSTORE_EMBEDDING_MODEL) when no local runtime can serve it. Off by default: vectors from another model do not share the index's geometry. Even when on, BASELITH_EMBEDDING_DIM must equal VECTORSTORE_EMBEDDING_DIM; a warning is logged. |
+| `BASELITH_EMBEDDING_API` | `EmbeddingApi` | `tei` | Server protocol: 'tei' (Hugging Face TEI /embed) or 'openai' (/embeddings: OpenAI, Azure OpenAI, vLLM, NVIDIA NIM, Infinity, Ollama /v1). For 'openai' the URL includes /v1. |
 | `BASELITH_EMBEDDING_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
 | `BASELITH_EMBEDDING_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
 | `BASELITH_EMBEDDING_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
 | `BASELITH_EMBEDDING_BATCH_SIZE` | `int` | `32` | Texts per HTTP request. |
+| `BASELITH_EMBEDDING_CA_BUNDLE` | `str \| None` | *empty* | PEM file of a private CA to trust, for a model server on the customer's own hardware. |
+| `BASELITH_EMBEDDING_CLIENT_CERT` | `str \| None` | *empty* | PEM client certificate presented to the server (mutual TLS). |
+| `BASELITH_EMBEDDING_CLIENT_KEY` | `str \| None` | *empty* | PEM private key of client_cert (mutual TLS). |
 | `BASELITH_EMBEDDING_DIM` | `int` | `1024` | Vector dimension. |
-| `BASELITH_EMBEDDING_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | `str` | *empty* | Text prepended to documents (e5: 'passage: '). |
+| `BASELITH_EMBEDDING_MAX_RESPONSE_BYTES` | `int` | `64 * 1024 * 1024` | Largest response body accepted from the server. |
+| `BASELITH_EMBEDDING_MAX_RETRIES` | `int` | `3` | Retries on 5xx / timeout (429 only with retry_rate_limited). |
+| `BASELITH_EMBEDDING_MAX_TOTAL_SECONDS` | `float` | `50.0` | Budget for one call, retries and backoff included; each attempt's timeout is clamped to what is left. Keep it below the edge proxy's read timeout (nginx/ingress default 60 s) so a slow model server fails the call rather than the client's connection. |
 | `BASELITH_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model id. |
+| `BASELITH_EMBEDDING_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own (/embed for tei, /embeddings for openai). |
+| `BASELITH_EMBEDDING_QUERY_PREFIX` | `str` | *empty* | Text prepended to queries, for models trained with an instruction (e5: 'query: ', Qwen3-Embedding, ...). bge-m3 needs none. |
+| `BASELITH_EMBEDDING_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
 | `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
-| `BASELITH_QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
+| `BASELITH_QDRANT_API_KEY` :material-key:<br>also accepts `QDRANT_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `BASELITH_QDRANT_GRPC_PORT` | `int` | `6334` |  |
 | `BASELITH_QDRANT_PREFER_GRPC` | `bool` | `False` | Use gRPC for data calls; multivector (ColBERT) payloads serialize far faster than over REST. |
 | `BASELITH_QDRANT_TIMEOUT` | `float` | `60.0` |  |
-| `BASELITH_QDRANT_URL` | `str \| None` | *empty* | Qdrant server URL (e.g. `http://qdrant:6333`). |
+| `BASELITH_QDRANT_URL`<br>also accepts `QDRANT_URL` | `str \| None` | *empty* | Qdrant server URL (e.g. `http://qdrant:6333`). |
+| `BASELITH_RERANK_ALLOW_INSECURE_KEY` | `bool` | `False` | Send the API key over plain http to a host that is not loopback or cluster-internal (single-label, `*.svc`, `*.cluster.local`). Off by default: the key would cross the network in clear. |
+| `BASELITH_RERANK_API` | `RerankApi` | `tei` | Server protocol: 'tei' (TEI /rerank), 'cohere' (/rerank with documents/top_n: Cohere, Jina, vLLM, Infinity) or 'nim' (NVIDIA NIM /ranking). URL includes /v1 where the server has one. |
 | `BASELITH_RERANK_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer token for the TEI server. |
 | `BASELITH_RERANK_BACKEND` | `Backend` | `remote` | 'remote' calls a TEI server; 'local' loads the model in-process (development only, imports torch). |
 | `BASELITH_RERANK_BACKOFF_BASE` | `float` | `0.5` | First retry delay (s); doubles each attempt. |
 | `BASELITH_RERANK_BATCH_SIZE` | `int` | `32` | Texts per HTTP request (TEI limit). |
+| `BASELITH_RERANK_CA_BUNDLE` | `str \| None` | *empty* | PEM file of a private CA to trust, for a model server on the customer's own hardware. |
+| `BASELITH_RERANK_CLIENT_CERT` | `str \| None` | *empty* | PEM client certificate presented to the server (mutual TLS). |
+| `BASELITH_RERANK_CLIENT_KEY` | `str \| None` | *empty* | PEM private key of client_cert (mutual TLS). |
 | `BASELITH_RERANK_MAX_CANDIDATES` | `int` | `100` | Hard cap on texts per rerank call. |
-| `BASELITH_RERANK_MAX_RETRIES` | `int` | `3` | Retries on 5xx / 429 / timeout. |
+| `BASELITH_RERANK_MAX_RESPONSE_BYTES` | `int` | `64 * 1024 * 1024` | Largest response body accepted from the server. |
+| `BASELITH_RERANK_MAX_RETRIES` | `int` | `3` | Retries on 5xx / timeout (429 only with retry_rate_limited). |
+| `BASELITH_RERANK_MAX_TOTAL_SECONDS` | `float` | `50.0` | Budget for one call, retries and backoff included; each attempt's timeout is clamped to what is left. Keep it below the edge proxy's read timeout (nginx/ingress default 60 s) so a slow model server fails the call rather than the client's connection. |
 | `BASELITH_RERANK_MODEL` | `str` | `BAAI/bge-reranker-v2-m3` | Reranker id. |
+| `BASELITH_RERANK_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own. |
+| `BASELITH_RERANK_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 
@@ -806,6 +829,7 @@ Declared in `core.config.storage`.
 | `DB_PREPARED_STATEMENTS` | `bool` | `True` | Let psycopg promote a query to a server-side prepared statement after it has run 5 times on a connection (its default prepare_threshold). Set false behind PgBouncer in transaction pooling mode older than 1.21 (or without max_prepared_statements): a statement prepared on one backend is then executed on another and fails with 'prepared statement "_pg3_0" does not exist'. |
 | `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
+| `DB_RLS_TENANT_SCOPE` | `Literal['session', 'transaction']` | `session` | How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config per session, memoized per pooled connection) or 'transaction' (each checkout is one transaction, set_config is transaction-local). Use 'transaction' behind a transaction-mode pooler such as PgBouncer pool_mode=transaction. |
 | `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
 | `DB_SSL_MODE` | `str \| None` | *empty* |  |
 | `DB_STATEMENT_TIMEOUT_MS` | `int` | `30000` | Server-side budgets baked into every pooled connection's startup options, in milliseconds (0 disables the Postgres guard). A statement that outlives `statement_timeout` is cancelled by the server, so a runaway query cannot hold a pooled connection indefinitely. The idle-in-transaction cap kills a session that opened a transaction and went quiet (leaked connection, crashed handler mid-transaction) before the locks it holds block everyone else. |
@@ -976,4 +1000,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-628 settings documented.
+652 settings documented.

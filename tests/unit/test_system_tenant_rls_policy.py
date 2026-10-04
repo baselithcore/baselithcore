@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS_DIR = REPO_ROOT / "migrations" / "versions"
+MIGRATIONS_DIR = REPO_ROOT / "core" / "db" / "migrations" / "versions"
 MIGRATION_PATH = MIGRATIONS_DIR / "010_system_tenant_rls_exemption.py"
 
 pytestmark = [pytest.mark.unit]

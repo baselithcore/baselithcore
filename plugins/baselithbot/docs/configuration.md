@@ -57,7 +57,7 @@ Human-in-the-loop gate detail: [approvals.md](./approvals.md).
 
 Dashboard writes to `computer_use` and `stealth` persist through
 [`RuntimeConfigStore`](../runtime_config.py) in
-`plugins/baselithbot/.state/runtime_config.json` (atomic write,
+`<state_dir>/runtime_config.json` (atomic write,
 `threading.Lock`). The overlay merges on top of the boot config whenever
 `BaselithbotPlugin.effective_computer_use_config()` /
 `effective_stealth_config()` are evaluated, and every change invalidates
@@ -70,15 +70,37 @@ the cached agent so the next run rebuilds with fresh guardrails.
 | `GET /dash/stealth` | Read effective Stealth config. |
 | `PUT /dash/stealth` | Validate + persist + invalidate + SSE `stealth.updated`. |
 
-Overlay files are ignored by git (`plugins/*/.state/` in
-[`.gitignore`](../../../.gitignore)).
+The overlay lives in the [state directory](#4a-state-directory), outside the
+repository.
+
+## 4a. State directory
+
+Every file the plugin persists — the secret-store master key
+(`.secret_key`, mode `0600`), `provider_keys.enc.json`, `replay.sqlite`,
+`workspaces.json`, `runtime_config.json`, `model_preferences.json`,
+`custom_crons.json`, `custom_agents.json`, ClawHub installs — lives under one
+directory, written `<state_dir>` in these docs. It is resolved by
+[`state_paths.py`](../state_paths.py), in this order:
+
+1. `BASELITHBOT_STATE_DIR`, when set.
+2. An existing legacy `plugins/baselithbot/.state/` inside the plugin
+   package: still used so an upgrade keeps its key and stores, but it logs a
+   deprecation warning. Move its contents to the per-user directory (or point
+   `BASELITHBOT_STATE_DIR` at it).
+3. The per-user data directory `$XDG_DATA_HOME/baselith/baselithbot`
+   (`~/.local/share/baselith/baselithbot` when `XDG_DATA_HOME` is unset).
+
+A directory the plugin creates is owner-only (`0700`). The state never
+defaults into the installed package, which may be read-only and is replaced
+on upgrade. In containers, mount a volume and set `BASELITHBOT_STATE_DIR`.
 
 ## 5. Environment variables
 
 | Env var | Purpose |
 |---------|---------|
 | `BASELITHBOT_DASHBOARD_TOKEN` | Bearer token for dashboard write endpoints. Unset = open dev mode (single warning logged). Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
-| `BASELITHBOT_SECRET_KEY` | Fernet master key encrypting provider API keys at rest. Unset = auto-generate once under `<state>/.secret_key` (mode `0600`). Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
+| `BASELITHBOT_STATE_DIR` | Directory for all plugin state (keys, stores, replay DB). Unset = per-user `$XDG_DATA_HOME/baselith/baselithbot`; see [State directory](#4a-state-directory). |
+| `BASELITHBOT_SECRET_KEY` | Fernet master key encrypting provider API keys at rest. Unset = auto-generate once under `<state_dir>/.secret_key` (mode `0600`). Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
 | `ELEVENLABS_API_KEY` | Optional; enables ElevenLabs voice provider |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | LLM + Vision providers (read from `core.config.services`) |
 | `TAILSCALE_AUTHKEY` | Gateway provisioning (optional) |
@@ -94,7 +116,7 @@ stored encrypted in `provider_keys.enc.json` ([`secret_store.py`](../secret_stor
 ## 6. Model preferences (persisted JSON)
 
 Persisted to
-`plugins/baselithbot/.state/model_preferences.json` via
+`<state_dir>/model_preferences.json` via
 [`ModelPreferenceStore`](../model_config.py). Defaults: provider
 `ollama/llama3.2`, vision `openai/gpt-4o`, temperature `0.7`.
 

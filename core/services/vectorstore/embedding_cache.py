@@ -5,7 +5,6 @@ Extracted from service.py to keep per-file LOC under 500.
 Provides cached embedding generation with Redis backing.
 """
 
-import hashlib
 import inspect
 from typing import Any, Protocol, runtime_checkable
 
@@ -67,10 +66,39 @@ class EmbedderProtocol(Protocol):
         ...
 
 
-def _cache_key(text: str, model_id: str) -> str:
-    """Build a cache key scoped to both text content and model."""
-    raw = f"{model_id}:{text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _cache_key(text: str, model_id: str, prompt: str = "", dim: int = 0) -> str:
+    """Key scoped to the text, the model, the document prompt and the width.
+
+    Same scheme as the query side (:func:`core.nlp.roles.cache_key`, used by
+    ``CachedEmbedder``) for the indexed role: a changed
+    ``BASELITH_EMBEDDING_DOCUMENT_PREFIX`` (or a model's own document prompt)
+    produces a different vector, so it must never be answered from an entry
+    cached under the old one. The dimension is folded into the model scope
+    because, unlike ``CachedEmbedder``'s Redis prefix, this cache's prefix
+    does not carry it.
+    """
+    from core.nlp.roles import DOCUMENT, cache_key
+
+    scope = f"{model_id}@{dim}" if dim else model_id
+    return cache_key(text, scope, DOCUMENT, prompt)
+
+
+async def _document_prompt(embedder: Any) -> str:
+    """The prompt ``embedder`` prepends to documents (``""`` when none).
+
+    Looks through the wrappers the runtime hands to indexing: a
+    ``LazyEmbedder`` is loaded (indexing is about to encode anyway) and a
+    ``CachedEmbedder`` exposes the underlying model as ``.model``.
+    """
+    from core.nlp.roles import DOCUMENT, model_prompt
+
+    if callable(getattr(type(embedder), "aload", None)):
+        embedder = await embedder.aload()
+    prompt = model_prompt(embedder, DOCUMENT)
+    if prompt:
+        return prompt
+    inner = getattr(embedder, "model", None)
+    return model_prompt(inner, DOCUMENT) if inner is not None else ""
 
 
 async def get_embeddings_cached(
@@ -78,6 +106,7 @@ async def get_embeddings_cached(
     texts: list[str],
     cache: Any,
     model_id: str = "",
+    dim: int = 0,
 ) -> list[Any]:
     """
     Get embeddings for a list of texts, using cache when available.
@@ -87,6 +116,7 @@ async def get_embeddings_cached(
         texts: List of texts to embed
         cache: Redis cache instance (or None)
         model_id: Embedding model identifier (prevents cross-model collisions)
+        dim: Embedding dimension (prevents cross-width collisions; 0 = unscoped)
 
     Returns:
         List of embedding vectors
@@ -97,7 +127,8 @@ async def get_embeddings_cached(
     vectors_map: dict[int, Any] = {}
     missing_indices: list[int] = []
     missing_texts: list[str] = []
-    cache_keys = [_cache_key(text, model_id) for text in texts]
+    prompt = await _document_prompt(embedder)
+    cache_keys = [_cache_key(text, model_id, prompt, dim) for text in texts]
 
     # Check cache
     if _supports_batch_get(cache):

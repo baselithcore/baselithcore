@@ -24,8 +24,11 @@ Opt-in via `QUOTAS_ENABLED`; default-off and a no-op until configured.
 `QuotaMiddleware` (`core/middleware/quota.py`, pure ASGI, registered in the app
 factory) enforces both scopes transparently. On every **authenticated** request it
 consumes one unit from the caller's identity budget *and* their tenant's aggregate
-budget; if either window is exhausted it returns `429` (with `Retry-After: 60`)
-before the route runs. It self-authenticates from the bearer token, so it does not
+budget; if either window is exhausted it returns `429` before the route runs,
+with `Retry-After` set to the seconds left until that window rolls over
+(midnight UTC for daily, the first of the next month for monthly). A quota
+store that cannot answer is a `503` with `Retry-After: 5` — the request is
+refused, not admitted unmetered. It self-authenticates from the bearer token, so it does not
 depend on its position in the stack. A complete no-op unless `QUOTAS_ENABLED`;
 unauthenticated requests are not quota-scoped and pass through.
 
@@ -80,6 +83,21 @@ request did no work (see [QuotaMiddleware](middleware.md#quotamiddleware)).
 status_pair = await manager.check_and_consume_pair(api_key_id, tenant_id, cost=1)
 # raises QuotaExceededError (before consuming) if either window would exceed
 ```
+
+### Refunds
+
+`refund_pair` gives a unit back through the store's `refund_many` when the
+store has one (both built-in stores do): an **existing** counter is
+decremented, floored at zero, and keeps its TTL; a **missing** counter is left
+missing. On Redis this is one Lua script (`REFUND_LUA`). The previous
+`INCRBY -cost` on a window that had expired in between minted a permanent
+negative counter with no TTL — free budget forever for that key. A third-party
+store without `refund_many` keeps the old `incr_many` path.
+
+Which responses are refunded (`401`/`403`/`404`/`405`/`409`/`429`/`503`, an
+idempotency replay) and which stay charged (a `CostControlMiddleware` `429`
+after the handler ran) is decided by the middleware — see
+[QuotaMiddleware](middleware.md#quotamiddleware).
 
 A `QuotaExceededError` raised inside a request is rendered by the
 [error envelope](../api/rest.md#error-envelope) as **429** with code
@@ -284,3 +302,9 @@ check-all-then-increment-all (`CHECK_AND_INCR_LUA` on Redis) that
 `check_and_consume` and `check_and_consume_pair` use; a third-party store
 without it falls back to read-then-increment, which is not atomic across
 workers.
+
+`InMemoryQuotaStore` keeps one key per identity per window per period, so
+under rotating identities it would grow forever; it is capped at **50 000**
+entries (`InMemoryQuotaStore.MAX_ENTRIES`), past which the oldest keys — in
+insertion order, the stalest windows — are evicted. Use the Redis backend for
+multi-worker correctness.

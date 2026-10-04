@@ -173,12 +173,17 @@ spec:
                   name: {{ $role.adminSecret.name | quote }}
                   key: {{ $role.adminSecret.passwordKey | quote }}
             {{- if $role.createRole }}
-            # The password the app will authenticate with. Same secret the app
-            # reads DB_PASSWORD from by default, so the two cannot drift.
+            # The password the app will authenticate with. Same value the app
+            # reads DB_PASSWORD from, so the two cannot drift — read through the
+            # hook-scoped copy (migrations-env.yaml): the release Secret is an
+            # ordinary resource Helm applies only after its hooks, so a first
+            # install referencing it hung for the whole deadline (upgrades
+            # worked, which is what hid it). `migrationSecretName` resolves to
+            # the external Secret itself when `secrets.existingSecret` is set.
             - name: RUNTIME_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $role.passwordSecret.name | default (include "baselithcore.secretName" .) | quote }}
+                  name: {{ $role.passwordSecret.name | default (include "baselithcore.migrationSecretName" .) | quote }}
                   key: {{ $role.passwordSecret.key | quote }}
             {{- end }}
           resources:

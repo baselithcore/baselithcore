@@ -48,3 +48,36 @@ def test_doctor_and_info_agree(
     assert check_plugins().message == "2 plugin(s) found"
     run_info(json_output=True)
     assert json.loads(capsys.readouterr().out)["project"]["plugin_count"] == 2
+
+
+def test_an_installed_framework_counts_its_bundled_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside a checkout the plugins ship in the package, not in ``./plugins``.
+
+    ``doctor`` used to fail "plugins/ directory not found" on every wheel
+    install run from a project directory.
+    """
+    import core.config.plugins as plugins_config
+    from core.plugins import discovery
+
+    site = tmp_path / "site-packages"
+    bundled = site / "plugins"
+    (bundled / "shipped").mkdir(parents=True)
+    (bundled / "shipped" / "plugin.py").write_text("")
+    (bundled / "shipped" / "manifest.yaml").write_text("name: shipped\n")
+    monkeypatch.setattr(plugins_config, "installed_plugins_dir", lambda: bundled)
+    monkeypatch.setattr(discovery, "installed_plugins_dir", lambda: bundled)
+    monkeypatch.setattr(discovery, "_site_package_roots", lambda: [site])
+    monkeypatch.delenv("PLUGIN_PLUGINS_PATH", raising=False)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    assert check_plugins().message == "1 plugin(s) found"
+
+    (project / "plugins" / "mine").mkdir(parents=True)
+    (project / "plugins" / "mine" / "plugin.py").write_text("")
+    (project / "plugins" / "mine" / "manifest.yaml").write_text("name: mine\n")
+
+    assert [p.name for p in local_plugins()] == ["mine", "shipped"]

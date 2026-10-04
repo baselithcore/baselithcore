@@ -77,6 +77,36 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+  # Edge guards the compose stack's nginx.conf applies and a single
+  # `path: /` Ingress does not: `/metrics` stays off the internet (Prometheus
+  # scrapes the pods through the ServiceMonitor, never through the Ingress)
+  # and the credential-stuffing targets — the admin console/API and the
+  # auth plugin's token endpoints — are throttled per client IP in the
+  # controller, before a guess costs the app a PBKDF2 slot. Rendered as two
+  # extra Ingress objects for the same hosts, so only ingress-nginx
+  # annotations are needed and no snippet (which controllers disable by
+  # default since 1.9) is involved. ingress-nginx only: the chart refuses
+  # another `className` rather than ship guards that silently do nothing.
+  guards:
+    enabled: false
+    metrics:
+      enabled: true
+      # Sources still allowed to reach /metrics through the Ingress. The
+      # loopback default admits nobody — a scrape never comes from there.
+      allowSourceRange: "127.0.0.1/32"
+    auth:
+      enabled: true
+      # Prefix paths. `/admin` and its versioned alias (the factory mounts
+      # the admin routers under /v1 too), plus the token/login endpoints an
+      # auth plugin serves under /api/auth/.
+      paths: ["/admin", "/v1/admin", "/api/auth"]
+      # requests per second per client IP, and the burst (rps x multiplier)
+      # served before the controller answers 503. 1 r/s with a burst of 20
+      # keeps an operator's dashboard usable and makes an online password
+      # guess cost about a second per attempt at the edge; the app's own
+      # failed-auth throttle and admin lockout stay behind it.
+      rps: 1
+      burstMultiplier: 20
 
 # requests.memory is a promise to the scheduler and the input to the kernel's
 # OOM victim score — a container is picked by how far it exceeds its request,
@@ -515,12 +545,17 @@ inference:
   # (a key you set in `config` still wins).
   tei:
     enabled: false
-    # CPU image, linux/amd64 only. Use a GPU image (and `resources` with
+    # CPU image: `cpu-<ver>` is linux/amd64 only; ARM nodes (Graviton, Apple
+    # Silicon labs) need `cpu-arm64-<ver>`. Use a GPU image (and `resources` with
     # nvidia.com/gpu plus a nodeSelector/tolerations) for real throughput —
     # CPU TEI is correct but slow, and rerank latency is on every chat turn.
     image:
       repository: ghcr.io/huggingface/text-embeddings-inference
       tag: cpu-1.9.4
+      # Same rule as `image.digest` above: set it and the tag becomes
+      # documentation. The model server runs arbitrary weights against every
+      # chat turn, so it deserves the same content pin as the app.
+      digest: ""
       pullPolicy: IfNotPresent
     # The container listens on 8080: ports below 1024 would need
     # NET_BIND_SERVICE, and the pod runs non-root with every capability dropped.
@@ -529,6 +564,33 @@ inference:
     hfTokenSecret:
       name: ""
       key: HF_TOKEN
+    # Bearer token the model servers demand and the app presents. Without it
+    # the only thing between a model server and the rest of the cluster is the
+    # NetworkPolicy below — which exists only when `networkPolicy.enabled` is
+    # on, so on a default install any pod in the cluster could use the
+    # embedding and rerank services. The chart reads the same Secret key into
+    # TEI's API_KEY and into the app's BASELITH_EMBEDDING_API_KEY /
+    # BASELITH_RERANK_API_KEY, so the two cannot drift. The token crosses the
+    # in-cluster Service in clear (TEI terminates no TLS): with an mTLS mesh
+    # that is fine, without one it is still better than no token at all.
+    apiKeySecret:
+      name: ""
+      key: TEI_API_KEY
+    # The TEI pods' own policy. Ingress is always restricted to this release's
+    # api and worker pods. Egress is deny-by-default too: DNS plus TCP/443 to
+    # the internet (the Hub download) with cloud metadata and the private
+    # ranges carved out, exactly like the app's `internetHttps` preset. A
+    # private model mirror (HF_ENDPOINT in an RFC1918 range) goes under
+    # `rules`; an air-gapped node with a pre-seeded PVC can switch egress off.
+    networkPolicy:
+      egress:
+        enabled: true
+        rules: []
+    # Rendered only for a server with more than one replica: a budget over a
+    # single pod denies every voluntary eviction and hangs node drains.
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
     # Models are downloaded on first start into /data. Without a PVC that is
     # every restart (2+Gi each), and a node with no egress to the Hub never
     # becomes ready.
@@ -536,24 +598,58 @@ inference:
       enabled: true
       size: 10Gi
       storageClass: ""
+    # Memory is measured, not guessed: cgroup memory.peak on a k3d lab
+    # (cpu-arm64-1.9.4) and docker stats (cpu-1.9.4, amd64). The batch budget,
+    # not the ~2.3Gi of weights, sizes these pods, and the PEAK is the startup
+    # warm-up, which runs one full --max-batch-tokens batch:
+    #   embedding, default 16384 tokens: 11.5Gi; at 4096: peak 6.8Gi, 5.6Gi after.
+    #   rerank, default 16384 tokens: OOMKilled at 6Gi during warm-up; at 4096:
+    #   peak 7.5Gi, 4.4Gi after.
+    # A limit below the warm-up peak never becomes ready (OOMKilled, restart
+    # loop). Re-measure on your nodes. ARM nodes: use tag cpu-arm64-1.9.4.
     embedding:
       model: BAAI/bge-m3
       replicas: 1
-      args: []
+      args: ["--max-batch-tokens", "4096"]
       resources:
-        requests: {cpu: "1", memory: 3Gi}
-        limits: {memory: 6Gi}
+        requests: {cpu: "1", memory: 7Gi}
+        limits: {memory: 9Gi}
       nodeSelector: {}
       tolerations: []
     rerank:
       model: BAAI/bge-reranker-v2-m3
       replicas: 1
-      args: []
+      args: ["--max-batch-tokens", "4096"]
       resources:
-        requests: {cpu: "1", memory: 3Gi}
-        limits: {memory: 6Gi}
+        requests: {cpu: "1", memory: 5Gi}
+        limits: {memory: 9Gi}
       nodeSelector: {}
       tolerations: []
+
+# -------------------------------------------------------------------------
+# Qdrant of this release's own (templates/qdrant.yaml)
+# -------------------------------------------------------------------------
+# A vector store per release: a StatefulSet with its own volume and API key
+# (BASELITH_QDRANT_API_KEY in the release Secret), reachable only from this
+# release's pods. On means the chart also points BASELITH_QDRANT_URL and
+# VECTORSTORE_HOST at it. The isolation choice for multi-customer fleets: one
+# Qdrant shared by many cells would hold every customer's vectors behind one
+# key. Leave off and set inference.qdrant.url to use a server you run.
+qdrant:
+  enabled: false
+  image:
+    repository: qdrant/qdrant
+    # -unprivileged: runs as uid 1000, as `restricted` Pod Security requires.
+    tag: v1.19.1-unprivileged
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  # Qdrant keeps vectors and HNSW graphs in memory: size the limit to the
+  # cell's corpus (bge-m3 dense, 1024 floats ≈ 4 KiB per chunk before index).
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
 
 # Extra raw env (e.g. valueFrom references) appended verbatim to the container.
 extraEnv: []
@@ -601,6 +697,16 @@ extraVolumeMounts: []
 # wrote — a changed image default reaches an existing volume only if you delete
 # the destination yourself.
 seedFromImage: []
+# The seed initContainer above. It copies a few files and exits, but a
+# container with no requests makes the whole pod BestEffort — first to be
+# evicted under node pressure — and a namespace LimitRange or ResourceQuota
+# rejects the pod outright.
+seedResources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
 
 # Declarative plugin set. The other way round from `seedFromImage` above: that
 # one makes configs/plugins.yaml writable so an admin can toggle plugins at
@@ -996,6 +1102,21 @@ backup:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Snapshot the release's own Qdrant (`qdrant.enabled`) beside the dump:
+  # one snapshot per collection, packed into qdrant_<ts>.tar.gz on the same
+  # volume, under the same retentionDays, and copied offsite with the dumps.
+  # Restore a collection by uploading its file to
+  # POST /collections/<name>/snapshots/upload?priority=snapshot.
+  qdrant:
+    enabled: true
+    image: curlimages/curl:8.22.0
+    # curl streams each snapshot to the volume; the tar runs on the volume.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
   schedule: "0 2 * * *"          # daily at 02:00
   image: postgres:16-alpine
   retentionDays: 30

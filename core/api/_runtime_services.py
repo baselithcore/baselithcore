@@ -1,8 +1,9 @@
 """Optional runtime services started/stopped by the app lifespan.
 
 Extracted from :mod:`core.api.lifespan` for the module size cap. Each service
-is opt-in via env and fail-open at startup: a service that cannot start logs
-a warning and the app boots without it (degraded, never down).
+is configured via env and fail-open at startup: a service that cannot start
+logs a warning and the app boots without it (degraded, never down). All are
+opt-in except the update check, whose core-release notice is on by default.
 
 Current services:
 
@@ -12,8 +13,11 @@ Current services:
 * **Prompt sync** (``BASELITH_PROMPT_SYNC=postgres``) — durable prompt
   catalog: write-through Postgres backend + per-replica refresh loop, so
   runtime label promotion reaches every replica.
-* **Plugin updates** (``PLUGIN_UPDATE_SOURCES_FILE``) — periodic check of the
-  plugins' release mirrors; only fully verified newer releases are reported.
+* **Updates** — periodic check for newer releases. The core-release notice
+  is **on by default** (``CORE_UPDATE_REPO`` defaults to the public core
+  repository; set it empty to turn it off). The plugin check is opt-in via
+  ``PLUGIN_UPDATE_SOURCES_FILE``: only fully verified newer plugin releases
+  of its release mirrors are reported.
 * **Update boot report** (``UPDATE_APPLY_ENABLED``) — each worker records the
   plugins it loaded so the one-click updater can verify a restart.
 """
@@ -36,9 +40,12 @@ async def start_runtime_services(app: Any) -> None:
     """Start the opt-in runtime services; failures degrade, never abort."""
     from pathlib import Path
 
+    from core.config.plugins import get_plugin_config
     from core.plugins.overlay import bundled_shadow_modules
 
-    shadows = bundled_shadow_modules(Path("plugins"))
+    # The root the loader scanned, not a cwd-relative ``plugins``.
+    plugins_root = Path(get_plugin_config().plugins_path)
+    shadows = bundled_shadow_modules(plugins_root)
     if shadows:
         logger.error(
             "plugin_overlay_shadowed: modules of overlaid plugins were loaded from "
@@ -70,7 +77,9 @@ async def start_runtime_services(app: Any) -> None:
 
         update_cfg = get_plugin_update_config()
         if update_cfg.enabled:
-            app.state.plugin_updates = PluginUpdateService(update_cfg)
+            app.state.plugin_updates = PluginUpdateService(
+                update_cfg, bundled_root=plugins_root
+            )
             set_plugin_update_service(app.state.plugin_updates)
             await app.state.plugin_updates.start()
     except Exception as exc:

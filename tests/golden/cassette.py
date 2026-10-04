@@ -6,8 +6,9 @@ moved and this module re-exports it, so every existing
 ``from tests.golden.cassette import ...`` keeps working.
 """
 
+from pathlib import Path
+
 from core.evaluation.cassette import (
-    CASSETTE_DIR,
     Cassette,
     CassetteMismatch,
     Expect,
@@ -15,6 +16,11 @@ from core.evaluation.cassette import (
     RecordingLLMService,
     Turn,
 )
+
+#: The golden cassettes, anchored to this file so they load from any cwd
+#: (core's default is cwd-relative, since it must never point into an
+#: installed package).
+CASSETTE_DIR = Path(__file__).resolve().parent / "cassettes"
 
 __all__ = [
     "CASSETTE_DIR",
