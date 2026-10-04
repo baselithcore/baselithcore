@@ -23,9 +23,14 @@ Two files are candidates, loaded in this order (first value wins):
 treats a missing env file as "no overrides").
 """
 
+import logging
+import os
+import stat
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # core/config/env.py -> parents[0]=config, parents[1]=core, parents[2]=repo root
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
@@ -64,8 +69,51 @@ def load_project_env() -> None:
     if _env_loaded:
         return
     for candidate in env_file_candidates():
-        load_dotenv(candidate, override=False)
+        if is_trusted_env_file(candidate):
+            load_dotenv(candidate, override=False)
     _env_loaded = True
+
+
+def is_trusted_env_file(path: Path) -> bool:
+    """Whether ``path`` may feed settings into this process.
+
+    The working directory is a trusted input (``./plugins`` and
+    ``configs/plugins.yaml`` are read from it too), but a ``.env`` another
+    local user can write is not: it could point the plugin path, the database
+    or the LLM endpoint elsewhere. On POSIX the file must belong to the
+    process's effective user (or root, as in container images) and must not
+    be group- or world-writable — the same fail-closed rule as the plugin
+    trust store. A missing file is trivially fine; a refused one is logged.
+
+    Args:
+        path: A candidate from :func:`env_file_candidates`.
+
+    Returns:
+        ``True`` when the file is absent or safe to load.
+    """
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        logger.warning("Not loading %s: cannot stat it (%s)", path, exc)
+        return False
+    if os.name != "posix":
+        return True
+    if info.st_uid not in (os.geteuid(), 0):
+        logger.warning(
+            "Not loading %s: owned by uid %d, not by this user (uid %d) or root",
+            path,
+            info.st_uid,
+            os.geteuid(),
+        )
+        return False
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        logger.warning(
+            "Not loading %s: it is group- or world-writable (chmod 600 it)", path
+        )
+        return False
+    return True
 
 
 # Loaded at import time on purpose: core.config.__init__ imports this module
@@ -77,5 +125,6 @@ __all__ = [
     "PROJECT_ENV_FILE",
     "PROJECT_ROOT",
     "env_file_candidates",
+    "is_trusted_env_file",
     "load_project_env",
 ]
