@@ -5137,7 +5137,7 @@
     },
     "/health/ready": {
       "get": {
-        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis is\nreported but advisory: the framework degrades to in-memory fallbacks, so it\ndoes not gate readiness. Results are cached (~30s) to bound probe overhead.",
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.",
         "operationId": "readiness_health_ready_get",
         "responses": {
           "200": {
@@ -6175,7 +6175,7 @@
     },
     "/v1/health/ready": {
       "get": {
-        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis is\nreported but advisory: the framework degrades to in-memory fallbacks, so it\ndoes not gate readiness. Results are cached (~30s) to bound probe overhead.",
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis and\nthe vector store are reported but advisory: the framework degrades without\nthem, so they do not gate readiness.\n\nEach check is bounded by ``HEALTH_READY_PROBE_TIMEOUT``, so a hung\ndependency yields a prompt 503 rather than a probe the kubelet times out.\nThe outcome \u2014 failure included \u2014 is cached for ``HEALTH_READY_CACHE_TTL``\nseconds, and concurrent callers during a refresh wait for the one check in\nflight instead of each starting their own.",
         "operationId": "readiness_v1_health_ready_get",
         "responses": {
           "200": {
