@@ -199,7 +199,12 @@ def test_key_collision_keeps_both_values(
     out = scan_structured_content(value, source="s")
 
     assert len(out) == 2 and sorted(out.values()) == [1, 2]
-    assert out[clean_key] == 2 and out[poisoned_key] == 1
+    assert out[clean_key] == 2
+    # The poisoned key never survives: an attacker who sends its clean twin
+    # must not get the unsanitized text through.
+    assert poisoned_key not in out
+    assert out[f"{clean_key} (2)"] == 1
+    assert all(ZWSP not in k for k in out)
 
 
 @pytest.mark.parametrize("bound", [32, 0])
@@ -213,3 +218,4 @@ def test_two_keys_sanitizing_to_the_same_text_both_survive(
     out = scan_structured_content({k1: "a", k2: "b"}, source="s")
 
     assert sorted(out.values()) == ["a", "b"]
+    assert all(ZWSP not in k for k in out)

@@ -979,8 +979,10 @@ through an explicit stack, at any depth — with each flagged string leaf and
 key sanitized in place; container types never change (a past-the-bound object
 stays an object, never a JSON string), and log-only mode returns the original
 subtree untouched. A key whose sanitized text would collide with another key
-of the same object keeps its original text (logged as
-`mcp_structured_key_sanitize_collision`), so sanitizing never drops a value.
+of the same object gets a free numbered suffix (`"name (2)"`, logged as
+`mcp_structured_key_sanitize_collision`): sanitizing never drops a value, and
+a poisoned key never survives unsanitized just because its clean twin was sent
+alongside it.
 
 ### SSRF guard (Streamable HTTP transport)
 

@@ -92,24 +92,28 @@ def _iter_strings(value: Any) -> Iterator[str]:
 def _scan_key(
     key: Any, original: dict[Any, Any], out: dict[Any, Any], **kw: Any
 ) -> Any:
-    """Scan one object key; keep the original when the sanitized one collides.
+    """Scan one object key; disambiguate when the sanitized one collides.
 
     Sanitizing can map two distinct keys to the same text (``"a\u200b"`` and
-    ``"a"``); writing both under one key would silently drop a value, so a
-    sanitized key that is already present — in the input or in the output
-    built so far — is not used and the original key is kept instead.
+    ``"a"``); writing both under one key would silently drop a value. Keeping
+    the *original* key instead would hand the flagged, unsanitized text to the
+    model — an attacker could force exactly that by sending the clean twin of
+    a poisoned key. So the sanitized key gets a numbered suffix that is free
+    in both the input and the output built so far: no value is lost and no
+    unsanitized key ever leaves.
     """
     from core.guardrails import scan_external_content
 
     if not isinstance(key, str):
         return key
     scanned = scan_external_content(key, **kw)
-    if scanned != key and (scanned in original or scanned in out):
-        logger.warning(
-            "mcp_structured_key_sanitize_collision source=%s", kw.get("source")
-        )
-        return key
-    return scanned
+    if scanned == key or (scanned not in original and scanned not in out):
+        return scanned
+    logger.warning("mcp_structured_key_sanitize_collision source=%s", kw.get("source"))
+    n = 2
+    while f"{scanned} ({n})" in original or f"{scanned} ({n})" in out:
+        n += 1
+    return f"{scanned} ({n})"
 
 
 def _sanitize_iteratively(value: Any, source: str) -> Any:
