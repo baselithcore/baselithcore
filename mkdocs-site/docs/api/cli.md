@@ -419,6 +419,11 @@ starts Compose and checks HTTP. It does not check for plugin packages in the hos
 Python environment. Invalid declared Core bounds, failed builds and failed probes
 return a nonzero exit code. Missing Core bounds remain a legacy warning.
 
+If a plugin ships a prebuilt frontend and declares `integrity_sha256`, the Docker
+installer first verifies that the existing output still matches the manifest. A
+matching bundle is reused instead of rebuilt, avoiding non-deterministic frontend
+asset hashes from invalidating the plugin integrity check.
+
 Use `--ref <branch-or-tag>` on the initial clone; existing directories are reused.
 `--force` replaces only a verifiably clean Git checkout. `--install-deps` without
 `--docker` installs Python dependencies in the host environment.
@@ -450,6 +455,10 @@ declared frontends, rebuilds and restarts the `api` service, waits for
 `/health`, then probes each plugin that declares `health_endpoint` or a
 `frontend` contract. A plugin whose manifest is missing or invalid stops the
 sync with a nonzero exit code rather than being skipped.
+
+The frontend step follows the same integrity rule as `plugin add --docker`: a
+prebuilt, integrity-verified bundle is reused; unsigned or missing output is
+built in the temporary Node container.
 
 `--docker` is what selects the Docker runtime; without it the command only
 prints the local plugin status, exactly like `plugin status`. The sync has no
