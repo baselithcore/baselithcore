@@ -69,10 +69,13 @@ class TestChat:
     def test_body_unchanged(
         self, spy: WireSpy, monkeypatch: pytest.MonkeyPatch, result: ChatResponse
     ) -> None:
+        # Replace the module's service, not an attribute on the lazy proxy:
+        # setattr on the proxy resolves a real ChatService and, on undo, pins
+        # an instance attribute that bypasses the proxy's lazy __getattr__.
         monkeypatch.setattr(
-            chat_module.chat_service,
-            "handle_chat_async",
-            AsyncMock(return_value=result),
+            chat_module,
+            "chat_service",
+            SimpleNamespace(handle_chat_async=AsyncMock(return_value=result)),
         )
         monkeypatch.setattr(
             chat_module,
