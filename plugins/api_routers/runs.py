@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -40,6 +41,13 @@ from plugins.api_routers._sse import (
     heartbeat_seconds,
 )
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.chat import SSEResponse
+from plugins.api_routers.schemas import (
+    RunForked,
+    RunHistoryPage,
+    RunState,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -68,7 +76,11 @@ def _require_store() -> Any:
     return store
 
 
-@router.get("/{run_id}/history")
+@router.get(
+    "/{run_id}/history",
+    response_model=RunHistoryPage,
+    responses=problem_responses(400, 401, 404, 422, 503),
+)
 async def state_history(
     run_id: str, page: PageParams = Depends(page_params)
 ) -> dict[str, Any]:
@@ -84,7 +96,11 @@ async def state_history(
     return {"run_id": run_id, **paginated(history, page, key="history")}
 
 
-@router.get("/{run_id}/history/{version}")
+@router.get(
+    "/{run_id}/history/{version}",
+    response_model=RunState,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def state_at_version(run_id: str, version: int) -> dict[str, Any]:
     """The full checkpoint state exactly as recorded at ``version``."""
     store = _require_store()
@@ -94,7 +110,8 @@ async def state_at_version(run_id: str, version: int) -> dict[str, Any]:
             status_code=404,
             detail=f"No snapshot for run '{run_id}' at version {version}.",
         )
-    return state.to_dict()
+    # Answer/steps/budget are open values: keep the pre-model wire encoding.
+    return jsonable_encoder(state.to_dict())
 
 
 def _event_frame(event: Any) -> str:
@@ -103,7 +120,13 @@ def _event_frame(event: Any) -> str:
     return f"id: {event.id}\nevent: {event.type.value}\ndata: {payload}\n\n"
 
 
-@router.get("/{run_id}/events")
+@router.get(
+    "/{run_id}/events",
+    # Documents the 200 as text/event-stream (a bare StreamingResponse was
+    # advertised as application/json).
+    response_class=SSEResponse,
+    responses=problem_responses(401),
+)
 async def run_events(run_id: str, request: Request) -> StreamingResponse:
     """Stream a run's structured events as Server-Sent Events.
 
@@ -149,7 +172,11 @@ async def run_events(run_id: str, request: Request) -> StreamingResponse:
     )
 
 
-@router.post("/{run_id}/fork")
+@router.post(
+    "/{run_id}/fork",
+    response_model=RunForked,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def fork(run_id: str, request: ForkRequest) -> dict[str, Any]:
     """Fork a run from its state at a version into a fresh resumable run.
 

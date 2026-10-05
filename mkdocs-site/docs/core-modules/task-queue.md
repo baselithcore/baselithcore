@@ -256,7 +256,7 @@ tracker = get_task_tracker()  # uses the shared queue Redis connection
 # get_status returns a plain dict (or None if unknown)
 status = tracker.get_status(job_id)
 if status:
-    print(status["status"])    # "queued" | "running" | "completed" | "failed" | ...
+    print(status["status"])    # "queued" | "running" | "retrying" | "completed" | "failed" | ...
     print(status["progress"])  # float 0-100
     print(status.get("result"))
 
@@ -329,9 +329,18 @@ Lifecycle on the worker:
    and stores `{"answer": str, "metadata": dict}` as the task result.
 3. A terminal webhook fires **best-effort**: `agent.completed` with
    `{task_id, answer, metadata}` on success, `agent.failed` with
-   `{task_id, error}` before the exception is re-raised on failure (RQ then
-   records the failed job and the [dead-letter machinery](#dead-letter-queue-dlq)
-   applies). A webhook outage never fails a finished run.
+   `{task_id, error}` before the exception is re-raised on the **last**
+   failed attempt (RQ then records the failed job and the
+   [dead-letter machinery](#dead-letter-queue-dlq) applies). A webhook outage
+   never fails a finished run.
+4. Failure is terminal only when RQ will not run the job again. The run is
+   enqueued with the default retry policy (`TASK_QUEUE_DEFAULT_RETRY_COUNT`,
+   `3`), so an attempt that raises while the job still has `retries_left`
+   records the **non-terminal** status `retrying` (`mark_retrying`, with the
+   attempt's `error`) and emits no webhook; the next attempt moves it back to
+   `running`. Only the attempt that exhausts the budget — or a job enqueued
+   without retries — marks `failed` and emits `agent.failed`. Pollers should
+   stop on `completed`, `failed` or `cancelled` only.
 
 Both routes call the synchronous queue/tracker clients through
 `asyncio.to_thread`, so a slow Redis never blocks the event loop. Query length

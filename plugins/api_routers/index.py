@@ -19,6 +19,12 @@ from core.api.versioning import V1_PREFIX, api_v1_enabled
 from core.config import get_app_config
 from core.middleware import require_admin_or_job
 from core.services.bootstrap import bootstrapper
+from plugins.api_routers.schemas import (
+    IndexBootstrapAccepted,
+    IndexRunAccepted,
+    IndexStatus,
+    problem_responses,
+)
 
 INDEX_BOOTSTRAP_ENABLED = get_app_config().index_bootstrap_enabled
 
@@ -41,7 +47,12 @@ def _accepted(request: Request, response: Response, mode: str) -> dict[str, obje
     return {"status": "scheduled", "mode": mode, "status_url": url}
 
 
-@router.get("/index/status")
+@router.get(
+    "/index/status",
+    response_model=IndexStatus,
+    response_model_exclude_unset=True,
+    responses=problem_responses(401, 403),
+)
 def index_status() -> dict[str, object]:
     """Retrieve the current status of the background indexing engine."""
     status_payload = bootstrapper.status()
@@ -50,7 +61,13 @@ def index_status() -> dict[str, object]:
     return status_payload
 
 
-@router.post("/index/bootstrap", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/index/bootstrap",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=IndexBootstrapAccepted,
+    response_model_exclude_unset=True,
+    responses=problem_responses(401, 403, 409, 422, 503),
+)
 async def trigger_bootstrap(
     request: Request, response: Response, force_full: bool = False
 ) -> dict[str, object]:
@@ -69,7 +86,12 @@ async def trigger_bootstrap(
     return {**current, **_accepted(request, response, str(current["mode"]))}
 
 
-@router.post("/reindex", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/reindex",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=IndexRunAccepted,
+    responses=problem_responses(401, 403, 409),
+)
 async def reindex(request: Request, response: Response) -> dict[str, object]:
     """Start an incremental indexing of local documents in the background.
 

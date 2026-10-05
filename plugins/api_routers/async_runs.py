@@ -25,6 +25,11 @@ from core.context import get_current_tenant_id
 from core.middleware import require_user
 from core.models.chat import MAX_ID_LENGTH
 from core.observability.logging import get_logger
+from plugins.api_routers.schemas import (
+    AsyncRunAccepted,
+    AsyncRunStatus,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -63,7 +68,12 @@ def status_path(task_id: str, root_path: str = "") -> str:
     return f"{root_path}{base}/agent/status/{task_id}"
 
 
-@router.post("/async", status_code=202)
+@router.post(
+    "/async",
+    status_code=202,
+    response_model=AsyncRunAccepted,
+    responses=problem_responses(401, 403, 422, 503),
+)
 async def submit_async_run(
     req: AsyncRunRequest, request: Request, response: Response
 ) -> dict:
@@ -82,7 +92,13 @@ async def submit_async_run(
     return {"task_id": task_id, "status_url": url}
 
 
-@router.get("/status/{task_id}")
+@router.get(
+    "/status/{task_id}",
+    response_model=AsyncRunStatus,
+    # A tracker record carries ``result``/``error`` only once they exist.
+    response_model_exclude_unset=True,
+    responses=problem_responses(401, 403, 404, 503),
+)
 async def async_run_status(task_id: str) -> dict:
     """Current TaskTracker record for the run.
 

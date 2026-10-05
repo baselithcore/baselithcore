@@ -24,6 +24,12 @@ from core.prompts.registry import get_prompt_registry
 from core.prompts.sync import PromptSynchronizer, get_prompt_synchronizer
 from core.prompts.types import PromptNotFoundError, PromptVersion
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.schemas import (
+    PromptLabelPromoted,
+    PromptPage,
+    PromptVersionRegistered,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -65,7 +71,7 @@ def _require_synchronizer() -> PromptSynchronizer:
     return synchronizer
 
 
-@router.get("")
+@router.get("", response_model=PromptPage, responses=problem_responses(400, 401, 422))
 async def list_prompts(page: PageParams = Depends(page_params)) -> dict[str, Any]:
     """List registered prompts with their versions and labels.
 
@@ -88,7 +94,12 @@ async def list_prompts(page: PageParams = Depends(page_params)) -> dict[str, Any
     return {**body, "total": len(names)}
 
 
-@router.post("/{name}/versions", status_code=201)
+@router.post(
+    "/{name}/versions",
+    status_code=201,
+    response_model=PromptVersionRegistered,
+    responses=problem_responses(401, 422, 503),
+)
 async def register_version(name: str, payload: PromptVersionIn) -> dict[str, Any]:
     """Register (and persist) a new version of ``name``."""
     synchronizer = _require_synchronizer()
@@ -108,7 +119,11 @@ async def register_version(name: str, payload: PromptVersionIn) -> dict[str, Any
     return {"name": name, "version": payload.version, "checksum": version.checksum}
 
 
-@router.post("/{name}/labels/{label}")
+@router.post(
+    "/{name}/labels/{label}",
+    response_model=PromptLabelPromoted,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def promote_label(name: str, label: str, payload: LabelIn) -> dict[str, Any]:
     """Point ``label`` at an existing version of ``name`` (durable promote)."""
     synchronizer = _require_synchronizer()

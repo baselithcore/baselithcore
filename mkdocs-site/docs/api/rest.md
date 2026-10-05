@@ -67,7 +67,8 @@ POST /chat        # unprefixed — still served, deprecated
 Versioned: chat (`/chat`, `/chat/stream`), indexing (`/index/*`, `/reindex`),
 feedback, the plugin-management API (`/api/plugins/*`), and the routers the
 `api_routers` plugin mounts — `/compliance`, `/approvals`, `/runs`,
-`/webhooks`, `/privacy`, `/prompts` and `/agent`.
+`/webhooks`, `/privacy`, `/prompts` and `/agent` — and the WebSocket chat
+channel (`/v1/chat/ws`, see below).
 
 The unprefixed copies are **deprecated**: their operations carry
 `deprecated: true` in the OpenAPI document, and every response they produce —
@@ -86,9 +87,15 @@ set yet; a `Sunset` header will announce one.
 
 Not versioned (one unprefixed path, never deprecated): health and readiness
 probes, `/metrics`, `/status`, `/admin/*`, the console, Backstage, discovery
-(`/.well-known/*`), MCP and the WebSocket channel (`/chat/ws`) — probes,
-Prometheus, nginx and the Helm chart address them directly. `/metrics`,
+(`/.well-known/*`) and MCP — probes, Prometheus, nginx and the Helm chart
+address them directly. `/metrics`,
 `/status` and `/admin/tenants` keep their historical `/v1` aliases.
+
+The WebSocket chat channel is served at **`/v1/chat/ws`** (canonical) and at
+`/chat/ws`, which is **deprecated** but carries no runtime signal: a WebSocket
+handshake has no response a client reliably reads `Deprecation`/`Link`
+headers from, so the deprecation is announced here only. Move WebSocket
+clients to `/v1/chat/ws`.
 
 Set `API_V1_ENABLED=false` to disable the `/v1` copies; the unprefixed paths
 are then the only ones and are not marked deprecated.
@@ -509,11 +516,13 @@ change sent the bare text `stream failed`; both SDKs accept either form.
 
 ---
 
-### WebSocket Chat (`WS /chat/ws`)
+### WebSocket Chat (`WS /v1/chat/ws`)
 
 Persistent conversational channel (`plugins/api_routers/chat_ws.py`): one
 authenticated connection, many turns. SSE (`POST /chat/stream`) remains the
-one-shot streaming surface.
+one-shot streaming surface. Connect to `/v1/chat/ws`; the unprefixed
+`/chat/ws` still works but is deprecated (see
+[API Versioning](#api-versioning)).
 
 **Handshake authorization** — the handshake runs the *same gate* as
 `POST /chat` (`require_user`): the same credentials, sent as handshake headers
@@ -571,7 +580,7 @@ import websockets  # pip install websockets
 
 async def chat() -> None:
     async with websockets.connect(
-        "ws://localhost:8000/chat/ws",
+        "ws://localhost:8000/v1/chat/ws",
         additional_headers={"x-api-key": "your-api-key"},
     ) as ws:
         await ws.send(json.dumps({"query": "Tell me a story"}))
@@ -1008,9 +1017,9 @@ for the exact routes.
 
 The framework's own `api_routers` plugin also mounts, at application startup,
 the [prompt-catalog admin API](#prompt-catalog-administration) (`/prompts`),
-the [WebSocket chat channel](#websocket-chat-ws-chatws) (`/chat/ws`), the
+the [WebSocket chat channel](#websocket-chat-ws-v1chatws) (`/v1/chat/ws`), the
 async agent runs (`POST /agent/async`, `GET /agent/status/{task_id}`) and the
-feature-gated routers below. None of them has a `/v1` alias. They are
+feature-gated routers below, each under `/v1` and, deprecated, unprefixed. They are
 registered at lifespan, so `baselith docs generate` misses them;
 `scripts/export_openapi.py` mounts them explicitly and the committed
 `sdk/openapi.json` therefore includes them (see
@@ -1194,6 +1203,27 @@ Access interactive Swagger/OpenAPI documentation:
 - **OpenAPI JSON**: `http://localhost:8000/openapi.json`
 
 From here you can test endpoints directly from the browser.
+
+**Typed responses.** The public routes declare Pydantic response models, so
+the OpenAPI document carries a typed 2xx schema rather than a bare object:
+chat (`POST /chat` → `ChatResponse`), feedback, async runs (submit and
+status), indexing (status and the two `202` triggers), the prompt catalog,
+privacy (providers, export, erasure, retention sweep), tenants, approvals
+(list, decision, resume), runs (history, state, fork) and webhooks (CRUD,
+deliveries, replay). The models live in `plugins/api_routers/schemas.py` and
+describe the existing payloads without changing them: open-ended payloads
+(task-tracker records, index status, run state) allow extra keys, and keys
+that are only sometimes present (a feedback `comment`, a task `result`) stay
+absent rather than appearing as `null`. Open values — a run state's `answer`,
+`budget`, `steps` and `plugin_data`, a resumed run's `result`, the export
+bundle's `data` — are encoded with `jsonable_encoder` before the model sees
+them, so they keep their pre-model spelling (`Decimal` as a number, a UTC
+`datetime` as `+00:00`, an arbitrary object as its attribute dict) instead of
+pydantic's (`"1.5"`, `Z`, or a 500 on an unserializable object). The same operations document their
+error statuses as `ProblemDetails` under `application/problem+json` (see
+[Error Envelope](#error-envelope)). Operation ids are unchanged: every API
+route is mounted twice (`/v1` and unprefixed), so a `<tag>_<function>`
+scheme would collide.
 
 !!! warning "Disabled in production — and when the environment is undeclared"
     `create_app()` turns all three endpoints **off** when the runtime

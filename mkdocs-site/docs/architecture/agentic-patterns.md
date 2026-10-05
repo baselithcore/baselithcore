@@ -182,9 +182,11 @@ safe_output = output.filtered_output
     (`wrap_untrusted`, tool name `document_retrieval`); the `Source [id]:`
     label stays outside the envelope so answers can still cite it. The
     system prompt carries `RAG_CONTEXT_IS_DATA_RULE`. Recalled memories are
-    scanned too and injected as one `memory_recall` envelope. A poisoned
-    document or memory therefore reaches the model as quoted data, never as
-    an instruction. See
+    scanned too and injected as one `memory_recall` envelope, and replayed
+    conversation history (`history_text` in the RAG prompt,
+    `recent_history` on the context) as one `conversation_history` envelope
+    via `render_history_context`. A poisoned document, memory or earlier turn
+    therefore reaches the model as quoted data, never as an instruction. See
     [Orchestration › Untrusted-output envelope](../core-modules/orchestration.md#untrusted-output-envelope).
 
 ---

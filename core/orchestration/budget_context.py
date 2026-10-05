@@ -82,7 +82,9 @@ DEFAULT_LIMITS: Final[Any] = _DefaultLimits()
 
 
 @contextmanager
-def standalone_budget(limits: LoopLimits | None) -> Iterator[LoopBudget | None]:
+def standalone_budget(
+    limits: LoopLimits | None, *, enforce_own: bool = False
+) -> Iterator[LoopBudget | None]:
     """Bind a budget for a run that may be happening outside any request.
 
     ``Orchestrator.process`` gives every request a :class:`LoopBudget`; a
@@ -99,14 +101,31 @@ def standalone_budget(limits: LoopLimits | None) -> Iterator[LoopBudget | None]:
       is charged through :func:`charge_llm_cost`;
     * ``limits=None`` binds nothing — the explicit opt-out.
 
+    With ``enforce_own=True`` (a caller's *explicit* caps, e.g.
+    ``Agent(loop_limits=LoopLimits(budget_usd=0.05))``) and an ambient budget
+    present, a nested child budget is bound instead of reusing the ambient
+    one untouched: the child enforces ``limits`` and forwards every unit it
+    records to the ambient budget (:attr:`LoopBudget.parent`), so the
+    enclosing request, crew or chat still sees — and caps — the full spend,
+    counted once. The ambient's orchestrated/standalone flag is unchanged.
+
     Args:
         limits: Caps for the fresh budget, or ``None`` to bind none.
+        enforce_own: Also enforce ``limits`` under an ambient budget.
 
     Yields:
         The budget in force (ambient or fresh), or ``None`` when opted out
         with no ambient budget.
     """
     ambient = _active_budget.get()
+    if ambient is not None and limits is not None and enforce_own:
+        child = LoopBudget(limits=limits, parent=ambient)
+        child_token = _active_budget.set(child)
+        try:
+            yield child
+        finally:
+            _active_budget.reset(child_token)
+        return
     if ambient is not None or limits is None:
         yield ambient
         return

@@ -51,12 +51,14 @@ class ApiRoutersPlugin(Plugin):
 
         Every API router is returned twice (see :mod:`core.api.versioning`):
         under ``/v1`` and, marked deprecated, at its historical unprefixed
-        path. The WebSocket channel is not versioned.
+        path. The WebSocket channel is served at ``/v1/chat/ws`` (canonical)
+        and at ``/chat/ws`` (deprecated in the docs; a handshake carries no
+        ``Deprecation`` header).
         """
-        from core.api.versioning import versioned_routers
+        from core.api.versioning import versioned_routers, versioned_websocket_routers
 
         # WebSocket chat channel: authenticates at the handshake with the
-        # same credentials as the REST chat surface. Not versioned.
+        # same credentials as the REST chat surface.
         from plugins.api_routers.chat_ws import router as chat_ws_router
 
         routers: list[Any] = []
@@ -104,4 +106,7 @@ class ApiRoutersPlugin(Plugin):
         from plugins.api_routers.async_runs import router as async_runs_router
 
         routers.append(async_runs_router)
-        return [chat_ws_router, *versioned_routers(routers)]
+        return [
+            *versioned_websocket_routers([chat_ws_router]),
+            *versioned_routers(routers),
+        ]

@@ -42,6 +42,7 @@ from plugins.api_routers._sse import (
     HeartbeatSource,
     heartbeat_seconds,
 )
+from plugins.api_routers.schemas import problem_responses
 
 logger = get_logger(__name__)
 
@@ -132,8 +133,12 @@ def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[st
     return headers
 
 
-@router.post("/chat")
-async def chat(req: ChatRequest, response: Response):
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    responses=problem_responses(401, 403, 422, 429, 503),
+)
+async def chat(req: ChatRequest, response: Response) -> ChatResponse:
     """
     Main endpoint for querying the agent.
     Delegated to ChatService which handles retrieval, reranking, caching, and response generation.

@@ -82,7 +82,7 @@ result.iterations        # LLM round-trips used
 | `autonomy_policy` | standalone guard | Left at its default, tools **explicitly declared** `category="destructive"` are refused (see [Safe defaults for a standalone run](#safe-defaults-for-a-standalone-run)); every other tool runs as before. An `AutonomyPolicy` replaces the guard with the real approval gate: tools whose category needs approval at the active level go through the enforcement chokepoint. `None` is the explicit opt-out — no guard, gate inert. |
 | `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
 | `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
-| `loop_limits` | orchestrator defaults | Caps for a run with no ambient `LoopBudget`: by default the orchestrator's `LoopLimits()` (`budget_usd`, `max_tool_calls`, `ORCHESTRATOR_LOOP_MAX_TOKENS`, `ORCHESTRATOR_LOOP_MAX_SECONDS`) with the iteration cap widened to `max_iterations`. An explicit `LoopLimits` replaces them; `None` disables the default budget. An ambient budget always wins. |
+| `loop_limits` | orchestrator defaults | Caps for a run with no ambient `LoopBudget`: by default the orchestrator's `LoopLimits()` (`budget_usd`, `max_tool_calls`, `ORCHESTRATOR_LOOP_MAX_TOKENS`, `ORCHESTRATOR_LOOP_MAX_SECONDS`) with the iteration cap widened to `max_iterations`. An explicit `LoopLimits` replaces them; `None` disables the default budget. Under an ambient budget the default and `None` reuse it, while an explicit `LoopLimits` is still enforced through a nested child budget that also charges the ambient one (once). |
 
 `agent.tool_names` reads back the tools an agent is armed with — their names
 in declaration order, as a `tuple[str, ...]`. It is the public counterpart of
@@ -178,15 +178,29 @@ so every LLM call is charged to it and every tool call counted; the iteration
 cap is widened to `max_iterations`, so that stays the cap that governs the
 loop. Inside an orchestrated request — or nested in another standalone run —
 the ambient budget is reused, never doubled. `loop_limits=LoopLimits(...)`
-sets the caps; `loop_limits=None` disables the default.
+sets the caps; `loop_limits=None` disables the default. Explicit caps are the
+agent's own and hold under an ambient budget too: the run binds a child
+budget (`standalone_budget(limits, enforce_own=True)`) that enforces them and
+forwards every charge, token and tick once to the ambient budget, so
+`Agent(loop_limits=LoopLimits(budget_usd=0.05))` inside a `Crew`, `GroupChat`,
+swarm batch or orchestrated request still aborts at USD 0.05 while the
+enclosing budget sees the spend (see
+[Nested budgets](orchestration.md#nested-budgets-explicit-caps-under-an-ambient-budget)).
 
 The same default applies to `GroupChat` (below) and to a swarm
 `Colony.execute_batch` ([swarm](swarm.md)), with one difference: every
 participant's `Agent.run` reuses that one shared budget, so its iteration and
 tool-call counters are lifted (`shared_loop_limits()`) — otherwise the agents'
 ticks would add up and end the chat or the batch early. The dollar, token and
-wall-clock caps still apply. A `Crew` gets the per-agent default per task,
-through each task's `Agent.run`.
+wall-clock caps still apply. A `Crew` binds the same shared budget for its
+whole `run()` — every task, and in `hierarchical` mode every manager turn — so
+the dollar, token and wall-clock caps bound the crew rather than each task
+separately (it used to get only the per-agent default per task, through each
+task's `Agent.run`). `Crew(loop_limits=...)` mirrors `Colony(loop_limits=...)`:
+left at the default it is `shared_loop_limits()`, an explicit `LoopLimits`
+replaces it, and `None` opts out so each task's `Agent.run` binds its own
+per-run default as before. An ambient budget always wins over the crew's
+caps; an agent's own explicit `loop_limits` are still enforced inside it.
 
 **Tool schemas are sent strict when they can be.** A tool whose parameter
 schema already fits the strict dialect — every property required and typed,
@@ -287,6 +301,11 @@ result.task_results   # per-task: name, output, text, agent_index,
   agent auto-assigns.
 - **Everything through `Agent.run`** — tools, `output_type` validation, cost
   accounting and the ambient `LoopBudget` apply per task unchanged.
+- **One crew-wide budget** — with no ambient budget, `run()` binds one shared
+  `LoopBudget` for the whole crew (`loop_limits=`, default
+  `shared_loop_limits()`: orchestrator dollar/token/wall-clock caps, counters
+  lifted; `None` opts out; an explicit `LoopLimits` replaces it). A breach
+  aborts the crew with `BudgetExceededError`.
 
 For auction-based allocation, capability matching, and structured handoffs,
 use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the

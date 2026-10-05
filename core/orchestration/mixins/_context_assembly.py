@@ -110,7 +110,17 @@ async def inject_memory_context(
         # Flatten for prompt context, marked as untrusted background data.
         context["memory_context"] = render_memory_context(memories)
 
-        # Context Folding integration: recent conversation history, possibly folded.
+        # Context Folding integration: recent conversation history, possibly
+        # folded. Earlier turns can quote tool output or documents, so they
+        # get the memory treatment: scanned and sealed in one envelope here,
+        # the single point where the orchestrator injects them.
+        from core.orchestration.history_context import render_history_context
+
+        recent_history = render_history_context(
+            recent_history
+            if isinstance(recent_history, str)
+            else str(recent_history or "")
+        )
         context["recent_history"] = recent_history
 
         # Record how much of the request's budget went to static recall rather

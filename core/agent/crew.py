@@ -19,7 +19,10 @@ The ten-line collaborative counterpart to the single-agent hello world:
 
 Every task executes through :meth:`Agent.run`, so tools, ``output_type``
 validation, cost accounting, and the ambient ``LoopBudget`` all apply
-unchanged. ``process="sequential"`` (default) threads each task's output into
+unchanged. A run with no ambient budget binds one shared crew-wide
+``LoopBudget`` (``Crew(loop_limits=...)``), so the dollar, token and
+wall-clock caps bound the whole crew rather than each task separately.
+``process="sequential"`` (default) threads each task's output into
 the next task's prompt as context; ``process="parallel"`` runs independent
 tasks concurrently; ``process="hierarchical"`` adds a ``manager`` agent that
 briefs, reviews, and may request one bounded revision per task (see
@@ -35,11 +38,15 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from core.agent.agent import Agent, AgentResult
 from core.observability.logging import get_logger
+from core.orchestration.budget_context import DEFAULT_LIMITS, standalone_budget
 from core.utils.concurrency import bounded_gather
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from core.orchestration.limits import LoopLimits
 
 logger = get_logger(__name__)
 
@@ -198,6 +205,19 @@ class Crew:
             ``OrchestrationConfig.crew_max_parallel`` (8). Each task is a
             full LLM call, so the whole task list must never be gathered at
             once. ``<= 0`` degrades to serial execution.
+        loop_limits: Caps for one ``LoopBudget`` shared by the whole
+            :meth:`run` when no budget is ambient. By default the crew shares
+            one built from the orchestrator's dollar, token and wall-clock
+            caps, with the iteration and tool-call counters lifted (every
+            task's ticks land on the shared budget; each agent keeps its own
+            ``max_iterations`` — see
+            :func:`core.agent._safety.shared_loop_limits`). An explicit
+            ``LoopLimits`` replaces those caps; ``None`` binds none, so each
+            task's ``Agent.run`` falls back to its own per-run budget. An
+            ambient budget (an orchestrated request, or an enclosing
+            standalone run) always wins. An agent's own explicit
+            ``loop_limits`` still apply to its task, as a child budget that
+            also charges the crew's.
 
     Raises:
         ValueError: Empty task list, unknown ``process``, hierarchical
@@ -214,6 +234,7 @@ class Crew:
         manager: Agent | None = None,
         cost_fn: CostFn | None = None,
         max_parallel: int | None = None,
+        loop_limits: LoopLimits | None = DEFAULT_LIMITS,
     ) -> None:
         if not tasks:
             raise ValueError("Crew needs at least one task.")
@@ -232,6 +253,7 @@ class Crew:
         self.manager = manager
         self.cost_fn = cost_fn
         self.max_parallel = max_parallel
+        self.loop_limits = loop_limits
         for index, task in enumerate(self.tasks):
             if task.agent is None:
                 if len(self.agents) == 1:
@@ -299,9 +321,26 @@ class Crew:
 
     # -- public API --------------------------------------------------------
 
+    def _crew_limits(self) -> LoopLimits | None:
+        """The caps the run binds when nothing is ambient (see ``loop_limits``)."""
+        if self.loop_limits is DEFAULT_LIMITS:
+            from core.agent._safety import shared_loop_limits
+
+            return shared_loop_limits()
+        return self.loop_limits
+
     async def run(self, inputs: dict[str, Any] | None = None) -> CrewResult:
-        """Execute the task list and return per-task results in order."""
-        inputs = inputs or {}
+        """Execute the task list and return per-task results in order.
+
+        The whole run — every task, and in ``hierarchical`` mode every manager
+        turn — shares one ambient ``LoopBudget`` (see ``loop_limits``); a
+        breach of its dollar, token or wall-clock cap aborts the crew with
+        :class:`~core.orchestration.limits.BudgetExceededError`.
+        """
+        with standalone_budget(self._crew_limits()):
+            return await self._run(inputs or {})
+
+    async def _run(self, inputs: dict[str, Any]) -> CrewResult:
         if self.process == "hierarchical":
             from core.agent.crew_hierarchical import run_hierarchical
 

@@ -17,6 +17,12 @@ probes, ``/metrics``, ``/status``, the ``/admin`` dashboard and the discovery
 documents keep their single unprefixed path, because probes, Prometheus,
 nginx and the Helm chart address them directly.
 
+WebSocket routers (:func:`versioned_websocket_routers`) are served the same
+two ways, but without the marker dependency: a handshake carries no
+``Deprecation`` header a client reliably sees, and the dependency's
+``Request`` parameter does not resolve on a WebSocket scope. The ``/v1``
+path is the canonical one; the unprefixed one is deprecated in the docs only.
+
 ``API_V1_ENABLED=false`` turns the ``/v1`` copies off; the unprefixed paths
 are then the only ones and are not marked deprecated.
 """
@@ -98,6 +104,31 @@ def versioned_routers(routers: Iterable[APIRouter]) -> list[APIRouter]:
     return legacy + current
 
 
+def versioned_websocket_routers(routers: Iterable[APIRouter]) -> list[APIRouter]:
+    """Serve WebSocket routers at their unprefixed path and under ``/v1``.
+
+    Unlike :func:`versioned_routers`, the unprefixed copy gets no deprecation
+    marker (see the module docstring): the routers are mounted as they are,
+    plus one ``/v1`` wrapper each. Returns the routers unchanged when ``/v1``
+    is disabled.
+
+    Args:
+        routers: Routers holding WebSocket routes.
+
+    Returns:
+        The original routers, then one ``/v1``-prefixed wrapper per router.
+    """
+    originals = list(routers)
+    if not api_v1_enabled():
+        return originals
+    current: list[APIRouter] = []
+    for router in originals:
+        v1 = APIRouter(prefix=V1_PREFIX)
+        v1.include_router(router)
+        current.append(v1)
+    return originals + current
+
+
 __all__ = [
     "DEPRECATED_SCOPE_KEY",
     "DEPRECATION_HEADER_VALUE",
@@ -107,4 +138,5 @@ __all__ = [
     "legacy_include_kwargs",
     "mark_deprecated_path",
     "versioned_routers",
+    "versioned_websocket_routers",
 ]

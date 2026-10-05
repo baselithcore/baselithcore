@@ -170,9 +170,9 @@ class Agent[OutputT]:
             settings — with the iteration cap widened to ``max_iterations``;
             breaching one raises ``BudgetExceededError``. An explicit
             :class:`~core.orchestration.limits.LoopLimits` replaces those caps;
-            ``None`` disables the default budget (bounded by
-            ``max_iterations`` alone, the pre-default behaviour). An ambient
-            budget always wins and is never doubled.
+            ``None`` disables the default budget. Under an ambient budget
+            the default and ``None`` reuse it; an explicit ``LoopLimits`` is
+            still enforced via a child budget that also charges the ambient.
     """
 
     def __init__(
@@ -331,7 +331,9 @@ class Agent[OutputT]:
         from core.orchestration.budget_context import standalone_budget
 
         limits = resolve_loop_limits(self._loop_limits, self.max_iterations)
-        with standalone_budget(limits):
+        # Explicit caps hold under an ambient budget too (child budget).
+        explicit = self._loop_limits is not DEFAULT and limits is not None
+        with standalone_budget(limits, enforce_own=explicit):
             return await self._run(prompt, run_id=run_id, checkpoint=checkpoint)
 
     async def _run(

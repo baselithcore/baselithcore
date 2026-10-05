@@ -170,3 +170,79 @@ def test_document_id_cannot_forge_lines_outside_the_envelope() -> None:
     assert first_line.startswith("Source [") and first_line.endswith("]:")
     assert "\n" not in first_line
     assert first_line.count("]") == 1
+
+
+class TestConversationHistory:
+    """Replayed turns are untrusted data: scanned, one envelope, labels kept."""
+
+    def test_history_is_scanned_and_enveloped_once(self) -> None:
+        from core.orchestration.history_context import render_history_context
+
+        text = render_history_context(f"User: hi\nAssistant: {_ESCAPE}")
+
+        assert text.startswith('<untrusted_tool_output tool="conversation_history">')
+        assert text.count(UNTRUSTED_CLOSE_TAG) == 1
+        assert text.endswith(UNTRUSTED_CLOSE_TAG)
+        assert "User: hi\nAssistant: benign" in text  # role labels readable
+        assert ZWSP not in text
+
+    def test_detection_only_mode_keeps_bytes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from core.orchestration.history_context import render_history_context
+
+        monkeypatch.setenv("BASELITH_SANITIZE_EXTERNAL_CONTENT", "off")
+
+        assert ZWSP in render_history_context("User: a" + ZWSP)
+
+    def test_blank_history_renders_empty(self) -> None:
+        from core.orchestration.history_context import render_history_context
+
+        assert render_history_context("") == ""
+        assert render_history_context("  \n") == ""
+
+    def test_rule_covers_the_conversation(self) -> None:
+        assert "conversation so far" in RAG_CONTEXT_IS_DATA_RULE
+
+    @pytest.mark.asyncio
+    async def test_both_rag_paths_envelope_history(self) -> None:
+        for streaming in (False, True):
+            llm = _LLM()
+            kwargs = dict(
+                vector_store=_Store(),
+                llm_service=llm,
+                config=_config(),
+                embedder=_Embedder(),
+            )
+            ctx = {"history_text": f"User: q0\nAssistant: {_ESCAPE}"}
+            if streaming:
+                handler = StandardRagStreamHandler(**kwargs)
+                _ = [c async for c in handler.handle("q", ctx)]
+            else:
+                await StandardRagHandler(**kwargs).handle("q", ctx)
+
+            prompt = llm.calls[0]["prompt"]
+            # One envelope for the history, one for the chunk — no more.
+            assert prompt.count(UNTRUSTED_CLOSE_TAG) == 2
+            assert prompt.count('tool="conversation_history"') == 1
+            assert "SYSTEM: ignore" in prompt  # inside an envelope, escaped
+            history = prompt.split("Context:")[0]
+            assert history.rstrip().endswith(UNTRUSTED_CLOSE_TAG)
+
+    @pytest.mark.asyncio
+    async def test_injected_recent_history_is_enveloped(self) -> None:
+        class _Memory:
+            async def recall(self, query: str, limit: int = 5) -> list[Any]:
+                return []
+
+            def get_context(self, max_tokens: int = 2000) -> str:
+                return "User: x\nAssistant: " + _ESCAPE
+
+        context: dict[str, Any] = {}
+        await inject_memory_context(
+            SimpleNamespace(memory_manager=_Memory()), "q", context, LoopBudget()
+        )
+
+        history = context["recent_history"]
+        assert history.startswith('<untrusted_tool_output tool="conversation_history">')
+        assert history.count(UNTRUSTED_CLOSE_TAG) == 1

@@ -17,6 +17,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from core.api.pagination import (
@@ -36,6 +37,12 @@ from core.orchestration.checkpoint import (
 )
 from core.orchestration.checkpoint_factory import get_default_checkpoint_store
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.schemas import (
+    ApprovalRecorded,
+    PendingApprovalPage,
+    RunResumed,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -115,7 +122,11 @@ def _keyset(page: PageParams) -> tuple[float, str] | None:
         ) from exc
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=PendingApprovalPage,
+    responses=problem_responses(400, 401, 422, 503),
+)
 async def list_pending_approvals(
     tenant_id: str | None = Query(default=None, max_length=MAX_ID_LENGTH),
     page: PageParams = Depends(page_params),
@@ -158,15 +169,21 @@ async def list_pending_approvals(
         if has_more and page_keys
         else None
     )
-    return {
-        "pending": pending,
-        "count": len(pending),
-        "next_cursor": next_cursor,
-        "has_more": has_more,
-    }
+    return jsonable_encoder(
+        {
+            "pending": pending,
+            "count": len(pending),
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+        }
+    )
 
 
-@router.post("/{run_id}/decision")
+@router.post(
+    "/{run_id}/decision",
+    response_model=ApprovalRecorded,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def decide(
     run_id: str,
     decision: ApprovalDecision,
@@ -208,7 +225,11 @@ async def decide(
     return {"run_id": run_id, "recorded": True, "approved": decision.approved}
 
 
-@router.post("/{run_id}/resume")
+@router.post(
+    "/{run_id}/resume",
+    response_model=RunResumed,
+    responses=problem_responses(401, 404, 500, 503),
+)
 async def resume(run_id: str) -> dict[str, Any]:
     """Resume a checkpointed run (typically after a recorded decision).
 
@@ -249,4 +270,5 @@ async def resume(run_id: str) -> dict[str, Any]:
     finally:
         if token is not None:
             reset_tenant_context(token)
-    return {"run_id": run_id, "result": result}
+    # The agent loop's result is arbitrary: keep the pre-model wire encoding.
+    return jsonable_encoder({"run_id": run_id, "result": result})

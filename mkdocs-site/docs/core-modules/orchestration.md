@@ -273,6 +273,18 @@ prompt reads `Conversation so far:`, then `Context:`, `Question:` and `Answer:`;
 without it the first block is omitted. The retrieved context stays the only
 source of facts, and retrieval runs on the raw query.
 
+The history itself is untrusted too: an earlier assistant turn can quote a
+tool result or a document. `build_rag_user_prompt` renders it through
+`render_history_context` (`core/orchestration/history_context.py`), which
+scans it with `scan_external_content` (source `conversation_history`, same
+`BASELITH_SANITIZE_EXTERNAL_CONTENT` policy) and seals it in **one**
+`<untrusted_tool_output tool="conversation_history">` envelope, keeping the
+`User:` / `Assistant:` labels readable inside it. Pass the raw turns — the
+function wraps on every call, by design (`wrap_untrusted` has no idempotency
+shortcut), so it runs exactly once per prompt. `RAG_CONTEXT_IS_DATA_RULE`
+names the conversation alongside the retrieved documents and says only the
+current Question is the user's request.
+
 !!! warning "Retrieved chunks are untrusted data"
     Anyone who can get a document into the knowledge base can write text the
     model reads, so retrieved chunks no longer reach the prompt as plain
@@ -638,7 +650,7 @@ stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed a
 | Symbol | Purpose |
 |--------|---------|
 | `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`, `max_seconds`) |
-| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()`. Optional `parent`: a nested scope's budget forwards every recorded unit once to the enclosing one (see [Nested budgets](#nested-budgets-explicit-caps-under-an-ambient-budget)) |
 | `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`, `context_tokens` and `elapsed_seconds`) |
 | `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens` / `max_seconds`) |
 
@@ -710,6 +722,11 @@ with `scan_external_content` and seals the bullet list in one
 `<untrusted_tool_output tool="memory_recall">` envelope, so a consumer that puts
 it in a prompt next to `UNTRUSTED_OUTPUT_SYSTEM_RULE` gets background data the
 model will not obey. An empty recall is still `""`.
+`context["recent_history"]` (the memory manager's recent-context block) gets
+the same treatment at the same point: `inject_memory_context` passes it
+through `render_history_context`, so it arrives as one
+`<untrusted_tool_output tool="conversation_history">` envelope (or `""` when
+empty). Put it in a prompt as-is — wrapping it again would nest the envelope.
 
 ```python
 snap = budget.snapshot()
@@ -755,6 +772,25 @@ used to be priced through `BASELITH_UNKNOWN_MODEL_COST_POLICY`, whose default
 bills `UNKNOWN_PRICE` at 100 $/M. A single local turn could therefore blow a
 `budget_usd` cap on money nobody spent. A model absent from the table that is
 **not** local is still charged, which is the visibility that policy exists for.
+
+#### Nested budgets: explicit caps under an ambient budget
+
+`standalone_budget(limits, enforce_own=True)` binds a **child** `LoopBudget`
+when an ambient one already exists, instead of reusing the ambient one
+untouched. The child enforces its own `limits`; every tick, tool call, charge
+and token count it records is forwarded once to its `parent` (the ambient
+budget), so the enclosing request, crew, group chat or swarm batch still sees
+and caps the full spend — counted once, not twice. Either side's cap raises
+`BudgetExceededError`; `remaining_seconds()` is the tighter of the two
+deadlines, the parent's deadline also fails the child's `check_deadline()`,
+and `token_pressure()` reports the higher pressure. The binding's
+orchestrated/standalone flag (`in_orchestrated_request()`) is unchanged.
+
+`Agent.run` uses it for an agent built with an explicit
+`loop_limits=LoopLimits(...)`: `Agent(loop_limits=LoopLimits(budget_usd=0.05))`
+inside a `Crew` aborts that run at USD 0.05 even though the crew-wide budget
+allows 0.50. An agent left at the default limits (or `loop_limits=None`)
+still just reuses the ambient budget.
 
 ### Durable checkpointing & resume
 

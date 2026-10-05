@@ -25,6 +25,14 @@ from core.observability.logging import get_logger
 from core.webhooks.service import get_webhook_service
 from core.webhooks.signing import reserved_header_names
 from core.webhooks.ssrf import WebhookSSRFError
+from plugins.api_routers.schemas import (
+    WebhookDeleted,
+    WebhookDeliveryPage,
+    WebhookEndpointPage,
+    WebhookEndpointView,
+    WebhookReplayed,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -87,11 +95,15 @@ class CreateWebhookRequest(BaseModel):
 class CreateWebhookResponse(BaseModel):
     """Registration result. The signing ``secret`` is returned only once."""
 
-    endpoint: dict[str, Any]
+    endpoint: WebhookEndpointView
     secret: str
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses=problem_responses(400, 401, 403, 409, 422),
+)
 async def create_webhook(
     request: Request, payload: CreateWebhookRequest
 ) -> CreateWebhookResponse:
@@ -124,10 +136,17 @@ async def create_webhook(
         ) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    return CreateWebhookResponse(endpoint=endpoint.redacted(), secret=secret)
+    return CreateWebhookResponse(
+        endpoint=WebhookEndpointView.model_validate(endpoint.redacted()),
+        secret=secret,
+    )
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=WebhookEndpointPage,
+    responses=problem_responses(400, 401, 403, 422),
+)
 async def list_webhooks(
     request: Request, page: PageParams = Depends(page_params)
 ) -> dict[str, Any]:
@@ -138,7 +157,11 @@ async def list_webhooks(
     return paginated(endpoints, page, key="endpoints", serialize=lambda e: e.redacted())
 
 
-@router.delete("/{endpoint_id}")
+@router.delete(
+    "/{endpoint_id}",
+    response_model=WebhookDeleted,
+    responses=problem_responses(401, 403, 404),
+)
 async def delete_webhook(request: Request, endpoint_id: str) -> dict[str, Any]:
     """Delete a webhook endpoint (requires ``webhooks:write``)."""
     _enforce(request, "webhooks:write")
@@ -153,7 +176,11 @@ async def delete_webhook(request: Request, endpoint_id: str) -> dict[str, Any]:
     return {"status": "deleted", "endpoint_id": endpoint_id}
 
 
-@router.get("/deliveries")
+@router.get(
+    "/deliveries",
+    response_model=WebhookDeliveryPage,
+    responses=problem_responses(400, 401, 403, 422),
+)
 async def list_deliveries(
     request: Request, page: PageParams = Depends(page_params)
 ) -> dict[str, Any]:
@@ -174,7 +201,11 @@ async def list_deliveries(
     )
 
 
-@router.post("/deliveries/{delivery_id}/replay")
+@router.post(
+    "/deliveries/{delivery_id}/replay",
+    response_model=WebhookReplayed,
+    responses=problem_responses(401, 403, 404),
+)
 async def replay_delivery(request: Request, delivery_id: str) -> dict[str, Any]:
     """Re-attempt a failed delivery (requires ``webhooks:write``)."""
     _enforce(request, "webhooks:write")
