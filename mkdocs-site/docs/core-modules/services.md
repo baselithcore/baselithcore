@@ -250,7 +250,17 @@ within a 1:3–3:1 ratio; earlier models only their fixed sizes).
 When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
-`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
+`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`
+(`core.services.llm._coercion`). The parse fails closed: only a leading
+`<think>` block, surrounding whitespace and one enclosing markdown code fence
+are removed, and what remains must be exactly one
+`{"tool": ...}`/`{"tool": null, "final": ...}` object. JSON is never extracted
+from prose, so a tool call the model merely quotes (from an untrusted tool
+output, say) is never executed. Any other reply is answered with **one** re-ask
+("reply again with ONLY a valid JSON object"); if that fails too, the original
+text is returned as a plain answer with no tool call. The coercion call runs through
+`LLM_FALLBACK_CHAIN` like plain text, so a failing primary fails over and the
+serving stage lands on the span. The
 return type is a uniform `LLMResult` in both modes. The flag is **on by
 default** — the `supports_native_tools` guard keeps providers without a native
 API on the coercion path, so the default is safe everywhere; set
@@ -724,6 +734,19 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **Tool calling is a server flag.** Without `--enable-auto-tool-choice` and a
   `--tool-call-parser` matching the model, set `LLM_VLLM_NATIVE_TOOLS=false`:
   tool use then goes through prompt coercion instead of a rejected request.
+  That holds for the message path too (`generate_messages`, which every
+  `core.agent.Agent` turn takes): a turn that offers tools or carries tool
+  blocks is rendered as a transcript and coerced, so no `tools`/`tool_choice`
+  ever reaches the server, while a tool-free turn still goes out as messages.
+  A message-path fallback-chain stage in that state is skipped on a turn that
+  offers tools (tool history alone is sent as ordinary messages, which a
+  parserless server accepts). The coerced call itself fails over through the
+  text chain.
+- **JSON mode turns thinking off.** A `json_mode` call (the coercion path uses
+  it) adds `extra_body.chat_template_kwargs.enable_thinking=false`, merged with
+  any `extra_body` the caller passed; a caller that sets `enable_thinking`
+  keeps its choice. Without it a thinking template (Qwen3) opens `<think>` and
+  `json_object` decoding forces the reasoning inside the JSON.
 - **vLLM-only sampling parameters** (`top_k`, `min_p`, `repetition_penalty`,
   `chat_template_kwargs` — e.g. `{"enable_thinking": false}` for Qwen3) travel
   in `extra_body`, forwarded untouched.

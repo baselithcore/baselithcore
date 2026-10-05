@@ -49,6 +49,7 @@ from core.services.llm.messages import (
     CONVERGENCE_NUDGE,
     Message,
     ToolResultBlock,
+    ToolUseBlock,
     render_as_prompt,
 )
 from core.services.llm.model_capabilities import configured_max_tokens
@@ -75,17 +76,50 @@ __all__ = ["generate_messages", "supports_message_api"]
 _RETRYABLE = RETRYABLE_ERRORS
 
 
-def supports_message_api(service: LLMService) -> bool:
+def supports_message_api(service: LLMService, *, tool_use: bool = False) -> bool:
     """Whether *service* will send a real message list for this configuration.
 
     Both halves matter: a provider that cannot receive messages obviously
     degrades, but so does one whose native tool API is switched off — the
     coercion fallback speaks prompts, and pretending otherwise would send a
     tool-calling conversation to a path that cannot answer one.
+
+    The switch exists per provider too: a vLLM server started without a tool
+    parser (``LLM_VLLM_NATIVE_TOOLS=false``) still speaks the message API but
+    answers a request carrying ``tools``/``tool_choice`` with HTTP 400. A turn
+    that involves tools therefore degrades on such a provider, exactly as
+    ``generate_structured`` already sends it to prompt coercion.
+
+    Args:
+        service: The owning :class:`LLMService`.
+        tool_use: Whether the turn offers tools or its history carries tool
+            calls/results. Only *offered* tools are what a parserless server
+            rejects (``tool_choice="auto"`` is an HTTP 400 there); a turn whose
+            history alone carries tool blocks is degraded too, conservatively,
+            so the primary's transcript never depends on the server's chat
+            template rendering tool turns. Fallback-chain stages are filtered
+            on offered tools only (``fallback_runtime``).
     """
     if not getattr(service.config, "enable_native_tools", False):
         return False
-    return bool(getattr(service.provider, "supports_messages", False))
+    if not getattr(service.provider, "supports_messages", False):
+        return False
+    # Message-capable providers declare the flag; one that does not is
+    # assumed native, which is what the message API meant before the flag.
+    if tool_use and getattr(service.provider, "supports_native_tools", True) is False:
+        return False
+    return True
+
+
+def _involves_tools(messages: list[Message], tools: list[LLMToolSpec] | None) -> bool:
+    """Whether a turn needs the provider's native tool API to go as messages."""
+    if tools:
+        return True
+    return any(
+        isinstance(block, ToolUseBlock | ToolResultBlock)
+        for message in messages
+        for block in getattr(message, "content", ())
+    )
 
 
 @retry(
@@ -222,7 +256,7 @@ async def generate_messages(
 
     resolved_model = service._resolve_model(model, task_category)
     max_tokens = configured_max_tokens(max_tokens, service.config)
-    if not supports_message_api(service):
+    if not supports_message_api(service, tool_use=_involves_tools(messages, tools)):
         return await _degrade_to_prompt(
             service,
             messages,
