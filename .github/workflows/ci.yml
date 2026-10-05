@@ -1495,7 +1495,13 @@ jobs:
     # failed. integration_test runs beside python_test rather than below it,
     # so it is named here explicitly.
     needs: [changes, python_test, integration_test]
-    if: ${{ !cancelled() && !failure() && github.ref == 'refs/heads/main' }}
+    # `[no release]` in the pushed commit's message holds this job back and
+    # nothing else. It replaces `[skip ci]`, which also skipped CodeQL and
+    # Semgrep on that commit: OpenSSF Scorecard's SAST check then counted the
+    # whole pull request it belonged to as unscanned.
+    if: >-
+      ${{ !cancelled() && !failure() && github.ref == 'refs/heads/main'
+      && !contains(github.event.head_commit.message, '[no release]') }}
     permissions:
       contents: write
       issues: write

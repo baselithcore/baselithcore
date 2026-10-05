@@ -12,6 +12,11 @@ and ships changes through Conventional Commits + semantic-release.
 | `feat!:` / `BREAKING CHANGE:` | MAJOR | Backward-incompatible change |
 | `docs:` `chore:` `refactor:` `test:` `ci:` | none | No release |
 
+`[no release]` in the message of the commit that reaches `main` holds the
+release job back for that push and leaves every other check running. Do not
+use `[skip ci]` for it: that also skips CodeQL and Semgrep, which OpenSSF
+Scorecard's SAST check reads per pull request.
+
 The version lives in `core/_version.py` (single source of truth). The release
 pipeline writes it into the artifacts it publishes, but it cannot commit it:
 `main` is pull-request-only. The bump and the matching
