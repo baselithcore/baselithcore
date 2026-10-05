@@ -59,6 +59,18 @@ result.iterations        # LLM round-trips used
   (`core/services/llm/message_transport.py`), now shared with the
   [ReAct loop](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) —
   same transport, same degradation, no behaviour change on this side.
+- **Conversations** — `agent.run(prompt, history=[...])` continues a stored
+  conversation: prior `Message`s are sent verbatim before the new prompt
+  (the caller's list is never mutated; a history ending on an unanswered
+  `tool_use` raises `ValueError`). `AgentResult.messages` includes them.
+- **Events** — `agent.run_events(prompt, history=...)` runs the same loop and
+  yields `TextDelta`, `ToolCallStarted`, `ToolCallFinished`, then `Completed`
+  (or `Failed` instead of raising). Text arrives per model turn. Tools and
+  `output_type` are supported. With several parallel tool calls in one turn,
+  every `ToolCallStarted` precedes execution and the `ToolCallFinished` events
+  arrive after the whole batch; `ToolCallFinished.content` is the observation
+  exactly as the model received it, wrapped in core's untrusted-tool-output
+  envelope.
 - **Streaming** — `agent.run_stream(prompt)` yields text chunks
   (text-only: `output_type`/tools are rejected on the stream path).
 - **The whole runtime underneath** — calls go through `LLMService`, so

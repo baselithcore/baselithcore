@@ -3,6 +3,14 @@
 from core.agent.agent import Agent, AgentOutputValidationError, AgentResult
 from core.agent.crew import AgentUsage, CostFn, Crew, CrewResult, Task, TaskResult
 from core.agent.crew_hierarchical import ReviewDecision, ReviewVerdict
+from core.agent.events import (
+    AgentEvent,
+    Completed,
+    Failed,
+    TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from core.agent.group_chat import (
     CapabilitySelector,
     ChatMessage,
@@ -16,14 +24,17 @@ from core.agent.group_chat import (
 
 __all__ = [
     "Agent",
+    "AgentEvent",
     "AgentOutputValidationError",
     "AgentResult",
     "AgentUsage",
     "CapabilitySelector",
     "ChatMessage",
+    "Completed",
     "CostFn",
     "Crew",
     "CrewResult",
+    "Failed",
     "GroupChat",
     "GroupChatResult",
     "LLMManagerSelector",
@@ -34,4 +45,7 @@ __all__ = [
     "SpeakerSelector",
     "Task",
     "TaskResult",
+    "TextDelta",
+    "ToolCallFinished",
+    "ToolCallStarted",
 ]

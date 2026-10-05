@@ -38,30 +38,26 @@ message API still works: the history is flattened into a prompt for it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from core.agent._safety import DEFAULT, collect_tools, resolve_loop_limits
 from core.agent._tool_dispatch import (
     build_tool_specs,
-    gate_context,
-    system_prompt_for,
 )
-from core.agent._tool_runtime import execute_tool_calls
+from core.agent.events import AgentEvent, Completed, Failed
 from core.observability.logging import get_logger
-from core.orchestration.call_keys import CallOccurrences
 from core.orchestration.idempotency import ToolLedger
 from core.reasoning.react import ToolDefinition
 from core.services.llm.message_transport import generate_over_messages
 from core.services.llm.messages import (
     Message,
-    ToolResultBlock,
-    message_from_result,
 )
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -285,6 +281,7 @@ class Agent[OutputT]:
         self,
         prompt: str,
         *,
+        history: Sequence[Message] | None = None,
         run_id: str | None = None,
         checkpoint: CheckpointManager | None = None,
     ) -> AgentResult[OutputT]:
@@ -302,6 +299,11 @@ class Agent[OutputT]:
 
         Args:
             prompt: The user prompt.
+            history: Prior turns of the conversation, oldest first, sent
+                verbatim before ``prompt`` (``None`` starts a fresh one). The
+                caller's list is not mutated, and ``AgentResult.messages``
+                includes these turns. A history ending on an unanswered
+                ``tool_use`` raises ``ValueError``.
             run_id: Identifier for this run, shared by every attempt at it.
                 **Supplying a stable id across retries is what makes
                 deduplication possible at all** — a fresh id per attempt is a
@@ -319,6 +321,7 @@ class Agent[OutputT]:
                 their calls sequentially. ``None`` changes nothing.
 
         Raises:
+            ValueError: ``history`` ends on an unanswered ``tool_use``.
             AgentOutputValidationError: ``output_type`` never satisfied.
             RuntimeError: ``max_iterations`` exhausted before a final answer.
             BudgetExceededError: A ``LoopBudget`` cap was hit — the ambient
@@ -328,129 +331,31 @@ class Agent[OutputT]:
                 agent was given an ``autonomy_policy``; without one the
                 approval gate is inert (see the constructor).
         """
+        from core.agent._loop import drive
+
+        with self._bound_budget():
+            async with contextlib.aclosing(
+                drive(
+                    self,
+                    prompt,
+                    history=history,
+                    run_id=run_id,
+                    checkpoint=checkpoint,
+                )
+            ) as events:
+                async for event in events:
+                    if isinstance(event, Completed):
+                        return event.result
+        raise RuntimeError("Agent loop ended without a result")  # pragma: no cover
+
+    def _bound_budget(self) -> contextlib.AbstractContextManager[Any]:
+        """Bind the run's budget (ambient, or the agent's own caps) for a run."""
         from core.orchestration.budget_context import standalone_budget
 
         limits = resolve_loop_limits(self._loop_limits, self.max_iterations)
         # Explicit caps hold under an ambient budget too (child budget).
         explicit = self._loop_limits is not DEFAULT and limits is not None
-        with standalone_budget(limits, enforce_own=explicit):
-            return await self._run(prompt, run_id=run_id, checkpoint=checkpoint)
-
-    async def _run(
-        self,
-        prompt: str,
-        *,
-        run_id: str | None,
-        checkpoint: CheckpointManager | None,
-    ) -> AgentResult[OutputT]:
-        """Body of :meth:`run`, with the run's budget already bound."""
-        from core.orchestration.enforcement import enforce_iteration
-
-        service = self._service()
-        specs = self._tool_specs()
-        response_format = self._response_format()
-        system = system_prompt_for(self.system_prompt, bool(self._tools))
-        context = gate_context(self)
-
-        if checkpoint is not None and not run_id:
-            run_id = checkpoint.run_id
-        occurrences = CallOccurrences()
-        history: list[Message] = [Message.user(prompt)]
-        tool_calls_made: list[str] = []
-        retries_left = self.max_retries
-        last_error: Exception | None = None
-
-        for iteration in range(1, self.max_iterations + 1):
-            # Charges the ambient request budget for this round trip (a no-op
-            # outside an orchestrated request); raises when the cap is hit.
-            enforce_iteration(context)
-            result = await self._generate(
-                service,
-                history,
-                specs=specs,
-                response_format=response_format,
-                system=system,
-            )
-            # Verbatim, before anything else: the API requires the turn that
-            # requested the tools — thinking blocks included — to come back
-            # unchanged alongside their results.
-            history.append(message_from_result(result))
-
-            if result.tool_calls:
-                # Gated in order, then overlapped: the provider emitted every
-                # call of this turn before seeing any result, so they are
-                # independent and running them serially paid the sum of their
-                # latencies. Each call's occurrence in the run keeps a loop
-                # that legitimately calls one tool twice with identical
-                # arguments from collapsing into one ledger entry.
-                outcomes = await execute_tool_calls(
-                    self,
-                    list(result.tool_calls),
-                    context=context,
-                    run_id=run_id,
-                    step_offset=len(tool_calls_made),
-                    occurrences=occurrences,
-                    checkpoint=checkpoint,
-                )
-                results: list[ToolResultBlock] = []
-                for call, (observation, is_error) in zip(
-                    result.tool_calls, outcomes, strict=True
-                ):
-                    tool_calls_made.append(call.name)
-                    results.append(
-                        ToolResultBlock(
-                            tool_use_id=call.id,
-                            content=observation,
-                            is_error=is_error,
-                        )
-                    )
-                # One message for the whole turn: a provider rejects a
-                # conversation whose parallel tool calls are answered apart.
-                history.append(Message.tool_results(results))
-                continue
-
-            text = result.text or ""
-            if self.output_type is None:
-                return AgentResult(
-                    output=text,  # type: ignore[arg-type]
-                    text=text,
-                    tool_calls_made=tool_calls_made,
-                    iterations=iteration,
-                    messages=history,
-                )
-            try:
-                parsed = self._parse_output(text)
-            except (ValidationError, ValueError) as exc:
-                last_error = exc
-                if retries_left <= 0:
-                    raise AgentOutputValidationError(
-                        f"output failed {self.output_type.__name__} validation "
-                        f"after {self.max_retries} retries: {exc}",
-                        last_error=exc,
-                    ) from exc
-                retries_left -= 1
-                # A correction turn, not a rewritten prompt: the failed answer
-                # is already in the history as the assistant turn above.
-                history.append(
-                    Message.user(
-                        f"That failed validation against the required schema: "
-                        f"{exc}\nReply again with ONLY a JSON object matching "
-                        f"the schema."
-                    )
-                )
-                continue
-            return AgentResult(
-                output=parsed,
-                text=text,
-                tool_calls_made=tool_calls_made,
-                iterations=iteration,
-                messages=history,
-            )
-
-        raise RuntimeError(
-            f"Agent.run exceeded max_iterations={self.max_iterations} "
-            f"(last validation error: {last_error})"
-        )
+        return standalone_budget(limits, enforce_own=explicit)
 
     async def _generate(
         self,
@@ -495,3 +400,46 @@ class Agent[OutputT]:
             system_prompt=self.system_prompt,
         ):
             yield chunk
+
+    async def run_events(
+        self,
+        prompt: str,
+        *,
+        history: Sequence[Message] | None = None,
+        run_id: str | None = None,
+        checkpoint: CheckpointManager | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run the agent and yield what happens, as it happens.
+
+        Same loop, arguments and controls as :meth:`run`, observed instead of
+        awaited: :class:`~core.agent.events.TextDelta` for each model turn's
+        text (plain-text agents only), ``ToolCallStarted`` /
+        ``ToolCallFinished`` around every tool call, and a final
+        :class:`~core.agent.events.Completed` carrying the
+        :class:`AgentResult`. An exception does not escape: it is the last
+        event, as :class:`~core.agent.events.Failed`. Cancellation still
+        propagates. Text arrives per model turn, not per token — the tool loop
+        needs each turn whole. When one turn carries several parallel tool
+        calls, every ``ToolCallStarted`` precedes execution and the
+        ``ToolCallFinished`` events arrive only after the whole batch is done.
+
+        Leaving the iteration early (``break``/``aclose``) stops the loop:
+        no further model call or tool runs.
+        """
+        from core.agent._loop import drive
+
+        try:
+            with self._bound_budget():
+                async with contextlib.aclosing(
+                    drive(
+                        self,
+                        prompt,
+                        history=history,
+                        run_id=run_id,
+                        checkpoint=checkpoint,
+                    )
+                ) as events:
+                    async for event in events:
+                        yield event
+        except Exception as exc:  # surfaced as the final event
+            yield Failed(error=exc)
