@@ -104,8 +104,8 @@ hash_surface_version: 5           # Written by `baselith plugin sign`. Advisory.
 | `description`           | ✅        | Brief description                                |
 | `author`                | ❌        | Author name or organization                      |
 | `license`               | ❌        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
-| `min_core_version`      | ❌        | Minimum BaselithCore version — full SemVer `MAJOR.MINOR.PATCH` (e.g. `0.29.0`) |
-| `max_core_version`      | ❌        | Maximum BaselithCore version, same format        |
+| `min_core_version`      | ❌        | Minimum public core release (`CORE_VERSION` in `core/_core_version.py`) — full SemVer `MAJOR.MINOR.PATCH` (e.g. `0.29.0`) |
+| `max_core_version`      | ❌        | Maximum public core release, same format        |
 | `python_dependencies`   | ❌        | Pip-style (PEP 440) package requirements         |
 | `plugin_dependencies`   | ❌        | Mapping of plugin name → version constraint      |
 | `dependencies`          | ❌        | Legacy list of required plugin **names**; prefer `plugin_dependencies` |
@@ -283,6 +283,18 @@ Two different grammars apply:
     `plugin_dependencies` are part of the gate, so **disabling a dependency disables its
     dependents**: turning `browser_agent` off in `configs/plugins.yaml` now skips
     `baselithbot`, where previously it logged a warning and loaded anyway.
+
+!!! note "Declare against the public core, from the manifest alone"
+    The public core project is the reference a plugin is written for, wherever it is
+    developed. Core bounds name a **public core release** — the gate compares them with
+    `CORE_VERSION` from `core/_core_version.py`, never with a downstream distribution's
+    own `core/_version.py` — so a floor above the latest public release refuses the
+    plugin everywhere. Likewise `python_dependencies` must list every third-party package
+    the plugin imports on its load path that the public core does not install: a
+    distribution whose base install is larger hides the gap until the plugin is
+    installed standalone, from its repository or the marketplace, and fails with an
+    `ImportError`. A package imported inside the function that needs it, or behind a
+    `try`/`except ImportError` that degrades, is optional and need not be declared.
 
 ---
 

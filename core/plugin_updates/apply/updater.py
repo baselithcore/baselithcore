@@ -204,7 +204,7 @@ def build_executor(config: UpdateApplyConfig) -> tuple[Executor, Path]:
     Raises:
         UpdaterRefused: ``BASELITH_PLUGIN_OVERLAY_DIR`` is unset or missing.
     """
-    from core._version import __version__
+    from core._core_version import CORE_VERSION
     from core.config.plugin_updates import get_plugin_update_config
     from core.config.plugins import get_plugin_config
     from core.plugins.overlay import OVERLAY_ENV, overlay_root
@@ -248,7 +248,7 @@ def build_executor(config: UpdateApplyConfig) -> tuple[Executor, Path]:
         runner=subprocess_runner,
         probe=probe,
         trusted_keys=trusted_keys,
-        core_version=__version__,
+        core_version=CORE_VERSION,
         max_unpacked_bytes=max_bytes * UNPACKED_SIZE_FACTOR,
     )
     return executor, root

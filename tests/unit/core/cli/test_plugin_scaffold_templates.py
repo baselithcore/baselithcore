@@ -10,7 +10,9 @@ Two defects in the scaffold templates:
   literals, so no linter ever saw them — the first thing a new plugin author
   ran into was a lint failure in code they had not written.
 
-The manifest now declares the running core version, and the generated code uses
+The manifest now declares the running public core release (``CORE_VERSION``,
+the number the loader's compatibility gate compares with in every
+distribution), and the generated code uses
 PEP 585/604 builtins.
 """
 
@@ -20,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core import __version__
+from core._core_version import CORE_VERSION
 from core.cli.commands.plugin.const import PLUGIN_TEMPLATE
 from core.cli.commands.plugin.create import create_plugin
 
@@ -47,7 +49,7 @@ def test_manifest_declares_the_running_core_version(
         (workdir / "plugins" / name / "manifest.yaml").read_text()
     )
 
-    assert manifest["min_core_version"] == __version__
+    assert manifest["min_core_version"] == CORE_VERSION
 
 
 @pytest.mark.parametrize("plugin_type", sorted(PLUGIN_TEMPLATE))

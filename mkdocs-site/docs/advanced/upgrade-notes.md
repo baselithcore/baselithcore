@@ -227,6 +227,19 @@ See [Security › Plugin trust store](security.md#plugin-trust-store).
 
 ## API and signature changes
 
+### Plugin core bounds name the public core release
+
+`min_core_version` / `max_core_version` are compared with `CORE_VERSION`
+(`core/_core_version.py`) by the plugin loader, `baselith plugin add`, the plugin
+update checker and the upgrade checklist — no longer with `core._version`. In the
+core project the two numbers are equal, so nothing changes there. A downstream
+distribution that versions its own `core/_version.py` independently must restate
+its plugins' bounds as public core releases: a floor written in the
+distribution's own numbering (`1.0.0` against a public `0.42.1`) now refuses the
+plugin. The upgrade checklist's plugin check, previously reported as not
+computed in a distribution, now runs there. `plugin_compatibility()` lost its
+`framework_version`, `core_version` and `distribution` parameters.
+
 ### `POST /chat/stream` is real Server-Sent Events
 
 It answers `text/event-stream` with one `data:` frame per model chunk, an

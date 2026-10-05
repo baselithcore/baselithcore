@@ -192,7 +192,7 @@ class PluginUpdateService:
                 method=self.deployment().method,
                 heartbeat=heartbeat,
                 active_run=self._runs.active(c.plugin),
-                core_version=FRAMEWORK_VERSION,
+                core_version=CORE_VERSION,
                 now=datetime.now(UTC),
             )
         except Exception as exc:
@@ -349,7 +349,7 @@ class PluginUpdateService:
             installed_versions(self._bundled_root),
             source=source,
             cache=self._cache,
-            core_version=FRAMEWORK_VERSION,
+            core_version=CORE_VERSION,
             trusted_keys=load_trust_roots,
             trust=trust,
         )

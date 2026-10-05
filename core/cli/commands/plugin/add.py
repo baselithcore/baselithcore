@@ -247,7 +247,7 @@ def _check_core_compatibility(manifest: dict | None) -> bool:
     if not min_core and not max_core:
         print_warning("No Core version bounds declared; compatibility is unverified.")
         return True
-    from core._version import __version__
+    from core._core_version import CORE_VERSION
     from core.plugins.version import check_plugin_compatibility
 
     if any(
@@ -257,7 +257,7 @@ def _check_core_compatibility(manifest: dict | None) -> bool:
         print_error("Core version bounds must be strings")
         return False
     problems = check_plugin_compatibility(
-        core_version=__version__, min_core_version=min_core, max_core_version=max_core
+        core_version=CORE_VERSION, min_core_version=min_core, max_core_version=max_core
     )
     if problems:
         print_error("Plugin Core compatibility check failed", "; ".join(problems))

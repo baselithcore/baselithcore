@@ -57,38 +57,19 @@ def installed_bounds(plugin_root: Path) -> list[PluginBoundsIssue]:
 def plugin_compatibility(
     target: str,
     bounds: list[PluginBoundsIssue] | None,
-    *,
-    framework_version: str,
-    core_version: str,
-    distribution: str | None,
 ) -> PluginCompatibility:
     """Which installed plugins would refuse to load on core ``target``.
 
     Plugin manifests declare ``min_core_version``/``max_core_version`` against
-    ``core._version`` (``framework_version``), not against the public core
-    release. The two are the same number in the public core project; in a
-    downstream distribution (``distribution`` set, or the two numbers differ)
-    they are not, and comparing the bounds with the public core target would
-    report every plugin as incompatible, so the check is reported as not
-    computed instead.
+    the public core release (``core._core_version.CORE_VERSION``) in every
+    distribution, the same number the loader's gate compares with, so the
+    bounds compare directly with the public release the upgrade installs.
 
     Args:
         target: The public core release the upgrade installs.
         bounds: The installed plugins' declared bounds, or None when the
             manifests could not be read (reported as not computed).
-        framework_version: ``core._version.__version__``.
-        core_version: ``core._core_version.CORE_VERSION``.
-        distribution: ``core._version.__distribution__``, if any.
     """
-    if distribution or framework_version != core_version:
-        name = distribution or "this distribution"
-        return PluginCompatibility(
-            checked=False,
-            target_version=target,
-            reason=f"plugins declare core bounds against {name}'s own version "
-            f"({framework_version}), not the public core release; check the "
-            "plugins' release notes instead",
-        )
     if bounds is None:
         return PluginCompatibility(
             checked=False,

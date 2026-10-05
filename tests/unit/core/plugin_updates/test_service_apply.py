@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core import _version
+from core._core_version import CORE_VERSION
 from core.config.plugin_update_apply import UpdateApplyConfig
 from core.config.plugin_updates import PluginUpdateConfig
 from core.plugin_updates import service as svc_mod
@@ -63,7 +63,7 @@ def _service(
                 pid=1,
                 started_at=now,
                 at=now,
-                core_version=_version.__version__,
+                core_version=CORE_VERSION,
                 enabled=True,
                 overlay_root=str(tmp_path / "ov"),
                 overlay_writable=True,

@@ -241,7 +241,7 @@ def _status(fmt: str) -> int:
 
 
 def _serve() -> int:
-    from core._version import __version__
+    from core._core_version import CORE_VERSION
 
     config = get_update_apply_config()
 
@@ -256,7 +256,7 @@ def _serve() -> int:
             store=RunStore(config.state_dir),
             executor=executor,
             overlay_root=root,
-            core_version=__version__,
+            core_version=CORE_VERSION,
             stop=stop,
         )
 

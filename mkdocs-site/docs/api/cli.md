@@ -473,8 +473,10 @@ baselith plugin create --interactive  # Interactive wizard
 
 **Generated code**:
 
-- The scaffolded `manifest.yaml` sets `min_core_version` to the version of the
-  framework that ran the command (`core._version.__version__`). It used to be
+- The scaffolded `manifest.yaml` sets `min_core_version` to the public core
+  release of the framework that ran the command (`CORE_VERSION` in
+  `core/_core_version.py`, the number every compatibility check compares with;
+  a downstream distribution's own `core._version` never applies). It used to be
   a hard-coded `0.31.0`, six minor releases behind. That value is the version
   you scaffolded against. Raise it on purpose when you start relying on newer
   APIs. Never lower it without testing against the older release.

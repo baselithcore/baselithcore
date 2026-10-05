@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core._version import __version__
+from core._core_version import CORE_VERSION
 from core.cli.ui import console, print_error, print_info, print_step, print_success
 
 from .const import PLUGIN_TEMPLATE
@@ -145,7 +145,7 @@ def _create_from_template(name: str, plugin_type: str, register: bool = True) ->
                 final_content = content.format(
                     name=name,
                     class_name=class_name,
-                    min_core_version=__version__,
+                    min_core_version=CORE_VERSION,
                 )
                 file_path.write_text(final_content)
 

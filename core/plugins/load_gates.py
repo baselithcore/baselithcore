@@ -19,7 +19,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from core._version import __version__ as CORE_VERSION
+# Plugins declare min/max_core_version against the PUBLIC core release, which
+# a downstream distribution (whose own _version differs) still ships verbatim.
+from core._core_version import CORE_VERSION
 from core.observability.logging import get_logger
 
 from .config_validation import is_config_enforcement_enabled, validate_plugin_config
