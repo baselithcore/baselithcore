@@ -90,7 +90,11 @@ def _iter_strings(value: Any) -> Iterator[str]:
 
 
 def _scan_key(
-    key: Any, original: dict[Any, Any], out: dict[Any, Any], **kw: Any
+    key: Any,
+    original: dict[Any, Any],
+    out: dict[Any, Any],
+    suffixes: dict[str, int],
+    **kw: Any,
 ) -> Any:
     """Scan one object key; disambiguate when the sanitized one collides.
 
@@ -100,7 +104,9 @@ def _scan_key(
     model — an attacker could force exactly that by sending the clean twin of
     a poisoned key. So the sanitized key gets a numbered suffix that is free
     in both the input and the output built so far: no value is lost and no
-    unsanitized key ever leaves.
+    unsanitized key ever leaves. ``suffixes`` (one dict per object) remembers
+    the next number to try for each sanitized key, so many colliding keys
+    cost linear, not quadratic, work.
     """
     from core.guardrails import scan_external_content
 
@@ -110,9 +116,10 @@ def _scan_key(
     if scanned == key or (scanned not in original and scanned not in out):
         return scanned
     logger.warning("mcp_structured_key_sanitize_collision source=%s", kw.get("source"))
-    n = 2
+    n = suffixes.get(scanned, 2)
     while f"{scanned} ({n})" in original or f"{scanned} ({n})" in out:
         n += 1
+    suffixes[scanned] = n + 1
     return f"{scanned} ({n})"
 
 
@@ -143,8 +150,9 @@ def _sanitize_iteratively(value: Any, source: str) -> Any:
         stack.append((value, root))
     while stack:
         src, dst = stack.pop()
+        suffixes: dict[str, int] = {}
         items = (
-            ((_scan_key(k, src, dst, **kw), v) for k, v in src.items())
+            ((_scan_key(k, src, dst, suffixes, **kw), v) for k, v in src.items())
             if isinstance(src, dict)
             else enumerate(src)
         )
@@ -194,8 +202,9 @@ def _scan_structured(value: Any, source: str, depth: int, budget: list[int]) -> 
     budget[0] -= 1
     if isinstance(value, dict):
         out: dict[Any, Any] = {}
+        suffixes: dict[str, int] = {}
         for key, item in value.items():
-            out[_scan_key(key, value, out, source=source)] = _scan_structured(
+            out[_scan_key(key, value, out, suffixes, source=source)] = _scan_structured(
                 item, source, depth + 1, budget
             )
         return out
