@@ -11,8 +11,8 @@ Three properties the native path has for free are restored here:
   ``LLM_FALLBACK_CHAIN`` (:func:`~core.services.llm.fallback_runtime.maybe_run_with_fallback`),
   so a failing primary falls through exactly like plain text generation does.
 * **Fail-closed parsing.** Only three wrappers are removed: a leading
-  ``<think>…</think>`` block (or an unterminated leading ``<think>``),
-  surrounding whitespace and one enclosing markdown code fence. What is left
+  ``<think>…</think>`` block, surrounding whitespace and one enclosing
+  markdown code fence. What is left
   must be exactly one JSON object carrying ``tool``/``final``. Nothing is ever
   fished out of prose: a tool-call object the model merely quotes (echoed from
   an untrusted tool output, say) would otherwise be executed.
@@ -129,19 +129,29 @@ def build_fallback_system(
     return "\n\n".join(parts)
 
 
-def _without_reasoning(content: str) -> str:
-    """*content* minus a LEADING ``<think>…</think>`` block or dangling ``<think>``.
+def _without_reasoning(content: str) -> str | None:
+    """*content* minus a LEADING ``<think>…</think>`` block; ``None`` to refuse.
 
     Only a block that opens the reply counts: a ``</think>`` planted later (in
     quoted tool output, say) must not open a window onto what follows it.
+    Fail-closed in the two ambiguous cases:
+
+    * an unterminated leading ``<think>`` — everything after it is reasoning
+      (possibly cut off mid-thought, possibly quoting untrusted content), so
+      a tool call in it is never the reply;
+    * a reasoning tag left after the block — a second ``</think>`` or a
+      ``<think>`` means the boundary cannot be trusted.
     """
     stripped = content.lstrip()
     if not stripped.startswith(THINK_OPEN):
         return content
     rest = stripped[len(THINK_OPEN) :]
-    if THINK_CLOSE in rest:
-        return rest.split(THINK_CLOSE, 1)[1]
-    return rest
+    if THINK_CLOSE not in rest:
+        return None
+    reply = rest.split(THINK_CLOSE, 1)[1]
+    if THINK_OPEN in reply or THINK_CLOSE in reply:
+        return None
+    return reply
 
 
 def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -160,7 +170,10 @@ def _reply_object(text: str) -> dict[str, Any] | None:
     After the reasoning is dropped, only surrounding whitespace and a single
     enclosing code fence are removed; any other surrounding text fails closed.
     """
-    body = _without_reasoning(text).strip()
+    without = _without_reasoning(text)
+    if without is None:
+        return None
+    body = without.strip()
     fenced = _FENCE.match(body)
     if fenced is not None:
         body = fenced.group("body").strip()
@@ -176,9 +189,9 @@ def _reply_object(text: str) -> dict[str, Any] | None:
 def parse_tool_reply(content: str | None) -> LLMResult | None:
     """Parse a coerced tool-turn reply, or ``None`` unless it is one clean object.
 
-    Fail-closed: a leading ``<think>…</think>`` (or unterminated leading
-    ``<think>``), surrounding whitespace and one enclosing code fence are the
-    only wrappers removed. Prose around the object makes the reply ``None``.
+    Fail-closed: a leading, closed ``<think>…</think>``, surrounding whitespace
+    and one enclosing code fence are the only wrappers removed; an
+    unterminated ``<think>`` or a stray reasoning tag after the block refuses. Prose around the object makes the reply ``None``.
     """
     if not content:
         return None
@@ -222,7 +235,14 @@ def parse_fallback(content: str, has_tools: bool) -> LLMResult:
 
 
 def _reask_prompt(prompt: str, rejected: str) -> str:
-    quoted = rejected[:_QUOTE_LIMIT]
+    """The recovery prompt; the rejected reply is quoted as untrusted data.
+
+    The reply can echo injected text (from a tool output it read), so it goes
+    back to the model inside the untrusted envelope, never as bare prompt.
+    """
+    from core.orchestration.tool_output import wrap_untrusted
+
+    quoted = wrap_untrusted(rejected[:_QUOTE_LIMIT], source="rejected_reply")
     return (
         f"{prompt}\n\nYour previous reply was not a valid JSON object:\n"
         f"{quoted}\n\n{REASK_INSTRUCTION}"

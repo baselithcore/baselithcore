@@ -251,13 +251,16 @@ When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
 `{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`
-(`core.services.llm._coercion`). The parse fails closed: only a leading
-`<think>` block, surrounding whitespace and one enclosing markdown code fence
-are removed, and what remains must be exactly one
-`{"tool": ...}`/`{"tool": null, "final": ...}` object. JSON is never extracted
-from prose, so a tool call the model merely quotes (from an untrusted tool
-output, say) is never executed. Any other reply is answered with **one** re-ask
-("reply again with ONLY a valid JSON object"); if that fails too, the original
+(`core.services.llm._coercion`). The parse fails closed: only a leading,
+closed `<think>…</think>` block, surrounding whitespace and one enclosing
+markdown code fence are removed, and what remains must be exactly one
+`{"tool": ...}`/`{"tool": null, "final": ...}` object. An unterminated leading
+`<think>` (everything after it is reasoning, possibly truncated) and a stray
+reasoning tag after the block both refuse. JSON is never extracted from prose,
+so a tool call the model merely quotes (from an untrusted tool output, say) is
+never executed. Any other reply is answered with **one** re-ask ("reply again
+with ONLY a valid JSON object", quoting the rejected reply inside the untrusted
+envelope); if that fails too, the original
 text is returned as a plain answer with no tool call. The coercion call runs through
 `LLM_FALLBACK_CHAIN` like plain text, so a failing primary fails over and the
 serving stage lands on the span. The

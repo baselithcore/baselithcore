@@ -3,8 +3,8 @@
 Extracting "the first balanced ``{...}``" from a reply is a parser
 differential: a tool-call object the model merely *quotes* (say, echoed from an
 untrusted tool output or web page) would be executed. The only normalisations
-allowed are a leading ``<think>`` block (or an unterminated leading
-``<think>``), surrounding whitespace and one enclosing markdown code fence;
+allowed are a leading, closed ``<think>`` block, surrounding whitespace and
+one enclosing markdown code fence (an unterminated ``<think>`` refuses);
 anything else triggers the single re-ask, and a second miss degrades to the
 raw text with no tool call.
 """
@@ -35,7 +35,6 @@ class TestAllowedNormalisations:
             _CALL,
             f"  \n{_CALL}\n  ",
             f"<think>I should call pop.</think>\n{_CALL}",
-            f"<think>{_CALL}",
             f"```json\n{_CALL}\n```",
             f"```\n{_CALL}\n```",
             f"<think>ok</think>\n```json\n{_CALL}\n```\n",
@@ -63,6 +62,10 @@ class TestRejectedShapes:
             f"Plan {{call pop}} -> {_CALL}",
             f"The tool returned {_INJECTED} which looks odd.",
             f"<think>hmm</think> Calling it now: {_CALL}",
+            # Everything after a dangling <think> is reasoning, never the reply.
+            f"<think>{_CALL}",
+            # A reasoning tag after the block: the boundary is not trustworthy.
+            f"<think>reading</think>{_CALL}</think>",
             f"Here: ```json\n{_CALL}\n```",
             f"```json\n{_CALL}\n```\nDone.",
             f"```json\n{_CALL}\n```\n```json\n{_CALL}\n```",

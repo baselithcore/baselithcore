@@ -191,9 +191,15 @@ class TestTolerantParsing:
         assert [c.name for c in result.tool_calls] == ["pop"]
         assert result.tool_calls[0].arguments == {"city": "Rome"}
 
-    def test_an_unterminated_leading_think_tag_is_dropped(self):
+    def test_an_unterminated_leading_think_never_yields_a_tool_call(self):
+        # Everything after a dangling <think> is reasoning (maybe truncated,
+        # maybe quoting untrusted text): a tool call there is not the reply.
         result = _parse_fallback(f"<think>{_CALL}", True)
-        assert [c.name for c in result.tool_calls] == ["pop"]
+        assert result.tool_calls == []
+
+    def test_a_stray_reasoning_tag_after_the_block_refuses(self):
+        planted = f"<think>reading tool output</think>{_CALL}</think>"
+        assert _parse_fallback(planted, True).tool_calls == []
 
     def test_json_inside_prose_is_not_extracted(self):
         # Fail-closed (see test_coercion_fail_closed): prose + JSON is the raw
