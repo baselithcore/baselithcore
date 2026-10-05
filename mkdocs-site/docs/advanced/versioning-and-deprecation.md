@@ -41,6 +41,26 @@ MINOR, an `experimental` one promises nothing.
 Additive changes (new optional params with safe defaults, new routes, new env
 vars, new flags) are **not** breaking.
 
+### Before 1.0: behaviour changes ship in a MINOR
+
+The framework is still on major version `0`, where Semantic Versioning (§4)
+makes no stability promise. Until `1.0.0` the project applies the rule above
+with one deliberate relaxation:
+
+- a change that **alters behaviour** — a default that becomes safer, a status
+  code or response shape corrected to the published contract, a metric or
+  span attribute aligned with an external specification — ships in a **MINOR**
+  release, never a PATCH, and always with an [Upgrade Notes](upgrade-notes.md)
+  entry that says what moved and how to restore the old behaviour. Type the
+  commit `feat:` (semantic-release maps `fix:` to a PATCH), or make sure a
+  `feat:` commit ships in the same release;
+- a **removal** (a public symbol, an HTTP route, a configuration variable) is
+  still staged through the deprecation process below and lands no earlier
+  than `1.0`, which is what `@deprecated(..., removed_in="1.0")` records.
+
+`1.0.0` is reserved for the release that also settles the package layout; from
+then on every row of the table above applies without exception.
+
 ### Enforcement: the public API surface gate
 
 The first bullet above is enforced, not just declared. `scripts/check_public_api.py`
