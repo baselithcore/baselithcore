@@ -114,6 +114,10 @@ def _build_frontend(plugin_name: str, manifest: dict[str, Any]) -> int:
     package_manager = frontend["package_manager"]
     build_command = frontend["build_command"]
 
+    if _has_verified_prebuilt_frontend(plugin_name, manifest, output):
+        print_info(f"Frontend already built and integrity-verified: {plugin_name}")
+        return 0
+
     print_step(f"Building frontend for {plugin_name} with Docker Node...")
     for local_dependency in _local_file_dependency_paths(workdir):
         dependency_manager = _detect_package_manager(local_dependency)
@@ -135,6 +139,31 @@ def _build_frontend(plugin_name: str, manifest: dict[str, Any]) -> int:
         return 1
     print_success("Frontend built")
     return 0
+
+
+def _has_verified_prebuilt_frontend(
+    plugin_name: str, manifest: dict[str, Any], output: Path
+) -> bool:
+    """Use a signed/prebuilt frontend as-is when it already verifies.
+
+    Rebuilding a static export can change asset filenames, which legitimately
+    moves the plugin integrity digest. If the publisher shipped a built bundle
+    and the manifest hash already matches the tree, keeping that bundle is the
+    safest and fastest Docker path.
+    """
+    if not manifest.get("integrity_sha256"):
+        return False
+    if not output.is_dir() or not any(path.is_file() for path in output.rglob("*")):
+        return False
+    try:
+        from core.plugins.integrity import compute_plugin_hash
+    except ImportError:
+        return False
+    plugin_dir = Path("plugins") / plugin_name
+    return (
+        compute_plugin_hash(plugin_dir).lower()
+        == str(manifest["integrity_sha256"]).strip().lower()
+    )
 
 
 def _frontend_config(

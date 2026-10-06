@@ -254,6 +254,12 @@ the check you run after changing a local service.
 `configs/.env.docker.core`, the env file the Docker Compose runtime reads, and
 stops there.
 
+The generated Docker Core profile also pins the document-ingestion defaults
+used by the runtime image: `VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3`,
+`VECTORSTORE_EMBEDDING_DIM=1024`, MiniLM as the explicit fallback model, and
+`DOCUMENTS_PDF_READER=auto` so PDF ingestion uses Docling when the documents
+runtime includes it and falls back to the legacy pypdf/OCR path otherwise.
+
 Both preserve a credential that is already valid and generate a `DB_PASSWORD`
 and a `SECRET_KEY` only where a placeholder is still in place. Neither downloads
 the core image nor builds it — `baselith up` does that — and neither starts a
@@ -413,6 +419,11 @@ starts Compose and checks HTTP. It does not check for plugin packages in the hos
 Python environment. Invalid declared Core bounds, failed builds and failed probes
 return a nonzero exit code. Missing Core bounds remain a legacy warning.
 
+If a plugin ships a prebuilt frontend and declares `integrity_sha256`, the Docker
+installer first verifies that the existing output still matches the manifest. A
+matching bundle is reused instead of rebuilt, avoiding non-deterministic frontend
+asset hashes from invalidating the plugin integrity check.
+
 Use `--ref <branch-or-tag>` on the initial clone; existing directories are reused.
 `--force` replaces only a verifiably clean Git checkout. `--install-deps` without
 `--docker` installs Python dependencies in the host environment.
@@ -444,6 +455,10 @@ declared frontends, rebuilds and restarts the `api` service, waits for
 `/health`, then probes each plugin that declares `health_endpoint` or a
 `frontend` contract. A plugin whose manifest is missing or invalid stops the
 sync with a nonzero exit code rather than being skipped.
+
+The frontend step follows the same integrity rule as `plugin add --docker`: a
+prebuilt, integrity-verified bundle is reused; unsigned or missing output is
+built in the temporary Node container.
 
 `--docker` is what selects the Docker runtime; without it the command only
 prints the local plugin status, exactly like `plugin status`. The sync has no
@@ -1201,6 +1216,11 @@ is also what [`init`](#init---initialize-project) writes into a new project's
 keys it added or changed; a file that already matches the profile is left
 untouched. Generated files are written `0600` — see the note under the
 [`up`](#up---docker-runtime) command.
+
+For `docker-core`, the normalized profile includes the same RAG/document
+defaults as `setup docker-core`: bge-m3/1024 for embeddings, MiniLM/384 as the
+operator fallback, and `DOCUMENTS_PDF_READER=auto` for Docling-first PDF
+ingestion with pypdf/OCR fallback.
 
 ### `config check-env` - Detect Misspelled Variables
 

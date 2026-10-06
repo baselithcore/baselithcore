@@ -926,8 +926,8 @@ Declared in `core.config.vectorstore`.
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
-| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Deprecated, no effect: nothing reads it; the vector dimension is VECTORSTORE_EMBEDDING_DIM |
-| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Deprecated, no effect: nothing reads it; to switch embedding model set VECTORSTORE_EMBEDDING_MODEL and VECTORSTORE_EMBEDDING_DIM together, on a fresh or migrated collection |
+| `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
+| `VECTORSTORE_EMBEDDING_FALLBACK_MODEL` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Operator fallback embedding model. Use it together with VECTORSTORE_EMBEDDING_FALLBACK_DIM when bge-m3 is not available; switching models requires a matching vector dimension and a fresh or migrated collection. |
 | `VECTORSTORE_EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | Embedding model name |
 | `VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED` | `bool` | `False` | Record gen_ai.usage.input_tokens on embedding spans. Costs an extra tokenizer pass per cache miss; off by default. |
 | `VECTORSTORE_GRPC_PORT` | `int` | `6334` | Vector store gRPC port |
