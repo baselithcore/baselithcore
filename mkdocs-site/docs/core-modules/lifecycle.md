@@ -233,6 +233,9 @@ cancellation; with it, 0.1 s and no error — also under `--workers`. An
 `EventSource` reconnects by itself to whichever worker comes up next.
 The MCP Streamable HTTP stream (`core.mcp.sse.SSEStream`) is the core's own
 consumer: it flushes what is already queued and ends on the drain signal.
+`is_draining()` is the synchronous half: `GET /health/ready` answers 503
+`draining` as soon as it is true, so the load balancer stops sending new
+requests to a process that is closing.
 `is_draining()` answers the same question synchronously, and
 `mark_draining()` is safe from any thread — including from the signal handler
 itself: the module lock is re-entrant (`threading.RLock`), because a stop

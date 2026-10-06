@@ -4,6 +4,7 @@ Sandbox Service.
 Provides isolated environments for secure code execution.
 """
 
+import contextlib
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -251,12 +252,16 @@ class SandboxService:
                 self, code, language, timeout, mounts, envs, rate
             )
 
-        async for frame in frames:
-            if frame.get("stream") == "exit" and budget is not None:
-                cost = float(frame.get("cost_usd", 0.0))
-                if cost > 0:
-                    budget.charge(cost)
-            yield frame
+        # aclosing: a consumer that stops early (client disconnect, cancel)
+        # closes the inner generator now, so its ``finally`` kills the
+        # container at once instead of waiting for generator finalisation.
+        async with contextlib.aclosing(frames):
+            async for frame in frames:
+                if frame.get("stream") == "exit" and budget is not None:
+                    cost = float(frame.get("cost_usd", 0.0))
+                    if cost > 0:
+                        budget.charge(cost)
+                yield frame
 
     async def _execute_sbx_async(
         self,

@@ -178,7 +178,7 @@ class TestEmbeddingMetrics:
         from prometheus_client import REGISTRY
 
         labels = {
-            "gen_ai_system": "sentence_transformers",
+            "gen_ai_provider_name": "sentence_transformers",
             "gen_ai_request_model": "metrics-model",
         }
         before = (

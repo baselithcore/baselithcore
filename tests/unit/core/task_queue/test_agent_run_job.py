@@ -14,6 +14,7 @@ class _Tracker:
         self.started: list[str] = []
         self.completed: list[tuple[str, dict]] = []
         self.failed: list[tuple[str, str]] = []
+        self.retrying: list[tuple[str, int]] = []
 
     def mark_started(self, job_id, message=""):
         self.started.append(job_id)
@@ -23,6 +24,9 @@ class _Tracker:
 
     def mark_failed(self, job_id, error):
         self.failed.append((job_id, error))
+
+    def mark_retrying(self, job_id, error, retries_left):
+        self.retrying.append((job_id, retries_left))
 
 
 class _Webhooks:
@@ -91,3 +95,82 @@ class TestRunAgentTask:
         result = job_module.run_agent_task("hello")
         assert result["answer"] == "the answer"
         assert len(tracker.completed) == 1
+
+
+class _Job:
+    def __init__(self, retries_left):
+        self.id = "job-1"
+        self.retries_left = retries_left
+
+
+class TestRetryAwareFailure:
+    """A failed attempt is terminal only when RQ will not run the job again."""
+
+    @pytest.fixture
+    def failing(self, harness, monkeypatch):
+        async def fake_chat(req):
+            raise RuntimeError("provider down")
+
+        monkeypatch.setattr(job_module, "_handle_chat", fake_chat)
+        return harness
+
+    def _run_with(self, monkeypatch, job):
+        monkeypatch.setattr(job_module, "get_current_job", lambda: job)
+        with pytest.raises(RuntimeError):
+            job_module.run_agent_task("hello")
+
+    def test_attempt_with_retries_left_is_not_terminal(self, failing, monkeypatch):
+        tracker, webhooks = failing
+        self._run_with(monkeypatch, _Job(retries_left=2))
+        assert tracker.failed == []
+        assert tracker.retrying == [("job-1", 2)]
+        assert webhooks.emitted == []
+
+    def test_last_attempt_marks_failed_and_notifies(self, failing, monkeypatch):
+        tracker, webhooks = failing
+        self._run_with(monkeypatch, _Job(retries_left=0))
+        assert tracker.failed == [("job-1", "provider down")]
+        assert tracker.retrying == []
+        assert [e for e, _ in webhooks.emitted] == ["agent.failed"]
+
+    def test_job_without_retry_policy_fails_terminally(self, failing, monkeypatch):
+        tracker, webhooks = failing
+        self._run_with(monkeypatch, _Job(retries_left=None))
+        assert len(tracker.failed) == 1
+        assert [e for e, _ in webhooks.emitted] == ["agent.failed"]
+
+    def test_retry_then_success_never_reports_failed(self, harness, monkeypatch):
+        tracker, webhooks = harness
+        calls = {"n": 0}
+
+        async def flaky_chat(req):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("transient")
+            return _Response()
+
+        monkeypatch.setattr(job_module, "_handle_chat", flaky_chat)
+        job = _Job(retries_left=3)
+        monkeypatch.setattr(job_module, "get_current_job", lambda: job)
+        with pytest.raises(RuntimeError):
+            job_module.run_agent_task("hello")
+        job.retries_left = 2  # RQ decrements after the failed attempt
+        job_module.run_agent_task("hello")
+        assert tracker.failed == []
+        assert len(tracker.completed) == 1
+        assert [e for e, _ in webhooks.emitted] == ["agent.completed"]
+
+
+def test_tracker_mark_retrying_is_non_terminal_status():
+    from core.task_queue.status import TaskStatus, TaskTracker
+
+    recorded = {}
+
+    class _Tracker(TaskTracker):
+        def set_status(self, task_id, status, **kwargs):
+            recorded.update(task_id=task_id, status=status, **kwargs)
+
+    _Tracker(conn=None).mark_retrying("t1", "boom", 2)  # type: ignore[arg-type]
+    assert recorded["status"] is TaskStatus.RETRYING
+    assert recorded["status"].value == "retrying"
+    assert recorded["error"] == "boom"

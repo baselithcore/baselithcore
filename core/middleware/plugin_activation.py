@@ -12,7 +12,6 @@ re-attempted, so anonymous traffic to a broken plugin's prefix cannot keep
 re-importing it under the global activation lock.
 """
 
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.middleware._plugin_route import matched_plugin_route
@@ -22,6 +21,29 @@ from core.plugins._activation_backoff import (
 )
 
 _RETRY_AFTER = str(int(ACTIVATION_BACKOFF_SECONDS))
+
+
+async def _unavailable(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    *,
+    detail: str,
+    retry_after: str | None,
+) -> None:
+    """Answer ``503`` as an RFC 9457 problem document (request id included)."""
+    # Lazy: core.api.errors pulls in the auth/quota stack, which this
+    # middleware module must not drag into every importer.
+    from core.api.errors import problem_response
+
+    response = problem_response(
+        status_code=503,
+        code="plugin_unavailable",
+        detail=detail,
+        instance=scope.get("path") or None,
+        headers={"Retry-After": retry_after} if retry_after else None,
+    )
+    await response(scope, receive, send)
 
 
 class PluginActivationMiddleware:
@@ -54,28 +76,32 @@ class PluginActivationMiddleware:
         try:
             activated = await plugin_registry.ensure_plugin_active(plugin_name)
         except PluginActivationBackoffError as exc:
-            response = JSONResponse(
-                status_code=503,
-                content={"detail": f"Plugin '{plugin_name}' failed to activate."},
-                headers={"Retry-After": str(exc.retry_after)},
+            await _unavailable(
+                scope,
+                receive,
+                send,
+                detail=f"Plugin '{plugin_name}' failed to activate.",
+                retry_after=str(exc.retry_after),
             )
-            await response(scope, receive, send)
             return
         except RuntimeError:
-            response = JSONResponse(
-                status_code=503,
-                content={"detail": "Plugin system is not ready yet."},
+            await _unavailable(
+                scope,
+                receive,
+                send,
+                detail="Plugin system is not ready yet.",
+                retry_after=None,
             )
-            await response(scope, receive, send)
             return
 
         if not activated:
-            response = JSONResponse(
-                status_code=503,
-                content={"detail": f"Plugin '{plugin_name}' failed to activate."},
-                headers={"Retry-After": _RETRY_AFTER},
+            await _unavailable(
+                scope,
+                receive,
+                send,
+                detail=f"Plugin '{plugin_name}' failed to activate.",
+                retry_after=_RETRY_AFTER,
             )
-            await response(scope, receive, send)
             return
 
         await self.app(scope, receive, send)

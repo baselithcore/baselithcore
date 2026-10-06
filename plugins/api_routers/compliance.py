@@ -19,11 +19,13 @@ document tool, not in a JSON POST.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
+import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from core.api.pagination import PageParams, page_params, paginated
 from core.auth.manager import AuthManager
 from core.auth.types import AuthUser
 from core.middleware import require_user
@@ -45,42 +47,65 @@ def _enforce(request: Request) -> AuthUser:
     return user
 
 
+#: Payload bounds. Registry records are persisted and rendered into audit
+#: documents; nothing a reviewer reads needs more than these.
+_Token = Annotated[str, StringConstraints(min_length=1, max_length=200)]
+_MAX_LIST_ITEMS = 100
+_MAX_CONTEXT_BYTES = 16 * 1024
+
+
+def _bounded_list() -> Any:
+    return Field(default_factory=list, max_length=_MAX_LIST_ITEMS)
+
+
 class RegisterSystemRequest(BaseModel):
     """Declare an AI system for the registry."""
 
-    name: str = Field(..., min_length=1)
-    version: str = "0.0.0"
-    role: str = "provider"
-    intended_purpose: str = ""
-    description: str = ""
-    annex_iii_areas: list[str] = Field(default_factory=list)
+    name: str = Field(..., min_length=1, max_length=200)
+    version: str = Field(default="0.0.0", max_length=100)
+    role: str = Field(default="provider", max_length=100)
+    intended_purpose: str = Field(default="", max_length=10_000)
+    description: str = Field(default="", max_length=10_000)
+    annex_iii_areas: list[_Token] = _bounded_list()
     annex_i_product: bool = False
-    art6_derogations: list[str] = Field(default_factory=list)
+    art6_derogations: list[_Token] = _bounded_list()
     performs_profiling: bool = False
     interacts_with_humans: bool = False
     generates_synthetic_content: bool = False
     is_gpai_model: bool = False
     gpai_systemic_risk: bool = False
-    provider_name: str | None = None
-    deployers: list[str] = Field(default_factory=list)
-    member_states: list[str] = Field(default_factory=list)
-    models: list[str] = Field(default_factory=list)
-    human_oversight_contacts: list[str] = Field(default_factory=list)
-    prohibited_practices: list[str] = Field(default_factory=list)
+    provider_name: str | None = Field(default=None, max_length=200)
+    deployers: list[_Token] = _bounded_list()
+    member_states: list[_Token] = _bounded_list()
+    models: list[_Token] = _bounded_list()
+    human_oversight_contacts: list[_Token] = _bounded_list()
+    prohibited_practices: list[_Token] = _bounded_list()
 
 
 class LifecycleRequest(BaseModel):
     """Move a registered system to a new lifecycle stage."""
 
-    stage: str = Field(..., min_length=1)
+    stage: str = Field(..., min_length=1, max_length=100)
 
 
 class ObservationRequest(BaseModel):
     """A production measurement against a post-market monitoring plan."""
 
-    metric: str = Field(..., min_length=1)
+    metric: str = Field(..., min_length=1, max_length=200)
     value: float
-    context: dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict, max_length=50)
+
+    @field_validator("context")
+    @classmethod
+    def _bounded_context(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Cap the serialised size: key count alone does not bound nesting."""
+        try:
+            size = len(orjson.dumps(v))
+        except TypeError as exc:
+            raise ValueError("context must be JSON-serialisable") from exc
+        if size > _MAX_CONTEXT_BYTES:
+            raise ValueError(f"context exceeds {_MAX_CONTEXT_BYTES} bytes")
+        return v
 
 
 def _bad_request(exc: Exception) -> HTTPException:
@@ -93,7 +118,9 @@ def _bad_request(exc: Exception) -> HTTPException:
 
 @router.get("/systems")
 async def list_systems(
-    request: Request, risk_category: str | None = None
+    request: Request,
+    risk_category: str | None = None,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List registered AI systems, optionally filtered by risk category."""
     _enforce(request)
@@ -107,7 +134,7 @@ async def list_systems(
         except ValueError as exc:
             raise _bad_request(exc) from exc
     systems = await get_ai_system_registry().list_systems(risk_category=category)
-    return {"systems": [s.to_dict() for s in systems], "count": len(systems)}
+    return paginated(systems, page, key="systems", serialize=lambda s: s.to_dict())
 
 
 @router.post("/systems", status_code=status.HTTP_201_CREATED)
@@ -253,13 +280,15 @@ async def inventory_summary(request: Request) -> dict[str, Any]:
 
 
 @router.get("/pending-registration")
-async def pending_registration(request: Request) -> dict[str, Any]:
+async def pending_registration(
+    request: Request, page: PageParams = Depends(page_params)
+) -> dict[str, Any]:
     """Systems owing an Art. 49 EU-database registration that has not happened."""
     _enforce(request)
     from core.compliance.registry import get_ai_system_registry
 
     pending = await get_ai_system_registry().unregistered_with_authority()
-    return {"systems": [s.to_dict() for s in pending], "count": len(pending)}
+    return paginated(pending, page, key="systems", serialize=lambda s: s.to_dict())
 
 
 # === Governance artefacts ===================================================
@@ -267,7 +296,10 @@ async def pending_registration(request: Request) -> dict[str, Any]:
 
 @router.get("/documentation")
 async def list_documentation(
-    request: Request, system_id: str | None = None, incomplete_only: bool = False
+    request: Request,
+    system_id: str | None = None,
+    incomplete_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Annex IV technical documentation, with the missing sections named."""
     _enforce(request)
@@ -280,7 +312,7 @@ async def list_documentation(
         documents = await service.for_system(system_id)
     else:
         documents = await service.list_documents()
-    return {"documents": [d.to_dict() for d in documents], "count": len(documents)}
+    return paginated(documents, page, key="documents", serialize=lambda d: d.to_dict())
 
 
 @router.post("/documentation/draft", status_code=status.HTTP_201_CREATED)
@@ -308,7 +340,10 @@ async def draft_documentation(request: Request, system_id: str) -> dict[str, Any
 
 @router.get("/fria")
 async def list_fria(
-    request: Request, system_id: str | None = None, incomplete_only: bool = False
+    request: Request,
+    system_id: str | None = None,
+    incomplete_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Art. 27 FRIAs, with the missing statutory elements named."""
     _enforce(request)
@@ -321,14 +356,17 @@ async def list_fria(
         assessments = await service.for_system(system_id)
     else:
         assessments = await service.list_assessments()
-    return {
-        "assessments": [a.to_dict() for a in assessments],
-        "count": len(assessments),
-    }
+    return paginated(
+        assessments, page, key="assessments", serialize=lambda a: a.to_dict()
+    )
 
 
 @router.get("/ropa")
-async def list_ropa(request: Request, incomplete_only: bool = False) -> dict[str, Any]:
+async def list_ropa(
+    request: Request,
+    incomplete_only: bool = False,
+    page: PageParams = Depends(page_params),
+) -> dict[str, Any]:
     """List the GDPR Art. 30 register, with the missing elements named."""
     _enforce(request)
     from core.compliance.documents import get_ropa_service
@@ -339,10 +377,9 @@ async def list_ropa(request: Request, incomplete_only: bool = False) -> dict[str
         if incomplete_only
         else await service.list_activities()
     )
-    return {
-        "activities": [a.to_dict() for a in activities],
-        "count": len(activities),
-    }
+    return paginated(
+        activities, page, key="activities", serialize=lambda a: a.to_dict()
+    )
 
 
 # === Post-market monitoring =================================================
@@ -350,7 +387,9 @@ async def list_ropa(request: Request, incomplete_only: bool = False) -> dict[str
 
 @router.get("/post-market")
 async def list_post_market(
-    request: Request, system_id: str | None = None
+    request: Request,
+    system_id: str | None = None,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Art. 72 monitoring plans, flagging overdue reviews."""
     _enforce(request)
@@ -361,10 +400,12 @@ async def list_post_market(
         await service.for_system(system_id) if system_id else await service.list_plans()
     )
     overdue = {p.id for p in await service.overdue_reviews()}
-    return {
-        "plans": [{**p.to_dict(), "review_overdue": p.id in overdue} for p in plans],
-        "count": len(plans),
-    }
+    return paginated(
+        plans,
+        page,
+        key="plans",
+        serialize=lambda p: {**p.to_dict(), "review_overdue": p.id in overdue},
+    )
 
 
 @router.post("/post-market/{plan_id}/observe")

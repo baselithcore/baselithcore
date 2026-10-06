@@ -13,11 +13,22 @@ the admin router — approvals are operator actions.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
+from core.api.pagination import (
+    PageParams,
+    PaginationError,
+    decode_cursor,
+    encode_cursor,
+    normalize_limit,
+    page_params,
+)
+from core.models.chat import MAX_ID_LENGTH
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
@@ -26,6 +37,12 @@ from core.orchestration.checkpoint import (
 )
 from core.orchestration.checkpoint_factory import get_default_checkpoint_store
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.schemas import (
+    ApprovalRecorded,
+    PendingApprovalPage,
+    RunResumed,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -72,31 +89,101 @@ def _require_store() -> Any:
     return store
 
 
-@router.get("")
-async def list_pending_approvals(tenant_id: str | None = None) -> dict[str, Any]:
-    """List runs durably paused awaiting a reviewer decision."""
+#: The listing window: ``list_runs`` returns at most this many pending runs,
+#: newest first. Pages are cut from that window with a keyset cursor.
+_LISTING_WINDOW = 500
+
+
+def _pending_entry(run_id: str, checkpoint: Any) -> dict[str, Any] | None:
+    if checkpoint is None or checkpoint.status != STATUS_AWAITING_APPROVAL:
+        return None
+    request = dict(checkpoint.pending_approval or {})
+    request.pop("decision", None)
+    return {
+        "run_id": run_id,
+        "tenant_id": checkpoint.tenant_id,
+        "query": checkpoint.query,
+        "intent": checkpoint.intent,
+        "pending_approval": request,
+        "updated_at": checkpoint.updated_at,
+    }
+
+
+def _keyset(page: PageParams) -> tuple[float, str] | None:
+    """The ``(updated_at, run_id)`` the previous page ended on, if any."""
+    if not page.cursor:
+        return None
+    try:
+        data = decode_cursor(page.cursor)
+        return float(data["u"]), str(data["r"])
+    except (PaginationError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid pagination cursor"
+        ) from exc
+
+
+@router.get(
+    "",
+    response_model=PendingApprovalPage,
+    responses=problem_responses(400, 401, 422, 503),
+)
+async def list_pending_approvals(
+    tenant_id: str | None = Query(default=None, max_length=MAX_ID_LENGTH),
+    page: PageParams = Depends(page_params),
+) -> dict[str, Any]:
+    """List runs durably paused awaiting a reviewer decision (cursor-paginated).
+
+    Newest first. The cursor is a keyset on ``(updated_at, run_id)``, so a
+    decision landing between two page fetches (which removes that run from
+    the listing) never makes the next page skip or repeat an entry. The
+    listing covers the :data:`_LISTING_WINDOW` most recent pending runs.
+    """
     store = _require_store()
-    pending: list[dict[str, Any]] = []
-    for run_id in await store.list_resumable(tenant_id):
-        checkpoint = await store.load(run_id)
-        if checkpoint is None or checkpoint.status != STATUS_AWAITING_APPROVAL:
-            continue
-        request = dict(checkpoint.pending_approval or {})
-        request.pop("decision", None)
-        pending.append(
-            {
-                "run_id": run_id,
-                "tenant_id": checkpoint.tenant_id,
-                "query": checkpoint.query,
-                "intent": checkpoint.intent,
-                "pending_approval": request,
-                "updated_at": checkpoint.updated_at,
-            }
+    limit = normalize_limit(page.limit)
+    after = _keyset(page)
+    rows = await store.list_runs(
+        tenant_id=tenant_id, status=STATUS_AWAITING_APPROVAL, limit=_LISTING_WINDOW
+    )
+    if len(rows) >= _LISTING_WINDOW:
+        logger.warning(
+            "approvals_listing_window_full",
+            extra={"window": _LISTING_WINDOW, "tenant_id": tenant_id},
         )
-    return {"pending": pending, "count": len(pending)}
+    keyed = sorted(
+        ((float(r.get("updated_at") or 0.0), str(r.get("run_id") or "")) for r in rows),
+        reverse=True,
+    )
+    if after is not None:
+        keyed = [k for k in keyed if k < after]
+    page_keys = keyed[:limit]
+    has_more = len(keyed) > limit
+    # Only the page is loaded, concurrently: the summaries carry no payload.
+    checkpoints = await asyncio.gather(*(store.load(r) for _, r in page_keys))
+    pending = [
+        entry
+        for (_, run_id), checkpoint in zip(page_keys, checkpoints, strict=True)
+        if (entry := _pending_entry(run_id, checkpoint)) is not None
+    ]
+    next_cursor = (
+        encode_cursor({"u": page_keys[-1][0], "r": page_keys[-1][1]})
+        if has_more and page_keys
+        else None
+    )
+    return jsonable_encoder(
+        {
+            "pending": pending,
+            "count": len(pending),
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+        }
+    )
 
 
-@router.post("/{run_id}/decision")
+@router.post(
+    "/{run_id}/decision",
+    response_model=ApprovalRecorded,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def decide(
     run_id: str,
     decision: ApprovalDecision,
@@ -138,7 +225,11 @@ async def decide(
     return {"run_id": run_id, "recorded": True, "approved": decision.approved}
 
 
-@router.post("/{run_id}/resume")
+@router.post(
+    "/{run_id}/resume",
+    response_model=RunResumed,
+    responses=problem_responses(401, 404, 500, 503),
+)
 async def resume(run_id: str) -> dict[str, Any]:
     """Resume a checkpointed run (typically after a recorded decision).
 
@@ -179,4 +270,5 @@ async def resume(run_id: str) -> dict[str, Any]:
     finally:
         if token is not None:
             reset_tenant_context(token)
-    return {"run_id": run_id, "result": result}
+    # The agent loop's result is arbitrary: keep the pre-model wire encoding.
+    return jsonable_encoder({"run_id": run_id, "result": result})

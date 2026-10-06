@@ -189,7 +189,7 @@ class TestGovernedAndPreflight:
                 ),
                 patch(_PROBE_SYNC, probe),
             ):
-                gov = resolve_governed_client_config("wikigen")
+                gov = resolve_governed_client_config("wiki_pages")
         finally:
             set_plugin_llm_policy_resolver(None)
         assert gov is not None and gov.api_base == B

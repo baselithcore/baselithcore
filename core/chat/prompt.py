@@ -129,11 +129,33 @@ def _system_prompt(current_date: str) -> str:
         return f"{_SYSTEM_PROMPT_PREFIX}{current_date}{_SYSTEM_PROMPT_SUFFIX}"
 
 
+#: Envelope ``tool`` attribute (and scan ``source``) for the retrieved context.
+CHAT_CONTEXT_SOURCE = "document_retrieval"
+
+
 def _render_history(history_text: str) -> str:
-    """Render conversation history section."""
+    """Render conversation history as one scanned, enveloped section."""
+    from core.orchestration.history_context import render_history_context
+
     if not history_text.strip():
         return ""
-    return f"PREVIOUS CONVERSATION (recent turns):\n{history_text.strip()}\n\n"
+    rendered = render_history_context(history_text.strip())
+    return f"PREVIOUS CONVERSATION (recent turns):\n{rendered}\n\n"
+
+
+def _render_context(context: str) -> str:
+    """Scan the retrieved context and seal it in the untrusted envelope.
+
+    Documents can carry injected instructions; inside the envelope, and under
+    the data-not-instructions rule, the model reads them as quoted data.
+    """
+    if not context.strip():
+        return context
+    from core.guardrails.indirect import scan_external_content
+    from core.orchestration.tool_output import wrap_untrusted
+
+    scanned = scan_external_content(context, source=CHAT_CONTEXT_SOURCE)
+    return wrap_untrusted(scanned, source=CHAT_CONTEXT_SOURCE)
 
 
 def build_prompt(
@@ -155,8 +177,10 @@ def build_prompt(
     Returns:
         Formatted prompt string
     """
+    from core.orchestration.handlers.rag import RAG_CONTEXT_IS_DATA_RULE
+
     current_date = datetime.now(UTC).strftime("%d/%m/%Y")
-    system_prompt = _system_prompt(current_date)
+    system_prompt = f"{_system_prompt(current_date)}\n\n{RAG_CONTEXT_IS_DATA_RULE}"
     history_section = _render_history(history_text)
 
     # Plugin-provided context (if any)
@@ -167,7 +191,7 @@ def build_prompt(
     return f"""{system_prompt}
 
 {history_section}{plugin_section}### CONTEXT:
-{context}
+{_render_context(context)}
 
 ### QUESTION:
 {user_query}

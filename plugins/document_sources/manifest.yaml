@@ -35,5 +35,5 @@ permissions:
   secrets: []
   filesystem:
   - '*'
-integrity_sha256: ad44dd38560caf54bf1a6d53a1ca56451dd95374155ada5ab6c7389c870a67e8
+integrity_sha256: db87684ffb9e3bf13791b5e00ee4eeb3f815aac994f5b550eab628011fe659a2
 hash_surface_version: 5

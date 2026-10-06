@@ -149,7 +149,7 @@ def test_record_genai_metrics_emits_histograms():
     )
 
     labels = {
-        "gen_ai_system": "anthropic",
+        "gen_ai_provider_name": "anthropic",
         "gen_ai_request_model": "claude-opus-4-8",
     }
     tokens_in = REGISTRY.get_sample_value(
@@ -174,7 +174,7 @@ def test_record_genai_metrics_emits_usd_cost_for_priced_models():
     from core.services.llm._telemetry import record_genai_metrics
 
     labels = {
-        "gen_ai_system": "anthropic",
+        "gen_ai_provider_name": "anthropic",
         "gen_ai_request_model": "claude-opus-4-8",
         # The cost counter carries a bounded `tenant` label (see
         # core.observability.metric_context). Which series this call lands on
@@ -197,7 +197,7 @@ def test_record_genai_metrics_no_cost_for_unpriced_models():
     from core.services.llm._telemetry import record_genai_metrics
 
     labels = {
-        "gen_ai_system": "ollama",
+        "gen_ai_provider_name": "ollama",
         "gen_ai_request_model": "some-local-model-not-priced",
     }
     record_genai_metrics(

@@ -23,9 +23,17 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+from core.observability.genai_semconv import (
+    GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS_DEPRECATED,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
+)
 from core.observability.logging import get_logger
 from core.services.llm._telemetry import (
-    gen_ai_system,
+    gen_ai_provider_for,
     record_genai_metrics,
     report_tokens_to_middleware,
 )
@@ -49,23 +57,37 @@ __all__ = [
 def set_usage_span_attributes(span: Any, usage: Usage) -> None:
     """Write one turn's token buckets onto *span* in OTel semconv terms.
 
-    ``gen_ai.usage.input_tokens`` carries *fresh* input only, exactly as the
-    providers report it (Anthropic's ``input_tokens`` excludes both cache
-    counters and the OpenAI reader subtracts its cached prefix out). Cached
-    prompt tokens get their own attributes because they are their own price
-    tier; folding them into the input count made a well-cached call look five
-    times more expensive than it was.
+    Span semantics follow the GenAI semantic conventions:
+    ``gen_ai.usage.input_tokens`` is the **total** prompt — fresh input plus
+    cache reads plus cache writes — and the two cache attributes report the
+    subsets of it. That is the opposite of the internal :class:`Usage`
+    record, whose ``input_tokens`` is *fresh* input only (Anthropic's
+    ``input_tokens`` excludes both cache counters and the OpenAI reader
+    subtracts its cached prefix out) because each bucket is its own price
+    tier. Only the span view is summed here; pricing, budgets and the tenant
+    ledger keep reading the four separate buckets.
+
+    ``gen_ai.usage.cache_creation.input_tokens`` is dual-emitted with its
+    replacement ``cache_write.input_tokens`` for the deprecation window.
 
     Args:
         span: The active generation span.
         usage: The billed record for the turn.
     """
-    span.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens)
-    span.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens)
-    if usage.cache_read_tokens:
-        span.set_attribute("gen_ai.usage.cache_read_tokens", usage.cache_read_tokens)
-    if usage.cache_write_tokens:
-        span.set_attribute("gen_ai.usage.cache_write_tokens", usage.cache_write_tokens)
+    cache_read = max(usage.cache_read_tokens, 0)
+    cache_write = max(usage.cache_write_tokens, 0)
+    span.set_attribute(
+        GEN_AI_USAGE_INPUT_TOKENS,
+        max(usage.input_tokens, 0) + cache_read + cache_write,
+    )
+    span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, usage.output_tokens)
+    if cache_read:
+        span.set_attribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read)
+    if cache_write:
+        span.set_attribute(GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS, cache_write)
+        span.set_attribute(
+            GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS_DEPRECATED, cache_write
+        )
 
 
 def charge_usage_to_budget(model: str, usage: Usage) -> float:
@@ -202,13 +224,13 @@ def account_turn(
     set_usage_span_attributes(span, billed)
     span.set_attribute("gen_ai.baselith.tool_calls", len(result.tool_calls))
     if isinstance(result.stop_reason, str) and result.stop_reason:
-        span.set_attribute("gen_ai.response.finish_reason", result.stop_reason)
+        span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [result.stop_reason])
 
     report_tokens_to_middleware(output_tokens, model=model)
     if service.cost_tracker:
         service.cost_tracker.track_tokens(output_tokens, model=model)
     record_genai_metrics(
-        gen_ai_system(provider or service.config.provider),
+        gen_ai_provider_for(service.config, provider),
         model,
         input_tokens=billed.input_tokens,
         output_tokens=billed.output_tokens,

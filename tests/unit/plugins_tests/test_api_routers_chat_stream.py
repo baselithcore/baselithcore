@@ -55,21 +55,21 @@ class TestSseFraming:
         )
 
         assert frames == [
-            "data: Hello\n\n",
-            "data:  World\n\n",
-            chat_module.SSE_DONE_EVENT,
+            "id: 1\ndata: Hello\n\n",
+            "id: 2\ndata:  World\n\n",
+            "id: 3\n" + chat_module.SSE_DONE_EVENT,
         ]
 
     def test_a_multiline_chunk_keeps_one_data_line_per_line(self) -> None:
         """SSE forbids a raw newline inside a field value (RFC: one per line)."""
         frames = _collect(chat_module.sse_stream(_StubRequest(), _chunks("a\nb"), 30.0))
 
-        assert frames[0] == "data: a\ndata: b\n\n"
+        assert frames[0] == "id: 1\ndata: a\ndata: b\n\n"
 
     def test_the_terminal_event_is_always_emitted(self) -> None:
         frames = _collect(chat_module.sse_stream(_StubRequest(), _chunks(), 30.0))
 
-        assert frames == [chat_module.SSE_DONE_EVENT]
+        assert frames == ["id: 1\n" + chat_module.SSE_DONE_EVENT]
         assert chat_module.SSE_DONE_EVENT.startswith("event: done\n")
 
 
@@ -86,9 +86,9 @@ class TestDisconnect:
         request = _StubRequest(disconnect_after=2)
         frames = _collect(chat_module.sse_stream(request, forever(), 30.0))
 
-        assert frames[-1] == chat_module.SSE_DONE_EVENT
+        assert frames[-1].endswith(chat_module.SSE_DONE_EVENT)
         # Two data frames, then the disconnect is observed and we stop pulling.
-        assert frames.count("data: tok\n\n") == 2
+        assert sum(f.endswith("data: tok\n\n") for f in frames) == 2
         assert produced <= 3
 
 
@@ -107,8 +107,9 @@ class TestSourceFailure:
 
         frames = _collect(chat_module.sse_stream(_StubRequest(), explodes(), 30.0))
 
-        assert frames[0] == "data: partial\n\n"
-        assert frames[-2:] == [chat_module.SSE_ERROR_EVENT, chat_module.SSE_DONE_EVENT]
+        assert frames[0] == "id: 1\ndata: partial\n\n"
+        assert frames[-2].startswith("id: 2\nevent: error\ndata: ")
+        assert frames[-1] == "id: 3\n" + chat_module.SSE_DONE_EVENT
 
     def test_the_error_frame_leaks_no_exception_detail(self) -> None:
         async def explodes() -> AsyncIterator[str]:
@@ -117,7 +118,9 @@ class TestSourceFailure:
 
         frames = _collect(chat_module.sse_stream(_StubRequest(), explodes(), 30.0))
 
-        assert frames == [chat_module.SSE_ERROR_EVENT, chat_module.SSE_DONE_EVENT]
+        assert len(frames) == 2
+        assert frames[0].startswith("id: 1\nevent: error\n")
+        assert frames[1] == "id: 2\n" + chat_module.SSE_DONE_EVENT
         assert "abc123" not in "".join(frames)
         assert "RuntimeError" not in "".join(frames)
 
@@ -131,7 +134,10 @@ class TestTimeout:
 
         frames = _collect(chat_module.sse_stream(_StubRequest(), hangs(), 0.05))
 
-        assert frames == ["data: first\n\n", chat_module.SSE_DONE_EVENT]
+        assert frames == [
+            "id: 1\ndata: first\n\n",
+            "id: 2\n" + chat_module.SSE_DONE_EVENT,
+        ]
 
 
 class TestEndpoint:
@@ -160,5 +166,106 @@ class TestEndpoint:
         assert response.headers["cache-control"] == "no-cache"
         assert response.headers["x-accel-buffering"] == "no"
         assert response.text == (
-            "data: Hello\n\ndata:  World\n\n" + chat_module.SSE_DONE_EVENT
+            "id: 1\ndata: Hello\n\nid: 2\ndata:  World\n\nid: 3\n"
+            + chat_module.SSE_DONE_EVENT
         )
+
+
+class TestErrorPayload:
+    def test_the_error_event_carries_a_json_code_and_request_id(self) -> None:
+        import json
+
+        from core.observability.setup import request_id_ctx
+
+        async def explodes() -> AsyncIterator[str]:
+            raise RuntimeError("provider read failed: token abc123")
+            yield ""  # pragma: no cover - unreachable, keeps this a generator
+
+        async def run() -> list[str]:
+            token = request_id_ctx.set("req-42")
+            try:
+                return [
+                    f
+                    async for f in chat_module.sse_stream(
+                        _StubRequest(), explodes(), 30.0
+                    )
+                ]
+            finally:
+                request_id_ctx.reset(token)
+
+        frames = asyncio.run(run())
+        data_line = next(
+            line for line in frames[0].split("\n") if line.startswith("data: ")
+        )
+        payload = json.loads(data_line[len("data: ") :])
+        assert payload == {
+            "code": "stream_failed",
+            "detail": "stream failed",
+            "request_id": "req-42",
+        }
+        assert "abc123" not in frames[0]
+
+
+class TestHeartbeat:
+    def test_a_quiet_source_gets_keepalive_comments_without_losing_the_chunk(
+        self,
+    ) -> None:
+        async def slow() -> AsyncIterator[str]:
+            await asyncio.sleep(0.12)
+            yield "late"
+
+        frames = _collect(
+            chat_module.sse_stream(
+                _StubRequest(), slow(), 30.0, heartbeat_interval=0.03
+            )
+        )
+
+        keepalives = [f for f in frames if f == ": keepalive\n\n"]
+        assert len(keepalives) >= 2
+        # The pending read survived every heartbeat: the chunk still arrives.
+        assert "id: 1\ndata: late\n\n" in frames
+        assert frames[-1] == "id: 2\n" + chat_module.SSE_DONE_EVENT
+
+    def test_a_client_gone_during_a_quiet_period_closes_the_source(self) -> None:
+        closed = asyncio.Event()
+
+        async def silent() -> AsyncIterator[str]:
+            try:
+                await asyncio.sleep(30)
+                yield "never"  # pragma: no cover
+            finally:
+                closed.set()
+
+        async def run() -> list[str]:
+            frames = [
+                f
+                async for f in chat_module.sse_stream(
+                    _StubRequest(disconnect_after=2),
+                    silent(),
+                    30.0,
+                    heartbeat_interval=0.01,
+                )
+            ]
+            return frames
+
+        frames = asyncio.run(run())
+        assert frames[-1].endswith(chat_module.SSE_DONE_EVENT)
+        assert "data: never" not in "".join(frames)
+        # The pending read was cancelled and the generator closed, not leaked.
+        assert closed.is_set()
+
+    def test_the_interval_comes_from_settings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        import plugins.api_routers._sse as sse_module
+
+        monkeypatch.setattr(
+            sse_module,
+            "get_app_config",
+            lambda: SimpleNamespace(sse_heartbeat_seconds=4.5),
+        )
+        assert sse_module.heartbeat_seconds() == 4.5
+        monkeypatch.setattr(sse_module, "get_app_config", lambda: SimpleNamespace())
+        assert sse_module.heartbeat_seconds() == sse_module.DEFAULT_HEARTBEAT_SECONDS

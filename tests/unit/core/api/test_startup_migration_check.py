@@ -15,7 +15,7 @@ import pytest
 import sqlalchemy
 from alembic.runtime import migration
 
-from core.api import startup_checks
+from core.api import _schema_check, startup_checks
 from core.db.migration_config import migration_heads
 
 
@@ -70,13 +70,13 @@ async def test_up_to_date_database_is_recognised_outside_the_repo(
     )
     seen: list[str] = []
     monkeypatch.setattr(
-        startup_checks.logger,
+        _schema_check.logger,
         "info",
         lambda msg, *args, **_kw: seen.append(msg % args if args else msg),
     )
     warned: list[str] = []
     monkeypatch.setattr(
-        startup_checks.logger,
+        _schema_check.logger,
         "warning",
         lambda msg, *args, **_kw: warned.append(msg % args if args else msg),
     )

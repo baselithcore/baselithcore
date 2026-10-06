@@ -135,7 +135,11 @@ audit_emit(AuditEventType.CONFIG_CHANGE, action="reload")
 With a running loop the write is scheduled as a task (a strong reference is held
 until it completes, so it cannot be collected mid-flight). Without one — module
 import, a worker thread, a sync CLI path — the event degrades to the logger
-representation rather than being dropped.
+representation rather than being dropped. At shutdown the lifespan awaits the
+writes still in flight (`flush_pending_audit_events(timeout=3.0)`, the
+critical `audit_events` teardown step) before the database pools close; any
+still pending after the timeout are cancelled and reported as
+`audit_flush_incomplete pending=<n>`.
 
 ## Tamper evidence
 

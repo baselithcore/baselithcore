@@ -599,7 +599,9 @@ subscriptions share one channel and the client must demultiplex them.
 
 Registering a tool, resource, template or prompt — or removing a tool with
 `server.unregister_tool(name)`, which returns whether the tool existed —
-announces the matching `list_changed` to the streams that opted in; `notify_resource_updated(uri)`
+announces the matching `list_changed` to the streams that opted in (the send
+is a background task the server holds a reference to until it finishes; a
+failed send is logged as `mcp_list_changed_announce_failed`); `notify_resource_updated(uri)`
 announces a content change to the streams watching that URI. When the server
 ends a subscription it answers the listen request with an empty result, so the
 client can tell a graceful close from a dropped transport.
@@ -828,7 +830,8 @@ graceful degradation: a legacy server can silently mis-serve a modern-shaped
 request.
 
 `call_tool()` returns `structuredContent` when the server sends it, falling
-back to parsing the text mirror for servers that only produce `content`.
+back to parsing the text mirror for servers that only produce `content`. The
+object is scanned before it is returned (see below), never handed over raw.
 
 ### Result caching
 
@@ -953,7 +956,33 @@ awaited response are dropped, so neither can be mistaken for a result.
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
 sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
-See [Guardrails](guardrails.md).
+**Every** text part is scanned (`scan_content_parts` in
+`core/mcp/client_operations.py`): a multi-part `tools/call` result, the text of
+an embedded `resource` part, and the `contents` of `resources/read`. Only a
+lone text item used to be scanned, so text beside an image — or a second text
+part — reached the model unscanned. Binary parts (`image`, `audio`, `blob`)
+pass through untouched. See [Guardrails](guardrails.md).
+
+A tool's `structuredContent` gets the same treatment
+(`scan_structured_content`): it used to be returned unscanned, so a server
+could put an injection in a JSON field and skip the boundary. Every string
+leaf — and every object key — is scanned under the same
+`BASELITH_SANITIZE_EXTERNAL_CONTENT` policy as text parts (findings always
+logged; flagged strings sanitized unless the flag is off). Numbers, booleans
+and `null` are untouched, the shape is preserved and the input is never
+mutated. The walk is bounded (`STRUCTURED_SCAN_MAX_DEPTH = 32` levels,
+`STRUCTURED_SCAN_MAX_NODES = 10_000` containers): a subtree past either bound
+is scanned for detection as one block of its joined strings (one scan, no
+recursion), so an oversized payload is never passed through unscanned. Only
+when that block is flagged *and* the policy sanitizes is the subtree copied —
+through an explicit stack, at any depth — with each flagged string leaf and
+key sanitized in place; container types never change (a past-the-bound object
+stays an object, never a JSON string), and log-only mode returns the original
+subtree untouched. A key whose sanitized text would collide with another key
+of the same object gets a free numbered suffix (`"name (2)"`, logged as
+`mcp_structured_key_sanitize_collision`): sanitizing never drops a value, and
+a poisoned key never survives unsanitized just because its clean twin was sent
+alongside it.
 
 ### SSRF guard (Streamable HTTP transport)
 

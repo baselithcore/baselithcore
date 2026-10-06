@@ -230,9 +230,9 @@ class PluginRuntimeHooks:
 
         Must be called with ``self._activation_lock`` held. Recurses so a
         dependency's *own* dependencies are activated first: e.g. activating a
-        plugin that depends on ``resto-graph`` (which in turn depends on the
+        plugin that depends on ``menu-graph`` (which in turn depends on the
         ``document-sources`` infra plugin) now pulls ``document-sources`` up
-        the chain instead of enabling ``resto-graph`` while its dependency is
+        the chain instead of enabling ``menu-graph`` while its dependency is
         still dormant (which failed ``_check_dependencies`` with "not loaded").
         The lock is a non-reentrant ``asyncio.Lock``, so recursion stays
         lock-free and re-uses the single acquisition from the public entry

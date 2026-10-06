@@ -24,10 +24,15 @@ Two properties of this module are load-bearing and easy to lose:
 """
 
 import os
+import signal
 import sys
+import time
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from multiprocessing import Process
-from typing import Any
+from types import FrameType
+from typing import Any, Protocol
 
 from redis import Redis
 from rq import Queue, Worker
@@ -180,6 +185,206 @@ def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker
     )
 
 
+#: Seconds the supervisor waits for children to finish the job in flight
+#: after a stop signal: inside the chart's 120s worker grace, with room left
+#: for the terminate/kill escalation.
+DEFAULT_STOP_TIMEOUT_S = 100.0
+_RESTART_BACKOFF_INITIAL_S = 1.0
+_RESTART_BACKOFF_MAX_S = 60.0
+#: A child that ran at least this long before dying is restarted at once.
+_STABLE_RUN_S = 60.0
+_TERMINATE_GRACE_S = 5.0
+
+
+class ChildProcess(Protocol):
+    """The slice of :class:`multiprocessing.Process` the supervisor uses."""
+
+    @property
+    def pid(self) -> int | None: ...
+
+    @property
+    def exitcode(self) -> int | None: ...
+
+    def start(self) -> None: ...
+
+    def is_alive(self) -> bool: ...
+
+    def join(self, timeout: float | None = None) -> None: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+
+@dataclass
+class _Slot:
+    process: ChildProcess | None = None
+    started_at: float = 0.0
+    failures: int = 0
+    next_start_at: float = 0.0
+
+
+class WorkerSupervisor:
+    """Keep ``count`` worker processes alive and stop them on a signal.
+
+    The orchestrator signals PID 1 only, so the supervisor forwards SIGTERM
+    and SIGINT to every child (each runs RQ's own warm/cold shutdown). A
+    child that exits while the supervisor is not stopping is restarted, with
+    exponential backoff per slot so a crash loop cannot spin. On stop it
+    joins the children for at most ``stop_timeout`` seconds, then terminates
+    and finally kills what is left, so the process always exits.
+    """
+
+    def __init__(
+        self,
+        spawn: Callable[[], ChildProcess],
+        count: int,
+        *,
+        stop_timeout: float = DEFAULT_STOP_TIMEOUT_S,
+        poll_interval: float = 1.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._spawn = spawn
+        self._slots = [_Slot() for _ in range(max(1, count))]
+        self._stop_timeout = stop_timeout
+        self._poll_interval = poll_interval
+        self._clock = clock
+        self._sleep = sleep
+        self._stopping = False
+        self._stop_signum: int = signal.SIGTERM
+        self._pid = os.getpid()
+
+    @property
+    def stopping(self) -> bool:
+        """Whether a stop has been requested."""
+        return self._stopping
+
+    def children(self) -> list[ChildProcess]:
+        """The child processes currently owned by a slot."""
+        return [slot.process for slot in self._slots if slot.process is not None]
+
+    def request_stop(self, signum: int = signal.SIGTERM) -> None:
+        """Stop supervising and forward ``signum`` to every live child.
+
+        Safe from a signal handler. A second call forwards again, which RQ
+        turns into a cold shutdown (the job in flight is killed).
+        """
+        if os.getpid() != self._pid:  # inherited copy in a forked child
+            return
+        self._stopping = True
+        self._stop_signum = signum
+        for child in self.children():
+            self._signal_child(child, signum)
+
+    @staticmethod
+    def _signal_child(child: ChildProcess, signum: int) -> None:
+        pid = child.pid
+        if pid is None or not child.is_alive():
+            return
+        try:
+            os.kill(pid, signum)
+        except ProcessLookupError:
+            return
+
+    def supervise_once(self) -> None:
+        """Reap dead children and start the ones whose backoff has elapsed."""
+        now = self._clock()
+        for index, slot in enumerate(self._slots):
+            child = slot.process
+            if child is not None and not child.is_alive():
+                child.join(0)
+                lived = now - slot.started_at
+                slot.failures = 0 if lived >= _STABLE_RUN_S else slot.failures + 1
+                delay = (
+                    0.0
+                    if slot.failures == 0
+                    else min(
+                        _RESTART_BACKOFF_INITIAL_S * 2 ** (slot.failures - 1),
+                        _RESTART_BACKOFF_MAX_S,
+                    )
+                )
+                slot.process = None
+                slot.next_start_at = now + delay
+                if not self._stopping:
+                    logger.warning(
+                        "rq_worker_child_exited slot=%d exitcode=%s restart_in_s=%.1f",
+                        index,
+                        child.exitcode,
+                        delay,
+                    )
+            if (
+                slot.process is None
+                and not self._stopping
+                and now >= slot.next_start_at
+            ):
+                process = self._spawn()
+                process.start()
+                slot.process = process
+                slot.started_at = now
+                if self._stopping:
+                    # A stop landed between start() and the slot assignment,
+                    # so request_stop() could not see this child; it is in
+                    # its own process group and would never hear of it.
+                    self._signal_child(process, self._stop_signum)
+
+    def shutdown(self) -> None:
+        """Join the children within ``stop_timeout``; terminate, then kill."""
+        deadline = self._clock() + self._stop_timeout
+        for child in self.children():
+            child.join(max(0.0, deadline - self._clock()))
+        for child in self.children():
+            if child.is_alive():
+                logger.warning("rq_worker_child_terminate pid=%s", child.pid)
+                child.terminate()
+                child.join(_TERMINATE_GRACE_S)
+            if child.is_alive():
+                logger.error("rq_worker_child_kill pid=%s", child.pid)
+                child.kill()
+                child.join(1.0)
+
+    def run(self) -> None:
+        """Supervise until a stop signal arrives, then shut the children down."""
+        previous: dict[int, Any] = {}
+
+        def _forward(signum: int, _frame: FrameType | None) -> None:
+            self.request_stop(signum)
+
+        try:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous[sig] = signal.signal(sig, _forward)
+        except ValueError:  # not the main thread: the caller owns signals
+            previous.clear()
+        try:
+            while not self._stopping:
+                self.supervise_once()
+                self._sleep(self._poll_interval)
+        finally:
+            if not self._stopping:  # leaving on an exception, not a signal
+                self.request_stop()
+            self._stopping = True
+            self.shutdown()
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
+
+def _connect(redis_url: str) -> Redis:
+    """Open the worker's Redis connection with bounded connects.
+
+    ``socket_connect_timeout`` bounds a connect to a Redis that is down or
+    unroutable. ``socket_timeout`` is deliberately left for RQ to set: its
+    ``Worker`` raises it to ``dequeue_timeout + 10`` so the blocking BLPOP
+    dequeue is never cut short, which a shorter enqueue-side deadline would do.
+    """
+    config = get_task_queue_config()
+    connection: Redis = Redis.from_url(
+        redis_url,
+        socket_connect_timeout=config.socket_connect_timeout,
+        health_check_interval=config.health_check_interval,
+    )
+    return connection
+
+
 def run_worker(
     redis_url: str, queue_names: list[str], with_scheduler: bool = True
 ) -> None:
@@ -195,25 +400,42 @@ def run_worker(
             delayed/scheduled jobs into the queue. Leave on unless a
             dedicated scheduler process owns that job.
     """
-    connection = Redis.from_url(redis_url)
-    build_worker(queue_names, connection).work(with_scheduler=with_scheduler)
+    # A forked child inherits the supervisor's forwarding handlers until RQ
+    # installs its own inside work(); a stop signal in that window must act
+    # on this process, not re-forward to the parent's other children.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, signal.SIG_DFL)
+    # Own process group: a terminal Ctrl-C reaches only the supervisor, which
+    # forwards it once. Sharing the group, the child would get SIGINT twice
+    # (terminal + forward) and RQ would read the second as a cold shutdown.
+    if hasattr(os, "setpgrp"):
+        os.setpgrp()
+    build_worker(queue_names, _connect(redis_url)).work(with_scheduler=with_scheduler)
 
 
 def start_worker(
     queue_names: list[str] | None = None,
     concurrency: int = 1,
     with_scheduler: bool = True,
+    stop_timeout: float = DEFAULT_STOP_TIMEOUT_S,
 ) -> None:
     """Start ``concurrency`` workers listening on the configured queues.
 
-    One worker runs in the calling process; any extra ones run as child
-    processes and are joined on shutdown. Every worker runs the scheduler —
-    RQ guards it with a Redis lock, so only one instance polls at a time.
+    With one worker it runs in the calling process. With more, the calling
+    process becomes a :class:`WorkerSupervisor` over ``concurrency`` child
+    workers: it forwards SIGTERM/SIGINT to them (the orchestrator signals
+    PID 1 only), restarts one that dies unexpectedly, and on shutdown waits
+    ``stop_timeout`` for their warm shutdown before terminating them. Every
+    worker runs the scheduler — RQ guards it with a Redis lock, so only one
+    instance polls at a time.
 
     Args:
         queue_names: Queues to listen on. Defaults to the configured set.
         concurrency: Number of worker processes (minimum 1).
         with_scheduler: Whether workers also run RQ's scheduler.
+        stop_timeout: Seconds the supervisor waits for children to finish
+            their job in flight after a stop signal. Keep it below the pod's
+            ``terminationGracePeriodSeconds``.
     """
     config = get_task_queue_config()
     redis_url = config.get_redis_url()
@@ -223,20 +445,16 @@ def start_worker(
     logger.info(f"Starting {workers} RQ worker(s) listening on: {names}")
     logger.info(f"Redis URL: {redact_url_credentials(redis_url)}")
 
-    children: list[Process] = []
-    for _ in range(workers - 1):
-        child = Process(
+    if workers == 1:
+        build_worker(names, _connect(redis_url)).work(with_scheduler=with_scheduler)
+        return
+
+    def _spawn() -> Process:
+        return Process(
             target=run_worker, args=(redis_url, names, with_scheduler), daemon=False
         )
-        child.start()
-        children.append(child)
 
-    try:
-        conn = Redis.from_url(redis_url)
-        build_worker(names, conn).work(with_scheduler=with_scheduler)
-    finally:
-        for child in children:
-            child.join()
+    WorkerSupervisor(_spawn, workers, stop_timeout=stop_timeout).run()
 
 
 if __name__ == "__main__":

@@ -163,3 +163,17 @@ def error_from_response(
         request_id=request_id,
         body=body,
     )
+
+
+class RunTimeoutError(BaselithError):
+    """``wait_for_run`` gave up before the run reached a terminal state.
+
+    ``last_status`` is the most recent :class:`~baselith_sdk.models.AgentRunStatus`
+    observed (``None`` if none was), so the caller can keep polling or report it.
+    """
+
+    def __init__(self, task_id: str, timeout: float, last_status: Any = None) -> None:
+        super().__init__(f"run {task_id} not finished after {timeout:g}s")
+        self.task_id = task_id
+        self.timeout = timeout
+        self.last_status = last_status

@@ -49,6 +49,7 @@ class IndexBootstrapper:
         self._current_mode: str | None = None
         self._last_error: str | None = None
         self._last_completed_mode: str | None = None
+        self._last_new_documents: int | None = None
 
     def is_bootstrapped(self) -> bool:
         """
@@ -82,6 +83,7 @@ class IndexBootstrapper:
             "mode": self._current_mode,
             "error": self._last_error,
             "last_completed": self._last_completed_mode,
+            "last_new_documents": self._last_new_documents,
         }
 
     def has_pending_changes(self) -> bool:
@@ -146,6 +148,25 @@ class IndexBootstrapper:
             self._last_error = None
             return True
 
+    async def schedule_manual(self, mode: str = "incremental") -> bool:
+        """Start an operator-requested indexing run in the background.
+
+        Unlike :meth:`schedule` this ignores the bootstrap toggle and the
+        change-detection shortcut — an operator asked for it — but shares the
+        single task slot, so it never overlaps a bootstrap (or another manual
+        run). Progress and the outcome are reported by :meth:`status`.
+
+        Returns:
+            bool: False when an indexing run is already in progress.
+        """
+        async with self._lock:
+            if self.is_running():
+                return False
+            self._current_mode = mode
+            self._task = asyncio.create_task(self._run(mode))
+            self._last_error = None
+            return True
+
     async def _run(self, mode: str) -> None:
         """
         Internal execution logic for the bootstrap task.
@@ -162,7 +183,10 @@ class IndexBootstrapper:
             if graph_db.is_enabled():
                 await asyncio.to_thread(graph_db.create_constraints)
 
-            await get_indexing_service().index_documents(incremental=incremental)
+            stats = await get_indexing_service().index_documents(
+                incremental=incremental
+            )
+            self._last_new_documents = getattr(stats, "new_documents", None)
             if mode == "full":
                 self._mark_bootstrapped()
             self._last_completed_mode = mode

@@ -59,7 +59,6 @@ import os
 import time
 from typing import Any
 
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.cache.redis_cache import create_redis_client
@@ -70,6 +69,7 @@ from core.middleware._idempotency_replay import (
     credential_verified,
     decode_entry,
     encode_entry,
+    idempotency_problem,
     replay_entry,
     request_target_digest,
 )
@@ -83,6 +83,9 @@ from core.middleware._idempotency_store import (
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+_KEY_TOO_LONG = "Idempotency-Key exceeds maximum length."
+_IN_FLIGHT = "A request with this Idempotency-Key is already in progress."
 
 # Historical name, still imported by callers and tests.
 _jwt_exp = jwt_exp
@@ -267,10 +270,9 @@ class IdempotencyMiddleware:
             await self.app(scope, receive, send)
             return
         if len(idem_key) > _MAX_KEY_LENGTH:
-            await JSONResponse(
-                status_code=400,
-                content={"detail": "Idempotency-Key exceeds maximum length."},
-            )(scope, receive, send)
+            await idempotency_problem(
+                scope, receive, send, 400, "idempotency_key_invalid", _KEY_TOO_LONG
+            )
             return
 
         has_credential = self._header(scope, b"authorization") or self._header(
@@ -312,13 +314,9 @@ class IdempotencyMiddleware:
 
         # 2) Lock held by a duplicate still in flight.
         if not acquired:
-            await JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "A request with this Idempotency-Key is already "
-                    "in progress."
-                },
-            )(scope, receive, send)
+            await idempotency_problem(
+                scope, receive, send, 409, "idempotency_key_in_flight", _IN_FLIGHT
+            )
             return
 
         # 3) Run the app, capturing the response unless it streams / is too big.

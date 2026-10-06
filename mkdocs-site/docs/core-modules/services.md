@@ -250,7 +250,20 @@ within a 1:3–3:1 ratio; earlier models only their fixed sizes).
 When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
-`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
+`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`
+(`core.services.llm._coercion`). The parse fails closed: only a leading,
+closed `<think>…</think>` block, surrounding whitespace and one enclosing
+markdown code fence are removed, and what remains must be exactly one
+`{"tool": ...}`/`{"tool": null, "final": ...}` object. An unterminated leading
+`<think>` (everything after it is reasoning, possibly truncated) and a stray
+reasoning tag after the block both refuse. JSON is never extracted from prose,
+so a tool call the model merely quotes (from an untrusted tool output, say) is
+never executed. Any other reply is answered with **one** re-ask ("reply again
+with ONLY a valid JSON object", quoting the rejected reply inside the untrusted
+envelope); if that fails too, the original
+text is returned as a plain answer with no tool call. The coercion call runs through
+`LLM_FALLBACK_CHAIN` like plain text, so a failing primary fails over and the
+serving stage lands on the span. The
 return type is a uniform `LLMResult` in both modes. The flag is **on by
 default** — the `supports_native_tools` guard keeps providers without a native
 API on the coercion path, so the default is safe everywhere; set
@@ -574,7 +587,9 @@ LoopBudget and cost-control middleware — callers own their own budgets.
 Every LLM call (plain, structured, streaming) emits the OTel Gen AI
 semantic-convention Prometheus metrics `gen_ai_client_token_usage`
 (input/output histograms) and `gen_ai_client_operation_duration_seconds`,
-labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
+labeled by `gen_ai_provider_name` (formerly `gen_ai_system` — see
+[the deprecation notes](observability-module.md#genai-semantic-conventions-genai_semconvpy))
+and `gen_ai_request_model` — standard dashboards
 light up without bespoke queries. Calls to models in the pricing table also
 emit `gen_ai_client_cost_usd_total` (estimated USD, extension metric — no
 semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
@@ -722,6 +737,19 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **Tool calling is a server flag.** Without `--enable-auto-tool-choice` and a
   `--tool-call-parser` matching the model, set `LLM_VLLM_NATIVE_TOOLS=false`:
   tool use then goes through prompt coercion instead of a rejected request.
+  That holds for the message path too (`generate_messages`, which every
+  `core.agent.Agent` turn takes): a turn that offers tools or carries tool
+  blocks is rendered as a transcript and coerced, so no `tools`/`tool_choice`
+  ever reaches the server, while a tool-free turn still goes out as messages.
+  A message-path fallback-chain stage in that state is skipped on a turn that
+  offers tools (tool history alone is sent as ordinary messages, which a
+  parserless server accepts). The coerced call itself fails over through the
+  text chain.
+- **JSON mode turns thinking off.** A `json_mode` call (the coercion path uses
+  it) adds `extra_body.chat_template_kwargs.enable_thinking=false`, merged with
+  any `extra_body` the caller passed; a caller that sets `enable_thinking`
+  keeps its choice. Without it a thinking template (Qwen3) opens `<think>` and
+  `json_object` decoding forces the reasoning inside the JSON.
 - **vLLM-only sampling parameters** (`top_k`, `min_p`, `repetition_penalty`,
   `chat_template_kwargs` — e.g. `{"enable_thinking": false}` for Qwen3) travel
   in `extra_body`, forwarded untouched.
@@ -2045,7 +2073,17 @@ async for frame in sandbox.execute_code_stream("print('hi')"):
   path; **on timeout the container is killed** and the exit frame reports
   `exit_code == -1` with `compute_seconds == timeout`.
 - The Docker backend attaches to the container's demuxed output from a worker
-  thread; the **sbx CLI has no streaming primitive**, so that backend
+  thread. The output is untrusted, so it is **bounded**: the hand-off queue
+  holds at most `STREAM_QUEUE_MAXSIZE` (256) frames and the reader blocks while
+  the consumer is slow (backpressure on the container's pipe), and at most
+  `MAX_STREAM_OUTPUT_BYTES` (8 MiB) are forwarded — the rest is dropped behind
+  one stderr frame carrying `"truncated": true`, while the container still
+  runs to its exit frame.
+- **A consumer that leaves kills the container.** Client disconnect,
+  cancellation or `aclose()` releases the reader thread and kills the
+  container, which the reader then removes — an abandoned stream no longer
+  keeps either alive until the timeout.
+- The **sbx CLI has no streaming primitive**, so that backend
   degrades to run-to-completion and emits the collected output as single
   stdout/stderr frames before the exit frame.
 - With a `budget=`, the cost is charged just before the exit frame is
@@ -2241,6 +2279,19 @@ The indexing state (document fingerprints) is persisted to Redis under `baselith
 Documents that are no longer present in any active source are automatically deleted from the vector store at the end of each indexing run.
 
 ---
+
+### Background runs: `IndexBootstrapper`
+
+`core/services/bootstrap.py` owns the one in-process indexing task slot the
+HTTP surface shares. `schedule()` is the startup/bootstrap path (honours
+`INDEX_BOOTSTRAP_ENABLED` and the change-detection shortcut);
+`schedule_manual(mode)` is the operator path behind `POST /reindex` and
+`POST /admin/reindex` — it ignores both, because an operator asked, but uses
+the same slot, so it never overlaps a bootstrap and returns `False` (the routes
+answer `409`) while one runs. Both start the run as a background task and
+return at once; `status()` reports `running`, `mode`, `error`,
+`last_completed` and `last_new_documents` (files indexed by the last finished
+run), which is what `GET /index/status` — the routes' `status_url` — serves.
 
 ## Human-in-the-Loop
 

@@ -364,6 +364,13 @@ one). The default `qa_docs` handler places them in the prompt as
 [Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
 Retrieval itself still runs on the raw query; there is no query rewriting.
 
+Replayed turns and retrieved documents are **data, not instructions**: both the
+`qa_docs` handler and the chat workflow's `build_prompt` (`core/chat/prompt.py`)
+scan them for indirect prompt injection and seal each in an untrusted envelope
+(`conversation_history`, `document_retrieval`), and the prompt carries the
+`RAG_CONTEXT_IS_DATA_RULE`, so a poisoned earlier turn or document cannot pass
+itself off as the user's request.
+
 The turn is recorded **after** the answer, and only a real answer: a result
 carrying `error`, or an empty `response`, is not stored. On the streaming route
 the turn is recorded once the stream completes; a stream that raises or that the

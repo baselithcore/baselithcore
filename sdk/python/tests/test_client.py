@@ -157,6 +157,62 @@ def test_chat_stream_surfaces_error_event():
     assert "stream failed" in str(ei.value)
 
 
+def test_chat_stream_error_event_json_payload_exposes_code_and_request_id():
+    """Current servers frame the error as JSON with a code and request id."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            "id: 1\ndata: partial\n\n"
+            ": keepalive\n\n"
+            'id: 2\nevent: error\ndata: {"code": "stream_failed", '
+            '"detail": "stream failed", "request_id": "req-9"}\n\n'
+            "id: 3\nevent: done\ndata: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    with BaselithClient(BASE, api_key="k", transport=httpx.MockTransport(handler)) as c:
+        gen = c.chat_stream("q")
+        assert next(gen) == "partial"
+        with pytest.raises(ChatStreamError) as ei:
+            next(gen)
+    assert ei.value.message == "stream failed"
+    assert ei.value.code == "stream_failed"
+    assert ei.value.request_id == "req-9"
+    assert "req-9" in str(ei.value)
+
+
+def test_iter_sse_chunks_ignores_keepalive_comments_and_id_fields():
+    raw = ["id: 1\ndata: a\n\n: keepalive\n\n", ": keepalive\n\nid: 2\ndata: b\n\n"]
+    assert list(_iter_sse_chunks(iter(raw))) == ["a", "b"]
+
+
+def test_problem_json_error_body_is_parsed():
+    """RFC 9457 ``application/problem+json`` must decode: code + request_id."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            content=json.dumps(
+                {
+                    "type": "urn:baselith:error:not_found",
+                    "title": "Not Found",
+                    "status": 404,
+                    "detail": "nope",
+                    "code": "not_found",
+                    "request_id": "rid-1",
+                }
+            ),
+            headers={"content-type": "application/problem+json"},
+        )
+
+    with BaselithClient(BASE, api_key="k", transport=httpx.MockTransport(handler)) as c:
+        with pytest.raises(NotFoundError) as ei:
+            c.chat("q")
+    assert ei.value.code == "not_found"
+    assert ei.value.request_id == "rid-1"
+    assert ei.value.message == "nope"
+
+
 def test_iter_sse_chunks_handles_events_split_across_reads():
     """White-box: the decoder buffers a frame split across arbitrary reads."""
     raw = ["data: hel", "lo\n", "\nevent: don", "e\ndata: [DONE]\n\n"]

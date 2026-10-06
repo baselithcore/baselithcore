@@ -581,8 +581,13 @@ non-streaming path only. See
 | Frame | When | Payload |
 | --- | --- | --- |
 | `data: <line>` | once per model chunk | A chunk containing newlines becomes one `data:` line per line — exactly how a compliant client reassembles it. |
-| `event: error` | the source raised mid-stream | `data: stream failed` — deliberately fixed text; the exception can carry provider detail, prompt fragments or credentials, and it is already in the log. |
+| `event: error` | the source raised mid-stream | `data: {"code":"stream_failed","detail":"stream failed","request_id":"…"}` — deliberately fixed apart from the request id; the exception can carry provider detail, prompt fragments or credentials, and it is already in the log under that id. |
 | `event: done` | **always**, last | `data: [DONE]`, matching the convention every OpenAI-compatible SSE client already implements. |
+| `: keepalive` | every `SSE_HEARTBEAT_SECONDS` (default 15) of silence | An SSE comment: no event, ignored by every client, but traffic that keeps proxy idle timeouts from dropping a stream waiting on a slow model. |
+
+Every event (not the comments) carries an `id:` numbered from `1`. There is no
+replay — `Last-Event-ID` is ignored; a client that lost the stream re-sends the
+request.
 
 The terminal event is the point: it used to answer `text/plain` with the tokens
 simply concatenated, which gave a client no frame boundaries and no way to tell a
@@ -591,7 +596,8 @@ finished stream from a dropped connection.
 Two other bounds apply to every stream:
 
 - **Client disconnect** — the generator checks `request.is_disconnected()` each
-  round and closes the source on the way out, so a closed tab no longer leaves the
+  round (including every heartbeat, so a silent stream notices too) and closes
+  the source on the way out, so a closed tab no longer leaves the
   upstream LLM call running (and billing).
 - **Wall clock** — `CHAT_STREAM_TIMEOUT_SECONDS` (default `300.0`) bounds the whole
   response; on expiry the stream ends cleanly with `event: done`.

@@ -13,16 +13,23 @@ Protected by the same admin Basic Auth as the admin router.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
+from core.api.pagination import PageParams, page_params, paginated
 from core.observability.logging import get_logger
 from core.prompts.registry import get_prompt_registry
 from core.prompts.sync import PromptSynchronizer, get_prompt_synchronizer
 from core.prompts.types import PromptNotFoundError, PromptVersion
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.schemas import (
+    PromptLabelPromoted,
+    PromptPage,
+    PromptVersionRegistered,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -39,8 +46,12 @@ class PromptVersionIn(BaseModel):
     version: str = Field(min_length=1, max_length=100)
     template: str = Field(min_length=1, max_length=200_000)
     description: str | None = Field(default=None, max_length=2000)
-    labels: list[str] = Field(default_factory=list)
-    variables: list[str] = Field(default_factory=list)
+    labels: list[Annotated[str, StringConstraints(min_length=1, max_length=100)]] = (
+        Field(default_factory=list, max_length=50)
+    )
+    variables: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] = (
+        Field(default_factory=list, max_length=200)
+    )
 
 
 class LabelIn(BaseModel):
@@ -60,23 +71,35 @@ def _require_synchronizer() -> PromptSynchronizer:
     return synchronizer
 
 
-@router.get("")
-async def list_prompts() -> dict[str, Any]:
-    """List registered prompts with their versions and labels."""
+@router.get("", response_model=PromptPage, responses=problem_responses(400, 401, 422))
+async def list_prompts(page: PageParams = Depends(page_params)) -> dict[str, Any]:
+    """List registered prompts with their versions and labels.
+
+    Paginated over the sorted prompt names; ``total`` counts every prompt,
+    ``count`` the ones on this page.
+    """
     registry = get_prompt_registry()
     store = registry.store
-    prompts = [
-        {
+    names = sorted(store.names())
+    body = paginated(
+        names,
+        page,
+        key="prompts",
+        serialize=lambda name: {
             "name": name,
             "versions": [pv.version for pv in store.versions(name)],
             "labels": store.labels(name),
-        }
-        for name in store.names()
-    ]
-    return {"prompts": prompts, "total": len(prompts)}
+        },
+    )
+    return {**body, "total": len(names)}
 
 
-@router.post("/{name}/versions", status_code=201)
+@router.post(
+    "/{name}/versions",
+    status_code=201,
+    response_model=PromptVersionRegistered,
+    responses=problem_responses(401, 422, 503),
+)
 async def register_version(name: str, payload: PromptVersionIn) -> dict[str, Any]:
     """Register (and persist) a new version of ``name``."""
     synchronizer = _require_synchronizer()
@@ -96,7 +119,11 @@ async def register_version(name: str, payload: PromptVersionIn) -> dict[str, Any
     return {"name": name, "version": payload.version, "checksum": version.checksum}
 
 
-@router.post("/{name}/labels/{label}")
+@router.post(
+    "/{name}/labels/{label}",
+    response_model=PromptLabelPromoted,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def promote_label(name: str, label: str, payload: LabelIn) -> dict[str, Any]:
     """Point ``label`` at an existing version of ``name`` (durable promote)."""
     synchronizer = _require_synchronizer()

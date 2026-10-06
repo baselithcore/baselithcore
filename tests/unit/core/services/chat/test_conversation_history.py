@@ -152,7 +152,11 @@ async def test_abandoned_stream_is_not_recorded() -> None:
 def test_prompt_carries_history_only_when_present() -> None:
     assert build_rag_user_prompt("ctx", "q").startswith("Context:")
     prompt = build_rag_user_prompt("ctx", "q", "User: a\nAssistant: b")
-    assert prompt.startswith("Conversation so far:\nUser: a\nAssistant: b")
+    assert prompt.startswith(
+        "Conversation so far:\n"
+        '<untrusted_tool_output tool="conversation_history">User: a\nAssistant: b'
+        "</untrusted_tool_output>"
+    )
     assert prompt.index("Conversation so far") < prompt.index("Context:")
 
 

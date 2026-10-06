@@ -50,7 +50,7 @@ cross_site = {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}
 
 with patch(
     "plugins.api_routers.status.get_indexing_service", return_value=_Indexing()
-), patch("plugins.api_routers.index.get_indexing_service", return_value=_Indexing()):
+), patch("core.services.bootstrap.get_indexing_service", return_value=_Indexing()):
     page = client.get("/admin", auth=auth)
     results = {
         "page": [page.status_code, "reindexDocs" in page.text],
@@ -58,7 +58,11 @@ with patch(
         "status": client.get("/admin/status", auth=auth).json(),
         "status_no_auth": client.get("/admin/status").status_code,
         "api_status_basic": client.get("/status", auth=auth).status_code,
-        "reindex": client.post("/admin/reindex", auth=auth, headers=same_origin).json(),
+        "reindex": [
+            (resp := client.post("/admin/reindex", auth=auth, headers=same_origin)).status_code,
+            resp.json(),
+            resp.headers.get("location"),
+        ],
         "reindex_cross_site": client.post(
             "/admin/reindex", auth=auth, headers=cross_site
         ).status_code,
@@ -110,7 +114,16 @@ def test_admin_dashboard_end_to_end() -> None:
     assert r["status"]["status"] == "ok"
     assert "clarification" in r["status"]["metrics"]
     assert r["status_no_auth"] == 401
-    assert r["reindex"] == {"status": "ok", "new_files_indexed": 2}
+    # Reindexing is scheduled in the background: 202 + where to poll.
+    assert r["reindex"] == [
+        202,
+        {
+            "status": "scheduled",
+            "mode": "incremental",
+            "status_url": "/v1/index/status",
+        },
+        "/v1/index/status",
+    ]
     assert r["reindex_bad_pass"] == 401
 
     # …while the API-key control plane still refuses Basic credentials, and

@@ -32,7 +32,7 @@ from core.observability.logging import get_logger
 from core.services.llm._accounting import charge_usage_to_budget, record_usage_cost
 from core.services.llm._deadline import stream_within_deadline
 from core.services.llm._telemetry import (
-    gen_ai_system,
+    gen_ai_provider_for,
     record_genai_metrics,
     report_tokens_to_middleware,
 )
@@ -195,7 +195,7 @@ async def generate_stream_events(
         if service.cost_tracker:
             service.cost_tracker.track_tokens(output_tokens, model=model)
         record_genai_metrics(
-            gen_ai_system(service.config.provider),
+            gen_ai_provider_for(service.config),
             model,
             input_tokens=billed.input_tokens,
             output_tokens=billed.output_tokens,

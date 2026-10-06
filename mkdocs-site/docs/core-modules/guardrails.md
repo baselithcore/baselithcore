@@ -634,6 +634,11 @@ switch, not an opt-in: `0`/`false`/`no`/`off` restores the unscanned path for a
 deployment that must accept byte-exact tool output; any other value — or none —
 leaves it on.
 
+The same scan-then-envelope treatment covers the two other places external
+text enters a prompt: retrieved RAG chunks (`render_rag_context`) and recalled
+memories (`render_memory_context`) — see
+[Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
+
 Scanning removes the smuggled bytes. Telling the model that the result is *data*
 rather than an instruction is the other half, and it lives in the
 [untrusted-output envelope](orchestration.md#untrusted-output-envelope).

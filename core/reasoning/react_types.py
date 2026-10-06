@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.orchestration._categories import (
+    UNDECLARED_DESTRUCTIVE,
+    UndeclaredCategory,
+    category_declared,
+)
+
 
 class StepType(str, Enum):
     """Type of a single ReAct trace entry."""
@@ -74,6 +80,11 @@ class ReActResult:
     error: str | None = None
 
 
+# The default category: "destructive", undeclared (see core.orchestration._categories).
+_UndeclaredCategory = UndeclaredCategory
+_UNDECLARED_DESTRUCTIVE: str = UNDECLARED_DESTRUCTIVE
+
+
 @dataclass
 class ToolDefinition:
     """
@@ -97,7 +108,7 @@ class ToolDefinition:
     fn: Callable[..., Any]
     description: str
     parameters: dict[str, Any] | None = None
-    category: str = "destructive"
+    category: str = _UNDECLARED_DESTRUCTIVE
 
     def json_schema(self) -> dict[str, Any]:
         """The JSON-Schema object describing this tool's arguments.
@@ -112,6 +123,16 @@ class ToolDefinition:
         from core.reasoning.react_native import infer_tool_parameters
 
         return infer_tool_parameters(self)
+
+    @property
+    def category_declared(self) -> bool:
+        """Whether ``category`` was set by the author rather than defaulted.
+
+        The value is ``"destructive"`` either way; the difference lets a
+        consumer that must not break undeclared tools (the typed ``Agent``'s
+        standalone guard) act only on tools explicitly marked destructive.
+        """
+        return category_declared(self.category)
 
     @property
     def is_read_only(self) -> bool:

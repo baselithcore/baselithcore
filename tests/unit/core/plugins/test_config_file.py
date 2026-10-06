@@ -45,10 +45,10 @@ class TestReadConfigs:
         monkeypatch.delenv(PLUGIN_CONFIG_PATH_ENV, raising=False)
         cfg = tmp_path / "configs" / "plugins.yaml"
         cfg.parent.mkdir()
-        cfg.write_text("auth:\n  enabled: true\nwikigen:\n  enabled: false\n")
+        cfg.write_text("auth:\n  enabled: true\nwiki_pages:\n  enabled: false\n")
         assert read_plugin_configs(tmp_path) == {
             "auth": {"enabled": True},
-            "wikigen": {"enabled": False},
+            "wiki_pages": {"enabled": False},
         }
 
     def test_escaping_or_malformed_never_raises(self, tmp_path, monkeypatch):
@@ -63,19 +63,19 @@ class TestReadConfigs:
 
 class TestEnableRule:
     def test_empty_config_enables_everything(self):
-        assert plugin_enabled({}, "wikigen", "wikigen") is True
+        assert plugin_enabled({}, "wiki_pages", "wiki_pages") is True
 
     def test_named_plugins_only_when_config_is_non_empty(self):
         configs = {"auth": {"enabled": True}}
         assert plugin_enabled(configs, "auth", "auth") is True
-        assert plugin_enabled(configs, "wikigen", "wikigen") is False
+        assert plugin_enabled(configs, "wiki_pages", "wiki_pages") is False
 
     def test_enabled_false_wins(self):
         assert plugin_enabled({"auth": {"enabled": False}}, "auth", "auth") is False
 
     def test_directory_and_manifest_name_variants_match(self):
-        configs = {"blog-forge": {"enabled": True}}
-        assert plugin_enabled(configs, "blog_forge", "blog-forge") is True
+        configs = {"news-feed": {"enabled": True}}
+        assert plugin_enabled(configs, "news_feed", "news-feed") is True
         configs = {"document_sources": {}}
         assert plugin_enabled(configs, "document_sources", "document-sources") is True
 

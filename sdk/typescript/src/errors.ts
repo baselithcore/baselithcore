@@ -15,8 +15,39 @@ export class BaselithError extends Error {
 /** Client constructed with an invalid configuration. */
 export class BaselithConfigError extends BaselithError {}
 
-/** The request never reached the server (network/timeout/abort). */
-export class ApiConnectionError extends BaselithError {}
+/**
+ * The request failed at the transport level (network/timeout/abort).
+ *
+ * `notSent` is `true` only when the failure provably happened before the
+ * request left the client (connection refused, DNS failure, connect timeout):
+ * a non-idempotent call (approval decision, run resume, delivery replay) is
+ * retried only in that case — a timeout may mean the server is still working.
+ */
+export class ApiConnectionError extends BaselithError {
+  readonly notSent: boolean;
+
+  constructor(message: string, opts: { notSent?: boolean } = {}) {
+    super(message);
+    this.notSent = opts.notSent ?? false;
+  }
+}
+
+/**
+ * `waitForRun` gave up before the run reached a terminal state.
+ * `lastStatus` is the most recent status record observed.
+ */
+export class RunTimeoutError extends BaselithError {
+  readonly taskId: string;
+  readonly timeoutMs: number;
+  readonly lastStatus?: unknown;
+
+  constructor(taskId: string, timeoutMs: number, lastStatus?: unknown) {
+    super(`run ${taskId} not finished after ${timeoutMs}ms`);
+    this.taskId = taskId;
+    this.timeoutMs = timeoutMs;
+    this.lastStatus = lastStatus;
+  }
+}
 
 /** An error response was returned by the API. */
 export class BaselithApiError extends BaselithError {

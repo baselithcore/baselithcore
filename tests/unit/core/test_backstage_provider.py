@@ -266,11 +266,11 @@ class TestToCatalogInfo:
     @pytest.mark.asyncio
     async def test_manage_link_from_template(self, plugin):
         provider = _provider(
-            plugin_link_template="http://h:8000/baselithcontrol/#/plugin/{plugin}"
+            plugin_link_template="http://h:8000/control_panel/#/plugin/{plugin}"
         )
         entity = await provider.to_catalog_info(plugin)
         assert {
-            "url": "http://h:8000/baselithcontrol/#/plugin/my-plugin",
+            "url": "http://h:8000/control_panel/#/plugin/my-plugin",
             "title": "Manage Plugin",
             "icon": "dashboard",
         } in entity["metadata"]["links"]

@@ -119,6 +119,27 @@ test('streamChat surfaces event: error as an ApiError instead of leaking it as t
   assert.deepEqual(chunks, ['partial']);
 });
 
+test('streamChat exposes code and requestId from a JSON error event', async () => {
+  const res = fakeStreamResponse([
+    'id: 1\ndata: partial\n\n',
+    ': keepalive\n\n',
+    'id: 2\nevent: error\ndata: {"code":"stream_failed","detail":"stream failed","request_id":"req-9"}\n\n',
+    'id: 3\nevent: done\ndata: [DONE]\n\n',
+  ]);
+  const chunks = [];
+  await assert.rejects(
+    () => withFakeFetch(res, () => streamChat({ query: 'q' }, (c) => chunks.push(c))),
+    (err) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.message, 'stream failed');
+      assert.equal(err.code, 'stream_failed');
+      assert.equal(err.requestId, 'req-9');
+      return true;
+    }
+  );
+  assert.deepEqual(chunks, ['partial']);
+});
+
 test('streamChat returns false (caller falls back) when the body cannot be streamed', async () => {
   const res = {
     ok: true,

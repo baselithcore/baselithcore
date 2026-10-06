@@ -132,10 +132,19 @@ def test_deliveries_serialises_only_the_requested_page(service, monkeypatch):
     """Only the returned page is dumped, and the cursor still walks the window."""
     from unittest.mock import AsyncMock, MagicMock
 
+    from core.webhooks.types import WebhookDelivery
+
     records = []
     for i in range(5):
         rec = MagicMock()
-        rec.model_dump.return_value = {"id": f"d{i}"}
+        # A complete record: the response model types every delivery field.
+        rec.model_dump.return_value = WebhookDelivery(
+            id=f"d{i}",
+            endpoint_id="whe_1",
+            event_id="evt_1",
+            event_type="t",
+            url=HOOK_URL,
+        ).model_dump()
         records.append(rec)
     monkeypatch.setattr(
         service.store, "list_deliveries", AsyncMock(return_value=records)

@@ -364,3 +364,35 @@ def test_queue_pool_blocks_instead_of_failing_when_exhausted():
             assert conn.connection_pool.timeout > 0
         finally:
             conn.close()
+
+
+def test_queue_pool_bounds_every_socket_operation():
+    """A Redis that accepts and then goes silent must not hang an enqueue.
+
+    The enqueue-side pool carries both a connect and a read deadline, taken
+    from ``TASK_QUEUE_SOCKET_*``. The worker's blocking dequeue is unaffected:
+    it opens its own connection.
+    """
+    import core.task_queue as tq
+    from core.config.task_queue import TaskQueueConfig
+
+    config = TaskQueueConfig(socket_timeout=7.5, socket_connect_timeout=1.5)
+    with (
+        patch("core.task_queue._redis_conn", None),
+        patch("core.task_queue.get_task_queue_config", return_value=config),
+    ):
+        conn = tq.get_queue_redis_connection()
+        try:
+            kwargs = conn.connection_pool.connection_kwargs
+            assert kwargs["socket_timeout"] == 7.5
+            assert kwargs["socket_connect_timeout"] == 1.5
+        finally:
+            conn.close()
+
+
+def test_queue_socket_deadline_defaults_are_bounded():
+    """Out of the box both deadlines are set (not ``None`` = wait forever)."""
+    from core.config.task_queue import TaskQueueConfig
+
+    config = TaskQueueConfig()
+    assert 0 < config.socket_connect_timeout <= config.socket_timeout

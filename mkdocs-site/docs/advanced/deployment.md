@@ -768,11 +768,16 @@ variables, so the three entry points behave alike behind one proxy.
   passes upstream headers through would otherwise advertise the exact server
   stack to every caller.
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
-  SIGTERM (default 30s, the same value `backend.py` uses so one variable cannot
-  mean two drains). Keep it **below** your termination grace so the pod drains
-  cleanly instead of being force-killed: the Helm chart sets
-  `terminationGracePeriodSeconds: 45` for the API, and 30 also matches the bare
-  Kubernetes default of 30s. Raise the grace period first if you raise this.
+  SIGTERM (default 30s, the same value `backend.py` and
+  `deploy/docker/core-entrypoint.sh` use so one variable cannot mean two
+  drains). The lifespan teardown runs only *after* this drain, under its own
+  40s deadline, and Kubernetes counts the 5s `preStop` sleep against the same
+  grace — so the Helm chart sets `terminationGracePeriodSeconds: 80`
+  (5 + 30 + 40, plus a margin). The bare Kubernetes default of 30s is too short
+  for this image: set the grace explicitly outside the chart, and raise it
+  first if you raise this. See
+  [Connection-pool drain on shutdown](runtime-tuning.md#connection-pool-drain-on-shutdown)
+  for the arithmetic.
 - **`--timeout-keep-alive`** — how long an idle client connection is kept
   open (default 75s). Uvicorn's own default is 5s, *shorter* than the idle
   timeout of the upstream keepalive pool of every common reverse proxy
@@ -1608,7 +1613,10 @@ docker compose exec api tar czf - /app/uploads \
 
 ### Readiness Endpoint
 
-`GET /health/ready` gates only on the database (503 → traffic drains) and
+`GET /health/ready` gates on the database (503 → traffic drains) — and
+answers 503 `{"status": "draining"}` from the moment the process receives
+SIGTERM, so the pod leaves the endpoints while it finishes in-flight work —
+and
 additionally reports two **advisory** keys that never gate readiness: `redis`
 (the framework falls back to in-memory) and `vectorstore` (recall degrades to
 keyword search). Watch both in dashboards/alerts — an operator should see them

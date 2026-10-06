@@ -252,7 +252,16 @@ optional and names the subsystem (`orchestration`, `memory`, `plugins`,
 
 A `BREAKING CHANGE:` footer (or a `!` after the type, e.g. `feat(api)!:`) forces
 a **major** release regardless of type. Pre-1.0 that is still a real signal —
-use it only for a change an operator has to act on.
+use it only for a change an operator has to act on; a behaviour change ships
+in a minor with an Upgrade Notes entry instead (see the
+[versioning policy](mkdocs-site/docs/advanced/versioning-and-deprecation.md#before-10-behaviour-changes-ship-in-a-minor)).
+
+**Holding a release back.** To land a commit on `main` without cutting a
+release, put `[no release]` in the message of the commit that reaches `main`
+(the merge commit, for a merged pull request). Only the release job is
+skipped; the rest of CI, CodeQL and Semgrep still run. Never use `[skip ci]`
+for this: it also skips the SAST scans, and OpenSSF Scorecard then counts the
+whole pull request that commit belongs to as unscanned.
 
 **Examples**:
 

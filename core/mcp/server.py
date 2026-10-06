@@ -73,6 +73,9 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
 
         self._tasks_store = TaskStore()
         self._subscriptions = SubscriptionHub()
+        # Strong references to in-flight list-changed notifications: the loop
+        # holds tasks weakly, so an unreferenced one can be collected mid-send.
+        self._announce_tasks: set[asyncio.Task[Any]] = set()
         self._running = False
         self._request_id = 0
         if autonomy_policy is None:
@@ -108,9 +111,25 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
         if not self._subscriptions.active:
             return
         try:
-            asyncio.get_running_loop().create_task(notifier())
+            task = asyncio.get_running_loop().create_task(notifier())
         except RuntimeError:
             logger.debug("mcp_list_changed_not_announced", reason="no running loop")
+            return
+        self._announce_tasks.add(task)
+        task.add_done_callback(self._announce_done)
+
+    def _announce_done(self, task: asyncio.Task[Any]) -> None:
+        """Drop the reference and surface a failed notification in the log."""
+        self._announce_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "mcp_list_changed_announce_failed",
+                error=repr(exc),
+                exc_info=exc,
+            )
 
     # -------------------------------------------------------------------------
     # Tool Registration

@@ -59,7 +59,9 @@ async def test_legacy_manager_without_query_kwarg_still_works():
     )
 
     assert memory.context_calls == [{"max_tokens": 2000}]
-    assert context["recent_history"].startswith("## Recent Context")
+    assert context["recent_history"].startswith(
+        '<untrusted_tool_output tool="conversation_history">## Recent Context'
+    )
 
 
 async def test_injected_context_size_is_recorded_on_the_budget():

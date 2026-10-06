@@ -116,6 +116,7 @@ Declared in `core.config.app`.
 | `SENTRY_PROFILES_SAMPLE_RATE` | `float` | `0.0` | Profiling is an investigation tool, not steady state: the profiler samples the interpreter at ~100 Hz for every profiled transaction, which is real CPU on a pod sized around one core. Off by default; raise it for the duration of an investigation and put it back. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `float` | `0.1` | Sentry trace/profile sample rates. Defaults are conservative for production; raise to 1.0 only in pre-prod or for short investigations. |
 | `SERVICE_VERSION` | `str` | *computed* | Service version reported as the `service.version` resource attribute. Defaults to the installed package version. |
+| `SSE_HEARTBEAT_SECONDS` | `float` | `15.0` | Silence budget of an HTTP SSE stream (`/chat/stream`, `/runs/{id}/events`): after this long without an event a `: keepalive` comment frame goes out, so proxy and client idle timeouts do not drop a stream that is merely waiting on a slow model or tool. |
 | `STRICT_TENANT_ISOLATION` | `bool` | `True` | If True, enforces strict logical isolation between different tenants. |
 | `TELEMETRY_CONSOLE_EXPORT` | `bool` | `False` | Also export spans/metrics/logs to stdout (debugging the pipeline locally). |
 | `TELEMETRY_ENABLED` | `bool` | `False` |  |
@@ -462,6 +463,7 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_LOOP_MAX_TOKENS` | `int` | `400000` | Cumulative token cap (input + output, every LLM call) for one orchestrated request. 0 disables the cap. |
 | `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` | `float` | `300.0` | Minimum progress silence before a 'running' checkpoint is re-entered by the recovery sweep. Recent progress means some worker still owns the run, and resuming it anyway would execute the same agent loop twice. Keep it at or above the sweep interval. |
 | `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` | `float` | `1800.0` | Progress-silence threshold after which a 'running' checkpoint is marked failed by the stale-run sweep. |
+| `ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED` | `bool` | `True` | With checkpoint_resume_on_startup off, still sweep every recovery_sweep_interval_seconds and mark 'running' checkpoints silent for recovery_stale_after_seconds as failed, so runs orphaned by a crash are visible instead of 'running' forever. Nothing is resumed. With resume on, the recovery cycle already includes this sweep. |
 | `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` | `float` | `300.0` | Interval between background crash-recovery sweeps (resume interrupted runs + fail wedged ones) when checkpoint_resume_on_startup is enabled. |
 | `ORCHESTRATOR_TOOL_LEDGER` | `Literal['auto', 'postgres', 'memory', 'off']` | `auto` | Backing store for the tool idempotency ledger, which keeps a redelivered or resumed run from repeating an effectful call. 'auto' uses Postgres when POSTGRES_ENABLED, else the in-process ledger with a warning; 'postgres' requires it and fails loudly instead of silently deduplicating within one worker only; 'memory' always uses the in-process ledger (single-worker deployments and tests); 'off' records nothing, so every retry re-executes every effectful call. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED` | `bool` | `False` | Enforce a sliding-window burst limit on side-effecting tool invocations (categories destructive/external_side_effect), keyed (tenant, tool). In-process; off by default. |
@@ -816,6 +818,7 @@ Declared in `core.config.storage`.
 | `CACHE_REDIS_PREFIX` | `str` | `baselithcore` |  |
 | `CACHE_REDIS_URL` | `str` | `redis://localhost:6379/1` |  |
 | `DATABASE_URL`<br>also accepts `DATABASE_URL` | `str \| None` | *empty* | Full database connection URL |
+| `DB_CONNECT_TIMEOUT` | `int` | `10` | libpq connect_timeout in seconds: a blackholed database fails the connect instead of waiting out the OS TCP timeout. |
 | `DB_HOST` | `str` | `postgres` |  |
 | `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` | `int` | `60000` |  |
 | `DB_MIGRATIONS_ON_STARTUP` | `bool` | `True` | Run `alembic upgrade head` inside the app lifespan at boot. Default True for single-node/back-compat. Set False when migrations run as a pre-deploy step (Helm hook Job / initContainer): a bad migration then fails one Job instead of crash-looping the whole ReplicaSet, and pods stop contending on the migration advisory lock during rolling deploys. |
@@ -831,8 +834,13 @@ Declared in `core.config.storage`.
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
 | `DB_RLS_TENANT_SCOPE` | `Literal['session', 'transaction']` | `session` | How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config per session, memoized per pooled connection) or 'transaction' (each checkout is one transaction, set_config is transaction-local). Use 'transaction' behind a transaction-mode pooler such as PgBouncer pool_mode=transaction. |
 | `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
+| `DB_SCHEMA_CHECK` | `Literal['strict', 'warn', 'off'] \| None` | *empty* | Startup schema-revision check: 'strict' refuses to start when the database is behind the packaged migration head, 'warn' logs it, 'off' skips it. Unset means strict in production, off elsewhere. |
 | `DB_SSL_MODE` | `str \| None` | *empty* |  |
 | `DB_STATEMENT_TIMEOUT_MS` | `int` | `30000` | Server-side budgets baked into every pooled connection's startup options, in milliseconds (0 disables the Postgres guard). A statement that outlives `statement_timeout` is cancelled by the server, so a runaway query cannot hold a pooled connection indefinitely. The idle-in-transaction cap kills a session that opened a transaction and went quiet (leaked connection, crashed handler mid-transaction) before the locks it holds block everyone else. |
+| `DB_TCP_KEEPALIVES_COUNT` | `int` | `3` |  |
+| `DB_TCP_KEEPALIVES_IDLE` | `int` | `30` | Idle seconds before the first TCP keepalive probe, so a pooled connection whose peer vanished is detected. |
+| `DB_TCP_KEEPALIVES_INTERVAL` | `int` | `10` |  |
+| `DB_TCP_USER_TIMEOUT_MS` | `int` | `60000` | libpq tcp_user_timeout (Linux): how long sent data may stay unacknowledged before the connection is dropped. |
 | `DB_USER` | `str` | `baselith` |  |
 | `GRAPH_CACHE_TTL` | `int` | `3600` |  |
 | `GRAPH_DB_ENABLED` | `bool` | `True` |  |
@@ -881,6 +889,8 @@ Declared in `core.config.task_queue`.
 | `TASK_QUEUE_QUEUES` | `Annotated[list[str], NoDecode]` | `['default', 'documents', 'analysis']` | NoDecode + csv_list, same reason as dlq_replay_allowed_modules below: `TASK_QUEUE_QUEUES=default,documents` must configure the queues, not raise a SettingsError out of the whole task-queue configuration. |
 | `TASK_QUEUE_REDIS_URL` | `str \| None` | *empty* | TASK_QUEUE_REDIS_URL — the most specific name, so it wins. |
 | `TASK_QUEUE_RESULT_TTL` | `int` | `86400` |  |
+| `TASK_QUEUE_SOCKET_CONNECT_TIMEOUT` | `float` | `2.0` | TCP connect deadline, in seconds, for a new task-queue Redis connection. |
+| `TASK_QUEUE_SOCKET_TIMEOUT` | `float` | `10.0` | Per-operation read deadline, in seconds, on the enqueue-side task-queue Redis pool. Not applied to the worker's blocking dequeue connection. |
 
 ## DORA Register of Information persistence configuration
 
@@ -1000,4 +1010,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-652 settings documented.
+662 settings documented.

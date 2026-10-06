@@ -59,6 +59,18 @@ result.iterations        # LLM round-trips used
   (`core/services/llm/message_transport.py`), now shared with the
   [ReAct loop](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) —
   same transport, same degradation, no behaviour change on this side.
+- **Conversations** — `agent.run(prompt, history=[...])` continues a stored
+  conversation: prior `Message`s are sent verbatim before the new prompt
+  (the caller's list is never mutated; a history ending on an unanswered
+  `tool_use` raises `ValueError`). `AgentResult.messages` includes them.
+- **Events** — `agent.run_events(prompt, history=...)` runs the same loop and
+  yields `TextDelta`, `ToolCallStarted`, `ToolCallFinished`, then `Completed`
+  (or `Failed` instead of raising). Text arrives per model turn. Tools and
+  `output_type` are supported. With several parallel tool calls in one turn,
+  every `ToolCallStarted` precedes execution and the `ToolCallFinished` events
+  arrive after the whole batch; `ToolCallFinished.content` is the observation
+  exactly as the model received it, wrapped in core's untrusted-tool-output
+  envelope.
 - **Streaming** — `agent.run_stream(prompt)` yields text chunks
   (text-only: `output_type`/tools are rejected on the stream path).
 - **The whole runtime underneath** — calls go through `LLMService`, so
@@ -79,9 +91,10 @@ result.iterations        # LLM round-trips used
 | `max_iterations` | `6` | Hard cap on LLM round-trips (tools + retries) |
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
-| `autonomy_policy` | `None` | When set, tools whose category needs approval at the active level are gated through the enforcement chokepoint. Left `None` deliberately: there is no ambient policy to inherit here, and defaulting to one would start demanding approval for every effectful tool of every existing typed agent, with no channel to approve on. |
+| `autonomy_policy` | standalone guard | Left at its default, tools **explicitly declared** `category="destructive"` are refused (see [Safe defaults for a standalone run](#safe-defaults-for-a-standalone-run)); every other tool runs as before. An `AutonomyPolicy` replaces the guard with the real approval gate: tools whose category needs approval at the active level go through the enforcement chokepoint. `None` is the explicit opt-out — no guard, gate inert. |
 | `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
 | `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
+| `loop_limits` | orchestrator defaults | Caps for a run with no ambient `LoopBudget`: by default the orchestrator's `LoopLimits()` (`budget_usd`, `max_tool_calls`, `ORCHESTRATOR_LOOP_MAX_TOKENS`, `ORCHESTRATOR_LOOP_MAX_SECONDS`) with the iteration cap widened to `max_iterations`. An explicit `LoopLimits` replaces them; `None` disables the default budget. Under an ambient budget the default and `None` reuse it, while an explicit `LoopLimits` is still enforced through a nested child budget that also charges the ambient one (once). |
 
 `agent.tool_names` reads back the tools an agent is armed with — their names
 in declaration order, as a `tuple[str, ...]`. It is the public counterpart of
@@ -94,7 +107,7 @@ reach into.
 |---|---|
 | `AgentOutputValidationError` | `output_type` was never satisfied within `max_retries`. |
 | `RuntimeError` | `max_iterations` exhausted before a final answer. |
-| `BudgetExceededError` | An ambient `LoopBudget` cap was hit. Fail-closed — a runaway loop cannot keep dispatching tools. |
+| `BudgetExceededError` | A `LoopBudget` cap was hit — the ambient one, or the run's own default budget (`loop_limits`). Fail-closed — a runaway loop cannot keep dispatching tools. |
 | `ApprovalPendingError` | A tool needs a human decision that is not available yet; the run pauses **durably**. Only reachable when the agent was given an `autonomy_policy`; without one the approval gate is inert. |
 
 The last two are new failure modes for callers that previously only had to handle
@@ -138,6 +151,79 @@ orchestrated request is subject to exactly the same caps as any other path.
     durable ledger configured. `run_id` defaults to the checkpoint's. Turns run
     their calls sequentially in this mode. Without a checkpoint nothing
     changes.
+
+## Safe defaults for a standalone run
+
+!!! warning "Behaviour change"
+    Two defaults changed for an `Agent` run **outside** an orchestrated
+    request. `Orchestrator.process` already gave every request a SUPERVISED
+    `AutonomyPolicy` and a `LoopBudget`; a standalone agent (a script, a worker,
+    a `Crew`) had neither. Both changes are opt-out with one argument.
+
+**Destructive tools are refused unless an approval policy is given.** A tool
+whose author wrote `category="destructive"` — on a `ToolDefinition`, a
+connector action or a declarative MCP tool — is not run (a connector
+`ActionSpec` left at its default category counts as undeclared, like a
+`ToolDefinition`). An `Agent` built inside an orchestrated request — by a plugin
+handler, say — is not guarded either: the host owns approval policy there. The model receives an
+`is_error` tool result saying the tool needs approval (and naming the opt-in
+for the operator), and `agent_destructive_tool_refused` is logged. Nothing
+else changes:
+
+- plain callables (`tools=[my_function]`) and a `ToolDefinition` left at the
+  default category still run. Their category is `destructive` for the ledger
+  and the approval matrix, but it was never *declared*, and refusing them
+  would break every existing typed agent. `ToolDefinition.category_declared`
+  tells the two apart;
+- `read_only`, `mutating`, `external_side_effect` and `self_modify` tools run
+  exactly as before;
+- `autonomy_policy=AutonomyPolicy(...)` (with a `human_intervention` channel or
+  a `checkpoint` for durable approval) replaces the guard with the real gate,
+  and a host that sets `agent._autonomy_policy` disarms it the same way;
+- `autonomy_policy=None` restores the previous behaviour: no guard, no gate.
+
+**A run with no ambient budget gets one.** Without a `LoopBudget` an
+`Agent.run` was bounded by `max_iterations` alone — no dollar, token or
+wall-clock cap. Now the run binds a budget built from the orchestrator's
+defaults as the ambient one (`core.orchestration.budget_context.standalone_budget`),
+so every LLM call is charged to it and every tool call counted; the iteration
+cap is widened to `max_iterations`, so that stays the cap that governs the
+loop. Inside an orchestrated request — or nested in another standalone run —
+the ambient budget is reused, never doubled. `loop_limits=LoopLimits(...)`
+sets the caps; `loop_limits=None` disables the default. Explicit caps are the
+agent's own and hold under an ambient budget too: the run binds a child
+budget (`standalone_budget(limits, enforce_own=True)`) that enforces them and
+forwards every charge, token and tick once to the ambient budget, so
+`Agent(loop_limits=LoopLimits(budget_usd=0.05))` inside a `Crew`, `GroupChat`,
+swarm batch or orchestrated request still aborts at USD 0.05 while the
+enclosing budget sees the spend (see
+[Nested budgets](orchestration.md#nested-budgets-explicit-caps-under-an-ambient-budget)).
+
+The same default applies to `GroupChat` (below) and to a swarm
+`Colony.execute_batch` ([swarm](swarm.md)), with one difference: every
+participant's `Agent.run` reuses that one shared budget, so its iteration and
+tool-call counters are lifted (`shared_loop_limits()`) — otherwise the agents'
+ticks would add up and end the chat or the batch early. The dollar, token and
+wall-clock caps still apply. A `Crew` binds the same shared budget for its
+whole `run()` — every task, and in `hierarchical` mode every manager turn — so
+the dollar, token and wall-clock caps bound the crew rather than each task
+separately (it used to get only the per-agent default per task, through each
+task's `Agent.run`). `Crew(loop_limits=...)` mirrors `Colony(loop_limits=...)`:
+left at the default it is `shared_loop_limits()`, an explicit `LoopLimits`
+replaces it, and `None` opts out so each task's `Agent.run` binds its own
+per-run default as before. An ambient budget always wins over the crew's
+caps; an agent's own explicit `loop_limits` are still enforced inside it.
+
+**Tool schemas are sent strict when they can be.** A tool whose parameter
+schema already fits the strict dialect — every property required and typed,
+extra keys forbidden (implicitly for a schema inferred from a signature,
+which the argument validator already closes), only keywords both providers'
+strict modes accept — goes out with `LLMToolSpec.strict=True`, so Anthropic
+and OpenAI constrain the emitted arguments to the schema. Any other tool (an
+optional argument, an untyped or bare `object` parameter, a `pattern` or
+`minLength` constraint) is sent exactly as before. Providers without strict
+tools (Ollama, Gemini) drop the flag; an OpenAI-compatible endpoint receives
+the standard `strict` field (`core/agent/_strict_tools.py`).
 
 ## How a tool call runs
 
@@ -227,6 +313,11 @@ result.task_results   # per-task: name, output, text, agent_index,
   agent auto-assigns.
 - **Everything through `Agent.run`** — tools, `output_type` validation, cost
   accounting and the ambient `LoopBudget` apply per task unchanged.
+- **One crew-wide budget** — with no ambient budget, `run()` binds one shared
+  `LoopBudget` for the whole crew (`loop_limits=`, default
+  `shared_loop_limits()`: orchestrator dollar/token/wall-clock caps, counters
+  lifted; `None` opts out; an explicit `LoopLimits` replaces it). A breach
+  aborts the crew with `BudgetExceededError`.
 
 For auction-based allocation, capability matching, and structured handoffs,
 use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
@@ -361,10 +452,17 @@ bounded by:
 2. **`terminate`** — optional caller predicate over the transcript, checked
    after every utterance; `True` ends the chat
    (`terminated_by: "predicate"`).
-3. **`budget`** — optional
-   [`LoopBudget`](orchestration.md) ticked once per round. Exhaustion ends
-   the chat **cleanly** with `terminated_by: "budget"` rather than raising,
-   so the partial transcript is preserved.
+3. **`budget`** — a [`LoopBudget`](orchestration.md) ticked once per
+   round. Exhaustion ends the chat **cleanly** with `terminated_by: "budget"`
+   rather than raising, so the partial transcript is preserved. Left at its
+   default, a chat with no ambient budget binds one of its own (orchestrator
+   defaults) as the ambient budget, so every participant's LLM call is
+   charged to it; it is checked for its deadline each round rather than
+   ticked (`max_rounds` already counts rounds, and typed-agent participants
+   tick it themselves), and a breach inside a turn also ends the chat with
+   `terminated_by: "budget"`. Inside an orchestrated request the ambient
+   budget is used as is and its breach propagates. `budget=None` disables
+   both.
 
 All group-chat symbols (`GroupChat`, `GroupChatResult`, `ChatMessage`,
 `Participant`, `SpeakerSelector` and the three selectors) are exported from

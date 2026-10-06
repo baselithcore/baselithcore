@@ -48,7 +48,20 @@ class TestSubmit:
         assert resp.status_code == 202
         body = resp.json()
         assert body["task_id"] == "job-123"
-        assert body["status_url"].endswith("/agent/status/job-123")
+        assert body["status_url"] == "/v1/agent/status/job-123"
+        assert resp.headers["location"] == body["status_url"]
+
+    def test_status_url_is_unversioned_when_v1_is_off(self, client, monkeypatch):
+        monkeypatch.setenv("API_V1_ENABLED", "false")
+        resp = client.post("/agent/async", json={"query": "do the thing"})
+        assert resp.json()["status_url"] == "/agent/status/job-123"
+        assert resp.headers["location"] == "/agent/status/job-123"
+
+    def test_conversation_id_is_bounded(self, client):
+        resp = client.post(
+            "/agent/async", json={"query": "q", "conversation_id": "x" * 129}
+        )
+        assert resp.status_code == 422
 
     def test_empty_query_rejected(self, client):
         resp = client.post("/agent/async", json={"query": ""})

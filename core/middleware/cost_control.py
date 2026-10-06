@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.config import get_app_config, get_storage_config
@@ -228,6 +227,14 @@ cost_controller = CostController(
 )
 
 
+def _retry_after_headers(exc: BudgetExceededError) -> dict[str, str] | None:
+    """``Retry-After`` for a breach that carries a back-off hint, else ``None``."""
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(retry_after, int | float) and retry_after > 0:
+        return {"Retry-After": str(int(retry_after))}
+    return None
+
+
 class CostControlMiddleware:
     """Pure ASGI middleware that initializes per-request cost tracking.
 
@@ -280,15 +287,22 @@ class CostControlMiddleware:
             # The handler ran up to the budget before this refusal: the outer
             # quota layer must not read the 429 as "no work was done".
             scope[WORK_DONE_SCOPE_KEY] = True
-            response = JSONResponse(
+            # Lazy: core.api.errors imports BudgetExceededError from here.
+            from core.api.errors import problem_response
+
+            # The exception text carries the configured limits
+            # ("Token limit exceeded: 12000/10000"); that is operator
+            # information, already logged above, not something a caller
+            # needs. The client gets the fact, not the thresholds — in the
+            # same RFC 9457 shape (and with the request id) as every other
+            # error the API emits.
+            response = problem_response(
                 status_code=429,
-                # The exception text carries the configured limits
-                # ("Token limit exceeded: 12000/10000"); that is operator
-                # information, already logged above, not something a caller
-                # needs. The client gets the fact, not the thresholds.
-                content={
-                    "error": "Quota exceeded",
-                    "message": "Request budget exceeded for this deployment.",
-                },
+                code="budget_exceeded",
+                title="Quota exceeded",
+                detail="Request budget exceeded for this deployment.",
+                error_type=BudgetExceededError.__name__,
+                instance=scope.get("path") or None,
+                headers=_retry_after_headers(budget_error),
             )
             await response(scope, receive, send)

@@ -84,6 +84,10 @@ class PromptSynchronizer:
         """Import the backend's versions and labels into the local registry.
 
         Fail-open: a backend error logs and returns — the next tick retries.
+        One bad row (a version the store rejects, a label naming a version
+        that never arrived) is logged and skipped; it must not stop the rest
+        of the import, nor — raised out of the periodic loop — every refresh
+        after it.
         """
         try:
             versions, labels = await self._backend.fetch_all()
@@ -91,9 +95,30 @@ class PromptSynchronizer:
             logger.warning("prompt_sync_refresh_failed", extra={"error": str(exc)})
             return
         for version in versions:
-            self._registry.store.put(version)
+            try:
+                self._registry.store.put(version)
+            except Exception as exc:
+                logger.warning(
+                    "prompt_sync_version_skipped",
+                    extra={
+                        "prompt": getattr(version, "name", None),
+                        "version": getattr(version, "version", None),
+                        "error": str(exc),
+                    },
+                )
         for (name, label), target in labels.items():
-            self._registry.store.set_label(name, label, target)
+            try:
+                self._registry.store.set_label(name, label, target)
+            except Exception as exc:
+                logger.warning(
+                    "prompt_sync_label_skipped",
+                    extra={
+                        "prompt": name,
+                        "label": label,
+                        "version": target,
+                        "error": str(exc),
+                    },
+                )
 
     async def start(self) -> None:
         """Start the periodic refresh loop (idempotent)."""
@@ -115,7 +140,12 @@ class PromptSynchronizer:
     async def _loop(self) -> None:
         while True:
             await asyncio.sleep(self._interval)
-            await self.refresh()
+            try:
+                await self.refresh()
+            except Exception:
+                # Last line of defence: an error escaping refresh() would end
+                # the task, and with it every future sync, silently.
+                logger.exception("prompt_sync_tick_failed")
 
 
 _synchronizer: PromptSynchronizer | None = None

@@ -120,6 +120,13 @@ When enabled, the `api-routers` plugin mounts a scoped management API at
 `POST /webhooks` returns the signing `secret` **once** at creation — store it;
 it is never returned again (endpoint reads are redacted).
 
+Both list routes are [cursor-paginated](../api/rest.md#pagination) (`limit`
+1–200, `cursor`, answered with `next_cursor` / `has_more`). The registration
+payload is bounded: `url` ≤ 2048 characters, `description` ≤ 2000, at most 100
+`event_types` (each ≤ 128) and 20 custom `headers` (name ≤ 256, value ≤ 4096).
+Every route is also served under `/v1` (the unprefixed paths are
+[deprecated](../api/rest.md#api-versioning)).
+
 ### Tenant isolation
 
 Every endpoint and delivery is scoped to the caller's tenant. List operations

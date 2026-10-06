@@ -301,30 +301,32 @@ class TestSubAppMountApis:
     @pytest.mark.asyncio
     async def test_mounted_subapp_gets_api_entity(self):
         registry = MagicMock()
-        registry.get_all.return_value = [_make_plugin("wikigen")]  # no host routers
-        p = _provider({"wikigen": PluginState.ACTIVE})
+        registry.get_all.return_value = [_make_plugin("wiki_pages")]  # no host routers
+        p = _provider({"wiki_pages": PluginState.ACTIVE})
         route = _mount_route(
-            "wikigen", "/wikigen", {"/api/pages": {"get": {"responses": {}}}}
+            "wiki_pages", "/wiki_pages", {"/api/pages": {"get": {"responses": {}}}}
         )
 
         graph = await p.export_graph(registry, routes=[route])
 
         comp = next(e for e in graph if e["kind"] == "Component")
-        assert comp["spec"]["providesApis"] == [em.api_name("wikigen")]
+        assert comp["spec"]["providesApis"] == [em.api_name("wiki_pages")]
 
         apis = [e for e in graph if e["kind"] == "API"]
-        assert len(apis) == 1 and apis[0]["metadata"]["name"] == em.api_name("wikigen")
+        assert len(apis) == 1 and apis[0]["metadata"]["name"] == em.api_name(
+            "wiki_pages"
+        )
         import json
 
         definition = json.loads(apis[0]["spec"]["definition"])
         # Paths are re-prefixed with the mount path so they stay addressable.
-        assert "/wikigen/api/pages" in definition["paths"]
+        assert "/wiki_pages/api/pages" in definition["paths"]
 
     @pytest.mark.asyncio
     async def test_no_routes_means_no_subapp_api(self):
         registry = MagicMock()
-        registry.get_all.return_value = [_make_plugin("wikigen")]
-        p = _provider({"wikigen": PluginState.ACTIVE})
+        registry.get_all.return_value = [_make_plugin("wiki_pages")]
+        p = _provider({"wiki_pages": PluginState.ACTIVE})
 
         graph = await p.export_graph(registry)  # routes=None → no discovery
 
@@ -335,13 +337,13 @@ class TestSubAppMountApis:
     @pytest.mark.asyncio
     async def test_staticfiles_mount_is_ignored(self):
         registry = MagicMock()
-        registry.get_all.return_value = [_make_plugin("aura")]
-        p = _provider({"aura": PluginState.ACTIVE})
+        registry.get_all.return_value = [_make_plugin("notes")]
+        p = _provider({"notes": PluginState.ACTIVE})
         # A StaticFiles/SPA mount has no callable openapi() → no API entity.
         static = MagicMock()
         static.app = MagicMock(spec=[])  # no openapi attribute
-        static.name = "aura"
-        static.path = "/aura"
+        static.name = "notes"
+        static.path = "/notes"
 
         graph = await p.export_graph(registry, routes=[static])
 

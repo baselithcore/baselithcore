@@ -23,8 +23,8 @@ def bridge():  # type: ignore[no-untyped-def]
 
 
 def test_sync_store_round_trip_and_isolation(bridge: SyncInference) -> None:
-    a = bridge.store("wikigen", "ta")
-    b = bridge.store("wikigen", "tb")
+    a = bridge.store("wiki_pages", "ta")
+    b = bridge.store("wiki_pages", "tb")
     a.create_collection("c", vectors_config=VectorParams(size=2, distance="Cosine"))  # type: ignore[arg-type]
     b.create_collection("c", vectors_config=VectorParams(size=2, distance="Cosine"))  # type: ignore[arg-type]
     a.upsert("c", [PointStruct(id=1, vector=[1.0, 0.0], payload={"w": "a"})])
@@ -34,7 +34,7 @@ def test_sync_store_round_trip_and_isolation(bridge: SyncInference) -> None:
 
 
 def test_concurrent_threads_share_one_loop(bridge: SyncInference) -> None:
-    store = bridge.store("wikigen", "t")
+    store = bridge.store("wiki_pages", "t")
     store.create_collection("c", vectors_config=VectorParams(size=2, distance="Cosine"))  # type: ignore[arg-type]
 
     def work(i: int) -> int:
@@ -48,14 +48,14 @@ def test_concurrent_threads_share_one_loop(bridge: SyncInference) -> None:
 
 
 def test_unknown_method_is_not_exposed(bridge: SyncInference) -> None:
-    store = bridge.store("wikigen", "t")
+    store = bridge.store("wiki_pages", "t")
     with pytest.raises(AttributeError):
         store.create_snapshot
 
 
 def test_empty_tenant_fails_closed(bridge: SyncInference) -> None:
     with pytest.raises(TenantScopeError):
-        bridge.store("wikigen", "")
+        bridge.store("wiki_pages", "")
 
 
 def test_close_is_idempotent_and_loop_restarts() -> None:

@@ -8,8 +8,9 @@ such as creating and listing tenants. Protected by admin credentials.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from core.models.chat import MAX_ID_LENGTH
 from core.services.tenant import (
     DEFAULT_TENANT_PAGE_SIZE,
     MAX_TENANT_PAGE_SIZE,
@@ -18,6 +19,7 @@ from core.services.tenant import (
     get_tenant_service,
 )
 from core.utils.logsafe import sanitize_log_value
+from plugins.api_routers.schemas import problem_responses
 
 from .admin import verify_credentials
 
@@ -29,11 +31,11 @@ router = APIRouter(prefix="/admin/tenants", tags=["admin", "tenants"])
 class CreateTenantRequest(BaseModel):
     """Payload for creating a new tenant."""
 
-    id: str
-    name: str
+    id: str = Field(..., min_length=1, max_length=MAX_ID_LENGTH)
+    name: str = Field(..., min_length=1, max_length=256)
 
 
-@router.get("", response_model=list[Tenant])
+@router.get("", response_model=list[Tenant], responses=problem_responses(401, 422))
 async def list_tenants(
     limit: int = Query(
         DEFAULT_TENANT_PAGE_SIZE, ge=1, le=MAX_TENANT_PAGE_SIZE, description="Page size"
@@ -46,7 +48,12 @@ async def list_tenants(
     return await service.list_tenants(limit=limit, offset=offset)
 
 
-@router.post("", response_model=Tenant, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=Tenant,
+    status_code=status.HTTP_201_CREATED,
+    responses=problem_responses(400, 401, 409, 422, 500),
+)
 async def create_tenant(
     request: CreateTenantRequest, user: str = Depends(verify_credentials)
 ):

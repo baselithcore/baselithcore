@@ -236,7 +236,7 @@ and fails the build if any other requirement pulls torch in. The default stays
 docker build --build-arg ML_RUNTIME=remote -t baselith:remote .
 ```
 
-Measured on the same tree, with only `auth` and `wikigen` enabled and the
+Measured on the same tree, with two plugins enabled and the
 inference services configured: the `remote` image is 7.9 GB against 13.1 GB, and
 the API process (one worker) holds about 250 MB RSS after startup, where an
 in-process BGE-M3 plus reranker cost 2.8 GB. A plugin listed in

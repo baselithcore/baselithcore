@@ -3,6 +3,7 @@
 Docker and sbx backends are fully mocked — no real containers are started.
 """
 
+import asyncio
 import threading
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -196,3 +197,125 @@ async def test_stream_budget_exceeded_propagates(mock_docker_client):
 
     assert any(f["stream"] == "stdout" for f in seen)
     assert all(f["stream"] != "exit" for f in seen)
+
+
+async def test_stream_output_is_capped_with_a_truncation_marker(
+    mock_docker_client, monkeypatch
+):
+    from core.services.sandbox import streaming
+    from core.services.sandbox.service import SandboxService
+
+    monkeypatch.setattr(streaming, "MAX_STREAM_OUTPUT_BYTES", 10)
+    container = make_container(
+        mock_docker_client,
+        [(b"12345678", None), (b"abcdef", None), (b"more", None)],
+    )
+    with patched_config():
+        service = SandboxService()
+        frames = await collect(service.execute_code_stream("print(1)"))
+
+    data = [f for f in frames if f["stream"] in ("stdout", "stderr")]
+    assert data[0]["data"] == "12345678"
+    assert data[1]["data"] == "ab"
+    assert data[2].get("truncated") is True
+    assert len(data) == 3  # everything after the cap is dropped
+    assert frames[-1]["stream"] == "exit"
+    container.remove.assert_called_with(force=True)
+
+
+async def test_stream_queue_is_bounded_and_applies_backpressure(
+    mock_docker_client, monkeypatch
+):
+    from core.services.sandbox import streaming
+    from core.services.sandbox.service import SandboxService
+
+    monkeypatch.setattr(streaming, "STREAM_QUEUE_MAXSIZE", 2)
+    produced: list[int] = []
+
+    def attach_frames(**kwargs):
+        for i in range(50):
+            produced.append(i)
+            yield (f"{i}\n".encode(), None)
+
+    container = MagicMock()
+    container.attach.side_effect = lambda **kwargs: attach_frames()
+    container.wait.return_value = {"StatusCode": 0}
+    mock_docker_client.containers.run.return_value = container
+
+    with patched_config():
+        service = SandboxService()
+        stream = service.execute_code_stream("print(1)")
+        first = await stream.__anext__()
+        assert first["data"] == "0\n"
+        await asyncio.sleep(0.3)
+        # The reader cannot run ahead of a slow consumer by more than the
+        # queue plus the frame it is blocked on.
+        assert len(produced) <= 5
+        rest = [f async for f in stream]
+
+    assert len(produced) == 50
+    assert rest[-1]["stream"] == "exit"
+
+
+async def test_disconnect_mid_stream_kills_the_container(mock_docker_client):
+    from core.services.sandbox.service import SandboxService
+
+    release = threading.Event()
+
+    def attach_frames(**kwargs):
+        yield (b"first", None)
+        release.wait(10)
+        yield (b"never", None)
+
+    container = MagicMock()
+    container.attach.side_effect = lambda **kwargs: attach_frames()
+    container.kill.side_effect = lambda *a, **k: release.set()
+    container.wait.return_value = {"StatusCode": 137}
+    mock_docker_client.containers.run.return_value = container
+
+    with patched_config():
+        service = SandboxService()
+        stream = service.execute_code_stream("print(1)", timeout=30)
+        assert (await stream.__anext__())["data"] == "first"
+        await stream.aclose()  # the client went away
+
+    for _ in range(50):
+        if container.remove.called:
+            break
+        await asyncio.sleep(0.05)
+    container.kill.assert_called()
+    container.remove.assert_called_with(force=True)
+
+
+async def test_direct_aclose_kills_the_container(mock_docker_client):
+    """The backend generator itself cleans up, whatever wraps it."""
+    from core.services.sandbox.service import SandboxService
+    from core.services.sandbox.streaming import stream_docker_execution
+
+    release = threading.Event()
+
+    def attach_frames(**kwargs):
+        yield (b"first", None)
+        release.wait(10)
+
+    container = MagicMock()
+    container.attach.side_effect = lambda **kwargs: attach_frames()
+    container.kill.side_effect = lambda *a, **k: release.set()
+    container.wait.return_value = {"StatusCode": 137}
+    mock_docker_client.containers.run.return_value = container
+
+    with patched_config():
+        service = SandboxService()
+        service.docker_factory.ensure_image = AsyncMock()
+        gen = stream_docker_execution(
+            service, "print(1)", "python", 30, None, None, 0.0
+        )
+        assert (await gen.__anext__())["data"] == "first"
+        await gen.aclose()
+
+    for _ in range(50):
+        if container.remove.called:
+            break
+        await asyncio.sleep(0.05)
+    container.kill.assert_called()
+    container.remove.assert_called_with(force=True)

@@ -13,6 +13,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from core.orchestration._categories import UNDECLARED_DESTRUCTIVE
+
 # Lower-case identifier with single underscores only: no ``__`` and no
 # trailing ``_``. ``__`` is the separator in credential secret names
 # (``CONNECTOR_<NAME>__<TENANT>__<FIELD>``), so allowing it here would let
@@ -77,13 +79,16 @@ class ActionSpec:
         description: What the action does, shown to agents and operators.
         input_schema: JSON-Schema object describing the parameters.
         category: Autonomy category read by the approval gate. Defaults to
-            the most restrictive one, so an undeclared action is gated.
+            the most restrictive one, so an undeclared action is gated; the
+            default stays distinguishable as *undeclared*, so the typed
+            ``Agent``'s standalone guard (which refuses only tools explicitly
+            declared destructive) leaves it alone.
     """
 
     name: str
     description: str
     input_schema: dict[str, Any] = field(default_factory=dict)
-    category: str = "destructive"
+    category: str = UNDECLARED_DESTRUCTIVE
 
     def __post_init__(self) -> None:
         if self.category not in AUTONOMY_CATEGORIES:

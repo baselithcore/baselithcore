@@ -17,10 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from core.api.pagination import PageParams, page_params, paginated
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint_factory import get_default_checkpoint_store
 from core.orchestration.checkpoint_history import (
@@ -32,7 +34,20 @@ from core.orchestration.run_events import (
     TERMINAL_EVENT_TYPES,
     get_run_event_stream,
 )
+from plugins.api_routers._sse import (
+    HEARTBEAT,
+    KEEPALIVE_FRAME,
+    HeartbeatSource,
+    heartbeat_seconds,
+)
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.chat import SSEResponse
+from plugins.api_routers.schemas import (
+    RunForked,
+    RunHistoryPage,
+    RunState,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -61,9 +76,15 @@ def _require_store() -> Any:
     return store
 
 
-@router.get("/{run_id}/history")
-async def state_history(run_id: str) -> dict[str, Any]:
-    """Version-ascending snapshot summaries for a run.
+@router.get(
+    "/{run_id}/history",
+    response_model=RunHistoryPage,
+    responses=problem_responses(400, 401, 404, 422, 503),
+)
+async def state_history(
+    run_id: str, page: PageParams = Depends(page_params)
+) -> dict[str, Any]:
+    """Version-ascending snapshot summaries for a run (cursor-paginated).
 
     Empty history for a known run means snapshots are not being recorded
     (``ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`` is off).
@@ -72,10 +93,14 @@ async def state_history(run_id: str) -> dict[str, Any]:
     history = await get_state_history(store, run_id)
     if not history and await store.load(run_id) is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
-    return {"run_id": run_id, "history": history, "count": len(history)}
+    return {"run_id": run_id, **paginated(history, page, key="history")}
 
 
-@router.get("/{run_id}/history/{version}")
+@router.get(
+    "/{run_id}/history/{version}",
+    response_model=RunState,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def state_at_version(run_id: str, version: int) -> dict[str, Any]:
     """The full checkpoint state exactly as recorded at ``version``."""
     store = _require_store()
@@ -85,28 +110,55 @@ async def state_at_version(run_id: str, version: int) -> dict[str, Any]:
             status_code=404,
             detail=f"No snapshot for run '{run_id}' at version {version}.",
         )
-    return state.to_dict()
+    # Answer/steps/budget are open values: keep the pre-model wire encoding.
+    return jsonable_encoder(state.to_dict())
 
 
-@router.get("/{run_id}/events")
-async def run_events(run_id: str) -> StreamingResponse:
+def _event_frame(event: Any) -> str:
+    """One SSE frame for an ``AgentEvent``; its ``id`` becomes the SSE ``id:``."""
+    payload = event.model_dump_json()
+    return f"id: {event.id}\nevent: {event.type.value}\ndata: {payload}\n\n"
+
+
+@router.get(
+    "/{run_id}/events",
+    # Documents the 200 as text/event-stream (a bare StreamingResponse was
+    # advertised as application/json).
+    response_class=SSEResponse,
+    responses=problem_responses(401),
+)
+async def run_events(run_id: str, request: Request) -> StreamingResponse:
     """Stream a run's structured events as Server-Sent Events.
 
-    Frames are ``event: <type>`` + ``data: <AgentEvent JSON>``; the stream
-    closes after a terminal event (final answer, error, or durable approval
-    pause). Subscribe **before** starting/resuming the run — events are
-    fan-out only, not replayed (the checkpoint trajectory is the durable
-    record).
+    Frames are ``id: <AgentEvent.id>`` + ``event: <type>`` + ``data:
+    <AgentEvent JSON>``; the stream closes after a terminal event (final
+    answer, error, or durable approval pause) or as soon as the client
+    disconnects. A quiet run gets a ``: keepalive`` comment every
+    ``SSE_HEARTBEAT_SECONDS``.
+
+    Subscribe **before** starting/resuming the run — events are fan-out only,
+    not replayed: the event store keeps no history to resume from, so a
+    ``Last-Event-ID`` sent on reconnect is accepted but cannot rewind the
+    feed. The checkpoint trajectory (``GET /runs/{run_id}/history``) is the
+    durable record a reconnecting client catches up from.
     """
     stream = get_run_event_stream()
+    interval = heartbeat_seconds()
 
     async def event_frames():
         async with stream.subscribe(run_id) as subscription:
-            async for event in subscription:
-                payload = event.model_dump_json()
-                yield f"event: {event.type.value}\ndata: {payload}\n\n"
-                if event.type in TERMINAL_EVENT_TYPES:
-                    break
+            reader = HeartbeatSource(subscription, interval)
+            try:
+                while not await request.is_disconnected():
+                    event = await reader.next()
+                    if event is HEARTBEAT:
+                        yield KEEPALIVE_FRAME
+                        continue
+                    yield _event_frame(event)
+                    if event.type in TERMINAL_EVENT_TYPES:
+                        break
+            finally:
+                await reader.aclose()
 
     return StreamingResponse(
         event_frames(),
@@ -120,7 +172,11 @@ async def run_events(run_id: str) -> StreamingResponse:
     )
 
 
-@router.post("/{run_id}/fork")
+@router.post(
+    "/{run_id}/fork",
+    response_model=RunForked,
+    responses=problem_responses(401, 404, 422, 503),
+)
 async def fork(run_id: str, request: ForkRequest) -> dict[str, Any]:
     """Fork a run from its state at a version into a fresh resumable run.
 

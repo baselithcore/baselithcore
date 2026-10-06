@@ -137,8 +137,9 @@ spec:
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
-          # Drain in-flight work before SIGTERM is delivered (belt-and-braces
-          # with the app's GracefulShutdown handler).
+          # Let the endpoint removal reach every proxy before SIGTERM, so no
+          # new request lands on a draining pod. Counted against
+          # terminationGracePeriodSeconds — see the budget in values.yaml.
           lifecycle:
             preStop:
               exec:

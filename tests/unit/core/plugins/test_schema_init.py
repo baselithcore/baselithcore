@@ -80,7 +80,7 @@ def _arrange(monkeypatch, candidates: list[tuple[str, Any, dict[str, Any]]]) -> 
 
 async def test_a_clean_run_exits_zero(monkeypatch, capsys) -> None:
     plugin = _Schemaful()
-    _arrange(monkeypatch, [("aura", plugin, {"persistence": "postgres"})])
+    _arrange(monkeypatch, [("notes", plugin, {"persistence": "postgres"})])
 
     assert await _run(None, json_output=False) == 0
     # The plugin's own config block reaches it: a cold-loaded plugin has none
@@ -91,7 +91,7 @@ async def test_a_clean_run_exits_zero(monkeypatch, capsys) -> None:
 async def test_a_failure_becomes_the_exit_code(monkeypatch, capsys) -> None:
     """A deploy Job must stop rather than start an application against a
     half-built schema."""
-    _arrange(monkeypatch, [("auth", _Broken(), {}), ("aura", _Schemaful(), {})])
+    _arrange(monkeypatch, [("auth", _Broken(), {}), ("notes", _Schemaful(), {})])
 
     assert await _run(None, json_output=False) == 1
     captured = capsys.readouterr()
@@ -99,12 +99,12 @@ async def test_a_failure_becomes_the_exit_code(monkeypatch, capsys) -> None:
     # failure separable from the progress.
     assert "permission denied for schema public" in captured.err
     # The one that worked is still reported: a partial run is not a silent one.
-    assert "aura" in captured.out
+    assert "notes" in captured.out
 
 
 async def test_one_failure_does_not_stop_the_others(monkeypatch) -> None:
     survivor = _Schemaful()
-    _arrange(monkeypatch, [("auth", _Broken(), {}), ("aura", survivor, {})])
+    _arrange(monkeypatch, [("auth", _Broken(), {}), ("notes", survivor, {})])
 
     await _run(None, json_output=False)
     assert survivor.seen == [{}]

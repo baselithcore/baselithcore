@@ -100,9 +100,9 @@ def manifest_refusal(
         text: The manifest file's text (YAML or JSON).
         plugin: The plugin the release is for.
         version: The release's version (from its tag).
-        core_version: The version plugin manifests declare bounds against
-            (``core._version.__version__``, as the loader and the signed
-            path use).
+        core_version: The version plugin manifests declare bounds against:
+            the public core release (``core._core_version.CORE_VERSION``), as
+            the loader and the signed path use.
     """
     try:
         data = yaml.safe_load(text)

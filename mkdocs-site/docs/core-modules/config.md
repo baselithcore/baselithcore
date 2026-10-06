@@ -358,6 +358,10 @@ COST_CONTROL_ENABLED=true          # Alias: LLM_BUDGET_ENABLED
 AGENT_MAX_TOKENS=10000             # Alias: LLM_BUDGET_MAX_TOKENS
 
 APP_TIMEZONE=Europe/Rome
+
+# HTTP SSE streams (/chat/stream, /runs/{id}/events)
+CHAT_STREAM_TIMEOUT_SECONDS=300    # wall clock of one chat stream
+SSE_HEARTBEAT_SECONDS=15           # silence before a `: keepalive` comment
 ```
 
 !!! tip "Multi-Tenancy"

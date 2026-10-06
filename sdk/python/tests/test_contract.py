@@ -20,6 +20,18 @@ _REQUIRED = [
     ("post", "/v1/feedback"),
     ("get", "/health"),
     ("get", "/health/ready"),
+    ("post", "/v1/agent/async"),
+    ("get", "/v1/agent/status/{task_id}"),
+    ("get", "/v1/runs/{run_id}/events"),
+    ("get", "/v1/runs/{run_id}/history"),
+    ("get", "/v1/approvals"),
+    ("post", "/v1/approvals/{run_id}/decision"),
+    ("post", "/v1/approvals/{run_id}/resume"),
+    ("get", "/v1/webhooks"),
+    ("post", "/v1/webhooks"),
+    ("delete", "/v1/webhooks/{endpoint_id}"),
+    ("get", "/v1/webhooks/deliveries"),
+    ("post", "/v1/webhooks/deliveries/{delivery_id}/replay"),
 ]
 
 

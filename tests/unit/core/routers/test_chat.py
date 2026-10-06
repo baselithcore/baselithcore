@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from core.models.chat import ChatRequest
+from core.models.chat import ChatRequest, ChatResponse
 
 
 @pytest.fixture
@@ -43,7 +43,9 @@ def mock_chat_service(chat_router_module, monkeypatch):
 
 def test_chat_endpoint_success(client, mock_chat_service):
     # Setup
-    mock_response = {"answer": "Hello!", "sources": []}
+    # The service returns a ChatResponse (its declared type); the body is
+    # that model's JSON, exactly as before the route declared response_model.
+    mock_response = ChatResponse(answer="Hello!", sources=[])
     mock_chat_service.handle_chat_async = AsyncMock(return_value=mock_response)
 
     payload = {"query": "Hello", "conversation_id": "123"}
@@ -53,7 +55,7 @@ def test_chat_endpoint_success(client, mock_chat_service):
 
     # Verify
     assert response.status_code == 200
-    assert response.json() == mock_response
+    assert response.json() == mock_response.model_dump(mode="json")
 
     # Verify mock call
     mock_chat_service.handle_chat_async.assert_called_once()
@@ -95,7 +97,8 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
     # Verify
     assert response.status_code == 200
     assert response.text == (
-        "data: Hello\n\ndata:  World\n\n" + chat_router_module.SSE_DONE_EVENT
+        "id: 1\ndata: Hello\n\nid: 2\ndata:  World\n\nid: 3\n"
+        + chat_router_module.SSE_DONE_EVENT
     )
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["x-accel-buffering"] == "no"

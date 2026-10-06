@@ -60,14 +60,90 @@ def _register(
     task.add_done_callback(background_tasks.discard)
 
 
+async def stale_sweep_loop(
+    checkpoint_store: Any,
+    *,
+    interval_seconds: float,
+    stale_after_seconds: float,
+    max_cycles: int | None = None,
+) -> None:
+    """Fail silent ``running`` checkpoints on an interval; never resume them.
+
+    The resume-off counterpart of
+    :func:`~core.orchestration.recovery.recovery_sweep_loop`. Without it a run
+    interrupted by a crash or restart stayed ``running`` forever when auto
+    resume is off: no worker owns it, nothing will touch it again, and it
+    reads as in-flight to every operator and dashboard. The progress
+    threshold is the same one the full recovery cycle uses, so a run still
+    executing on another worker (which keeps bumping its heartbeat) is left
+    alone. No cross-replica lock: two replicas failing the same run write the
+    same terminal state.
+
+    Args:
+        checkpoint_store: The shared checkpoint store.
+        interval_seconds: Delay between sweeps. Must be > 0.
+        stale_after_seconds: Progress-silence threshold.
+        max_cycles: Stop after this many sweeps (tests); ``None`` runs until
+            cancelled.
+
+    Raises:
+        ValueError: ``interval_seconds`` is not positive.
+    """
+    from core.orchestration.recovery import sweep_stale_runs
+
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+    logger.info(
+        "🧬 Stale-run sweep every %.0fs (fail after %.0fs silent; auto resume off)",
+        interval_seconds,
+        stale_after_seconds,
+    )
+    cycle = 0
+    while max_cycles is None or cycle < max_cycles:
+        cycle += 1
+        try:
+            report = await sweep_stale_runs(
+                checkpoint_store, max_age_seconds=stale_after_seconds
+            )
+            if report.stale:
+                logger.warning(
+                    "stale_sweep failed=%d orphaned run(s) (auto resume off)",
+                    len(report.stale),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("stale_sweep_failed error=%s", exc)
+        if max_cycles is not None and cycle >= max_cycles:
+            return
+        await asyncio.sleep(interval_seconds)
+
+
 def _schedule_recovery_sweep(
     checkpoint_store: Any, background_tasks: set[asyncio.Task[Any]]
 ) -> None:
-    """Start the recovery sweep loop when ``checkpoint_resume_on_startup``."""
+    """Start the recovery sweep loop when ``checkpoint_resume_on_startup``.
+
+    With resume off, a fail-only loop runs instead (unless
+    ``recovery_stale_sweep_enabled`` is off): nothing is re-entered, but a run
+    a crash left ``running`` is marked failed once it has been silent for
+    ``recovery_stale_after_seconds`` rather than staying orphaned forever.
+    """
     from core.config.orchestration import get_orchestration_config
 
     config = get_orchestration_config()
     if not config.checkpoint_resume_on_startup:
+        if config.recovery_stale_sweep_enabled:
+            _register(
+                asyncio.create_task(
+                    stale_sweep_loop(
+                        checkpoint_store,
+                        interval_seconds=config.recovery_sweep_interval_seconds,
+                        stale_after_seconds=config.recovery_stale_after_seconds,
+                    )
+                ),
+                background_tasks,
+            )
         return
 
     async def _recover() -> None:
@@ -131,8 +207,9 @@ async def start_checkpoint_recovery(
 ) -> None:
     """Init the shared checkpoint store and schedule the recovery sweeps.
 
-    No-op unless ``ORCHESTRATOR_CHECKPOINT_ENABLED``; the sweeps additionally
-    require ``checkpoint_resume_on_startup``. The sweep task is registered in
+    No-op unless ``ORCHESTRATOR_CHECKPOINT_ENABLED``. Resuming interrupted
+    runs additionally requires ``checkpoint_resume_on_startup``; without it
+    only the stale-run sweep runs (:func:`stale_sweep_loop`). The sweep task is registered in
     ``background_tasks`` so the event loop cannot garbage-collect it, and it
     is cancelled with the rest of them at shutdown.
 
@@ -175,4 +252,4 @@ async def start_checkpoint_recovery(
         logger.warning("Checkpoint store initialization failed: %s", exc)
 
 
-__all__ = ["start_checkpoint_recovery"]
+__all__ = ["stale_sweep_loop", "start_checkpoint_recovery"]

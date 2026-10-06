@@ -196,27 +196,19 @@ def test_plugins_whose_bounds_exclude_the_target_are_listed() -> None:
         _bounds("too_old", None, "0.40.9"),
         _bounds("too_new", "0.50.0", None),
     ]
-    compat = plugin_compatibility(
-        "0.41.0",
-        bounds,
-        framework_version="0.40.2",
-        core_version="0.40.2",
-        distribution=None,
-    )
+    compat = plugin_compatibility("0.41.0", bounds)
     assert compat.checked
     assert [b.plugin for b in compat.incompatible] == ["too_old", "too_new"]
 
 
-def test_a_distribution_does_not_compare_bounds_against_the_public_core() -> None:
+def test_bounds_compare_against_the_public_core_in_every_distribution() -> None:
+    # A downstream distribution versions itself independently, but its plugins
+    # declare bounds against the public core release, so the check still runs.
     compat = plugin_compatibility(
-        "0.41.0",
-        [_bounds("x", "1.0.0", None)],
-        framework_version="1.14.0",
-        core_version="0.40.2",
-        distribution="acme",
+        "0.41.0", [_bounds("ok", "0.40.0", None), _bounds("x", "1.0.0", None)]
     )
-    assert not compat.checked and compat.incompatible == []
-    assert compat.reason is not None and "acme" in compat.reason
+    assert compat.checked
+    assert [b.plugin for b in compat.incompatible] == ["x"]
 
 
 def test_installed_bounds_reads_manifests(tmp_path: Path) -> None:

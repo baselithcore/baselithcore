@@ -8,6 +8,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+#: Upper bound on caller-supplied identifiers (conversation, tenant, KB label).
+#: Real ids are UUIDs, slugs or short opaque tokens; the bound keeps a
+#: megabyte "id" out of cache keys, log lines and storage rows. Same bound as
+#: ``FeedbackRequest.conversation_id``.
+MAX_ID_LENGTH = 128
+
 
 class ChatRequest(BaseModel):
     """
@@ -18,11 +24,11 @@ class ChatRequest(BaseModel):
     """
 
     query: str = Field(..., min_length=1, max_length=8000)
-    conversation_id: str | None = None
+    conversation_id: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
     stream: bool | None = False
     rag_only: bool = False
-    kb_label: str | None = None
-    tenant_id: str | None = None
+    kb_label: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
+    tenant_id: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
     max_response_tokens: int | None = Field(
         default=None,
         ge=1,
@@ -67,7 +73,7 @@ class FeedbackRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=8000)
     answer: str = Field(..., min_length=1, max_length=32000)
     feedback: Literal["positive", "negative"]
-    conversation_id: str | None = Field(default=None, max_length=128)
+    conversation_id: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
     sources: list[FeedbackDocumentReference | dict[str, Any]] | None = None
     comment: str | None = Field(default=None, max_length=4000)
 

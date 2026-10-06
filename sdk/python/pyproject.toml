@@ -41,6 +41,9 @@ classifiers = [
 dependencies = [
     "httpx>=0.27,<1.0",
     "pydantic>=2.0,<3.0",
+    # The models use `X | None` under `from __future__ import annotations`;
+    # pydantic evaluates those strings at runtime, which 3.9 cannot do alone.
+    "eval_type_backport>=0.2; python_version < '3.10'",
 ]
 
 [project.urls]

@@ -89,13 +89,7 @@ def build_upgrade_instructions(
         namespace=deployment.namespace or "<namespace>",
         base_url=(deployment.base_url or "<base-url>").rstrip("/"),
     )
-    plugins = plugin_compatibility(
-        target,
-        bounds,
-        framework_version=deployment.framework_version,
-        core_version=system.installed_version,
-        distribution=deployment.distribution,
-    )
+    plugins = plugin_compatibility(target, bounds)
     custom_text = custom_error = None
     if deployment.method == "custom":
         custom_text, custom_error = render_instructions(
