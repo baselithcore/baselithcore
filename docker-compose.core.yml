@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - ${BASELITH_DOCKER_ENV_FILE:-configs/.env.docker.core.example}
+      - ${BASELITH_DOCKER_ENV_FILE:-configs/.env.docker.core}
     environment:
       HOST: 0.0.0.0
       PORT: 8000

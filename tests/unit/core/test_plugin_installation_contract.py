@@ -126,6 +126,23 @@ def test_empty_frontend_output_is_failure(tmp_path, monkeypatch):
     assert add_docker._build_frontend("sample", manifest) == 0
 
 
+def test_verified_prebuilt_frontend_is_not_rebuilt(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path, manifest = plugin(tmp_path, frontend={"path": "ui", "output_dir": "out"})
+    (path / "ui" / "out").mkdir(parents=True)
+    (path / "ui" / "out" / "index.html").write_text("test")
+
+    from core.plugins.integrity import compute_plugin_hash
+
+    manifest["integrity_sha256"] = compute_plugin_hash(path)
+    (path / "manifest.yaml").write_text(yaml.safe_dump(manifest))
+    run = Mock(side_effect=AssertionError("verified frontend must not rebuild"))
+    monkeypatch.setattr(add_docker.subprocess, "run", run)
+
+    assert add_docker._build_frontend("sample", manifest) == 0
+    run.assert_not_called()
+
+
 def test_requirements_prefer_yaml_and_preserve_unchanged_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     path, _ = plugin(tmp_path, python_dependencies=["httpx>=0.27", "httpx>=0.27"])

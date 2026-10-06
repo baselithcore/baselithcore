@@ -52,6 +52,12 @@ the keys that shape the runtime itself — none of them belongs in the root
 | `BASELITH_POSTGRES_PORT`   | `5432`                                    | Host port published for PostgreSQL, bound to `127.0.0.1`   |
 | `BASELITH_REDIS_PORT`      | `6379`                                    | Host port published for Redis/FalkorDB, bound to `127.0.0.1` |
 | `BASELITH_QDRANT_PORT`     | `6333`                                    | Host port published for Qdrant, bound to `127.0.0.1`       |
+
+The profile also writes the ingestion defaults used by the full document
+runtime: `VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3`,
+`VECTORSTORE_EMBEDDING_DIM=1024`, MiniLM/384 as the explicit operator fallback,
+and `DOCUMENTS_PDF_READER=auto` so PDF ingestion uses Docling first and falls
+back to pypdf/OCR when Docling is unavailable or cannot parse the file.
 | `BASELITH_RUN_MIGRATIONS`  | `true`                                    | Whether the API entrypoint applies migrations at startup   |
 
 Only the API port is published on every interface; the three backing stores are
