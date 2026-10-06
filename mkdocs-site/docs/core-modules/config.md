@@ -358,6 +358,10 @@ COST_CONTROL_ENABLED=true          # Alias: LLM_BUDGET_ENABLED
 AGENT_MAX_TOKENS=10000             # Alias: LLM_BUDGET_MAX_TOKENS
 
 APP_TIMEZONE=Europe/Rome
+
+# HTTP SSE streams (/chat/stream, /runs/{id}/events)
+CHAT_STREAM_TIMEOUT_SECONDS=300    # wall clock of one chat stream
+SSE_HEARTBEAT_SECONDS=15           # silence before a `: keepalive` comment
 ```
 
 !!! tip "Multi-Tenancy"
@@ -431,6 +435,8 @@ VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3
 VECTORSTORE_EMBEDDING_DIM=1024
+VECTORSTORE_EMBEDDING_FALLBACK_MODEL=sentence-transformers/all-MiniLM-L6-v2
+VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 
 # Managed/remote Qdrant — both unset for the loopback compose default
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant

@@ -441,6 +441,13 @@ surveillance authority — and a Python REPL is not a surface those readers have
 | `GET /compliance/profile` | Report the deployment posture against the profile |
 | `GET /compliance/audit/verify` | Verify the audit trail's hash chain |
 
+Every `GET` that lists records is [cursor-paginated](../api/rest.md#pagination)
+(`limit` 1–200, default 50, plus `cursor`; the answer adds `next_cursor` and
+`has_more` beside the list key). Payloads are bounded (names ≤ 200 characters,
+free text ≤ 10 000, lists ≤ 100 items, an observation's `context` ≤ 50 keys and
+16 KiB serialised). Every route is also served under `/v1` (the unprefixed
+paths are [deprecated](../api/rest.md#api-versioning)).
+
 The surface is read-heavy plus the few transitions that carry a regulatory
 meaning. Authoring an Annex IV section or a FRIA is document work and belongs in
 a document tool, not a JSON POST.

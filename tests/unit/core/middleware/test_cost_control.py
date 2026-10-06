@@ -219,7 +219,9 @@ async def test_budget_exceeded_handler_renders_429_problem_document():
     body = orjson.loads(response.body)
     assert body["code"] == "budget_exceeded"
     assert body["type"] == "urn:baselith:error:budget_exceeded"
-    assert "51/50" in body["detail"]
+    # The configured thresholds are operator information, not the caller's.
+    assert "51/50" not in body["detail"]
+    assert body["detail"] == "Request budget exceeded for this deployment."
 
 
 @pytest.mark.asyncio

@@ -73,8 +73,12 @@ class LLMToolSpec:
             a ``{"type": "object", ...}`` schema; reused verbatim as the
             provider ``input_schema`` / function ``parameters``.
         strict: When True, request strict schema enforcement where the provider
-            supports it (adds ``additionalProperties: false`` semantics so the
-            emitted arguments validate exactly).
+            supports it (Anthropic and OpenAI send it as the tool's ``strict``
+            field; providers without the feature drop it). The schema must
+            already be in the strict dialect — every property required,
+            ``additionalProperties: false`` — since it is sent verbatim. The
+            typed ``Agent`` sets it only for schemas that qualify (see
+            :mod:`core.agent._strict_tools`).
         annotations: Behavioural hints about the tool, in MCP's vocabulary
             (``readOnlyHint``, ``destructiveHint``). Derived from the tool's
             autonomy category so the *same* fact that drives the approval gate

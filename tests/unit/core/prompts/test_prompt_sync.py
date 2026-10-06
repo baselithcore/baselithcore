@@ -132,3 +132,59 @@ async def test_background_loop_refreshes_periodically():
         assert registry.list_versions("late"), "loop never imported the remote write"
     finally:
         await syncer.stop()
+
+
+@pytest.mark.asyncio
+async def test_refresh_skips_a_bad_row_and_imports_the_rest():
+    backend = FakeBackend()
+    writer = PromptSynchronizer(registry=PromptRegistry(), backend=backend)
+    await writer.push_version(_pv("good", "1"))
+    await writer.push_version(_pv("bad", "1"))
+    await writer.push_label("good", "production", "1")
+    # A label pointing at a version this replica never received.
+    backend.labels[("ghost", "production")] = "9"
+
+    registry = PromptRegistry()
+    real_put = registry.store.put
+
+    def flaky_put(version: PromptVersion) -> None:
+        if version.name == "bad":
+            raise ValueError("corrupt row")
+        real_put(version)
+
+    registry.store.put = flaky_put  # type: ignore[method-assign]
+    reader = PromptSynchronizer(registry=registry, backend=backend)
+
+    await reader.refresh()
+
+    assert registry.get("good", label="production").version == "1"
+
+
+@pytest.mark.asyncio
+async def test_the_loop_survives_a_failing_tick():
+    backend = FakeBackend()
+    syncer = PromptSynchronizer(
+        registry=PromptRegistry(), backend=backend, interval_seconds=0.01
+    )
+    calls = {"n": 0}
+    real_refresh = syncer.refresh
+
+    async def boom_once() -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("unexpected")
+        await real_refresh()
+
+    syncer.refresh = boom_once  # type: ignore[method-assign]
+    task = asyncio.get_running_loop().create_task(syncer._loop())
+    try:
+        for _ in range(100):
+            if calls["n"] >= 3:
+                break
+            await asyncio.sleep(0.01)
+        assert calls["n"] >= 3
+        assert not task.done()
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task

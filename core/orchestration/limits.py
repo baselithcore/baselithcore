@@ -137,7 +137,17 @@ class LoopBudgetSnapshot:
 
 @dataclass
 class LoopBudget:
-    """Mutable per-request budget tracker."""
+    """Mutable per-request budget tracker.
+
+    A budget may have a ``parent``: a nested scope (an ``Agent.run`` with its
+    own explicit ``LoopLimits`` inside a crew, group chat or orchestrated
+    request) that must honour its own caps *and* still spend from the
+    enclosing budget. Every recorded tick, tool call, charge and token count
+    lands once on the child and is forwarded once to the parent, so the
+    parent sees the full spend without double counting; either side's cap
+    raises :class:`BudgetExceededError`. The parent's deadline also bounds
+    the child.
+    """
 
     limits: LoopLimits = field(default_factory=LoopLimits)
     iterations: int = 0
@@ -147,6 +157,8 @@ class LoopBudget:
     context_tokens: int = 0
     # Monotonic start time; basis for the wall-clock deadline.
     started_at: float = field(default_factory=time.monotonic)
+    #: Enclosing budget every recorded unit is forwarded to (see class doc).
+    parent: LoopBudget | None = field(default=None, repr=False, compare=False)
 
     def elapsed_seconds(self) -> float:
         """Wall-clock seconds since the budget was created."""
@@ -159,26 +171,34 @@ class LoopBudget:
         timeout for the next tool/LLM call.
         """
         cap = self.limits.max_seconds
-        if cap is None:
-            return None
-        return max(0.0, cap - self.elapsed_seconds())
+        own = None if cap is None else max(0.0, cap - self.elapsed_seconds())
+        inherited = self.parent.remaining_seconds() if self.parent else None
+        if own is None:
+            return inherited
+        return own if inherited is None else min(own, inherited)
 
     def check_deadline(self) -> None:
         """Raise when the wall-clock deadline has passed. No-op without one."""
         cap = self.limits.max_seconds
         if cap is not None and self.elapsed_seconds() > cap:
             raise BudgetExceededError("max_seconds", self.snapshot())
+        if self.parent is not None:
+            self.parent.check_deadline()
 
     def tick(self) -> None:
         """Advance one iteration. Raises if iteration or deadline cap reached."""
         self.check_deadline()
         self.iterations += 1
+        if self.parent is not None:
+            self.parent.tick()
         if self.iterations > self.limits.max_iterations:
             raise BudgetExceededError("max_iterations", self.snapshot())
 
     def record_tool_call(self) -> None:
         """Record a tool invocation. Raises if cap reached."""
         self.tool_calls += 1
+        if self.parent is not None:
+            self.parent.record_tool_call()
         if self.tool_calls > self.limits.max_tool_calls:
             raise BudgetExceededError("max_tool_calls", self.snapshot())
 
@@ -187,6 +207,8 @@ class LoopBudget:
         if cost_usd < 0:
             raise ValueError("cost_usd must be non-negative")
         self.cost_usd += cost_usd
+        if self.parent is not None:
+            self.parent.charge(cost_usd)
         if self.cost_usd > self.limits.budget_usd:
             raise BudgetExceededError("budget_usd", self.snapshot())
 
@@ -199,6 +221,8 @@ class LoopBudget:
         if count <= 0:
             return
         self.tokens += count
+        if self.parent is not None:
+            self.parent.record_tokens(count)
         cap = self.limits.max_tokens
         if cap is not None and self.tokens > cap:
             raise BudgetExceededError("max_tokens", self.snapshot())
@@ -219,6 +243,8 @@ class LoopBudget:
         if count <= 0:
             return
         self.context_tokens += count
+        if self.parent is not None:
+            self.parent.record_context_tokens(count)
 
     def context_share(self) -> float:
         """Fraction of the request's tokens attributable to injected context.
@@ -243,14 +269,16 @@ class LoopBudget:
 
         Handlers poll this to trigger context compaction *before* a hard cap
         aborts the request (e.g. compact when ``token_pressure() > 0.8``).
+        With a ``parent``, the higher of the two pressures is reported.
         """
+        inherited = self.parent.token_pressure() if self.parent else 0.0
         cap = self.limits.max_tokens
         if cap:
-            return min(self.tokens / cap, 1.0)
+            return max(min(self.tokens / cap, 1.0), inherited)
         window = _context_window_tokens()
         if window <= 0 or self.context_tokens <= 0:
-            return 0.0
-        return min(self.context_tokens / window, 1.0)
+            return inherited
+        return max(min(self.context_tokens / window, 1.0), inherited)
 
     def snapshot(self) -> LoopBudgetSnapshot:
         return LoopBudgetSnapshot(

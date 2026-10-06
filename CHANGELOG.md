@@ -713,7 +713,7 @@ pull-request-only, so the release job cannot commit here. Follows
   Compose stack. Both keep DDL with the owner, are idempotent (an upgrade
   repairs a role whose attributes drifted), and never put a password on a
   command line.
-- **`baselithcontrol` ships with `require_admin: true`.** The bundled
+- **The admin console plugin ships with `require_admin: true`.** The bundled
   `configs/plugins.yaml` shipped it as `false`, which in an
   auth-disabled deployment promoted the anonymous local operator to admin on
   the control console. It is inert with `AUTH_REQUIRED=true` (the default),

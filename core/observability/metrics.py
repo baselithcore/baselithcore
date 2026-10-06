@@ -91,11 +91,16 @@ INDEXED_DOCUMENTS_GAUGE = Gauge(
 # ``trace_id`` as an OpenMetrics exemplar, so a slow bucket in Grafana links
 # straight to the trace that produced it. The proxy is transparent — the
 # ``.labels(...).observe(...)`` call sites are unchanged.
+# The provider label is ``gen_ai_provider_name`` (semconv attribute
+# ``gen_ai.provider.name``); it replaced the deprecated ``gen_ai_system`` label
+# in place — same position, same values, same cardinality — so positional
+# ``.labels(provider, model, ...)`` callers need no change. Queries on the old
+# label can bridge with ``label_replace`` (see the observability docs).
 GEN_AI_TOKEN_USAGE = ExemplarHistogram(
     Histogram(
         "gen_ai_client_token_usage",
         "Tokens used per Gen AI client call (semconv gen_ai.client.token.usage).",
-        ["gen_ai_system", "gen_ai_request_model", "gen_ai_token_type"],
+        ["gen_ai_provider_name", "gen_ai_request_model", "gen_ai_token_type"],
         buckets=(16, 64, 256, 1024, 4096, 16384, 65536, 262144),
     )
 )
@@ -103,7 +108,7 @@ GEN_AI_OPERATION_DURATION = ExemplarHistogram(
     Histogram(
         "gen_ai_client_operation_duration_seconds",
         "Gen AI client call duration (semconv gen_ai.client.operation.duration).",
-        ["gen_ai_system", "gen_ai_request_model", "gen_ai_operation_name"],
+        ["gen_ai_provider_name", "gen_ai_request_model", "gen_ai_operation_name"],
         buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
     )
 )
@@ -120,7 +125,7 @@ GEN_AI_COST_USD = TenantLabeledCounter(
     Counter(
         "gen_ai_client_cost_usd_total",
         "Estimated USD cost of Gen AI client calls (from the pricing table).",
-        ["gen_ai_system", "gen_ai_request_model", "tenant"],
+        ["gen_ai_provider_name", "gen_ai_request_model", "tenant"],
     )
 )
 LLM_REQUESTS_TOTAL = Counter(

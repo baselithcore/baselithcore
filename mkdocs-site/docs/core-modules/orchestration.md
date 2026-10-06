@@ -273,6 +273,33 @@ prompt reads `Conversation so far:`, then `Context:`, `Question:` and `Answer:`;
 without it the first block is omitted. The retrieved context stays the only
 source of facts, and retrieval runs on the raw query.
 
+The history itself is untrusted too: an earlier assistant turn can quote a
+tool result or a document. `build_rag_user_prompt` renders it through
+`render_history_context` (`core/orchestration/history_context.py`), which
+scans it with `scan_external_content` (source `conversation_history`, same
+`BASELITH_SANITIZE_EXTERNAL_CONTENT` policy) and seals it in **one**
+`<untrusted_tool_output tool="conversation_history">` envelope, keeping the
+`User:` / `Assistant:` labels readable inside it. Pass the raw turns — the
+function wraps on every call, by design (`wrap_untrusted` has no idempotency
+shortcut), so it runs exactly once per prompt. `RAG_CONTEXT_IS_DATA_RULE`
+names the conversation alongside the retrieved documents and says only the
+current Question is the user's request.
+
+!!! warning "Retrieved chunks are untrusted data"
+    Anyone who can get a document into the knowledge base can write text the
+    model reads, so retrieved chunks no longer reach the prompt as plain
+    `Source [id]: content` lines. `render_rag_context` (`handlers/rag.py`)
+    scans each chunk with `scan_external_content` — findings logged with the
+    document id, flagged content sanitized under
+    `BASELITH_SANITIZE_EXTERNAL_CONTENT` (on by default) — and seals it in the
+    same `<untrusted_tool_output tool="document_retrieval">` envelope tool
+    output uses (`wrap_untrusted`, which escapes any envelope marker inside
+    the text, so a chunk cannot close its envelope and write outside it). The
+    `Source [id]:` label stays outside the envelope, scrubbed of markers, so
+    answers can still cite it. `RAG_SYSTEM_PROMPT` now carries
+    `RAG_CONTEXT_IS_DATA_RULE`: the enveloped text is reference data, never
+    instructions. Both RAG paths share the renderer and the prompt.
+
 !!! note "Sources ride on the context, not the stream"
     The stream chunk protocol carries text only, so the streaming RAG handler
     exposes its citations by mutating the orchestration context —
@@ -623,7 +650,7 @@ stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed a
 | Symbol | Purpose |
 |--------|---------|
 | `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`, `max_seconds`) |
-| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `record_context_tokens(n)`, `token_pressure()`, `context_share()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()`. Optional `parent`: a nested scope's budget forwards every recorded unit once to the enclosing one (see [Nested budgets](#nested-budgets-explicit-caps-under-an-ambient-budget)) |
 | `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`, `context_tokens` and `elapsed_seconds`) |
 | `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens` / `max_seconds`) |
 
@@ -687,6 +714,20 @@ the request actually spent. `inject_memory_context` records it automatically;
 the value rides on every `LoopBudgetSnapshot`, so it reaches callers in the
 reply's `budget` field with no extra wiring.
 
+**Recalled memories are marked as untrusted.** A memory is whatever an earlier
+turn, an ingested document or a tool result stored — content the operator
+never wrote. `context["memory_context"]` used to be plain `- {content}` lines;
+`render_memory_context` (`mixins/_context_assembly.py`) now scans each memory
+with `scan_external_content` and seals the bullet list in one
+`<untrusted_tool_output tool="memory_recall">` envelope, so a consumer that puts
+it in a prompt next to `UNTRUSTED_OUTPUT_SYSTEM_RULE` gets background data the
+model will not obey. An empty recall is still `""`.
+`context["recent_history"]` (the memory manager's recent-context block) gets
+the same treatment at the same point: `inject_memory_context` passes it
+through `render_history_context`, so it arrives as one
+`<untrusted_tool_output tool="conversation_history">` envelope (or `""` when
+empty). Put it in a prompt as-is — wrapping it again would nest the envelope.
+
 ```python
 snap = budget.snapshot()
 snap.context_tokens      # e.g. 640 — tokens of injected memory context
@@ -731,6 +772,25 @@ used to be priced through `BASELITH_UNKNOWN_MODEL_COST_POLICY`, whose default
 bills `UNKNOWN_PRICE` at 100 $/M. A single local turn could therefore blow a
 `budget_usd` cap on money nobody spent. A model absent from the table that is
 **not** local is still charged, which is the visibility that policy exists for.
+
+#### Nested budgets: explicit caps under an ambient budget
+
+`standalone_budget(limits, enforce_own=True)` binds a **child** `LoopBudget`
+when an ambient one already exists, instead of reusing the ambient one
+untouched. The child enforces its own `limits`; every tick, tool call, charge
+and token count it records is forwarded once to its `parent` (the ambient
+budget), so the enclosing request, crew, group chat or swarm batch still sees
+and caps the full spend — counted once, not twice. Either side's cap raises
+`BudgetExceededError`; `remaining_seconds()` is the tighter of the two
+deadlines, the parent's deadline also fails the child's `check_deadline()`,
+and `token_pressure()` reports the higher pressure. The binding's
+orchestrated/standalone flag (`in_orchestrated_request()`) is unchanged.
+
+`Agent.run` uses it for an agent built with an explicit
+`loop_limits=LoopLimits(...)`: `Agent(loop_limits=LoopLimits(budget_usd=0.05))`
+inside a `Crew` aborts that run at USD 0.05 even though the crew-wide budget
+allows 0.50. An agent left at the default limits (or `loop_limits=None`)
+still just reuses the ambient budget.
 
 ### Durable checkpointing & resume
 
@@ -1176,6 +1236,17 @@ replay from the store, so recovery is idempotent). Runs paused
 API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
 as a background task at app startup (default off).
 
+**Orphans are failed even with resume off.** Auto resume stays opt-in because
+re-entering a run repeats LLM calls and side effects. With it off, the startup
+wiring runs `stale_sweep_loop` (`core/api/_recovery_startup.py`) instead: every
+`ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` it calls `sweep_stale_runs` and
+marks a `running` checkpoint whose last progress is older than
+`ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` (default 1800 s) as `failed`, with
+a `stale: no progress for …` error. Nothing is re-entered, and a run still
+executing on another worker keeps bumping its heartbeat, so it is left alone.
+Before this, a run interrupted by a crash stayed `running` forever. Set
+`ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED=false` to restore that.
+
 **One sweep per fleet, not per worker.** With `WEB_CONCURRENCY > 1` (or
 multiple replicas) every worker runs the startup sweep, and an unguarded sweep
 re-entered the same interrupted runs once per worker — duplicate agent
@@ -1319,9 +1390,13 @@ Lifecycle events flow whenever the run is addressable by id — a checkpoint
 store is **not** required (without one you get `run_started` + `final`/`error`;
 tool-step events come from `run_step`, i.e. with checkpointing on). Over HTTP,
 `GET /runs/{run_id}/events` serves the same stream as SSE frames
-(`event: <type>` / `data: <AgentEvent JSON>`) and closes after a terminal
-event. Subscribe before starting/resuming the run: events are fan-out only,
-never replayed — the checkpoint trajectory remains the durable record.
+(`id: <AgentEvent.id>` / `event: <type>` / `data: <AgentEvent JSON>`) and
+closes after a terminal event or as soon as the client disconnects; a quiet
+run gets a `: keepalive` comment every `SSE_HEARTBEAT_SECONDS` (default 15).
+Subscribe before starting/resuming the run: events are fan-out only, never
+replayed — the event stream keeps no history, so a reconnecting client's
+`Last-Event-ID` cannot rewind it; catch up from `GET /runs/{run_id}/history`
+(cursor-paginated), the durable record.
 
 The consumer's lifetime bounds the run. If the iterator stops **before** a
 terminal event — the SSE client disconnected, or the generator was

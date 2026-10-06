@@ -43,8 +43,16 @@ class TestWorkerModule:
         # Execute
         start_worker()
 
-        # Verify Redis connection created with config URL
-        mock_redis.from_url.assert_called_once_with("redis://test-redis:6379/1")
+        # Verify Redis connection created with config URL and a bounded
+        # connect; socket_timeout is left to RQ (dequeue_timeout + 10) so
+        # the blocking dequeue is never cut short.
+        mock_redis.from_url.assert_called_once()
+        url_args, url_kwargs = mock_redis.from_url.call_args
+        assert url_args == ("redis://test-redis:6379/1",)
+        assert (
+            url_kwargs["socket_connect_timeout"] == mock_config.socket_connect_timeout
+        )
+        assert "socket_timeout" not in url_kwargs
 
         # Verify Queues created with connection
         assert mock_queue_cls.call_count == 2
@@ -102,26 +110,26 @@ class TestSchedulerAndConcurrency:
         assert kwargs["exception_handlers"] == [dead_letter_handler]
 
     @patch("core.task_queue.worker.Process")
-    @patch("core.task_queue.worker.Redis")
-    @patch("core.task_queue.worker.Queue")
-    @patch("core.task_queue.worker.TenantAwareWorker")
+    @patch("core.task_queue.worker.WorkerSupervisor")
     @patch("core.task_queue.worker.get_task_queue_config")
-    def test_concurrency_spawns_extra_processes(
-        self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis, mock_process
+    def test_concurrency_runs_a_supervisor_over_n_children(
+        self, mock_get_config, mock_supervisor, mock_process
     ):
         """`--concurrency N` must actually run N workers, not just print N."""
         mock_get_config.return_value = TaskQueueConfig(
             redis_url="redis://test:6379/2", queues=["default"]
         )
-        mock_worker_cls.return_value = MagicMock()
 
         start_worker(concurrency=3)
 
-        # N - 1 children; the Nth worker runs in the calling process.
-        assert mock_process.call_count == 2
-        child = mock_process.return_value
-        assert child.start.call_count == 2
-        assert child.join.call_count == 2
+        args, kwargs = mock_supervisor.call_args
+        spawn, count = args
+        assert count == 3
+        mock_supervisor.return_value.run.assert_called_once()
+        spawn()
+        _p_args, p_kwargs = mock_process.call_args
+        assert p_kwargs["args"] == ("redis://test:6379/2", ["default"], True)
+        assert p_kwargs["daemon"] is False
 
     @patch("core.task_queue.worker.Process")
     @patch("core.task_queue.worker.Redis")
@@ -197,14 +205,14 @@ class TestJobContextRestoration:
             monkeypatch,
             {
                 "tenant_id": "acme",
-                "plugin": "baselith_world",
+                "plugin": "world_sim",
                 "llm_policy": {"provider": "ollama", "model": "llama3.2"},
             },
         )
 
         assert result == "done"
         assert seen["tenant"] == "acme"
-        assert seen["plugin"] == "baselith_world"
+        assert seen["plugin"] == "world_sim"
         assert seen["policy"].provider == "ollama"
         assert seen["policy"].model == "llama3.2"
 
@@ -214,7 +222,7 @@ class TestJobContextRestoration:
 
         self._run_and_capture(
             monkeypatch,
-            {"plugin": "baselith_world", "llm_policy": {"provider": "openai"}},
+            {"plugin": "world_sim", "llm_policy": {"provider": "openai"}},
         )
 
         assert get_current_plugin() is None

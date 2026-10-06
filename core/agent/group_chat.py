@@ -13,9 +13,11 @@ round-robin, never crash the chat), and :class:`CapabilitySelector`
 (keyword match of the last message against participant capabilities).
 
 Every chat is bounded three ways: ``max_rounds``, an optional caller
-``terminate`` predicate over the transcript, and an optional
-:class:`~core.orchestration.limits.LoopBudget` ticked once per round —
-an emergent conversation is still a loop, and loops end.
+``terminate`` predicate over the transcript, and a
+:class:`~core.orchestration.limits.LoopBudget` — an emergent conversation is
+still a loop, and loops end. A chat started outside an orchestrated request
+gets a default budget (dollar, token and wall-clock caps) unless the caller
+passes its own or opts out with ``budget=None``.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from core.agent._safety import DEFAULT, shared_loop_limits
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -184,9 +187,17 @@ class GroupChat:
         terminate: Optional predicate over the transcript, checked after
             every utterance; True ends the chat (``terminated_by:
             "predicate"``).
-        budget: Optional ``LoopBudget`` ticked once per round; exhaustion
-            ends the chat cleanly (``terminated_by: "budget"``) rather
-            than raising.
+        budget: A ``LoopBudget`` ticked once per round; exhaustion ends the
+            chat cleanly (``terminated_by: "budget"``) rather than raising.
+            Left at its default, a chat with no ambient budget binds one of
+            its own (the orchestrator's default caps) as the ambient budget,
+            so every participant's LLM call is charged to it; it is checked
+            for its deadline each round rather than ticked (``max_rounds``
+            already counts rounds, and participants that are typed agents
+            tick it themselves), and a breach inside a turn also ends the chat
+            with ``terminated_by: "budget"``. Inside an orchestrated request
+            the ambient budget is used as is. ``None`` disables both — the
+            pre-default behaviour.
     """
 
     def __init__(
@@ -196,7 +207,7 @@ class GroupChat:
         *,
         max_rounds: int = 8,
         terminate: Callable[[list[ChatMessage]], bool] | None = None,
-        budget: Any | None = None,
+        budget: Any | None = DEFAULT,
     ) -> None:
         if not participants:
             raise ValueError("group chat needs at least one participant")
@@ -210,20 +221,46 @@ class GroupChat:
 
     async def run(self, topic: str) -> GroupChatResult:
         """Converse about ``topic`` until a bound or the predicate ends it."""
+        from core.orchestration.budget_context import (
+            get_active_budget,
+            standalone_budget,
+        )
+
+        if self._budget is not DEFAULT:
+            return await self._converse(topic, ticked=self._budget, owned=None)
+        ambient = get_active_budget()
+        with standalone_budget(shared_loop_limits()) as bound:
+            # Only a budget this chat created is ours to stop on; an ambient
+            # one belongs to the request, which handles its own breach.
+            owned = bound if ambient is None else None
+            return await self._converse(topic, ticked=None, owned=owned)
+
+    async def _converse(
+        self, topic: str, *, ticked: Any | None, owned: Any | None
+    ) -> GroupChatResult:
+        """The round loop: ``ticked`` is ticked per round, ``owned`` checked."""
         from core.orchestration.limits import BudgetExceededError
 
         result = GroupChatResult()
         for _ in range(self._max_rounds):
-            if self._budget is not None:
-                try:
-                    self._budget.tick()
-                except BudgetExceededError:
-                    result.terminated_by = "budget"
-                    return result
-            speaker = await self._selector.select(
-                self._participants, topic, result.transcript
-            )
-            content = await speaker.respond(topic, list(result.transcript))
+            try:
+                if ticked is not None:
+                    ticked.tick()
+                if owned is not None:
+                    owned.check_deadline()
+            except BudgetExceededError:
+                result.terminated_by = "budget"
+                return result
+            try:
+                speaker = await self._selector.select(
+                    self._participants, topic, result.transcript
+                )
+                content = await speaker.respond(topic, list(result.transcript))
+            except BudgetExceededError:
+                if owned is None:
+                    raise  # not this chat's budget: its owner handles it
+                result.terminated_by = "budget"
+                return result
             result.transcript.append(ChatMessage(speaker=speaker.name, content=content))
             result.rounds += 1
             if self._terminate is not None and self._terminate(result.transcript):

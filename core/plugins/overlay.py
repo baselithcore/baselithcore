@@ -116,10 +116,11 @@ def _trusted_public_keys(plugin_name: str) -> list[str]:
 
 
 def _running_core_version() -> str:
-    # The same version the loader's compatibility gate compares against.
-    from core._version import __version__
+    # The same version the loader's compatibility gate compares against: the
+    # public core release, never a downstream distribution's own version.
+    from core._core_version import CORE_VERSION
 
-    return __version__
+    return CORE_VERSION
 
 
 def register_overlay_packages(

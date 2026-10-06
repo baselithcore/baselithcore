@@ -716,8 +716,12 @@ while a manifest is corrected.
 
 **Version compatibility** (`check_plugin_compatibility`,
 `core/plugins/version.py`) checks the plugin's
-declared `min_core_version` / `max_core_version` against the running core version
-(`core._version.__version__`) and each entry in `plugin_dependencies` (a map of
+declared `min_core_version` / `max_core_version` against the public core release
+the running tree corresponds to (`CORE_VERSION` in `core/_core_version.py`). That
+is the same number as `core._version.__version__` in the core project; a downstream
+distribution versions its own `_version.py` independently, and its plugins still
+declare bounds against the public release, so one manifest means the same thing
+on every distribution. The gate also checks each entry in `plugin_dependencies` (a map of
 plugin name → version constraint such as `">=0.1.0"`) against the versions of the
 plugins actually present. Prerelease ordering (`_compare_prerelease`) prefers PEP
 440 semantics and falls back to semver §11 precedence only when a segment isn't

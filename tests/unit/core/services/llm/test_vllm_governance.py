@@ -102,7 +102,7 @@ class TestGoverned:
                 "core.services.llm.runtime.resolve_llm_credential", return_value=None
             ),
         ):
-            gov = resolve_governed_client_config("docheck")
+            gov = resolve_governed_client_config("doc_review")
 
         assert gov is not None
         assert (gov.provider, gov.model) == ("vllm", "qwen")
@@ -124,7 +124,7 @@ class TestGoverned:
                 "core.services.llm.runtime.resolve_llm_credential", return_value=None
             ),
         ):
-            gov = resolve_governed_client_config("docheck")
+            gov = resolve_governed_client_config("doc_review")
 
         assert gov is not None and gov.api_key is None
 

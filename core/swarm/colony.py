@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from core.config.swarm import SwarmConfig, get_swarm_config
 from core.observability.logging import get_logger
-from core.swarm.colony_ops import ColonyOpsMixin
+from core.orchestration.budget_context import DEFAULT_LIMITS, standalone_budget
+from core.swarm.colony_ops import ColonyOpsMixin, batch_limits
 
 from .auction import TaskAuction
 from .pheromones import PheromoneSystem
@@ -31,6 +32,7 @@ from .types import (
 
 if TYPE_CHECKING:
     from core.memory.manager import AgentMemory
+    from core.orchestration.limits import LoopLimits
 
 logger = get_logger(__name__)
 
@@ -52,6 +54,8 @@ class Colony(ColonyOpsMixin):
         pheromones: PheromoneSystem | None = None,
         team_engine: TeamFormationEngine | None = None,
         memory_manager: Optional["AgentMemory"] = None,
+        *,
+        loop_limits: "LoopLimits | None" = DEFAULT_LIMITS,
     ):
         """
         Initialize swarm colony.
@@ -62,9 +66,13 @@ class Colony(ColonyOpsMixin):
             pheromones: Optional pheromone system instance
             team_engine: Optional team formation engine instance
             memory_manager: Optional memory orchestration manager
+            loop_limits: Caps for an :meth:`execute_batch` with no ambient
+                ``LoopBudget``: by default the batch shares one built from the
+                orchestrator's defaults; ``None`` disables it.
         """
         self.config = config or get_swarm_config()
         self.memory_manager = memory_manager
+        self._loop_limits = loop_limits
 
         # Core subsystems
         self.auction = auction or TaskAuction(config=self.config.auction)
@@ -415,6 +423,12 @@ class Colony(ColonyOpsMixin):
             BatchResult: A summary object containing successful results,
                         failure reasons, and unassigned task IDs.
         """
+        with standalone_budget(batch_limits(self._loop_limits)):
+            return await self._execute_batch(tasks, execute_fn)
+
+    async def _execute_batch(
+        self, tasks: list[Task], execute_fn: "Colony.ExecuteFn"
+    ) -> "Colony.BatchResult":
         result = Colony.BatchResult()
 
         # 1. Allocate all tasks via auction

@@ -254,6 +254,12 @@ the check you run after changing a local service.
 `configs/.env.docker.core`, the env file the Docker Compose runtime reads, and
 stops there.
 
+The generated Docker Core profile also pins the document-ingestion defaults
+used by the runtime image: `VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3`,
+`VECTORSTORE_EMBEDDING_DIM=1024`, MiniLM as the explicit fallback model, and
+`DOCUMENTS_PDF_READER=auto` so PDF ingestion uses Docling when the documents
+runtime includes it and falls back to the legacy pypdf/OCR path otherwise.
+
 Both preserve a credential that is already valid and generate a `DB_PASSWORD`
 and a `SECRET_KEY` only where a placeholder is still in place. Neither downloads
 the core image nor builds it — `baselith up` does that — and neither starts a
@@ -413,6 +419,11 @@ starts Compose and checks HTTP. It does not check for plugin packages in the hos
 Python environment. Invalid declared Core bounds, failed builds and failed probes
 return a nonzero exit code. Missing Core bounds remain a legacy warning.
 
+If a plugin ships a prebuilt frontend and declares `integrity_sha256`, the Docker
+installer first verifies that the existing output still matches the manifest. A
+matching bundle is reused instead of rebuilt, avoiding non-deterministic frontend
+asset hashes from invalidating the plugin integrity check.
+
 Use `--ref <branch-or-tag>` on the initial clone; existing directories are reused.
 `--force` replaces only a verifiably clean Git checkout. `--install-deps` without
 `--docker` installs Python dependencies in the host environment.
@@ -445,6 +456,10 @@ declared frontends, rebuilds and restarts the `api` service, waits for
 `frontend` contract. A plugin whose manifest is missing or invalid stops the
 sync with a nonzero exit code rather than being skipped.
 
+The frontend step follows the same integrity rule as `plugin add --docker`: a
+prebuilt, integrity-verified bundle is reused; unsigned or missing output is
+built in the temporary Node container.
+
 `--docker` is what selects the Docker runtime; without it the command only
 prints the local plugin status, exactly like `plugin status`. The sync has no
 fingerprinting — it rebuilds every time and relies on Docker layer reuse for the
@@ -473,8 +488,10 @@ baselith plugin create --interactive  # Interactive wizard
 
 **Generated code**:
 
-- The scaffolded `manifest.yaml` sets `min_core_version` to the version of the
-  framework that ran the command (`core._version.__version__`). It used to be
+- The scaffolded `manifest.yaml` sets `min_core_version` to the public core
+  release of the framework that ran the command (`CORE_VERSION` in
+  `core/_core_version.py`, the number every compatibility check compares with;
+  a downstream distribution's own `core._version` never applies). It used to be
   a hard-coded `0.31.0`, six minor releases behind. That value is the version
   you scaffolded against. Raise it on purpose when you start relying on newer
   APIs. Never lower it without testing against the older release.
@@ -1200,6 +1217,11 @@ keys it added or changed; a file that already matches the profile is left
 untouched. Generated files are written `0600` — see the note under the
 [`up`](#up---docker-runtime) command.
 
+For `docker-core`, the normalized profile includes the same RAG/document
+defaults as `setup docker-core`: bge-m3/1024 for embeddings, MiniLM/384 as the
+operator fallback, and `DOCUMENTS_PDF_READER=auto` for Docling-first PDF
+ingestion with pypdf/OCR fallback.
+
 ### `config check-env` - Detect Misspelled Variables
 
 Report environment variables that look like a misspelled setting — a name close
@@ -1346,9 +1368,13 @@ baselith queue worker --concurrency 4
 
 **Parameters**:
 
-- `--concurrency`: Number of worker **processes** to run (default: 1). One
-  runs in the foreground process; the rest are child processes, joined on
-  shutdown.
+- `--concurrency`: Number of worker **processes** to run (default: 1). With
+  1 the worker runs in the foreground process. With more, the foreground
+  process supervises that many child workers: it forwards SIGTERM/SIGINT to
+  them (an orchestrator signals PID 1 only), waits up to 100 s for their warm
+  shutdown before terminating them, and restarts a child that exits
+  unexpectedly, with exponential backoff (1 s doubling to 60 s; a child that
+  ran for a minute restarts at once).
 
 Workers started this way are tenant-aware (they restore `tenant_id`/`user_id`
 context before running a job), record terminal failures to the dead-letter

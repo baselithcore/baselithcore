@@ -18,6 +18,7 @@ core/observability/
 ├── otel_instrumentation.py  # what gets instrumented, and the propagators
 ├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
 ├── agent_spans.py    # Agent-attributed spans (OTel GenAI: invoke_agent / execute_tool)
+├── genai_semconv.py  # OTel GenAI attribute names, one place (+ deprecation aliases)
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
 ├── audit.py      # AuditLogger — typed audit events to pluggable sinks
@@ -251,6 +252,70 @@ so before this its work was attributable to nobody.
 
 Attribution is best-effort and never fails a completion: if the context cannot
 be read, the span simply omits the key.
+
+### GenAI semantic conventions (`genai_semconv.py`)
+
+Every LLM and embedding span takes its `gen_ai.*` keys from
+`core/observability/genai_semconv.py`, which tracks the
+[OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
+(`docs/registry/attributes/gen-ai.md`; the GenAI conventions left the core
+`semantic-conventions` repository after v1.41). The attributes the LLM service
+writes on a `chat {model}` span:
+
+| Attribute | Type | Meaning |
+| --------- | ---- | ------- |
+| `gen_ai.operation.name` | string | `chat` (`embeddings` on embedding spans) |
+| `gen_ai.provider.name` | string | Well-known value where one exists — see below |
+| `gen_ai.request.model` | string | Model requested |
+| `gen_ai.response.model` | string | Model that actually served the call (failover) |
+| `gen_ai.request.temperature` / `gen_ai.request.max_tokens` | double / int | When set |
+| `gen_ai.usage.input_tokens` | int | **All** prompt tokens, cache reads and cache writes included |
+| `gen_ai.usage.output_tokens` | int | Completion tokens |
+| `gen_ai.usage.cache_read.input_tokens` | int | Subset of input served from the provider cache (when non-zero) |
+| `gen_ai.usage.cache_write.input_tokens` | int | Subset of input written to the provider cache (when non-zero) |
+| `gen_ai.response.finish_reasons` | string[] | Provider stop reason, e.g. `["end_turn"]` |
+
+Provider values: `anthropic`, `openai`, `gcp.gemini` (Gemini API),
+`aws.bedrock` and `gcp.vertex_ai` — the latter two also when Claude is served
+through `LLM_ANTHROPIC_BACKEND=bedrock|vertex`, because the spec names the
+endpoint reached rather than the model vendor. Providers with no well-known
+value (`ollama`, `vllm`, `huggingface`, `sentence_transformers` for local
+embeddings) report their lowercase name, which the spec allows.
+
+`gen_ai.usage.input_tokens` on the span is the spec total. The internal
+`Usage` record keeps *fresh* input separately, and pricing, `LoopBudget`, the
+tenant ledger and `gen_ai_client_cost_usd_total` still price each bucket at its
+own tier — only the span view is summed. Everything app-specific stays under
+`gen_ai.baselith.*`.
+
+The `gen_ai_client_*` Prometheus metrics label the provider as
+`gen_ai_provider_name`, with the same values.
+
+!!! warning "Deprecated names"
+    Renamed keys are **dual-emitted for one deprecation window** so existing
+    dashboards keep working; they carry the same value as their replacement and
+    will stop being emitted in a future minor release.
+
+| Deprecated | Replacement | Status |
+| ---------- | ----------- | ------ |
+| `gen_ai.system` | `gen_ai.provider.name` | Dual-emitted on spans |
+| `gen_ai.usage.cache_creation.input_tokens` | `gen_ai.usage.cache_write.input_tokens` | Dual-emitted on spans |
+| `gen_ai.usage.cache_read_tokens` | `gen_ai.usage.cache_read.input_tokens` | Removed (was never a spec name) |
+| `gen_ai.usage.cache_write_tokens` | `gen_ai.usage.cache_write.input_tokens` | Removed (was never a spec name) |
+| `gen_ai.response.finish_reason` (string) | `gen_ai.response.finish_reasons` (string[]) | Removed |
+| Prometheus label `gen_ai_system` | `gen_ai_provider_name` | Renamed in place |
+
+Two semantic changes come with it: span `gen_ai.usage.input_tokens` now
+*includes* cached tokens (it used to be fresh input only), and the
+Prometheus label rename means a query on `gen_ai_system` returns nothing.
+Bridge an old query until it is rewritten:
+
+```promql
+label_replace(
+  sum by (gen_ai_provider_name) (rate(gen_ai_client_cost_usd_total[5m])),
+  "gen_ai_system", "$1", "gen_ai_provider_name", "(.*)"
+)
+```
 
 ### OpenInference enrichment (`openinference.py`)
 
@@ -507,6 +572,13 @@ await audit.log(
 
 Convenience helpers `log_auth`, `log_api_request`, and `log_chat` wrap the
 common event types.
+
+From synchronous code `audit_emit()` schedules the write as a task on the
+running loop. Those tasks are flushed at shutdown:
+`await flush_pending_audit_events(timeout=3.0)` waits for the ones still in
+flight, cancels whatever is left after the timeout and returns that count. The
+API lifespan runs it as the critical `audit_events` teardown step, before the
+database pools close.
 
 The hash-chained SQLite sink behind it is safe to share between processes:
 every uvicorn or task-queue worker opens its own sink on the same file, and each

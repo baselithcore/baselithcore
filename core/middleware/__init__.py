@@ -5,6 +5,7 @@ Provides HTTP middleware components for the baselith-core.
 """
 
 from ._admin_auth import authenticate_admin_basic
+from .api_deprecation import APIDeprecationMiddleware
 from .cost_control import (
     BudgetExceededError,
     CostController,
@@ -76,4 +77,6 @@ __all__ = [
     "HTTPMetricsMiddleware",
     # Catch-all 500 inside the observability layers
     "UnhandledErrorMiddleware",
+    # Deprecation/Link headers on the unprefixed API paths
+    "APIDeprecationMiddleware",
 ]

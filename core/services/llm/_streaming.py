@@ -18,6 +18,7 @@ from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
 from core.models.pricing import qualified_model_id
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import get_logger
 from core.services.llm._accounting import (
     charge_usage_to_budget,
@@ -26,7 +27,7 @@ from core.services.llm._accounting import (
 )
 from core.services.llm._stream_fallback import open_stream
 from core.services.llm._telemetry import (
-    gen_ai_system,
+    gen_ai_provider_for,
     record_genai_metrics,
     report_tokens_to_middleware,
 )
@@ -67,7 +68,7 @@ async def stream_response(
         f"chat {model}",
         attributes={
             "gen_ai.operation.name": "chat",
-            "gen_ai.system": gen_ai_system(service.config.provider),
+            **provider_attributes(gen_ai_provider_for(service.config)),
             "gen_ai.request.model": model,
             "gen_ai.baselith.prompt_length": len(prompt),
             "gen_ai.baselith.streaming": True,
@@ -188,7 +189,7 @@ async def stream_response(
             # outside an orchestrated request — background jobs meter too.
             await record_usage_cost(billing_model, billed)
             record_genai_metrics(
-                gen_ai_system(serving_provider),
+                gen_ai_provider_for(service.config, serving_provider),
                 billing_model,
                 input_tokens=billed.input_tokens,
                 output_tokens=billed.output_tokens,

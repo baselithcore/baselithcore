@@ -59,7 +59,7 @@ already there before Helm runs.
 FastAPI / HTTPX / Redis auto-instrumentation. The SDK ships in the image, but
 it does nothing until this is on — with it off there is no TracerProvider and
 therefore **no spans at all**, which surfaces as an empty Traces tab in
-BaselithControl on a cluster that is plainly serving requests.
+the admin console on a cluster that is plainly serving requests.
 
 ```yaml
 telemetry:

@@ -23,15 +23,23 @@ one-time warning per process so a missing pricing entry stays visible.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from typing import Any, Final
 
 from core.observability.logging import get_logger
-from core.orchestration.limits import LoopBudget
+from core.orchestration.limits import LoopBudget, LoopLimits
 
 logger = get_logger(__name__)
 
 _active_budget: ContextVar[LoopBudget | None] = ContextVar(
     "active_loop_budget", default=None
+)
+#: True while the ambient budget is one :func:`standalone_budget` created
+#: (a run outside any orchestrated request), False under ``activate_budget``.
+_standalone_bound: ContextVar[bool] = ContextVar(
+    "baselith_standalone_budget_bound", default=False
 )
 
 # Models we have already warned about missing a pricing entry in this
@@ -59,6 +67,89 @@ def deactivate_budget(token: Token) -> None:
 def get_active_budget() -> LoopBudget | None:
     """Return the ambient budget, or None outside an orchestrated request."""
     return _active_budget.get()
+
+
+class _DefaultLimits:
+    """Sentinel: "use the safe default" (distinct from an explicit ``None``)."""
+
+    def __repr__(self) -> str:
+        return "DEFAULT"
+
+
+#: Default for the ``loop_limits``/``budget`` arguments of runs that bind a
+#: :func:`standalone_budget` — "the default caps", where ``None`` means "none".
+DEFAULT_LIMITS: Final[Any] = _DefaultLimits()
+
+
+@contextmanager
+def standalone_budget(
+    limits: LoopLimits | None, *, enforce_own: bool = False
+) -> Iterator[LoopBudget | None]:
+    """Bind a budget for a run that may be happening outside any request.
+
+    ``Orchestrator.process`` gives every request a :class:`LoopBudget`; a
+    typed ``Agent``, a ``GroupChat`` or a swarm batch started from a script,
+    a worker or a test had none, so it was bounded by its own iteration count
+    and nothing else — no dollar, token or wall-clock cap. This closes that
+    gap without double-applying one:
+
+    * an ambient budget already active (the run is inside an orchestrated
+      request, or nested in another standalone run) is reused untouched —
+      the run charges the request it belongs to, exactly as before;
+    * otherwise, with ``limits``, a fresh budget is created and bound as the
+      ambient one for the duration of the block, so every LLM call inside it
+      is charged through :func:`charge_llm_cost`;
+    * ``limits=None`` binds nothing — the explicit opt-out.
+
+    With ``enforce_own=True`` (a caller's *explicit* caps, e.g.
+    ``Agent(loop_limits=LoopLimits(budget_usd=0.05))``) and an ambient budget
+    present, a nested child budget is bound instead of reusing the ambient
+    one untouched: the child enforces ``limits`` and forwards every unit it
+    records to the ambient budget (:attr:`LoopBudget.parent`), so the
+    enclosing request, crew or chat still sees — and caps — the full spend,
+    counted once. The ambient's orchestrated/standalone flag is unchanged.
+
+    Args:
+        limits: Caps for the fresh budget, or ``None`` to bind none.
+        enforce_own: Also enforce ``limits`` under an ambient budget.
+
+    Yields:
+        The budget in force (ambient or fresh), or ``None`` when opted out
+        with no ambient budget.
+    """
+    ambient = _active_budget.get()
+    if ambient is not None and limits is not None and enforce_own:
+        child = LoopBudget(limits=limits, parent=ambient)
+        child_token = _active_budget.set(child)
+        try:
+            yield child
+        finally:
+            _active_budget.reset(child_token)
+        return
+    if ambient is not None or limits is None:
+        yield ambient
+        return
+    budget = LoopBudget(limits=limits)
+    token = _active_budget.set(budget)
+    standalone_token = _standalone_bound.set(True)
+    try:
+        yield budget
+    finally:
+        _standalone_bound.reset(standalone_token)
+        _active_budget.reset(token)
+
+
+def in_orchestrated_request() -> bool:
+    """Whether the current code runs under an orchestrator-bound budget.
+
+    True inside ``Orchestrator.process`` (and anything it calls, such as a
+    plugin handler building its own ``Agent``); False in a standalone run,
+    including one nested in another standalone run.
+
+    Returns:
+        ``True`` when the ambient budget was bound by the orchestrator.
+    """
+    return _active_budget.get() is not None and not _standalone_bound.get()
 
 
 def charge_llm_cost(

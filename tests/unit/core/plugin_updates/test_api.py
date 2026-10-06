@@ -95,6 +95,8 @@ def test_factory_registers_updates_before_plugin_management() -> None:
     from core.api import factory
 
     src = inspect.getsource(factory)
-    assert src.index("include_router(plugin_updates_router)") < src.index(
-        "include_router(plugin_management_router)"
+    # Both routers are mounted from one ordered list (served unprefixed and
+    # under /v1); updates must come first or /{plugin_name} swallows /updates.
+    assert src.index("plugin_api_routers = [plugin_updates_router]") < src.index(
+        "plugin_api_routers.append(plugin_management_router)"
     )

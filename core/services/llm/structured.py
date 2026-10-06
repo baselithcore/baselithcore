@@ -11,8 +11,9 @@ Two execution modes, chosen per request:
   *and* the active provider advertises ``supports_native_tools``. Delegates to
   the provider's ``generate_structured`` and returns provider-parsed tool calls.
 * **Fallback** — otherwise. Describes the tools (and any response schema) in an
-  augmented system prompt, requests JSON via the legacy string path, and parses
-  a ``{"tool": ..., "arguments": {...}}`` object back into a :class:`ToolCall`.
+  augmented system prompt, requests JSON via the legacy string path (through
+  the fallback chain), and parses a ``{"tool": ..., "arguments": {...}}``
+  object back into a :class:`ToolCall` — see :mod:`core.services.llm._coercion`.
 
 Kept out of ``service.py`` to respect the module size cap and so both modes
 share the same span / token / budget accounting.
@@ -20,18 +21,29 @@ share the same span / token / budget accounting.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, cast
 
 from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.models.pricing import qualified_model_id
 from core.observability import get_tracer
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._accounting import account_turn, record_usage_cost
+
+# The coercion path lives in ``_coercion`` (module size cap); its historical
+# private names stay importable from here.
+from core.services.llm._coercion import _render_tools  # noqa: F401
+from core.services.llm._coercion import (  # noqa: F401
+    build_fallback_system as _build_fallback_system,
+)
+from core.services.llm._coercion import generate_fallback as _generate_fallback
+from core.services.llm._coercion import (  # noqa: F401
+    parse_fallback as _parse_fallback,
+)
 from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import (
-    gen_ai_system,
+    gen_ai_provider_for,
     report_tokens_to_middleware,
 )
 from core.services.llm.cost_control import estimate_tokens_async
@@ -49,7 +61,6 @@ from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
     ResponseFormat,
-    ToolCall,
     ToolChoice,
 )
 from core.services.llm.usage import Usage
@@ -124,155 +135,6 @@ async def _native_with_retry(
         raise RateLimitError(str(e), retry_after=retry_after_from_exception(e)) from e
 
 
-def _render_tools(tools: list[LLMToolSpec]) -> str:
-    """Render tool specs as a compact JSON catalog for the fallback prompt."""
-    catalog = [
-        {"name": t.name, "description": t.description, "parameters": t.parameters}
-        for t in tools
-    ]
-    return json.dumps(catalog, ensure_ascii=False, sort_keys=True)
-
-
-def _build_fallback_system(
-    base_system: str | None,
-    tools: list[LLMToolSpec] | None,
-    tool_choice: ToolChoice | None,
-    response_format: ResponseFormat | None,
-) -> str:
-    """Augment the system prompt to coerce tool calls / structured JSON.
-
-    Used for providers without a native tool API. Deterministic (sorted keys)
-    so it doesn't defeat prompt caching.
-    """
-    parts: list[str] = []
-    if base_system:
-        parts.append(base_system)
-
-    if tools:
-        choice = tool_choice or ToolChoice(mode="auto")
-        parts.append("You can call tools. Available tools (JSON):")
-        parts.append(_render_tools(tools))
-        if choice.mode == "tool":
-            parts.append(
-                f'You MUST call the tool "{choice.name}". Respond with ONLY a '
-                'JSON object: {"tool": "' + str(choice.name) + '", "arguments": {...}}.'
-            )
-        elif choice.mode == "any":
-            parts.append(
-                "You MUST call one tool. Respond with ONLY a JSON object: "
-                '{"tool": <tool name>, "arguments": {...}}.'
-            )
-        else:
-            parts.append(
-                "To call a tool, respond with ONLY a JSON object: "
-                '{"tool": <tool name>, "arguments": {...}}. '
-                'If no tool is needed, respond with {"tool": null, '
-                '"final": <your answer as a string>}.'
-            )
-    elif response_format is not None:
-        parts.append(
-            "Respond with ONLY a JSON object that conforms to this JSON Schema (JSON):"
-        )
-        parts.append(
-            json.dumps(response_format.schema, ensure_ascii=False, sort_keys=True)
-        )
-
-    return "\n\n".join(parts)
-
-
-def _parse_fallback(content: str, has_tools: bool) -> LLMResult:
-    """Parse a fallback JSON response into an :class:`LLMResult`.
-
-    Tolerant: on malformed JSON (or JSON that isn't a tool-call object) the raw
-    text is returned as ``text`` with no tool calls, so the caller degrades to a
-    plain answer rather than erroring.
-    """
-    if not has_tools:
-        # response_format-only (or plain) path: the JSON *is* the answer.
-        return LLMResult(text=content or None, native=False)
-
-    try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        return LLMResult(text=content or None, native=False)
-
-    if not isinstance(parsed, dict):
-        return LLMResult(text=content or None, native=False)
-
-    tool_name = parsed.get("tool")
-    if tool_name:
-        arguments = parsed.get("arguments")
-        return LLMResult(
-            text=None,
-            tool_calls=[
-                ToolCall(
-                    id="fallback-call-0",
-                    name=str(tool_name),
-                    arguments=arguments if isinstance(arguments, dict) else {},
-                )
-            ],
-            stop_reason="tool_use",
-            native=False,
-        )
-
-    # Explicit no-tool answer.
-    final = parsed.get("final")
-    return LLMResult(text=str(final) if final is not None else content, native=False)
-
-
-async def _generate_fallback(
-    service: LLMService,
-    prompt: str,
-    model: str,
-    *,
-    tools: list[LLMToolSpec] | None,
-    tool_choice: ToolChoice | None,
-    response_format: ResponseFormat | None,
-    system_prompt: str | None,
-    temperature: float | None,
-    max_tokens: int | None,
-    allow_refusal: bool = False,
-    usage_sink: list[Usage] | None = None,
-) -> LLMResult:
-    """Prompt-coercion path for providers without native tool calling.
-
-    ``allow_refusal`` is forwarded as a provider kwarg rather than applied
-    here: this path returns through the legacy text API, where the provider
-    itself decides whether a refusal raises (it has the stop reason; the
-    ``(text, tokens)`` return type does not carry one back).
-    """
-    augmented_system = _build_fallback_system(
-        system_prompt, tools, tool_choice, response_format
-    )
-    want_json = bool(tools) or response_format is not None
-
-    extra: dict[str, Any] = {}
-    if augmented_system:
-        extra["system"] = augmented_system
-    if temperature is not None:
-        extra["temperature"] = temperature
-    if max_tokens is not None:
-        extra["max_tokens"] = max_tokens
-    if allow_refusal:
-        extra["allow_refusal"] = True
-
-    # Owned by the caller when it passed one: a refusal raises out of this
-    # function, and the turn still has to be accounted for.
-    usage_sink = [] if usage_sink is None else usage_sink
-    content, tokens_used = await service._generate_with_retry(
-        prompt=prompt,
-        model=model,
-        json_mode=want_json,
-        usage_sink=usage_sink,
-        **extra,
-    )
-    result = _parse_fallback(content, has_tools=bool(tools))
-    result.tokens_used = tokens_used
-    if usage_sink:
-        result.usage = usage_sink[-1]
-    return result
-
-
 async def generate_structured(
     service: LLMService,
     prompt: str,
@@ -334,7 +196,7 @@ async def generate_structured(
     tracer = get_tracer("llm-service")
     span_attributes: dict[str, Any] = {
         "gen_ai.operation.name": "chat",
-        "gen_ai.system": gen_ai_system(service.config.provider),
+        **provider_attributes(gen_ai_provider_for(service.config)),
         "gen_ai.request.model": model,
         "gen_ai.baselith.native_tools": use_native,
         "gen_ai.baselith.tool_count": len(tools) if tools else 0,
@@ -367,9 +229,9 @@ async def generate_structured(
         # Held by this frame so a refusal raised out of the coercion path
         # still carries the provider's metered usage to the accounting below.
         fallback_usage: list[Usage] = []
-        # Who ends up answering. Overwritten by the native path when a fallback
-        # stage serves; the coercion path below never fails over, so the
-        # configured provider is already the truth for it.
+        # Who ends up answering. Overwritten by whichever path runs: both the
+        # native call and the coercion fallback go through LLM_FALLBACK_CHAIN,
+        # so a fallback stage may serve either.
         serving_provider = service.config.provider
         serving_model = model
         try:
@@ -409,7 +271,11 @@ async def generate_structured(
                 span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
                 span.set_attribute("gen_ai.response.model", serving_model)
             else:
-                result = await _generate_fallback(
+                (
+                    result,
+                    serving_provider,
+                    serving_model,
+                ) = await _generate_fallback(
                     service,
                     prompt,
                     model,
@@ -422,6 +288,8 @@ async def generate_structured(
                     allow_refusal=allow_refusal,
                     usage_sink=fallback_usage,
                 )
+                span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
+                span.set_attribute("gen_ai.response.model", serving_model)
         except LLMRefusalError:
             # A refusal is generated output: the provider ran the model and
             # billed for it. Account for the turn before the error propagates,

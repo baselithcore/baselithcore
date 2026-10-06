@@ -2,9 +2,17 @@
  * Typed client for the BaselithCore API.
  *
  * Built on the platform `fetch` (Node >=18, browsers, edge runtimes) with no
- * runtime dependencies. Features: API-key/bearer auth, retry with backoff +
- * jitter on 429/5xx (honouring `Retry-After`), idempotency keys, streaming, and
- * a typed error hierarchy parsed from the API's error envelope.
+ * runtime dependencies. Features: API-key/bearer/Basic auth, retry with
+ * backoff + jitter on 429/5xx (honouring `Retry-After`; a non-idempotent call
+ * — approval decision, run resume, delivery replay — is re-sent only when it
+ * provably never left the client or got a 429), idempotency keys,
+ * streaming, cursor pagination, and a typed error hierarchy parsed from the
+ * API's error envelope. Covers chat, feedback, probes, async agent runs, run
+ * event streams and history, approvals, and webhooks.
+ *
+ * Routes are written as their OpenAPI templates (`/agent/status/{task_id}`)
+ * with `pathParams` filled in by `request()`, so the `sdk-contract` gate can
+ * read them from this file.
  *
  * @example
  * ```ts
@@ -15,20 +23,55 @@
  * ```
  */
 
-import { ApiConnectionError, errorFromResponse } from './errors.js';
+import { ApiConnectionError, BaselithConfigError, errorFromResponse } from './errors.js';
 import type {
+  AgentRunRequest,
+  AgentRunStatus,
+  AgentRunSubmission,
+  ApprovalDecisionRequest,
+  ApprovalDecisionResult,
+  ApprovalPage,
   ChatRequest,
   ChatResponse,
   FeedbackRequest,
   HealthStatus,
+  Page,
   ReadinessStatus,
+  RunEvent,
+  RunHistoryPage,
+  RunResumeResult,
+  WebhookCreated,
+  WebhookCreateRequest,
+  WebhookDeleted,
+  WebhookDeliveryPage,
+  WebhookPage,
+  WebhookReplay,
 } from './models.js';
+import {
+  backoffMs,
+  base64Utf8,
+  decodeBody,
+  fillPath,
+  isNotSentError,
+  parseRetryAfter,
+  queryString,
+  sleep,
+  trimSlashes,
+} from './http.js';
+import { iterPages, pollUntilTerminal, type PageOptions } from './pagination.js';
+import { decodeRunEvents, decodeSseStream, readTextChunks } from './sse.js';
+
+export { ChatStreamError } from './sse.js';
 
 type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
+/** Default `resumeRun` timeout: the server runs the resumed loop in-request (~600 s). */
+const DEFAULT_RESUME_TIMEOUT_MS = 660_000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+/** Statuses a non-idempotent call may retry: refused before any work was done. */
+const UNSAFE_RETRYABLE_STATUS = new Set([429]);
 const VERSION = '0.42.1';
 const USER_AGENT = `baselith-sdk-ts/${VERSION}`;
 
@@ -36,6 +79,8 @@ export interface BaselithClientOptions {
   baseUrl: string;
   apiKey?: string;
   bearerToken?: string;
+  /** HTTP Basic credentials — the approvals and runs routes take the admin ones. */
+  basicAuth?: { username: string; password: string };
   tenantId?: string;
   /** Path prefix for data endpoints; `null` to call unversioned paths. */
   apiVersion?: string | null;
@@ -43,173 +88,6 @@ export interface BaselithClientOptions {
   maxRetries?: number;
   /** Override the `fetch` implementation (testing / custom agents). */
   fetchImpl?: FetchImpl;
-}
-
-/** Trim leading and/or trailing '/' in linear time (no regex → no ReDoS). */
-function trimSlashes(s: string, opts: { leading?: boolean; trailing?: boolean }): string {
-  let start = 0;
-  let end = s.length;
-  if (opts.leading) while (start < end && s.charCodeAt(start) === 47) start++;
-  if (opts.trailing) while (end > start && s.charCodeAt(end - 1) === 47) end--;
-  return s.slice(start, end);
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-function backoffMs(attempt: number, retryAfter?: number): number {
-  if (retryAfter !== undefined && retryAfter >= 0) return retryAfter * 1000;
-  return Math.min(2 ** attempt, 30) * 1000 + Math.random() * 500;
-}
-
-function parseRetryAfter(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-async function decodeBody(res: Response): Promise<unknown> {
-  const ctype = res.headers.get('content-type') ?? '';
-  if (ctype.includes('application/json')) {
-    try {
-      return await res.json();
-    } catch {
-      return await res.text();
-    }
-  }
-  return await res.text();
-}
-
-/**
- * Raised when `/chat/stream` frames an `event: error` mid-stream.
- *
- * The server has already committed to a 200 response by the time a provider
- * read fails, so the only way to report it is in-band (see
- * `plugins/api_routers/chat.py`'s `SSE_ERROR_EVENT`). The message is
- * deliberately generic — the server never puts provider detail on the wire.
- */
-export class ChatStreamError extends Error {
-  constructor(message = 'stream failed') {
-    super(message);
-    this.name = new.target.name;
-  }
-}
-
-/** One decoded SSE event: an optional `event:` name and its `data:` payload. */
-interface SseEvent {
-  event: string | null;
-  data: string;
-}
-
-/**
- * Parse one blank-line-delimited SSE block into an event.
- *
- * Returns `null` for a block that carries no event at all — e.g. one made
- * only of `: keepalive`-style comment lines.
- */
-function parseSseBlock(block: string): SseEvent | null {
-  let event: string | null = null;
-  const dataLines: string[] = [];
-  for (const line of block.split('\n')) {
-    if (!line || line.startsWith(':')) continue; // blank line, or a comment (keepalive)
-    if (line.startsWith('event:')) {
-      event = line.slice('event:'.length).trim();
-    } else if (line.startsWith('data:')) {
-      let value = line.slice('data:'.length);
-      if (value.startsWith(' ')) value = value.slice(1);
-      dataLines.push(value);
-    }
-  }
-  if (event === null && dataLines.length === 0) return null;
-  return { event, data: dataLines.join('\n') };
-}
-
-/**
- * Incremental text -> SSE-event decoder.
- *
- * Buffers raw text across chunk boundaries (a `data:` line, or the blank
- * line ending an event, can arrive split across two reads) and yields one
- * {@link SseEvent} per complete, blank-line-terminated block.
- */
-class SseDecoder {
-  private buffer = '';
-  // A chunk boundary can fall exactly between a "\r" and its "\n": normalising
-  // a trailing "\r" on the spot would make a "\n" arriving at the start of the
-  // *next* feed() read as a second, spurious line break instead of completing
-  // the same "\r\n". So a trailing bare "\r" is held back (not normalised yet)
-  // until the next feed() or flush() resolves it, one way or the other.
-  private pendingCr = false;
-
-  *feed(text: string): Generator<SseEvent> {
-    if (this.pendingCr) {
-      text = '\r' + text;
-      this.pendingCr = false;
-    }
-    if (text.endsWith('\r')) {
-      text = text.slice(0, -1);
-      this.pendingCr = true;
-    }
-    this.buffer += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    let idx: number;
-    while ((idx = this.buffer.indexOf('\n\n')) !== -1) {
-      const block = this.buffer.slice(0, idx);
-      this.buffer = this.buffer.slice(idx + 2);
-      const event = parseSseBlock(block);
-      if (event) yield event;
-    }
-  }
-
-  /** Yield one final event from a trailing, unterminated buffer (if any). */
-  *flush(): Generator<SseEvent> {
-    if (this.pendingCr) {
-      this.buffer += '\n';
-      this.pendingCr = false;
-    }
-    if (this.buffer.trim()) {
-      const event = parseSseBlock(this.buffer);
-      this.buffer = '';
-      if (event) yield event;
-    }
-  }
-}
-
-/**
- * Decode a raw `/chat/stream` text stream into plain text chunks.
- *
- * Frames the wire format emitted by `plugins/api_routers/chat.py`: splits on
- * blank lines, reassembles multi-line `data:` fields, ignores `: keepalive`
- * comment lines, stops at `event: done` and throws {@link ChatStreamError} on
- * `event: error`.
- */
-async function* decodeSseStream(
-  rawChunks: AsyncIterable<string> | Iterable<string>
-): AsyncGenerator<string> {
-  const sse = new SseDecoder();
-  for await (const raw of rawChunks) {
-    for (const event of sse.feed(raw)) {
-      if (event.event === 'done') return;
-      if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
-      yield event.data;
-    }
-  }
-  for (const event of sse.flush()) {
-    if (event.event === 'done') return;
-    if (event.event === 'error') throw new ChatStreamError(event.data || 'stream failed');
-    yield event.data;
-  }
-}
-
-/** Yield decoded text chunks from a `ReadableStream<Uint8Array>` reader. */
-async function* readTextChunks(
-  reader: ReadableStreamDefaultReader<Uint8Array>
-): AsyncGenerator<string> {
-  const decoder = new TextDecoder();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) yield decoder.decode(value, { stream: true });
-  }
-  const tail = decoder.decode();
-  if (tail) yield tail;
 }
 
 export class BaselithClient {
@@ -238,7 +116,14 @@ export class BaselithClient {
       Accept: 'application/json',
     };
     if (opts.apiKey) headers['x-api-key'] = opts.apiKey;
+    if (opts.bearerToken && opts.basicAuth) {
+      throw new BaselithConfigError('bearerToken and basicAuth both set Authorization; pass one');
+    }
     if (opts.bearerToken) headers['Authorization'] = `Bearer ${opts.bearerToken}`;
+    if (opts.basicAuth) {
+      const { username, password } = opts.basicAuth;
+      headers['Authorization'] = `Basic ${base64Utf8(`${username}:${password}`)}`;
+    }
     if (opts.tenantId) headers['X-Tenant-ID'] = opts.tenantId;
     this.defaultHeaders = headers;
   }
@@ -253,13 +138,31 @@ export class BaselithClient {
     return { ...this.defaultHeaders, ...extra };
   }
 
-  private async rawFetch(url: string, init: RequestInit): Promise<Response> {
+  /**
+   * One `fetch`, aborted if the response headers take longer than `timeoutMs`.
+   * The body is read after the timer is cleared, so a long SSE stream is never
+   * cut by it; `rawFetch` failures carry `notSent` for the retry policy.
+   */
+  private async rawFetch(
+    url: string,
+    init: RequestInit,
+    timeoutMs = this.timeoutMs
+  ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     try {
       return await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (e) {
-      throw new ApiConnectionError(e instanceof Error ? e.message : 'request failed');
+      const message = timedOut
+        ? `request timed out after ${timeoutMs} ms`
+        : e instanceof Error
+          ? e.message
+          : 'request failed';
+      throw new ApiConnectionError(message, { notSent: !timedOut && isNotSentError(e) });
     } finally {
       clearTimeout(timer);
     }
@@ -270,12 +173,20 @@ export class BaselithClient {
     path: string,
     opts: {
       versioned?: boolean;
+      pathParams?: Record<string, string | number>;
+      query?: Record<string, string | number | null | undefined>;
       body?: unknown;
       idempotencyKey?: string;
+      headers?: Record<string, string>;
+      /** Non-idempotent: no re-send after a timeout, a mid-request failure or a 5xx. */
+      unsafe?: boolean;
+      timeoutMs?: number;
     } = {}
   ): Promise<Response> {
-    const url = this.url(path, opts.versioned ?? true);
+    const url =
+      this.url(fillPath(path, opts.pathParams), opts.versioned ?? true) + queryString(opts.query);
     const extra: Record<string, string> = {};
+    if (opts.headers) Object.assign(extra, opts.headers);
     if (opts.body !== undefined) extra['Content-Type'] = 'application/json';
     if (opts.idempotencyKey) extra['Idempotency-Key'] = opts.idempotencyKey;
     const init: RequestInit = {
@@ -284,18 +195,20 @@ export class BaselithClient {
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     };
 
+    const retryStatus = opts.unsafe ? UNSAFE_RETRYABLE_STATUS : RETRYABLE_STATUS;
     let lastErr: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       let res: Response;
       try {
-        res = await this.rawFetch(url, init);
+        res = await this.rawFetch(url, init, opts.timeoutMs);
       } catch (e) {
         lastErr = e;
-        if (attempt >= this.maxRetries) throw e;
+        const retryable = !opts.unsafe || (e instanceof ApiConnectionError && e.notSent);
+        if (attempt >= this.maxRetries || !retryable) throw e;
         await sleep(backoffMs(attempt));
         continue;
       }
-      if (RETRYABLE_STATUS.has(res.status) && attempt < this.maxRetries) {
+      if (retryStatus.has(res.status) && attempt < this.maxRetries) {
         await sleep(backoffMs(attempt, parseRetryAfter(res.headers.get('Retry-After'))));
         continue;
       }
@@ -370,5 +283,202 @@ export class BaselithClient {
   async readiness(): Promise<ReadinessStatus> {
     const res = await this.request('GET', '/health/ready', { versioned: false });
     return (await res.json()) as ReadinessStatus;
+  }
+
+  // --- Async agent runs ---
+
+  /** Queue an agent run; returns its `task_id` and poll URL (`202 Accepted`). */
+  async submitAgentRun(
+    query: string,
+    opts: Omit<AgentRunRequest, 'query'> & { idempotencyKey?: string } = {}
+  ): Promise<AgentRunSubmission> {
+    const { idempotencyKey, ...rest } = opts;
+    const body: AgentRunRequest = { query, ...rest };
+    const res = await this.request('POST', '/agent/async', {
+      body,
+      idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
+    });
+    const sub = (await res.json()) as AgentRunSubmission;
+    const location = res.headers.get('Location');
+    return location ? { ...sub, location } : sub;
+  }
+
+  /** Current status of a queued run (404 for unknown or other-tenant ids). */
+  async getAgentRun(taskId: string): Promise<AgentRunStatus> {
+    const res = await this.request('GET', '/agent/status/{task_id}', {
+      pathParams: { task_id: taskId },
+    });
+    return (await res.json()) as AgentRunStatus;
+  }
+
+  /**
+   * Poll until the run is completed, failed or cancelled.
+   * Throws {@link RunTimeoutError} once `timeoutMs` (default 300000) elapses.
+   */
+  async waitForRun(
+    taskId: string,
+    opts: { timeoutMs?: number; pollIntervalMs?: number } = {}
+  ): Promise<AgentRunStatus> {
+    return pollUntilTerminal(
+      (id) => this.getAgentRun(id),
+      taskId,
+      opts.timeoutMs ?? 300_000,
+      opts.pollIntervalMs ?? 2_000
+    );
+  }
+
+  // --- Runs: events and history ---
+
+  /**
+   * Stream a run's structured events (SSE) until its terminal event.
+   *
+   * Subscribe before starting or resuming the run: the feed is fan-out only,
+   * not replayed (`lastEventId` is sent but cannot rewind it).
+   */
+  async *streamRunEvents(
+    runId: string,
+    opts: { lastEventId?: string } = {}
+  ): AsyncGenerator<RunEvent> {
+    const res = await this.request('GET', '/runs/{run_id}/events', {
+      pathParams: { run_id: runId },
+      headers: {
+        Accept: 'text/event-stream',
+        ...(opts.lastEventId ? { 'Last-Event-ID': opts.lastEventId } : {}),
+      },
+    });
+    if (!res.body) {
+      const text = await res.text();
+      yield* decodeRunEvents(text ? [text] : []);
+      return;
+    }
+    yield* decodeRunEvents(readTextChunks(res.body.getReader()));
+  }
+
+  /** One page of a run's version-ascending snapshot summaries. */
+  async getRunHistory(runId: string, opts: PageOptions = {}): Promise<RunHistoryPage> {
+    const res = await this.request('GET', '/runs/{run_id}/history', {
+      pathParams: { run_id: runId },
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
+    return (await res.json()) as RunHistoryPage;
+  }
+
+  // --- Approvals ---
+
+  /** One page of runs paused awaiting a decision (newest first). */
+  async listApprovals(opts: PageOptions & { tenantId?: string } = {}): Promise<ApprovalPage> {
+    const res = await this.request('GET', '/approvals', {
+      query: { tenant_id: opts.tenantId, limit: opts.limit, cursor: opts.cursor },
+    });
+    return (await res.json()) as ApprovalPage;
+  }
+
+  /**
+   * Record an approve/deny decision; `approver` is a display label only.
+   * Sent with an `Idempotency-Key` (auto-generated unless given) and never
+   * re-sent after a timeout or 5xx — retry with the same key instead.
+   */
+  async decideApproval(
+    runId: string,
+    decision: ApprovalDecisionRequest,
+    opts: { idempotencyKey?: string } = {}
+  ): Promise<ApprovalDecisionResult> {
+    const res = await this.request('POST', '/approvals/{run_id}/decision', {
+      pathParams: { run_id: runId },
+      body: decision,
+      idempotencyKey: opts.idempotencyKey ?? crypto.randomUUID(),
+      unsafe: true,
+    });
+    return (await res.json()) as ApprovalDecisionResult;
+  }
+
+  /**
+   * Resume a checkpointed run so the approval gate consumes the decision.
+   *
+   * The server runs the resumed agent loop inside this request, so the call
+   * waits up to `timeoutMs` (default 660000). It carries an `Idempotency-Key`
+   * and is never re-sent after a timeout or 5xx — the loop may still be
+   * running; retry with the same `idempotencyKey`.
+   */
+  async resumeRun(
+    runId: string,
+    opts: { timeoutMs?: number; idempotencyKey?: string } = {}
+  ): Promise<RunResumeResult> {
+    const res = await this.request('POST', '/approvals/{run_id}/resume', {
+      pathParams: { run_id: runId },
+      idempotencyKey: opts.idempotencyKey ?? crypto.randomUUID(),
+      unsafe: true,
+      timeoutMs: opts.timeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS,
+    });
+    return (await res.json()) as RunResumeResult;
+  }
+
+  // --- Webhooks ---
+
+  /** Register an endpoint (`webhooks:write`); the signing secret is returned once. */
+  async createWebhook(
+    webhook: WebhookCreateRequest,
+    idempotencyKey?: string
+  ): Promise<WebhookCreated> {
+    const res = await this.request('POST', '/webhooks', {
+      body: { event_types: ['*'], ...webhook },
+      idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
+    });
+    return (await res.json()) as WebhookCreated;
+  }
+
+  /** One page of the tenant's endpoints (`webhooks:read`). */
+  async listWebhooks(opts: PageOptions = {}): Promise<WebhookPage> {
+    const res = await this.request('GET', '/webhooks', {
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
+    return (await res.json()) as WebhookPage;
+  }
+
+  /** Delete an endpoint (`webhooks:write`). */
+  async deleteWebhook(endpointId: string): Promise<WebhookDeleted> {
+    const res = await this.request('DELETE', '/webhooks/{endpoint_id}', {
+      pathParams: { endpoint_id: endpointId },
+    });
+    return (await res.json()) as WebhookDeleted;
+  }
+
+  /** One page of the tenant's delivery records (`webhooks:read`). */
+  async listWebhookDeliveries(opts: PageOptions = {}): Promise<WebhookDeliveryPage> {
+    const res = await this.request('GET', '/webhooks/deliveries', {
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
+    return (await res.json()) as WebhookDeliveryPage;
+  }
+
+  /** Re-attempt a delivery (`webhooks:write`); keyed, never re-sent on timeout/5xx. */
+  async replayWebhookDelivery(
+    deliveryId: string,
+    opts: { idempotencyKey?: string } = {}
+  ): Promise<WebhookReplay> {
+    const res = await this.request('POST', '/webhooks/deliveries/{delivery_id}/replay', {
+      pathParams: { delivery_id: deliveryId },
+      idempotencyKey: opts.idempotencyKey ?? crypto.randomUUID(),
+      unsafe: true,
+    });
+    return (await res.json()) as WebhookReplay;
+  }
+
+  // --- Pagination ---
+
+  /**
+   * Yield every page of a list method, following `next_cursor`.
+   *
+   * @example
+   * ```ts
+   * for await (const page of client.iterPages((o) => client.listWebhooks(o), { limit: 50 }))
+   *   for (const ep of page.endpoints) console.log(ep.id);
+   * ```
+   */
+  iterPages<O extends PageOptions, P extends Page>(
+    fetch: (opts: O) => Promise<P>,
+    opts?: O
+  ): AsyncGenerator<P> {
+    return iterPages(fetch, opts);
   }
 }

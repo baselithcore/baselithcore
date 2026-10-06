@@ -92,8 +92,7 @@ def probe_vllm_sync(
 ) -> VLLMProbe:
     """Synchronous :func:`probe_vllm`, for code that resolves in sync paths.
 
-    Plugins that hold their own SDK client (docheck, agent_jira, wikigen,
-    dbview) resolve their endpoint synchronously; this lets them route by model
+    Plugins that hold their own SDK client resolve their endpoint synchronously; this lets them route by model
     across several vLLM servers too. Never raises.
     """
     import httpx

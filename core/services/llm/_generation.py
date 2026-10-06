@@ -17,6 +17,7 @@ from core.middleware.cost_control import (
 )
 from core.models.pricing import qualified_model_id
 from core.observability.agent_spans import PLUGIN_KEY
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import get_logger
 from core.quotas.manager import CostBudgetExceededError
 from core.services.llm._accounting import (
@@ -25,7 +26,7 @@ from core.services.llm._accounting import (
     set_usage_span_attributes,
 )
 from core.services.llm._telemetry import (
-    gen_ai_system,
+    gen_ai_provider_for,
     record_genai_metrics,
     report_tokens_to_middleware,
 )
@@ -94,7 +95,7 @@ def _build_span_attributes(
     under the ``gen_ai.baselith.*`` extension namespace."""
     attributes: dict[str, Any] = {
         "gen_ai.operation.name": "chat",
-        "gen_ai.system": gen_ai_system(service.config.provider),
+        **provider_attributes(gen_ai_provider_for(service.config)),
         "gen_ai.request.model": model,
         "gen_ai.baselith.json_mode": json_mode,
         "gen_ai.baselith.prompt_length": len(prompt),
@@ -426,7 +427,7 @@ async def generate_response(
             if service.cost_tracker:
                 service.cost_tracker.track_tokens(output_tokens, model=billing_model)
             record_genai_metrics(
-                gen_ai_system(serving_provider),
+                gen_ai_provider_for(service.config, serving_provider),
                 billing_model,
                 input_tokens=billed.input_tokens,
                 output_tokens=billed.output_tokens,

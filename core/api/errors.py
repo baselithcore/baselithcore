@@ -264,11 +264,17 @@ async def budget_exceeded_handler(
     by Starlette's ``ExceptionMiddleware`` (the innermost layer), which without
     this handler renders it as a generic 500. Registering the specific handler
     keeps every budget breach (tokens, graph queries, SQL queries) a 429.
+
+    The detail is fixed — the same text the middleware answers with. The
+    exception message carries the configured thresholds ("SQL query limit
+    exceeded: 51/50"): operator information, logged here, not a caller's.
     """
+    logger.warning("budget_exceeded", extra={"reason": str(exc)})
     return problem_response(
         status_code=429,
         code="budget_exceeded",
-        detail=str(exc) or "Request cost budget exceeded.",
+        title="Quota exceeded",
+        detail="Request budget exceeded for this deployment.",
         error_type=exc.__class__.__name__,
         instance=request.url.path,
     )

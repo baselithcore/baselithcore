@@ -25,7 +25,7 @@ async def _sse_app(scope, receive, send) -> None:
 def _scope(accept: bytes) -> dict:
     return {
         "type": "http",
-        "path": "/api/baselithcontrol/stream",
+        "path": "/api/control_panel/stream",
         "headers": [(b"accept", accept)],
     }
 
@@ -170,7 +170,7 @@ async def _heartbeat_app(scope, receive, send) -> None:
 def _gzip_scope() -> dict:
     return {
         "type": "http",
-        "path": "/docheck/api/v1/policies/ingest/document/stream",
+        "path": "/doc_review/api/v1/policies/ingest/document/stream",
         "headers": [(b"accept", b"*/*"), (b"accept-encoding", b"gzip, deflate, br")],
     }
 

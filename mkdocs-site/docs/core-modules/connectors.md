@@ -290,7 +290,13 @@ def get_mcp_tools(self) -> list[dict]:
 ```
 
 Both carry the action's autonomy `category`, so the approval gate applies. An
-action that declares no category is gated as `destructive`.
+action that declares no category is gated as `destructive`. That default stays
+recognisably *undeclared* (`core.orchestration._categories.UNDECLARED_DESTRUCTIVE`,
+equal to the string `"destructive"` everywhere), so a standalone typed `Agent`
+— which refuses only tools explicitly declared destructive (see
+[Agent › Safe defaults](agent.md#safe-defaults-for-a-standalone-run)) — still
+runs it. Write `category="destructive"` on the `ActionSpec` to have such an
+agent refuse the action without an approval policy.
 
 ## DORA register
 

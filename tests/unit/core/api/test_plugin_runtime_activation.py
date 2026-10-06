@@ -1,9 +1,9 @@
 """Transitive dependency auto-activation in :class:`PluginRuntimeHooks`.
 
 Regression: lazy runtime activation enabled a plugin's *direct* dependency but
-not that dependency's *own* dependencies. A plugin depending on ``resto-graph``
+not that dependency's *own* dependencies. A plugin depending on ``menu-graph``
 (which depends on the ``document-sources`` infra plugin) failed with
-"requires document-sources which is not loaded", because ``resto-graph`` was
+"requires document-sources which is not loaded", because ``menu-graph`` was
 enabled while ``document-sources`` was still dormant. Activation must recurse so
 transitive infra deps come up first.
 """
@@ -71,30 +71,30 @@ def _hooks(graph: dict[str, dict[str, str]]) -> tuple[PluginRuntimeHooks, _HotRe
 
 @pytest.mark.asyncio
 async def test_transitive_dependency_activation_order() -> None:
-    # resto-service -> resto-graph -> document-sources
+    # menu-service -> menu-graph -> document-sources
     graph = {
-        "resto-service": {"resto-graph": ">=1.0.0"},
-        "resto-graph": {"document-sources": ">=1.0.0"},
+        "menu-service": {"menu-graph": ">=1.0.0"},
+        "menu-graph": {"document-sources": ">=1.0.0"},
         "document-sources": {},
     }
     hooks, hot = _hooks(graph)
 
-    assert await hooks.activate_plugin_for_runtime("resto-service") is True
+    assert await hooks.activate_plugin_for_runtime("menu-service") is True
     # Dependency enabled before dependent, all the way down the chain.
-    assert hot.enabled == ["document-sources", "resto-graph", "resto-service"]
+    assert hot.enabled == ["document-sources", "menu-graph", "menu-service"]
 
 
 @pytest.mark.asyncio
 async def test_already_active_dependency_not_reenabled() -> None:
     graph = {
-        "resto-graph": {"document-sources": ">=1.0.0"},
+        "menu-graph": {"document-sources": ">=1.0.0"},
         "document-sources": {},
     }
     hooks, hot = _hooks(graph)
     hooks._lifecycle.states["document-sources"] = PluginState.ACTIVE
 
-    assert await hooks.activate_plugin_for_runtime("resto-graph") is True
-    assert hot.enabled == ["resto-graph"]  # doc-sources already up, not re-enabled
+    assert await hooks.activate_plugin_for_runtime("menu-graph") is True
+    assert hot.enabled == ["menu-graph"]  # doc-sources already up, not re-enabled
 
 
 @pytest.mark.asyncio
@@ -112,26 +112,26 @@ async def test_disabled_dependency_is_not_auto_activated() -> None:
     # ``secret-plugin`` is absent from discovery (operator set ``enabled:
     # false``, so ``discover_plugins`` skipped it). Activating a dependent must
     # fail closed and NEVER enable the disabled dependency.
-    graph = {"resto-service": {"secret-plugin": ">=1.0.0"}}  # secret-plugin absent
+    graph = {"menu-service": {"secret-plugin": ">=1.0.0"}}  # secret-plugin absent
     hooks, hot = _hooks(graph)
 
-    assert await hooks.activate_plugin_for_runtime("resto-service") is False
+    assert await hooks.activate_plugin_for_runtime("menu-service") is False
     assert "secret-plugin" not in hot.enabled
     assert hot.enabled == []  # dependent not enabled either — dep failed
 
 
 @pytest.mark.asyncio
 async def test_transitive_disabled_dependency_fails_closed() -> None:
-    # resto-service -> resto-graph -> document-sources(disabled/absent).
+    # menu-service -> menu-graph -> document-sources(disabled/absent).
     # The whole chain must refuse: no plugin in the chain gets enabled.
     graph = {
-        "resto-service": {"resto-graph": ">=1.0.0"},
-        "resto-graph": {"document-sources": ">=1.0.0"},
+        "menu-service": {"menu-graph": ">=1.0.0"},
+        "menu-graph": {"document-sources": ">=1.0.0"},
         # document-sources intentionally absent from discovery
     }
     hooks, hot = _hooks(graph)
 
-    assert await hooks.activate_plugin_for_runtime("resto-service") is False
+    assert await hooks.activate_plugin_for_runtime("menu-service") is False
     assert hot.enabled == []
 
 

@@ -154,6 +154,15 @@ query (with a query prompt/prefix) and as a document are different vectors,
 and because a changed `BASELITH_EMBEDDING_QUERY_PREFIX` must not serve a
 vector embedded under the old one.
 
+### Embedding span attributes
+
+Each embedding call runs inside an OpenTelemetry GenAI span
+(`gen_ai.operation.name=embeddings`). The provider is reported as
+`gen_ai.provider.name`, the current semantic-conventions key; the deprecated
+`gen_ai.system` is still emitted with the same value for one deprecation
+window. See
+[Observability › GenAI semantic conventions](observability-module.md#genai-semantic-conventions-genai_semconvpy).
+
 ### Query and document sides
 
 Asymmetric retrieval models embed the search side differently from the

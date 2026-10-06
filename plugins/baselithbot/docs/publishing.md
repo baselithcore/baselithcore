@@ -194,45 +194,50 @@ record, clients choose upgrade cadence.
 
 ## 8. Keeping the extracted repo in sync with `baselithcore`
 
-**Canonical model — `git subtree split`.** The monorepo
+**Canonical model — snapshot publishing.** The monorepo
 (`baselithcore`) is the authoritative source of truth for
 Baselithbot; the standalone repo
 (`plugin-baselithbot`) is a derived publish target for
 marketplace consumers. **All edits land in the monorepo first**, then
-the subtree is split and pushed. This preserves commit history,
-integration coverage (core version bumps exercise
+the plugin directory is published to the standalone repo as a
+snapshot commit. This keeps integration coverage (core version bumps exercise
 `tests/plugins/baselithbot/` + `tests/unit/plugins_tests/test_baselithbot_*`
-on every CI run), and the framework CI gates
+on every CI run) and the framework CI gates
 (`scripts/check_official_plugin_typing.py`,
 `scripts/check_architecture_boundaries.py`) that allowlist the plugin.
+
+Each publication is one new commit whose tree is exactly
+`plugins/baselithbot/` at the monorepo `HEAD` and whose single parent is
+the standalone repo's current tip, so every push is a plain fast-forward
+and no force push is ever needed. The standalone repo carries no
+monorepo history: its history begins with the snapshot of 2026-10-06, and
+each later commit is titled `Publish baselithbot from monorepo <sha>`.
 
 Publish cadence:
 
 ```bash
 cd /path/to/baselithcore
 
-# 1. Split a fresh branch reflecting the current monorepo HEAD.
-git subtree split -P plugins/baselithbot -b baselithbot-split
+# 1. Build one snapshot commit: the plugin tree at HEAD on top of the
+#    standalone repo's tip (nothing to do when the trees are equal).
+git fetch git@github.com:baselithcore/plugin-baselithbot.git main
+tip=$(git rev-parse FETCH_HEAD)
+tree=$(git rev-parse HEAD:plugins/baselithbot)
+[ "$tree" = "$(git rev-parse "$tip^{tree}")" ] || {
+  snap=$(git commit-tree "$tree" -p "$tip" \
+    -m "Publish baselithbot from monorepo $(git rev-parse --short HEAD)")
+  git push git@github.com:baselithcore/plugin-baselithbot.git "$snap:refs/heads/main"
+}
 
-# 2. Push to the standalone repo's main (force-with-lease — the split
-#    rewrites commit SHAs; the standalone main is output-only, never
-#    edited by hand).
-git push --force-with-lease \
-    git@github.com:<user>/plugin-baselithbot.git \
-    baselithbot-split:main
-
-# 3. Delete the throwaway split branch.
-git branch -D baselithbot-split
-
-# 4. In the standalone repo, tag + publish to the marketplace
+# 2. In the standalone repo, tag + publish to the marketplace
 #    (see §5–§6 above).
 ```
 
-Golden rule: **never edit the standalone repo directly**. Any commit
-landing there (outside the subtree push) will diverge and be overwritten
-by the next `--force-with-lease`. Issue triage and PRs can live on the
+Golden rule for Baselithbot: **never edit the standalone repo directly**. A
+commit landing there outside a snapshot publication is never imported back
+and is superseded by the next snapshot. Issue triage and PRs can live on the
 standalone repo (marketplace-visible), but the fix merges into
-`baselithcore` and re-propagates via subtree.
+`baselithcore` and reaches the standalone repo with the next snapshot.
 
 ### Discouraged — Git submodule
 
@@ -242,7 +247,7 @@ evaluated and rejected. The submodule dance (`git submodule update
 ergonomics the monorepo depends on, and the framework CI gates
 (`scripts/check_official_plugin_typing.py`) would have to be rewired to
 clone the submodule before running. Do not switch strategies mid-flight
-— mixing subtree and submodule will diverge histories.
+— mixing snapshot publishing and a submodule will diverge histories.
 
 ## 9. CI gates that still apply
 

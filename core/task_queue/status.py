@@ -20,6 +20,8 @@ class TaskStatus(str, Enum):
     PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"
+    #: Non-terminal: an attempt failed and RQ will run the job again.
+    RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -204,6 +206,21 @@ class TaskTracker:
     def mark_failed(self, task_id: str, error: str) -> None:
         """Mark task as failed."""
         self.set_status(task_id, TaskStatus.FAILED, message="Task failed", error=error)
+
+    def mark_retrying(self, task_id: str, error: str, retries_left: int) -> None:
+        """Record a failed attempt that the queue will retry (non-terminal).
+
+        Args:
+            task_id: Job id the record belongs to.
+            error: Description of the attempt's failure.
+            retries_left: Attempts the queue still has after this one.
+        """
+        self.set_status(
+            task_id,
+            TaskStatus.RETRYING,
+            message=f"Attempt failed; retrying ({retries_left} left)",
+            error=error,
+        )
 
 
 # Lazy singleton instance

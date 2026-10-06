@@ -493,13 +493,12 @@ installed plugins' manifests cannot be read), never as an error.
 
 **Plugin compatibility.** The checklist lists installed plugins whose
 `min_core_version`/`max_core_version` exclude the target release, so they are
-updated or removed first. The bounds are compared with the version
-`core._version` reports (see the plugin loader); in the core project that is the
-public core release, so the check is exact. A downstream distribution marks its
-`core/_version.py` with `__distribution__` and versions it independently, so
-its plugins' bounds do not speak about the public core release: there the check
-is reported as not computed (`plugins.checked: false`), rather than flagging
-every plugin.
+updated or removed first. Plugins declare those bounds against the public
+core release (`CORE_VERSION` in `core/_core_version.py`) in every distribution,
+the same number the plugin loader's compatibility gate compares with, so the
+target compares with them directly and the check is exact in a downstream
+distribution too. It is reported as not computed (`plugins.checked: false`)
+only when the installed plugins' manifests cannot be read.
 
 **Plugin updates.** Each available plugin candidate carries `install`
 (`method`, `guide_url`, `automated: false`): the instructions describe how

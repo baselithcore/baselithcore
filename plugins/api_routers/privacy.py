@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from core.auth.manager import AuthManager
@@ -18,6 +19,13 @@ from core.auth.types import AuthUser
 from core.middleware import require_user
 from core.observability.logging import get_logger
 from core.privacy.service import get_data_subject_service
+from core.privacy.types import SubjectExport
+from plugins.api_routers.schemas import (
+    ErasureResult,
+    PrivacyProviders,
+    RetentionResult,
+    problem_responses,
+)
 
 logger = get_logger(__name__)
 
@@ -47,7 +55,11 @@ class RetentionRequest(BaseModel):
     older_than_days: int = Field(..., ge=0)
 
 
-@router.get("/providers")
+@router.get(
+    "/providers",
+    response_model=PrivacyProviders,
+    responses=problem_responses(401, 403),
+)
 async def list_providers(request: Request) -> dict[str, Any]:
     """List the registered data providers (requires ``privacy:manage``)."""
     _enforce(request)
@@ -55,16 +67,26 @@ async def list_providers(request: Request) -> dict[str, Any]:
     return {"providers": [p.name for p in service.registry.all()]}
 
 
-@router.post("/export")
+@router.post(
+    "/export",
+    response_model=SubjectExport,
+    responses=problem_responses(401, 403, 422),
+)
 async def export_subject(request: Request, payload: SubjectRequest) -> dict[str, Any]:
     """Export all data held for a subject (right to access / portability)."""
     _enforce(request)
     service = get_data_subject_service()
     bundle = await service.export_subject(payload.subject_id)
-    return bundle.model_dump()
+    # Provider records are arbitrary: encode them as the route always did
+    # (see the schemas module docstring), not with pydantic's Any rules.
+    return jsonable_encoder(bundle.model_dump())
 
 
-@router.post("/erase")
+@router.post(
+    "/erase",
+    response_model=ErasureResult,
+    responses=problem_responses(401, 403, 422),
+)
 async def erase_subject(request: Request, payload: SubjectRequest) -> dict[str, Any]:
     """Erase all data held for a subject (right to erasure)."""
     _enforce(request)
@@ -73,7 +95,12 @@ async def erase_subject(request: Request, payload: SubjectRequest) -> dict[str, 
     return {**report.model_dump(), "total": report.total}
 
 
-@router.post("/retention/sweep", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/retention/sweep",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=RetentionResult,
+    responses=problem_responses(401, 403, 422),
+)
 async def retention_sweep(
     request: Request, payload: RetentionRequest
 ) -> dict[str, Any]:

@@ -62,6 +62,7 @@ core/middleware/
 ├── csrf.py                # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
 ├── plugin_activation.py   # PluginActivationMiddleware (pure ASGI)
 ├── plugin_context.py      # PluginContextMiddleware (pure ASGI)
+├── api_deprecation.py     # APIDeprecationMiddleware (pure ASGI, RFC 9745 Deprecation + successor Link)
 ├── _plugin_route.py       # Per-request memo of the plugin route match (shared by the two above)
 ├── tenant.py              # TenantMiddleware
 ├── quota.py               # QuotaMiddleware
@@ -99,6 +100,7 @@ from core.middleware import (
 ```
 
 `RequestIdMiddleware` is imported from `core.middleware.observability`;
+`APIDeprecationMiddleware` from `core.middleware.api_deprecation`;
 `StaticCacheMiddleware` and `SmartGzipMiddleware` from
 `core.middleware.optimization`.
 
@@ -119,7 +121,7 @@ adds, in order:
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` (header pre-encoded once at construction) |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request — added before Tenant/CORS so it runs *inside* them (tenant context already set) |
-| `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request; a plugin whose activation failed is answered `503` + `Retry-After` for 60 s without a new attempt |
+| `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request; a plugin whose activation failed is answered `503` + `Retry-After` for 60 s without a new attempt (an RFC 9457 problem document, `code: "plugin_unavailable"`) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
@@ -130,6 +132,7 @@ adds, in order:
 | `UnhandledErrorMiddleware` | `unhandled_error.py` | Catch-all `500`: renders an unhandled exception as RFC 9457 `problem+json` *inside* CORS, `SecurityHeaders` and `RequestId`, then re-raises — see [below](#unhandlederrormiddleware) |
 | `CORSMiddleware` | FastAPI | CORS, outer to every perimeter guard so a browser can read their refusals (credentials disabled for wildcard origins; preflight answers cacheable for `max_age=7200`, the ceiling Chromium honours, instead of Starlette's 600s — see below) |
 | `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP — registered near-outermost so they land on **every** response, including short-circuits from the inner guards |
+| `APIDeprecationMiddleware` | `api_deprecation.py` | Add `Deprecation: @<date>` (RFC 9745) and `Link: </v1/…>; rel="successor-version"` to responses of the deprecated unprefixed API paths — see [below](#apideprecationmiddleware) |
 | `RequestIdMiddleware` | `observability.py` | Propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it and every inner log line can bind it |
 | `HTTPMetricsMiddleware` | `http_metrics.py` | Registered **last** → **outermost**: RED metrics measuring true end-to-end latency and capturing every response status |
 
@@ -326,8 +329,9 @@ strict and docs header lists are cached independently after first use.
 function guard two different attacks.
 
 **HTTP (CSRF).** Only `POST`/`PUT`/`PATCH`/`DELETE` are checked. An `Origin`
-that is present, not allowlisted and not same-origin ⇒ `403`
-(`{"detail": "CSRF check failed: origin not allowed."}`). The `*` wildcard
+that is present, not allowlisted and not same-origin ⇒ `403`, an RFC 9457
+problem document with `code: "csrf_origin_rejected"` (and the request's
+`request_id`). The `*` wildcard
 accepts any explicit `Origin`. **Same-origin** requests always pass without an
 allowlist entry — `Sec-Fetch-Site: same-origin`, or an `Origin` whose scheme,
 host and port equal the request's own (ASGI scheme + `Host`; `ws`/`wss` map to
@@ -394,14 +398,43 @@ stats = cost_controller.get_stats()
 
 `CostController` raises `BudgetExceededError` when a budget is exceeded
 (`agent_max_tokens`, `graph_query_limit`, `graph_max_hops`). The middleware
-catches it and, if the response has not started, returns `429` with a
-`Quota exceeded` body. Limits are sourced from app/storage config; the global
+catches it and, if the response has not started, returns `429` as an RFC 9457
+problem document (`code: "budget_exceeded"`, `title: "Quota exceeded"`, a
+fixed `detail` that never names the configured thresholds, the request's
+`request_id`, and `Retry-After` when the exception carries a `retry_after`
+hint). The `budget_exceeded_handler` in `core/api/errors.py` answers a breach
+raised deep inside a route with the same document. Limits are sourced from app/storage config; the global
 `cost_controller` instance is constructed at import time.
 
 That `429` comes *after* the handler has spent its budget, so before answering
 the middleware sets the ASGI scope key `baselith.work_done`
 (`WORK_DONE_SCOPE_KEY`). The outer `QuotaMiddleware` reads it and does **not**
 refund the quota unit, although `429` is otherwise a refunded status.
+
+---
+
+## APIDeprecationMiddleware
+
+`core/middleware/api_deprecation.py`. Every API router is mounted under `/v1`
+and, for backward compatibility, at its unprefixed path
+(`core/api/versioning.py`: `versioned_routers` / `legacy_include_kwargs`). The
+unprefixed copy is included with `deprecated=True` (OpenAPI) **and** a marker
+dependency, `mark_deprecated_path`, that sets the scope key
+`baselith.deprecated_api_path`. At `http.response.start` this middleware reads
+that key and adds:
+
+```http
+Deprecation: @1791072000
+Link: </v1/chat>; rel="successor-version"
+```
+
+A dependency, not the matched route's `deprecated` attribute: FastAPI keeps an
+include-level `deprecated=True` on a private per-include context, so the route
+object a middleware sees says `None`. Because the marker runs with the route's
+dependencies, every outcome of a deprecated route — success, `HTTPException`,
+validation error, streaming — carries the headers; a request that never
+reached one (a `404`, an outer guard's refusal, any `/v1/...` path) does not.
+With `API_V1_ENABLED=false` nothing is versioned and nothing is marked.
 
 ---
 
@@ -450,7 +483,10 @@ uncached; nothing is stored unless the request **matched a route**; `5xx`,
 `404`/`405` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
 stored; a duplicate still in flight gets `409`; a retry reusing the key with a
 **different request body or query string** gets `422`; and the whole thing is fail-open if
-Redis is down.
+Redis is down. Every refusal is an RFC 9457 problem document with a stable
+`code` — `idempotency_key_invalid` (`400`, key over the length cap),
+`idempotency_key_in_flight` (`409`), `idempotency_key_mismatch` (`422`) — and
+the request's `request_id`.
 
 **Tee, not buffer.** Capture never delays the response: **every** response is
 forwarded frame by frame as the app produces it — the start frame and all

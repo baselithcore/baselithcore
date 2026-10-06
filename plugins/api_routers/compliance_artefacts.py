@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from core.api.pagination import PageParams, page_params, paginated
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,10 +45,10 @@ def _unprocessable(exc: Exception) -> HTTPException:
 class DraftInstructionsRequest(BaseModel):
     """Draft Art. 13 instructions from the records already on file."""
 
-    system_id: str = Field(..., min_length=1)
-    risk_file_id: str | None = None
-    monitoring_plan_id: str | None = None
-    provider_contact: str | None = None
+    system_id: str = Field(..., min_length=1, max_length=200)
+    risk_file_id: str | None = Field(default=None, max_length=200)
+    monitoring_plan_id: str | None = Field(default=None, max_length=200)
+    provider_contact: str | None = Field(default=None, max_length=500)
 
 
 # === Art. 9 risk management =================================================
@@ -55,7 +56,10 @@ class DraftInstructionsRequest(BaseModel):
 
 @router.get("/risk-management")
 async def list_risk_files(
-    request: Request, system_id: str | None = None, incomplete_only: bool = False
+    request: Request,
+    system_id: str | None = None,
+    incomplete_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Art. 9 risk files, with missing elements and open risks named."""
     _enforce(request)
@@ -69,10 +73,12 @@ async def list_risk_files(
     else:
         files = await service.list_files()
     overdue = {f.id for f in await service.overdue_reviews()}
-    return {
-        "files": [{**f.to_dict(), "review_overdue": f.id in overdue} for f in files],
-        "count": len(files),
-    }
+    return paginated(
+        files,
+        page,
+        key="files",
+        serialize=lambda f: {**f.to_dict(), "review_overdue": f.id in overdue},
+    )
 
 
 @router.get("/risk-management/{file_id}")
@@ -112,7 +118,10 @@ async def review_risk_file(request: Request, file_id: str) -> dict[str, Any]:
 
 @router.get("/instructions")
 async def list_instructions(
-    request: Request, system_id: str | None = None, incomplete_only: bool = False
+    request: Request,
+    system_id: str | None = None,
+    incomplete_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Art. 13 instructions, with the missing elements named."""
     _enforce(request)
@@ -125,7 +134,7 @@ async def list_instructions(
         records = await service.for_system(system_id)
     else:
         records = await service.list_instructions()
-    return {"instructions": [i.to_dict() for i in records], "count": len(records)}
+    return paginated(records, page, key="instructions", serialize=lambda i: i.to_dict())
 
 
 @router.get("/instructions/{instructions_id}")
@@ -215,7 +224,10 @@ async def issue_instructions(request: Request, instructions_id: str) -> dict[str
 
 @router.get("/dpia")
 async def list_dpia(
-    request: Request, incomplete_only: bool = False, blocked_only: bool = False
+    request: Request,
+    incomplete_only: bool = False,
+    blocked_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List DPIAs. ``blocked_only`` returns those that may not start processing."""
     _enforce(request)
@@ -228,10 +240,9 @@ async def list_dpia(
         assessments = await service.incomplete()
     else:
         assessments = await service.list_assessments()
-    return {
-        "assessments": [a.to_dict() for a in assessments],
-        "count": len(assessments),
-    }
+    return paginated(
+        assessments, page, key="assessments", serialize=lambda a: a.to_dict()
+    )
 
 
 @router.post("/dpia/{assessment_id}/complete")
@@ -274,7 +285,9 @@ async def record_prior_consultation(
 
 @router.get("/automated-decisions")
 async def list_automated_decisions(
-    request: Request, non_compliant_only: bool = False
+    request: Request,
+    non_compliant_only: bool = False,
+    page: PageParams = Depends(page_params),
 ) -> dict[str, Any]:
     """List Art. 22 decision-making activities and their safeguard posture."""
     _enforce(request)
@@ -283,8 +296,9 @@ async def list_automated_decisions(
     registry = get_automated_decision_registry()
     activities = registry.non_compliant() if non_compliant_only else registry.all()
     return {
-        "activities": [a.to_dict() for a in activities],
-        "count": len(activities),
+        **paginated(
+            activities, page, key="activities", serialize=lambda a: a.to_dict()
+        ),
         "in_scope": len(registry.in_scope()),
     }
 

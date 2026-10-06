@@ -243,7 +243,7 @@ class PluginMetadata:
         self.extensions: dict[str, Any] = dict(extensions or {})
 
         # Optional named LLM sub-policies for a plugin with more than one
-        # distinct LLM pipeline (e.g. wikigen: "ingestion" vs "chat"). Each entry
+        # distinct LLM pipeline (e.g. a wiki plugin: "ingestion" vs "chat"). Each entry
         # is ``{"id": <stable-key>, "label": <display>}``; the central LLM-policy
         # console renders one provider/model selector per declared scope (in
         # addition to the plugin default), and the plugin resolves each pipeline

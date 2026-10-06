@@ -17,7 +17,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS` | `false` | API | Allow replay for callers presenting **no** credential, bucketed per source address. Off by default: such callers would otherwise share one bucket and could replay each other's responses (see below). |
 | `UVICORN_KEEP_ALIVE` | `75` | API (all three entry points) | Seconds an idle client connection is kept open. uvicorn's own default is 5s — *shorter* than the upstream idle timeout of nginx, ALB and Envoy (60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep it longer than your proxy's. |
-| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30` | API (all three entry points) | Seconds to drain in-flight requests and streams on `SIGTERM` before lifespan teardown. Keep it **below** the orchestrator's termination grace (Kubernetes default 30s; the Helm chart sets 45s). |
+| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30` | API (all three entry points) | Seconds to drain in-flight requests and streams on `SIGTERM` before lifespan teardown. Keep `preStop + this + 40s` (the teardown deadline) within the orchestrator's termination grace — the Helm chart sets 80s for the default 30s; see [Connection-pool drain on shutdown](#connection-pool-drain-on-shutdown). |
 | `UVICORN_LIMIT_CONCURRENCY` | unset (no limit) | API (all three entry points) | Load shedding: above this many concurrent connections/tasks uvicorn answers `503` immediately instead of queueing work until the client or the proxy times out — an explicit "over capacity" the proxy and the HPA can act on, where unbounded queueing shows up as latency collapse across every request. Size it from a load test against one replica; leave unset to keep uvicorn's default. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
@@ -261,13 +261,43 @@ upsert.
 The teardown is an ordered list of named steps (`core.api._shutdown`):
 runtime services, orchestrator drain, background tasks, retention and
 regulatory subsystems, plugins, lazy registry, shared clients, usage sinks,
-sync inference, rate limiter, OpenTelemetry flush, bootstrapper, then the
-Postgres and Redis pools. `run_shutdown_steps()` bounds each awaitable step
-(15 s by default; 30 s for the orchestrator drain and plugin shutdown), logs a
-failure as `shutdown_step_failed step=<name>` with the traceback, and always
-moves on — one failing step used to skip every step after it, leaving pools
-undrained and telemetry unflushed. The shutdown log line names any failed
-steps.
+pending audit events, sync inference, rate limiter, OpenTelemetry flush,
+bootstrapper, then the Postgres and Redis pools. `run_shutdown_steps()` bounds
+each awaitable step (15 s by default; 30 s for the orchestrator drain and
+plugin shutdown), logs a failure as `shutdown_step_failed step=<name>` with
+the traceback, and always moves on — one failing step used to skip every step
+after it, leaving pools undrained and telemetry unflushed. The shutdown log
+line names any failed steps.
+
+**One deadline for the whole teardown.** Per-step timeouts alone added up to
+minutes, far past the pod's grace, so a slow drain or plugin shutdown used the
+time and SIGKILL landed before the flushes. The lifespan now runs the steps
+under `TEARDOWN_BUDGET_S` (40 s). The flushes that lose data when skipped —
+`usage_sinks` (6 s), `audit_events` (4 s), `telemetry` (5 s), `db_pool` (3 s)
+and `redis_pools` (2 s) — are **critical** and declare a reserve; every step
+before them is clipped so those 20 s stay available, and a non-critical step
+reached with no budget left is skipped and logged as
+`shutdown_step_skipped step=<name> reason=budget`. A critical step always gets
+at least its reserve, even after a synchronous step overran. The OpenTelemetry
+flush runs off-loop (`asyncio.to_thread`), so a collector that stopped
+answering is bounded like every other step. `audit_events` awaits the
+fire-and-forget `audit_emit()` writes still in flight
+(`flush_pending_audit_events`) before the pools close; what is still pending
+after its timeout is cancelled and counted in `audit_flush_incomplete`.
+
+The budget the deployment has to grant, in order:
+
+| Phase | Default | Where |
+|---|---|---|
+| `preStop` sleep (endpoint removal reaches the proxies) | 5 s | Helm `deployment.yaml` |
+| HTTP drain, then readiness already 503 | 30 s | `GRACEFUL_SHUTDOWN_TIMEOUT` (`backend.py`, the image `CMD`, `core-entrypoint.sh`) |
+| Lifespan teardown | 40 s | `core.api._shutdown.TEARDOWN_BUDGET_S` |
+| **`terminationGracePeriodSeconds`** | **80 s** | Helm `values.yaml` (5 + 30 + 40, plus 5 s to exit) |
+
+A unit test (`tests/unit/helm/test_helm_chart_shutdown_budget.py`) reads all
+four from their sources and fails when the grace stops covering the sum, or
+when the three entry points disagree on the drain default. Raise
+`terminationGracePeriodSeconds` whenever you raise `GRACEFUL_SHUTDOWN_TIMEOUT`.
 
 The FastAPI lifespan shutdown explicitly closes the shared Postgres
 connection pools (`core.db.connection.close_async_pool`) and the shared Redis
@@ -343,12 +373,17 @@ alone.
 ## OpenTelemetry GenAI semantic conventions
 
 LLM spans now use the OTel
-[GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
-`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`,
-`gen_ai.request.temperature`/`max_tokens`, and
-`gen_ai.usage.input_tokens`/`output_tokens`. App-specific fields (cache hits,
+[GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai):
+`gen_ai.operation.name`, `gen_ai.provider.name` (plus the deprecated
+`gen_ai.system` for one window), `gen_ai.request.model`,
+`gen_ai.request.temperature`/`max_tokens`,
+`gen_ai.usage.input_tokens` (cached tokens included)/`output_tokens`,
+`gen_ai.usage.cache_read.input_tokens`/`cache_write.input_tokens` and
+`gen_ai.response.finish_reasons`. App-specific fields (cache hits,
 prompt length) live under the `gen_ai.baselith.*` extension namespace. Standard
-GenAI observability dashboards light up without custom mapping.
+GenAI observability dashboards light up without custom mapping. The full
+attribute table and the deprecation notes are in
+[Observability › GenAI semantic conventions](../core-modules/observability-module.md#genai-semantic-conventions-genai_semconvpy).
 
 ## 2026-07-10 performance additions
 

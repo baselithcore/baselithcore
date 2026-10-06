@@ -24,8 +24,8 @@ async def runtime():  # type: ignore[no-untyped-def]
 
 
 async def test_tenant_a_cannot_see_or_write_tenant_b(runtime: QdrantRuntime) -> None:
-    a = runtime.scoped("wikigen", "tenant-a")
-    b = runtime.scoped("wikigen", "tenant-b")
+    a = runtime.scoped("wiki_pages", "tenant-a")
+    b = runtime.scoped("wiki_pages", "tenant-b")
     await a.create_collection("docs", vectors_config=VEC)
     await b.create_collection("docs", vectors_config=VEC)
     await a.upsert("docs", [PointStruct(id=1, vector=[1.0, 0.0], payload={"who": "a"})])
@@ -43,8 +43,8 @@ async def test_tenant_a_cannot_see_or_write_tenant_b(runtime: QdrantRuntime) -> 
 
 
 async def test_other_plugin_same_tenant_is_separate(runtime: QdrantRuntime) -> None:
-    w = runtime.scoped("wikigen", "t")
-    d = runtime.scoped("docheck", "t")
+    w = runtime.scoped("wiki_pages", "t")
+    d = runtime.scoped("doc_review", "t")
     await w.create_collection("docs", vectors_config=VEC)
     assert not await d.collection_exists("docs")
     assert await d.list_collections() == []
@@ -53,14 +53,14 @@ async def test_other_plugin_same_tenant_is_separate(runtime: QdrantRuntime) -> N
 def test_names_cannot_escape_scope() -> None:
     for bad in ("../x", "a.b", "other.tenant.docs", "", "x" * 200, "a b"):
         with pytest.raises(TenantScopeError):
-            scoped_name("t", "wikigen", bad)
+            scoped_name("t", "wiki_pages", bad)
     with pytest.raises(TenantScopeError):
         scoped_name("t", "wiki.gen", "docs")
 
 
 def test_dot_in_tenant_cannot_forge_another_scope() -> None:
-    forged = scoped_name("a.wikigen", "p", "docs")
-    assert forged != scoped_name("a", "wikigen", "docs")
+    forged = scoped_name("a.wiki_pages", "p", "docs")
+    assert forged != scoped_name("a", "wiki_pages", "docs")
     assert forged.count(".") == 2  # tenant was hashed, no extra separators
     assert scoped_name("user@x.io", "p", "d") == scoped_name("user@x.io", "p", "d")
     assert scoped_name("user@x.io", "p", "d") != scoped_name("user@x.co", "p", "d")
@@ -69,7 +69,7 @@ def test_dot_in_tenant_cannot_forge_another_scope() -> None:
 @pytest.mark.parametrize("tenant", ["", "   "])
 def test_empty_tenant_fails_closed(tenant: str) -> None:
     with pytest.raises(TenantScopeError):
-        scoped_name(tenant, "wikigen", "docs")
+        scoped_name(tenant, "wiki_pages", "docs")
 
 
 def test_runtime_refuses_embedded_and_missing_url() -> None:

@@ -44,6 +44,20 @@ class TestHistory:
         assert body["run_id"] == "run-1"
         assert [s["version"] for s in body["history"]] == [1, 2]
 
+    def test_history_is_cursor_paginated(self, client, store):
+        anyio.run(lambda: _seed_run(store))
+        first = client.get("/runs/run-1/history", params={"limit": 1}).json()
+        assert [s["version"] for s in first["history"]] == [1]
+        assert first["has_more"] is True and first["count"] == 1
+        second = client.get(
+            "/runs/run-1/history", params={"limit": 1, "cursor": first["next_cursor"]}
+        ).json()
+        assert [s["version"] for s in second["history"]] == [2]
+        assert second["has_more"] is False and second["next_cursor"] is None
+        assert (
+            client.get("/runs/run-1/history", params={"limit": 500}).status_code == 422
+        )
+
     def test_404_for_unknown_run(self, client):
         resp = client.get("/runs/nope/history")
         assert resp.status_code == 404
@@ -116,6 +130,41 @@ class TestEventStream:
         assert "event: tool_call" in body
         assert "event: final" in body
         assert '"response":"done"' in body.replace(" ", "")
+        # Every frame carries its AgentEvent id as the SSE id.
+        frames = [f for f in body.split("\n\n") if f.startswith("id: ")]
+        assert len(frames) == 2
+        assert all(f.split("\n")[1].startswith("event: ") for f in frames)
+
+
+class TestEventStreamKeepaliveAndDisconnect:
+    @pytest.mark.asyncio
+    async def test_quiet_run_gets_keepalives_then_disconnect_unsubscribes(
+        self, monkeypatch
+    ):
+        from core.orchestration.run_events import RunEventStream
+
+        stream = RunEventStream()
+        monkeypatch.setattr(runs_module, "get_run_event_stream", lambda: stream)
+        monkeypatch.setattr(runs_module, "heartbeat_seconds", lambda: 0.01)
+
+        disconnected = False
+        checks = 0
+
+        class _Req:
+            async def is_disconnected(self) -> bool:
+                nonlocal checks
+                checks += 1
+                return disconnected
+
+        response = await runs_module.run_events("quiet", _Req())
+        frames: list[str] = []
+        async for frame in response.body_iterator:
+            frames.append(frame)
+            if len(frames) == 3:
+                disconnected = True
+        assert frames[:3] == [": keepalive\n\n"] * 3
+        # The client went away: the subscription was released, not leaked.
+        assert "quiet" not in stream._subscribers
 
 
 class TestFork:

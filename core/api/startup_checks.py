@@ -20,6 +20,10 @@ from core.api._regulatory_startup import (
     stop_regulatory_subsystems,
     stop_retention_scheduler,
 )
+from core.api._schema_check import (
+    SchemaRevisionMismatchError,
+    check_schema_revision,
+)
 from core.config import get_storage_config
 from core.config.environment import is_production_env
 from core.observability.logging import get_logger
@@ -295,15 +299,48 @@ async def _enforce_rls_posture(postgres_reachable: bool) -> None:
         )
 
 
+#: Deadlines for the startup Redis ping. Without them a blackholed Redis (SYN
+#: dropped by a firewall, or a server that accepts and never answers) stalled
+#: boot for the OS TCP timeout — minutes — before the check could even report.
+STARTUP_REDIS_CONNECT_TIMEOUT_S = 2.0
+STARTUP_REDIS_SOCKET_TIMEOUT_S = 2.0
+#: Overall cap, client-side retries included.
+STARTUP_REDIS_PROBE_TIMEOUT_S = 5.0
+
+
+async def _ping_redis(url: str) -> None:
+    """Ping Redis once with short deadlines; raise when it does not answer."""
+    import asyncio
+
+    client = redis.from_url(
+        url,
+        socket_connect_timeout=STARTUP_REDIS_CONNECT_TIMEOUT_S,
+        socket_timeout=STARTUP_REDIS_SOCKET_TIMEOUT_S,
+    )
+    try:
+        async with asyncio.timeout(STARTUP_REDIS_PROBE_TIMEOUT_S):
+            await client.ping()
+    finally:
+        await client.aclose()
+
+
 async def run_startup_health_checks() -> None:
     """
     Ping critical infrastructure services at startup.
 
     Logs a WARNING (or ERROR in production) when a required service is
-    unreachable.  Does not raise — the framework uses lazy initialization
-    and individual operations will surface connection errors at call time.
-    In production a failed check is escalated to
+    unreachable. An unreachable service never raises — the framework uses
+    lazy initialization and individual operations will surface connection
+    errors at call time. In production a failed check is escalated to
     ERROR level so alerting systems can act on it.
+
+    Misconfigurations do raise: a role that bypasses row-level security, an
+    LLM preflight in strict mode, and a schema behind the packaged migration
+    head under ``DB_SCHEMA_CHECK=strict`` (the production default).
+
+    Raises:
+        SchemaRevisionMismatchError: The database answers but is not at the
+            packaged Alembic head and ``DB_SCHEMA_CHECK`` resolves to strict.
     """
     is_production = is_production_env()
     log_fn = logger.error if is_production else logger.warning
@@ -326,9 +363,7 @@ async def run_startup_health_checks() -> None:
 
     if CACHE_REDIS_URL:
         try:
-            _redis_check = redis.from_url(CACHE_REDIS_URL)
-            await _redis_check.ping()
-            await _redis_check.close()
+            await _ping_redis(CACHE_REDIS_URL)
             logger.info("✅ Startup health check: Redis OK")
         except Exception as exc:
             log_fn(
@@ -336,61 +371,12 @@ async def run_startup_health_checks() -> None:
                 type(exc).__name__,
             )
 
-    if is_production and POSTGRES_ENABLED and not postgres_reachable:
-        logger.warning("Could not verify migration status: PostgreSQL unreachable")
-    elif is_production and POSTGRES_ENABLED:
-        try:
-            import asyncio as _asyncio
-
-            from alembic.runtime.migration import MigrationContext
-            from alembic.script import ScriptDirectory
-
-            from core.db.migration_config import build_alembic_config
-
-            def _check_migrations() -> tuple[str, str]:
-                from sqlalchemy import create_engine
-
-                alembic_cfg = build_alembic_config()
-                script = ScriptDirectory.from_config(alembic_cfg)
-                head_rev: str = script.get_current_head() or "unknown"
-
-                db_url = (
-                    alembic_cfg.get_main_option("sqlalchemy.url")
-                    or get_storage_config().conninfo
-                )
-                # Force the sync psycopg (v3) driver: only psycopg3 is installed,
-                # so a bare ``postgresql://`` (defaults to psycopg2) or an async
-                # driver (``+psycopg_async`` / ``+asyncpg``) would fail to import
-                # under this sync ``create_engine``. Normalize the scheme.
-                for _scheme in (
-                    "postgresql+psycopg_async://",
-                    "postgresql+asyncpg://",
-                    "postgresql://",
-                ):
-                    if db_url.startswith(_scheme):
-                        db_url = "postgresql+psycopg://" + db_url[len(_scheme) :]
-                        break
-                engine = create_engine(db_url)
-                with engine.connect() as conn:
-                    ctx = MigrationContext.configure(conn)
-                    current_rev: str = ctx.get_current_revision() or "none"
-                engine.dispose()
-                return current_rev, head_rev
-
-            current, head = await _asyncio.to_thread(_check_migrations)
-            if current != head:
-                logger.error(
-                    "Database migrations are NOT up to date — "
-                    "current: %s, head: %s. Run `alembic upgrade head` before deploying.",
-                    current,
-                    head,
-                )
-            else:
-                logger.info(
-                    "✅ Startup health check: DB migrations up to date (%s)", current
-                )
-        except Exception as exc:
-            logger.warning("Could not verify migration status: %s", type(exc).__name__)
+    if POSTGRES_ENABLED:
+        # Raises in ``DB_SCHEMA_CHECK=strict`` (the production default) when
+        # the schema is behind the packaged head; see core.api._schema_check.
+        await check_schema_revision(
+            is_production=is_production, postgres_reachable=postgres_reachable
+        )
 
     # Which provider will actually serve, and can it. Unlike the probes above
     # this one can *stop* a rollout (strict mode), because the failure it
@@ -403,6 +389,7 @@ async def run_startup_health_checks() -> None:
 
 
 __all__ = [
+    "SchemaRevisionMismatchError",
     "check_compliance_profile",
     "register_consent_provider",
     "run_startup_health_checks",

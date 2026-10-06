@@ -105,14 +105,17 @@
     ],
     "core.agent": [
       "Agent",
+      "AgentEvent",
       "AgentOutputValidationError",
       "AgentResult",
       "AgentUsage",
       "CapabilitySelector",
       "ChatMessage",
+      "Completed",
       "CostFn",
       "Crew",
       "CrewResult",
+      "Failed",
       "GroupChat",
       "GroupChatResult",
       "LLMManagerSelector",
@@ -122,7 +125,10 @@
       "RoundRobinSelector",
       "SpeakerSelector",
       "Task",
-      "TaskResult"
+      "TaskResult",
+      "TextDelta",
+      "ToolCallFinished",
+      "ToolCallStarted"
     ],
     "core.agents": [
       "BrowserAgent",
@@ -788,6 +794,7 @@
       "Perspective"
     ],
     "core.middleware": [
+      "APIDeprecationMiddleware",
       "BudgetExceededError",
       "CSRFOriginMiddleware",
       "CostControlMiddleware",
@@ -861,6 +868,7 @@
       "metrics",
       "openinference_enabled",
       "openinference_llm_attributes",
+      "provider_attributes",
       "register_span_sink",
       "setup_telemetry",
       "shutdown_telemetry",

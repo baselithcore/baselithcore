@@ -21,44 +21,53 @@ from core.plugins.manifest_model import validate_manifest_data
 
 def test_manifest_accepts_display_name() -> None:
     model = validate_manifest_data(
-        {"name": "cv_intake", "version": "1.0.0", "display_name": "CV Intake"}
+        {"name": "resume_intake", "version": "1.0.0", "display_name": "Resume Intake"}
     )
-    assert model.display_name == "CV Intake"
-    assert model.name == "cv_intake"
+    assert model.display_name == "Resume Intake"
+    assert model.name == "resume_intake"
 
 
 def test_manifest_display_name_defaults_to_empty() -> None:
-    model = validate_manifest_data({"name": "cv_intake", "version": "1.0.0"})
+    model = validate_manifest_data({"name": "resume_intake", "version": "1.0.0"})
     assert model.display_name == ""
 
 
 def test_metadata_carries_display_name_and_leaves_name_alone() -> None:
     model = validate_manifest_data(
-        {"name": "cv_intake", "version": "1.0.0", "display_name": "  CV Intake "}
+        {
+            "name": "resume_intake",
+            "version": "1.0.0",
+            "display_name": "  Resume Intake ",
+        }
     )
     meta = PluginMetadata.from_model(model)
-    assert meta.display_name == "CV Intake"
-    assert meta.name == "cv_intake"
+    assert meta.display_name == "Resume Intake"
+    assert meta.name == "resume_intake"
 
 
 def test_metadata_without_display_name_is_empty() -> None:
-    assert PluginMetadata(name="aura", version="1.0.0").display_name == ""
+    assert PluginMetadata(name="notes", version="1.0.0").display_name == ""
 
 
 def test_to_dict_round_trips_through_the_manifest_schema() -> None:
-    meta = PluginMetadata(name="cv_intake", version="1.0.0", display_name="CV Intake")
+    meta = PluginMetadata(
+        name="resume_intake", version="1.0.0", display_name="Resume Intake"
+    )
     data = meta.to_dict()
-    assert data["display_name"] == "CV Intake"
+    assert data["display_name"] == "Resume Intake"
     again = PluginMetadata.from_model(validate_manifest_data(data))
-    assert again.display_name == "CV Intake"
+    assert again.display_name == "Resume Intake"
 
 
 @pytest.mark.parametrize(
     ("meta", "expected"),
     [
-        (SimpleNamespace(name="cv_intake", display_name="CV Intake"), "CV Intake"),
-        (SimpleNamespace(name="cv_intake", display_name=""), "Cv Intake"),
-        (SimpleNamespace(name="cv_intake", display_name="   "), "Cv Intake"),
+        (
+            SimpleNamespace(name="resume_intake", display_name="Resume Intake"),
+            "Resume Intake",
+        ),
+        (SimpleNamespace(name="resume_intake", display_name=""), "Resume Intake"),
+        (SimpleNamespace(name="resume_intake", display_name="   "), "Resume Intake"),
         (SimpleNamespace(name="coding-agent"), "Coding Agent"),
     ],
 )
@@ -68,18 +77,18 @@ def test_plugin_title_prefers_display_name(meta: object, expected: str) -> None:
 
 def test_plugin_title_ignores_a_non_string_display_name() -> None:
     # Duck-typed metadata (mocks, third-party shims) may answer any attribute.
-    assert plugin_title(SimpleNamespace(name="aura", display_name=42)) == "Aura"
+    assert plugin_title(SimpleNamespace(name="notes", display_name=42)) == "Notes"
 
 
 @pytest.mark.asyncio
 async def test_catalog_title_uses_display_name() -> None:
-    plugin = make_plugin(name="cv_intake")
-    plugin.metadata.display_name = "CV Intake"
+    plugin = make_plugin(name="resume_intake")
+    plugin.metadata.display_name = "Resume Intake"
     entity = await make_provider().to_catalog_info(plugin)
-    assert entity["metadata"]["title"] == "CV Intake"
+    assert entity["metadata"]["title"] == "Resume Intake"
     # The entity identity is still the registry name, so the catalog keeps
     # the same Component and every relation pointing at it.
-    assert entity["metadata"]["name"] == "cv_intake"
+    assert entity["metadata"]["name"] == "resume_intake"
 
 
 @pytest.mark.asyncio

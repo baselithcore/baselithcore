@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import get_logger
 from core.observability.metrics import (
     GEN_AI_OPERATION_DURATION,
@@ -38,7 +39,8 @@ logger = get_logger(__name__)
 #: trace without them is missing the inference that produced the query vector.
 EMBEDDING_OPERATION = "embeddings"
 
-#: ``gen_ai.system`` for the local sentence-transformers runtime.
+#: ``gen_ai.provider.name`` (custom value) for the local sentence-transformers
+#: runtime.
 EMBEDDING_SYSTEM = "sentence_transformers"
 
 
@@ -288,7 +290,7 @@ class CachedEmbedder:
             f"{EMBEDDING_OPERATION} {model_name}",
             attributes={
                 "gen_ai.operation.name": EMBEDDING_OPERATION,
-                "gen_ai.system": EMBEDDING_SYSTEM,
+                **provider_attributes(EMBEDDING_SYSTEM),
                 "gen_ai.request.model": model_name,
                 "gen_ai.baselith.input_count": inputs,
             },

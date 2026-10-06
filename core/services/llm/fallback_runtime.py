@@ -251,7 +251,8 @@ async def maybe_run_messages_with_fallback(
     Same chain discipline as :func:`maybe_run_structured_with_fallback`, applied
     to ``generate_messages``: direct provider call when no chain is set;
     otherwise primary + config-declared stages, skipping open breakers and
-    stages whose provider has no message API. That last filter is the same
+    stages whose provider has no message API — or, on a turn that offers tools,
+    no native tool API (a parserless vLLM server). That filter is the same
     reasoning as the structured one's native-tool check, one step stricter: a
     stage that cannot receive a message list would have to be handed a
     flattened transcript, silently dropping tool-call correlation, ``is_error``
@@ -272,6 +273,11 @@ async def maybe_run_messages_with_fallback(
 
     primary_name = service.config.provider
     chain_spec = getattr(service.config, "fallback_chain", "")
+    # Only *offered* tools put ``tools``/``tool_choice`` on the request, which
+    # is what a parserless server rejects. Tool calls/results already in the
+    # history travel as ordinary assistant/``tool`` messages, which such a
+    # server renders through its chat template, so they do not skip a stage.
+    offers_tools = bool(kwargs.get("tools"))
 
     async def _primary() -> object:
         return await _messages_with_retry(service, messages, model, **kwargs)  # type: ignore[arg-type]
@@ -297,6 +303,15 @@ async def maybe_run_messages_with_fallback(
             if not getattr(clone.provider, "supports_messages", False):
                 raise LLMProviderError(
                     f"Fallback provider '{_provider}' has no message API"
+                )
+            # A message-capable stage with its tool API switched off (a vLLM
+            # server without a tool parser) would 400 on a turn offering tools.
+            if (
+                offers_tools
+                and getattr(clone.provider, "supports_native_tools", True) is False
+            ):
+                raise LLMProviderError(
+                    f"Fallback provider '{_provider}' has no native tool API"
                 )
             return await _messages_with_retry(clone, messages, _model, **kwargs)  # type: ignore[arg-type]
 

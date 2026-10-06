@@ -14,25 +14,68 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-# OTel GenAI semantic-convention `gen_ai.system` values for our providers
-# (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Falls back to the raw
-# configured provider name lowercased for anything not mapped here.
-_GEN_AI_SYSTEM = {
+# OTel GenAI semantic-convention ``gen_ai.provider.name`` values for our
+# providers (well-known values from
+# https://github.com/open-telemetry/semantic-conventions-genai, registry
+# ``gen-ai.md``). Anything not mapped falls back to the configured provider
+# name lowercased, which the spec allows as a custom value.
+_GEN_AI_PROVIDER_NAME = {
     "anthropic": "anthropic",
     "openai": "openai",
+    "azure_openai": "azure.ai.openai",
+    "bedrock": "aws.bedrock",
+    "vertex": "gcp.vertex_ai",
+    "vertex_ai": "gcp.vertex_ai",
+    # The Gemini API (generativelanguage.googleapis.com) is "gcp.gemini".
+    "gemini": "gcp.gemini",
+    "mistral": "mistral_ai",
+    "groq": "groq",
+    "deepseek": "deepseek",
+    # No well-known value; the lowercase product name is the custom value.
     "ollama": "ollama",
     "huggingface": "huggingface",
-    # semconv value for the Gemini API is "gcp.gemini".
-    "gemini": "gcp.gemini",
-    # No semconv well-known value; the spec allows the lowercase product name.
     "vllm": "vllm",
 }
 
 
-def gen_ai_system(provider: str | None) -> str:
-    """Normalize the configured provider to a ``gen_ai.system`` value."""
+def gen_ai_provider_name(provider: str | None) -> str:
+    """Normalize the configured provider to a ``gen_ai.provider.name`` value."""
     key = (provider or "").lower()
-    return _GEN_AI_SYSTEM.get(key, key or "unknown")
+    return _GEN_AI_PROVIDER_NAME.get(key, key or "unknown")
+
+
+# The Anthropic SDK can serve Claude through a cloud's own endpoint; the spec
+# names the provider by the endpoint actually reached, not the model vendor.
+_ANTHROPIC_BACKEND_PROVIDER = {
+    "bedrock": "aws.bedrock",
+    "vertex": "gcp.vertex_ai",
+}
+
+
+def gen_ai_provider_for(config: object, provider: str | None = None) -> str:
+    """``gen_ai.provider.name`` for a call served under *config*.
+
+    Like :func:`gen_ai_provider_name`, but resolves the Anthropic serving
+    backend: ``LLM_ANTHROPIC_BACKEND=bedrock`` reports ``aws.bedrock`` and
+    ``vertex`` reports ``gcp.vertex_ai``, as the spec requires.
+
+    Args:
+        config: The LLM config (``provider`` / ``anthropic_backend`` are read
+            defensively, so a test double without them still works).
+        provider: The provider that actually served the call, when it differs
+            from the configured one (failover); defaults to ``config.provider``.
+    """
+    name = provider or getattr(config, "provider", None)
+    if (name or "").lower() == "anthropic":
+        backend = getattr(config, "anthropic_backend", None)
+        if isinstance(backend, str) and backend in _ANTHROPIC_BACKEND_PROVIDER:
+            return _ANTHROPIC_BACKEND_PROVIDER[backend]
+    return gen_ai_provider_name(name if isinstance(name, str) else None)
+
+
+#: Back-compat alias: the value is the same, only the attribute it feeds was
+#: renamed (``gen_ai.system`` -> ``gen_ai.provider.name``).
+gen_ai_system = gen_ai_provider_name
 
 
 # Observers for every token report, resolved at call time — so a consumer
@@ -149,7 +192,7 @@ def report_external_usage(
 
 
 def record_genai_metrics(
-    system: str,
+    provider: str,
     model: str,
     *,
     input_tokens: int = 0,
@@ -187,9 +230,9 @@ def record_genai_metrics(
             (cache_write_tokens, "cache_write"),
         ):
             if count > 0:
-                GEN_AI_TOKEN_USAGE.labels(system, model, token_type).observe(count)
+                GEN_AI_TOKEN_USAGE.labels(provider, model, token_type).observe(count)
         if duration_seconds is not None:
-            GEN_AI_OPERATION_DURATION.labels(system, model, operation).observe(
+            GEN_AI_OPERATION_DURATION.labels(provider, model, operation).observe(
                 duration_seconds
             )
         if input_tokens > 0 or output_tokens > 0 or cache_read_tokens > 0:
@@ -206,12 +249,14 @@ def record_genai_metrics(
                     batch=batch,
                 )
                 if cost > 0:
-                    GEN_AI_COST_USD.labels(system, model).inc(cost)
+                    GEN_AI_COST_USD.labels(provider, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests
         pass
 
 
 __all__ = [
+    "gen_ai_provider_for",
+    "gen_ai_provider_name",
     "gen_ai_system",
     "record_genai_metrics",
     "register_token_sink",

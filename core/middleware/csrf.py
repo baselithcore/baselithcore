@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.middleware._security_metrics import SECURITY_EVENTS
@@ -127,9 +126,13 @@ class CSRFOriginMiddleware:
         reason = self._rejection_reason(scope)
         if reason is not None:
             SECURITY_EVENTS.labels(reason="csrf_origin_rejected").inc()
-            response = JSONResponse(
+            from core.api.errors import problem_response
+
+            response = problem_response(
                 status_code=403,
-                content={"detail": "CSRF check failed: origin not allowed."},
+                code="csrf_origin_rejected",
+                detail="CSRF check failed: origin not allowed.",
+                instance=scope.get("path") or None,
             )
             await response(scope, receive, send)
             return

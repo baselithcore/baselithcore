@@ -59,7 +59,10 @@ async function decodeError(res) {
       message = body.error.message || message;
       requestId = body.error.request_id || requestId;
     } else if (body && body.detail) {
+      // RFC 9457 problem document (current servers): detail + code + request_id.
       message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+      code = body.code || code;
+      requestId = body.request_id || requestId;
     }
   } catch {
     /* non-JSON body — keep the status message */
@@ -158,6 +161,22 @@ class SseDecoder {
   }
 }
 
+/** ApiError for an in-band `event: error` frame: JSON payload or legacy text. */
+function streamError(data) {
+  if (data && data.trimStart().startsWith('{')) {
+    try {
+      const payload = JSON.parse(data);
+      return new ApiError(payload.detail || payload.message || 'stream failed', {
+        code: payload.code,
+        requestId: payload.request_id,
+      });
+    } catch {
+      /* not JSON — fall through to the legacy text form */
+    }
+  }
+  return new ApiError(data || 'stream failed');
+}
+
 /** Stream a chat response, invoking onChunk(text) for each decoded SSE chunk.
  *  Decodes the wire format emitted by plugins/api_routers/chat.py: splits on
  *  blank lines, reassembles multi-line `data:` fields, ignores `: keepalive`
@@ -179,7 +198,7 @@ export async function streamChat(payload, onChunk) {
   const handleEvents = (events) => {
     for (const event of events) {
       if (event.event === 'done') return true;
-      if (event.event === 'error') throw new ApiError(event.data || 'stream failed');
+      if (event.event === 'error') throw streamError(event.data);
       onChunk(event.data);
     }
     return false;

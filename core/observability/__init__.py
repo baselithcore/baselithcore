@@ -14,6 +14,7 @@ from core.observability.audit import (
 )
 from core.observability.audit_chain import SQLiteAuditSink
 from core.observability.cache import Cache, create_cache, get_cache
+from core.observability.genai_semconv import provider_attributes
 from core.observability.logging import bind_context, configure_logging, get_logger
 from core.observability.openinference import (
     MAX_CONTENT_CHARS,
@@ -64,6 +65,7 @@ __all__ = [
     # OpenInference enrichment (LLM-observability backends)
     "MAX_CONTENT_CHARS",
     "openinference_enabled",
+    "provider_attributes",
     "openinference_llm_attributes",
     # Span observation seam (in-process fan-out of completed spans)
     "SpanRecord",

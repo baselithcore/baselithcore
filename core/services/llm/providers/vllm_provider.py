@@ -85,6 +85,27 @@ def _clean(result: LLMResult) -> LLMResult:
     return result
 
 
+def _thinking_off_for_json(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """*kwargs* with the chat template's thinking switched off, for JSON mode.
+
+    ``response_format: json_object`` constrains every generated token to JSON,
+    but a thinking template (Qwen3) opens ``<think>`` in the prompt: the model's
+    reasoning is then forced *inside* the object, and the reply comes back as
+    garbled JSON. ``enable_thinking: false`` closes the block in the template so
+    the constrained output is the answer alone. A caller that set
+    ``enable_thinking`` itself keeps its choice; any other ``extra_body`` is
+    merged, never replaced, and never mutated. Templates without the variable
+    ignore it.
+    """
+    extra_body = dict(kwargs.get("extra_body") or {})
+    template = dict(extra_body.get("chat_template_kwargs") or {})
+    if "enable_thinking" in template:
+        return kwargs
+    template["enable_thinking"] = False
+    extra_body["chat_template_kwargs"] = template
+    return {**kwargs, "extra_body": extra_body}
+
+
 def _reasoning_of(delta: Any) -> str | None:
     """The reasoning a parsing server streams in its own delta field."""
     for name in ("reasoning_content", "reasoning"):
@@ -191,13 +212,17 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         Args:
             prompt: User message content.
             model: The server's ``--served-model-name`` (or the model path).
-            json_mode: If True, requests a ``json_object`` response format.
+            json_mode: If True, requests a ``json_object`` response format
+                and turns the chat template's thinking off (unless the caller
+                set ``chat_template_kwargs.enable_thinking``).
             **kwargs: Same surface as :meth:`OpenAIProvider.generate`, plus
                 ``extra_body`` for vLLM-only sampling parameters.
 
         Returns:
             tuple[str, int]: Response text and total tokens used.
         """
+        if json_mode:
+            kwargs = _thinking_off_for_json(kwargs)
         with self._routed(await self._endpoint_for(model)):
             text, tokens = await _generate(self, prompt, model, json_mode, **kwargs)
         return strip_reasoning(text), tokens

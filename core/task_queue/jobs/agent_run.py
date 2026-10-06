@@ -8,6 +8,14 @@ request on a worker, tracks its lifecycle in the TaskTracker (poll via
 (``agent.completed`` / ``agent.failed``) so callers can subscribe instead
 of polling. Webhook delivery is best-effort — a webhook outage never fails
 a finished run.
+
+Failure is terminal only on the last attempt. The scheduler enqueues with
+RQ ``Retry`` (``TASK_QUEUE_DEFAULT_RETRY_COUNT``), so an attempt that raises
+while the job still has ``retries_left`` is recorded as the non-terminal
+``retrying`` status and emits no webhook; only the attempt that exhausts the
+budget (or a job enqueued without retries) marks ``failed`` and emits
+``agent.failed``. Otherwise a poller would see ``failed`` and stop while a
+later retry completes the run.
 """
 
 from __future__ import annotations
@@ -43,6 +51,16 @@ async def _handle_chat(req: Any) -> Any:
     return await chat_service.handle_chat_async(req)
 
 
+def _retries_left(job: Any) -> int:
+    """Retries RQ still holds for *job* after the running attempt.
+
+    RQ decrements ``retries_left`` only after an attempt fails, so inside the
+    job it counts the attempts still to come; ``None`` means no retry policy.
+    """
+    left = getattr(job, "retries_left", None) if job is not None else None
+    return left if isinstance(left, int) and left > 0 else 0
+
+
 def run_agent_task(
     query: str,
     conversation_id: str | None = None,
@@ -58,12 +76,14 @@ def run_agent_task(
         result in the TaskTracker.
 
     Raises:
-        Exception: Whatever the agent raised — RQ records the job failed
-            (and the dead-letter machinery applies); the failure webhook is
-            emitted first.
+        Exception: Whatever the agent raised — RQ retries the job or, on the
+            last attempt, records it failed (and the dead-letter machinery
+            applies); the failure webhook is emitted first on that last
+            attempt only.
     """
     job = get_current_job()
     job_id = job.id if job else "unknown"
+    retries_left = _retries_left(job)
     tracker = _get_tracker()
     tracker.mark_started(job_id, f"Agent run: {query[:80]}")
 
@@ -87,7 +107,10 @@ def run_agent_task(
         try:
             payload = await _run()
         except Exception as exc:
-            await _notify(AGENT_FAILED_EVENT, {"task_id": job_id, "error": str(exc)})
+            if retries_left == 0:
+                await _notify(
+                    AGENT_FAILED_EVENT, {"task_id": job_id, "error": str(exc)}
+                )
             raise
         await _notify(AGENT_COMPLETED_EVENT, {"task_id": job_id, **payload})
         return payload
@@ -95,7 +118,10 @@ def run_agent_task(
     try:
         result = asyncio.run(_run_and_notify())
     except Exception as exc:
-        tracker.mark_failed(job_id, str(exc))
+        if retries_left:
+            tracker.mark_retrying(job_id, str(exc), retries_left)
+        else:
+            tracker.mark_failed(job_id, str(exc))
         raise
     tracker.mark_completed(job_id, "Agent run completed", result=result)
     return result

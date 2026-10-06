@@ -18,6 +18,7 @@ from core.observability import telemetry
 from core.observability.logging import get_logger
 from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
 from core.services.feedback_service import get_feedback_service
+from plugins.api_routers.schemas import FeedbackAck, problem_responses
 
 logger = get_logger(__name__)
 
@@ -64,7 +65,13 @@ def _normalize_sources_payload(raw_sources: Any) -> list[dict[str, Any]] | None:
     return normalized or None
 
 
-@router.post("/feedback")
+@router.post(
+    "/feedback",
+    response_model=FeedbackAck,
+    # ``comment`` is in the body only when the caller sent one.
+    response_model_exclude_unset=True,
+    responses=problem_responses(401, 403, 422),
+)
 async def feedback(
     payload: dict[str, Any] = Body(...),
     _: str = Depends(require_user),
