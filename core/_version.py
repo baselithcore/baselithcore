@@ -1,3 +1,3 @@
 """Single source of truth for the framework version."""
 
-__version__ = "0.42.1"
+__version__ = "0.43.0"

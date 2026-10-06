@@ -72,7 +72,7 @@ const DEFAULT_RESUME_TIMEOUT_MS = 660_000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 /** Statuses a non-idempotent call may retry: refused before any work was done. */
 const UNSAFE_RETRYABLE_STATUS = new Set([429]);
-const VERSION = '0.42.1';
+const VERSION = '0.43.0';
 const USER_AGENT = `baselith-sdk-ts/${VERSION}`;
 
 export interface BaselithClientOptions {

@@ -7,6 +7,26 @@ pull-request-only, so the release job cannot commit here. Follows
 [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.43.0](https://github.com/baselithcore/baselithcore/compare/v0.42.1...v0.43.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* harden shutdown, startup, agent defaults and the HTTP contract for production ([4f45068](https://github.com/baselithcore/baselithcore/commit/4f45068f274060c6d6237393c59727f8d5e83d2a))
+* **llm:** prompt-coerce tool calls for vLLM servers without a tool parser ([8153520](https://github.com/baselithcore/baselithcore/commit/8153520c85adbf7faf56286fafc0d13895bc00d7))
+* **llm:** refuse coerced tool calls hidden in unterminated reasoning ([7d4a256](https://github.com/baselithcore/baselithcore/commit/7d4a2560318cab2961fa24e8162250b71e4e4ecf))
+* **mcp:** keep collision suffixing linear in the number of keys ([60fde5e](https://github.com/baselithcore/baselithcore/commit/60fde5eda41519d75fcabe5d120dcdd6c658e128))
+* **mcp:** never keep an unsanitized structuredContent key on collision ([ed44f88](https://github.com/baselithcore/baselithcore/commit/ed44f8801176b0beb5e7c9ffcb650eb47caad315))
+* **plugins:** compare plugin core bounds with the public core release ([f944166](https://github.com/baselithcore/baselithcore/commit/f9441660d9ca34c07f10253df53026449cf408b1))
+* preserve verified plugin frontend builds ([6be2428](https://github.com/baselithcore/baselithcore/commit/6be2428199beaaecba19f059bfad6cb28197fae0))
+
+
+### Features
+
+* **agent:** continue a conversation and stream typed run events ([df060af](https://github.com/baselithcore/baselithcore/commit/df060af25400b5155812de6ed5e2f268e0c959d3))
+* standardize docling ingestion and bge embeddings ([25d1a05](https://github.com/baselithcore/baselithcore/commit/25d1a05f27a427021c6a095b68c4440523dcd39d))
+* typed API responses, broader SDKs and untrusted history ([eee99f5](https://github.com/baselithcore/baselithcore/commit/eee99f59d3f871942369b34d702b6df9c2190c4b))
+
 ## [0.42.1](https://github.com/baselithcore/baselithcore/compare/v0.42.0...v0.42.1) (2026-10-04)
 
 
