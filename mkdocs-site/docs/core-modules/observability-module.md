@@ -674,8 +674,11 @@ single line and bounds the length. `core.connectors` builds every error message
 with them.
 
 The patterns run on text an outside party controls, so they are written to stay
-linear: the affixes around the credential keywords are bounded (an unbounded
-`[\w-]*` on both sides backtracked quadratically over keyword-like text), and
+linear and complete: a key matches when it is one whole word holding a
+credential keyword anywhere in it, found by a lookahead confined to that word.
+So a key of any length is seen, a non-credential pair never swallows a
+credential behind it (`status=token=…`), and nothing backtracks quadratically.
+In addition
 callers bound the input first — `safe_snippet` cuts at 4096 characters, and
 `describe_exception` (`core.services.llm.exceptions`) does the same before it
 redacts an upstream error.

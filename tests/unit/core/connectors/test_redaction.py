@@ -162,3 +162,21 @@ def test_keyword_runs_do_not_backtrack_quadratically():
     t_large = time.perf_counter() - start
     # 10x the input: linear is ~10x, the old quadratic pattern was ~100x.
     assert t_large < max(t_small, 0.001) * 40
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x" * 60 + "_access_token=SUPERSECRET",
+        '{"my_' + "a" * 300 + '_api_key": "SUPERSECRET"}',
+        "status=token=SUPERSECRET",
+        "a=b=c=d=api_key=SUPERSECRET",
+    ],
+)
+def test_no_key_shape_skips_redaction(text):
+    """A long key prefix or a non-secret pair in front never hides a secret."""
+    assert "SUPERSECRET" not in redact_secrets(text)
+
+
+def test_non_credential_pairs_and_numeric_codes_are_kept():
+    assert redact_secrets("codex=fine code=404") == "codex=fine code=404"

@@ -153,12 +153,17 @@ def redact_sensitive(
 # misses the JSON form (``"access_token": "x"``) and the OAuth ``code``. These
 # patterns are for text that may echo a credential back: a provider's error
 # body, a transport error carrying a URL with a query.
-# The affixes are bounded: unbounded ``[\w-]*`` on both sides of the keyword
-# alternation backtracks quadratically over a long run of keyword-like text
-# (``"token" * N``), and this pattern runs on third-party error bodies.
+# A key matches when it is one whole word holding a credential keyword
+# anywhere in it (or is exactly ``code``). The keyword is found by a lookahead
+# confined to that word, so a key of any length is seen, and a non-credential
+# pair is never matched — it cannot swallow a credential behind it
+# (``status=token=…``). Earlier forms either wrapped the keyword in unbounded
+# ``[\w-]*`` affixes (quadratic backtracking over keyword-like text) or bounded
+# them (a long key prefix skipped redaction). A match only starts at a word
+# boundary, so the scan stays linear.
 _KEY_NAMES = (
-    r"(?:[\w-]{0,40}(?:token|secret|password|passwd|api[-_]?key|authorization"
-    r"|assertion|verifier|credential|bearer|session)[\w-]{0,40}|code)"
+    r"(?:(?=[\w-]*?(?:token|secret|password|passwd|api[-_]?key|authorization"
+    r"|assertion|verifier|credential|bearer|session))[\w-]+|code)"
 )
 _SECRET_PAIR = re.compile(
     rf"(?<![\w-])(?P<k>{_KEY_NAMES})(?P<q>[\"']?)(?P<sep>\s*[:=]\s*)"
