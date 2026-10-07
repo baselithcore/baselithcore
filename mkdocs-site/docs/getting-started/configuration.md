@@ -348,12 +348,18 @@ Declared in `core.config.mcp`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `MCP_ALLOWED_COMMANDS` | `str` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Comma-separated allowlist of executable basenames that MCPClient may spawn for stdio servers. A custom `command` whose argv[0] basename is not in this list is rejected — manifests/config cannot make the client exec arbitrary binaries. |
+| `MCP_ALLOWED_COMMANDS` | `str` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Comma-separated allowlist of executable NAMES that MCPClient may spawn for stdio servers, matched exactly (case-sensitive on POSIX, no version suffix folding: list `python3.12` to allow `python3.12`). An entry with a path separator is ignored, and shells / exec-wrappers (sh, bash, env, xargs, ssh, cmd, powershell, ...) are refused whatever this says. A name is looked up in MCP_STDIO_TRUSTED_BIN_DIRS only, never on PATH. Naming an interpreter does NOT allow what it can be told to run: see MCP_STDIO_ALLOWED_DIRS. Package runners in the list (npx, uvx, bunx) additionally need MCP_ALLOW_PACKAGE_RUNNERS=true. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | `bool` | `False` | Fail-closed by default: the SSRF guard rejects private/loopback/ link-local MCP server hosts. Enable only for trusted local development against an MCP server on localhost/the internal network. |
+| `MCP_ALLOW_PACKAGE_RUNNERS` | `bool` | `False` | Package runners (npx, uvx, bunx, pnpx, `uv tool run`, `bun x`, `deno run npm:`) download and execute code from a registry at spawn time. They are refused even when listed in MCP_ALLOWED_COMMANDS unless this is true, because config reaching the client may be untrusted. |
 | `MCP_AUTONOMY_LEVEL` | `str` | `supervised` | Autonomy level applied when no explicit policy is passed to MCPServer: supervised \| semi_autonomous \| fully_autonomous. MCP transports have no human-approval channel, so gated categories are rejected outright (fail-closed). Set fully_autonomous only when the MCP client itself enforces human approval (e.g. Claude Desktop tool prompts). |
 | `MCP_CACHE_SCOPE` | `Literal['public', 'private']` | `private` | "private" is the safe default: listings and reads may be filtered by the authenticated identity, and a shared cache would leak them across authorization contexts. Set "public" only when every caller sees the same primitives. |
 | `MCP_CACHE_TTL_MS` | `int` | `60000` | Freshness hint on list/read results, in milliseconds. 0 means "always stale": correct for a server whose tools or resources change per request. |
+| `MCP_CLIENT_MAX_ITEMS` | `int` | `1000` |  |
+| `MCP_CLIENT_MAX_LINE_BYTES` | `int` | `4194304` | Hard cap on one newline-delimited stdio frame. Also bounds what the asyncio StreamReader buffers while a server dribbles a line forever. |
+| `MCP_CLIENT_MAX_PAGES` | `int` | `20` | Pagination guard for tools/list and resources/list: the client follows nextCursor at most this many pages / collects at most this many items, then fails closed. A repeated cursor is always an error. |
+| `MCP_CLIENT_MAX_RESPONSE_BYTES` | `int` | `4194304` | Hard cap on one HTTP response body, JSON or the accumulated SSE stream. A hostile server cannot stream gigabytes into the agent's memory; past the cap the request fails with MCPTransportError. |
 | `MCP_CLIENT_REQUEST_TIMEOUT` | `float` | `30.0` | Upper bound (seconds) on waiting for a response from an external MCP server. Guards against a hung or unresponsive server blocking the agent loop indefinitely. |
+| `MCP_CLIENT_TOTAL_DEADLINE_SECONDS` | `float` | `60.0` | Total wall-clock deadline for one HTTP request, covering the whole SSE stream. mcp_client_request_timeout only bounds each network phase, so a server trickling keep-alive events would otherwise hold the call open forever. |
 | `MCP_EXECUTE_CODE_TIMEOUT` | `int` | `30` |  |
 | `MCP_HTTP_ALLOWED_ORIGINS` | `str` | *empty* | Comma-separated allowlist of browser Origins (DNS-rebinding defense). Requests without an Origin header (non-browser clients) always pass. |
 | `MCP_HTTP_AUTHORIZATION_SERVERS` | `str` | *empty* | Comma-separated issuer URLs advertised as `authorization_servers` in the RFC 9728 protected-resource metadata. Defaults to the configured OIDC issuer when empty. |
@@ -366,6 +372,10 @@ Declared in `core.config.mcp`.
 | `MCP_HTTP_TRANSPORT_ENABLED` | `bool` | `False` | Off by default: enabling exposes the MCP server on the API surface. |
 | `MCP_LIST_PAGE_SIZE` | `int` | `100` | Maximum entries returned by one tools/list, resources/list or resources/templates/list page; the client pages on with `nextCursor`. |
 | `MCP_MAX_TOOL_RESULT_BYTES` | `int` | `1048576` | Upper bound on the serialized size of one `tools/call` result. A larger result is truncated with an explicit notice rather than refused: the call succeeded, and the model is told what it is missing. 0 disables the cap; any other value must clear MIN_TOOL_RESULT_BYTES, the cost of the truncation envelope itself. |
+| `MCP_OAUTH_MAX_RESPONSE_BYTES` | `int` | `262144` |  |
+| `MCP_OAUTH_TIMEOUT_SECONDS` | `float` | `15.0` | OAuth client (core.mcp.oauth_client): per-call deadline and response cap for discovery, registration and token requests. |
+| `MCP_POOL_IDLE_SECONDS` | `float` | `300.0` |  |
+| `MCP_POOL_MAX_CLIENTS` | `int` | `64` | Per-key client pool (core.mcp.keyed_pool): live clients kept at once, and how long an unused one survives before it is closed. |
 | `MCP_RAG_DEFAULT_TOP_K` | `int` | `5` |  |
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
@@ -376,7 +386,12 @@ Declared in `core.config.mcp`.
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
 | `MCP_SERVER_VERSION` | `str` | `2.0.0` |  |
 | `MCP_SSE_TRANSPORT_ENABLED` | `bool` | `False` | Deprecated, no effect: nothing reads it; the served transport is Streamable HTTP (MCP_HTTP_TRANSPORT_ENABLED) |
+| `MCP_STDIO_ALLOWED_DIRS` | `str` | *empty* | Comma-separated ABSOLUTE directories whose scripts a stdio server may run. The first positional argument of python/node/deno/bun/uv must be a file whose symlink-resolved path is inside one of them (no `..`, not world-writable, not in a world-writable directory). Empty (default): no script is allowed, so stdio stays unusable until the operator opts in. |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | `str` | *empty* | Comma-separated environment variable names a server spec's `env` may set even though they can inject code (PATH, LD_*, DYLD_*, PYTHON*, NODE_*, proxy and CA-bundle variables, ...). Exact names; empty (default): none. |
+| `MCP_STDIO_ALLOWED_MODULES` | `str` | *empty* | Comma-separated importable module names `python -m` may run (exact match). Empty (default): `-m` is refused. |
+| `MCP_STDIO_ENV_PASSTHROUGH` | `str` | *empty* | Extra environment variable names a stdio server may inherit, on top of the built-in allowlist (PATH, HOME, USER, LOGNAME, LANG, LANGUAGE, LC_*, TMPDIR/TEMP/TMP, TZ, TERM and the Windows system variables). The parent environment is otherwise NEVER passed down: it carries API keys. Comma-separated; a trailing `*` matches a prefix. |
 | `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` | Deprecated, no effect: nothing reads it; stdio runs when the server is launched as a process |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | `str` | *empty* | Comma-separated absolute directories a command name is resolved in. Empty (default): /usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin, the active venv/conda bin. The running interpreter's own directory is always trusted. A non-empty value replaces the system list. |
 | `MCP_TASK_POLL_INTERVAL_MS` | `int` | `1000` |  |
 | `MCP_TASK_TTL_MS` | `int` | `3600000` | How long a task handle stays resolvable, and how often the client should poll it. Both are hints carried in the CreateTaskResult. |
 | `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `float` | `60.0` | Server-side deadline on one `tools/call` handler. Without it a hung tool holds the request (and, on HTTP, the connection) indefinitely. 0 disables the deadline. |
@@ -1012,4 +1027,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-664 settings documented.
+679 settings documented.

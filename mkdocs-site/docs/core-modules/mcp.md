@@ -707,7 +707,10 @@ core/mcp/
 ├── cache.py                    # client-side ttlMs / cacheScope cache
 ├── pool.py                     # MCPConnectionPool (many servers at once)
 ├── declarative.py              # MCP_SERVERS registry: mount_configured_servers, make_mcp_tool_fns
-├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
+├── stdio_client_transport.py   # stdio framing, id demux, plan_launch gate, spawn
+├── stdio_binaries.py           # trusted-dir resolution, shell/wrapper deny-list
+├── stdio_args.py               # per-family argument policy, script-location checks
+├── stdio_env.py                # sanitised child env, code-injecting key deny-list
 ├── http_client_transport.py    # Streamable HTTP client transport
 ├── server.py                   # MCPServer (registration API) + create_default_server
 ├── registration.py             # tools / resources / templates / prompts registry API
@@ -768,14 +771,16 @@ always torn down.
 ```python
 from core.mcp import MCPClient
 
-# Spawn a local server script over stdio
-async with MCPClient("./tools/weather_server.py") as client:
+# Spawn a local server script over stdio (absolute path, inside an approved
+# directory: MCP_STDIO_ALLOWED_DIRS - see "Command Allowlist" below)
+async with MCPClient("/srv/mcp/weather_server.py") as client:
     tools = await client.list_tools()          # list[MCPToolInfo]
     result = await client.call_tool(
         "get_weather", {"city": "Rome"}
     )
 
 # Or pass an explicit command instead of a script path
+# (`-m` needs MCP_STDIO_ALLOWED_MODULES=my_pkg.server)
 async with MCPClient(command=["python", "-m", "my_pkg.server"]) as client:
     ...
 
@@ -789,7 +794,10 @@ async with MCPClient(
 
 The constructor signature is
 `MCPClient(server_script=None, command=None, url=None, http_headers=None,
-input_provider=None, client_capabilities=None)`:
+input_provider=None, client_capabilities=None, *, auth=None,
+on_unauthorized=None, allowed_hosts=None, max_response_bytes=None,
+httpx_transport=None)`; the keyword-only arguments are covered in
+[Third-party servers: the security model](#third-party-servers-the-security-model):
 
 - `server_script` / `command` — a local stdio server; `command` overrides
   `server_script` and is subject to the [command allowlist](#command-allowlist).
@@ -800,8 +808,9 @@ input_provider=None, client_capabilities=None)`:
   `{"Authorization": "Bearer <token>"}`).
 - `input_provider` — async callback fulfilling an `InputRequests` map
   (elicitation / sampling / roots) so multi round-trip requests complete
-  transparently. Without one the client declares no such capability and a
-  server may not ask.
+  transparently. Without one the client declares no such capability, a
+  server may not ask, and any such request it sends anyway is answered with a
+  JSON-RPC error.
 - `client_capabilities` — capabilities advertised on every modern request;
   derived from `input_provider` when omitted.
 
@@ -858,19 +867,100 @@ To manage several servers at once, use `MCPConnectionPool`:
 from core.mcp import MCPConnectionPool
 
 async with MCPConnectionPool() as pool:
-    await pool.add_server("weather", "./weather_server.py")
-    await pool.add_server("database", "./db_server.py")
+    await pool.add_server("weather", "/srv/mcp/weather_server.py")
+    await pool.add_server("database", "/srv/mcp/db_server.py")
     result = await pool.call_tool("weather", "get_forecast", {...})
 ```
 
 ### Command Allowlist
 
 A custom `command` can originate from a plugin manifest or operator config, so
-`MCPClient` refuses to spawn arbitrary binaries: the basename of `argv[0]`
-must appear in `MCP_ALLOWED_COMMANDS` (default
-`python,python3,node,npx,uvx,uv,deno,bun,bunx`; versioned names like
-`python3.12` are accepted, and the current interpreter is always allowed).
-A disallowed command raises `ValueError` before any process is started.
+`MCPClient` never spawns "whatever it is told to". Naming a program is **not**
+the same as allowing what that program can be made to run: `python -c`,
+`python -m http.server`, `node -e`, `deno run https://…`, `bun -e`,
+`uv run --with evil` are all "allowlisted binaries" running arbitrary code. The
+gate (`plan_launch`, `core/mcp/stdio_client_transport.py`) is therefore a
+launch policy, not a name list, and it runs again on **every spawn** (a file or
+symlink changed since configuration was loaded is judged as it is now):
+
+1. **Hard deny-list.** Shells and exec-wrappers (`sh`, `bash`, `zsh`, `env`,
+   `xargs`, `nohup`, `timeout`, `sudo`, `ssh`, `busybox`, `cmd`, `powershell`,
+   `perl`, `awk`, `find`, …) are never launchable, whatever
+   `MCP_ALLOWED_COMMANDS` says, and neither is a trusted binary that is a
+   *symlink to* one. It is not configurable.
+2. **Exact names.** The basename of `argv[0]` must equal an entry of
+   `MCP_ALLOWED_COMMANDS` (default
+   `python,python3,node,npx,uvx,uv,deno,bun,bunx`): case-sensitive on POSIX, no
+   prefix or version folding (`python3.12` is allowed only if listed). Entries
+   containing a path separator, or naming a denied program, are ignored. The
+   running interpreter's own name is always allowed.
+3. **Trusted directories, never `PATH`.** A bare name is searched only in
+   `MCP_STDIO_TRUSTED_BIN_DIRS` (default `/usr/bin`, `/bin`, `/usr/local/bin`,
+   `/opt/homebrew/bin`, the active venv/conda `bin`; the running interpreter's
+   directory is always trusted); an absolute `argv[0]` must sit in one of them.
+   A hijacked or relative `PATH` entry (`.`) changes nothing. The file behind it
+   must be executable, not world-writable (nor in a world-writable directory),
+   and its symlink-resolved path must stay inside the trusted prefixes.
+4. **Arguments per command family.** Only a script file may be launched:
+   - `python`: harmless switches (`-u -B -s -E -I -O -OO -q -b -P`) then a
+     script. `-c`, `-m` (unless the module is exactly in
+     `MCP_STDIO_ALLOWED_MODULES`), `-`, `-i`, `-W`, `-X`, combined flags and
+     `--` are refused.
+   - `node`: `--no-warnings`, `--no-deprecation`, `--enable-source-maps`,
+     `--trace-warnings`, `--max-old-space-size=N`, then a script. `-e/--eval`,
+     `-p/--print`, `-r/--require`, `--import`, loaders and `--inspect` are
+     refused.
+   - `deno`: `deno run [--quiet --no-prompt --no-check --no-remote --cached-only
+     --allow-{read,write,net,env}=<scope>] <script>`. `eval`, `repl`, `install`,
+     `-A/--allow-all`, bare or `--allow-run/ffi/sys` grants and any `http(s):`/
+     `file:` script are refused.
+   - `bun`: `bun [run] [--silent --bun] <script>`; `-e`, `--preload`, `repl`,
+     `install`, `add`, `create`, `run <package.json script name>` are refused.
+   - `uv`: `uv run [--no-project --quiet --frozen --locked --offline --no-sync]
+     <script>`; `--with*`, `--from`, `--python`, `-m`, `run python …`, `pip`,
+     `tool`, `add` are refused.
+   - The script (first positional) must be an **absolute** path without `..`,
+     a regular file whose **symlink-resolved** location is inside
+     `MCP_STDIO_ALLOWED_DIRS`, with neither the file nor any directory up to the
+     approved root world-writable. A URL or scheme (`https:`, `file:`, `npm:`)
+     is never a script.
+   - Every argument, whatever the family: at most 64 arguments of at most 4096
+     characters, no NUL or newline, and nothing starting with `@` (response-file
+     expansion).
+5. **Package runners.** `npx`, `uvx`, `bunx`, `pnpx`, `uv tool run`/`uv x`,
+   `bun x`, `deno run npm:…`/`jsr:…` download and execute registry code at spawn
+   time, so they are refused (even though `npx`/`uvx`/`bunx` stay on the default
+   allowlist) unless `MCP_ALLOW_PACKAGE_RUNNERS=true`. The opt-in covers
+   registry packages only: inline-code and shell flags (`-c`, `--call`, `-e`,
+   `--eval`, `--shell`, `--require`, …), URL/VCS specifiers (`https:`, `file:`,
+   `git+`, `github:`) and non-package `@file` arguments stay refused.
+6. **No shell, fixed cwd.** The argv list is exec'd directly (`shell=False`
+   always; `;`, `$()` and backticks in an argument are plain text). The child
+   starts in the script's own (validated) directory, or in a private empty
+   `0700` temp directory when there is no script (`python -m`, runners) - never
+   in the server process's cwd, which `python -m` would otherwise put on
+   `sys.path`.
+
+**Breaking change.** `MCP_STDIO_ALLOWED_DIRS` is empty by default, so no stdio
+script can run until an operator lists the directories they trust (absolute
+paths, comma-separated). `python server.py` with a relative path, `python -c`,
+`python -m anything`, `sys.executable` with arbitrary arguments and
+`python3.12`-style variants that used to pass no longer do.
+
+| Setting | Default | Meaning |
+| ------- | ------- | ------- |
+| `MCP_STDIO_ALLOWED_DIRS` | empty (no script allowed) | Absolute directories whose scripts may be launched |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | system dirs + venv/conda bin | Where command names resolve; non-empty replaces the system list |
+| `MCP_STDIO_ALLOWED_MODULES` | empty (`-m` refused) | Exact module names `python -m` may run |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | empty | Code-injecting env keys a server spec may set anyway (exact names) |
+
+**Residual risk.** A script the operator approved can still do anything the
+child's OS user can (resource limits such as `RLIMIT_AS`/`RLIMIT_CPU` are not
+applied: run the server process under a container or systemd limits); `deno
+run`'s script and an inline-metadata `uv run` script may fetch their own
+imports/dependencies, so approve such scripts like code you would deploy; and
+a file is checked immediately before `exec`, not held open across it, so keep
+approved directories writable only by the deploying user.
 
 ### Declarative external server registry (`MCP_SERVERS`)
 
@@ -879,7 +969,7 @@ servers in configuration: `MCPConfig.mcp_servers` maps a server name to an
 `MCPServerSpec`, env-configurable as a JSON object via `MCP_SERVERS`:
 
 ```env
-MCP_SERVERS='{"weather": {"command": "python", "args": ["weather_server.py"], "autonomy_category": "read_only"}}'
+MCP_SERVERS='{"weather": {"command": "python", "args": ["/srv/mcp/weather_server.py"], "autonomy_category": "read_only"}}'
 ```
 
 `MCPServerSpec` fields: `command` + `args` + `env` for a stdio server, **or**
@@ -916,7 +1006,15 @@ Safety posture, in order:
   definition `<server_name>.<tool_name>` (collision-safe across servers) and
   tags it with the server's configured `autonomy_category`, so the
   [approval gate](orchestration.md#autonomypolicy-three-tier-spectrum)
-  treats external tools with the caution the operator declared.
+  treats external tools with the caution the operator declared. A server that
+  is **not** in `MCP_SERVERS` and gets no explicit `autonomy_category=`
+  defaults to the most restrictive category, `destructive` (it used to be
+  `read_only`), with a deprecation warning in the log.
+- **Server text is untrusted** — the server name must match `[A-Za-z0-9_-]{1,64}`
+  (`ValueError` otherwise); a tool whose name is not `[A-Za-z0-9_.-]{1,64}`, or
+  repeats an earlier one, is skipped; descriptions lose control and bidi
+  characters, pass through `scan_external_content` with sanitising on, and are
+  capped at 2000 characters.
 
 ### Tool execution errors
 
@@ -936,22 +1034,28 @@ except MCPToolError as exc:
 
 `MCPToolError` is distinct from the `RuntimeError` raised on transport and
 JSON-RPC protocol failures, which indicate a broken connection rather than a
-correctable call.
+correctable call. All of them are subclasses of `MCPClientError`, itself a
+`RuntimeError`, so an existing `except RuntimeError` still catches everything;
+the [typed errors](#typed-errors) below tell the cases apart.
 
 ### Request Timeout & Untrusted Output
 
 Every request to an external server is bounded by
 `MCP_CLIENT_REQUEST_TIMEOUT` (seconds, default `30.0`, see
 `core.config.mcp.MCPConfig`) — a total deadline, not a per-frame one. If a
-server hangs, the read aborts with a `RuntimeError` and the client is marked
-disconnected. Tool calls are **not** auto-retried: retrying a non-idempotent
+server hangs, the read aborts with an `MCPTransportError` and the client is
+marked disconnected. Tool calls are **not** auto-retried: retrying a non-idempotent
 tool could double-execute a side effect.
 
 Responses are demultiplexed on the JSON-RPC `id`
-(`core/mcp/stdio_client_transport.py`): a server may interleave notifications
-(`notifications/message`, `notifications/progress`) with replies, and a late
-reply to an abandoned request may still be in the pipe. Frames that are not the
-awaited response are dropped, so neither can be mistaken for a result.
+(`core/mcp/stdio_client_transport.py`, `core/mcp/reply_matching.py`): a server
+may interleave notifications (`notifications/message`,
+`notifications/progress`) with replies, and a late reply to an abandoned
+request may still be in the pipe. Frames that are not the awaited response are
+dropped, so neither can be mistaken for a result. A message is the reply only
+when it has `result` or `error`, **no** `method`, and an `id` of exactly our
+type and value — a server *request* that reuses our id is never taken for the
+answer, on either transport.
 
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
@@ -988,11 +1092,167 @@ alongside it.
 
 `HTTPClientTransport` (the client side of the Streamable HTTP transport)
 builds its `httpx.AsyncClient` via `core.security.http.create_hardened_async_client`,
-so every request — and every redirect hop — is re-validated and IP-pinned
-against `core.security.ssrf` before it reaches the wire. Private/loopback/
-link-local/metadata-service hosts are rejected by default. Set
-`MCP_ALLOW_INTERNAL_ENDPOINTS=true` only for trusted local development
-against an MCP server on localhost or an internal network.
+so every request is re-validated and IP-pinned against `core.security.ssrf`
+before it reaches the wire. Private/loopback/link-local/metadata-service hosts
+are rejected by default, and **redirects are never followed**: a 3xx is an
+`MCPTransportError`. Set `MCP_ALLOW_INTERNAL_ENDPOINTS=true` only for trusted
+local development against an MCP server on localhost or an internal network.
+
+### Third-party servers: the security model
+
+Everything a server says is untrusted. The client bounds what the server
+controls and refuses what it never agreed to. Each default below is a setting
+on `MCPConfig` (see the [tunables table](#client-transports-and-tunables)).
+
+#### Tool metadata and pinning
+
+`list_tools()` follows `nextCursor` and returns `MCPToolInfo` with `title`,
+`annotations` (`MCPToolAnnotations`: `read_only_hint`, `destructive_hint`,
+`idempotent_hint`, `open_world_hint`, each `bool | None`, plus a `raw` dict),
+`output_schema` and `spec_hash`. The hints are **advisory**: never let a
+server's `readOnlyHint` lower the friction in front of its own tool.
+
+`spec_hash` is the lowercase hex SHA-256 of the UTF-8 canonical JSON of
+`{"description", "inputSchema", "name", "outputSchema"}` — keys sorted at every
+depth, `separators=(",", ":")`, `ensure_ascii=False`, a missing output schema
+as `null`. `title` and `annotations` are not hashed. Store the hash when a tool
+is approved and treat a different hash as a changed contract (a "rug pull")
+until it is approved again.
+
+Pagination is bounded: `MCP_CLIENT_MAX_PAGES` (20) and `MCP_CLIENT_MAX_ITEMS`
+(1000); a cursor the server repeats, or either bound, raises
+`MCPProtocolError` instead of looping or returning a silently truncated list.
+`list_resources()` pages the same way.
+
+#### Typed errors
+
+| Error | Meaning |
+| ----- | ------- |
+| `MCPAuthError` | HTTP 401/403. Carries `status_code`, the bounded `www_authenticate` challenge and the RFC 9728 `resource_metadata` URL when present |
+| `MCPTransportError` | HTTP failure (`status_code`), network error, deadline, size cap, redirect, SSRF block (`MCPBlockedError`, also an `SsrfError`), bad stdio framing |
+| `MCPProtocolError` | JSON-RPC `error` reply (`code`), no reply in the response, repeated cursor |
+| `MCPToolError` | the tool ran and reported `isError` |
+
+All derive from `MCPClientError(RuntimeError)`. Messages never embed a raw
+server body: server text goes through `safe_snippet` (redacted, one line,
+about 160 characters).
+
+#### Transport limits
+
+| Limit | Setting | Default |
+| ----- | ------- | ------- |
+| HTTP body, JSON or accumulated SSE (`max_response_bytes=`) | `MCP_CLIENT_MAX_RESPONSE_BYTES` | 4 MiB |
+| Wall-clock for one HTTP request including the whole SSE stream (`total_timeout=` on the transport) | `MCP_CLIENT_TOTAL_DEADLINE_SECONDS` | 60 |
+| One stdio frame | `MCP_CLIENT_MAX_LINE_BYTES` | 4 MiB |
+| Total wait for a stdio reply (and its write) | `MCP_CLIENT_REQUEST_TIMEOUT` | 30 |
+
+`allowed_hosts=` pins the endpoint: the URL host must be in the list (`ValueError`
+at construction) and the SSRF policy enforces it on every request.
+
+#### Authentication
+
+`http_headers` stay static. For anything that expires, pass `auth`, an async
+callable returning a header mapping, evaluated for **every** request, and
+optionally `on_unauthorized`, an async hook called once per request after a
+401 with the `MCPAuthError`; returning headers retries that request once with
+them, returning `None` gives up. A 403 never triggers the hook. Credentials are
+never logged and never appear in error text.
+
+```python
+async def headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {await tokens.current(user, server)}"}
+
+async def refresh(err: MCPAuthError) -> dict[str, str] | None:
+    token = await tokens.refresh(user, server)       # your storage
+    return {"Authorization": f"Bearer {token}"} if token else None
+
+client = MCPClient(url=server_url, auth=headers, on_unauthorized=refresh,
+                   allowed_hosts=["mcp.example.com"])
+```
+
+`core.mcp.oauth_client.OAuthClient` is the library for obtaining those tokens —
+no storage, no UI, typed in and out, every call bounded (deadline
+`MCP_OAUTH_TIMEOUT_SECONDS` 15, cap `MCP_OAUTH_MAX_RESPONSE_BYTES` 256 KiB),
+SSRF-guarded, `https` only, no redirects:
+
+```python
+oauth = OAuthClient()
+try:
+    pr = await oauth.discover_protected_resource(url, resource_metadata_url=err.resource_metadata)
+    server = await oauth.discover_authorization_server(pr.authorization_servers[0])
+    reg = await oauth.register_client(server, client_name="My app", redirect_uris=[cb])  # RFC 7591, optional
+    req = oauth.build_authorization_request(server, client_id=reg.client_id, redirect_uri=cb, resource=url)
+    # keep req.state and req.code_verifier; send the user to req.url; on the callback:
+    tokens = await oauth.exchange_code(server, client_id=reg.client_id, redirect_uri=cb, code=code,
+                                       code_verifier=req.code_verifier, resource=url)
+    tokens = await oauth.refresh(server, client_id=reg.client_id, refresh_token=tokens.refresh_token, resource=url)
+    await oauth.revoke_token(server, token=tokens.refresh_token, client_id=reg.client_id)  # RFC 7009, best effort
+finally:
+    await oauth.aclose()
+```
+
+It implements RFC 9728 (the metadata `resource` must equal the URL asked
+about), RFC 8414 with the OpenID well-known fallbacks (`issuer` must match;
+`S256` must be advertised, else it refuses; the token, registration and
+revocation endpoints must share the issuer's origin, so a metadata document
+cannot send a code, a refresh token or a client secret to another host, unless
+the caller passes `allow_cross_origin_endpoints=True` for an issuer it trusts
+to split its endpoints), RFC 7591, the RFC 8707 `resource`
+parameter on the authorization, code and refresh requests, PKCE S256 and token
+revocation (RFC 7009: `revoke_token` returns `False` when the server offers no
+revocation endpoint or refuses, and never follows a redirect). Tokens, client
+credentials and the verifier are `SecretStr`.
+
+#### Server-initiated requests: default deny
+
+`sampling/createMessage`, `elicitation/create` and `roots/list` hand the server
+the client's authority, so none is advertised or fulfilled unless you pass an
+explicit `input_provider` — and then only for the capabilities declared
+(`client_capabilities`, default all three). The provider receives
+`{"<request id>": {"method": ..., "params": ...}}` and returns
+`{"<request id>": <result>}`. Anything else a server asks — on stdio, in an SSE
+stream, on the legacy or the modern path — is answered with a JSON-RPC
+`-32601` error rather than dropped; `ping` gets an empty result. The legacy
+`initialize` advertises the same capabilities as the modern request metadata.
+
+#### stdio environment
+
+A stdio child is spawned with `build_child_env()`, **not** a copy of
+`os.environ` (which carries API keys and database URLs): only `HOME`,
+`USER`, `LOGNAME`, `LANG`, `LANGUAGE`, `LC_*`, `TMPDIR`/`TEMP`/`TMP`, `TZ`,
+`TERM` and the Windows system variables cross, plus the names in
+`MCP_STDIO_ENV_PASSTHROUGH` (comma-separated, trailing `*` for a prefix), plus
+the server spec's own `env`. `PATH` is pinned to the trusted bin directories and
+`PYTHONUNBUFFERED=1` is always set.
+
+A spec's `env` cannot steer how code is loaded. These keys (case-insensitive)
+raise `ValueError` naming the key - an error, not a silent drop: `PATH`, `HOME`
+and the profile/XDG locations, `LD_*`, `DYLD_*`, `PYTHON*` (except
+`PYTHONUNBUFFERED`/`UTF8`/`IOENCODING`/`DONTWRITEBYTECODE`/`HASHSEED`),
+`NODE_*`, `NPM_CONFIG_*`, `BUN_*`, `DENO_*`, `UV_*`, `PIP_*`, `GIT_*`, `BASH_ENV`,
+`ENV`, `IFS`, `SSL_CERT_*`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+`HTTP(S)_PROXY`, `ALL_PROXY`, `NO_PROXY`, `RUBYOPT`, `PERL5OPT`,
+`JAVA_TOOL_OPTIONS`. List the exact key in `MCP_STDIO_ALLOWED_ENV_KEYS` to allow
+it. Keys must be plain identifiers; values single-line and at most 32 KiB.
+Treat stdio servers as admin-only: a shared process is a shared trust domain.
+
+#### Per-key client pool
+
+`MCPConnectionPool` is one registry per process, keyed by server name. For
+multi-tenant use, `KeyedMCPClientPool` keeps one client per key of your
+choosing and is bounded: `MCP_POOL_MAX_CLIENTS` (64) live clients, the least
+recently used *idle* one closed to make room, idle clients closed after
+`MCP_POOL_IDLE_SECONDS` (300) on the next access or `await pool.reap()`.
+
+```python
+pool = KeyedMCPClientPool()
+async with pool.lease((tenant, user, "notion"), lambda: MCPClient(url=u, auth=headers)) as c:
+    await c.call_tool("search", {"q": "roadmap"})
+await pool.close((tenant, user, "notion"))   # e.g. after a failure
+```
+
+A leased client is never evicted or expired; when every slot is leased a new
+key raises `MCPPoolExhaustedError`. `connect()` failures are not cached.
 
 ---
 
@@ -1296,7 +1556,22 @@ MCP_REQUEST_STATE_SECRET=                # REQUIRED for multi-replica MRTR
 MCP_REQUEST_STATE_TTL_SECONDS=300
 MCP_TASK_TTL_MS=3600000
 MCP_TASK_POLL_INTERVAL_MS=1000
-MCP_ALLOWED_COMMANDS=python,python3,node,npx,uvx,uv,deno,bun,bunx
+MCP_ALLOWED_COMMANDS=python,python3,node,npx,uvx,uv,deno,bun,bunx   # exact names; see Command Allowlist
+MCP_STDIO_ALLOWED_DIRS=                  # absolute dirs whose scripts may run; empty = no stdio script allowed
+MCP_STDIO_TRUSTED_BIN_DIRS=              # where command names resolve (default: system dirs + venv/conda bin)
+MCP_STDIO_ALLOWED_MODULES=               # modules `python -m` may run (exact); empty = -m refused
+MCP_STDIO_ALLOWED_ENV_KEYS=              # code-injecting env keys a server spec may still set (exact)
+MCP_ALLOW_PACKAGE_RUNNERS=false          # npx/uvx/bunx/uv tool run/bun x fetch code at spawn
+MCP_STDIO_ENV_PASSTHROUGH=               # extra env names a stdio child may inherit (CORP_* ok)
+MCP_CLIENT_MAX_RESPONSE_BYTES=4194304
+MCP_CLIENT_MAX_LINE_BYTES=4194304
+MCP_CLIENT_TOTAL_DEADLINE_SECONDS=60.0
+MCP_CLIENT_MAX_PAGES=20
+MCP_CLIENT_MAX_ITEMS=1000
+MCP_POOL_MAX_CLIENTS=64
+MCP_POOL_IDLE_SECONDS=300.0
+MCP_OAUTH_TIMEOUT_SECONDS=15.0
+MCP_OAUTH_MAX_RESPONSE_BYTES=262144
 # Declarative external server registry (JSON object; see MCP Client above).
 # Stdio commands stay behind MCP_ALLOWED_COMMANDS.
 MCP_SERVERS=
@@ -1320,4 +1595,16 @@ auto-retried. The client-side settings on `MCPConfig` are:
 | ------- | ------- | ------- |
 | `MCP_CLIENT_REQUEST_TIMEOUT` | `30.0` | Total per-request deadline (seconds) when waiting on an external server |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | `false` | Let the SSRF guard on the HTTP client accept private/loopback/link-local hosts — trusted local development only |
-| `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Executable basenames `MCPClient` may spawn for stdio servers (see [Command Allowlist](#command-allowlist)) |
+| `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Executable names (exact match) `MCPClient` may spawn for stdio servers; shells/wrappers are never allowed (see [Command Allowlist](#command-allowlist)) |
+| `MCP_STDIO_ALLOWED_DIRS` | empty | Absolute directories whose scripts a stdio server may run; empty means none |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | system dirs + venv/conda `bin` | Directories command names resolve in (`PATH` is never searched) |
+| `MCP_STDIO_ALLOWED_MODULES` | empty | Modules `python -m` may run (exact names) |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | empty | Code-injecting env keys a server spec may set anyway (exact names) |
+| `MCP_ALLOW_PACKAGE_RUNNERS` | `false` | Permit package runners (`npx`, `uvx`, `bunx`, `uv tool run`, `bun x`, `deno run npm:`) that are on the allowlist |
+| `MCP_STDIO_ENV_PASSTHROUGH` | empty | Extra environment names a stdio child may inherit, beyond the built-in allowlist (trailing `*` = prefix) |
+| `MCP_CLIENT_MAX_RESPONSE_BYTES` | `4194304` | Cap on one HTTP response body (JSON or accumulated SSE) |
+| `MCP_CLIENT_MAX_LINE_BYTES` | `4194304` | Cap on one stdio frame |
+| `MCP_CLIENT_TOTAL_DEADLINE_SECONDS` | `60.0` | Wall-clock deadline for one HTTP request, covering the whole SSE stream |
+| `MCP_CLIENT_MAX_PAGES` / `MCP_CLIENT_MAX_ITEMS` | `20` / `1000` | Pagination bounds for `list_tools()` / `list_resources()` |
+| `MCP_POOL_MAX_CLIENTS` / `MCP_POOL_IDLE_SECONDS` | `64` / `300.0` | `KeyedMCPClientPool` size cap and idle lifetime |
+| `MCP_OAUTH_TIMEOUT_SECONDS` / `MCP_OAUTH_MAX_RESPONSE_BYTES` | `15.0` / `262144` | `OAuthClient` per-call deadline and response cap |

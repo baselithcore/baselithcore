@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
+import core.config.mcp as mcp_config_module
 from core.config.mcp import MCPConfig, MCPServerSpec
 from core.mcp.client import MCPServerInfo
 from core.mcp.client_types import MCPToolInfo
@@ -56,6 +58,23 @@ class _FakePool:
         return {"echo": arguments}
 
 
+@pytest.fixture
+def scripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An approved stdio script directory: spawning is deny-by-default now.
+
+    ``python weather_server.py`` used to pass on the interpreter's name alone;
+    the script must now be an absolute path inside ``MCP_STDIO_ALLOWED_DIRS``.
+    """
+    root = tmp_path / "servers"
+    root.mkdir(mode=0o755)
+    for name in ("weather_server.py", "s.py", "b.py", "g.py"):
+        (root / name).write_text("pass\n")
+    monkeypatch.setenv("MCP_STDIO_ALLOWED_DIRS", str(root))
+    monkeypatch.setattr(mcp_config_module, "_mcp_config", None)
+    yield root
+    monkeypatch.setattr(mcp_config_module, "_mcp_config", None)
+
+
 def _config(servers: dict[str, dict[str, Any]]) -> MCPConfig:
     return MCPConfig(MCP_SERVERS=servers)
 
@@ -99,10 +118,13 @@ class TestConfigWiring:
 
 
 class TestMountConfiguredServers:
-    async def test_mounts_and_returns_tool_map(self) -> None:
+    async def test_mounts_and_returns_tool_map(self, scripts: Path) -> None:
         config = _config(
             {
-                "weather": {"command": "python", "args": ["weather_server.py"]},
+                "weather": {
+                    "command": "python",
+                    "args": [str(scripts / "weather_server.py")],
+                },
                 "docs": {"url": "https://example.com/mcp"},
             }
         )
@@ -114,14 +136,17 @@ class TestMountConfiguredServers:
         )
         result = await mount_configured_servers(pool, config)  # type: ignore[arg-type]
         assert result == {"weather": ["get_forecast"], "docs": ["search", "read"]}
-        assert pool.added["weather"].command == ["python", "weather_server.py"]
+        assert pool.added["weather"].command == [
+            "python",
+            str(scripts / "weather_server.py"),
+        ]
         assert pool.added["docs"].url == "https://example.com/mcp"
 
-    async def test_disallowed_command_refused_fail_closed(self) -> None:
+    async def test_disallowed_command_refused_fail_closed(self, scripts: Path) -> None:
         config = _config(
             {
                 "evil": {"command": "evilbinary", "args": ["x"]},
-                "ok": {"command": "python", "args": ["s.py"]},
+                "ok": {"command": "python", "args": [str(scripts / "s.py")]},
             }
         )
         pool = _FakePool(tools_by_name={"ok": []})
@@ -130,19 +155,25 @@ class TestMountConfiguredServers:
         assert "evil" not in pool.added
         assert result == {"ok": []}
 
-    async def test_env_forwarded_to_connection(self) -> None:
+    async def test_env_forwarded_to_connection(self, scripts: Path) -> None:
         config = _config(
-            {"w": {"command": "python", "args": ["s.py"], "env": {"API_MODE": "test"}}}
+            {
+                "w": {
+                    "command": "python",
+                    "args": [str(scripts / "s.py")],
+                    "env": {"API_MODE": "test"},
+                }
+            }
         )
         pool = _FakePool()
         await mount_configured_servers(pool, config)  # type: ignore[arg-type]
         assert pool.envs["w"] == {"API_MODE": "test"}
 
-    async def test_connect_failure_skips_only_that_server(self) -> None:
+    async def test_connect_failure_skips_only_that_server(self, scripts: Path) -> None:
         config = _config(
             {
-                "bad": {"command": "python", "args": ["b.py"]},
-                "good": {"command": "python", "args": ["g.py"]},
+                "bad": {"command": "python", "args": [str(scripts / "b.py")]},
+                "good": {"command": "python", "args": [str(scripts / "g.py")]},
             }
         )
         pool = _FakePool(tools_by_name={"good": []}, fail_for=("bad",))
@@ -175,13 +206,14 @@ class TestMakeMcpToolFns:
         assert pool.calls == [("weather", "get_forecast", {"city": "Rome"})]
         assert "Rome" in out
 
-    def test_default_category_read_only(self) -> None:
+    def test_unknown_server_defaults_to_most_restrictive_category(self) -> None:
+        # Was "read_only": an undeclared server silently got the least friction.
         defs = make_mcp_tool_fns(
             _FakePool(),  # type: ignore[arg-type]
             "weather",
             [MCPToolInfo("t", "d", {})],
         )
-        assert defs[0].category == "read_only"
+        assert defs[0].category == "destructive"
 
     def test_accepts_plain_tool_names(self) -> None:
         defs = make_mcp_tool_fns(

@@ -26,7 +26,6 @@
     "core/learning/feedback.py": 1,
     "core/marketplace/auth.py": 1,
     "core/marketplace/publisher.py": 1,
-    "core/mcp/http_client_transport.py": 1,
     "core/mcp/tools.py": 1,
     "core/memory/manager.py": 1,
     "core/middleware/_admin_credentials.py": 1,

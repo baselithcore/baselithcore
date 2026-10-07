@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from core.config import get_mcp_config
+from core.mcp.client_errors import MCPAuthError, MCPTransportError
 from core.mcp.modern import SERVER_INFO_KEY, negotiate_version
 from core.observability.logging import get_logger
 
@@ -36,6 +37,7 @@ class HandshakeMixin:
     # Supplied by MCPClient.
     _protocol_version: str | None
     _client_info: dict[str, Any]
+    client_capabilities: dict[str, Any]
     # Declared as it is on MCPClient, not as `Any`: the mixin re-declaring it
     # loosely was what made `return self._server_info` an untyped return from a
     # method promising MCPServerInfo.
@@ -94,7 +96,10 @@ class HandshakeMixin:
             {
                 "protocolVersion": LATEST_PROTOCOL_VERSION,
                 "clientInfo": self._client_info,
-                "capabilities": {},
+                # Declared capabilities, not a blanket {}: an input_provider
+                # makes the client able (and willing) to fulfil sampling,
+                # elicitation and roots, and nothing else ever is.
+                "capabilities": self.client_capabilities,
             },
         )
 
@@ -125,6 +130,16 @@ class HandshakeMixin:
         """
         try:
             result = await self._send_request("server/discover", {})
+        except MCPAuthError:
+            # Refused credentials are not "a legacy server": surface them.
+            raise
+        except MCPTransportError as exc:
+            if exc.status_code is None:
+                # Network failure, deadline, oversized frame: the server never
+                # answered, so there is nothing to fall back to.
+                raise
+            logger.debug("mcp_discover_probe_declined", status=exc.status_code)
+            return None
         except RuntimeError as exc:
             # "Method not found" and friends: a legacy server, not a failure.
             logger.debug("mcp_discover_probe_declined", error=str(exc))

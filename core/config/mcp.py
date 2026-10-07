@@ -5,6 +5,7 @@ Settings for the Model Context Protocol (MCP) server and client.
 """
 
 import logging
+import os
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -245,13 +246,96 @@ class MCPConfig(BaseSettings):
         default=False, alias="MCP_ALLOW_INTERNAL_ENDPOINTS"
     )
 
-    # Comma-separated allowlist of executable basenames that MCPClient may
-    # spawn for stdio servers. A custom `command` whose argv[0] basename is
-    # not in this list is rejected — manifests/config cannot make the client
-    # exec arbitrary binaries.
+    # Comma-separated allowlist of executable NAMES that MCPClient may spawn
+    # for stdio servers, matched exactly (case-sensitive on POSIX, no version
+    # suffix folding: list `python3.12` to allow `python3.12`). An entry with a
+    # path separator is ignored, and shells / exec-wrappers (sh, bash, env,
+    # xargs, ssh, cmd, powershell, ...) are refused whatever this says. A name
+    # is looked up in MCP_STDIO_TRUSTED_BIN_DIRS only, never on PATH. Naming an
+    # interpreter does NOT allow what it can be told to run: see
+    # MCP_STDIO_ALLOWED_DIRS. Package runners in the list (npx, uvx, bunx)
+    # additionally need MCP_ALLOW_PACKAGE_RUNNERS=true.
     mcp_allowed_commands: str = Field(
         default="python,python3,node,npx,uvx,uv,deno,bun,bunx",
         alias="MCP_ALLOWED_COMMANDS",
+    )
+    # Comma-separated ABSOLUTE directories whose scripts a stdio server may
+    # run. The first positional argument of python/node/deno/bun/uv must be a
+    # file whose symlink-resolved path is inside one of them (no `..`, not
+    # world-writable, not in a world-writable directory). Empty (default): no
+    # script is allowed, so stdio stays unusable until the operator opts in.
+    mcp_stdio_allowed_dirs: str = Field(default="", alias="MCP_STDIO_ALLOWED_DIRS")
+    # Comma-separated absolute directories a command name is resolved in.
+    # Empty (default): /usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin, the
+    # active venv/conda bin. The running interpreter's own directory is always
+    # trusted. A non-empty value replaces the system list.
+    mcp_stdio_trusted_bin_dirs: str = Field(
+        default="", alias="MCP_STDIO_TRUSTED_BIN_DIRS"
+    )
+    # Comma-separated importable module names `python -m` may run (exact match).
+    # Empty (default): `-m` is refused.
+    mcp_stdio_allowed_modules: str = Field(
+        default="", alias="MCP_STDIO_ALLOWED_MODULES"
+    )
+    # Comma-separated environment variable names a server spec's `env` may set
+    # even though they can inject code (PATH, LD_*, DYLD_*, PYTHON*, NODE_*,
+    # proxy and CA-bundle variables, ...). Exact names; empty (default): none.
+    mcp_stdio_allowed_env_keys: str = Field(
+        default="", alias="MCP_STDIO_ALLOWED_ENV_KEYS"
+    )
+
+    # === Client hardening (third-party servers are untrusted) ===
+    # Hard cap on one HTTP response body, JSON or the accumulated SSE stream.
+    # A hostile server cannot stream gigabytes into the agent's memory; past
+    # the cap the request fails with MCPTransportError.
+    mcp_client_max_response_bytes: int = Field(
+        default=4_194_304, alias="MCP_CLIENT_MAX_RESPONSE_BYTES", ge=1024
+    )
+    # Hard cap on one newline-delimited stdio frame. Also bounds what the
+    # asyncio StreamReader buffers while a server dribbles a line forever.
+    mcp_client_max_line_bytes: int = Field(
+        default=4_194_304, alias="MCP_CLIENT_MAX_LINE_BYTES", ge=1024
+    )
+    # Total wall-clock deadline for one HTTP request, covering the whole SSE
+    # stream. mcp_client_request_timeout only bounds each network phase, so a
+    # server trickling keep-alive events would otherwise hold the call open
+    # forever.
+    mcp_client_total_deadline_seconds: float = Field(
+        default=60.0, alias="MCP_CLIENT_TOTAL_DEADLINE_SECONDS", gt=0
+    )
+    # Pagination guard for tools/list and resources/list: the client follows
+    # nextCursor at most this many pages / collects at most this many items,
+    # then fails closed. A repeated cursor is always an error.
+    mcp_client_max_pages: int = Field(default=20, alias="MCP_CLIENT_MAX_PAGES", ge=1)
+    mcp_client_max_items: int = Field(default=1000, alias="MCP_CLIENT_MAX_ITEMS", ge=1)
+    # Extra environment variable names a stdio server may inherit, on top of
+    # the built-in allowlist (PATH, HOME, USER, LOGNAME, LANG, LANGUAGE, LC_*,
+    # TMPDIR/TEMP/TMP, TZ, TERM and the Windows system variables). The parent
+    # environment is otherwise NEVER passed down: it carries API keys.
+    # Comma-separated; a trailing ``*`` matches a prefix.
+    mcp_stdio_env_passthrough: str = Field(
+        default="", alias="MCP_STDIO_ENV_PASSTHROUGH"
+    )
+    # Package runners (npx, uvx, bunx, pnpx, ``uv tool run``, ``bun x``,
+    # ``deno run npm:``) download and execute code from a registry at spawn
+    # time. They are refused even when listed in MCP_ALLOWED_COMMANDS unless
+    # this is true, because config reaching the client may be untrusted.
+    mcp_allow_package_runners: bool = Field(
+        default=False, alias="MCP_ALLOW_PACKAGE_RUNNERS"
+    )
+    # Per-key client pool (core.mcp.keyed_pool): live clients kept at once, and
+    # how long an unused one survives before it is closed.
+    mcp_pool_max_clients: int = Field(default=64, alias="MCP_POOL_MAX_CLIENTS", ge=1)
+    mcp_pool_idle_seconds: float = Field(
+        default=300.0, alias="MCP_POOL_IDLE_SECONDS", gt=0
+    )
+    # OAuth client (core.mcp.oauth_client): per-call deadline and response cap
+    # for discovery, registration and token requests.
+    mcp_oauth_timeout_seconds: float = Field(
+        default=15.0, alias="MCP_OAUTH_TIMEOUT_SECONDS", gt=0
+    )
+    mcp_oauth_max_response_bytes: int = Field(
+        default=262_144, alias="MCP_OAUTH_MAX_RESPONSE_BYTES", ge=1024
     )
 
     # === Declarative external server registry ===
@@ -319,9 +403,10 @@ class MCPConfig(BaseSettings):
 
     @property
     def allowed_command_basenames(self) -> frozenset[str]:
-        """Parsed, normalized view of ``mcp_allowed_commands``."""
+        """Parsed view of ``mcp_allowed_commands`` (exact names; folded on Windows)."""
+        fold = os.name == "nt"
         return frozenset(
-            item.strip().lower()
+            item.strip().lower() if fold else item.strip()
             for item in self.mcp_allowed_commands.split(",")
             if item.strip()
         )

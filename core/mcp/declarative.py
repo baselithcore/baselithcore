@@ -21,6 +21,8 @@ Safety posture:
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -94,10 +96,76 @@ async def mount_configured_servers(
     return mounted
 
 
+#: What an undeclared server's tools are treated as: the most restrictive
+#: category, matching ``ToolDefinition``'s own default, so an unknown server is
+#: gated rather than waved through. (It used to be ``read_only``.)
+UNKNOWN_SERVER_CATEGORY = "destructive"
+
+#: A tool name as the MCP spec writes them (1-128 of ``A-Za-z0-9_.-``), tightened
+#: to 64 so ``<server>.<tool>`` stays within common model-API name limits.
+_TOOL_NAME = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
+_SERVER_NAME = re.compile(r"[A-Za-z0-9_\-]{1,64}")
+
+
+def _valid_name(pattern: re.Pattern[str], name: object) -> bool:
+    """Whole-string match on plain ASCII that NFKC leaves unchanged.
+
+    ``fullmatch``, never ``^...$`` + ``match``: ``$`` also matches before a
+    trailing newline, so ``"tool\n"`` would pass and then differ from ``"tool"``
+    in every downstream comparison.
+    """
+    return (
+        isinstance(name, str)
+        and name.isascii()
+        and unicodedata.normalize("NFKC", name) == name
+        and pattern.fullmatch(name) is not None
+    )
+
+
+MAX_DESCRIPTION_CHARS = 2000
+
+
 def _configured_category(server_name: str) -> str:
-    """The server's configured autonomy category; ``read_only`` when unknown."""
+    """The server's configured autonomy category.
+
+    An unknown server falls back to :data:`UNKNOWN_SERVER_CATEGORY` (the most
+    restrictive) and logs a deprecation warning: the previous fallback,
+    ``read_only``, silently trusted a server nobody had declared. Declare the
+    server in ``MCP_SERVERS`` or pass ``autonomy_category=`` explicitly.
+    """
     spec = get_mcp_config().mcp_servers.get(server_name)
-    return spec.autonomy_category if spec is not None else "read_only"
+    if spec is not None:
+        return spec.autonomy_category
+    logger.warning(
+        "mcp_unknown_server_category_defaulted",
+        server_name=server_name,
+        category=UNKNOWN_SERVER_CATEGORY,
+        deprecation=(
+            "undeclared MCP servers used to default to read_only; declare the "
+            "server or pass autonomy_category explicitly"
+        ),
+    )
+    return UNKNOWN_SERVER_CATEGORY
+
+
+def _clean_description(text: str, source: str) -> str:
+    """A server-written description made safe to show a model.
+
+    Control and format characters (bidi overrides, zero-width, NULs) are
+    dropped, the text is scanned and sanitised as untrusted external content,
+    and the result is capped at :data:`MAX_DESCRIPTION_CHARS`.
+    """
+    from core.guardrails import scan_external_content
+
+    printable = "".join(
+        ch
+        for ch in text
+        if ch in "\n\t" or unicodedata.category(ch) not in {"Cc", "Cf", "Cs", "Co"}
+    )
+    cleaned = scan_external_content(
+        printable[: MAX_DESCRIPTION_CHARS * 2], source=source, sanitize=True
+    )
+    return cleaned[:MAX_DESCRIPTION_CHARS]
 
 
 def _as_tool_info(tool: MCPToolInfo | str) -> MCPToolInfo:
@@ -116,7 +184,8 @@ def make_mcp_tool_fns(
     """Build per-tool ToolDefinitions proxying to a mounted MCP server.
 
     Each definition is named ``<server_name>.<tool_name>`` (collision-safe
-    across servers), calls through :meth:`MCPConnectionPool.call_tool`, and
+    across servers; the server name and each tool name are validated, an
+    invalid or duplicate tool name is skipped), calls through :meth:`MCPConnectionPool.call_tool`, and
     is tagged with the server's autonomy category so the approval gate
     applies the operator's declared caution.
 
@@ -127,16 +196,28 @@ def make_mcp_tool_fns(
             latter compose directly with :func:`mount_configured_servers`
             output, at the cost of an empty description/schema.
         autonomy_category: Explicit category override; when omitted it is
-            read from the global config's ``mcp_servers`` entry, defaulting
-            to ``read_only``.
+            read from the global config's ``mcp_servers`` entry. A server not
+            in the config defaults to the most restrictive category
+            (``destructive``) with a deprecation warning - it used to be
+            ``read_only``.
+
+    Tool descriptions are server-written and therefore untrusted: they are
+    stripped of control/bidi characters, scanned and sanitised, and capped.
 
     Returns:
         ToolDefinitions ready for registration in a tool registry.
+
+    Raises:
+        ValueError: *server_name* is not 1-64 characters of ``A-Za-z0-9_-``.
     """
     # Lazy import: core.reasoning pulls the whole reasoning stack, which
     # this wiring module must not load at import time.
     from core.reasoning.react import ToolDefinition
 
+    if not _valid_name(_SERVER_NAME, server_name):
+        raise ValueError(
+            f"invalid MCP server name {server_name!r}: use 1-64 of A-Z a-z 0-9 _ -"
+        )
     category = (
         autonomy_category
         if autonomy_category is not None
@@ -153,13 +234,26 @@ def make_mcp_tool_fns(
         return call_mcp_tool
 
     definitions: list[ToolDefinition] = []
+    seen: set[str] = set()
     for tool in tools:
         info = _as_tool_info(tool)
+        # Duplicates are judged case-insensitively too: ``Tool`` and ``tool`` are one tool.
+        if not _valid_name(_TOOL_NAME, info.name) or info.name.lower() in seen:
+            logger.warning(
+                "mcp_declarative_tool_skipped",
+                server_name=server_name,
+                reason="duplicate" if info.name.lower() in seen else "invalid_name",
+            )
+            continue
+        seen.add(info.name.lower())
+        description = _clean_description(
+            info.description, f"mcp_tool_description:{server_name}.{info.name}"
+        )
         definitions.append(
             ToolDefinition(
                 name=f"{server_name}.{info.name}",
                 fn=_make_fn(info.name),
-                description=info.description
+                description=description
                 or f"Tool '{info.name}' on external MCP server '{server_name}'.",
                 parameters=info.input_schema or None,
                 category=category,

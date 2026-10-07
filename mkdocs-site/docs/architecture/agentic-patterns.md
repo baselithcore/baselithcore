@@ -479,7 +479,8 @@ from core.mcp import MCPClient
 
 # Connect to an MCP server (a launchable script or custom command).
 # Entering the context manager calls connect(); leaving it disconnects.
-async with MCPClient(server_script="path/to/server.py") as client:
+# The script must be an absolute path inside MCP_STDIO_ALLOWED_DIRS.
+async with MCPClient(server_script="/srv/mcp/server.py") as client:
     tools = await client.list_tools()  # discover available tools
 
     # Execute a tool exposed by the server

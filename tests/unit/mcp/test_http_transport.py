@@ -1,5 +1,6 @@
 """Tests for the MCP Streamable HTTP transport (server + client sides)."""
 
+import json
 import socket
 from types import SimpleNamespace
 
@@ -428,7 +429,7 @@ async def test_mcp_client_http_branch_uses_transport():
         def __init__(self):
             self.sent = []
 
-        async def send(self, message):
+        async def send(self, message, **_handlers):
             self.sent.append(message)
             if message.get("method") == "tools/list":
                 return {
@@ -453,15 +454,19 @@ async def test_mcp_client_http_branch_uses_transport():
 
 
 def test_sse_parsing_matches_request_id():
+    from core.mcp.bounded_http import SSEParser
+    from core.mcp.reply_matching import is_reply
+
     body = (
-        'data: {"jsonrpc":"2.0","method":"noise"}\n\n'
-        'data: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}\n\n'
+        b'data: {"jsonrpc":"2.0","method":"noise"}\n\n'
+        b'data: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}\n\n'
     )
-    parsed = HTTPClientTransport._parse_sse(body, 7)
-    assert parsed["result"] == {"ok": True}
-    # Without a matching id the last decoded event wins.
-    fallback = HTTPClientTransport._parse_sse(body, None)
-    assert fallback["id"] == 7
+    events = [json.loads(d) for d in SSEParser().feed(body)]
+    replies = [e for e in events if is_reply(e, 7)]
+    assert [r["result"] for r in replies] == [{"ok": True}]
+    # No "last decoded event wins" fallback any more: an event that is not a
+    # reply to OUR id is never taken as one.
+    assert not any(is_reply(e, 8) for e in events)
 
 
 if __name__ == "__main__":  # pragma: no cover

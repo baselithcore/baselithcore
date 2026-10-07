@@ -1,6 +1,8 @@
 """Tests for MCP security hardening: command allowlist + autonomy gate."""
 
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,24 +15,53 @@ from core.orchestration.autonomy import (
     enforce_approval,
 )
 
+FAKE_SERVER = str(Path(__file__).parent / "fakes" / "stdio_server.py")
+
+
+def _fake_bin(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
 
 class TestCommandAllowlist:
+    # The conftest approves the fakes directory for stdio scripts; these cases
+    # used a relative `server.py`, which is now refused (see
+    # test_stdio_allowlist_escape.py) so they name the fake server instead.
     def test_current_interpreter_allowed(self) -> None:
-        MCPClient._validate_command([sys.executable, "server.py"])
+        MCPClient._validate_command([sys.executable, FAKE_SERVER])
+
+    @pytest.mark.parametrize("name", ["python", "python3", "node"])
+    def test_known_interpreters_allowed(
+        self, name: str, tmp_path: Path, mcp_env: Any
+    ) -> None:
+        # Names resolve in the trusted bin dirs only (never PATH), so the
+        # interpreters live in one we configure instead of depending on the host.
+        _fake_bin(tmp_path / "bin", name)
+        mcp_env(MCP_STDIO_TRUSTED_BIN_DIRS=str(tmp_path / "bin"))
+        MCPClient._validate_command([name, FAKE_SERVER])
+
+    def test_variant_names_are_refused_unless_listed(self, tmp_path: Path) -> None:
+        # `python3.12` used to pass because its alphabetic prefix, `python`, was
+        # listed. Matching is exact now: a fuzzy name widens the list silently.
+        fake = _fake_bin(tmp_path / "bin", "python3.12")
+        with pytest.raises(ValueError, match="not in the allowed command"):
+            MCPClient._validate_command([str(fake), FAKE_SERVER])
 
     @pytest.mark.parametrize(
         "cmd",
         [
-            ["python", "server.py"],
-            ["python3", "server.py"],
-            ["/usr/local/bin/python3.12", "server.py"],
-            ["node", "server.js"],
             ["npx", "-y", "@modelcontextprotocol/server-filesystem"],
             ["uvx", "mcp-server-git"],
         ],
     )
-    def test_known_interpreters_allowed(self, cmd: list[str]) -> None:
-        MCPClient._validate_command(cmd)
+    def test_package_runners_refused_without_opt_in(self, cmd: list[str]) -> None:
+        # npx/uvx stay on the default allowlist but fetch code at spawn time,
+        # so they additionally need MCP_ALLOW_PACKAGE_RUNNERS=true.
+        with pytest.raises(ValueError, match="MCP_ALLOW_PACKAGE_RUNNERS"):
+            MCPClient._validate_command(cmd, allow_package_runners=False)
 
     @pytest.mark.parametrize(
         "cmd",
@@ -42,7 +73,9 @@ class TestCommandAllowlist:
         ],
     )
     def test_arbitrary_binaries_rejected(self, cmd: list[str]) -> None:
-        with pytest.raises(ValueError, match="not in the allowed command"):
+        # Shells and wrappers are refused by the hard deny-list (a different
+        # message than "not allowlisted"), everything else by the allowlist.
+        with pytest.raises(ValueError, match="not in the allowed command|shell"):
             MCPClient._validate_command(cmd)
 
     def test_empty_command_rejected(self) -> None:
@@ -50,10 +83,14 @@ class TestCommandAllowlist:
             MCPClient._validate_command([])
 
     def test_allowlist_extensible_via_env(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         import core.config.mcp as mcp_config_module
 
+        _fake_bin(tmp_path, "my-trusted-runner")
+        _fake_bin(tmp_path, "node")
+        # The name is looked up in the trusted bin dirs, not on PATH.
+        monkeypatch.setenv("MCP_STDIO_TRUSTED_BIN_DIRS", str(tmp_path))
         monkeypatch.setenv("MCP_ALLOWED_COMMANDS", "python,my-trusted-runner")
         monkeypatch.setattr(mcp_config_module, "_mcp_config", None)
         try:

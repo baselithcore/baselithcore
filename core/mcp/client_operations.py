@@ -13,7 +13,8 @@ import json
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
-from core.mcp.client_errors import MCPToolError, error_text
+from core.mcp.client_errors import MCPProtocolError, MCPToolError, error_text
+from core.mcp.client_limits import client_limits
 from core.mcp.client_types import MCPToolInfo
 from core.observability.logging import get_logger
 
@@ -258,17 +259,63 @@ class OperationsMixin:
     # Tool Operations
     # -------------------------------------------------------------------------
 
+    async def _list_paginated(self, method: str, key: str) -> list[Any]:
+        """Collect every page of a list operation, following ``nextCursor``.
+
+        Bounded on three axes, because the server controls all of them: at most
+        ``MCP_CLIENT_MAX_PAGES`` pages, at most ``MCP_CLIENT_MAX_ITEMS`` items
+        in total, and a cursor the server has already handed out is a cycle.
+        Each violation raises :class:`MCPProtocolError` instead of returning a
+        silently truncated list.
+        """
+        limits = client_limits()
+        items: list[Any] = []
+        seen: set[str] = set()
+        cursor: str | None = None
+        for _ in range(limits.max_pages):
+            response = await self._send_request(
+                method, {"cursor": cursor} if cursor else {}
+            )
+            page = response.get(key, [])
+            if not isinstance(page, list):
+                raise MCPProtocolError(f"'{method}' result has no '{key}' list")
+            items.extend(page)
+            if len(items) > limits.max_items:
+                raise MCPProtocolError(
+                    f"'{method}' returned more than {limits.max_items} items"
+                )
+            following = response.get("nextCursor")
+            if not following:
+                return items
+            if not isinstance(following, str) or following in seen:
+                raise MCPProtocolError(
+                    f"'{method}' repeated a pagination cursor; refusing to loop"
+                )
+            seen.add(following)
+            cursor = following
+        raise MCPProtocolError(f"'{method}' exceeded {limits.max_pages} pages")
+
     async def list_tools(self) -> list[MCPToolInfo]:
         """
-        List available tools from the server.
+        List available tools from the server, following pagination.
+
+        Entries that are not objects with a string ``name`` are skipped.
 
         Returns:
-            List of tool information
+            List of tool information (with title, annotations, output schema
+            and spec hash; see :class:`~core.mcp.client_types.MCPToolInfo`)
+
+        Raises:
+            MCPProtocolError: A pagination bound was exceeded or a cursor
+                repeated.
         """
         self._ensure_connected()
 
-        response = await self._send_request("tools/list", {})
-        tools = response.get("tools", [])
+        tools = [
+            t
+            for t in await self._list_paginated("tools/list", "tools")
+            if isinstance(t, dict) and isinstance(t.get("name"), str)
+        ]
 
         if self._http is not None:
             # The HTTP transport needs the schemas to mirror `x-mcp-header`
@@ -277,14 +324,7 @@ class OperationsMixin:
                 t["name"]: t.get("inputSchema", {}) for t in tools
             }
 
-        return [
-            MCPToolInfo(
-                name=t["name"],
-                description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
-            )
-            for t in tools
-        ]
+        return [MCPToolInfo.from_wire(t) for t in tools]
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any] | None = None
@@ -383,12 +423,11 @@ class OperationsMixin:
     # -------------------------------------------------------------------------
 
     async def list_resources(self) -> list[dict[str, Any]]:
-        """List available resources from the server."""
+        """List available resources from the server, following pagination."""
         self._ensure_connected()
 
-        response = await self._send_request("resources/list", {})
-        resources: list[dict[str, Any]] = response.get("resources", [])
-        return resources
+        resources = await self._list_paginated("resources/list", "resources")
+        return [r for r in resources if isinstance(r, dict)]
 
     async def read_resource(self, uri: str) -> Any:
         """Read a resource from the server."""

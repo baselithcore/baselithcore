@@ -14,17 +14,25 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.config import get_mcp_config
 from core.mcp.cache import ResultCache
-from core.mcp.client_errors import MCPToolError
+from core.mcp.client_errors import (
+    MCPAuthError,
+    MCPClientError,
+    MCPProtocolError,
+    MCPToolError,
+    MCPTransportError,
+    bounded,
+)
 from core.mcp.client_handshake import HandshakeMixin
 from core.mcp.client_operations import OperationsMixin
 from core.mcp.client_types import MCPToolInfo
 from core.mcp.modern import MODERN_PROTOCOL_VERSION, client_request_meta
+from core.mcp.server_requests import answer_server_request
 from core.mcp.stdio_client_transport import (
     read_response,
     resolve_command,
@@ -33,6 +41,11 @@ from core.mcp.stdio_client_transport import (
     write_message,
 )
 from core.observability.logging import get_logger
+
+if TYPE_CHECKING:
+    import httpx
+
+    from core.mcp.http_client_transport import HeaderProvider, UnauthorizedHook
 
 logger = get_logger(__name__)
 
@@ -78,6 +91,12 @@ class MCPClient(HandshakeMixin, OperationsMixin):
         input_provider: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
         | None = None,
         client_capabilities: dict[str, Any] | None = None,
+        *,
+        auth: HeaderProvider | None = None,
+        on_unauthorized: UnauthorizedHook | None = None,
+        allowed_hosts: Iterable[str] | None = None,
+        max_response_bytes: int | None = None,
+        httpx_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """
         Initialize MCP client.
@@ -94,12 +113,31 @@ class MCPClient(HandshakeMixin, OperationsMixin):
                 complete transparently. Without one the client declares no such
                 capability and a server may not ask.
             client_capabilities: Capabilities advertised on every modern
-                request. Derived from *input_provider* when omitted.
+                request (and on the legacy ``initialize``). Derived from
+                *input_provider* when omitted; ``{}`` without one.
+            auth: Async callable returning HTTP headers, evaluated for every
+                request so a refreshed token is picked up (HTTP only).
+            on_unauthorized: Async hook called once after a 401; may return
+                fresh headers for a single retry (HTTP only).
+            allowed_hosts: Exact hostnames the HTTP endpoint may have
+                (validated at connect; also enforced by the SSRF policy).
+            max_response_bytes: Cap on one HTTP response body (default
+                ``MCP_CLIENT_MAX_RESPONSE_BYTES``).
+            httpx_transport: httpx transport override for in-process testing.
+
+        Server-initiated requests (sampling, elicitation, roots) are denied
+        with a JSON-RPC error unless *input_provider* is set and the matching
+        capability is declared.
         """
         self.server_script = server_script
         self.command = command
         self.url = url
         self.http_headers = http_headers
+        self._auth = auth
+        self._on_unauthorized = on_unauthorized
+        self._allowed_hosts = allowed_hosts
+        self._max_response_bytes = max_response_bytes
+        self._httpx_transport = httpx_transport
         self.input_provider = input_provider
         # A server MUST NOT ask for input the client never declared, so the
         # declaration follows what this client can actually fulfil.
@@ -165,7 +203,7 @@ class MCPClient(HandshakeMixin, OperationsMixin):
         self._process = await spawn(cmd, env)
 
         if self._process.stdout is None or self._process.stdin is None:
-            raise RuntimeError("Failed to open process pipes")
+            raise MCPTransportError("Failed to open process pipes")
 
         self._reader = self._process.stdout
         self._writer = self._process.stdin
@@ -176,7 +214,15 @@ class MCPClient(HandshakeMixin, OperationsMixin):
         """Connect over the Streamable HTTP transport."""
         from core.mcp.http_client_transport import HTTPClientTransport
 
-        transport = HTTPClientTransport(url, headers=self.http_headers)
+        transport = HTTPClientTransport(
+            url,
+            headers=self.http_headers,
+            httpx_transport=self._httpx_transport,
+            max_response_bytes=self._max_response_bytes,
+            allowed_hosts=self._allowed_hosts,
+            auth=self._auth,
+            on_unauthorized=self._on_unauthorized,
+        )
         self._http = transport
         try:
             # Same era probe as stdio: a modern server answers server/discover
@@ -230,7 +276,7 @@ class MCPClient(HandshakeMixin, OperationsMixin):
     def _ensure_connected(self) -> None:
         """Ensure the client is connected."""
         if not self._connected:
-            raise RuntimeError("Not connected to MCP server. Call connect() first.")
+            raise MCPClientError("Not connected to MCP server. Call connect() first.")
 
     async def _send_request(
         self, method: str, params: dict[str, Any]
@@ -264,44 +310,73 @@ class MCPClient(HandshakeMixin, OperationsMixin):
         }
 
         if self._http is not None:
-            response = await self._http.send(request)
-            if not isinstance(response, dict):
-                raise RuntimeError(f"Empty MCP response for '{method}'")
-            if "error" in response:
-                error = response["error"]
-                raise RuntimeError(
-                    f"MCP error {error.get('code')}: {error.get('message')}"
-                )
-            result: dict[str, Any] = response.get("result", {})
-            return result
+            http_reply = await self._http.send(
+                request,
+                on_server_request=self._handle_server_request,
+                on_notification=self._on_notification,
+            )
+            if not isinstance(http_reply, dict):
+                raise MCPProtocolError(f"Empty MCP response for '{method}'")
+            return self._unwrap(http_reply)
 
         if self._writer is None or self._reader is None:
-            raise RuntimeError("Not connected")
+            raise MCPClientError("Not connected")
 
-        await write_message(self._writer, request)
-
-        # Read until the reply carrying our id arrives, bounded by a timeout so
-        # a hung server cannot block the agent loop indefinitely. On timeout we
-        # mark the connection unusable rather than risk consuming a late reply
-        # as the answer to a subsequent request.
+        # Read until the reply carrying our id arrives, bounded by a total
+        # deadline so a hung or dribbling server cannot block the agent loop
+        # indefinitely. On any transport failure we mark the connection
+        # unusable rather than risk consuming a late reply as the answer to a
+        # subsequent request.
         timeout = get_mcp_config().mcp_client_request_timeout
         try:
-            response = await read_response(self._reader, request["id"], timeout=timeout)
+            await asyncio.wait_for(write_message(self._writer, request), timeout)
+            reply = await read_response(
+                self._reader,
+                request["id"],
+                timeout=timeout,
+                on_notification=self._on_notification,
+                writer=self._writer,
+                on_server_request=self._handle_server_request,
+            )
         except TimeoutError as exc:
             self._connected = False
-            raise RuntimeError(
+            raise MCPTransportError(
                 f"MCP server timed out after {timeout}s waiting for "
                 f"response to '{method}'"
             ) from exc
+        except MCPTransportError:
+            self._connected = False
+            raise
 
-        # Check for error
-        if "error" in response:
-            error = response["error"]
-            raise RuntimeError(f"MCP error {error.get('code')}: {error.get('message')}")
-
-        cacheable: dict[str, Any] = response.get("result", {})
+        cacheable = self._unwrap(reply)
         self.cache.store(method, params, cacheable)
         return cacheable
+
+    @staticmethod
+    def _unwrap(reply: dict[str, Any]) -> dict[str, Any]:
+        """The ``result`` of a reply, or a typed error for its ``error``."""
+        if "error" in reply:
+            error = reply["error"]
+            if not isinstance(error, dict):
+                raise MCPProtocolError("MCP error: malformed error object")
+            code = error.get("code")
+            raise MCPProtocolError(
+                f"MCP error {code}: {bounded(error.get('message'))}",
+                code=code if isinstance(code, int) else None,
+            )
+        result = reply.get("result", {})
+        if not isinstance(result, dict):
+            raise MCPProtocolError("MCP result is not an object")
+        return result
+
+    async def _handle_server_request(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Answer a request the server made of us (default-deny, see
+        :mod:`core.mcp.server_requests`)."""
+        return await answer_server_request(
+            message,
+            input_provider=self.input_provider,
+            capabilities=self.client_capabilities,
+        )
 
     def _on_notification(self, message: dict[str, Any]) -> None:
         """React to a server notification seen while awaiting a reply.
@@ -325,9 +400,16 @@ class MCPClient(HandshakeMixin, OperationsMixin):
             return
 
         if self._writer is None:
-            raise RuntimeError("Not connected")
+            raise MCPClientError("Not connected")
 
-        await write_message(self._writer, notification)
+        timeout = get_mcp_config().mcp_client_request_timeout
+        try:
+            await asyncio.wait_for(write_message(self._writer, notification), timeout)
+        except TimeoutError as exc:
+            self._connected = False
+            raise MCPTransportError(
+                f"MCP server timed out after {timeout}s accepting '{method}'"
+            ) from exc
 
 
 def __getattr__(name: str) -> Any:
@@ -341,8 +423,12 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "MCPAuthError",
     "MCPClient",
+    "MCPClientError",
+    "MCPProtocolError",
     "MCPToolError",
+    "MCPTransportError",
     "MCPServerInfo",
     "MCPToolInfo",
 ]
