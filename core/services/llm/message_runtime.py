@@ -22,7 +22,9 @@ Kept out of ``service.py`` (module size cap), like ``structured`` and
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from core.lifecycle.deterministic import get_llm_override_kwargs
@@ -33,6 +35,7 @@ from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._accounting import account_turn, record_usage_cost
 from core.services.llm._deadline import await_within_deadline
+from core.services.llm._message_stream import can_stream_turn, stream_attempt
 from core.services.llm._telemetry import (
     gen_ai_provider_for,
     report_tokens_to_middleware,
@@ -43,8 +46,13 @@ from core.services.llm.errors import (
     LLMRefusalError,
     is_retryable,
     retry_after_from_exception,
+    safe_error_text,
 )
-from core.services.llm.exceptions import LLMProviderError, RateLimitError
+from core.services.llm.exceptions import (
+    LLMProviderError,
+    RateLimitError,
+    StreamInterruptedError,
+)
 from core.services.llm.messages import (
     CONVERGENCE_NUDGE,
     Message,
@@ -143,11 +151,19 @@ async def _messages_with_retry(
     # API is an optional capability (:class:`MessageCapableProvider`), so the
     # base provider protocol does not declare it.
     provider = cast("MessageCapableProvider", service.provider)
+    # Popped, never forwarded: it is the caller's callback, not a provider
+    # parameter. Streaming is decided per stage (fallback clones included).
+    on_text = kwargs.pop("on_text", None)
     try:
+        if on_text is not None and can_stream_turn(service, kwargs):
+            return await stream_attempt(service, messages, model, on_text, **kwargs)
         # Bounded by the ambient LoopBudget's remaining wall-clock time.
         return await await_within_deadline(
             provider.generate_messages(messages, model, **kwargs)
         )
+    except StreamInterruptedError:
+        # Text already reached the caller: never retried, never re-sent.
+        raise
     except _RETRYABLE as e:
         logger.warning(
             "Transient provider failure (messages, %s), will retry: %s",
@@ -221,6 +237,7 @@ async def generate_messages(
     max_tokens: int | None = None,
     task_category: str | None = None,
     allow_refusal: bool = False,
+    on_text: Callable[[str], None] | None = None,
 ) -> LLMResult:
     """Generate one turn from a neutral conversation history.
 
@@ -240,13 +257,21 @@ async def generate_messages(
         task_category: Optional cost-aware routing hint.
         allow_refusal: When True a refusal is returned on the result instead
             of raising ``LLMRefusalError``.
+        on_text: Receives each text chunk as the provider streams it. Honoured
+            only on the native message path of a provider with
+            ``supports_streaming_tools`` (and ``LLM_STREAM_AGENT_TEXT`` on);
+            every other path ignores it and returns the whole turn at once, so
+            a caller must still handle a turn that never called it.
 
     Returns:
         LLMResult: text and/or structured tool calls with usage, and
-        ``message`` when the provider built the assistant turn.
+        ``message`` when the provider built the assistant turn. Exactly one
+        usage record is booked per call, streamed or not.
 
     Raises:
         LLMRefusalError: The model declined and ``allow_refusal`` is False.
+        StreamInterruptedError: A stream failed after ``on_text`` had already
+            delivered text (partial text on the exception).
     """
     from core.orchestration.limits import (
         BudgetExceededError as LoopBudgetExceededError,
@@ -312,6 +337,16 @@ async def generate_messages(
             extra["max_tokens"] = max_tokens
         if allow_refusal:
             extra["allow_refusal"] = True
+        # What the caller has been shown so far: the basis of the estimate
+        # booked when the stream is cancelled or breaks mid-way.
+        streamed: list[str] = []
+        if on_text is not None:
+
+            def _tap(chunk: str, _forward: Callable[[str], None] = on_text) -> None:
+                streamed.append(chunk)
+                _forward(chunk)
+
+            extra["on_text"] = _tap
         # CORE_DETERMINISTIC_MODE pins sampling on the agent loop's path too,
         # not only on plain text generation.
         extra.update(get_llm_override_kwargs(service.config.provider))
@@ -364,15 +399,46 @@ async def generate_messages(
             )
             await record_usage_cost(billing_model, billed)
             raise
+        except (StreamInterruptedError, asyncio.CancelledError) as interrupted:
+            # Generated, billed output the caller already saw: book an
+            # estimate of it exactly once, or a broken or abandoned stream
+            # (a client that opens many and cancels) leaves no trace in any
+            # ledger and escapes the budget.
+            span.set_attribute(
+                "gen_ai.baselith.error",
+                "cancelled"
+                if isinstance(interrupted, asyncio.CancelledError)
+                else "stream_interrupted",
+            )
+            partial = "".join(streamed)
+            billing_model = qualified_model_id(serving_provider, serving_model)
+            billed = account_turn(
+                service,
+                span,
+                model=billing_model,
+                result=LLMResult(
+                    text=partial or None,
+                    stop_reason="error",
+                    tokens_used=input_tokens + await estimate_tokens_async(partial),
+                ),
+                input_tokens=input_tokens,
+                started=started,
+                provider=serving_provider,
+            )
+            await record_usage_cost(billing_model, billed)
+            raise
         except (LoopBudgetExceededError, RateLimitError):
             span.set_attribute("gen_ai.baselith.error", "budget_or_rate_limit")
             raise
         except LLMProviderError:
             raise
         except Exception as e:
-            span.set_attribute("gen_ai.baselith.error", str(e))
-            logger.error(f"Message generation failed: {e}")
-            raise LLMProviderError(f"Message generation failed: {e}") from e
+            # A streamed turn's failure text is never echoed: an upstream body
+            # may quote the prompt or a credential (type and status only).
+            detail = safe_error_text(e) if on_text is not None else str(e)
+            span.set_attribute("gen_ai.baselith.error", detail)
+            logger.error(f"Message generation failed: {detail}")
+            raise LLMProviderError(f"Message generation failed: {detail}") from None
 
         # The model that answered, provider-namespaced when local.
         billing_model = qualified_model_id(serving_provider, serving_model)

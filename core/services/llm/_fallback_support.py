@@ -142,7 +142,10 @@ def fatal_exception_types() -> tuple[type[BaseException], ...]:
     )
     from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
     from core.services.llm.errors import LLMClientError, LLMRefusalError
-    from core.services.llm.exceptions import BudgetExceededError
+    from core.services.llm.exceptions import (
+        BudgetExceededError,
+        StreamInterruptedError,
+    )
 
     return (
         BudgetExceededError,
@@ -150,6 +153,8 @@ def fatal_exception_types() -> tuple[type[BaseException], ...]:
         LoopBudgetExceededError,
         LLMRefusalError,
         LLMClientError,
+        # A stream that broke after text reached the caller is committed.
+        StreamInterruptedError,
     )
 
 

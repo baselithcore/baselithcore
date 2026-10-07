@@ -800,11 +800,13 @@ Declared in `core.config.services`.
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
 | `LLM_ROUTING_MAX_COST_PER_1K_USD` | `float \| None` | *empty* | Budget cap for routed calls: when the routed model's approximate cost per 1K tokens exceeds it, the priciest model in the policy pool that fits is used instead (cheapest if none fits). Empty disables the cap. |
 | `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
+| `LLM_STREAM_AGENT_TEXT` | `bool` | `True` | Stream an agent turn's text chunk by chunk when the serving provider supports streamed tool calls (`supports_streaming_tools`); false restores one TextDelta per model turn. Env: LLM_STREAM_AGENT_TEXT via the LLM_ prefix. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
 | `LLM_VLLM_API_BASE` | `str \| None` | *empty* | vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is appended when missing). Falls back to LLM_API_BASE only when LLM_PROVIDER=vllm. Required for vLLM: there is no default. |
 | `LLM_VLLM_API_KEY` :material-key:<br>also accepts `VLLM_API_KEY` | `SecretStr \| None` | *empty* | The key the vLLM server was started with (--api-key / VLLM_API_KEY). Leave empty for a keyless server. |
 | `LLM_VLLM_ENDPOINTS` | `str \| None` | *empty* | Several vLLM servers, one per model: comma-separated OpenAI roots, one per server (e.g. `http://gpu:8002/v1`). Calls name a model and go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is the one-server form of the same setting. |
+| `LLM_VLLM_LIVE_STREAM_MODELS` | `str` | *empty* | Regex of vLLM served-model names known not to reason inline, whose agent text may stream from the first chunk. Other models hold their answer until a closing think tag so reasoning never leaks. Env: LLM_VLLM_LIVE_STREAM_MODELS via the LLM_ prefix. |
 | `LLM_VLLM_NATIVE_TOOLS` | `bool` | `True` | Whether the vLLM server supports native tool calling (started with --enable-auto-tool-choice --tool-call-parser &lt;parser>). Set false to use prompt-coerced tool calls instead. |
 | `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
@@ -1010,4 +1012,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-662 settings documented.
+664 settings documented.

@@ -9,7 +9,11 @@ It composes pieces core already owns instead of re-implementing them:
   (``connector.<name>``), with ``Retry-After`` honoured through the
   ``retry_after`` attribute of :class:`ConnectorRateLimitedError`;
 * the error hierarchy of :mod:`core.connectors.errors`, with credentials
-  redacted out of every message.
+  redacted out of every message. Redaction covers the ``secrets`` the client
+  was built with, the credentials of the request's own headers (an
+  ``Authorization`` bearer, an ``X-Api-Key``: what a provider may echo back),
+  and anything credential-shaped in a response body. Response bodies and
+  headers are never logged or embedded raw: only a bounded, redacted excerpt.
 
 Only a genuine outage (transport failure, timeout, 408, 5xx) counts against
 the breaker. A 404, a rejected credential or a rate limit says nothing about
@@ -49,6 +53,30 @@ from core.security.http import SsrfBlockingTransport, create_hardened_async_clie
 from core.security.ssrf import SsrfError, SsrfPolicy
 
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
+
+_CREDENTIAL_HEADER = ("authorization", "token", "key", "secret", "password", "cookie")
+
+
+def _header_secrets(headers: Any) -> tuple[str, ...]:
+    """Credential values carried by a request's headers, to redact for that call."""
+    if not headers:
+        return ()
+    try:
+        items = list(dict(headers).items())
+    except (TypeError, ValueError):
+        return ()
+    found: list[str] = []
+    for name, value in items:
+        if not isinstance(value, str) or not any(
+            m in str(name).lower() for m in _CREDENTIAL_HEADER
+        ):
+            continue
+        found.append(value.strip())
+        parts = value.split(None, 1)
+        if len(parts) == 2:  # "Bearer <token>": the token alone is what gets echoed
+            found.append(parts[1].strip())
+    return tuple(v for v in found if len(v) >= 8)
+
 
 # Transport failures raised before a single byte of the request was sent.
 _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
@@ -123,6 +151,7 @@ class ConnectorHttp:
                 :mod:`core.connectors.errors`.
         """
         spec = self._spec
+        secrets = (*self._secrets, *_header_secrets(kwargs.get("headers")))
         breaker = get_circuit_breaker(f"connector.{spec.name}")
         if idempotent is None:
             idempotent = method.upper() in IDEMPOTENT_METHODS
@@ -140,7 +169,9 @@ class ConnectorHttp:
         )
         async def attempt() -> httpx.Response:
             try:
-                outcome = await breaker.async_call(self._send, method, url, **kwargs)
+                outcome = await breaker.async_call(
+                    self._send, method, url, secrets, **kwargs
+                )
             except CircuitBreakerError as exc:
                 raise ConnectorUnavailableError(
                     spec.name, "circuit open; call not attempted"
@@ -153,7 +184,7 @@ class ConnectorHttp:
         return response
 
     async def _send(
-        self, method: str, url: str, **kwargs: Any
+        self, method: str, url: str, secrets: tuple[str, ...], **kwargs: Any
     ) -> httpx.Response | ConnectorError:
         """One wire attempt, run inside the breaker.
 
@@ -170,16 +201,16 @@ class ConnectorHttp:
                 f"no complete response within the {self._spec.deadline_s}s deadline",
             ) from exc
         except SsrfError as exc:
-            return ConnectorEgressError(name, redact(str(exc), self._secrets))
+            return ConnectorEgressError(name, redact(str(exc), secrets))
         except _NOT_SENT as exc:
-            detail = redact(str(exc).strip() or type(exc).__name__, self._secrets)
+            detail = redact(str(exc).strip() or type(exc).__name__, secrets)
             raise ConnectorConnectError(name, detail) from exc
         except httpx.TransportError as exc:
-            detail = redact(str(exc).strip() or type(exc).__name__, self._secrets)
+            detail = redact(str(exc).strip() or type(exc).__name__, secrets)
             raise ConnectorTransientError(name, detail) from exc
         if isinstance(response, ConnectorError):
             return response
-        error = error_for_response(name, response, self._secrets)
+        error = error_for_response(name, response, secrets)
         if error is None:
             return response
         if type(error) is ConnectorTransientError:

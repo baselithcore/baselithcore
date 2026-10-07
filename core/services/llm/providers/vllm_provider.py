@@ -48,7 +48,11 @@ from core.services.llm.messages import Message
 from core.services.llm.providers._openai_request import request_kwargs
 from core.services.llm.providers._vllm_routing import VLLMRoutingMixin
 from core.services.llm.providers.openai_provider import OpenAIProvider
-from core.services.llm.reasoning_text import ReasoningStreamFilter, strip_reasoning
+from core.services.llm.reasoning_text import (
+    ReasoningStreamFilter,
+    can_stream_live,
+    strip_reasoning,
+)
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -291,6 +295,53 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
                 self, messages, model, tools=tools, system=system, **kwargs
             )
         return _clean(result)
+
+    @get_circuit_breaker(_BREAKER)
+    async def generate_messages_stream(
+        self,
+        messages: list[Message],
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        system: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Stream one turn; inline reasoning never reaches the text.
+
+        A model not known to be free of inline reasoning (see
+        :func:`~core.services.llm.reasoning_text.can_stream_live`) holds its
+        answer until ``</think>`` (the reasoning is dropped, the answer then
+        streams live); a known non-reasoner streams from the first chunk.
+
+        Args:
+            messages: Conversation so far, oldest first.
+            model: Model name.
+            tools: Tools the model may call (delivered whole, never streamed).
+            system: System prompt.
+            **kwargs: Same surface as :meth:`generate_messages`.
+
+        Yields:
+            ``TextDelta`` per visible text chunk, then one ``StreamEnd``.
+        """
+        from core.services.llm.providers._openai_messages_stream import (
+            stream_messages,
+        )
+
+        # Held as a client, not a context variable: see ``generate_stream``.
+        client = self._client_for(await self._endpoint_for(model))
+        from core.config.services import get_llm_config
+
+        live = can_stream_live(model, get_llm_config().vllm_live_stream_models)
+        async for event in stream_messages(
+            client,
+            messages,
+            model,
+            tools=tools,
+            system=system,
+            guard=ReasoningStreamFilter(eager=live),
+            **kwargs,
+        ):
+            yield event
 
     @get_circuit_breaker(_BREAKER)
     async def generate_stream(

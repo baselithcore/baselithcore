@@ -147,7 +147,11 @@ An intermediate base without a spec declares itself with
 
 ## Errors
 
-Every failure is a `ConnectorError`, and its message is already redacted:
+Every failure is a `ConnectorError`, and its message is already redacted. The
+text of a provider's error response is never embedded raw: the message carries
+only a bounded (200 characters), single-line excerpt, with credential shapes
+masked before the cut (see [Security contract](#security-contract)). Response
+headers are never embedded or logged.
 
 | Error | When | Retried |
 |---|---|---|
@@ -320,10 +324,21 @@ registration.
 
 The machinery enforces what it can. The rest is on the connector author:
 
-- **Mark every credential `secret=True`.** Redaction only masks the values of
-  secret fields, and only through `BaseConnector` (or a `ConnectorHttp` built
-  with `secrets=`). A token declared `secret=False`, or a signed nonce or
-  session cookie the connector builds itself, is not redacted.
+- **Mark every credential `secret=True`.** Exact-value redaction only masks the
+  values of secret fields, and only through `BaseConnector` (or a
+  `ConnectorHttp` built with `secrets=`). A token declared `secret=False`, or a
+  signed nonce or session cookie the connector builds itself, is not redacted
+  by value.
+- **Redaction also works by shape and by request.** Beyond those values,
+  `ConnectorHttp` masks the credentials of the request's own headers
+  (`Authorization`, anything named `*token*`, `*key*`, `*secret*`, a cookie) for
+  that call, so a provider echoing the bearer back in an error body cannot leak
+  it through the exception, the retry log lines or the health detail. Error
+  excerpts and exception text are also scrubbed by pattern with
+  `core.observability.redaction.redact_secrets`: `Bearer` and `Authorization`
+  values, `access_token`/`refresh_token`/`client_secret`/`password`/`api_key`
+  pairs, OAuth `code` values (`key=value` and JSON forms), JWTs and Google
+  `ya29.`/`1//` tokens. A numeric `code` (a status) is kept.
 - **Keep credentials out of URLs.** Error messages quote the host, never the
   query string. Even so, send tokens in headers.
 - **An injected `client=` must come from `create_hardened_async_client`.**

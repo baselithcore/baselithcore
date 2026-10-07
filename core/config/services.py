@@ -246,6 +246,23 @@ class LLMConfig(BaseSettings):
         "in LLMService.generate() (falls back to prompt coercion when off).",
     )
 
+    # Real token streaming of the agent loop's text (``Agent.run_events``).
+    stream_agent_text: bool = Field(
+        default=True,
+        description="Stream an agent turn's text chunk by chunk when the "
+        "serving provider supports streamed tool calls "
+        "(``supports_streaming_tools``); false restores one TextDelta per "
+        "model turn. Env: LLM_STREAM_AGENT_TEXT via the LLM_ prefix.",
+    )
+
+    vllm_live_stream_models: str = Field(
+        default="",
+        description="Regex of vLLM served-model names known not to reason "
+        "inline, whose agent text may stream from the first chunk. Other "
+        "models hold their answer until a closing think tag so reasoning "
+        "never leaks. Env: LLM_VLLM_LIVE_STREAM_MODELS via the LLM_ prefix.",
+    )
+
     # Per-process cap on simultaneously in-flight provider calls. Token
     # budgets and rate limits bound spend per request/minute, but nothing
     # bounded concurrency: a burst of requests opened that many provider

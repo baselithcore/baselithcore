@@ -48,6 +48,7 @@ __all__ = [
     "RETRYABLE_ERRORS",
     "is_retryable",
     "map_provider_exception",
+    "safe_error_text",
     "retry_after_from_exception",
 ]
 
@@ -238,8 +239,28 @@ def _status_code(exc: BaseException) -> int | None:
     return status
 
 
+def safe_error_text(exc: BaseException) -> str:
+    """A description of *exc* that can never carry a body, prompt or header.
+
+    SDK errors stringify with the upstream response body, and a server that
+    echoes its request back (a 400 quoting the offending message, a gateway
+    reflecting an ``Authorization`` header) would put prompts, tool arguments
+    or bearer tokens into exception messages and logs. Only the exception's
+    class name and HTTP status are safe to keep.
+
+    Args:
+        exc: The upstream exception.
+
+    Returns:
+        ``"<ClassName>"`` or ``"<ClassName> (HTTP <status>)"``.
+    """
+    status = _status_code(exc)
+    name = type(exc).__name__
+    return f"{name} (HTTP {status})" if status is not None else name
+
+
 def map_provider_exception(
-    exc: BaseException, *, provider: str, action: str = ""
+    exc: BaseException, *, provider: str, action: str = "", redact: bool = False
 ) -> LLMProviderError:
     """Translate an SDK exception into this package's neutral taxonomy.
 
@@ -248,6 +269,8 @@ def map_provider_exception(
         provider: Human-readable provider label for the message
             (``"Anthropic"``, ``"OpenAI"``).
         action: Optional qualifier for the message (``"streaming"``).
+        redact: Describe the failure by type and status only
+            (:func:`safe_error_text`), never by the SDK's message.
 
     Returns:
         LLMProviderError: The most specific neutral class the exception maps
@@ -259,7 +282,8 @@ def map_provider_exception(
         return exc
 
     label = f"{provider} {action}".strip()
-    message = f"{label} error: {describe_exception(exc)}"
+    detail = safe_error_text(exc) if redact else describe_exception(exc)
+    message = f"{label} error: {detail}"
     names = _class_names(exc)
 
     # Timeout before connection: both SDKs nest APITimeoutError under

@@ -17,6 +17,23 @@ class LLMProviderError(Exception):
     pass
 
 
+class StreamInterruptedError(LLMProviderError):
+    """A provider stream failed *after* text had already reached the caller.
+
+    Never retried and never failed over: the consumer has rendered the partial
+    answer, so restarting on the same or another provider would duplicate or
+    contradict it. The text that was delivered is kept on ``partial_text`` so a
+    host can persist it as an interrupted answer.
+
+    Attributes:
+        partial_text: Everything streamed to the caller before the failure.
+    """
+
+    def __init__(self, message: str, *, partial_text: str = "") -> None:
+        super().__init__(message)
+        self.partial_text = partial_text
+
+
 class RateLimitError(LLMProviderError):
     """Raised when API rate limit is exceeded (429 status).
 
@@ -54,8 +71,18 @@ def describe_exception(exc: BaseException) -> str:
     Args:
         exc: The upstream exception being wrapped.
 
+    Credentials an upstream error echoes back (bearer tokens, ``api_key=``
+    pairs, JWTs) are masked with the shared
+    :func:`core.observability.redaction.redact_secrets`, so the text is safe
+    to log and to surface.
+
     Returns:
-        ``str(exc)`` when it carries anything, else the exception's class name.
+        ``str(exc)`` (credentials masked) when it carries anything, else the
+        exception's class name.
     """
-    message = str(exc).strip()
+    # Imported lazily: ``core.observability`` pulls in config and telemetry,
+    # which must not load just because an exception class was imported.
+    from core.observability.redaction import redact_secrets
+
+    message = redact_secrets(str(exc)).strip()
     return message or type(exc).__name__

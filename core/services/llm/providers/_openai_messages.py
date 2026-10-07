@@ -41,7 +41,45 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = get_logger(__name__)
 
-__all__ = ["generate_messages"]
+__all__ = ["build_request", "generate_messages"]
+
+
+def build_request(
+    messages: list[Message],
+    model: str,
+    *,
+    tools: list[LLMToolSpec] | None,
+    system: str | None,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Shape the Chat Completions request for one message-API turn.
+
+    Shared by the buffered and the streamed turn so the two cannot send
+    different requests for the same conversation. Pops ``tool_choice`` and
+    ``response_format`` from *kwargs*.
+    """
+    tool_choice: ToolChoice | None = kwargs.pop("tool_choice", None)
+    response_format: ResponseFormat | None = kwargs.pop("response_format", None)
+    wire: list[dict[str, Any]] = []
+    system_prompt = system or kwargs.get("system") or ""
+    if system_prompt:
+        wire.append({"role": "system", "content": system_prompt})
+    wire.extend(to_openai(messages))
+
+    request_kwargs: dict[str, Any] = {"model": model, "messages": wire}
+    if "temperature" in kwargs:
+        request_kwargs["temperature"] = kwargs["temperature"]
+    cap = token_cap(kwargs)
+    if cap:
+        request_kwargs["max_completion_tokens"] = cap
+    if tools:
+        request_kwargs["tools"] = to_openai_tools(tools)
+        request_kwargs["tool_choice"] = to_openai_tool_choice(
+            tool_choice or ToolChoice(mode="auto")
+        )
+    if response_format is not None:
+        request_kwargs["response_format"] = response_format_kwarg(response_format)
+    return request_kwargs
 
 
 async def generate_messages(
@@ -69,29 +107,11 @@ async def generate_messages(
         and ``message`` — the assistant turn as neutral blocks, for replay on
         the next iteration.
     """
-    tool_choice: ToolChoice | None = kwargs.pop("tool_choice", None)
-    response_format: ResponseFormat | None = kwargs.pop("response_format", None)
     client = provider._ensure_client()
     try:
-        wire: list[dict[str, Any]] = []
-        system_prompt = system or kwargs.get("system") or ""
-        if system_prompt:
-            wire.append({"role": "system", "content": system_prompt})
-        wire.extend(to_openai(messages))
-
-        request_kwargs: dict[str, Any] = {"model": model, "messages": wire}
-        if "temperature" in kwargs:
-            request_kwargs["temperature"] = kwargs["temperature"]
-        cap = token_cap(kwargs)
-        if cap:
-            request_kwargs["max_completion_tokens"] = cap
-        if tools:
-            request_kwargs["tools"] = to_openai_tools(tools)
-            request_kwargs["tool_choice"] = to_openai_tool_choice(
-                tool_choice or ToolChoice(mode="auto")
-            )
-        if response_format is not None:
-            request_kwargs["response_format"] = response_format_kwarg(response_format)
+        request_kwargs = build_request(
+            messages, model, tools=tools, system=system, kwargs=kwargs
+        )
 
         response = await client.chat.completions.create(**request_kwargs)
         result = result_from_completion(

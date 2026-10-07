@@ -15,7 +15,15 @@ are the safety net for a server that lacks it, and are inert on one that has it
 
 from __future__ import annotations
 
-__all__ = ["THINK_CLOSE", "THINK_OPEN", "ReasoningStreamFilter", "strip_reasoning"]
+import re
+
+__all__ = [
+    "THINK_CLOSE",
+    "THINK_OPEN",
+    "ReasoningStreamFilter",
+    "can_stream_live",
+    "strip_reasoning",
+]
 
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
@@ -23,6 +31,37 @@ THINK_CLOSE = "</think>"
 #: How much answer text a stream holds back while waiting to learn whether it
 #: opened with reasoning. Past this, it is treated as reasoning-free and flows.
 DEFAULT_MAX_BUFFER = 64_000
+
+#: Model families known NOT to reason inline. Only for these may a stream flow
+#: from its first chunk: any other model might open its reasoning block in the
+#: chat template (Qwen3, DeepSeek-R1, a custom ``--served-model-name``), so its
+#: answer is held until ``</think>`` — never leaking reasoning is worth more
+#: than a live stream, and the hold is exactly the pre-streaming behaviour.
+_LIVE_SAFE = re.compile(
+    r"llama|mistral|mixtral|gemma|phi-?\d|qwen-?2|glm-?4|granite|olmo|smollm"
+    r"|command|^gpt-",
+    re.I,
+)
+
+
+def can_stream_live(model: str | None, extra_pattern: str = "") -> bool:
+    """Whether *model*'s text may stream without waiting for a ``</think>``.
+
+    Args:
+        model: The served model name.
+        extra_pattern: Operator regex (``LLM_VLLM_LIVE_STREAM_MODELS``) naming
+            further models known not to reason inline.
+    """
+    if not model:
+        return False
+    if _LIVE_SAFE.search(model):
+        return True
+    if extra_pattern:
+        try:
+            return re.search(extra_pattern, model, re.I) is not None
+        except re.error:
+            return False
+    return False
 
 
 def strip_reasoning(text: str | None) -> str:
@@ -55,8 +94,24 @@ class ReasoningStreamFilter:
     separate field — it is then parsing reasoning itself.
     """
 
-    def __init__(self, max_buffer: int = DEFAULT_MAX_BUFFER) -> None:
+    def __init__(
+        self,
+        max_buffer: int = DEFAULT_MAX_BUFFER,
+        *,
+        eager: bool = False,
+    ) -> None:
+        """Create a filter.
+
+        Args:
+            max_buffer: Characters held while waiting for a closing tag.
+            eager: Release a stream the moment it is clear it does not
+                *open* with a ``<think>`` tag, instead of waiting for a closing
+                tag — what lets a model that does not reason inline stream
+                live. False keeps the hold-until-close behaviour that a
+                template-opened reasoner needs.
+        """
         self._max_buffer = max_buffer
+        self._eager = eager
         self._buffer = ""
         self._probing = True
         self._trim_lead = False
@@ -82,6 +137,13 @@ class ReasoningStreamFilter:
             return self._lead(after)
         if len(self._buffer) > self._max_buffer:
             return self.passthrough()
+        if self._eager:
+            head = self._buffer.lstrip()
+            # Not (the start of) an opening tag, so it cannot be reasoning.
+            if head and not (
+                head.startswith(THINK_OPEN) or THINK_OPEN.startswith(head)
+            ):
+                return self.passthrough()
         return ""
 
     def finish(self) -> str:

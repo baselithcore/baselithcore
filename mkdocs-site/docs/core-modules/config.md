@@ -420,6 +420,8 @@ LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)
+LLM_VLLM_LIVE_STREAM_MODELS=         # Regex of vLLM models known not to reason inline (stream live)
+LLM_STREAM_AGENT_TEXT=true           # Stream agent text token by token (false = one TextDelta per turn)
 LLM_MAX_CONCURRENT_REQUESTS=0        # Max in-flight provider calls per process (0 = unlimited)
 
 # Anthropic serving backend: 'api' (default, needs ANTHROPIC_API_KEY),

@@ -15,16 +15,21 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
+from core.observability.redaction import redact_secrets, safe_snippet
+
 _BODY_SNIPPET = 200
 _REDACTED = "***"
 
 
 def redact(text: str, secrets: Iterable[str]) -> str:
-    """Replace every non-empty secret in ``text`` with ``***``."""
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, _REDACTED)
-    return text
+    """Mask ``secrets`` and anything credential-shaped in ``text`` with ``***``.
+
+    Beyond the explicit values, bearer tokens, access/refresh tokens, client
+    secrets, passwords and OAuth ``code`` values are masked by pattern (see
+    :func:`core.observability.redaction.redact_secrets`), so a message built
+    from a third party's text cannot leak a token the caller never registered.
+    """
+    return redact_secrets(text, secrets, mask=_REDACTED)
 
 
 class ConnectorError(Exception):
@@ -132,9 +137,12 @@ def error_for_response(
     if status < 400:
         return None
     try:
-        body = response.text[:_BODY_SNIPPET]
+        body = safe_snippet(
+            response.text[:4096], secrets, limit=_BODY_SNIPPET, mask=_REDACTED
+        )
     except httpx.ResponseNotRead:
         body = ""
+    # Headers are never embedded; the body is a redacted, bounded, single-line excerpt.
     message = redact(f"HTTP {status} from {response.url.host}: {body}", secrets)
     if status in (401, 403):
         return ConnectorAuthError(connector, message)

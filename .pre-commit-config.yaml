@@ -181,6 +181,16 @@ repos:
         entry: python scripts/check_no_inprocess_ml.py
         language: system
         pass_filenames: false
+      # Model choice, provider keys and failover are central (core.services.llm
+      # and its per-plugin policy seam); a plugin that imports a provider SDK,
+      # names a provider API host or registers its own key resolver has a
+      # second path the policy and the cost ledger never see. Allowlist in
+      # configs/plugin_llm_keys_allowlist.yaml only shrinks.
+      - id: no-plugin-llm-keys
+        name: no-plugin-llm-keys
+        entry: python scripts/check_no_plugin_llm_keys.py
+        language: system
+        pass_filenames: false
       - id: file-size-cap
         name: file-size-cap
         entry: python scripts/check_file_size.py

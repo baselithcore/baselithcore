@@ -6,7 +6,7 @@ Provides a unified interface for LLM operations with caching and cost tracking.
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from core.cache import SemanticLLMCache, TTLCache
@@ -65,6 +65,10 @@ class LLMService:
     # cannot serve. Always True here — a provider that cannot receive a
     # message list is degraded inside ``generate_messages``, not refused.
     supports_messages: bool = True
+
+    # Identity-checked like the flag above: ``generate_messages(on_text=...)``
+    # is passed only to a service that says so (doubles keep their signature).
+    supports_text_streaming: bool = True
 
     def __init__(
         self,
@@ -381,6 +385,7 @@ class LLMService:
         max_tokens: int | None = None,
         task_category: str | None = None,
         allow_refusal: bool = False,
+        on_text: "Callable[[str], None] | None" = None,
     ) -> "Any":
         """
         Generate one turn from a neutral conversation history.
@@ -409,6 +414,10 @@ class LLMService:
             task_category: Optional cost-aware routing hint.
             allow_refusal: When True a refusal is returned on the result
                 instead of raising ``LLMRefusalError``.
+            on_text: Called with each text chunk as the provider streams it
+                (plain-text turns on a provider with
+                ``supports_streaming_tools``); the result is still the whole
+                consolidated turn. Ignored on every other path.
 
         Returns:
             LLMResult: text and/or structured tool calls with usage.
@@ -427,6 +436,7 @@ class LLMService:
             max_tokens=max_tokens,
             task_category=task_category,
             allow_refusal=allow_refusal,
+            on_text=on_text,
         )
 
     @follows_policy

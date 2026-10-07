@@ -65,7 +65,17 @@ result.iterations        # LLM round-trips used
   `tool_use` raises `ValueError`). `AgentResult.messages` includes them.
 - **Events** — `agent.run_events(prompt, history=...)` runs the same loop and
   yields `TextDelta`, `ToolCallStarted`, `ToolCallFinished`, then `Completed`
-  (or `Failed` instead of raising). Text arrives per model turn. Tools and
+  (or `Failed` instead of raising). Text streams **token by token** within a
+  turn: a provider with streamed message turns (`supports_streaming_tools`;
+  OpenAI and vLLM today) yields many `TextDelta`, one per chunk, while any
+  other path (other providers, `LLM_STREAM_AGENT_TEXT=false`, prompt-coerced
+  tools, `output_type`) yields one `TextDelta` per turn. A consumer must accept
+  any number of deltas per turn; `Completed.result.text` is the consolidated
+  answer. Tool calls are never streamed (`ToolCallStarted` fires once the call
+  is complete). A failure before a turn's first chunk retries and fails over
+  as usual; one after text was emitted is never restarted — the run ends with
+  `Failed(StreamInterruptedError)` whose `partial_text` is what was delivered.
+  Leaving the iteration closes the provider stream. Tools and
   `output_type` are supported. With several parallel tool calls in one turn,
   every `ToolCallStarted` precedes execution and the `ToolCallFinished` events
   arrive after the whole batch; `ToolCallFinished.content` is the observation

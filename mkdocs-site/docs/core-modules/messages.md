@@ -213,6 +213,25 @@ result = await llm_service.generate_messages(
 
 Every argument after `messages` is keyword-only.
 
+### Streaming a turn (`on_text`)
+
+`generate_messages(..., on_text=callback)` hands each text chunk to `callback`
+as the provider produces it and still returns the whole consolidated
+`LLMResult` (exactly one usage record is booked per call). It streams only on
+the native path, on a provider that declares `supports_streaming_tools`
+(`OpenAIProvider` and `VLLMProvider`, via `generate_messages_stream`), with
+`LLM_STREAM_AGENT_TEXT` on (default `true`) and no `response_format`; every
+other path ignores the callback and returns the turn at once, so a caller must
+handle a turn that never called it. vLLM streams live only for models known not to reason inline (llama, mistral, gemma,
+qwen2, … or `LLM_VLLM_LIVE_STREAM_MODELS`); any other served name holds its answer
+until `</think>` so reasoning never leaks. Tool calls arrive whole on the result, and
+inline reasoning (`<think>…</think>`, even split across chunks) never reaches
+the callback. Before the first chunk a failure retries and fails over the
+fallback chain; after it, the turn is committed and a failure raises
+`StreamInterruptedError` (never retried or failed over) carrying
+`partial_text`; the spend of the partial turn is booked as an estimate.
+Cancelling the caller closes the provider stream.
+
 ---
 
 ## Cache breakpoints

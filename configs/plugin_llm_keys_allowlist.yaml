@@ -1,0 +1,23 @@
+# Plugin files still allowed to import a provider SDK, name a provider API host
+# or register their own key resolver.
+#
+# Enforced by scripts/check_no_plugin_llm_keys.py. Model choice, provider
+# credentials and failover are central (core.services.llm and a policy source
+# registered through core.services.llm.policy). This list may only SHRINK: an
+# entry whose path no longer exists, or no longer holds a flagged construct,
+# fails the gate. Moving a file behind the funnel (get_llm_service) or the
+# governed-client seam (resolve_governed_client_config) means deleting its entry
+# here. A new entry needs a reason a reviewer can disagree with.
+allow:
+  - path: plugins/baselithbot/plugin.py
+    reason: >-
+      Published copy of the plugin that still registers its own vision key
+      resolver; superseded by the central routing of the next plugin release.
+  - path: plugins/baselithbot/dashboard/security.py
+    reason: >-
+      Published copy of the plugin whose provider-key probe calls the provider
+      hosts directly; removed with the next plugin release.
+  - path: plugins/baselithbot/voice/openai_realtime.py
+    reason: >-
+      OpenAI Realtime voice over a WebSocket. The funnel has no realtime audio
+      seam; the key is the central VOICE_OPENAI_API_KEY from core.config.

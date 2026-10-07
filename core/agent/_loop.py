@@ -9,7 +9,9 @@ could drift. Behaviour is unchanged: the loop still raises — only
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, Sequence
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -25,6 +27,7 @@ from core.agent.events import (
 )
 from core.orchestration.call_keys import CallOccurrences
 from core.services.llm.messages import Message, ToolResultBlock, message_from_result
+from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ResponseFormat
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from core.agent.agent import Agent
@@ -56,6 +59,55 @@ def validate_history(history: Sequence[Message] | None) -> list[Message]:
     return turns
 
 
+async def _turn_events(
+    agent: Agent[Any],
+    service: Any,
+    messages: list[Message],
+    *,
+    specs: list[LLMToolSpec] | None,
+    response_format: ResponseFormat | None,
+    system: str | None,
+) -> AsyncGenerator[str | LLMResult, None]:
+    """One model turn as it happens: text chunks, then the whole result.
+
+    The model call runs as a task that feeds a queue, because the provider
+    delivers text through a callback while the loop is a generator: this is the
+    bridge, and the only place the two meet. A turn on a provider that cannot
+    stream simply yields the result with no chunks before it.
+
+    Whoever stops iterating (client disconnect, ``aclose``, cancellation) also
+    stops the model call: the task is cancelled and awaited here, which closes
+    the provider's stream and its HTTP connection before this generator ends.
+
+    Yields:
+        ``str`` chunks in arrival order, then exactly one :class:`LLMResult`.
+        A failed call re-raises its exception after the chunks that preceded it.
+    """
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    task = asyncio.ensure_future(
+        agent._generate(
+            service,
+            messages,
+            specs=specs,
+            response_format=response_format,
+            system=system,
+            on_text=queue.put_nowait,
+        )
+    )
+    # FIFO behind every chunk: the sentinel can only follow the last one.
+    task.add_done_callback(lambda _done: queue.put_nowait(None))
+    try:
+        while (chunk := await queue.get()) is not None:
+            yield chunk
+        yield await task
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.wait({task})
+        if not task.cancelled():
+            task.exception()  # mark retrieved: the consumer already left
+
+
 async def drive(
     agent: Agent[Any],
     prompt: str,
@@ -63,8 +115,13 @@ async def drive(
     history: Sequence[Message] | None,
     run_id: str | None,
     checkpoint: CheckpointManager | None,
+    stream_text: bool = False,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the tool loop, yielding events; the last one is :class:`Completed`.
+
+    ``stream_text`` (set by ``run_events`` only) streams a plain-text turn's
+    text as it is produced: one :class:`TextDelta` per provider chunk, instead
+    of one per turn. ``run`` leaves it off — it never reads the deltas.
 
     Raises exactly what :meth:`Agent.run` documents (validation, iteration
     cap, budget, approval-pending). Never yields
@@ -93,18 +150,41 @@ async def drive(
         # Charges the ambient request budget for this round trip (a no-op
         # outside an orchestrated request); raises when the cap is hit.
         enforce_iteration(context)
-        result = await agent._generate(
-            service,
-            messages,
-            specs=specs,
-            response_format=response_format,
-            system=system,
-        )
+        streamed = False
+        result: LLMResult | None = None
+        if stream_text and plain_text:
+            async with aclosing(
+                _turn_events(
+                    agent,
+                    service,
+                    messages,
+                    specs=specs,
+                    response_format=response_format,
+                    system=system,
+                )
+            ) as turn:
+                async for item in turn:
+                    if isinstance(item, str):
+                        streamed = True
+                        yield TextDelta(text=item)
+                    else:
+                        result = item
+            assert result is not None
+        else:
+            result = await agent._generate(
+                service,
+                messages,
+                specs=specs,
+                response_format=response_format,
+                system=system,
+            )
         # Verbatim, before anything else: the API requires the turn that
         # requested the tools — thinking blocks included — to come back
         # unchanged alongside their results.
         messages.append(message_from_result(result))
-        if plain_text and result.text:
+        # A turn that did not stream (provider without streaming, kill switch
+        # off, a degraded path) still owes its text, once and whole.
+        if plain_text and result.text and not streamed:
             yield TextDelta(text=result.text)
 
         if result.tool_calls:

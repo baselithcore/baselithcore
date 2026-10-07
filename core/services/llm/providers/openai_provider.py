@@ -85,6 +85,9 @@ class OpenAIProvider:
     # travel as correlated messages, and an append-only history keeps the
     # prefix stable for OpenAI's automatic prompt caching.
     supports_messages: bool = True
+    # Streamed message turns (``generate_messages_stream``): text chunks as
+    # they arrive, tool calls accumulated and delivered whole at the end.
+    supports_streaming_tools: bool = True
 
     #: Name used in error messages and logs. Subclasses speaking the same
     #: protocol to another server (``VLLMProvider``) override it, so an outage
@@ -345,6 +348,47 @@ class OpenAIProvider:
         return await generate_messages(
             self, messages, model, tools=tools, system=system, **kwargs
         )
+
+    # An async generator: errors surface during iteration, and a half-consumed
+    # stream must never be retried (it would duplicate delivered text).
+    @get_circuit_breaker("openai_provider")
+    async def generate_messages_stream(
+        self,
+        messages: list[Message],
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        system: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Stream one turn from a neutral message history.
+
+        Body lives in ``_openai_messages_stream`` (module size cap).
+
+        Args:
+            messages: Conversation so far, oldest first.
+            model: Model name.
+            tools: Tools the model may call (delivered whole, never streamed).
+            system: System prompt.
+            **kwargs: Same surface as :meth:`generate_messages`.
+
+        Yields:
+            ``TextDelta`` per text chunk, then one ``StreamEnd`` with the
+            authoritative :class:`LLMResult`.
+        """
+        from core.services.llm.providers._openai_messages_stream import (
+            stream_messages,
+        )
+
+        async for event in stream_messages(
+            self._ensure_client(),
+            messages,
+            model,
+            tools=tools,
+            system=system,
+            **kwargs,
+        ):
+            yield event
 
     @get_circuit_breaker("openai_provider")
     async def generate_image(

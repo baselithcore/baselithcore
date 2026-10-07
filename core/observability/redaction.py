@@ -9,7 +9,7 @@ foreign-log pre-chain), masking secrets by key and by value.
 from __future__ import annotations
 
 import re
-from collections.abc import MutableMapping
+from collections.abc import Iterable, MutableMapping
 from typing import Any
 
 from core.config import get_app_config
@@ -147,4 +147,74 @@ def redact_sensitive(
     return event_dict
 
 
-__all__ = ["redact_sensitive", "redact_url_credentials"]
+# --- free text from third parties (provider error bodies, exception messages) ----
+#
+# The key-name pass above cannot see inside a string, and ``_CREDENTIALS_REGEX``
+# misses the JSON form (``"access_token": "x"``) and the OAuth ``code``. These
+# patterns are for text that may echo a credential back: a provider's error
+# body, a transport error carrying a URL with a query.
+_KEY_NAMES = (
+    r"(?:[\w-]*(?:token|secret|password|passwd|api[-_]?key|authorization|assertion"
+    r"|verifier|credential|bearer|session)[\w-]*|code)"
+)
+_SECRET_PAIR = re.compile(
+    rf"(?<![\w-])(?P<k>{_KEY_NAMES})(?P<q>[\"']?)(?P<sep>\s*[:=]\s*)"
+    r"(?P<v>(?:(?:Bearer|Basic|Token)\s+)?(?:\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\s&,;\"'}\]]+))",
+    re.IGNORECASE,
+)
+_BEARER = re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
+_JWT = re.compile(
+    r"\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*|\bya29\.[\w-]{10,}|(?<![\w/])1//[\w-]{20,}"
+)
+_MAX_FREE_TEXT = 4096
+
+
+def redact_secrets(
+    text: str, secrets: Iterable[str] = (), *, mask: str = _REDACTED
+) -> str:
+    """Mask credentials in third-party free text (key=value, JSON, bearer, JWT).
+
+    Covers ``Authorization``/bearer values, any ``*token*``/``*secret*``/
+    ``password``/``api_key``/``verifier`` pair, and OAuth ``code`` values, in
+    ``key=value``, ``key: value`` and JSON (``"key": "value"``) forms, plus
+    standalone ``Bearer <token>`` and JWT-looking strings. A numeric ``code``
+    (an HTTP/error status) is kept. ``secrets`` are masked wherever they
+    appear, whatever surrounds them.
+    """
+
+    def pair(m: re.Match[str]) -> str:
+        value = m.group("v")
+        if m.group("k").lower() == "code" and value.strip("\"'").isdigit():
+            return m.group(0)
+        quote = m.group("q")
+        if value[:1] in ('"', "'"):
+            return f"{m.group('k')}{quote}{m.group('sep')}{value[0]}{mask}{value[0]}"
+        return f"{m.group('k')}{quote}{m.group('sep')}{mask}"
+
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, mask)
+    text = _SECRET_PAIR.sub(pair, text)
+    text = _BEARER.sub(rf"\1 {mask}", text)
+    return _JWT.sub(mask, text)
+
+
+def safe_snippet(
+    text: str, secrets: Iterable[str] = (), *, limit: int = 200, mask: str = _REDACTED
+) -> str:
+    """A bounded, single-line, redacted excerpt of untrusted ``text``.
+
+    Redaction runs before the cut so a credential straddling the limit cannot
+    leave a readable prefix; control characters (log forging) become spaces.
+    """
+    cleaned = redact_secrets(text[:_MAX_FREE_TEXT], secrets, mask=mask)
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:limit]
+
+
+__all__ = [
+    "redact_secrets",
+    "redact_sensitive",
+    "redact_url_credentials",
+    "safe_snippet",
+]

@@ -18,7 +18,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @dataclass(frozen=True, slots=True)
 class TextDelta:
-    """Assistant text produced by one model turn (plain-text agents only)."""
+    """A chunk of assistant text (plain-text agents only).
+
+    With a streaming provider a model turn yields many of these, each a raw
+    fragment in arrival order (a word, a few characters, whatever the provider
+    sent); otherwise one delta carries the whole turn. Concatenating the
+    deltas of a turn gives its text; ``Completed.result.text`` is the
+    consolidated, authoritative final answer.
+    """
 
     text: str
 

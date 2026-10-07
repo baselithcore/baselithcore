@@ -16,6 +16,7 @@ third one has somewhere to start.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 from core.services.llm.messages import (
@@ -26,7 +27,11 @@ from core.services.llm.messages import (
 )
 from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ResponseFormat
 
-__all__ = ["generate_over_messages", "service_supports_messages"]
+__all__ = [
+    "generate_over_messages",
+    "service_supports_messages",
+    "service_supports_text_streaming",
+]
 
 
 def service_supports_messages(service: Any) -> bool:
@@ -46,6 +51,17 @@ def service_supports_messages(service: Any) -> bool:
     return getattr(service, "supports_messages", False) is True and callable(send)
 
 
+def service_supports_text_streaming(service: Any) -> bool:
+    """Whether ``service.generate_messages`` accepts an ``on_text`` callback.
+
+    Identity-checked for the same reason as :func:`service_supports_messages`:
+    a double must not be handed a keyword it never declared.
+    """
+    return service_supports_messages(service) and (
+        getattr(service, "supports_text_streaming", False) is True
+    )
+
+
 async def generate_over_messages(
     service: Any,
     history: list[Message],
@@ -55,6 +71,7 @@ async def generate_over_messages(
     system: str | None = None,
     model: str | None = None,
     task_category: str | None = None,
+    on_text: Callable[[str], None] | None = None,
 ) -> LLMResult:
     """Send the conversation so far and return the model's reply.
 
@@ -79,11 +96,17 @@ async def generate_over_messages(
         system: System prompt.
         model: Model override, or ``None`` for the deployment default.
         task_category: Cost-aware routing hint.
+        on_text: Streamed-text callback. Forwarded only to a service that
+            declares ``supports_text_streaming``; it may never be called (a
+            provider that cannot stream returns the whole turn at once).
 
     Returns:
         The model's reply.
     """
     if service_supports_messages(service):
+        extra: dict[str, Any] = {}
+        if on_text is not None and service_supports_text_streaming(service):
+            extra["on_text"] = on_text
         return cast(
             "LLMResult",
             await service.generate_messages(
@@ -93,6 +116,7 @@ async def generate_over_messages(
                 response_format=response_format,
                 system=system,
                 task_category=task_category,
+                **extra,
             ),
         )
 

@@ -365,8 +365,13 @@ class Agent[OutputT]:
         specs: list[LLMToolSpec] | None,
         response_format: ResponseFormat | None,
         system: str | None,
+        on_text: Callable[[str], None] | None = None,
     ) -> LLMResult:
         """One model round-trip for the conversation so far.
+
+        ``on_text`` receives the turn's text chunk by chunk when the serving
+        provider streams (see :mod:`core.agent._loop`); the result is always
+        the whole turn.
 
         The transport itself — the message API, or the legacy flattened
         transcript for a service that predates it — lives in
@@ -381,6 +386,7 @@ class Agent[OutputT]:
             system=system,
             model=self.model,
             task_category=self.task_category,
+            on_text=on_text,
         )
 
     async def run_stream(self, prompt: str) -> AsyncIterator[str]:
@@ -412,16 +418,29 @@ class Agent[OutputT]:
         """Run the agent and yield what happens, as it happens.
 
         Same loop, arguments and controls as :meth:`run`, observed instead of
-        awaited: :class:`~core.agent.events.TextDelta` for each model turn's
-        text (plain-text agents only), ``ToolCallStarted`` /
+        awaited: :class:`~core.agent.events.TextDelta` for each chunk of the
+        model's text (plain-text agents only), ``ToolCallStarted`` /
         ``ToolCallFinished`` around every tool call, and a final
         :class:`~core.agent.events.Completed` carrying the
         :class:`AgentResult`. An exception does not escape: it is the last
         event, as :class:`~core.agent.events.Failed`. Cancellation still
-        propagates. Text arrives per model turn, not per token — the tool loop
-        needs each turn whole. When one turn carries several parallel tool
-        calls, every ``ToolCallStarted`` precedes execution and the
-        ``ToolCallFinished`` events arrive only after the whole batch is done.
+        propagates. Text streams **within** a turn when the serving provider
+        supports streamed tool calls (``supports_streaming_tools``) and
+        ``LLM_STREAM_AGENT_TEXT`` is on: many ``TextDelta`` per turn, each a
+        raw chunk. Otherwise the turn's whole text arrives as one
+        ``TextDelta``, so a consumer must accept any number of deltas per turn
+        and may concatenate them; ``Completed.result.text`` is the
+        authoritative consolidated final text. Tool calls are never streamed:
+        a call surfaces as ``ToolCallStarted`` once the model has finished
+        writing it. When one turn carries several parallel tool calls, every
+        ``ToolCallStarted`` precedes execution and the ``ToolCallFinished``
+        events arrive only after the whole batch is done.
+
+        A provider failure *before* the first chunk of a turn retries and
+        fails over as usual; one *after* text was emitted is never restarted
+        (the consumer already rendered it): the run ends with ``Failed``
+        carrying :class:`~core.services.llm.exceptions.StreamInterruptedError`,
+        whose ``partial_text`` is what was delivered.
 
         Leaving the iteration early (``break``/``aclose``) stops the loop:
         no further model call or tool runs.
@@ -437,6 +456,7 @@ class Agent[OutputT]:
                         history=history,
                         run_id=run_id,
                         checkpoint=checkpoint,
+                        stream_text=True,
                     )
                 ) as events:
                     async for event in events:

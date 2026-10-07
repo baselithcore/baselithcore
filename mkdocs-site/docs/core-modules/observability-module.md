@@ -661,3 +661,14 @@ BASELITH_OTEL_ASGI_SUB_SPANS=false
 
 !!! tip "Zero-Dependency Fallback"
     If `structlog`, `prometheus_client`, or `opentelemetry` are not installed, all observability features degrade gracefully to stdlib equivalents. No exceptions are raised.
+
+## Redacting third-party text
+
+`core.observability.redaction.redact_secrets(text, secrets=())` and
+`safe_snippet(text, secrets=(), limit=200)` mask credentials in free text that
+may echo one back, such as a provider's error body or a transport error. They
+cover `Bearer`/`Authorization` values, `*token*`/`*secret*`/`password`/`api_key`/
+`verifier` pairs and OAuth `code` values in `key=value` and JSON forms, plus JWTs.
+`safe_snippet` redacts before it truncates, collapses control characters to a
+single line and bounds the length. `core.connectors` builds every error message
+with them.

@@ -271,6 +271,13 @@ API on the coercion path, so the default is safe everywhere; set
 Token usage, the middleware cost controller, and the per-request `LoopBudget`
 are charged identically on both paths.
 
+**Streamed message turns.** `generate_messages(on_text=...)` streams a turn's
+text chunk by chunk on providers that declare `supports_streaming_tools`
+(OpenAI, vLLM; `generate_messages_stream`), while still returning the whole
+`LLMResult` with exactly one usage record. Coerced tools, structured output,
+other providers and `LLM_STREAM_AGENT_TEXT=false` keep the buffered turn. See
+[Messages](messages.md#streaming-a-turn-on_text).
+
 **Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
 fall through an ordered chain of `provider:model` stages when the primary
 provider fails or its circuit breaker is open — e.g.
@@ -1255,6 +1262,15 @@ Three deliberate limits on what is honoured:
 
 `None` in any of those cases is not a failure: the retry layer simply falls back
 to its own exponential curve.
+
+### Error text in logs
+
+`describe_exception` (the text providers put into `LLMProviderError` messages
+and log lines) runs the upstream message through the shared
+`core.observability.redaction.redact_secrets`, so a bearer token, an `api_key=`
+pair or a JWT that a provider echoes back is masked. `safe_error_text` is
+stricter and keeps only the class name and HTTP status; the streaming paths use
+it because a stream failure can carry request bodies.
 
 ### Concurrency Cap (per process)
 
