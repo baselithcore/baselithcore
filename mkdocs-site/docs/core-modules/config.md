@@ -1376,3 +1376,12 @@ model server that is not TEI, such as a customer's own GPUs, uses `API`
 embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, and `CA_BUNDLE` / `CLIENT_CERT` /
 `CLIENT_KEY` for a private CA or mutual TLS. See
 [Inference Services](../advanced/inference-services.md).
+
+### Voice: OpenAI-compatible sidecars
+
+`VoiceConfig` (`VOICE_`) gained an `openai_compatible` provider: `VOICE_STT_BASE_URL` and
+`VOICE_TTS_BASE_URL` (API roots including `/v1`), `VOICE_COMPAT_API_KEY`, `VOICE_STT_MODEL`,
+`VOICE_TTS_MODEL`, `VOICE_TTS_VOICE`, the caps `VOICE_MAX_AUDIO_BYTES`, `VOICE_MAX_RESPONSE_BYTES`,
+`VOICE_MAX_TTS_CHARS`, `VOICE_TIMEOUT_SECONDS`, and `VOICE_ALLOW_INTERNAL_ENDPOINTS` (default `false`;
+sidecars on private addresses need it). The default `Permissions-Policy` now allows the microphone for the own
+origin (`microphone=(self)`). See [Services: Voice](services.md#voice-service).

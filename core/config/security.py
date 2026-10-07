@@ -326,9 +326,12 @@ class SecurityConfig(BaseSettings):
     # Restrictive default: deny access to powerful browser features the API/
     # console never needs, so a compromised/embedded page cannot request them.
     # Override with a policy string, or "" to omit the header entirely.
+    # ``microphone=(self)``: the console's own pages may capture audio (push-to-talk
+    # voice input); getUserMedia is blocked outright by ``microphone=()``. Embedded
+    # third-party frames still cannot request it, and every other feature stays denied.
     permissions_policy: str | None = Field(
         default=(
-            "geolocation=(), camera=(), microphone=(), payment=(), "
+            "geolocation=(), camera=(), microphone=(self), payment=(), "
             "usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
         ),
         alias="PERMISSIONS_POLICY",

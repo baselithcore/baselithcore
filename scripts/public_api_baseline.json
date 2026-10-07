@@ -1482,10 +1482,18 @@
     "core.services.voice": [
       "STTRequest",
       "TTSRequest",
+      "VoiceCapabilities",
+      "VoiceEgressError",
+      "VoiceError",
+      "VoiceInputError",
+      "VoiceLimitError",
+      "VoiceNotConfiguredError",
       "VoiceProvider",
       "VoiceRequest",
       "VoiceResponse",
-      "VoiceService"
+      "VoiceService",
+      "VoiceTimeoutError",
+      "VoiceUpstreamError"
     ],
     "core.skill_evolution": [
       "EvidenceRef",

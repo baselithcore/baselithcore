@@ -432,6 +432,8 @@ Declared in `core.config.multimodal`.
 | `VISION_OPENAI_AUDIO_MODEL` | `str` | `gpt-4o-audio-preview` | OpenAI audio-capable chat model for native audio analysis (env VISION_OPENAI_AUDIO_MODEL). |
 | `VISION_OPENAI_MODEL` | `str` | `gpt-4o` | OpenAI vision model identifier. |
 | `VISION_PROVIDER` | `Literal['openai', 'anthropic', 'google', 'ollama']` | `openai` | Default vision capabilities provider |
+| `VOICE_ALLOW_INTERNAL_ENDPOINTS` | `bool` | `False` | Allow the compatible endpoints to sit on private, loopback or link-local addresses (a sidecar on the same host or network). Off by default: the SSRF guard refuses them. |
+| `VOICE_COMPAT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer key for the OpenAI-compatible servers (most sidecars are keyless). |
 | `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
 | `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_multilingual_v2` | ElevenLabs model ID for TTS |
 | `VOICE_ELEVENLABS_SIMILARITY_BOOST` | `float` | `0.75` | ElevenLabs similarity boost |
@@ -439,8 +441,17 @@ Declared in `core.config.multimodal`.
 | `VOICE_EMBEDDING_MODEL` | `str` | `all-MiniLM-L6-v2` | Sentence-transformer model for semantic voice cache |
 | `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VOICE_GOOGLE_APPLICATION_CREDENTIALS`<br>also accepts `GOOGLE_APPLICATION_CREDENTIALS` | `str \| None` | *empty* |  |
+| `VOICE_MAX_AUDIO_BYTES` | `int` | `10 * 1024 * 1024` | Largest audio upload sent to STT. |
+| `VOICE_MAX_RESPONSE_BYTES` | `int` | `20 * 1024 * 1024` | Largest response body read from a server. |
+| `VOICE_MAX_TTS_CHARS` | `int` | `4096` | Longest text accepted for synthesis. |
 | `VOICE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* |  |
-| `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google']` | `openai` | Default voice synthesis provider |
+| `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google', 'openai_compatible']` | `openai` | Default voice provider. 'openai_compatible' talks to any server that speaks the OpenAI audio API (faster-whisper-server, Piper/Kokoro wrappers) at VOICE_STT_BASE_URL / VOICE_TTS_BASE_URL, with no external provider key. |
+| `VOICE_STT_BASE_URL` | `str \| None` | *empty* | OpenAI-compatible STT root, e.g. `http://whisper:8000/v1` (VOICE_STT_BASE_URL). |
+| `VOICE_STT_MODEL` | `str` | `whisper-1` | STT model name sent to the server. |
+| `VOICE_TIMEOUT_SECONDS` | `float` | `30.0` | Deadline of one voice request. |
+| `VOICE_TTS_BASE_URL` | `str \| None` | *empty* | OpenAI-compatible TTS root, e.g. `http://tts:8000/v1` (VOICE_TTS_BASE_URL). |
+| `VOICE_TTS_MODEL` | `str` | `tts-1` | TTS model name sent to the server. |
+| `VOICE_TTS_VOICE` | `str` | `alloy` | Default TTS voice for compatible servers. |
 
 ## Observability configuration (metric cardinality and trace exemplars)
 
@@ -765,7 +776,7 @@ Declared in `core.config.security`.
 | `OIDC_SCOPES_CLAIM` | `str` | `scope` |  |
 | `OIDC_TENANT_CLAIM` | `str \| None` | *empty* |  |
 | `OIDC_USERNAME_CLAIM` | `str` | `sub` | Claim names to read identity/authorization from (IdP-specific). |
-| `PERMISSIONS_POLICY` | `str \| None` | `geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` | Restrictive default: deny access to powerful browser features the API/ console never needs, so a compromised/embedded page cannot request them. Override with a policy string, or "" to omit the header entirely. |
+| `PERMISSIONS_POLICY` | `str \| None` | `geolocation=(), camera=(), microphone=(self), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` | Restrictive default: deny access to powerful browser features the API/ console never needs, so a compromised/embedded page cannot request them. Override with a policy string, or "" to omit the header entirely. `microphone=(self)`: the console's own pages may capture audio (push-to-talk voice input); getUserMedia is blocked outright by `microphone=()`. Embedded third-party frames still cannot request it, and every other feature stays denied. |
 | `RATE_LIMIT_ADMIN_PER_MINUTE` | `int \| None` | `120` | Non-null default so admin endpoints are never silently unlimited: a value of None makes the rate limiter no-op for that scope (unthrottled brute force / resource abuse). 120/min is generous for console use while still bounding abuse. Set explicitly (or to a high number) to widen it. |
 | `RATE_LIMIT_FAIL_MODE` | `str \| None` | *empty* | Behavior when the Redis limiter backend is unreachable: open   — degrade to a per-process in-memory window (N replicas silently allow up to N x the limit until Redis recovers) closed — reject rate-limited requests with 503 (availability traded for a hard limit; the limit is treated as a security control) Unset (the default) resolves at limiter construction: `closed` in production when a Redis cache backend is declared (CACHE_BACKEND=redis), where the per-role limits, the auth-failure throttle and the admin lockout are brute-force/cost controls that must not silently widen when the shared counter blips; `open` outside production and in deployments that never configured Redis (the per-process window is the design there, not a degraded state). Set explicitly to pin either behaviour. |
 | `RATE_LIMIT_JOB_PER_MINUTE` | `int \| None` | *empty* |  |
@@ -1027,4 +1038,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-679 settings documented.
+690 settings documented.

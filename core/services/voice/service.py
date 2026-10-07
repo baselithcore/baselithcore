@@ -24,6 +24,10 @@ from typing import Any
 
 from core.config import get_voice_config
 from core.observability.logging import get_logger
+from core.services.voice import _usage
+from core.services.voice._http_providers import HttpProviders
+from core.services.voice._openai_wire import OpenAIWireClient
+from core.services.voice._wire_calls import WireCalls
 from core.services.voice.models import (
     AudioFormat,
     STTRequest,
@@ -35,7 +39,7 @@ from core.services.voice.models import (
 logger = get_logger(__name__)
 
 
-class VoiceService:
+class VoiceService(WireCalls, HttpProviders):
     """
     Multi-provider voice service.
 
@@ -43,12 +47,11 @@ class VoiceService:
     - OpenAI TTS/Whisper
     - ElevenLabs TTS
     - Google Cloud TTS/STT
+    - Any OpenAI-compatible audio server (``VOICE_PROVIDER=openai_compatible``)
 
-    Features:
-    - Multiple voices and models
-    - Audio format conversion
-    - Language detection
-    - Real-time streaming (future)
+    Built with ``plugin=`` the service obeys the central per-plugin LLM policy
+    pin (see :mod:`core.services.voice._routing`). Failures of the compatible
+    and governed paths are :class:`core.services.voice.errors.VoiceError`.
     """
 
     # Default voices per provider
@@ -56,7 +59,11 @@ class VoiceService:
         VoiceProvider.OPENAI: "alloy",
         VoiceProvider.ELEVENLABS: "Rachel",
         VoiceProvider.GOOGLE: "en-US-Wavenet-D",
+        VoiceProvider.OPENAI_COMPATIBLE: "alloy",
     }
+
+    def _config(self) -> Any:
+        return get_voice_config()
 
     def __init__(
         self,
@@ -64,6 +71,8 @@ class VoiceService:
         openai_api_key: str | None = None,
         elevenlabs_api_key: str | None = None,
         google_credentials_path: str | None = None,
+        plugin: str | None = None,
+        scope: str | None = "voice",
     ) -> None:
         """
         Initialize voice service.
@@ -74,7 +83,13 @@ class VoiceService:
             openai_api_key: OpenAI API key (or from env OPENAI_API_KEY)
             elevenlabs_api_key: ElevenLabs API key (or from env ELEVENLABS_API_KEY)
             google_credentials_path: Path to Google credentials JSON
+            plugin: Plugin the service acts for; its central LLM pin (scope
+                ``scope``) then wins over ``VOICE_*`` credentials.
+            scope: Named LLM sub-policy to resolve for ``plugin``.
         """
+        self._plugin = plugin
+        self._scope = scope
+        self._wire: OpenAIWireClient | None = None
         _voice_cfg = get_voice_config()
         self.default_provider = VoiceProvider(default_provider or _voice_cfg.provider)
         self._openai_key = openai_api_key or (
@@ -152,6 +167,9 @@ class VoiceService:
         if self._openai_client is not None:
             await self._openai_client.close()
             self._openai_client = None
+        if self._wire is not None:
+            await self._wire.aclose()
+            self._wire = None
 
     # -------------------------------------------------------------------------
     # Text-to-Speech
@@ -179,6 +197,9 @@ class VoiceService:
             VoiceResponse with audio data
         """
         provider = provider or self.default_provider
+        route = self._route("tts", provider)
+        if route is not None:
+            return await self._tts_wire(route, text, voice, speed, format)
         voice = voice or self.DEFAULT_VOICES.get(provider, "alloy")
 
         request = TTSRequest(
@@ -195,17 +216,19 @@ class VoiceService:
 
         try:
             if provider == VoiceProvider.OPENAI:
-                return await self._tts_openai(request)
+                response = await self._tts_openai(request)
             elif provider == VoiceProvider.ELEVENLABS:
-                return await self._tts_elevenlabs(request)
+                response = await self._tts_elevenlabs(request)
             elif provider == VoiceProvider.GOOGLE:
-                return await self._tts_google(request)
+                response = await self._tts_google(request)
             else:
                 raise ValueError(f"Unsupported TTS provider: {provider}")
 
         except Exception as e:
             logger.error("tts_error", provider=provider.value, error=str(e))
             raise
+        _usage.report_tts(response.model, text)
+        return response
 
     async def _tts_openai(self, request: TTSRequest) -> VoiceResponse:
         """
@@ -240,103 +263,6 @@ class VoiceService:
             metadata={"voice": request.voice, "format": request.format.value},
         )
 
-    async def _tts_elevenlabs(self, request: TTSRequest) -> VoiceResponse:
-        """
-        Generate high-quality speech using ElevenLabs API.
-
-        Args:
-            request: Audio generation parameters.
-
-        Returns:
-            VoiceResponse: Generated audio data.
-        """
-        if not self._elevenlabs_key:
-            raise ValueError("ElevenLabs API key not configured")
-
-        voice_cfg = get_voice_config()
-        model_id = voice_cfg.elevenlabs_model_id
-        client = self._get_http_client()
-
-        response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{request.voice}",
-            headers={
-                "xi-api-key": self._elevenlabs_key,
-                "Content-Type": "application/json",
-            },
-            json={
-                "text": request.text,
-                "model_id": model_id,
-                "voice_settings": {
-                    "stability": voice_cfg.elevenlabs_stability,
-                    "similarity_boost": voice_cfg.elevenlabs_similarity_boost,
-                },
-            },
-        )
-        response.raise_for_status()
-        audio_bytes = response.content
-
-        return VoiceResponse(
-            success=True,
-            content=audio_bytes,
-            provider="elevenlabs",
-            model=model_id,
-            metadata={"voice": request.voice},
-        )
-
-    async def _tts_google(self, request: TTSRequest) -> VoiceResponse:
-        """
-        Generate speech using Google Cloud Text-to-Speech.
-
-        Args:
-            request: Audio generation parameters.
-
-        Returns:
-            VoiceResponse: Generated audio data.
-        """
-        # Google Cloud TTS API
-        _google_secret = get_voice_config().google_api_key
-        if not _google_secret:
-            raise ValueError("Google API key not configured")
-        google_api_key = _google_secret.get_secret_value()
-
-        # Parse voice name for language code
-        language_code = "en-US"
-        if "-" in request.voice:
-            parts = request.voice.split("-")
-            if len(parts) >= 2:
-                language_code = f"{parts[0]}-{parts[1]}"
-
-        client = self._get_http_client()
-        response = await client.post(
-            "https://texttospeech.googleapis.com/v1/text:synthesize",
-            params={"key": google_api_key},
-            json={
-                "input": {"text": request.text},
-                "voice": {
-                    "languageCode": language_code,
-                    "name": request.voice,
-                },
-                "audioConfig": {
-                    "audioEncoding": "MP3",
-                    "speakingRate": request.speed,
-                },
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        import base64
-
-        audio_bytes = base64.b64decode(data["audioContent"])
-
-        return VoiceResponse(
-            success=True,
-            content=audio_bytes,
-            provider="google",
-            model="wavenet",
-            metadata={"voice": request.voice, "language": language_code},
-        )
-
     # -------------------------------------------------------------------------
     # Speech-to-Text
     # -------------------------------------------------------------------------
@@ -347,6 +273,9 @@ class VoiceService:
         audio_file: str | None = None,
         language: str | None = None,
         provider: VoiceProvider | None = None,
+        *,
+        content_type: str | None = None,
+        duration_seconds: float | None = None,
     ) -> VoiceResponse:
         """
         Convert speech to text using the selected provider.
@@ -356,6 +285,8 @@ class VoiceService:
             audio_file: Path to an audio file on disk.
             language: ISO language code (e.g., 'en', 'it').
             provider: Explicit provider override.
+            content_type: MIME type of ``audio_data`` (names the upload).
+            duration_seconds: Audio length, for the usage estimate only.
 
         Returns:
             VoiceResponse: Transcribed text and provider info.
@@ -377,17 +308,27 @@ class VoiceService:
             language=language,
         )
 
+        route = self._route("stt", provider)
+        if route is not None:
+            return await self._stt_wire(route, request, content_type, duration_seconds)
         try:
             if provider == VoiceProvider.OPENAI:
-                return await self._stt_openai(request)
+                response = await self._stt_openai(request)
             elif provider == VoiceProvider.GOOGLE:
-                return await self._stt_google(request)
+                response = await self._stt_google(request)
             else:
                 raise ValueError(f"Unsupported STT provider: {provider}")
 
         except Exception as e:
             logger.error("stt_error", provider=provider.value, error=str(e))
             raise
+        _usage.report_stt(
+            response.model,
+            len(request.get_audio_bytes()),
+            response.text,
+            duration_seconds,
+        )
+        return response
 
     async def _stt_openai(self, request: STTRequest) -> VoiceResponse:
         """
@@ -424,56 +365,6 @@ class VoiceService:
             content=transcript.text,
             provider="openai",
             model=request.model,
-            language=request.language,
-        )
-
-    async def _stt_google(self, request: STTRequest) -> VoiceResponse:
-        """
-        Transcribe audio using Google Cloud Speech-to-Text.
-
-        Args:
-            request: Transcription parameters.
-
-        Returns:
-            VoiceResponse: Transcribed text.
-        """
-        import base64
-
-        _google_secret = get_voice_config().google_api_key
-        if not _google_secret:
-            raise ValueError("Google API key not configured")
-        google_api_key = _google_secret.get_secret_value()
-
-        audio_bytes = request.get_audio_bytes()
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        client = self._get_http_client()
-
-        response = await client.post(
-            "https://speech.googleapis.com/v1/speech:recognize",
-            params={"key": google_api_key},
-            json={
-                "config": {
-                    "encoding": "MP3",
-                    "languageCode": request.language or "en-US",
-                    "enableAutomaticPunctuation": True,
-                },
-                "audio": {"content": audio_b64},
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        # Extract transcript
-        results = data.get("results", [])
-        transcript = " ".join(
-            r["alternatives"][0]["transcript"] for r in results if r.get("alternatives")
-        )
-
-        return VoiceResponse(
-            success=True,
-            content=transcript,
-            provider="google",
-            model="speech-v1",
             language=request.language,
         )
 

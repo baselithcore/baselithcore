@@ -20,6 +20,7 @@ class VoiceProvider(str, Enum):
     ELEVENLABS = "elevenlabs"
     GOOGLE = "google"
     LOCAL = "local"  # For local TTS/STT engines
+    OPENAI_COMPATIBLE = "openai_compatible"  # OpenAI audio API on any server
 
 
 class VoiceModel(str, Enum):

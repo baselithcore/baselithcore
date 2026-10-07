@@ -8,8 +8,9 @@ re-exports every name here — import from ``core.config`` as usual.
 
 import logging
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -96,9 +97,83 @@ class VoiceConfig(BaseSettings):
         extra="ignore",
     )
 
-    provider: Literal["openai", "elevenlabs", "google"] = Field(
-        default="openai", description="Default voice synthesis provider"
+    provider: Literal["openai", "elevenlabs", "google", "openai_compatible"] = Field(
+        default="openai",
+        description=(
+            "Default voice provider. 'openai_compatible' talks to any server that speaks "
+            "the OpenAI audio API (faster-whisper-server, Piper/Kokoro wrappers) at "
+            "VOICE_STT_BASE_URL / VOICE_TTS_BASE_URL, with no external provider key."
+        ),
     )
+
+    # OpenAI-compatible mode (local sidecars). Base URLs are the API root, /v1 included.
+    stt_base_url: str | None = Field(
+        default=None,
+        description="OpenAI-compatible STT root, e.g. http://whisper:8000/v1 (VOICE_STT_BASE_URL).",
+    )
+    tts_base_url: str | None = Field(
+        default=None,
+        description="OpenAI-compatible TTS root, e.g. http://tts:8000/v1 (VOICE_TTS_BASE_URL).",
+    )
+    compat_api_key: SecretStr | None = Field(
+        default=None,
+        description="Optional bearer key for the OpenAI-compatible servers (most sidecars are keyless).",
+    )
+    stt_model: str = Field(
+        default="whisper-1", description="STT model name sent to the server."
+    )
+    tts_model: str = Field(
+        default="tts-1", description="TTS model name sent to the server."
+    )
+    tts_voice: str = Field(
+        default="alloy", description="Default TTS voice for compatible servers."
+    )
+    allow_internal_endpoints: bool = Field(
+        default=False,
+        description=(
+            "Allow the compatible endpoints to sit on private, loopback or link-local "
+            "addresses (a sidecar on the same host or network). Off by default: the SSRF "
+            "guard refuses them."
+        ),
+    )
+    max_audio_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024,
+        description="Largest audio upload sent to STT.",
+    )
+    max_response_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=1024,
+        description="Largest response body read from a server.",
+    )
+    max_tts_chars: int = Field(
+        default=4096,
+        ge=1,
+        le=100_000,
+        description="Longest text accepted for synthesis.",
+    )
+    timeout_seconds: float = Field(
+        default=30.0, gt=0.0, le=300.0, description="Deadline of one voice request."
+    )
+
+    @field_validator("stt_base_url", "tts_base_url")
+    @classmethod
+    def _http_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parts = urlsplit(value.strip())
+        if (
+            parts.scheme not in ("http", "https")
+            or not parts.hostname
+            or parts.username
+            or parts.password
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError(
+                "must be an http(s) URL without credentials, query or fragment"
+            )
+        return value.strip().rstrip("/")
 
     openai_api_key: SecretStr | None = Field(
         default=None,

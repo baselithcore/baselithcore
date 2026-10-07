@@ -1889,7 +1889,7 @@ Speech synthesis and recognition.
     `MCPServer`.
 
 `VoiceService()` takes its default provider from `VOICE_PROVIDER`
-(`openai` | `elevenlabs` | `google`, default `openai`), the same way
+(`openai` | `elevenlabs` | `google` | `openai_compatible`, default `openai`), the same way
 `VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to override
 it per instance.
 
@@ -1931,6 +1931,66 @@ print(response.content)
 # Shorthand: transcript string directly
 text = await voice.transcribe("/path/to/audio.mp3")
 ```
+
+### Governed seam and OpenAI-compatible sidecars
+
+`VoiceService(plugin="my_plugin")` acts on behalf of a plugin. Each call resolves
+the plugin's central LLM policy for the `voice` scope
+(`resolve_governed_client_config(plugin, "voice")`): a pin to `openai` or `vllm`
+makes the pin's endpoint and credential serve the call, ahead of any `VOICE_*`
+key. A pin to a provider with no OpenAI audio API is ignored with a warning, and
+the pinned *chat model* is never applied: audio models are `VOICE_STT_MODEL` and
+`VOICE_TTS_MODEL`. Without a pin the `VOICE_*` configuration applies. The pin is
+resolved again on every call, so a console change needs no restart.
+
+`VOICE_PROVIDER=openai_compatible` (or the default `openai` provider with no
+OpenAI key but a base URL set) talks to any server speaking the OpenAI audio API,
+with **no external provider key**:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VOICE_STT_BASE_URL` / `VOICE_TTS_BASE_URL` | unset | API root **including `/v1`** |
+| `VOICE_COMPAT_API_KEY` | unset | Bearer key, if the server wants one |
+| `VOICE_STT_MODEL` / `VOICE_TTS_MODEL` / `VOICE_TTS_VOICE` | `whisper-1` / `tts-1` / `alloy` | Names sent to the server |
+| `VOICE_ALLOW_INTERNAL_ENDPOINTS` | `false` | Allow private, loopback and link-local servers |
+| `VOICE_MAX_AUDIO_BYTES` / `VOICE_MAX_RESPONSE_BYTES` | 10 MiB / 20 MiB | Request and response caps |
+| `VOICE_MAX_TTS_CHARS` / `VOICE_TIMEOUT_SECONDS` | 4096 / 30 | Text cap and per-request deadline |
+
+Calls go through the SSRF-hardened HTTP client: a sidecar on a private address
+(the usual case) is refused until `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`. Failures
+are typed (`VoiceError` with a stable `code`: `not_configured`, `egress_blocked`,
+`too_large`, `upstream_failed`, `timeout`, `invalid_input`) and never embed a
+response body. `VoiceService.capabilities()` reports, without a network probe,
+whether STT and TTS are configured.
+
+**Usage.** Every call is reported through the same usage seam as LLM calls
+(`report_external_usage`) as a token-equivalent estimate under the model labels
+`stt:<model>` and `tts:<model>`: STT prompt = `ceil(seconds * 50)` (the
+`duration_seconds` argument, else `bytes / 12000`), completion = `ceil(chars / 4)`;
+TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
+
+Reference sidecars (not started by the framework):
+
+```yaml
+services:
+  stt:
+    image: fedirz/faster-whisper-server:latest-cpu
+    environment: { WHISPER__MODEL: Systran/faster-whisper-small }
+    ports: ["127.0.0.1:8001:8000"]
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest # or any Piper OpenAI wrapper
+    ports: ["127.0.0.1:8002:8880"]
+# VOICE_PROVIDER=openai_compatible
+# VOICE_STT_BASE_URL=http://127.0.0.1:8001/v1  VOICE_STT_MODEL=Systran/faster-whisper-small
+# VOICE_TTS_BASE_URL=http://127.0.0.1:8002/v1  VOICE_TTS_MODEL=kokoro  VOICE_TTS_VOICE=af_heart
+# VOICE_ALLOW_INTERNAL_ENDPOINTS=true
+```
+
+**Browsers.** Capturing the microphone with `getUserMedia` needs HTTPS (or
+`localhost`) and a `Permissions-Policy` that allows it: the framework default and
+the reference nginx edge send `microphone=(self)` (own origin only; camera,
+geolocation and the rest stay denied). A custom `PERMISSIONS_POLICY` or proxy
+header of `microphone=()` blocks voice input.
 
 ### Shared OpenAI client
 
