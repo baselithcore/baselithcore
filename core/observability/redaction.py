@@ -153,9 +153,12 @@ def redact_sensitive(
 # misses the JSON form (``"access_token": "x"``) and the OAuth ``code``. These
 # patterns are for text that may echo a credential back: a provider's error
 # body, a transport error carrying a URL with a query.
+# The affixes are bounded: unbounded ``[\w-]*`` on both sides of the keyword
+# alternation backtracks quadratically over a long run of keyword-like text
+# (``"token" * N``), and this pattern runs on third-party error bodies.
 _KEY_NAMES = (
-    r"(?:[\w-]*(?:token|secret|password|passwd|api[-_]?key|authorization|assertion"
-    r"|verifier|credential|bearer|session)[\w-]*|code)"
+    r"(?:[\w-]{0,40}(?:token|secret|password|passwd|api[-_]?key|authorization"
+    r"|assertion|verifier|credential|bearer|session)[\w-]{0,40}|code)"
 )
 _SECRET_PAIR = re.compile(
     rf"(?<![\w-])(?P<k>{_KEY_NAMES})(?P<q>[\"']?)(?P<sep>\s*[:=]\s*)"

@@ -146,3 +146,19 @@ async def test_the_requests_own_bearer_is_redacted_when_echoed_raw(
     await http.aclose()
     assert token not in str(info.value) + caplog.text
     assert "boom ***" in str(info.value)
+
+
+def test_keyword_runs_do_not_backtrack_quadratically():
+    """Bounded affixes: a long run of keyword-like text stays linear."""
+    import time
+
+    small = "token" * 800
+    large = "token" * 8000
+    start = time.perf_counter()
+    redact_secrets(small)
+    t_small = time.perf_counter() - start
+    start = time.perf_counter()
+    redact_secrets(large)
+    t_large = time.perf_counter() - start
+    # 10x the input: linear is ~10x, the old quadratic pattern was ~100x.
+    assert t_large < max(t_small, 0.001) * 40

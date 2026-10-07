@@ -224,7 +224,10 @@ the native path, on a provider that declares `supports_streaming_tools`
 other path ignores the callback and returns the turn at once, so a caller must
 handle a turn that never called it. vLLM streams live only for models known not to reason inline (llama, mistral, gemma,
 qwen2, … or `LLM_VLLM_LIVE_STREAM_MODELS`); any other served name holds its answer
-until `</think>` so reasoning never leaks. Tool calls arrive whole on the result, and
+until `</think>` so reasoning never leaks. A name carrying an inline-reasoner
+marker (`r1`, `reason`, `think`, `qwq`, `qwen3`, `gpt-oss`, …) always holds,
+even when it also names a base family (`deepseek-r1-distill-llama-70b`) or
+matches `LLM_VLLM_LIVE_STREAM_MODELS`. Tool calls arrive whole on the result, and
 inline reasoning (`<think>…</think>`, even split across chunks) never reaches
 the callback. Before the first chunk a failure retries and fails over the
 fallback chain; after it, the turn is committed and a failure raises

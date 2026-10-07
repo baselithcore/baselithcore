@@ -672,3 +672,10 @@ cover `Bearer`/`Authorization` values, `*token*`/`*secret*`/`password`/`api_key`
 `safe_snippet` redacts before it truncates, collapses control characters to a
 single line and bounds the length. `core.connectors` builds every error message
 with them.
+
+The patterns run on text an outside party controls, so they are written to stay
+linear: the affixes around the credential keywords are bounded (an unbounded
+`[\w-]*` on both sides backtracked quadratically over keyword-like text), and
+callers bound the input first — `safe_snippet` cuts at 4096 characters, and
+`describe_exception` (`core.services.llm.exceptions`) does the same before it
+redacts an upstream error.

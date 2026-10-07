@@ -42,6 +42,15 @@ _LIVE_SAFE = re.compile(
     r"|command|^gpt-",
     re.I,
 )
+#: Inline reasoners, checked FIRST: a distilled or fine-tuned reasoner carries
+#: its base family in its name (``deepseek-r1-distill-llama-70b``,
+#: ``...-qwen2.5-...``), and a substring match on the family alone would stream
+#: its ``<think>`` block to the client. Any of these markers keeps the hold.
+_INLINE_REASONER = re.compile(
+    r"(?<![a-z])r1(?![0-9])|deepseek-r|reason|think|qwq|qwen-?3|magistral"
+    r"|exaone-deep|gpt-oss|marco-o1|sky-t1|openthinker|phi-?4-reasoning",
+    re.I,
+)
 
 
 def can_stream_live(model: str | None, extra_pattern: str = "") -> bool:
@@ -53,6 +62,8 @@ def can_stream_live(model: str | None, extra_pattern: str = "") -> bool:
             further models known not to reason inline.
     """
     if not model:
+        return False
+    if _INLINE_REASONER.search(model):
         return False
     if _LIVE_SAFE.search(model):
         return True

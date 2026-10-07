@@ -53,6 +53,10 @@ class RateLimitError(LLMProviderError):
         self.retry_after = retry_after
 
 
+#: Longest exception text described (and scanned for credentials).
+_MAX_DESCRIBED_CHARS = 4096
+
+
 def describe_exception(exc: BaseException) -> str:
     """A human-usable description of *exc*, never an empty string.
 
@@ -84,5 +88,6 @@ def describe_exception(exc: BaseException) -> str:
     # which must not load just because an exception class was imported.
     from core.observability.redaction import redact_secrets
 
-    message = redact_secrets(str(exc)).strip()
+    # Bounded before the regex pass: an upstream error body can be megabytes.
+    message = redact_secrets(str(exc)[:_MAX_DESCRIBED_CHARS]).strip()
     return message or type(exc).__name__

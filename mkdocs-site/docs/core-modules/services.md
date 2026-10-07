@@ -1268,7 +1268,9 @@ to its own exponential curve.
 `describe_exception` (the text providers put into `LLMProviderError` messages
 and log lines) runs the upstream message through the shared
 `core.observability.redaction.redact_secrets`, so a bearer token, an `api_key=`
-pair or a JWT that a provider echoes back is masked. `safe_error_text` is
+pair or a JWT that a provider echoes back is masked. The message is cut to
+4096 characters before that pass, so a megabyte error body costs a bounded
+scan. `safe_error_text` is
 stricter and keeps only the class name and HTTP status; the streaming paths use
 it because a stream failure can carry request bodies.
 

@@ -18,3 +18,10 @@ def test_plain_messages_and_empty_exceptions_are_unchanged():
         == "model not found (404)"
     )
     assert describe_exception(TimeoutError()) == "TimeoutError"
+
+
+def test_a_huge_error_body_is_bounded_before_redaction():
+    from core.services.llm.exceptions import _MAX_DESCRIBED_CHARS, describe_exception
+
+    text = describe_exception(RuntimeError("x" * (_MAX_DESCRIBED_CHARS * 50)))
+    assert len(text) <= _MAX_DESCRIBED_CHARS
