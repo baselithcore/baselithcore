@@ -2,6 +2,13 @@
 
 Shared by the Streamable HTTP client transport and the OAuth client: both talk
 to servers that are not ours, and neither may let one buffer an unbounded body.
+
+Only uncompressed bodies are accepted. httpx inflates a whole network chunk
+before handing it on, so a byte counter on decoded output runs *after* a gzip,
+brotli or zstd bomb has already been expanded in memory: a few KiB on the wire
+become gigabytes before any cap is consulted. Requests therefore ask for
+``identity``, and a response that is encoded anyway is refused before its body
+is read — so the only decoder httpx ever runs on it is the identity one.
 """
 
 from __future__ import annotations
@@ -18,8 +25,18 @@ def too_large(limit: int) -> MCPTransportError:
     return MCPTransportError(f"MCP response too large (cap {limit} bytes)")
 
 
-def check_declared_length(response: httpx.Response, limit: int) -> None:
-    """Refuse up front when ``Content-Length`` already exceeds *limit*."""
+IDENTITY_ENCODING = "identity"
+"""The only ``Accept-Encoding`` the client sends, and the only one it accepts."""
+
+
+def check_response_headers(response: httpx.Response, limit: int) -> None:
+    """Refuse up front a compressed body or a ``Content-Length`` over *limit*."""
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in ("", IDENTITY_ENCODING):
+        raise MCPTransportError(
+            f"MCP response uses Content-Encoding {encoding!r}; only an "
+            "uncompressed body is accepted"
+        )
     declared = response.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > limit:
         raise too_large(limit)
@@ -27,7 +44,7 @@ def check_declared_length(response: httpx.Response, limit: int) -> None:
 
 async def read_capped(response: httpx.Response, limit: int) -> bytes:
     """Read a streamed response body, aborting once it passes *limit* bytes."""
-    check_declared_length(response, limit)
+    check_response_headers(response, limit)
     chunks: list[bytes] = []
     total = 0
     async for chunk in response.aiter_bytes():
@@ -63,4 +80,10 @@ class SSEParser:
         return payloads
 
 
-__all__ = ["SSEParser", "check_declared_length", "read_capped", "too_large"]
+__all__ = [
+    "IDENTITY_ENCODING",
+    "SSEParser",
+    "check_response_headers",
+    "read_capped",
+    "too_large",
+]

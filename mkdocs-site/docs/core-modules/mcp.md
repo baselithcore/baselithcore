@@ -1149,6 +1149,13 @@ about 160 characters).
 `allowed_hosts=` pins the endpoint: the URL host must be in the list (`ValueError`
 at construction) and the SSRF policy enforces it on every request.
 
+The body caps count **uncompressed** bytes, so compression is off the table:
+the HTTP transport and `OAuthClient` send `Accept-Encoding: identity` (overriding
+any caller header), and a response carrying a `Content-Encoding` other than
+`identity` fails with `MCPTransportError` before a byte of it is read. httpx
+inflates a whole network chunk before any counter sees it, so a few KiB of
+gzip, brotli or zstd would otherwise expand to gigabytes ahead of the cap.
+
 #### Authentication
 
 `http_headers` stay static. For anything that expires, pass `auth`, an async

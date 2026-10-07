@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import httpx
 
 from core.config import get_mcp_config
-from core.mcp.bounded_http import read_capped
+from core.mcp.bounded_http import IDENTITY_ENCODING, read_capped
 from core.mcp.client_errors import MCPBlockedError, MCPTransportError, bounded
 from core.mcp.oauth_types import MCPOAuthError
 from core.security.http import create_hardened_async_client
@@ -83,7 +83,11 @@ class OAuthHTTP:
                     url,
                     data=data,
                     json=json_body,
-                    headers={"Accept": "application/json", **(headers or {})},
+                    headers={
+                        "Accept": "application/json",
+                        **(headers or {}),
+                        "Accept-Encoding": IDENTITY_ENCODING,
+                    },
                 ) as response:
                     status = response.status_code
                     if 300 <= status < 400:

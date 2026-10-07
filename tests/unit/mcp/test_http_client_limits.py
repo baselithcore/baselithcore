@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import gzip
 import time
 from typing import Any
 
 import httpx
 import pytest
 
+from core.mcp.bounded_http import read_capped
 from core.mcp.client_errors import MCPTransportError
 from core.mcp.http_client_transport import HTTPClientTransport
 
@@ -166,3 +168,65 @@ async def test_ssrf_targets_are_blocked(target: str) -> None:
     with pytest.raises(MCPTransportError, match="(?i)blocked|ssrf|not allowed"):
         await t.send(PING)
     await t.close()
+
+
+class _CountingBody(httpx.AsyncByteStream):
+    """A fixed body that records whether anyone pulled it."""
+
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.pulled = False
+
+    async def __aiter__(self) -> Any:
+        self.pulled = True
+        yield self.payload
+
+
+# 64 MiB of zeros gzip down to ~64 KiB: httpx would inflate the whole chunk
+# before any byte counter sees it, so the cap must never meet a decoder.
+_BOMB = gzip.compress(b"\0" * (64 << 20))
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "text/event-stream"])
+async def test_a_compressed_body_is_refused_before_it_is_inflated(
+    internal_ok: None, content_type: str
+) -> None:
+    body = _CountingBody(_BOMB)
+
+    async def handler(req: httpx.Request, b: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": content_type, "content-encoding": "gzip"},
+            stream=body,
+        )
+
+    transport, _ = make_transport(handler)
+    t = HTTPClientTransport(URL, httpx_transport=transport, max_response_bytes=1 << 20)
+    with pytest.raises(MCPTransportError, match="Content-Encoding"):
+        await t.send(PING)
+    assert not body.pulled
+    await t.close()
+
+
+async def test_requests_ask_for_an_uncompressed_body(internal_ok: None) -> None:
+    transport, seen = make_transport(
+        lambda req, b: _json(rpc(1, {"tools": []}))  # type: ignore[arg-type,return-value]
+    )
+    t = HTTPClientTransport(
+        URL, httpx_transport=transport, headers={"accept-encoding": "br"}
+    )
+    await t.send(PING)
+    assert seen[0][0].headers.get_list("accept-encoding") == ["identity"]
+    await t.close()
+
+
+async def _json(payload: Any) -> httpx.Response:
+    return json_response(payload)
+
+
+async def test_oauth_reads_refuse_a_compressed_body() -> None:
+    body = _CountingBody(_BOMB)
+    response = httpx.Response(200, headers={"content-encoding": "br"}, stream=body)
+    with pytest.raises(MCPTransportError, match="Content-Encoding"):
+        await read_capped(response, 1 << 20)
+    assert not body.pulled

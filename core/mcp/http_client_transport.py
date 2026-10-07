@@ -39,8 +39,9 @@ import httpx
 
 from core.config import get_mcp_config
 from core.mcp.bounded_http import (
+    IDENTITY_ENCODING,
     SSEParser,
-    check_declared_length,
+    check_response_headers,
     read_capped,
     too_large,
 )
@@ -150,7 +151,13 @@ class HTTPClientTransport:
             base.update(await self._auth())
         if override:
             base.update(override)
-        headers = {"Accept": _ACCEPT, **base}
+        headers = {
+            "Accept": _ACCEPT,
+            **{k: v for k, v in base.items() if k.lower() != "accept-encoding"},
+            # A compressed reply is refused (core.mcp.bounded_http); do not
+            # invite one, whatever the caller's static headers say.
+            "Accept-Encoding": IDENTITY_ENCODING,
+        }
         if self._session_id:
             headers[_SESSION_HEADER] = self._session_id
         if self._protocol_version:
@@ -267,7 +274,7 @@ class HTTPClientTransport:
             request_id = message.get("id")
             if status == 202 or request_id is None:
                 return None
-            check_declared_length(response, self._max_bytes)
+            check_response_headers(response, self._max_bytes)
 
             if response.headers.get("content-type", "").startswith("text/event-stream"):
                 reply = await self._drain_sse(
