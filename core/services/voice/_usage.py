@@ -12,6 +12,13 @@ priced (unknown model ids have no price):
   it, ``bytes / 12000``, roughly 96 kbit/s), completion = ``ceil(chars / 4)``.
 * TTS, label ``tts:<model>``: prompt = ``ceil(chars / 4)``, completion = 0.
 
+* ElevenLabs bills its own units, which the token-shaped seam cannot name, so they ride in
+  the prompt field with the unit in the label: ``tts:elevenlabs/<model>`` reports
+  **characters** (``prompt`` = chars), ``stt:elevenlabs/<model>`` reports **audio seconds**
+  (``prompt`` = ceil(seconds)). Both stay unpriced (unknown model ids have no price) and
+  attributed to whichever plugin/scope is bound to the call (Lith: scope ``voice``). Never the
+  text or the audio, only the counts.
+
 Reporting never raises: the audio was already produced.
 """
 
@@ -49,6 +56,16 @@ def report_tts(model: str, text: str) -> None:
     _report(f"tts:{model}", math.ceil(len(text) / CHARS_PER_TOKEN), 0)
 
 
+def report_tts_characters(model: str, characters: int) -> None:
+    """Report one ElevenLabs synthesis in the unit it bills: characters."""
+    _report(f"tts:elevenlabs/{model}", max(int(characters), 0), 0)
+
+
+def report_stt_seconds(model: str, seconds: float) -> None:
+    """Report one ElevenLabs transcription in the unit it bills: audio seconds."""
+    _report(f"stt:elevenlabs/{model}", math.ceil(max(seconds, 0.0)), 0)
+
+
 def _report(label: str, prompt: int, completion: int) -> None:
     try:
         from core.services.llm._telemetry import report_external_usage
@@ -58,4 +75,4 @@ def _report(label: str, prompt: int, completion: int) -> None:
         logger.debug("voice_usage_report_failed", error_type=type(exc).__name__)
 
 
-__all__ = ["report_stt", "report_tts"]
+__all__ = ["report_stt", "report_stt_seconds", "report_tts", "report_tts_characters"]

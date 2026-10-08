@@ -20,11 +20,14 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from core.config import get_voice_config
 from core.observability.logging import get_logger
 from core.services.voice import _usage
+from core.services.voice._elevenlabs import ElevenLabsClient
+from core.services.voice._elevenlabs_calls import ElevenLabsCalls
 from core.services.voice._http_providers import HttpProviders
 from core.services.voice._openai_wire import OpenAIWireClient
 from core.services.voice._wire_calls import WireCalls
@@ -32,6 +35,7 @@ from core.services.voice.models import (
     AudioFormat,
     STTRequest,
     TTSRequest,
+    VoiceOverrides,
     VoiceProvider,
     VoiceResponse,
 )
@@ -39,13 +43,13 @@ from core.services.voice.models import (
 logger = get_logger(__name__)
 
 
-class VoiceService(WireCalls, HttpProviders):
+class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
     """
     Multi-provider voice service.
 
     Supports:
     - OpenAI TTS/Whisper
-    - ElevenLabs TTS
+    - ElevenLabs TTS and Scribe STT (native; ``VOICE_PROVIDER=elevenlabs``)
     - Google Cloud TTS/STT
     - Any OpenAI-compatible audio server (``VOICE_PROVIDER=openai_compatible``)
 
@@ -57,7 +61,6 @@ class VoiceService(WireCalls, HttpProviders):
     # Default voices per provider
     DEFAULT_VOICES = {
         VoiceProvider.OPENAI: "alloy",
-        VoiceProvider.ELEVENLABS: "Rachel",
         VoiceProvider.GOOGLE: "en-US-Wavenet-D",
         VoiceProvider.OPENAI_COMPATIBLE: "alloy",
     }
@@ -73,6 +76,7 @@ class VoiceService(WireCalls, HttpProviders):
         google_credentials_path: str | None = None,
         plugin: str | None = None,
         scope: str | None = "voice",
+        overrides: Callable[[], VoiceOverrides | None] | None = None,
     ) -> None:
         """
         Initialize voice service.
@@ -86,22 +90,30 @@ class VoiceService(WireCalls, HttpProviders):
             plugin: Plugin the service acts for; its central LLM pin (scope
                 ``scope``) then wins over ``VOICE_*`` credentials.
             scope: Named LLM sub-policy to resolve for ``plugin``.
+            overrides: Called on every call for the host's live settings (provider choice,
+                an ElevenLabs key/voice/model); see :class:`VoiceOverrides`. The
+                environment's ElevenLabs key always wins over the override's.
         """
         self._plugin = plugin
         self._scope = scope
         self._wire: OpenAIWireClient | None = None
+        self._eleven: ElevenLabsClient | None = None
+        self._overrides_fn = overrides
         _voice_cfg = get_voice_config()
-        self.default_provider = VoiceProvider(default_provider or _voice_cfg.provider)
+        self._base_provider = VoiceProvider(default_provider or _voice_cfg.provider)
         self._openai_key = openai_api_key or (
             _voice_cfg.openai_api_key.get_secret_value()
             if _voice_cfg.openai_api_key
             else None
         )
+        # A blank key (``VOICE_ELEVENLABS_API_KEY=`` in a copied template) is no key.
         self._elevenlabs_key = elevenlabs_api_key or (
             _voice_cfg.elevenlabs_api_key.get_secret_value()
             if _voice_cfg.elevenlabs_api_key
             else None
         )
+        if self._elevenlabs_key is not None and not self._elevenlabs_key.strip():
+            self._elevenlabs_key = None
         self._google_creds = (
             google_credentials_path or _voice_cfg.google_credentials_path
         )
@@ -112,11 +124,24 @@ class VoiceService(WireCalls, HttpProviders):
 
         logger.info(
             "voice_service_initialized",
-            default_provider=self.default_provider.value,
+            default_provider=self._base_provider.value,
             openai_available=bool(self._openai_key),
             elevenlabs_available=bool(self._elevenlabs_key),
             google_available=bool(self._google_creds),
         )
+
+    @property
+    def default_provider(self) -> VoiceProvider:
+        """The provider in force now: the host's override, else ``VOICE_PROVIDER``."""
+        chosen = getattr(self._overrides(), "provider", None)
+        if chosen == "elevenlabs":
+            return VoiceProvider.ELEVENLABS
+        if chosen == "sidecar" and self._base_provider not in (
+            VoiceProvider.OPENAI,
+            VoiceProvider.OPENAI_COMPATIBLE,
+        ):
+            return VoiceProvider.OPENAI_COMPATIBLE
+        return self._base_provider
 
     def _get_http_client(self) -> Any:
         """Lazily create a shared HTTP client for provider calls.
@@ -170,6 +195,9 @@ class VoiceService(WireCalls, HttpProviders):
         if self._wire is not None:
             await self._wire.aclose()
             self._wire = None
+        if self._eleven is not None:
+            await self._eleven.aclose()
+            self._eleven = None
 
     # -------------------------------------------------------------------------
     # Text-to-Speech
@@ -197,6 +225,8 @@ class VoiceService(WireCalls, HttpProviders):
             VoiceResponse with audio data
         """
         provider = provider or self.default_provider
+        if provider == VoiceProvider.ELEVENLABS:
+            return await self._tts_elevenlabs_native(text, voice, speed)
         route = self._route("tts", provider)
         if route is not None:
             return await self._tts_wire(route, text, voice, speed, format)
@@ -217,8 +247,6 @@ class VoiceService(WireCalls, HttpProviders):
         try:
             if provider == VoiceProvider.OPENAI:
                 response = await self._tts_openai(request)
-            elif provider == VoiceProvider.ELEVENLABS:
-                response = await self._tts_elevenlabs(request)
             elif provider == VoiceProvider.GOOGLE:
                 response = await self._tts_google(request)
             else:
@@ -308,6 +336,8 @@ class VoiceService(WireCalls, HttpProviders):
             language=language,
         )
 
+        if provider == VoiceProvider.ELEVENLABS:
+            return await self._stt_elevenlabs(request, content_type, duration_seconds)
         route = self._route("stt", provider)
         if route is not None:
             return await self._stt_wire(route, request, content_type, duration_seconds)

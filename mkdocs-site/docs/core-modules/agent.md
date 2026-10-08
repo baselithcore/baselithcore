@@ -99,6 +99,7 @@ result.iterations        # LLM round-trips used
 | `tools` | `()` | Callables or `ToolDefinition`s |
 | `max_retries` | `2` | Validation-failure correction rounds |
 | `max_iterations` | `6` | Hard cap on LLM round-trips (tools + retries) |
+| `max_identical_calls` | `None` (off) | Brake on a looping model: the first N calls of one tool with identical arguments run, the next is not executed and the model is told to answer with what it has, and a further one ends the run with `RepeatedToolCallError`. |
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
 | `autonomy_policy` | standalone guard | Left at its default, tools **explicitly declared** `category="destructive"` are refused (see [Safe defaults for a standalone run](#safe-defaults-for-a-standalone-run)); every other tool runs as before. An `AutonomyPolicy` replaces the guard with the real approval gate: tools whose category needs approval at the active level go through the enforcement chokepoint. `None` is the explicit opt-out — no guard, gate inert. |
@@ -116,7 +117,10 @@ reach into.
 | Exception | When |
 |---|---|
 | `AgentOutputValidationError` | `output_type` was never satisfied within `max_retries`. |
-| `RuntimeError` | `max_iterations` exhausted before a final answer. |
+| `AgentIterationLimitError` | `max_iterations` exhausted before a final answer. |
+| `RepeatedToolCallError` | The model kept repeating an identical tool call after being told to stop (`max_identical_calls`); `.tool_name` names it. |
+
+Both loop errors derive from `AgentLoopError`, itself a `RuntimeError` (so an existing `except RuntimeError` keeps working), and carry `.tool_calls_made` so a host can tell its user what the agent was stuck on.
 | `BudgetExceededError` | A `LoopBudget` cap was hit — the ambient one, or the run's own default budget (`loop_limits`). Fail-closed — a runaway loop cannot keep dispatching tools. |
 | `ApprovalPendingError` | A tool needs a human decision that is not available yet; the run pauses **durably**. Only reachable when the agent was given an `autonomy_policy`; without one the approval gate is inert. |
 

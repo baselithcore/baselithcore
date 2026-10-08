@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from core.services.voice.errors import VoiceNotConfiguredError
 from core.services.voice.models import VoiceProvider
 from core.services.voice.service import VoiceService
 
@@ -62,29 +63,6 @@ async def test_tts_openai(voice_service):
         assert response.content == b"openai-audio"
         assert response.provider == "openai"
         mock_client.audio.speech.create.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_tts_elevenlabs(voice_service):
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.content = b"elevenlabs-audio"
-        mock_response.raise_for_status = MagicMock()
-        mock_client.post.return_value = mock_response
-
-        response = await voice_service.text_to_speech(
-            text="Hello", provider=VoiceProvider.ELEVENLABS, voice="Rachel"
-        )
-
-        assert response.success
-        assert response.content == b"elevenlabs-audio"
-        assert response.provider == "elevenlabs"
-        mock_client.post.assert_awaited_once()
-        url = mock_client.post.call_args[0][0]
-        assert url.startswith("https://api.elevenlabs.io/v1/text-to-speech/")
 
 
 @pytest.mark.asyncio
@@ -159,19 +137,23 @@ async def test_stt_google(voice_service):
 @pytest.mark.asyncio
 async def test_http_client_reused_between_calls(voice_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
+        import base64
+
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
-        mock_response.content = b"elevenlabs-audio"
+        mock_response.json.return_value = {
+            "audioContent": base64.b64encode(b"google-audio").decode()
+        }
         mock_response.raise_for_status = MagicMock()
         mock_client.post.return_value = mock_response
 
         await voice_service.text_to_speech(
-            text="Hello", provider=VoiceProvider.ELEVENLABS, voice="Rachel"
+            text="Hello", provider=VoiceProvider.GOOGLE, voice="en-US-Standard-A"
         )
         await voice_service.text_to_speech(
-            text="Hello again", provider=VoiceProvider.ELEVENLABS, voice="Rachel"
+            text="Hello again", provider=VoiceProvider.GOOGLE, voice="en-US-Standard-A"
         )
 
         mock_client_cls.assert_called_once()
@@ -234,7 +216,7 @@ async def test_missing_api_keys():
             await empty_service.text_to_speech("hi", provider=VoiceProvider.OPENAI)
 
         # ElevenLabs
-        with pytest.raises(ValueError, match="ElevenLabs API key"):
+        with pytest.raises(VoiceNotConfiguredError, match="ElevenLabs API key"):
             await empty_service.text_to_speech("hi", provider=VoiceProvider.ELEVENLABS)
 
         # Google

@@ -220,3 +220,62 @@ class VoiceRequest:
                 provider=provider,
             ),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceInfo:
+    """One synthesis voice a provider offers the account.
+
+    Attributes:
+        id: The provider's voice id (what ``text_to_speech(voice=...)`` takes).
+        name: Display name.
+        languages: Lower-case ISO 639-1 codes the voice is verified for (may be empty).
+        category: The provider's own class (``premade``, ``cloned``...), or ``""``.
+    """
+
+    id: str
+    name: str
+    languages: tuple[str, ...] = ()
+    category: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceOverrides:
+    """Settings a host layers over ``VOICE_*`` at call time (an admin console, say).
+
+    The host passes a callable returning this (or None) to :class:`VoiceService`, so a
+    change applies on the next call without a restart. The environment stays the
+    ceiling for credentials: a key set in ``VOICE_ELEVENLABS_API_KEY`` is never
+    replaced by ``elevenlabs_api_key`` here.
+
+    Attributes:
+        provider: ``"elevenlabs"``, ``"sidecar"`` (the OpenAI-compatible family) or None
+            (follow ``VOICE_PROVIDER``).
+        elevenlabs_api_key: Used only while the environment sets no key.
+        elevenlabs_voice_id: Default voice, over ``VOICE_ELEVENLABS_VOICE_ID``.
+        elevenlabs_tts_model: Synthesis model, over ``VOICE_ELEVENLABS_TTS_MODEL``.
+    """
+
+    provider: str | None = None
+    elevenlabs_api_key: str | None = None
+    elevenlabs_voice_id: str | None = None
+    elevenlabs_tts_model: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceProbe:
+    """The answer of a cheap authenticated check of a provider key.
+
+    Attributes:
+        ok: The key works and the account can still synthesize.
+        code: ``ok`` or a stable error code (``key_invalid``, ``permission_missing``,
+            ``quota_exceeded``, ``rate_limited``, ``provider_unavailable``,
+            ``not_configured``, ``timeout``, ``egress_blocked``).
+        characters_used: Characters spent this billing period, when the key may read it.
+        characters_limit: The period's allowance, when known.
+    """
+
+    ok: bool
+    code: str
+    characters_used: int | None = None
+    characters_limit: int | None = None

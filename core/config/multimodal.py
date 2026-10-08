@@ -10,7 +10,7 @@ import logging
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -195,10 +195,53 @@ class VoiceConfig(BaseSettings):
         ),
     )
 
-    # ElevenLabs specific voice tuning.
-    elevenlabs_model_id: str = Field(
-        default="eleven_multilingual_v2",
-        description="ElevenLabs model ID for TTS",
+    # ElevenLabs (native provider, VOICE_PROVIDER=elevenlabs). The key above is the
+    # credential; everything below is what it is pointed at and how it speaks.
+    elevenlabs_base_url: str = Field(
+        default="https://api.elevenlabs.io",
+        description=(
+            "ElevenLabs API root (VOICE_ELEVENLABS_BASE_URL). https only; the egress guard "
+            "allows exactly this host and follows no redirect. Change it for a data-residency "
+            "or enterprise endpoint (e.g. https://api.eu.residency.elevenlabs.io)."
+        ),
+    )
+    elevenlabs_tts_model: str = Field(
+        default="eleven_flash_v2_5",
+        validation_alias=AliasChoices(
+            "VOICE_ELEVENLABS_TTS_MODEL", "VOICE_ELEVENLABS_MODEL_ID"
+        ),
+        description=(
+            "ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency "
+            "and half the credit cost, multilingual (Italian included), which suits a voice "
+            "assistant that speaks sentence by sentence. eleven_multilingual_v2 trades "
+            "latency for richer prosody; eleven_v3 is the most expressive."
+        ),
+    )
+    elevenlabs_stt_model: str = Field(
+        default="scribe_v1",
+        description="ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL).",
+    )
+    elevenlabs_voice_id: str = Field(
+        default="21m00Tcm4TlvDq8ikWAM",
+        description=(
+            "Default ElevenLabs voice id (VOICE_ELEVENLABS_VOICE_ID); the premade 'Rachel', "
+            "which every account can use."
+        ),
+    )
+    elevenlabs_output_format: Literal[
+        "mp3_22050_32",
+        "mp3_24000_48",
+        "mp3_44100_32",
+        "mp3_44100_64",
+        "mp3_44100_96",
+        "mp3_44100_128",
+        "mp3_44100_192",
+    ] = Field(
+        default="mp3_44100_128",
+        description=(
+            "ElevenLabs output_format (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is "
+            "what browsers play; mp3_44100_192 needs a paid tier."
+        ),
     )
     elevenlabs_stability: float = Field(
         default=0.5, ge=0.0, le=1.0, description="ElevenLabs voice stability"
@@ -206,6 +249,34 @@ class VoiceConfig(BaseSettings):
     elevenlabs_similarity_boost: float = Field(
         default=0.75, ge=0.0, le=1.0, description="ElevenLabs similarity boost"
     )
+    elevenlabs_style: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="ElevenLabs style exaggeration"
+    )
+    elevenlabs_retries: int = Field(
+        default=2,
+        ge=0,
+        le=4,
+        description="Retries after an HTTP 429 (bounded by the request deadline).",
+    )
+
+    @model_validator(mode="after")
+    def _elevenlabs_endpoint(self) -> "VoiceConfig":
+        parts = urlsplit(self.elevenlabs_base_url.strip())
+        local_http = parts.scheme == "http" and self.allow_internal_endpoints
+        if (
+            (parts.scheme != "https" and not local_http)
+            or not parts.hostname
+            or parts.username
+            or parts.password
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError(
+                "VOICE_ELEVENLABS_BASE_URL must be an https URL without credentials, "
+                "query or fragment (http only with VOICE_ALLOW_INTERNAL_ENDPOINTS)"
+            )
+        self.elevenlabs_base_url = self.elevenlabs_base_url.strip().rstrip("/")
+        return self
 
     # Model used for caching voice samples by content similarity.
     embedding_model: str = Field(

@@ -191,11 +191,14 @@ def register_voice_tools(server: MCPServer) -> None:
                 {"id": "nova", "description": "Friendly and energetic"},
                 {"id": "shimmer", "description": "Clear and expressive"},
             ],
+            # ElevenLabs takes voice ids, not names; the account's real list is
+            # VoiceService.list_voices(). These two premade voices exist on every account.
             "elevenlabs": [
-                {"id": "Rachel", "description": "American female"},
-                {"id": "Adam", "description": "American male"},
-                {"id": "Antoni", "description": "Warm storyteller"},
-                {"id": "Bella", "description": "British female"},
+                {
+                    "id": "21m00Tcm4TlvDq8ikWAM",
+                    "description": "Rachel, American female",
+                },
+                {"id": "pNInz6obpgDQGcFmaJgB", "description": "Adam, American male"},
             ],
             "google": [
                 {"id": "en-US-Wavenet-A", "description": "Male US English"},

@@ -65,6 +65,50 @@ class VoiceUpstreamError(VoiceError):
         self.status = status
 
 
+class VoiceProviderError(VoiceUpstreamError):
+    """A provider failure that was understood, so it carries a stable, specific code.
+
+    Subclasses of :class:`VoiceUpstreamError`: code that only knows the generic
+    ``upstream_failed`` keeps working, code that wants to word the cause reads ``code``.
+    """
+
+
+class VoiceKeyInvalidError(VoiceProviderError):
+    """The provider rejected the API key (401/403)."""
+
+    code = "key_invalid"
+
+
+class VoicePermissionMissingError(VoiceProviderError):
+    """The key is valid but lacks a permission the call needs (e.g. Speech to Text)."""
+
+    code = "permission_missing"
+
+
+class VoiceQuotaError(VoiceProviderError):
+    """The account's character or credit allowance is used up."""
+
+    code = "quota_exceeded"
+
+
+class VoiceNotFoundError(VoiceProviderError):
+    """The voice id is unknown to the provider (or not usable by the account)."""
+
+    code = "voice_not_found"
+
+
+class VoiceRateLimitedError(VoiceProviderError):
+    """The provider is throttling the account (429), retries exhausted."""
+
+    code = "rate_limited"
+
+
+class VoiceUnavailableError(VoiceProviderError):
+    """The provider is down, overloaded, or answered something unusable (5xx, redirect)."""
+
+    code = "provider_unavailable"
+
+
 class VoiceTimeoutError(VoiceError):
     """The provider did not answer within the deadline."""
 
@@ -81,9 +125,16 @@ __all__ = [
     "VoiceEgressError",
     "VoiceError",
     "VoiceInputError",
+    "VoiceKeyInvalidError",
     "VoiceLimitError",
     "VoiceNotConfiguredError",
+    "VoiceNotFoundError",
+    "VoicePermissionMissingError",
+    "VoiceProviderError",
+    "VoiceQuotaError",
+    "VoiceRateLimitedError",
     "VoiceTimeoutError",
+    "VoiceUnavailableError",
     "VoiceUpstreamError",
     "safe_text",
 ]

@@ -1,5 +1,10 @@
 """Typed developer-facing Agent API (see :mod:`core.agent.agent`)."""
 
+from core.agent._repeat_guard import (
+    AgentIterationLimitError,
+    AgentLoopError,
+    RepeatedToolCallError,
+)
 from core.agent.agent import Agent, AgentOutputValidationError, AgentResult
 from core.agent.crew import AgentUsage, CostFn, Crew, CrewResult, Task, TaskResult
 from core.agent.crew_hierarchical import ReviewDecision, ReviewVerdict
@@ -24,6 +29,8 @@ from core.agent.group_chat import (
 
 __all__ = [
     "Agent",
+    "AgentIterationLimitError",
+    "AgentLoopError",
     "AgentEvent",
     "AgentOutputValidationError",
     "AgentResult",
@@ -39,6 +46,7 @@ __all__ = [
     "GroupChatResult",
     "LLMManagerSelector",
     "Participant",
+    "RepeatedToolCallError",
     "ReviewDecision",
     "ReviewVerdict",
     "RoundRobinSelector",

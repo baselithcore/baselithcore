@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from core.agent._repeat_guard import (
+    AgentIterationLimitError,
+    RepeatedToolCallError,
+    RepeatGuard,
+)
 from core.agent._tool_dispatch import gate_context, system_prompt_for
 from core.agent._tool_runtime import execute_tool_calls
 from core.agent.events import (
@@ -140,6 +145,11 @@ async def drive(
     if checkpoint is not None and not run_id:
         run_id = checkpoint.run_id
     occurrences = CallOccurrences()
+    repeats = (
+        RepeatGuard(agent.max_identical_calls)
+        if agent.max_identical_calls is not None
+        else None
+    )
     messages: list[Message] = [*turns, Message.user(prompt)]
     tool_calls_made: list[str] = []
     retries_left = agent.max_retries
@@ -201,15 +211,30 @@ async def drive(
             # latencies. Each call's occurrence in the run keeps a loop
             # that legitimately calls one tool twice with identical
             # arguments from collapsing into one ledger entry.
-            outcomes = await execute_tool_calls(
-                agent,
-                calls,
-                context=context,
-                run_id=run_id,
-                step_offset=len(tool_calls_made),
-                occurrences=occurrences,
-                checkpoint=checkpoint,
+            refused: dict[int, tuple[str, bool]] = {}
+            if repeats is not None:
+                try:
+                    for position, call in enumerate(calls):
+                        if (note := repeats.check(call)) is not None:
+                            refused[position] = (note, True)
+                except RepeatedToolCallError as stop:
+                    stop.tool_calls_made = list(tool_calls_made)
+                    raise
+            runnable = [c for i, c in enumerate(calls) if i not in refused]
+            ran = iter(
+                await execute_tool_calls(
+                    agent,
+                    runnable,
+                    context=context,
+                    run_id=run_id,
+                    step_offset=len(tool_calls_made),
+                    occurrences=occurrences,
+                    checkpoint=checkpoint,
+                )
             )
+            outcomes = [
+                refused[i] if i in refused else next(ran) for i in range(len(calls))
+            ]
             results: list[ToolResultBlock] = []
             for call, (observation, is_error) in zip(calls, outcomes, strict=True):
                 tool_calls_made.append(call.name)
@@ -276,9 +301,10 @@ async def drive(
         )
         return
 
-    raise RuntimeError(
+    raise AgentIterationLimitError(
         f"Agent.run exceeded max_iterations={agent.max_iterations} "
-        f"(last validation error: {last_error})"
+        f"(last validation error: {last_error})",
+        tool_calls_made=tool_calls_made,
     )
 
 

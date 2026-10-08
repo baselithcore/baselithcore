@@ -1,4 +1,4 @@
-"""The plain-HTTP provider paths of ``VoiceService`` (ElevenLabs, Google Cloud)."""
+"""The plain-HTTP provider paths of ``VoiceService`` (Google Cloud)."""
 
 from __future__ import annotations
 
@@ -10,56 +10,11 @@ from core.services.voice.models import STTRequest, TTSRequest, VoiceResponse
 class HttpProviders:
     """Mixin of ``VoiceService``: TTS/STT over the shared ``httpx`` client."""
 
-    _elevenlabs_key: str | None
-
     def _config(self) -> Any:  # pragma: no cover - provided by VoiceService
         raise NotImplementedError
 
     def _get_http_client(self) -> Any:  # pragma: no cover - provided by VoiceService
         raise NotImplementedError
-
-    async def _tts_elevenlabs(self, request: TTSRequest) -> VoiceResponse:
-        """
-        Generate high-quality speech using ElevenLabs API.
-
-        Args:
-            request: Audio generation parameters.
-
-        Returns:
-            VoiceResponse: Generated audio data.
-        """
-        if not self._elevenlabs_key:
-            raise ValueError("ElevenLabs API key not configured")
-
-        voice_cfg = self._config()
-        model_id = voice_cfg.elevenlabs_model_id
-        client = self._get_http_client()
-
-        response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{request.voice}",
-            headers={
-                "xi-api-key": self._elevenlabs_key,
-                "Content-Type": "application/json",
-            },
-            json={
-                "text": request.text,
-                "model_id": model_id,
-                "voice_settings": {
-                    "stability": voice_cfg.elevenlabs_stability,
-                    "similarity_boost": voice_cfg.elevenlabs_similarity_boost,
-                },
-            },
-        )
-        response.raise_for_status()
-        audio_bytes = response.content
-
-        return VoiceResponse(
-            success=True,
-            content=audio_bytes,
-            provider="elevenlabs",
-            model=model_id,
-            metadata={"voice": request.voice},
-        )
 
     async def _tts_google(self, request: TTSRequest) -> VoiceResponse:
         """

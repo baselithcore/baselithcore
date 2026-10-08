@@ -125,6 +125,10 @@ class Agent[OutputT]:
             from type hints and the docstring) or explicit ``ToolDefinition``s.
         max_retries: Validation-failure retries for ``output_type``.
         max_iterations: Hard cap on LLM round-trips (tool loop + retries).
+        max_identical_calls: Opt-in brake on a looping model: the first N calls
+            of one tool with identical arguments run, the next is refused with
+            an observation telling the model to answer, and a further one ends
+            the run with ``RepeatedToolCallError``. ``None`` (default) is off.
         task_category: Optional cost-aware routing hint (TaskCategory value).
         llm_service: Injected service (tests); defaults to the shared
             context-aware :func:`core.services.llm.get_llm_service`.
@@ -186,12 +190,14 @@ class Agent[OutputT]:
         tool_ledger: ToolLedger | None = None,
         tool_timeout: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
         loop_limits: LoopLimits | None = DEFAULT,
+        max_identical_calls: int | None = None,
     ) -> None:
         self.model = model
         self.output_type = output_type
         self.system_prompt = system_prompt
         self.max_retries = max_retries
         self.max_iterations = max_iterations
+        self.max_identical_calls = max_identical_calls
         self.task_category = task_category
         self.tool_timeout = tool_timeout
         self._llm_service = llm_service

@@ -12,11 +12,15 @@ Kept apart from :mod:`core.services.voice.service` (size cap). Order, per call:
 2. **Compatible sidecar.** ``VOICE_PROVIDER=openai_compatible`` (or the default
    ``openai`` provider with no OpenAI key but a ``VOICE_*_BASE_URL``) talks to
    ``VOICE_STT_BASE_URL`` / ``VOICE_TTS_BASE_URL`` with no external key.
-3. Otherwise the provider SDK paths of ``VoiceService``, unchanged.
+3. **ElevenLabs.** ``VOICE_PROVIDER=elevenlabs`` (or a host override) is handled by
+   :mod:`core.services.voice._elevenlabs_calls`, before any of the above applies: a governed
+   pin to an OpenAI-wire provider is not consulted, because the operator named ElevenLabs.
+4. Otherwise the provider SDK paths of ``VoiceService``, unchanged.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -40,7 +44,7 @@ class VoiceCapabilities:
         tts: Text-to-speech is configured.
         stt_provider: Who serves STT (``openai``, ``vllm``, ``openai_compatible``,
             ``google``) or None.
-        tts_provider: Who serves TTS (also ``elevenlabs``) or None.
+        tts_provider: Who serves TTS or None. ``elevenlabs`` serves both directions.
     """
 
     stt: bool
@@ -57,7 +61,11 @@ class WireRouting:
     _openai_key: str | None
     _elevenlabs_key: str | None
     _wire: OpenAIWireClient | None
-    default_provider: VoiceProvider
+    _eleven_key: Callable[[], str | None]  # ElevenLabsCalls, in the final class
+
+    @property
+    def default_provider(self) -> VoiceProvider:  # pragma: no cover - VoiceService
+        raise NotImplementedError
 
     def _config(self) -> Any:  # pragma: no cover - overridden by VoiceService
         raise NotImplementedError
@@ -140,8 +148,8 @@ class WireRouting:
                     stt = tts = "openai"
             if provider == VoiceProvider.GOOGLE and cfg.google_api_key:
                 stt = tts = "google"
-            if provider == VoiceProvider.ELEVENLABS and self._elevenlabs_key:
-                tts = "elevenlabs"
+            if provider == VoiceProvider.ELEVENLABS and self._eleven_key():
+                stt = tts = "elevenlabs"
         return VoiceCapabilities(stt is not None, tts is not None, stt, tts)
 
 

@@ -435,9 +435,15 @@ Declared in `core.config.multimodal`.
 | `VOICE_ALLOW_INTERNAL_ENDPOINTS` | `bool` | `False` | Allow the compatible endpoints to sit on private, loopback or link-local addresses (a sidecar on the same host or network). Off by default: the SSRF guard refuses them. |
 | `VOICE_COMPAT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer key for the OpenAI-compatible servers (most sidecars are keyless). |
 | `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
-| `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_multilingual_v2` | ElevenLabs model ID for TTS |
+| `VOICE_ELEVENLABS_BASE_URL` | `str` | `https://api.elevenlabs.io` | ElevenLabs API root (VOICE_ELEVENLABS_BASE_URL). https only; the egress guard allows exactly this host and follows no redirect. Change it for a data-residency or enterprise endpoint (e.g. `https://api.eu.residency.elevenlabs.io`). |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `Literal['mp3_22050_32', 'mp3_24000_48', 'mp3_44100_32', 'mp3_44100_64', 'mp3_44100_96', 'mp3_44100_128', 'mp3_44100_192']` | `mp3_44100_128` | ElevenLabs output_format (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is what browsers play; mp3_44100_192 needs a paid tier. |
+| `VOICE_ELEVENLABS_RETRIES` | `int` | `2` | Retries after an HTTP 429 (bounded by the request deadline). |
 | `VOICE_ELEVENLABS_SIMILARITY_BOOST` | `float` | `0.75` | ElevenLabs similarity boost |
 | `VOICE_ELEVENLABS_STABILITY` | `float` | `0.5` | ElevenLabs voice stability |
+| `VOICE_ELEVENLABS_STT_MODEL` | `str` | `scribe_v1` | ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL). |
+| `VOICE_ELEVENLABS_STYLE` | `float` | `0.0` | ElevenLabs style exaggeration |
+| `VOICE_ELEVENLABS_TTS_MODEL`<br>also accepts `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_flash_v2_5` | ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency and half the credit cost, multilingual (Italian included), which suits a voice assistant that speaks sentence by sentence. eleven_multilingual_v2 trades latency for richer prosody; eleven_v3 is the most expressive. |
+| `VOICE_ELEVENLABS_VOICE_ID` | `str` | `21m00Tcm4TlvDq8ikWAM` | Default ElevenLabs voice id (VOICE_ELEVENLABS_VOICE_ID); the premade 'Rachel', which every account can use. |
 | `VOICE_EMBEDDING_MODEL` | `str` | `all-MiniLM-L6-v2` | Sentence-transformer model for semantic voice cache |
 | `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VOICE_GOOGLE_APPLICATION_CREDENTIALS`<br>also accepts `GOOGLE_APPLICATION_CREDENTIALS` | `str \| None` | *empty* |  |
@@ -1038,4 +1044,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-690 settings documented.
+696 settings documented.

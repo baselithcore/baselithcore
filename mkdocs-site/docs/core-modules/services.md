@@ -1889,18 +1889,23 @@ Speech synthesis and recognition.
     `MCPServer`.
 
 `VoiceService()` takes its default provider from `VOICE_PROVIDER`
-(`openai` | `elevenlabs` | `google` | `openai_compatible`, default `openai`), the same way
-`VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to override
-it per instance.
+(`openai` | `elevenlabs` | `google` | `openai_compatible`, default `openai`; any other value is
+refused at startup), the same way `VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to
+override it per instance.
 
 ### Voice Structure
 
 ```text
 core/services/voice/
 ├── __init__.py
-├── service.py          # VoiceService
-├── tts.py              # Text-to-Speech
-└── stt.py              # Speech-to-Text
+├── service.py              # VoiceService
+├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429)
+├── _elevenlabs_calls.py    # ElevenLabs TTS / Scribe STT / voice list / key check
+├── _openai_wire.py         # OpenAI-compatible wire client (sidecars, governed pin)
+├── _routing.py             # which backend serves a call
+├── _usage.py               # usage-seam reporting
+├── errors.py               # typed VoiceError family with stable codes
+└── models.py               # requests, responses, VoiceInfo, VoiceOverrides, VoiceProbe
 ```
 
 ### Text-to-Speech
@@ -1968,6 +1973,47 @@ whether STT and TTS are configured.
 `stt:<model>` and `tts:<model>`: STT prompt = `ceil(seconds * 50)` (the
 `duration_seconds` argument, else `bytes / 12000`), completion = `ceil(chars / 4)`;
 TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
+
+### ElevenLabs (native provider)
+
+ElevenLabs is not OpenAI-compatible, so `VOICE_PROVIDER=elevenlabs` has its own adapter in
+`core/services/voice/_elevenlabs*.py`. It serves **both directions**: text-to-speech
+(`POST /v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
+(`POST /v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VOICE_ELEVENLABS_API_KEY` (or `ELEVENLABS_API_KEY`) | unset | The API key (`SecretStr`) |
+| `VOICE_ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io` | API root; **https only** (a data-residency endpoint such as `https://api.eu.residency.elevenlabs.io` goes here). `http` is accepted only together with `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`, for a local fake |
+| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency (an assistant speaks sentence by sentence) and cost (about half the credits per character), and is multilingual, Italian included; use `eleven_multilingual_v2` or `eleven_v3` for richer prosody |
+| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v1` | Scribe model (`scribe_v2` is available) |
+| `VOICE_ELEVENLABS_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` | Default voice (the premade "Rachel"); a call may name another id |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play) |
+| `VOICE_ELEVENLABS_STABILITY` / `_SIMILARITY_BOOST` / `_STYLE` | `0.5` / `0.75` / `0.0` | Voice settings |
+| `VOICE_ELEVENLABS_RETRIES` | `2` | Retries after an HTTP 429, inside the request deadline |
+
+Safety properties: the egress policy allows exactly the base URL's host and no redirect is
+followed (a 3xx is an error, so the key can never be steered elsewhere); the voice id is
+checked against `[A-Za-z0-9_-]{1,64}` before it enters the URL path; request and response
+bodies are capped by `VOICE_MAX_AUDIO_BYTES` / `VOICE_MAX_RESPONSE_BYTES` and one
+`VOICE_TIMEOUT_SECONDS` deadline covers the exchange, retries included. A provider error body is read
+only to choose a stable code and is never echoed or logged. The codes (all `VoiceUpstreamError`
+subclasses, so `except VoiceUpstreamError` still works): `key_invalid` (401/403),
+`permission_missing` (the key lacks a permission), `quota_exceeded`, `voice_not_found`,
+`rate_limited` (429 after the retries), `provider_unavailable` (5xx, redirect, unreachable).
+
+A host that layers settings on top of `VOICE_*` at call time (an admin console) passes
+`VoiceService(overrides=callable)`; the callable returns a `VoiceOverrides` (provider, key, default voice,
+model) and is read on every call. **The environment's key always wins** over the override's.
+
+**Usage.** ElevenLabs bills characters and audio seconds, which the token-shaped usage seam cannot
+name, so they ride in the prompt field with the unit in the label: `tts:elevenlabs/<model>` reports
+**characters**, `stt:elevenlabs/<model>` reports **audio seconds** (the length ElevenLabs returns, else
+the caller's `duration_seconds`, else `bytes / 12000`). Unpriced, attributed to the plugin and scope bound
+to the call. Never the text or the audio.
+
+!!! warning "Privacy"
+    With this provider the text to synthesize and the recorded audio are sent to ElevenLabs.
 
 Reference sidecars (not started by the framework):
 
