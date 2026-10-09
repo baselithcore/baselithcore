@@ -22,7 +22,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -30,50 +30,35 @@ import httpx
 from core.observability.logging import get_logger
 from core.security.http import create_hardened_async_client
 from core.security.ssrf import SsrfError, SsrfPolicy
+from core.services.voice._elevenlabs_errors import KNOWN_STATUS, Kind, classify
+from core.services.voice._elevenlabs_payload import (
+    REQUEST_ID,
+    is_stitched,
+    speech_payload,
+)
 from core.services.voice.errors import (
     VoiceEgressError,
     VoiceError,
     VoiceInputError,
-    VoiceKeyInvalidError,
     VoiceLimitError,
     VoiceNotFoundError,
-    VoicePermissionMissingError,
-    VoiceQuotaError,
     VoiceRateLimitedError,
     VoiceTimeoutError,
     VoiceUnavailableError,
     VoiceUpstreamError,
     safe_text,
 )
-from core.services.voice.models import VoiceInfo
+from core.services.voice.models import SpeechContext, VoiceInfo
 
 logger = get_logger(__name__)
 
-Kind = Literal["tts", "stt", "voices"]
 
 #: What a voice id looks like; it goes into a URL path, so nothing else is let through.
 VOICE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-#: Models that accept ``language_code`` (others answer 400 when it is sent).
-_LANGUAGE_MODELS = ("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_v3")
 _ERROR_BODY_MAX = 4096
 _RETRY_AFTER_MAX = 2.0
 _PAGE_SIZE = 100
 _MAX_PAGES = 3
-#: ``detail.status`` values read from an error body; anything else is ignored.
-_KNOWN_STATUS = frozenset(
-    {
-        "quota_exceeded",
-        "invalid_api_key",
-        "missing_permissions",
-        "voice_not_found",
-        "voice_does_not_exist",
-        "invalid_uid",
-        "too_many_concurrent_requests",
-        "system_busy",
-        "detected_unusual_activity",
-    }
-)
-_NOT_FOUND = frozenset({"voice_not_found", "voice_does_not_exist", "invalid_uid"})
 _LANG_NAMES = {"italian": "it", "english": "en"}
 
 
@@ -87,47 +72,13 @@ class ElevenLabsTarget:
         return (self.api_key,)
 
 
-def classify(status: int, detail: str | None, kind: Kind) -> VoiceError:
-    """The stable error for an HTTP ``status`` (and the body's ``detail.status``)."""
-    if detail == "quota_exceeded" or status == 402:
-        return VoiceQuotaError("the voice account has no allowance left", status=status)
-    if status in (401, 403):
-        if detail == "missing_permissions":
-            return VoicePermissionMissingError(
-                "the voice key lacks a permission this call needs", status=status
-            )
-        if detail == "detected_unusual_activity":
-            return VoiceUnavailableError(
-                "the voice account is restricted", status=status
-            )
-        return VoiceKeyInvalidError(
-            "the voice provider rejected the key", status=status
-        )
-    if status == 413:
-        return VoiceLimitError("the voice provider refused the request as too large")
-    if status == 404 or detail in _NOT_FOUND:
-        if kind == "tts":
-            return VoiceNotFoundError("the voice id is unknown", status=status)
-        return VoiceUnavailableError(
-            "the voice provider has no such resource", status=status
-        )
-    if status == 422:
-        if kind == "tts":
-            return VoiceNotFoundError(
-                "the voice request was not accepted", status=status
-            )
-        return VoiceInputError("the provider did not accept the audio")
-    if status == 429:
-        return VoiceRateLimitedError(
-            "the voice provider is rate limiting", status=status
-        )
-    if status >= 500 or status == 408:
-        return VoiceUnavailableError(
-            f"the voice provider answered HTTP {status}", status=status
-        )
-    return VoiceUpstreamError(
-        f"the voice provider answered HTTP {status}", status=status
-    )
+@dataclass(frozen=True)
+class SpeechResult:
+    """One synthesised passage: the audio and what the provider told about the request."""
+
+    audio: bytes
+    request_id: str | None = None
+    stitched: bool = False
 
 
 def _language_codes(raw: Any) -> tuple[str, ...]:
@@ -170,6 +121,10 @@ def parse_voices(payload: Any) -> list[VoiceInfo]:
     return voices
 
 
+#: How long an idle connection to the provider is kept for the next sentence.
+_KEEPALIVE_SECONDS = 45.0
+
+
 class ElevenLabsClient:
     """Capped, deadline-bound client for the ElevenLabs endpoints Lith needs."""
 
@@ -200,6 +155,17 @@ class ElevenLabsClient:
         kwargs: dict[str, Any] = {"timeout": timeout_seconds, "follow_redirects": False}
         if transport is not None:
             kwargs["transport"] = transport
+        else:
+            # The hardened client disables keep-alive by default, so that one pool never coalesces
+            # two validated hostnames behind a shared pinned IP. This policy admits exactly one
+            # host, so the pool can only ever hold connections to it: keeping them costs no
+            # isolation and saves a DNS lookup, a TCP and a TLS handshake on every sentence a
+            # voice assistant speaks (the dominant part of its time to first audio).
+            kwargs["limits"] = httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=4,
+                keepalive_expiry=_KEEPALIVE_SECONDS,
+            )
         self._client = create_hardened_async_client(policy, **kwargs)
 
     async def aclose(self) -> None:
@@ -255,27 +221,55 @@ class ElevenLabsClient:
         style: float,
         speed: float = 1.0,
         language: str | None = None,
+        context: SpeechContext | None = None,
     ) -> bytes:
         """Synthesize ``text``; returns the audio bytes."""
+        result = await self.speech_result(
+            target,
+            text,
+            voice_id=voice_id,
+            model=model,
+            output_format=output_format,
+            stability=stability,
+            similarity_boost=similarity_boost,
+            style=style,
+            speed=speed,
+            language=language,
+            context=context,
+        )
+        return result.audio
+
+    async def speech_result(
+        self,
+        target: ElevenLabsTarget,
+        text: str,
+        *,
+        voice_id: str,
+        model: str,
+        output_format: str,
+        stability: float,
+        similarity_boost: float,
+        style: float,
+        speed: float = 1.0,
+        language: str | None = None,
+        context: SpeechContext | None = None,
+    ) -> SpeechResult:
+        """Synthesize ``text``: the audio, the provider's request id and whether it was stitched."""
         if not text.strip():
             raise VoiceInputError("text is empty")
         if not VOICE_ID.fullmatch(voice_id):
             raise VoiceNotFoundError("the voice id is not valid")
-        settings: dict[str, float] = {
-            "stability": stability,
-            "similarity_boost": similarity_boost,
-            "style": style,
-        }
-        if abs(speed - 1.0) > 0.01:
-            settings["speed"] = min(1.2, max(0.7, speed))
-        payload: dict[str, Any] = {
-            "text": text,
-            "model_id": model,
-            "voice_settings": settings,
-        }
-        if language and model in _LANGUAGE_MODELS:
-            payload["language_code"] = language
-        audio = await self._call(
+        payload = speech_payload(
+            text,
+            model=model,
+            stability=stability,
+            similarity_boost=similarity_boost,
+            style=style,
+            speed=speed,
+            language=language,
+            context=context,
+        )
+        audio, headers = await self._exchange(
             target,
             "POST",
             f"/v1/text-to-speech/{quote(voice_id, safe='')}",
@@ -285,7 +279,12 @@ class ElevenLabsClient:
         )
         if not audio:
             raise VoiceUpstreamError("the speech response was empty")
-        return audio
+        raw = headers.get("request-id", "")
+        return SpeechResult(
+            audio=audio,
+            request_id=raw if REQUEST_ID.fullmatch(raw) else None,
+            stitched=is_stitched(payload),
+        )
 
     async def voices(self, target: ElevenLabsTarget) -> list[VoiceInfo]:
         """The voices the account can use (a few pages at most)."""
@@ -354,6 +353,18 @@ class ElevenLabsClient:
         kind: Kind,
         **kwargs: Any,
     ) -> bytes:
+        body, _ = await self._exchange(target, method, path, kind=kind, **kwargs)
+        return body
+
+    async def _exchange(
+        self,
+        target: ElevenLabsTarget,
+        method: str,
+        path: str,
+        *,
+        kind: Kind,
+        **kwargs: Any,
+    ) -> tuple[bytes, httpx.Headers]:
         headers = {"xi-api-key": target.api_key}
         url = self._base + path
         try:
@@ -366,7 +377,7 @@ class ElevenLabsClient:
                     try:
                         status = response.status_code
                         if 200 <= status < 300:
-                            return await self._read(response)
+                            return await self._read(response), response.headers
                         if 300 <= status < 400:
                             logger.warning("voice_redirect_refused", status=status)
                             raise VoiceUnavailableError(
@@ -420,7 +431,7 @@ class ElevenLabsClient:
         except (ValueError, AttributeError, httpx.HTTPError):
             return None
         status = detail.get("status") if isinstance(detail, dict) else None
-        return status if isinstance(status, str) and status in _KNOWN_STATUS else None
+        return status if isinstance(status, str) and status in KNOWN_STATUS else None
 
     async def _read(self, response: httpx.Response) -> bytes:
         declared = response.headers.get("content-length", "")
@@ -437,6 +448,7 @@ class ElevenLabsClient:
 __all__ = [
     "ElevenLabsClient",
     "ElevenLabsTarget",
+    "SpeechResult",
     "classify",
     "parse_voices",
 ]

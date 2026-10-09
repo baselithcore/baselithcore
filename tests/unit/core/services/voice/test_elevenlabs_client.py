@@ -426,3 +426,33 @@ class TestVoices:
 
         await client(handle).voices(TARGET)
         assert calls == 3
+
+
+def test_the_provider_pool_keeps_connections_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One allowed host means a keep-alive pool cannot coalesce hostnames: no handshake per sentence."""
+    seen: dict[str, Any] = {}
+
+    def fake(policy: Any, **kwargs: Any) -> httpx.AsyncClient:
+        seen.update(kwargs)
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200))
+        )
+
+    monkeypatch.setattr(
+        "core.services.voice._elevenlabs.create_hardened_async_client", fake
+    )
+    from core.services.voice._elevenlabs import ElevenLabsClient
+
+    ElevenLabsClient(
+        base_url="https://api.elevenlabs.io",
+        allow_internal=False,
+        timeout_seconds=5.0,
+        max_request_bytes=1024,
+        max_response_bytes=1024,
+    )
+    limits = seen["limits"]
+    assert limits.max_keepalive_connections == 4
+    assert limits.keepalive_expiry == 45.0
+    assert "transport" not in seen

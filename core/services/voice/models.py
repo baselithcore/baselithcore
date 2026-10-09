@@ -279,3 +279,39 @@ class VoiceProbe:
     code: str
     characters_used: int | None = None
     characters_limit: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechContext:
+    """What surrounds one synthesised passage, so consecutive passages sound like one voice.
+
+    Providers that support request stitching (ElevenLabs, except ``eleven_v3``) use it to
+    carry prosody across the boundary; others ignore it. Everything here is advisory: a
+    provider that cannot use a field simply drops it.
+
+    Attributes:
+        previous_text: Text spoken just before this passage.
+        next_text: Text that will be spoken right after it, when already known.
+        previous_request_ids: Provider request ids of the passages just before (at most
+            three are used); they take precedence over ``previous_text``.
+        normalization: ``auto``, ``on`` or ``off``: the provider's own text normalisation.
+    """
+
+    previous_text: str | None = None
+    next_text: str | None = None
+    previous_request_ids: tuple[str, ...] = ()
+    normalization: Literal["auto", "on", "off"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechTuning:
+    """Preferred synthesis settings for one call, used where the operator chose none.
+
+    A value set explicitly by the operator (``VOICE_ELEVENLABS_*`` in the environment, or a
+    host override) always wins over the one here; see ``VoiceService.elevenlabs_explicit``.
+    """
+
+    model: str | None = None
+    stability: float | None = None
+    similarity_boost: float | None = None
+    style: float | None = None

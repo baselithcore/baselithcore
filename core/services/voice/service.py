@@ -33,6 +33,8 @@ from core.services.voice._openai_wire import OpenAIWireClient
 from core.services.voice._wire_calls import WireCalls
 from core.services.voice.models import (
     AudioFormat,
+    SpeechContext,
+    SpeechTuning,
     STTRequest,
     TTSRequest,
     VoiceOverrides,
@@ -210,6 +212,10 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
         speed: float = 1.0,
         format: AudioFormat = AudioFormat.MP3,
         provider: VoiceProvider | None = None,
+        *,
+        language: str | None = None,
+        context: SpeechContext | None = None,
+        tuning: SpeechTuning | None = None,
     ) -> VoiceResponse:
         """
         Convert text to speech.
@@ -220,13 +226,24 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
             speed: Speech speed (0.25 to 4.0)
             format: Output audio format
             provider: Provider to use (default from init)
+            language: ISO 639-1 language of the text (ElevenLabs models that take it).
+            context: Neighbouring passages for continuity (ElevenLabs request stitching).
+            tuning: Preferred model and voice settings for this call; the operator's
+                explicit ``VOICE_ELEVENLABS_*`` values win (ElevenLabs only).
 
         Returns:
             VoiceResponse with audio data
         """
         provider = provider or self.default_provider
         if provider == VoiceProvider.ELEVENLABS:
-            return await self._tts_elevenlabs_native(text, voice, speed)
+            return await self._tts_elevenlabs_native(
+                text,
+                voice,
+                speed,
+                language=language,
+                context=context,
+                tuning=tuning,
+            )
         route = self._route("tts", provider)
         if route is not None:
             return await self._tts_wire(route, text, voice, speed, format)

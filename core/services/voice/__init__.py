@@ -25,6 +25,8 @@ from core.services.voice.errors import (
     VoiceUpstreamError,
 )
 from core.services.voice.models import (
+    SpeechContext,
+    SpeechTuning,
     STTRequest,
     TTSRequest,
     VoiceInfo,
@@ -38,6 +40,8 @@ from core.services.voice.service import VoiceService
 
 __all__ = [
     "STTRequest",
+    "SpeechContext",
+    "SpeechTuning",
     "TTSRequest",
     "VoiceCapabilities",
     "VoiceEgressError",

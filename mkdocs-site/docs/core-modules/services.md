@@ -2002,6 +2002,31 @@ subclasses, so `except VoiceUpstreamError` still works): `key_invalid` (401/403)
 `permission_missing` (the key lacks a permission), `quota_exceeded`, `voice_not_found`,
 `rate_limited` (429 after the retries), `provider_unavailable` (5xx, redirect, unreachable).
 
+**Latency.** The adapter keeps its connection pool alive (idle connections are kept for 45 s), so a
+voice assistant that speaks sentence by sentence does not pay a DNS lookup, a TCP handshake and a TLS
+handshake for every sentence. The hardened client disables keep-alive by default so that one pool never
+coalesces two validated hostnames behind a shared pinned IP; this adapter's egress policy admits exactly
+one host, so there is nothing to coalesce. For a smaller payload at the same cost per character set
+`VOICE_ELEVENLABS_OUTPUT_FORMAT=mp3_24000_48`.
+
+**Continuity and tuning per call.** `text_to_speech(..., language=, context=, tuning=)` accepts three
+optional, provider-neutral arguments that only the ElevenLabs path uses:
+
+- `context=SpeechContext(previous_text, next_text, previous_request_ids, normalization)` is the
+  neighbourhood of the passage. The adapter sends it as ElevenLabs request stitching: `previous_request_ids`
+  (at most three, validated, taking precedence) else `previous_text`, `next_text` (each cut to 600
+  characters) and `apply_text_normalization`. `eleven_v3` has no stitching, so those fields are dropped
+  silently; a caller can always ask for the best continuity. The provider's `request-id` response header comes
+  back in `VoiceResponse.metadata["request_id"]` (with `stitched`), which is what the next passage chains to.
+  Ids are valid for about two hours; the chain itself (who owns it, how long it lives) is the host's job.
+- `language` becomes `language_code` for the models that take it (`eleven_flash_v2_5`, `eleven_turbo_v2_5`,
+  `eleven_v3`); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to 0.7-1.2.
+- `tuning=SpeechTuning(model, stability, similarity_boost, style)` states preferred values for this call. A
+  value the operator set explicitly (`VOICE_ELEVENLABS_*` in the environment, or a host override's model)
+  always wins; `VoiceService.elevenlabs_explicit()` says which ones those are, so a host can show the source.
+
+Billing is unchanged by stitching: only the passage's own characters are reported.
+
 A host that layers settings on top of `VOICE_*` at call time (an admin console) passes
 `VoiceService(overrides=callable)`; the callable returns a `VoiceOverrides` (provider, key, default voice,
 model) and is read on every call. **The environment's key always wins** over the override's.

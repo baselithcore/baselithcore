@@ -23,6 +23,8 @@ from core.services.voice.errors import (
     VoiceNotConfiguredError,
 )
 from core.services.voice.models import (
+    SpeechContext,
+    SpeechTuning,
     STTRequest,
     VoiceInfo,
     VoiceOverrides,
@@ -114,8 +116,57 @@ class ElevenLabsCalls:
             return override.elevenlabs_tts_model
         return str(self._config().elevenlabs_tts_model)
 
+    def elevenlabs_explicit(self) -> frozenset[str]:
+        """Which synthesis settings the operator chose (``model``, ``stability``,
+        ``similarity_boost``, ``style``): set in the environment, or by a host override.
+
+        A per-call :class:`SpeechTuning` fills only the others. Never raises.
+        """
+        found: set[str] = set()
+        fields: set[str] = set(getattr(self._config(), "model_fields_set", ()))
+        for name, key in (
+            ("elevenlabs_tts_model", "model"),
+            ("elevenlabs_stability", "stability"),
+            ("elevenlabs_similarity_boost", "similarity_boost"),
+            ("elevenlabs_style", "style"),
+        ):
+            if name in fields:
+                found.add(key)
+        override = self._overrides()
+        if override and override.elevenlabs_tts_model:
+            found.add("model")
+        return frozenset(found)
+
+    def _eleven_tuned(self, tuning: SpeechTuning | None) -> dict[str, Any]:
+        """Model and voice settings in force: operator's explicit, else the tuning, else default."""
+        cfg = self._config()
+        explicit = self.elevenlabs_explicit()
+        chosen = tuning or SpeechTuning()
+        out: dict[str, Any] = {}
+        for key, default in (
+            ("stability", cfg.elevenlabs_stability),
+            ("similarity_boost", cfg.elevenlabs_similarity_boost),
+            ("style", cfg.elevenlabs_style),
+        ):
+            wanted = getattr(chosen, key)
+            out[key] = float(
+                wanted if wanted is not None and key not in explicit else default
+            )
+        if chosen.model and "model" not in explicit:
+            out["model"] = chosen.model
+        else:
+            out["model"] = self._eleven_tts_model()
+        return out
+
     async def _tts_elevenlabs_native(
-        self, text: str, voice: str | None, speed: float
+        self,
+        text: str,
+        voice: str | None,
+        speed: float,
+        *,
+        language: str | None = None,
+        context: SpeechContext | None = None,
+        tuning: SpeechTuning | None = None,
     ) -> VoiceResponse:
         """Synthesize with ElevenLabs; the audio is MP3 (``VOICE_ELEVENLABS_OUTPUT_FORMAT``)."""
         target = self._eleven_target()
@@ -125,28 +176,41 @@ class ElevenLabsCalls:
         if len(text) > cfg.max_tts_chars:
             raise VoiceLimitError("text exceeds the synthesis cap")
         voice_id = voice or self._eleven_default_voice()
-        model = self._eleven_tts_model()
+        tuned = self._eleven_tuned(tuning)
+        model = tuned["model"]
         logger.info(
-            "tts_start", provider="elevenlabs", text_length=len(text), model=model
+            "tts_start",
+            provider="elevenlabs",
+            text_length=len(text),
+            model=model,
+            stitched=context is not None,
         )
-        audio = await self._eleven_client().speech(
+        result = await self._eleven_client().speech_result(
             target,
             text,
             voice_id=voice_id,
             model=model,
             output_format=str(cfg.elevenlabs_output_format),
-            stability=float(cfg.elevenlabs_stability),
-            similarity_boost=float(cfg.elevenlabs_similarity_boost),
-            style=float(cfg.elevenlabs_style),
+            stability=tuned["stability"],
+            similarity_boost=tuned["similarity_boost"],
+            style=tuned["style"],
             speed=speed,
+            language=language,
+            context=context,
         )
+        # Billed characters: a stitched request still counts, its context text does not.
         _usage.report_tts_characters(model, len(text))
         return VoiceResponse(
             success=True,
-            content=audio,
+            content=result.audio,
             provider="elevenlabs",
             model=model,
-            metadata={"voice": voice_id, "format": "mp3"},
+            metadata={
+                "voice": voice_id,
+                "format": "mp3",
+                "request_id": result.request_id,
+                "stitched": result.stitched,
+            },
         )
 
     async def _stt_elevenlabs(

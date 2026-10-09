@@ -1484,6 +1484,8 @@
     ],
     "core.services.voice": [
       "STTRequest",
+      "SpeechContext",
+      "SpeechTuning",
       "TTSRequest",
       "VoiceCapabilities",
       "VoiceEgressError",
