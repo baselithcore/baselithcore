@@ -370,7 +370,7 @@ async def test_exporters_github_exchange_refuses_internal_marketplace_url(monkey
 
     # SsrfError is caught alongside httpx.HTTPError and degrades to a 502
     # (bad gateway), not an unhandled 500 — same pattern as
-    # plugins/baselithbot/dashboard/security.py's probe_provider().
+    # plugins/examplebot/dashboard/security.py's probe_provider().
     with pytest.raises(HTTPException) as exc_info:
         await exporters_router._exchange_github_for_jwt(github_token="gho_x")
     assert exc_info.value.status_code == 502

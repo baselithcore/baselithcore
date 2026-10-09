@@ -216,7 +216,7 @@ in [Packaging › Vendor extensions](packaging.md#vendor-extensions).
     is the one place with slack: it tries the manifest name, the directory name, and
     the directory name with `-`/`_` swapped, so dir `weather_agent` with
     `name: weather-agent` still finds its config entry. Anything else (dir
-    `baselithbot` with `name: BaselithBot`, or two different words) does not resolve:
+    `my_plugin` with `name: Acme`, or two different words) does not resolve:
     the config entry is never matched and the plugin runs as if it had none.
 
     Hot reload (`POST /api/plugins/{name}/enable|disable|reload` and the startup

@@ -736,7 +736,7 @@ seedResources:
 #     config:
 #       api_routers: {enabled: true}
 #       browser_agent: {enabled: true}
-#       baselithbot: {enabled: true, headless: true}
+#       reasoning_agent: {enabled: true}
 #
 # Mutually exclusive with `config.PLUGIN_CONFIG_PATH` and with a
 # `seedFromImage` entry from /app/configs/plugins.yaml; the chart refuses to

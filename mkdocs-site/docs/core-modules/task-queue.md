@@ -234,11 +234,10 @@ expr.next_after(datetime(2026, 1, 5, 10, 7, tzinfo=UTC))
   day-of-month and day-of-week are restricted (neither raw field starts with
   `*`), a day matches if it satisfies *either* field; otherwise both apply.
 
-Two consumers ship with the framework: the
+The
 [`WorkflowScheduler`](workflows.md#scheduled-workflows-workflowscheduler)
-runs cron-scheduled workflow definitions, and the baselithbot plugin's
-`CronScheduler.add_cron(name, expr, fn)` fires periodic bot jobs on cron
-expressions (UTC) alongside its interval triggers.
+is the consumer that ships with the framework: it runs cron-scheduled
+workflow definitions.
 
 ---
 

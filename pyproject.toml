@@ -38,10 +38,8 @@ classifiers = [
 keywords = ["ai", "agents", "framework"]
 
 dependencies = [
-  # aiohttp is here for the baselithbot plugin, which ships in this
-  # distribution (plugins/baselithbot/voice). The libraries a third-party
-  # plugin used to get for free — defusedxml, email-validator, markdown-it-py,
-  # networkx, sse-starlette — imported by nothing in core/ or the official
+  # The libraries a third-party plugin used to get for free — defusedxml,
+  # email-validator, markdown-it-py, networkx, sse-starlette — imported by nothing in core/ or the official
   # plugins, moved to the `plugin-compat` extra: a plugin declares what it
   # imports, and every install stopped paying for what none of it uses.
   # <3.9.4: CVE-2024-23334 (static-route path traversal) and
@@ -51,8 +49,7 @@ dependencies = [
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
-  # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
-  # plugin (Fernet secret store).
+  # and core/world_model/mandates.py (Ed25519) import it.
   # >=50.0.0: CVE-2026-69247 (GHSA-g6cj-pr64-35w5) — PKCS#7 EnvelopedData
   # decryption leaked a Bleichenbacher oracle via distinguishable errors and
   # timing; present in 44.0.0–49.0.0, fixed in 50.0.0. Not reachable from this
@@ -132,7 +129,7 @@ browser = [
   # CVEs. 1.62.0 ships Chromium 151.0.7922.34, Firefox 153.0, WebKit 26.5.
   # A floor, not an exact pin: browser security fixes arrive as new playwright
   # releases, and an `==` here would block every one of them until we cut a
-  # baselith-core release. Matches `plugins/baselithbot/pyproject.toml`.
+  # baselith-core release.
   "playwright>=1.62.0",
 ]
 documents = [
@@ -427,16 +424,6 @@ version = {attr = "core._version.__version__"}
     "migrations/script.py.mako",
     "migrations/versions/*.py",
 ]
-# Plugin build files that its integrity signature covers (core.plugins.integrity
-# hashes pyproject.toml and requirements*.txt). Not shipping them made the
-# installed copy's digest differ from the signed one, so the plugin failed its
-# integrity check on every wheel install. scripts/check_distribution_artifacts.py
-# verifies every signed plugin against the installed tree.
-"plugins.baselithbot" = [
-    "pyproject.toml",
-    "requirements.txt",
-]
-
 # `ui/dist/**/*` above is a deliberately broad include — it has to be, because
 # the bundle's filenames are content-hashed and cannot be enumerated. That
 # breadth is what makes this table necessary.

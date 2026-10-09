@@ -330,9 +330,9 @@ class TestGovernance:
                 "http://central.test/v1",
             ),
         )
-        svc = service(server, plugin="baselithbot")
+        svc = service(server, plugin="myplugin")
         await svc.speech_to_text(audio_data=b"abc")
-        assert seen == [("baselithbot", "voice")]
+        assert seen == [("myplugin", "voice")]
         assert (
             server.calls[0]["headers"]["authorization"] == "Bearer sk-central-key-999"
         )
@@ -348,7 +348,7 @@ class TestGovernance:
             monkeypatch,
             GovernedClientConfig("vllm", "m", None, "http://gpu.test:8002/v1"),
         )
-        await service(server, plugin="baselithbot").text_to_speech("hi")
+        await service(server, plugin="myplugin").text_to_speech("hi")
         assert server.calls[0]["headers"]["host"] == "gpu.test:8002"
 
     async def test_non_openai_pin_is_ignored(
@@ -360,7 +360,7 @@ class TestGovernance:
                 "anthropic", "claude", SecretStr("sk-ant-0000000"), None
             ),
         )
-        svc = service(server, plugin="baselithbot")
+        svc = service(server, plugin="myplugin")
         assert (
             svc.capabilities().stt_provider == "openai_compatible"
         )  # falls back to VOICE_*
@@ -371,14 +371,14 @@ class TestGovernance:
         self, server: FakeServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self.pin(monkeypatch, None)
-        await service(server, plugin="baselithbot").speech_to_text(audio_data=b"abc")
+        await service(server, plugin="myplugin").speech_to_text(audio_data=b"abc")
         assert server.calls[0]["headers"]["host"] == "voice.test"
 
     async def test_resolved_per_call(
         self, server: FakeServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = self.pin(monkeypatch, None)
-        svc = service(server, plugin="baselithbot")
+        svc = service(server, plugin="myplugin")
         await svc.speech_to_text(audio_data=b"abc")
         await svc.speech_to_text(audio_data=b"abc")
         assert len(seen) == 2

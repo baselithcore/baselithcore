@@ -15,7 +15,7 @@ Exit status:
 Run via pre-commit / CI:
 
     python scripts/check_plugin_integrity.py
-    python scripts/check_plugin_integrity.py --require-signed plugins/baselithbot
+    python scripts/check_plugin_integrity.py --require-signed plugins/web_scraper
 
 To re-sign after legitimate changes::
 

@@ -1614,12 +1614,6 @@ overrides the process-wide default per request; with no registry the
 dispatch is a no-op, matching every other primitive the chokepoint consults.
 `reset_tool_hook_registry()` drops the default (tests / reconfiguration).
 
-The first production consumer of the `post` phase is Baselithbot's
-computer-use `fs_write`: it dispatches a post event carrying the
-compile-verification outcome of each written `.py` file, observed by a
-`*fs_write` logging hook — see
-[Baselithbot › Post-write verification](../plugins/baselithbot.md#post-write-verification-computer-use).
-
 ### Tool burst rate limit (`rate_limit.py`)
 
 The per-run `LoopBudget` caps how many tool calls one request may make in

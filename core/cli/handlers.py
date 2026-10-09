@@ -15,7 +15,7 @@ That declaration is applied **at the dispatch point** by :func:`run_command`,
 which :mod:`core.cli.__main__` calls for every command it resolves. It was
 briefly a decorator on the functions below, which was wrong in a way worth
 recording: the real dispatch table lives in ``__main__`` and plugins inject
-into it at runtime (``plugins/baselithbot/diagnostics/cli.py`` does), as does
+into it at runtime (a plugin's CLI module does), as does
 the ``set_defaults(handler=...)`` fallback for plugin-owned parsers. A
 per-function decorator can only cover the handlers it can see, so every
 plugin-registered command ran unscoped. Scoping the dispatch instead makes the

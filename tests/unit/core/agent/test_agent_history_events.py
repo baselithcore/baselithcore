@@ -1,6 +1,6 @@
 """``Agent`` continues a conversation (``history=``) and streams typed events.
 
-A conversational host (Baselithbot's assistant) needs both: every turn resumes
+A conversational host (a chat assistant plugin) needs both: every turn resumes
 the stored conversation, and the UI renders tool activity while the loop runs.
 """
 

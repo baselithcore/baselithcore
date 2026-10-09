@@ -171,10 +171,8 @@ approval gates apply.
 
 ## Relationship to plugin-local skill systems
 
-The `baselithbot` plugin keeps its richer, OpenClaw-compatible skill
-subsystem (ClawHub marketplace, workspace scopes, MANIFEST.yaml quality
-signals) but reuses the core frontmatter parser
-(`core.plugins.declarative.split_frontmatter`), so `SKILL.md` frontmatter
-semantics stay uniform across the stack. New plugins should prefer the
-declarative `skills/` convention and only build custom machinery for
+A plugin may still build its own skill machinery, and can reuse the core
+frontmatter parser (`core.plugins.declarative.split_frontmatter`) so `SKILL.md`
+frontmatter semantics stay uniform across the stack. New plugins should prefer
+the declarative `skills/` convention and only build custom machinery for
 genuinely domain-specific needs.

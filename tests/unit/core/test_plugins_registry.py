@@ -354,9 +354,9 @@ class TestReservedRoutePrefixes:
 
     def test_non_reserved_single_segment_prefix_still_works(self, registry):
         registry.register_discovered_plugin(
-            self._discovery("baselithbot", "/baselithbot")
+            self._discovery("examplebot", "/examplebot")
         )
-        assert registry.match_plugin_route("/baselithbot/api/x") == "baselithbot"
+        assert registry.match_plugin_route("/examplebot/api/x") == "examplebot"
 
     def test_multi_segment_prefix_under_api_still_works(self, registry):
         registry.register_discovered_plugin(

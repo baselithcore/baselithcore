@@ -129,7 +129,6 @@ nav = [
       { "Marketplace"          = "plugins/marketplace.md" },
       { "Goals Plugin"         = "plugins/goals.md" },
       { "Reasoning Agent"      = "plugins/reasoning-agent.md" },
-      { "Baselithbot"          = "plugins/baselithbot.md" },
       { "Packaging"            = "plugins/packaging.md" },
       { "Backstage Integration" = "plugins/backstage.md" },
       { "Backstage Publish"    = "plugins/backstage-publish.md" },

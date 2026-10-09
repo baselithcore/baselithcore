@@ -127,7 +127,7 @@ config = ScraperConfig(
     rate_limit_enabled=True,
     rate_limit_requests=20,          # max requests per period (default: 10)
     rate_limit_period_seconds=60.0,  # period length in seconds (default: 1.0)
-    user_agent="BaselithBot/1.0",
+    user_agent="MyBot/1.0",
 )
 
 scraper = Scraper(config=config)

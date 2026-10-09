@@ -170,8 +170,8 @@ class PluginRuntimeHooks:
         """Activate every discovered plugin the config file enables.
 
         Iterates the *discovered* plugins (keyed by canonical manifest name),
-        not the raw config keys: a directory/config key (``baselithbot``) may
-        differ from the manifest name (``BaselithBot``), and lifecycle state
+        not the raw config keys: a directory/config key (``my_plugin``) may
+        differ from the manifest name (``MyPlugin``), and lifecycle state
         is keyed by the canonical name. Enablement goes through
         :func:`core.plugins.config_file.plugin_enabled` — the rule discovery
         already applied — so a block without ``enabled:`` (or no config file

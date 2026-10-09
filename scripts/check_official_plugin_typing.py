@@ -6,7 +6,7 @@ This keeps typing pressure on first-party plugins without forcing the whole
 The roster is **derived, not hardcoded**: an official plugin is a directory
 under `plugins/` whose manifest declares `integrity_sha256`, i.e. one this repo
 signs and ships. The old hardcoded tuple silently dropped `plugins/goals`,
-`plugins/reasoning_agent` and `plugins/baselithbot/dashboard` — a plugin added
+`plugins/reasoning_agent` — a plugin added
 after the list was written was simply never gated.
 """
 
@@ -37,12 +37,7 @@ UNSIGNED_BY_DESIGN: frozenset[str] = frozenset({"example-plugin", "test-project"
 # Subdirectories within the official plugins that are excluded from the strict
 # typing gate (non-Python assets, generated code, vendored trees, or test
 # suites with their own conventions).
-EXCLUDED_SUBPATHS: tuple[str, ...] = (
-    "plugins/baselithbot/ui",
-    "plugins/baselithbot/docs",
-    "plugins/baselithbot/.state",
-    "plugins/baselithbot/tests",
-)
+EXCLUDED_SUBPATHS: tuple[str, ...] = ()
 
 
 def _is_excluded(relative_path: str) -> bool:

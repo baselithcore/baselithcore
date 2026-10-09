@@ -155,7 +155,7 @@ class HotReloadController:
 
             # The loader keys lifecycle state by the plugin's *manifest* name,
             # which may differ from the config/directory key used to enable it
-            # (e.g. dir ``baselithbot`` vs manifest ``BaselithBot``, or
+            # (e.g. dir ``my_plugin`` vs manifest ``MyPlugin``, or
             # ``browser_agent`` vs ``browser-agent``). Prefer the instance we
             # just loaded / already hold; only fall back to a name lookup.
             if plugin is None:

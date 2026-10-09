@@ -114,7 +114,7 @@ class TestExporterLoopSuppression:
 
     @pytest.mark.parametrize(
         "name",
-        ["core.orchestration.orchestrator", "uvicorn.access", "plugins.baselithbot"],
+        ["core.orchestration.orchestrator", "uvicorn.access", "plugins.examplebot"],
     )
     def test_application_loggers_pass(self, name):
         record = logging.LogRecord(name, logging.INFO, __file__, 1, "x", None, None)

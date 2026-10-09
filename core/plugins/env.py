@@ -9,7 +9,7 @@ operator config next to its code (the file is gitignored like every ``.env``).
 Loading is additive and **scoped by construction**:
 
 - Only keys in the plugin's own namespace are loaded — by default those
-  prefixed ``<DIRNAME>_`` (e.g. ``BASELITHBOT_*`` for ``plugins/baselithbot``),
+  prefixed ``<DIRNAME>_`` (e.g. ``WEB_SCRAPER_*`` for ``plugins/web_scraper``),
   or an explicit ``allowed_prefixes``. A plugin ``.env`` therefore cannot flip a
   framework/core key it does not own (``MCP_HTTP_REQUIRE_AUTH``,
   ``BASELITH_SKIP_INTEGRITY_CHECK``, ``ALLOW_ORIGINS``, …); out-of-namespace

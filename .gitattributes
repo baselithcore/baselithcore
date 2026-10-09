@@ -43,7 +43,6 @@
 uv.lock linguist-generated=true
 package-lock.json linguist-generated=true
 sdk/typescript/package-lock.json linguist-generated=true
-plugins/baselithbot/ui/package-lock.json linguist-generated=true
 # `-diff` IS right here: these are minified, content-hashed bundles where a
 # textual diff is noise, and the gate that guards them compares bytes, not
 # hunks.

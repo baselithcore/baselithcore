@@ -105,7 +105,7 @@ def test_framework_global_keys_are_protected(key: str) -> None:
     "key",
     [
         "MYPLUGIN_TOKEN",
-        "BASELITHBOT_CHANNEL",
+        "EXAMPLEBOT_CHANNEL",
         "FOO",
         # A plugin whose own namespace merely *starts with* a dangerous word
         # must not be blocked: exact-key matching for PYTHON*/LD*/DYLD* vectors
@@ -128,7 +128,7 @@ def test_plugin_scoped_keys_stay_settable(key: str) -> None:
 @pytest.mark.parametrize(
     ("dir_name", "expected"),
     [
-        ("baselithbot", "BASELITHBOT_"),
+        ("examplebot", "EXAMPLEBOT_"),
         ("document_sources", "DOCUMENT_SOURCES_"),
         ("document-sources", "DOCUMENT_SOURCES_"),
         ("example-plugin", "EXAMPLE_PLUGIN_"),
@@ -147,7 +147,7 @@ def test_namespace_prefixes_dedupes_and_drops_empty() -> None:
 
 
 def test_in_namespace_key_allowed() -> None:
-    verdict = classify_plugin_env_key("BASELITHBOT_CHANNEL", prefixes=("BASELITHBOT_",))
+    verdict = classify_plugin_env_key("EXAMPLEBOT_CHANNEL", prefixes=("EXAMPLEBOT_",))
     assert verdict is EnvKeyVerdict.ALLOW
 
 

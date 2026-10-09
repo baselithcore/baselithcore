@@ -440,8 +440,8 @@ class TestReplayAllowlist:
             ),
         ):
             dlq._replay_from_record(_record(func_name="core.task_queue.jobs.run"))
-            dlq._replay_from_record(_record(func_name="plugins.baselithbot.jobs.run"))
-        assert enqueued["func"] == "plugins.baselithbot.jobs.run"
+            dlq._replay_from_record(_record(func_name="plugins.examplebot.jobs.run"))
+        assert enqueued["func"] == "plugins.examplebot.jobs.run"
 
     def test_round_trip_from_a_recorded_job(self, dlq):
         enqueued = {}

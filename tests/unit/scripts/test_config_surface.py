@@ -209,7 +209,7 @@ class TestEveryShippedTemplateIsChecked:
     """The "binds nothing" check must cover every template we tell people to copy.
 
     It only ever read ``.env.example``. But ``baselith doctor`` tells an operator
-    to run ``cp configs/.env.base .env``, and the baselithbot docs call that file
+    to run ``cp configs/.env.base .env``, and the docs call that file
     the reference template — so it is a template people actually start from, and
     it had rotted unobserved: ten entries naming a removed OCR backend and a
     widget API that no longer exists, none of which bind anything.

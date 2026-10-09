@@ -372,8 +372,8 @@ so it is sanitised to one line and truncated to **256** characters.
 
 !!! note "Same-origin browser UIs need no allowlist entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too; a UI served
-    by the deployment itself (e.g. the `baselithbot` dashboard opening
-    `/ws/pair`) passes because that `Origin` equals the handshake's own origin.
+    by the deployment itself (e.g. a plugin dashboard opening a
+    WebSocket) passes because that `Origin` equals the handshake's own origin.
     Behind a TLS-terminating proxy that does not forward the scheme the server
     sees `http`/`ws` while the page is `https` — list the public origin in
     `ALLOW_ORIGINS` in that case.

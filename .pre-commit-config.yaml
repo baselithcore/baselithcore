@@ -135,8 +135,8 @@ repos:
       # A plugin's shipped SPA bundle is generated output with two owners that
       # both compare it byte for byte, so no formatter may touch it:
       #
-      #   * the `ui_build` gate in ci.yml rebuilds plugins/baselithbot/ui from
-      #     a clean `npm ci` and diffs the result against what is committed;
+      #   * a drift gate that rebuilds the bundle from a clean `npm ci` and
+      #     diffs the result against what is committed;
       #   * ui/dist/** is inside the plugin-integrity hash surface
       #     (core/plugins/integrity.py), so a rewritten byte invalidates the
       #     manifest's integrity_sha256 and the plugin stops loading under
@@ -148,7 +148,7 @@ repos:
       # hook put the newline back on the way into the commit.
       #
       # The pattern covers ui/{dist,out,build} for ANY plugin rather than
-      # naming baselithbot: the integrity surface already matches all three (a
+      # naming one plugin: the integrity surface already matches all three (a
       # Next.js export lands in ui/out, a Create React App build in ui/build),
       # so an exclusion that only knew `dist` would leave the same trap set for
       # the next plugin.
@@ -452,9 +452,9 @@ repos:
         # A plugin's shipped SPA bundle is the same rule with more at stake:
         # `files:` above matches the bundles, the stylesheet and index.html
         # inside it, and prettier un-minifies what it formats — measured on
-        # baselithbot, one bundle went from 1 line to 237 and the stylesheet
-        # from 1 to 4493. A single `pre-commit run --all-files` would wedge the
-        # `ui_build` gate, invalidate the plugin's integrity_sha256 and ship an
+        # one plugin, one bundle went from 1 line to 237 and the stylesheet
+        # from 1 to 4493. A single `pre-commit run --all-files` would wedge a
+        # drift gate, invalidate the plugin's integrity_sha256 and ship an
         # un-minified dashboard in the wheel. See the end-of-file-fixer note.
         exclude: |
           (?x)^(

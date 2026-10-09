@@ -13,7 +13,7 @@ class TestSanitizeLogValue:
     """Escaping and truncation of untrusted values headed for a log line."""
 
     def test_plain_value_is_unchanged(self) -> None:
-        assert sanitize_log_value("baselithbot") == "baselithbot"
+        assert sanitize_log_value("examplebot") == "examplebot"
 
     @pytest.mark.parametrize(
         ("raw", "escaped"),

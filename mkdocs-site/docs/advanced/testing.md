@@ -28,7 +28,7 @@ tests/
 ├── chaos/                 # Fault-injection resilience tests (marker: chaos)
 ├── golden/                # Real Agent loop driven by recorded LLM cassettes
 ├── core/                  # Plugin-system and memory tests
-├── plugins/               # Per-plugin suites (api_routers, baselithbot)
+├── plugins/               # Per-plugin suites (api_routers, ...)
 └── load/                  # Locust profile — not part of the pytest suite
 ```
 
@@ -882,9 +882,7 @@ lock file, not a fresh resolution.
 The `needs:` list is load-bearing: a gate that nothing depends on is advisory, so
 every blocking gate is wired into the test → release path structurally rather
 than relying on branch protection. That now includes `zizmor` (workflow audit),
-`helm_lint` (chart lint + kubeconform render) and `ui_build` (the BaselithBot
-dashboard typechecks, builds, and the committed `ui/dist/` matches a clean
-rebuild). `dependency_review` is deliberately **not** in the list: it only runs
+and `helm_lint` (chart lint + kubeconform render). `dependency_review` is deliberately **not** in the list: it only runs
 on `pull_request`, and a skipped dependency blocks the dependent job, so listing
 it would make every push to `main` skip `python_test`.
 

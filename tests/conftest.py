@@ -384,7 +384,7 @@ async def cleanup_global_state_between_tests():
         pass
 
     # Clear the process-global vision API-key resolver registry. Plugins
-    # (e.g. baselithbot) register a resolver in ``initialize`` and only drop it
+    # register a resolver in ``initialize`` and only drop it
     # in ``shutdown``; tests that load/init a plugin without a paired shutdown
     # would otherwise leak a mock-backed resolver into VisionService and make
     # unrelated vision tests resolve bogus keys.

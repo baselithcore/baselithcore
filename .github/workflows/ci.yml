@@ -124,7 +124,6 @@ jobs:
       image: ${{ steps.plan.outputs.image }}
       workflows: ${{ steps.plan.outputs.workflows }}
       helm: ${{ steps.plan.outputs.helm }}
-      ui: ${{ steps.plan.outputs.ui }}
       frontend: ${{ steps.plan.outputs.frontend }}
       sdk: ${{ steps.plan.outputs.sdk }}
       supply: ${{ steps.plan.outputs.supply }}
@@ -988,10 +987,9 @@ jobs:
     timeout-minutes: 30
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
-    # required checks in branch protection. zizmor, helm_lint, ui_build and
+    # required checks in branch protection. zizmor, helm_lint and
     # frontend_test join them for the same reason — a gate that nothing depends
-    # on is advisory, and a workflow audit, a chart that will not render, a
-    # stale dashboard bundle or a broken SSE client in the shipped chat UI are
+    # on is advisory, and a workflow audit, a chart that will not render or a broken SSE client in the shipped chat UI are
     # all things that must not reach a release.
     #
     # Most of them are skipped when the `changes` plan says their inputs did
@@ -1003,7 +1001,7 @@ jobs:
     # dependency_review is deliberately NOT here: it only runs on
     # pull_request, and it gates the diff under review rather than the tree
     # that ships.
-    needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, frontend_test]
     if: ${{ !cancelled() && !failure() && needs.changes.outputs.python == 'true' }}
     # 3.14 is NOT here. requires-python is >=3.12 with no upper cap, so it is
     # worth testing — but until every upstream dep publishes wheels it can only
@@ -1197,76 +1195,6 @@ jobs:
         run: |
           pytest tests/integration tests/core/skill_evolution/test_store_postgres.py \
             -m "not slow" --no-cov -q -rs
-
-  # ============================================================
-  # 🏗️ BUILD
-  # ============================================================
-  ui_build:
-    # `plugins/baselithbot/ui/dist/` is COMMITTED and is the only thing the
-    # wheel ships (ui/src and ui/node_modules are excluded in pyproject.toml).
-    # A committed build output that nothing rebuilds is a build output that
-    # drifts: a change to ui/src/ that was never rebuilt ships the previous
-    # bundle, and the dashboard silently serves stale code for a release.
-    #
-    # This rebuilds it from a clean `npm ci` and fails if the result differs
-    # from what is committed — the same shape as the openapi_drift gate — and
-    # lints and tests the sources on the way through.
-    name: BaselithBot UI Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [changes]
-    if: needs.changes.outputs.ui == 'true'
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          # From the dashboard's own .nvmrc rather than a literal here, so a
-          # contributor's `nvm use`, the package.json `engines.node` floor and
-          # the version CI builds the committed dist/ with are one fact. A
-          # bundle built on a different major is a bundle this gate's rebuild
-          # comparison can fail for reasons nobody changed.
-          node-version-file: plugins/baselithbot/ui/.nvmrc
-          cache: 'npm'
-          cache-dependency-path: plugins/baselithbot/ui/package-lock.json
-      - name: Install, lint, typecheck, test and build
-        working-directory: plugins/baselithbot/ui
-        # npm ci, not npm install: it installs the locked tree exactly and
-        # fails on a lockfile that disagrees with package.json, rather than
-        # quietly resolving something new and rewriting the lock.
-        #
-        # lint and test run HERE and nowhere else. The dashboard ships an
-        # ESLint 9 flat config and a vitest suite, and until this step neither
-        # was executed by any workflow: `npm test` elsewhere in this file
-        # belongs to the `sdk` job (sdk/typescript), and `frontend_test` covers
-        # a different tree entirely (core/static/frontend/js, via node --test).
-        # A test suite no pipeline runs is a test suite that rots silently.
-        run: |
-          npm ci
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      - name: Committed dist/ matches a clean rebuild
-        # `git status --porcelain`, not `git diff`: dist/ is covered by a
-        # `dist/` line in .gitignore and its bundles are tracked only because
-        # they were force-added. `git diff` sees modifications and deletions of
-        # those tracked files but is blind to ADDED ones — and an added file is
-        # the normal shape of this drift, because the bundle names are
-        # content-hashed, so a source change produces a new filename rather
-        # than a changed one. --porcelain reports tracked and untracked alike.
-        run: |
-          DRIFT="$(git status --porcelain -- plugins/baselithbot/ui/dist)"
-          if [ -n "$DRIFT" ]; then
-            echo "::error::plugins/baselithbot/ui/dist is out of date."
-            echo "Run 'npm ci && npm run build' in plugins/baselithbot/ui and commit dist/."
-            echo "$DRIFT"
-            exit 1
-          fi
 
   # ============================================================
   # 🐳 CONTAINER IMAGE

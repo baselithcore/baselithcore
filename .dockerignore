@@ -32,12 +32,10 @@ deploy/sandbox/client-certs/
 # layer that gets pushed to a registry.
 configs/.env*
 # Plugin runtime state, gitignored but present in any working checkout that
-# has run the plugin: baselithbot keeps its secret-store master key
-# (.state/.secret_key), its replay SQLite database and workspace registry
-# there. Baked into the image, the developer's key would silently become the
-# production key (the store reuses an existing file when
-# BASELITHBOT_SECRET_KEY is unset) and anyone able to pull the layer could
-# decrypt every stored provider and channel credential.
+# has run the plugin: a plugin may keep a secret-store master key or local
+# databases there. Baked into the image, the developer's key would silently
+# become the production key and anyone able to pull the layer could decrypt
+# every stored credential.
 plugins/*/.state/
 
 # === Virtual env ===

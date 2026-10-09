@@ -743,7 +743,7 @@ authors precise, early feedback instead of an opaque failure during init.
 !!! warning "Disabling a plugin now disables its dependents"
     `plugin_dependencies` are part of the compat gate, so a dependency that is absent
     from the load set is a refusal, not a warning. Turning `browser_agent` off in
-    `configs/plugins.yaml` therefore skips `baselithbot` as well. Either disable the
+    `configs/plugins.yaml` therefore skips every plugin that depends on it as well. Either disable the
     dependents too, or set `BASELITH_ENFORCE_PLUGIN_COMPAT=false` for the duration.
 
 `BASELITH_ENFORCE_PLUGIN_CONFIG` has a **single** reading, owned by
@@ -1415,7 +1415,7 @@ and integrity/signing requirements.
 | `SkillSandboxError` | Path escapes the configured roots |
 | `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope); `render_catalog(query=)` BM25-pre-filters large catalogs |
 | `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers — defined in `core/plugins/skill_scripts.py`, re-exported from `core.plugins` (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
-| `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
+| `split_frontmatter` | Shared SKILL.md frontmatter parser (reusable by plugin-local skill systems) |
 
 The loader resolves and pins every root, so a malicious symlink or
 prompt-injection attempt cannot escape into the filesystem.

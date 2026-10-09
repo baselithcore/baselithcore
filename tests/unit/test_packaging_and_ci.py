@@ -303,10 +303,10 @@ def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
 # ---------------------------------------------------------------------------
 
 
-VITE_OUTPUT = "plugins/baselithbot/ui/dist/"
+VITE_OUTPUT = "plugins/example-plugin/ui/dist/"
 
 # Hooks that REWRITE the files they are given. Any one of them pointed at
-# VITE_OUTPUT wedges the `ui_build` drift gate permanently.
+# VITE_OUTPUT wedges any byte-for-byte drift gate permanently.
 CONTENT_REWRITING_HOOKS = ("end-of-file-fixer", "mixed-line-ending", "prettier")
 
 
@@ -327,7 +327,7 @@ def test_formatters_keep_out_of_the_vite_output(hook_id: str) -> None:
     assert re.search(pattern, VITE_OUTPUT) if pattern else False, (
         f"The {hook_id} hook is not excluded from {VITE_OUTPUT}, which is "
         "vite's output and is compared byte for byte against a clean rebuild "
-        "by the ui_build gate. end-of-file-fixer appending one newline to the "
+        "by a drift gate. end-of-file-fixer appending one newline to the "
         ".js.map files was enough to report all 30 as drift on every CI run, "
         "with no local rebuild able to clear it: the hook put the newline "
         "back on the way into the commit. Prettier is worse -- it un-minifies "
@@ -351,7 +351,7 @@ def test_typescript_build_caches_are_not_tracked() -> None:
     git = shutil.which("git")
     assert git is not None, "git is required to check what is tracked"
     tracked = subprocess.run(
-        [git, "ls-files", "plugins/baselithbot/ui"],
+        [git, "ls-files", "plugins/*/ui"],
         capture_output=True,
         text=True,
         check=True,
@@ -360,7 +360,7 @@ def test_typescript_build_caches_are_not_tracked() -> None:
     for path in tracked:
         assert not path.endswith(".tsbuildinfo"), (
             f"{path} is a tsc incremental-build cache. It is listed in "
-            "plugins/baselithbot/ui/.gitignore and was force-added; tracked, "
+            "the plugin's ui/.gitignore and was force-added; tracked, "
             "it is rewritten by every `npm run build` and gets swept into "
             "unrelated commits."
         )
@@ -398,9 +398,7 @@ def test_merge_queue_runs_are_never_cancelled() -> None:
     assert "merge_group" in concurrency["cancel-in-progress"]
 
 
-@pytest.mark.parametrize(
-    "job", ["zizmor", "helm_lint", "dependency_review", "ui_build"]
-)
+@pytest.mark.parametrize("job", ["zizmor", "helm_lint", "dependency_review"])
 def test_new_gates_are_present_and_least_privilege(job: str) -> None:
     """Each new job declares its own read-only permissions and a timeout."""
     spec = _workflow(CI_WORKFLOW)["jobs"][job]
@@ -419,7 +417,7 @@ def test_no_job_escalates_permissions_without_declaring_them() -> None:
 def test_new_gates_block_the_release_path() -> None:
     """A gate nothing depends on is advisory, whatever branch protection says."""
     needs = _workflow(CI_WORKFLOW)["jobs"]["python_test"]["needs"]
-    for gate in ("zizmor", "helm_lint", "ui_build"):
+    for gate in ("zizmor", "helm_lint"):
         assert gate in needs, (
             f"{gate} does not block python_test, so a release can ship past it."
         )

@@ -551,7 +551,6 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_WORKFLOW_VERSION_PINNING` | **`enforce`** | A durable workflow run is pinned to the definition it started on (declared version + structural fingerprint). `enforce` fails a resume whose definition changed mid-flight rather than replaying recorded outputs into an edited graph; `warn` logs and continues; `off` records the pin but ignores mismatches. Safe as a default because a run with no pin gets one on first sight and cannot mismatch retroactively. |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
 | `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
-| `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
 | `A2A_ALLOW_INTERNAL_ENDPOINTS` | **dev on / prod off** | `A2AClientConfig.allow_internal_endpoints` default. Unset, it is environment-aware: allowed in development (meshes commonly run peer agents internally), denied in production (a peer endpoint cannot be steered at cloud metadata/Redis/Postgres). An explicit `true`/`false` overrides in both directions — set `true` to opt a private-mesh production deployment back in. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
@@ -567,8 +566,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 
 !!! note "SSRF opt-out flags at a glance"
     `BASELITH_BROWSER_ALLOW_INTERNAL`, `WEBHOOK_ALLOW_INTERNAL`,
-    `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS`, `A2A_ALLOW_INTERNAL_ENDPOINTS`, and
-    `MCP_ALLOW_INTERNAL_ENDPOINTS` are the five environment knobs that flip a
+    `A2A_ALLOW_INTERNAL_ENDPOINTS`, and `MCP_ALLOW_INTERNAL_ENDPOINTS` are the
+    four environment knobs that flip a
     component's `SsrfPolicy.allow_internal` — see [SSRF: connection
     pinning](#ssrf-connection-pinning) below for what each guards and
     `BASELITH_MARKETPLACE_ALLOW_INTERNAL` above for the plugin-registry
@@ -1135,8 +1134,8 @@ applying the **identical** decision function against `ALLOW_ORIGINS`:
 
 !!! note "Same-origin UIs need no entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too. A browser UI
-    served from the same deployment (e.g. the `baselithbot` dashboard, which opens
-    `/ws/pair`) is admitted when that `Origin` equals the handshake's own origin
+    served from the same deployment (e.g. a plugin dashboard that opens a
+    WebSocket) is admitted when that `Origin` equals the handshake's own origin
     (`ws`→`http`, `wss`→`https`, host and port from the `Host` header). Behind a
     TLS-terminating proxy that does not forward the scheme, the server sees
     `ws`/`http` while the page is `https`: list the public origin in
@@ -1524,11 +1523,6 @@ outbound call sites build on — full API reference in [Security & Encryption
 - **Plugin exporters** (`core.plugins.exporters.router`) — the GitHub →
   marketplace JWT exchange always targets `OFFICIAL_MARKETPLACE_URL`, now
   additionally hardened against a compromised/misconfigured marketplace URL.
-- **Baselithbot** (`plugins.baselithbot.http.hardened_client`) — every channel
-  webhook, integration, and skill HTTP call (Slack, Discord, Matrix, the
-  ClawHub skill, dashboard security checks, the Ollama model probe, …) routes
-  through this factory. Gated by `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` (default
-  off) — see [baselithbot Security](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/security.md).
 
 ### SSRF unification — migration notes
 
@@ -1540,7 +1534,7 @@ consequences when upgrading:
 
 - **New default-deny on previously-unguarded call sites.** OIDC discovery/
   JWKS, the A2A-adjacent fine-tuning providers, the plugin exporters'
-  marketplace JWT exchange, and every baselithbot outbound HTTP call now
+  and marketplace JWT exchange now
   reject internal/loopback/link-local/metadata destinations by default. If
   any of these legitimately need to reach an internal host in your
   deployment (a self-hosted fine-tuning mirror, an internal marketplace, a
@@ -1565,10 +1559,6 @@ consequences when upgrading:
   `core.security.ssrf` (see [Security & Encryption §Deprecated
   shims](../core-modules/security.md#deprecated-shims)); existing imports
   keep working unchanged.
-- **Ollama model discovery** (`plugins.baselithbot.diagnostics.ollama_probe`)
-  requires `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true` to reach a
-  localhost/LAN Ollama instance — without it the probe fails closed and the
-  dashboard falls back to its static model catalog (it never raises).
 - **Hardened clients no longer honor `HTTP_PROXY`/`HTTPS_PROXY` from the
   environment.** `create_hardened_async_client` always builds (or receives) an
   explicit `transport`, and httpx only auto-reads env proxies (`trust_env`)

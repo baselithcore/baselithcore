@@ -234,16 +234,16 @@ async function loadPluginAssets() {
 
 ## Shipping a Built Dashboard
 
-`plugins/baselithbot` is the reference for a full React dashboard:
+A plugin can ship a full built React dashboard:
 
-- Sources live under `plugins/baselithbot/ui/` (Vite + React). `npm run build` produces
+- Keep the sources under `plugins/my_plugin/ui/` (Vite + React). `npm run build` produces
   `ui/dist/`. Only `ui/dist/**` ships — `ui/src/` and `ui/node_modules/` are excluded
   from the wheel and from `baselith plugin marketplace publish` archives.
-- The plugin serves the bundle from its **own router** (`plugins/baselithbot/api/router.py`):
+- Serve the bundle from the plugin's **own router**:
   `GET /ui`, `/ui/` and `/ui/{path}` return files from `ui/dist`, falling back to
   `index.html` for client-side routes and adding the plugin's security headers.
-- It overrides `get_router_prefix()` to `/baselithbot` (instead of the default
-  `/api/baselithbot`), so the dashboard is reachable at `/baselithbot/ui/`.
+- Override `get_router_prefix()` (for example to `/my_plugin`, instead of the default
+  `/api/my_plugin`) to choose where the dashboard is reachable.
 - `ui/dist/**` is part of the integrity hash; re-sign after every build.
 
 Both routes work: a `static/` directory with `index.html` uses the framework's SPA mount

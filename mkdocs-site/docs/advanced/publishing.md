@@ -67,4 +67,4 @@ which is where the provenance attestations come from.
 
 !!! tip "Testing a change to the packaging"
     Inspect the wheel contents with `unzip -l dist/*.whl` — for example to
-    confirm `plugins/baselithbot/ui/dist/**` is included and `ui/src/` is not.
+    confirm that a plugin's built assets are included and its sources are not.

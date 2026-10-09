@@ -282,7 +282,7 @@ Two different grammars apply:
 
     `plugin_dependencies` are part of the gate, so **disabling a dependency disables its
     dependents**: turning `browser_agent` off in `configs/plugins.yaml` now skips
-    `baselithbot`, where previously it logged a warning and loaded anyway.
+    every plugin that depends on it, where previously it logged a warning and loaded anyway.
 
 !!! note "Declare against the public core, from the manifest alone"
     The public core project is the reference a plugin is written for, wherever it is
@@ -382,8 +382,8 @@ deployment can move from `warn` to `enforce` without a restart.
 
 ### The official plugins
 
-Every plugin under `plugins/` declares a block. Three declare `egress: ["*"]`
-(`baselithbot`, `browser_agent`, `web_scraper`) plus `document_sources`, because
+Every plugin under `plugins/` declares a block. Two declare `egress: ["*"]`
+(`browser_agent`, `web_scraper`) plus `document_sources`, because
 their targets are supplied per request — that is the honest declaration, and it
 still tells an operator these are the outbound ones. The rest declare an empty
 network set, which under `enforce` means they are refused any screened outbound

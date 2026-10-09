@@ -204,7 +204,7 @@ plugins:
   config:
     api_routers: {enabled: true}
     browser_agent: {enabled: true}
-    baselithbot: {enabled: true, headless: true}
+    reasoning_agent: {enabled: true}
 ```
 
 The chart renders it into a ConfigMap mounted read-only over

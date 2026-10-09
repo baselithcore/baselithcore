@@ -181,12 +181,8 @@ app = FastAPI(lifespan=lifespan)
 !!! tip "Plugin-owned components"
     A plugin that owns a `LifecycleMixin` subclass must `await` its
     `startup()` itself — typically lazily, on first use — and call its
-    `shutdown()` from the plugin's own `shutdown()`. That is how the shipped
-    `baselithbot` plugin does it: `BaselithbotAgent(LifecycleMixin)`
-    (`plugins/baselithbot/browser/agent.py`) is started in
-    `get_or_start_agent()` (`plugins/baselithbot/plugin.py`) with
-    `await new_agent.startup()`, and the plugin's `shutdown()` awaits
-    `self._agent.shutdown()` before calling `super()`.
+    `shutdown()` from the plugin's own `shutdown()`, before calling
+    `super().shutdown()`.
 
 ## Draining long-lived streams
 

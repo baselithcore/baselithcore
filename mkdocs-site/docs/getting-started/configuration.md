@@ -1025,18 +1025,6 @@ Declared in `core.utils.tokens`.
 | --- | --- | --- | --- |
 | `BASELITH_EXACT_TOKEN_COUNTING` | `bool` | `False` | Use anthropic.Anthropic().messages.count_tokens (via estimate_tokens_async) for claude* models instead of the tiktoken/heuristic estimate. Off by default: ANTHROPIC_API_KEY alone is not enough to enable it, since a key is present in most production deployments already and this call is a blocking network request. The sync estimate_tokens() never makes this call regardless of this setting. |
 
-## OpenAI Realtime WebSocket adapter for the core duplex voice protocol
-
-Declared in `plugins.baselithbot.voice.openai_realtime`.
-
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `BASELITHBOT_VOICE_REALTIME_ENABLED` | `bool` | `False` | Select the realtime duplex loop over the sequential wake/STT/LLM/TTS pipeline. |
-| `BASELITHBOT_VOICE_REALTIME_LATENCY_BUDGET_MS` | `float` | `500.0` | Warn when speech-stop to first assistant audio exceeds this budget. |
-| `BASELITHBOT_VOICE_REALTIME_MODEL` | `str` | `gpt-4o-realtime-preview` | OpenAI Realtime model identifier. |
-| `BASELITHBOT_VOICE_REALTIME_SILENCE_DURATION_MS` | `int` | `500` | Server-VAD silence window marking end of user speech. |
-| `BASELITHBOT_VOICE_REALTIME_VOICE` | `str` | `alloy` | Assistant voice preset. |
-
 ## Auditing your environment
 
 ```bash
@@ -1044,4 +1032,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-696 settings documented.
+691 settings documented.

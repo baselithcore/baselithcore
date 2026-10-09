@@ -50,8 +50,8 @@ warning. Both variables survive only as explicit downgrade flags:
 
 **What can break:** `plugin_dependencies` are part of the compat gate, so
 **disabling a plugin now disables its dependents**. Turning `browser_agent` off
-in `configs/plugins.yaml` skips `baselithbot` too, where it previously logged a
-warning and loaded anyway. Either disable the dependents explicitly, or set the
+in `configs/plugins.yaml` skips every plugin that declares it as a dependency, where it
+previously logged a warning and loaded anyway. Either disable the dependents explicitly, or set the
 downgrade flag for the duration.
 
 See [Plugin System › Load-time Admission Gates](../core-modules/plugins.md#load-time-admission-gates).

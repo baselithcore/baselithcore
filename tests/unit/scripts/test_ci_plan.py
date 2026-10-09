@@ -78,7 +78,7 @@ def test_develop_prs_run_the_floor_python_only() -> None:
     [
         "mkdocs-site/docs/core-modules/db.md",
         "README.md",
-        "plugins/baselithbot/docs/security.md",
+        "plugins/web_scraper/docs/security.md",
         "plugins/web_scraper/README.md",
     ],
 )
@@ -92,7 +92,7 @@ def test_prose_only_skips_the_suite(path: str) -> None:
     "path",
     [
         "core/chat/prompts/conversation_system.md",  # a prompt template is code
-        "plugins/baselithbot/SKILL.md",
+        "plugins/web_scraper/SKILL.md",
         "evals/cases/qa.yaml",
         "configs/.env.base",
         "deploy/helm/baselithcore/values.yaml",  # tests render the chart
@@ -106,12 +106,11 @@ def test_executed_markdown_and_data_still_run_the_suite(path: str) -> None:
     ("path", "flag"),
     [
         ("deploy/helm/baselithcore/templates/deployment.yaml", "helm"),
-        ("plugins/baselithbot/ui/src/App.tsx", "ui"),
         ("core/static/frontend/js/api.js", "frontend"),
         ("sdk/typescript/src/client.ts", "sdk"),
         (".github/workflows/codeql.yml", "workflows"),
         ("uv.lock", "supply"),
-        ("plugins/baselithbot/ui/package-lock.json", "supply"),
+        ("sdk/typescript/package-lock.json", "supply"),
         ("Dockerfile", "supply"),
         (".trivyignore.yaml", "supply"),
     ],

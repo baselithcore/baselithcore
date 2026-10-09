@@ -75,7 +75,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Return ``(frontmatter, body)`` for a Markdown file.
 
     Frontmatter is the YAML block between two ``---`` lines at the start.
-    Public seam: plugin-level skill systems (e.g. baselithbot) reuse this
+    Public seam: plugin-level skill systems (e.g. a plugin's own skill catalog) reuse this
     parser so SKILL.md frontmatter semantics stay uniform across the stack.
     """
     lines = text.splitlines()

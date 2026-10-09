@@ -192,7 +192,6 @@ through `assert_url_safe`/`assert_url_safe_async` or
 | Plugin exporters (marketplace JWT exchange) | `core.plugins.exporters.router` | Rejected; always targets `OFFICIAL_MARKETPLACE_URL`. No opt-out. |
 | Browser agent navigation + sub-resources | `plugins.browser_agent` | Rejected by default; `BASELITH_BROWSER_ALLOW_INTERNAL=true`. See [Runtime hardening controls](../advanced/security.md#ssrf-connection-pinning). |
 | Web scraper (HTTP + Playwright fetchers) | `plugins.web_scraper` | Governed by `ScraperConfig.block_private_ips` (default `True`). See [Web Scraper](scraper.md#security-ssrf-protection). |
-| Baselithbot channels/integrations/skills | `plugins.baselithbot.http.hardened_client` | Rejected by default; `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true`. |
 
 ### Per-caller egress guard
 

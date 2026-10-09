@@ -78,7 +78,7 @@ spec:
         sourcePath:
           title: Plugin Path
           type: string
-          default: plugins/baselithbot
+          default: plugins/my-plugin
 
         includeDocs:
           title: Include docs/ directory
@@ -106,8 +106,8 @@ spec:
           title: Plugin Entry Point
           type: string
           description: >
-            Written into manifest.yaml (e.g. "plugin:BaselithbotPlugin").
-          default: "plugin:BaselithbotPlugin"
+            Written into manifest.yaml (e.g. "plugin:MyPlugin").
+          default: "plugin:MyPlugin"
 
         author:
           title: Author

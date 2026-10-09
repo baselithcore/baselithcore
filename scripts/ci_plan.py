@@ -76,7 +76,6 @@ DOCS_ONLY = re.compile(
 SCOPES: dict[str, re.Pattern[str]] = {
     "workflows": re.compile(r"^\.github/"),
     "helm": re.compile(r"^deploy/helm/"),
-    "ui": re.compile(r"^plugins/baselithbot/ui/"),
     "frontend": re.compile(r"^core/static/frontend/"),
     "sdk": re.compile(r"^sdk/"),
     # What the dependency scanners read: manifests, locks, the image recipe

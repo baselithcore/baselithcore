@@ -83,7 +83,7 @@ FORBIDDEN_WHEEL_PREFIXES = (
     "plugins/example-plugin/",
     "plugins/test-project/",
 )
-# Source maps. The baselithbot dashboard builds with `sourcemap: 'hidden'`,
+# Source maps. A plugin dashboard builds with `sourcemap: 'hidden'`,
 # which still writes .map files — they are for uploading to an error tracker,
 # not for shipping. In the wheel they would roughly triple the packaged
 # dashboard and expose its original TypeScript sources, and because `hidden`

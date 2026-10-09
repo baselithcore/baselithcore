@@ -9,7 +9,7 @@ The declaration is made **at the dispatch point** (``core.cli.handlers.
 run_command``, called from ``core.cli.__main__.main``), not by decorating the
 handler functions. That distinction is the point of half this module: the real
 dispatch table lives in ``__main__`` and plugin CLIs inject into it at runtime
-(``plugins/baselithbot/diagnostics/cli.py``), or attach a handler with
+(``plugins/examplebot/diagnostics/cli.py``), or attach a handler with
 ``parser.set_defaults(handler=...)``. A per-function decorator covered neither,
 so every plugin-registered command ran unscoped while a coverage test that
 enumerated the *unused* map in ``handlers`` reported full classification.
@@ -206,7 +206,7 @@ class TestLongLivedProcessesAreNotScoped:
 class TestPluginRegisteredCommands:
     """The hole the decorator left open.
 
-    ``plugins/baselithbot/diagnostics/cli.py`` writes straight into
+    ``plugins/examplebot/diagnostics/cli.py`` writes straight into
     ``core.cli.__main__.COMMAND_HANDLERS_MAP`` at parser-registration time, and
     plugin parsers also use ``set_defaults(handler=...)``. Neither passes
     through anything ``core.cli.handlers`` can decorate, so both have to be
@@ -227,10 +227,10 @@ class TestPluginRegisteredCommands:
         self, monkeypatch, rls_on
     ):
         handler, seen = _probe()
-        monkeypatch.setitem(cli_main.COMMAND_HANDLERS_MAP, "baselithbot", handler)
+        monkeypatch.setitem(cli_main.COMMAND_HANDLERS_MAP, "examplebot", handler)
 
         with no_tenant():
-            self._dispatch(argparse.Namespace(command="baselithbot"))
+            self._dispatch(argparse.Namespace(command="examplebot"))
 
         assert seen == [SYSTEM_TENANT_ID]
 
@@ -256,7 +256,7 @@ def _core_commands() -> set[str]:
     """The commands ``core.cli.__main__`` itself declares.
 
     The dispatch map is the live one, and a plugin CLI injects into it at
-    parser-registration time (``baselithbot``), so enumerating it whole makes
+    parser-registration time (``examplebot``), so enumerating it whole makes
     the classification assertion depend on whether some earlier import
     registered a plugin. The handlers declared here are the module's own
     lambdas; an injected one belongs to the plugin module.

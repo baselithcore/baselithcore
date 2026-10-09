@@ -117,8 +117,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #     the extra back.
 #   * `computer_use` (pyautogui, mss). Both need an X11 display. In this
 #     headless server image `import pyautogui` raises KeyError: 'DISPLAY' and
-#     mss raises "Cannot connect to display". The import guards in
-#     plugins/baselithbot/computer_use/ already treat them as optional.
+#     mss raises "Cannot connect to display". Nothing in this repo
+#     imports them.
 #
 # The `grep -v` drops the CUDA runtime, triton and the CUDA Python bindings.
 # They are dependencies of the PyPI torch wheel, which is what uv.lock
@@ -536,7 +536,7 @@ COPY --from=app /install-app /install-app
 # --- Application source ---
 # Owned by appuser, because the app writes inside its own tree: it rewrites
 # configs/plugins.yaml on every plugin enable/disable, and a plugin may persist
-# state under its own directory (baselithbot's .state/.secret_key).
+# state under its own directory.
 COPY --chown=appuser:appuser backend.py ./
 # Alembic config for the pre-deploy Job's `alembic upgrade head`. The scripts
 # themselves live in core/db/migrations (copied with core/ below); alembic.ini
@@ -581,15 +581,8 @@ RUN python -m compileall -q --invalidation-mode checked-hash \
     /app/backend.py /app/core /app/plugins
 
 # --- Writable runtime directories ---
-# state/baselithbot is the mount point of compose.prod.yaml's plugin_state
-# volume (BASELITHBOT_STATE_DIR). It must exist in the image, owned by appuser
-# and 0700: Docker seeds an empty named volume from the image directory it is
-# mounted on, ownership included, and a mount point the image lacks is created
-# root-owned — a fresh volume the plugin could not write its key into.
-RUN mkdir -p data logs documents qdrant_data state/baselithbot \
-    && chown appuser:appuser /app data logs documents qdrant_data \
-        state state/baselithbot \
-    && chmod 0700 state/baselithbot
+RUN mkdir -p data logs documents qdrant_data \
+    && chown appuser:appuser /app data logs documents qdrant_data
 
 # --- Debian security updates ---
 # LAST, and the position is the whole point.

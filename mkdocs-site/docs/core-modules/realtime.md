@@ -253,8 +253,4 @@ async for event in await session.events():
 
 Only the protocol belongs in core. Domain-specific adapters — the OpenAI
 Realtime WebSocket session, audio device plumbing, and the barge-in
-playback loop — live under `plugins/` per the Sacred Core rule. The
-shipped implementation is in the `baselithbot` plugin
-(`OpenAIRealtimeSession`, `RealtimeVoiceLoop`, opt-in via
-`BASELITHBOT_VOICE_REALTIME_ENABLED`): see
-[Baselithbot — Realtime duplex voice](../plugins/baselithbot.md#realtime-duplex-voice).
+playback loop — live under `plugins/` per the Sacred Core rule.
