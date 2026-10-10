@@ -35,6 +35,8 @@ class CodeExecutionResult:
     error: str = ""
     execution_time_ms: float = 0.0
     return_value: Any = None
+    #: The process exit code (124 on a sandbox timeout); None when the run never started.
+    exit_code: int | None = None
 
 
 @dataclass
@@ -51,3 +53,17 @@ class CodingResult:
     tests_total: int = 0
     execution_results: list[CodeExecutionResult] = field(default_factory=list)
     review: CodeReview | None = None
+    #: The pytest file that verified final_code (empty when nothing ran).
+    test_code: str = ""
+    #: What changed, one short line each, as the model reported it.
+    changes: list[str] = field(default_factory=list)
+    #: How the verified loop ended: success, stalled, exhausted, budget_exceeded, failed, or
+    #: "" when no loop ran (explain).
+    loop_status: str = ""
+    #: For a fix: whether the tests fail on the original code (they catch the bug). None when
+    #: it was not checked.
+    tests_reproduce_bug: bool | None = None
+    #: Seconds the sandbox spent on this task.
+    sandbox_seconds: float = 0.0
+    #: The AI Act Art. 50 provenance tag of final_code (core.transparency), when marked.
+    provenance: dict[str, Any] | None = None

@@ -1,6 +1,6 @@
 """Tests for Coding Agent."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,83 +19,42 @@ async def test_init(coding_agent):
 
 
 @pytest.mark.asyncio
-async def test_generate_code(coding_agent):
-    with patch.object(coding_agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
-        with patch.object(
-            coding_agent, "_execute_code", new_callable=AsyncMock
-        ) as mock_exec:
-            mock_ask.return_value = "print('hello')"
-            mock_exec.return_value.success = True
+async def test_run_tests_reads_the_report_the_sandbox_printed(
+    coding_agent, monkeypatch
+):
+    from plugins.coding_agent import agent as agent_module
+    from plugins.coding_agent.harness import report_marker
 
-            result = await coding_agent.generate_code("Print hello")
+    monkeypatch.setattr(agent_module, "new_run_key", lambda: "k" * 32)
+    line = (
+        report_marker("k" * 32)
+        + '{"passed": 2, "failed": 1, "errors": 0, "collection_error": false, '
+    )
+    line += '"failures": [["test_x", "assert 1 == 2"]], "exit": 1}'
+    sandbox = _SandboxStub(result=_exec_result(stdout="noise\n" + line, exit_code=1))
+    coding_agent._sandbox = sandbox
 
-            assert result.success
-            assert result.final_code == "print('hello')"
-            mock_ask.assert_called_once()
-            # A syntax check must not run the generated program.
-            mock_exec.assert_not_called()
+    report = await coding_agent._run_tests("def f(): ...", "def test_x(): ...")
 
-
-@pytest.mark.asyncio
-async def test_generate_code_syntax_error_fails_without_execution(coding_agent):
-    with patch.object(coding_agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
-        with patch.object(
-            coding_agent, "_execute_code", new_callable=AsyncMock
-        ) as mock_exec:
-            mock_ask.return_value = "def broken(:\n    pass"
-
-            result = await coding_agent.generate_code("anything")
-
-            assert not result.success
-            assert "SyntaxError" in (result.error or "")
-            mock_exec.assert_not_called()
+    assert (report.passed, report.failed, report.total, report.green) == (
+        2,
+        1,
+        3,
+        False,
+    )
+    assert "test_x" in report.evidence()
+    assert (
+        "test_solution.py" in sandbox.calls[0]["code"]
+    )  # the harness, not the bare code
 
 
 @pytest.mark.asyncio
-async def test_generate_code_non_python_still_uses_sandbox():
-    agent = CodingAgent(language=CodeLanguage.JAVASCRIPT)
-    with patch.object(agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
-        with patch.object(agent, "_execute_code", new_callable=AsyncMock) as mock_exec:
-            mock_ask.return_value = "console.log(1)"
-            mock_exec.return_value.success = True
-            await agent.generate_code("log one")
-            mock_exec.assert_called_once_with("console.log(1)")
+async def test_a_sandbox_timeout_is_reported_as_one(coding_agent):
+    coding_agent._sandbox = _SandboxStub(result=_exec_result(exit_code=124))
 
+    report = await coding_agent._run_tests("x = 1", "def test_x(): ...")
 
-@pytest.mark.asyncio
-async def test_fix_code_success(coding_agent):
-    with patch.object(coding_agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
-        with patch.object(
-            coding_agent, "_execute_code", new_callable=AsyncMock
-        ) as mock_exec:
-            mock_ask.return_value = "fixed_code"
-            mock_exec.return_value.success = True
-
-            result = await coding_agent.fix_code("buggy", "error")
-
-            assert result.success
-            assert result.final_code == "fixed_code"
-            assert result.iterations == 1
-
-
-@pytest.mark.asyncio
-async def test_fix_code_retry(coding_agent):
-    with patch.object(coding_agent, "_ask_llm", new_callable=AsyncMock) as mock_ask:
-        with patch.object(
-            coding_agent, "_execute_code", new_callable=AsyncMock
-        ) as mock_exec:
-            # First attempt fails, second succeeds
-            mock_ask.side_effect = ["fix1", "fix2"]
-            mock_exec.side_effect = [
-                MagicMock(success=False, error="err1"),
-                MagicMock(success=True),
-            ]
-
-            result = await coding_agent.fix_code("buggy", "error")
-
-            assert result.success
-            assert result.final_code == "fix2"
-            assert result.iterations == 2
+    assert not report.green and "time" in report.evidence()
 
 
 class _SandboxStub:

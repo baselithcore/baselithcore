@@ -2193,6 +2193,19 @@ BaselithCore supports two types of sandboxing for secure code execution:
   the same sandbox, and the one that runs agent-supplied code is the one that
   was reviewed. Edit the direct pins in `requirements.sandbox.in` and recompile
   with the `uv pip compile` line in its header; never hand-edit the `.txt`.
+  Besides numpy, pandas, matplotlib and scikit-learn the image carries
+  `pytest`, so a coding agent can run the tests it writes: write the code and the
+  test file under `/tmp` (the only writable path) and call `pytest.main` with
+  `-p no:cacheprovider`. An image built before pytest was added has to be
+  rebuilt (from the repository root: `docker build -t agent-sandbox:latest -f
+  core/services/sandbox/Dockerfile.sandbox core/services/sandbox`), or removed so
+  the first run builds it again.
+- **Read-only mounts**: `execute_code_async(..., mounts=..., mounts_read_only=True)`
+  binds every `mounts` entry read-only (docker provider; the sbx provider refuses
+  it with `ValueError` before anything runs). A caller that hands the sandbox a
+  directory of files to read, such as a coding agent staging a repository
+  workspace, uses it so the code under test cannot write back to the host; it
+  copies what it needs to `/tmp` first.
 - **No toolchain in the image**: the wheels-only install above leaves nothing to
   compile, so the image installs no compiler — a C toolchain sitting in the one
   image that executes agent-supplied code is a capability handed to the payload.

@@ -85,6 +85,7 @@ class SandboxService:
         mounts: dict[str, str] | None = None,
         envs: dict[str, str] | None = None,
         budget: Any | None = None,
+        mounts_read_only: bool = False,
     ) -> ExecutionResult:
         """
         Execute code asynchronously in a sandbox environment.
@@ -99,12 +100,20 @@ class SandboxService:
                 ``charge(cost_usd)`` method. The metered execution cost is
                 charged against it after each execution;
                 ``BudgetExceededError`` propagates to the caller.
+            mounts_read_only: Mount every ``mounts`` entry read-only (docker
+                provider only).
 
         Returns:
             ExecutionResult with ``compute_seconds``/``cost_usd`` populated
             from wall-clock time and ``SandboxConfig.cost_per_compute_second``.
+
+        Raises:
+            ValueError: ``mounts_read_only`` on the sbx provider, which does not
+                promise read-only mounts.
         """
 
+        if mounts_read_only and self.provider == "sbx":
+            raise ValueError("read-only mounts need the docker sandbox provider")
         config = get_sandbox_config()
         timeout = timeout or config.timeout
 
@@ -120,7 +129,7 @@ class SandboxService:
             )
         else:
             result = await self._execute_docker_async(
-                code, language, timeout, mounts, envs
+                code, language, timeout, mounts, envs, read_only=mounts_read_only
             )
         return self._meter_and_charge(result, config, budget)
 
@@ -321,6 +330,8 @@ class SandboxService:
         timeout: int,
         mounts: dict[str, str] | None,
         envs: dict[str, str] | None,
+        *,
+        read_only: bool = False,
     ) -> ExecutionResult:
         """Internal Docker execution path (Legacy)."""
         import asyncio
@@ -331,10 +342,20 @@ class SandboxService:
         except ImportError:
 
             def Mount(
-                target: str, source: str, type: str = "bind", **kwargs: Any
+                target: str,
+                source: str,
+                type: str = "bind",
+                read_only: bool = False,
+                **kwargs: Any,
             ) -> dict[str, Any]:
                 """Mock Mount object for environments where docker-py is missing."""
-                return {"Target": target, "Source": source, "Type": type, **kwargs}
+                return {
+                    "Target": target,
+                    "Source": source,
+                    "Type": type,
+                    "ReadOnly": read_only,
+                    **kwargs,
+                }
 
         loop = asyncio.get_running_loop()
 
@@ -342,7 +363,11 @@ class SandboxService:
         docker_mounts = []
         if mounts:
             for source, target in mounts.items():
-                docker_mounts.append(Mount(target=target, source=source, type="bind"))
+                docker_mounts.append(
+                    Mount(
+                        target=target, source=source, type="bind", read_only=read_only
+                    )
+                )
 
         # Ensure image first (async)
         await self.docker_factory.ensure_image()

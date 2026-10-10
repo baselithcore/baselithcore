@@ -17,3 +17,6 @@ numpy==2.5.3
 pandas==3.0.6
 matplotlib==3.11.2
 scikit-learn==1.9.1
+# Coding agents run the tests they write inside the sandbox; the closure adds
+# iniconfig, pluggy and pygments, all pure-Python wheels.
+pytest==9.1.1

@@ -13,6 +13,13 @@ from .tools import build_coding_tool_definitions
 class CodingAgentPlugin(Plugin):
     """Plugin exposing coding agent capabilities."""
 
+    async def initialize(self, config: dict[str, Any]) -> None:
+        """Activate, then register the agent in the AI-system inventory (never fatal)."""
+        await super().initialize(config)
+        from .compliance import register_ai_system
+
+        await register_ai_system(str(self.metadata.version or ""))
+
     def create_agent(self, **kwargs: Any) -> CodingAgent:
         """Create a coding agent instance."""
         return CodingAgent(**kwargs)

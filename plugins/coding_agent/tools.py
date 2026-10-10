@@ -1,4 +1,9 @@
-"""MCP tools exposed by the Coding Agent plugin."""
+"""MCP tools exposed by the Coding Agent plugin.
+
+Each verified tool returns the code under its historical key (``fixed_code``, ``generated_code``,
+``test_code``, ``refactored_code``) plus what proves it: the tests that ran, how many passed,
+how the loop ended and what changed.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +20,13 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_LANGUAGE: dict[str, Any] = {
+    "type": "string",
+    "description": "Language of the code; only python runs, any language can be explained",
+    "enum": ["python", "javascript", "typescript"],
+    "default": "python",
+}
+
 
 def _review_payload(result: CodingResult) -> dict[str, Any]:
     """Ride-along ``review`` entry for flagged results (empty when clean)."""
@@ -23,205 +35,208 @@ def _review_payload(result: CodingResult) -> dict[str, Any]:
     return {"review": asdict(result.review)}
 
 
+def _payload(result: CodingResult, code_key: str) -> dict[str, Any]:
+    """The tool answer for a verified task."""
+    out: dict[str, Any] = {
+        "status": "success" if result.success else "failed",
+        code_key: result.final_code,
+        "explanation": result.explanation,
+        "iterations": result.iterations,
+        "loop_status": result.loop_status,
+        "tests_passed": result.tests_passed,
+        "tests_total": result.tests_total,
+        "changes": result.changes,
+        "error": result.error,
+        **_review_payload(result),
+    }
+    if code_key != "test_code":
+        out["test_code"] = result.test_code
+    if result.tests_reproduce_bug is not None:
+        out["tests_reproduce_bug"] = result.tests_reproduce_bug
+    return out
+
+
+def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {**properties, "language": _LANGUAGE},
+        "required": required,
+    }
+
+
 def build_coding_tool_definitions() -> list[dict[str, Any]]:
     """Return coding MCP tool definitions with lazy agent creation."""
     coding_agent: CodingAgent | None = None
 
-    async def get_coding_agent() -> CodingAgent:
+    def get_coding_agent() -> CodingAgent:
         nonlocal coding_agent
         if coding_agent is None:
             coding_agent = CodingAgent()
         return coding_agent
 
     async def fix_code(
-        code: str, error_message: str, context: str = ""
+        code: str, error_message: str, context: str = "", language: str = "python"
     ) -> dict[str, Any]:
         try:
-            agent = await get_coding_agent()
-            result = await agent.fix_code(code, error_message, context)
-            return {
-                "status": "success" if result.success else "failed",
-                "fixed_code": result.final_code,
-                "iterations": result.iterations,
-                "error": result.error,
-                "explanation": result.explanation,
-                **_review_payload(result),
-            }
+            result = await get_coding_agent().fix_code(
+                code, error_message, context, language=language
+            )
+            return _payload(result, "fixed_code")
         except Exception as exc:
-            logger.error("coding_tool_error", tool="fix_code", error=str(exc))
+            logger.error(
+                "coding_tool_error", tool="fix_code", error_type=type(exc).__name__
+            )
             return {"status": "error", "error": str(exc)}
 
     async def generate_code(
-        description: str, examples: list[str] | None = None
+        description: str, examples: list[str] | None = None, language: str = "python"
     ) -> dict[str, Any]:
         try:
-            agent = await get_coding_agent()
-            result = await agent.generate_code(description, examples)
-            return {
-                "status": "success" if result.success else "failed",
-                "generated_code": result.final_code,
-                "error": result.error,
-                **_review_payload(result),
-            }
+            result = await get_coding_agent().generate_code(
+                description, examples, language=language
+            )
+            return _payload(result, "generated_code")
         except Exception as exc:
-            logger.error("coding_tool_error", tool="generate_code", error=str(exc))
+            logger.error(
+                "coding_tool_error", tool="generate_code", error_type=type(exc).__name__
+            )
             return {"status": "error", "error": str(exc)}
 
     async def generate_tests(
-        code: str, test_framework: str = "pytest"
+        code: str, test_framework: str = "pytest", language: str = "python"
     ) -> dict[str, Any]:
         try:
-            agent = await get_coding_agent()
-            result = await agent.generate_tests(code, test_framework)
-            return {
-                "status": "success" if result.success else "failed",
-                "test_code": result.final_code,
-                "error": result.error,
-                **_review_payload(result),
-            }
+            result = await get_coding_agent().generate_tests(
+                code, test_framework, language=language
+            )
+            return _payload(result, "test_code")
         except Exception as exc:
-            logger.error("coding_tool_error", tool="generate_tests", error=str(exc))
+            logger.error(
+                "coding_tool_error",
+                tool="generate_tests",
+                error_type=type(exc).__name__,
+            )
             return {"status": "error", "error": str(exc)}
 
-    async def explain_code(code: str) -> dict[str, Any]:
+    async def explain_code(code: str, language: str = "python") -> dict[str, Any]:
         try:
-            agent = await get_coding_agent()
-            explanation = await agent.explain_code(code)
+            explanation = await get_coding_agent().explain_code(code, language=language)
             return {"status": "success", "explanation": explanation}
         except Exception as exc:
-            logger.error("coding_tool_error", tool="explain_code", error=str(exc))
+            logger.error(
+                "coding_tool_error", tool="explain_code", error_type=type(exc).__name__
+            )
             return {"status": "error", "error": str(exc)}
 
-    async def refactor_code(code: str, goals: str = "") -> dict[str, Any]:
+    async def refactor_code(
+        code: str, goals: str = "", language: str = "python"
+    ) -> dict[str, Any]:
         try:
-            agent = await get_coding_agent()
-            result = await agent.refactor_code(code, goals)
-            return {
-                "status": "success" if result.success else "failed",
-                "refactored_code": result.final_code,
-                "explanation": result.explanation,
-                "error": result.error,
-                **_review_payload(result),
-            }
+            result = await get_coding_agent().refactor_code(
+                code, goals, language=language
+            )
+            return _payload(result, "refactored_code")
         except Exception as exc:
-            logger.error("coding_tool_error", tool="refactor_code", error=str(exc))
+            logger.error(
+                "coding_tool_error", tool="refactor_code", error_type=type(exc).__name__
+            )
             return {"status": "error", "error": str(exc)}
 
+    text = {"type": "string"}
     return [
         {
             "name": "fix_code",
             "description": (
-                "Fix buggy code using an auto-debug loop. "
-                "Analyzes errors and iteratively fixes until success."
+                "Fix buggy code. Writes tests that reproduce the bug, then retries the fix in "
+                "an isolated sandbox until every test passes; returns the code and the tests."
             ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The buggy code to fix",
-                    },
-                    "error_message": {
-                        "type": "string",
-                        "description": "The error message",
-                    },
+            "input_schema": _schema(
+                {
+                    "code": {**text, "description": "The buggy code to fix"},
+                    "error_message": {**text, "description": "The error message"},
                     "context": {
-                        "type": "string",
-                        "description": "Additional context about what the code should do",
+                        **text,
+                        "description": "What the code should do",
                         "default": "",
                     },
                 },
-                "required": ["code", "error_message"],
-            },
+                ["code", "error_message"],
+            ),
             "handler": fix_code,
-            # Executes candidate code in the sandbox on every fix iteration.
+            # Runs model-written code in the sandbox on every attempt.
             "category": "destructive",
         },
         {
             "name": "generate_code",
-            "description": "Generate code from a natural language description.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "description": {
-                        "type": "string",
-                        "description": "What the code should do",
-                    },
+            "description": (
+                "Write code from a description, with pytest tests it must pass in an isolated "
+                "sandbox."
+            ),
+            "input_schema": _schema(
+                {
+                    "description": {**text, "description": "What the code should do"},
                     "examples": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "items": text,
                         "description": "Optional input/output examples",
                         "default": [],
                     },
                 },
-                "required": ["description"],
-            },
+                ["description"],
+            ),
             "handler": generate_code,
-            # Python is syntax-checked in-process without running it; other
-            # languages still go through the sandbox, so the category stays
-            # conservative.
             "category": "destructive",
         },
         {
             "name": "generate_tests",
-            "description": "Generate unit tests for the given code.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The code to generate tests for",
-                    },
+            "description": (
+                "Write pytest tests for the given code and run them once against it; failing "
+                "tests may point at bugs."
+            ),
+            "input_schema": _schema(
+                {
+                    "code": {**text, "description": "The code to generate tests for"},
                     "test_framework": {
-                        "type": "string",
-                        "description": "Test framework to use",
+                        **text,
+                        "description": "Test style (both run under pytest)",
                         "enum": ["pytest", "unittest"],
                         "default": "pytest",
                     },
                 },
-                "required": ["code"],
-            },
+                ["code"],
+            ),
             "handler": generate_tests,
-            # LLM-only transformation, no execution.
-            "category": "read_only",
+            # Since 1.1 the tests are executed in the sandbox.
+            "category": "destructive",
         },
         {
             "name": "explain_code",
-            "description": "Explain what the given code does in detail.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The code to explain",
-                    }
-                },
-                "required": ["code"],
-            },
+            "description": "Explain what the given code does, in any language.",
+            "input_schema": _schema(
+                {"code": {**text, "description": "The code to explain"}}, ["code"]
+            ),
             "handler": explain_code,
-            # LLM-only explanation, no execution.
+            # Model-only explanation, nothing is executed.
             "category": "read_only",
         },
         {
             "name": "refactor_code",
-            "description": "Refactor code for better quality, readability, or performance.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The code to refactor",
-                    },
+            "description": (
+                "Refactor code for the given goals. Tests pinning today's behaviour are written "
+                "first and must stay green in the sandbox."
+            ),
+            "input_schema": _schema(
+                {
+                    "code": {**text, "description": "The code to refactor"},
                     "goals": {
-                        "type": "string",
+                        **text,
                         "description": "Specific refactoring goals",
                         "default": "",
                     },
                 },
-                "required": ["code"],
-            },
+                ["code"],
+            ),
             "handler": refactor_code,
-            # Executes the refactored code in the sandbox to validate it.
             "category": "destructive",
         },
     ]
@@ -229,7 +244,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
 
 def register_coding_tools(server: MCPServer) -> None:
     """Register coding tools with an MCP server."""
-    for tool_def in build_coding_tool_definitions():
+    definitions = build_coding_tool_definitions()
+    for tool_def in definitions:
         server.register_tool(
             name=tool_def["name"],
             description=tool_def["description"],
@@ -237,5 +253,4 @@ def register_coding_tools(server: MCPServer) -> None:
             handler=tool_def["handler"],
             category=tool_def["category"],
         )
-
-    logger.info("coding_tools_registered", tool_count=5)
+    logger.info("coding_tools_registered", tool_count=len(definitions))

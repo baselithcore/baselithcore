@@ -1,53 +1,70 @@
 """
 Coding Agent.
 
-An autonomous agent for code generation, debugging, and testing.
-Implements an auto-debug loop:
-1. Generate/Execute code
-2. Analyze errors
-3. Fix issues
-4. Retry until success
+Writes, fixes, tests, explains and refactors code, and proves what it returns:
 
-Uses the Sandbox Service for secure code execution.
+1. The model answers with typed JSON (:mod:`.schemas`), code and pytest tests together.
+2. The tests run against the code in the core sandbox (:mod:`.harness`).
+3. ``core.loops.EngineeredLoop`` drives the retries: each failed run becomes a lesson for the
+   next attempt, and a run that keeps hitting the same failure stops early (:mod:`.loop`).
+4. The deterministic security review and an AI-generated provenance tag are applied last.
+
+Everything a caller passes in is treated as data (:mod:`.prompts`). Only Python executes;
+any language can be explained.
 
 Usage:
     from plugins.coding_agent import CodingAgent
 
     agent = CodingAgent()
     result = await agent.fix_code(buggy_code, error_message)
-    result = await agent.generate_tests(code, requirements)
+    result.success, result.tests_passed, result.tests_total, result.test_code
 """
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
 
 from core.guardrails.code_review import review_code
+from core.observability.agent_spans import agent_span
 from core.observability.logging import get_logger
 
-from .prompts import (
-    SYSTEM_PROMPT,
-    get_explain_prompt,
-    get_fix_prompt,
-    get_generate_prompt,
-    get_refactor_prompt,
-    get_test_prompt,
-)
+from . import flows
+from .compliance import mark_generated
+from .harness import TestReport, build_test_script, new_run_key, parse_report, screen
+from .llm import ask_typed
+from .prompts import TEXT_SYSTEM_PROMPT, explain_prompt
 from .types import CodeExecutionResult, CodeLanguage, CodingResult
 
 logger = get_logger(__name__)
 
+M = TypeVar("M", bound=BaseModel)
+PLUGIN = "coding-agent"
+_NOT_RUNNABLE = (
+    "only Python runs in the sandbox; code in other languages can only be explained"
+)
+
+
+@dataclass
+class _Call:
+    """What one task's flow sees of the agent: the task language, typed asks, test runs."""
+
+    agent: CodingAgent
+    language: str
+    max_attempts: int
+
+    async def ask(self, prompt: str, model: type[M]) -> M:
+        return await self.agent._ask(prompt, model)
+
+    async def run_tests(self, code: str, tests: str) -> TestReport:
+        return await self.agent._run_tests(code, tests)
+
 
 class CodingAgent:
-    """
-    Autonomous coding agent with auto-debug capabilities.
-
-    Features:
-    - Auto-fix: Execute -> Error -> Analyze -> Fix -> Retry loop
-    - Test generation: Generate unit tests from code
-    - Code explanation: Explain what code does
-    - Refactoring: Improve code quality
-    """
+    """Coding agent whose answers are verified by tests run in the sandbox."""
 
     def __init__(
         self,
@@ -59,22 +76,17 @@ class CodingAgent:
         Initialize coding agent.
 
         Args:
-            max_fix_attempts: Maximum attempts to fix code
-            execution_timeout: Timeout for code execution in seconds
-            language: Default programming language
+            max_fix_attempts: Most attempts of one verified loop (fix, write, refactor).
+            execution_timeout: Seconds one sandbox run (code plus tests) may take.
+            language: The language used when a call names none.
         """
         self.max_fix_attempts = max_fix_attempts
         self.execution_timeout = execution_timeout
         self.language = language
         self._sandbox: Any | None = None
+        # Optional injected LLM override. A caller with its own scoped LLM service
+        # may set ``agent._llm``; when unset, ``_get_llm`` uses the central funnel.
         self._llm: Any | None = None
-
-        logger.info(
-            "coding_agent_initialized",
-            max_attempts=max_fix_attempts,
-            timeout=execution_timeout,
-            language=language.value,
-        )
 
     async def _get_sandbox(self) -> Any:
         """Get or create sandbox service."""
@@ -91,31 +103,53 @@ class CodingAgent:
         return self._sandbox
 
     async def _get_llm(self) -> Any:
-        """Get or create LLM service."""
-        if self._llm is None:
-            try:
-                from core.services.llm.service import LLMService
+        """The injected client, or the central policy-aware funnel resolved per call."""
+        if self._llm is not None:
+            return self._llm
+        try:
+            from core.services.llm import get_llm_service
 
-                self._llm = LLMService()
-            except ImportError:
-                logger.error("llm_service_not_available")
-                raise RuntimeError(
-                    "LLMService is not available. Please ensure core.services.llm is correctly configured."
-                ) from None
-        return self._llm
+            return get_llm_service()
+        except ImportError:
+            logger.error("llm_service_not_available")
+            raise RuntimeError(
+                "LLMService is not available. Please ensure core.services.llm is correctly configured."
+            ) from None
+
+    async def _ask_llm(self, prompt: str) -> str:
+        """One plain-text answer (explanations, and the typed path's fallback)."""
+        llm = await self._get_llm()
+        try:
+            response = await llm.generate(
+                prompt=prompt, system_prompt=TEXT_SYSTEM_PROMPT, temperature=0.0
+            )
+            # The central funnel returns an ``LLMResult`` (``.text``); an injected
+            # client may still answer with ``.content``.
+            for attr in ("text", "content"):
+                value = getattr(response, attr, None)
+                if isinstance(value, str):
+                    return value
+            return ""
+        except Exception as exc:
+            logger.error("llm_generation_error", error_type=type(exc).__name__)
+            raise
+
+    async def _ask(self, prompt: str, model: type[M]) -> M:
+        """A validated ``model`` answer (schema-bound, plain-text fallback)."""
+        return await ask_typed(
+            await self._get_llm(), prompt, model, ask_text=self._ask_llm
+        )
 
     async def _execute_code(self, code: str) -> CodeExecutionResult:
-        """Execute code in sandbox."""
+        """Run ``code`` (a Python script) in the sandbox."""
         sandbox = await self._get_sandbox()
-
         try:
             result = await sandbox.execute_code_async(
-                code=code, language=self.language.value, timeout=self.execution_timeout
+                code, language="python", timeout=self.execution_timeout
             )
         except Exception as exc:
-            # Sandbox infrastructure failure (e.g. Docker unavailable): return
-            # a failed result so the fix loop degrades gracefully, but log it —
-            # a silent failure here previously masked a broken integration.
+            # Sandbox infrastructure failure (e.g. Docker unavailable): a failed result the
+            # loop reports as evidence, logged so a broken integration never hides.
             logger.error(
                 "sandbox_execution_error", error=str(exc), error_type=type(exc).__name__
             )
@@ -124,77 +158,40 @@ class CodingAgent:
             success=result.exit_code == 0,
             output=result.stdout or "",
             error=result.stderr or "",
-            execution_time_ms=result.execution_time * 1000.0,
+            execution_time_ms=int(result.execution_time * 1000),
+            exit_code=result.exit_code,
         )
 
-    async def _syntax_check(self, code: str) -> CodeExecutionResult:
-        """Validate generated code **without running it**.
-
-        ``generate_code`` promises a syntax check, and it used to deliver one
-        by executing the whole generated program in the sandbox — model output
-        that a prompt-injected description can steer, run for up to
-        ``execution_timeout`` seconds with no reason to run at all. Python is
-        compiled in-process (``compile`` parses and byte-compiles, it executes
-        nothing); other languages have no in-process parser here, so they
-        still go through the sandbox.
-        """
-        if self.language is not CodeLanguage.PYTHON:
-            return await self._execute_code(code)
-        try:
-            compile(code, "<generated>", "exec", dont_inherit=True)
-        except (SyntaxError, ValueError) as exc:
-            return CodeExecutionResult(
-                success=False, error=f"{type(exc).__name__}: {exc}"
-            )
-        return CodeExecutionResult(success=True)
-
-    async def _ask_llm(self, prompt: str) -> str:
-        """Ask LLM for code generation/fixing."""
-        llm = await self._get_llm()
-
-        try:
-            response = await llm.generate(
-                prompt=prompt, system_prompt=SYSTEM_PROMPT, temperature=0.0
-            )
-            return response.content
-        except Exception as exc:
-            logger.error("llm_generation_error", error=str(exc))
-            raise
+    async def _run_tests(self, code: str, tests: str) -> TestReport:
+        """Run ``tests`` against ``code`` in the sandbox and read the report back."""
+        refused = screen(code, tests)
+        if refused is not None:
+            return TestReport(problem=f"refused before running: {refused}")
+        key = new_run_key()
+        run = await self._execute_code(build_test_script(code, tests, key=key))
+        exit_code = (
+            run.exit_code if run.exit_code is not None else (0 if run.success else 1)
+        )
+        return parse_report(
+            run.output, run.error, exit_code, run.execution_time_ms / 1000, key=key
+        )
 
     def _extract_code(self, response: str) -> str:
-        """Extract code from LLM response."""
-        if "```python" in response:
-            start = response.find("```python") + 9
-            end = response.find("```", start)
-            if end > start:
-                return response[start:end].strip()
-
-        if "```" in response:
-            start = response.find("```") + 3
+        """The first fenced block of ``response``, or the whole text (pre-1.1 helper)."""
+        start = response.find("```")
+        if start >= 0:
             newline = response.find("\n", start)
-            if newline > start and newline - start < 15:
-                start = newline + 1
-            end = response.find("```", start)
-            if end > start:
-                return response[start:end].strip()
-
+            end = response.find("```", newline + 1)
+            if newline > start and end > newline:
+                return response[newline + 1 : end].strip()
         return response.strip()
 
     def _apply_security_review(self, result: CodingResult) -> CodingResult:
         """Run the deterministic security review over ``final_code``.
 
-        Every code-returning path funnels through here before the result
-        leaves the agent. A ``high``-severity review (leaked credential,
-        eval/exec on dynamic input) replaces the code with a refusal note
-        listing the findings — the agent must never ship a secret. Lower
-        severities attach the review to the result without blocking.
-
-        Args:
-            result: The result about to be returned; mutated in place.
-
-        Returns:
-            The same result, with ``review`` populated and, on a high
-            severity verdict, ``final_code`` replaced and ``success`` False.
+        A ``high``-severity review (leaked credential, eval/exec on dynamic input) replaces the
+        code with a refusal note listing the findings: the agent never ships a secret. Lower
+        severities ride along on the result without blocking.
         """
         if not result.final_code:
             return result
@@ -231,177 +228,148 @@ class CodingAgent:
             )
         return result
 
-    async def fix_code(
-        self, code: str, error_message: str, context: str = ""
+    def _review_tests(self, result: CodingResult) -> CodingResult:
+        """The same review over the returned tests: a test file never ships a secret either."""
+        if not result.test_code or result.test_code == result.final_code:
+            return result
+        review = review_code(result.test_code)
+        if review.verdict == "flagged" and review.severity == "high":
+            result.test_code = (
+                "Tests withheld by deterministic security review (severity: high): "
+                + "; ".join(c.message for c in review.comments)
+            )
+            result.success = False
+            result.error = (
+                result.error or "security review flagged the tests (high severity)"
+            )
+            logger.warning("coding_review_blocked_tests", findings=len(review.comments))
+        return result
+
+    def _resolve(self, language: str | CodeLanguage | None) -> str:
+        if language is None:
+            return self.language.value
+        return str(
+            language.value if isinstance(language, CodeLanguage) else language
+        ).lower()
+
+    async def _verified(
+        self,
+        task: str,
+        language: str | CodeLanguage | None,
+        original: str,
+        run: Callable[[_Call], Awaitable[CodingResult]],
     ) -> CodingResult:
-        """
-        Automatically repair code using an iterative self-correction loop.
-
-        Sends the failing code and error message to the LLM, extracts
-        the proposed fix, and validates it within a secure sandbox
-        environment. Retries until success or max attempts reached.
-        """
-        logger.info(
-            "coding_fix_start",
-            code_length=len(code),
-            error_preview=error_message[:100],
-        )
-
-        current_code = code
-        current_error = error_message
-        execution_results: list[CodeExecutionResult] = []
-
-        for attempt in range(1, self.max_fix_attempts + 1):
-            prompt = get_fix_prompt(
-                self.language.value, current_code, current_error, context
-            )
-
+        """Run one verified task: span, language check, flow, review, provenance."""
+        lang = self._resolve(language)
+        with agent_span(
+            f"coding_agent.{task}",
+            plugin=PLUGIN,
+            attributes={"coding.task": task, "coding.language": lang},
+        ) as span:
+            if lang != CodeLanguage.PYTHON.value:
+                return CodingResult(
+                    success=False,
+                    original_code=original,
+                    final_code="",
+                    error=_NOT_RUNNABLE,
+                )
             try:
-                response = await self._ask_llm(prompt)
-                fixed_code = self._extract_code(response)
-
-                logger.info(
-                    "coding_fix_attempt",
-                    attempt=attempt,
-                    code_changed=fixed_code != current_code,
-                )
-
-                result = await self._execute_code(fixed_code)
-                execution_results.append(result)
-
-                if result.success:
-                    return self._apply_security_review(
-                        CodingResult(
-                            success=True,
-                            original_code=code,
-                            final_code=fixed_code,
-                            iterations=attempt,
-                            explanation=f"Fixed after {attempt} attempt(s)",
-                            execution_results=execution_results,
-                        )
-                    )
-
-                current_code = fixed_code
-                current_error = result.error
-
+                result = await run(_Call(self, lang, self.max_fix_attempts))
             except Exception as exc:
-                logger.error("coding_fix_error", attempt=attempt, error=str(exc))
-                return self._apply_security_review(
-                    CodingResult(
-                        success=False,
-                        original_code=code,
-                        final_code=current_code,
-                        iterations=attempt,
-                        error=str(exc),
-                        execution_results=execution_results,
-                    )
+                logger.error(
+                    "coding_task_error", task=task, error_type=type(exc).__name__
                 )
-
-        return self._apply_security_review(
-            CodingResult(
-                success=False,
-                original_code=code,
-                final_code=current_code,
-                iterations=self.max_fix_attempts,
-                error=(
-                    f"Could not fix after {self.max_fix_attempts} attempts. "
-                    f"Last error: {current_error}"
-                ),
-                execution_results=execution_results,
+                result = CodingResult(
+                    success=False,
+                    original_code=original,
+                    final_code="",
+                    error=f"the coding agent failed ({type(exc).__name__}: {str(exc)[:200]})",
+                    loop_status="failed",
+                )
+            result = self._review_tests(self._apply_security_review(result))
+            generated = result.final_code and result.final_code != result.original_code
+            if generated and not result.final_code.startswith("Code withheld"):
+                result.provenance = mark_generated(result.final_code)
+            outcome = {
+                "coding.success": result.success,
+                "coding.loop_status": result.loop_status,
+                "coding.attempts": result.iterations,
+                "coding.tests_passed": result.tests_passed,
+                "coding.tests_total": result.tests_total,
+                "coding.sandbox_seconds": round(result.sandbox_seconds, 2),
+            }
+            if span is not None:
+                span.set_attributes(outcome)
+            logger.info(
+                "coding_task_done",
+                task=task,
+                success=result.success,
+                loop_status=result.loop_status,
+                attempts=result.iterations,
+                tests_passed=result.tests_passed,
+                tests_total=result.tests_total,
+                sandbox_seconds=round(result.sandbox_seconds, 2),
             )
+            return result
+
+    async def fix_code(
+        self,
+        code: str,
+        error_message: str,
+        context: str = "",
+        *,
+        language: str | CodeLanguage | None = None,
+    ) -> CodingResult:
+        """Fix ``code``: tests that reproduce the bug are written first, then the fix is
+        retried until they pass (``tests_reproduce_bug`` says whether they fail on ``code``)."""
+        return await self._verified(
+            "fix", language, code, lambda k: flows.fix(k, code, error_message, context)
         )
 
     async def generate_code(
-        self, description: str, examples: list[str] | None = None
+        self,
+        description: str,
+        examples: list[str] | None = None,
+        *,
+        language: str | CodeLanguage | None = None,
     ) -> CodingResult:
-        """Synthesize new source code from natural language requirements."""
-        logger.info("coding_generate_start", description=description[:100])
-
-        prompt = get_generate_prompt(self.language.value, description, examples)
-
-        try:
-            response = await self._ask_llm(prompt)
-            generated_code = self._extract_code(response)
-
-            result = await self._syntax_check(generated_code)
-
-            return self._apply_security_review(
-                CodingResult(
-                    success=result.success,
-                    original_code="",
-                    final_code=generated_code,
-                    iterations=1,
-                    error=result.error if not result.success else None,
-                    execution_results=[result],
-                )
-            )
-
-        except Exception as exc:
-            logger.error("coding_generate_error", error=str(exc))
-            return CodingResult(
-                success=False, original_code="", final_code="", error=str(exc)
-            )
+        """Write code for ``description`` together with the tests it has to pass."""
+        return await self._verified(
+            "write", language, "", lambda k: flows.write(k, description, examples)
+        )
 
     async def generate_tests(
-        self, code: str, test_framework: str = "pytest"
+        self,
+        code: str,
+        test_framework: str = "pytest",
+        *,
+        language: str | CodeLanguage | None = None,
     ) -> CodingResult:
-        """Generate unit tests for code."""
-        logger.info("coding_tests_start", code_length=len(code))
+        """Write pytest tests for ``code`` and run them once against it (``final_code`` holds
+        the tests; ``unittest`` style runs under pytest too)."""
+        return await self._verified(
+            "tests", language, code, lambda k: flows.write_tests(k, code)
+        )
 
-        prompt = get_test_prompt(self.language.value, code, test_framework)
+    async def refactor_code(
+        self, code: str, goals: str = "", *, language: str | CodeLanguage | None = None
+    ) -> CodingResult:
+        """Refactor ``code`` for ``goals``; characterization tests pin today's behaviour first."""
+        return await self._verified(
+            "refactor", language, code, lambda k: flows.refactor(k, code, goals)
+        )
 
-        try:
-            response = await self._ask_llm(prompt)
-            test_code = self._extract_code(response)
-
-            return self._apply_security_review(
-                CodingResult(
-                    success=True,
-                    original_code=code,
-                    final_code=test_code,
-                    iterations=1,
-                    explanation=f"Generated {test_framework} tests",
-                )
-            )
-
-        except Exception as exc:
-            logger.error("coding_tests_error", error=str(exc))
-            return CodingResult(
-                success=False, original_code=code, final_code="", error=str(exc)
-            )
-
-    async def explain_code(self, code: str) -> str:
-        """Explain what code does."""
-        prompt = get_explain_prompt(self.language.value, code)
-
-        try:
-            return await self._ask_llm(prompt)
-        except Exception as exc:
-            return f"Error explaining code: {exc}"
-
-    async def refactor_code(self, code: str, goals: str = "") -> CodingResult:
-        """Refactor code for better quality."""
-        prompt = get_refactor_prompt(self.language.value, code, goals)
-
-        try:
-            response = await self._ask_llm(prompt)
-            refactored = self._extract_code(response)
-
-            result = await self._execute_code(refactored)
-
-            return self._apply_security_review(
-                CodingResult(
-                    success=result.success,
-                    original_code=code,
-                    final_code=refactored,
-                    iterations=1,
-                    explanation=f"Refactored with goals: {goals or 'default'}",
-                    execution_results=[result],
-                )
-            )
-
-        except Exception as exc:
-            logger.error("coding_refactor_error", error=str(exc))
-            return CodingResult(
-                success=False, original_code=code, final_code=code, error=str(exc)
-            )
+    async def explain_code(
+        self, code: str, *, language: str | CodeLanguage | None = None
+    ) -> str:
+        """Explain ``code`` in plain words (any language; nothing is executed)."""
+        lang = self._resolve(language)
+        with agent_span(
+            "coding_agent.explain",
+            plugin=PLUGIN,
+            attributes={"coding.task": "explain", "coding.language": lang},
+        ):
+            try:
+                return await self._ask_llm(explain_prompt(lang, code))
+            except Exception as exc:
+                return f"Error explaining code: {exc}"

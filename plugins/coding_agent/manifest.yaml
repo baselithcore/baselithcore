@@ -1,7 +1,7 @@
 name: coding-agent
-version: 0.1.0
-description: Autonomous coding agent with code generation, debugging, refactoring,
-  and MCP tools
+version: 1.1.0
+description: Coding agent that writes, fixes, tests and refactors code and proves it
+  with pytest tests run in the sandbox, exposed as MCP tools
 author: Baselith
 tags:
 - coding
@@ -23,5 +23,5 @@ permissions:
   - '*'
   secrets: []
   filesystem: []
-integrity_sha256: 5ddf6c5ee0c6ee09e1c62b9e7eab8a86315d78e83603bf641d49772213282d03
+integrity_sha256: bfc139bc135ff879d1ab3f2a874b3d0aae1646d0939249e88a47117f91f2520a
 hash_surface_version: 5
