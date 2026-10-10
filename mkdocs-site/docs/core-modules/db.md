@@ -19,6 +19,7 @@ core/db/
 ├── migrate.py         # `python -m core.db.migrate`: what `baselith db migrate` runs
 ├── migration_config.py # Locates the packaged migrations; builds the Alembic Config
 ├── migrations/        # Alembic environment: env.py, script.py.mako, versions/
+├── rls_posture.py     # Does row-level security actually apply to this role?
 ├── rls_policy.py      # Core's tenant_isolation policy for plugin-owned tables
 ├── schema.py          # Schema bootstrap via Alembic migrations
 ├── serializers.py     # Source/row (de)serialization helpers

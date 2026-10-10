@@ -852,6 +852,14 @@ a line of code. Three framework pieces compose the mechanism:
    `LLMService` clone built for the pinned `(provider, model)` pair, sharing
    the central config's timeouts, caching and cost accounting.
 
+Every provider takes `request_timeout` and `connect_timeout` from the
+`LLMConfig` its service was built with — Ollama included. A caller that builds
+`LLMService(config=LLMConfig(..., request_timeout=600))` for a slow local model
+gets that deadline; Ollama used to read the process-wide `LLM_REQUEST_TIMEOUT`
+instead, so a long structured generation on a large local model was cut off at
+the global default however long its own config allowed. A provider built
+directly with no explicit timeouts still falls back to the global values.
+
 ```python
 from core.services.llm import PluginLLMPolicy, set_plugin_llm_policy_resolver
 
@@ -1967,6 +1975,21 @@ are typed (`VoiceError` with a stable `code`: `not_configured`, `egress_blocked`
 `too_large`, `upstream_failed`, `timeout`, `invalid_input`) and never embed a
 response body. `VoiceService.capabilities()` reports, without a network probe,
 whether STT and TTS are configured.
+
+**Caps on every provider.** `VOICE_MAX_TTS_CHARS` and `VOICE_MAX_AUDIO_BYTES` are
+checked by `VoiceService` itself before any provider runs, so they hold for the
+OpenAI SDK and Google paths as well as for the wire and ElevenLabs clients. Audio
+passed as `audio_file=` is read once, in a worker thread, and an over-cap file is
+refused from its size before a byte is read; the bytes are then reused by the
+provider call and the usage report. An unreadable file raises `VoiceInputError`
+without echoing the path.
+
+**Google.** The Google Cloud TTS/STT calls carry the API key in the
+`X-Goog-Api-Key` header, never in the URL, so it cannot surface in an HTTP error
+message or a log line. They run under the same `VOICE_TIMEOUT_SECONDS` deadline,
+stream the response and abandon it at `VOICE_MAX_RESPONSE_BYTES`, and fail with
+the typed `VoiceError` family (`upstream_failed`, `timeout`, `too_large`) without
+embedding the response body.
 
 **Usage.** Every call is reported through the same usage seam as LLM calls
 (`report_external_usage`) as a token-equivalent estimate under the model labels

@@ -1,13 +1,34 @@
 """Tests for Voice Service."""
 
+import base64
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from pydantic import SecretStr
 
 from core.services.voice.errors import VoiceNotConfiguredError
 from core.services.voice.models import VoiceProvider
 from core.services.voice.service import VoiceService
+
+_REAL_HTTPX_CLIENT = httpx.AsyncClient
+
+
+def _real_caps(cfg: MagicMock) -> None:
+    """Give a mocked VoiceConfig the real cap defaults (a bare MagicMock ints to 1)."""
+    cfg.max_audio_bytes = 10 * 1024 * 1024
+    cfg.max_response_bytes = 20 * 1024 * 1024
+    cfg.max_tts_chars = 4096
+    cfg.timeout_seconds = 30.0
+
+
+def _google_transport(payload: dict, seen: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=payload)
+
+    return httpx.MockTransport(handler)
 
 
 @pytest.fixture
@@ -19,6 +40,7 @@ def voice_service():
         mock_config.return_value.elevenlabs_api_key = SecretStr("fake-key")
         mock_config.return_value.google_api_key = SecretStr("fake-google-key")
         mock_config.return_value.provider = "openai"
+        _real_caps(mock_config.return_value)
 
         service = VoiceService(
             openai_api_key="fake-key",
@@ -67,31 +89,22 @@ async def test_tts_openai(voice_service):
 
 @pytest.mark.asyncio
 async def test_tts_google(voice_service):
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value = mock_client
+    seen: list[httpx.Request] = []
+    b64_content = base64.b64encode(b"google-audio").decode("utf-8")
+    voice_service._http_client = _REAL_HTTPX_CLIENT(
+        transport=_google_transport({"audioContent": b64_content}, seen)
+    )
 
-        mock_response = MagicMock()
-        # Mock base64 encoded response
-        import base64
+    response = await voice_service.text_to_speech(
+        text="Hello", provider=VoiceProvider.GOOGLE, voice="en-US-Standard-A"
+    )
 
-        b64_content = base64.b64encode(b"google-audio").decode("utf-8")
-        mock_response.json.return_value = {"audioContent": b64_content}
-        mock_response.raise_for_status = MagicMock()
-        mock_client.post.return_value = mock_response
-
-        response = await voice_service.text_to_speech(
-            text="Hello", provider=VoiceProvider.GOOGLE, voice="en-US-Standard-A"
-        )
-
-        assert response.success
-        assert response.content == b"google-audio"
-        assert response.provider == "google"
-        mock_client.post.assert_awaited_once()
-        assert (
-            mock_client.post.call_args[0][0]
-            == "https://texttospeech.googleapis.com/v1/text:synthesize"
-        )
+    assert response.success
+    assert response.content == b"google-audio"
+    assert response.provider == "google"
+    assert len(seen) == 1
+    assert str(seen[0].url) == "https://texttospeech.googleapis.com/v1/text:synthesize"
+    assert json.loads(seen[0].content)["voice"]["languageCode"] == "en-US"
 
 
 @pytest.mark.asyncio
@@ -114,41 +127,34 @@ async def test_stt_openai(voice_service):
 
 @pytest.mark.asyncio
 async def test_stt_google(voice_service):
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "results": [{"alternatives": [{"transcript": "Hello google"}]}]
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_client.post.return_value = mock_response
-
-        response = await voice_service.speech_to_text(
-            audio_data=b"audio-data", provider=VoiceProvider.GOOGLE
+    seen: list[httpx.Request] = []
+    voice_service._http_client = _REAL_HTTPX_CLIENT(
+        transport=_google_transport(
+            {"results": [{"alternatives": [{"transcript": "Hello google"}]}]}, seen
         )
+    )
 
-        assert response.success
-        assert response.text == "Hello google"
-        mock_client.post.assert_awaited_once()
+    response = await voice_service.speech_to_text(
+        audio_data=b"audio-data", provider=VoiceProvider.GOOGLE
+    )
+
+    assert response.success
+    assert response.text == "Hello google"
+    assert len(seen) == 1
+    sent = json.loads(seen[0].content)
+    assert base64.b64decode(sent["audio"]["content"]) == b"audio-data"
 
 
 @pytest.mark.asyncio
 async def test_http_client_reused_between_calls(voice_service):
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        import base64
+    seen: list[httpx.Request] = []
+    payload = {"audioContent": base64.b64encode(b"google-audio").decode()}
 
-        mock_client = AsyncMock()
-        mock_client_cls.return_value = mock_client
+    def build(**kwargs):
+        kwargs.pop("transport", None)
+        return _REAL_HTTPX_CLIENT(transport=_google_transport(payload, seen), **kwargs)
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "audioContent": base64.b64encode(b"google-audio").decode()
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_client.post.return_value = mock_response
-
+    with patch("httpx.AsyncClient", side_effect=build) as mock_client_cls:
         await voice_service.text_to_speech(
             text="Hello", provider=VoiceProvider.GOOGLE, voice="en-US-Standard-A"
         )
@@ -157,6 +163,8 @@ async def test_http_client_reused_between_calls(voice_service):
         )
 
         mock_client_cls.assert_called_once()
+        assert len(seen) == 2
+    await voice_service.aclose()
 
 
 @pytest.mark.asyncio
@@ -205,6 +213,7 @@ async def test_missing_api_keys():
         mock_config.return_value.google_api_key = None
         mock_config.return_value.google_credentials_path = None
         mock_config.return_value.provider = "openai"
+        _real_caps(mock_config.return_value)
 
         # Initialize service AFTER patching config
         empty_service = VoiceService(

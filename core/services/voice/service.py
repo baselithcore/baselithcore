@@ -26,11 +26,13 @@ from typing import Any
 from core.config import get_voice_config
 from core.observability.logging import get_logger
 from core.services.voice import _usage
+from core.services.voice._audio_input import load_audio
 from core.services.voice._elevenlabs import ElevenLabsClient
 from core.services.voice._elevenlabs_calls import ElevenLabsCalls
 from core.services.voice._http_providers import HttpProviders
 from core.services.voice._openai_wire import OpenAIWireClient
 from core.services.voice._wire_calls import WireCalls
+from core.services.voice.errors import VoiceLimitError
 from core.services.voice.models import (
     AudioFormat,
     SpeechContext,
@@ -253,6 +255,11 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
             text=text, voice=voice, speed=speed, format=format, provider=provider
         )
         request.validate()
+        # The wire and ElevenLabs paths check this themselves; the SDK and
+        # Google paths did not, so VOICE_MAX_TTS_CHARS held for two providers
+        # out of four.
+        if len(text) > int(self._config().max_tts_chars):
+            raise VoiceLimitError("text exceeds the synthesis cap")
 
         logger.info(
             "tts_start",
@@ -345,11 +352,16 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
             provider=provider,
         )
         request.validate()
+        # One read, in a worker thread, under VOICE_MAX_AUDIO_BYTES, for every
+        # provider — cached on the request so the provider paths below and the
+        # usage report never read the file again.
+        audio = await load_audio(request, int(self._config().max_audio_bytes))
 
         logger.info(
             "stt_start",
             provider=provider.value,
             has_file=bool(audio_file),
+            audio_bytes=len(audio),
             language=language,
         )
 
@@ -369,12 +381,7 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
         except Exception as e:
             logger.error("stt_error", provider=provider.value, error=str(e))
             raise
-        _usage.report_stt(
-            response.model,
-            len(request.get_audio_bytes()),
-            response.text,
-            duration_seconds,
-        )
+        _usage.report_stt(response.model, len(audio), response.text, duration_seconds)
         return response
 
     async def _stt_openai(self, request: STTRequest) -> VoiceResponse:

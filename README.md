@@ -98,8 +98,10 @@ lazily. The framework's own packages live under `core.*` and each declares
 what it promises — see [API stability
 tiers](https://docs.baselithcore.xyz/advanced/api-stability/).
 
-Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, with migrations
-applied at startup. From a checkout of this repository, with Docker running:
+Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, plus two Hugging
+Face Text Embeddings Inference servers for embedding and reranking, with
+migrations applied at startup. From a checkout of this repository, with Docker
+running:
 
 ```bash
 uv pip install -e .             # installs the `baselith` CLI
@@ -230,7 +232,7 @@ docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 | **Cognitive layer** | MCTS, Tree-of-Thoughts, world model, swarm auctions & bounded handoffs → [Reasoning](https://docs.baselithcore.xyz/core-modules/reasoning/) · [Swarm](https://docs.baselithcore.xyz/core-modules/swarm/) |
 | **Governance & safety** | Autonomy gating, durable human-in-the-loop, plan approval, loop & tool budgets, layered guardrails, sandboxed code → [Autonomy & Safety](https://docs.baselithcore.xyz/core-modules/orchestration/) |
 | **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, hierarchical chunking, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) |
-| **Multimodal** | Vision, native PDF and audio content blocks, duplex realtime voice with barge-in → [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
+| **Multimodal** | Vision, native PDF and audio content blocks, speech-to-text and text-to-speech (OpenAI, ElevenLabs, Google or any OpenAI-compatible server), and a duplex voice session contract with barge-in → [Services](https://docs.baselithcore.xyz/core-modules/services/) · [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
 | **Interoperability** | Native dual-era MCP (server + client + declarative registry), A2A peer interop, AP2 signed-mandate commerce → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) |
 | **Self-improvement, governed** | Skill evolution, prompt compilation and evolutionary search — every change eval-gated, audited and human-approvable → [Skill Evolution](https://docs.baselithcore.xyz/core-modules/skill-evolution/) |
 | **Evaluation & observability** | Trajectory eval in CI, multi-model bake-off, LLM-as-judge, red-team, OTel + Prometheus with USD cost metrics → [Evaluation](https://docs.baselithcore.xyz/core-modules/evaluation/) |
@@ -249,7 +251,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
-runs **9,026 tests** behind a **78% branch-coverage floor**, strict typing,
+runs **11,991 tests** behind a **78% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates.
 [GOVERNANCE.md](https://github.com/baselithcore/baselithcore/blob/main/GOVERNANCE.md) says how decisions get made and what needs a
 proposal before code; [CODE_OF_CONDUCT.md](https://github.com/baselithcore/baselithcore/blob/main/CODE_OF_CONDUCT.md) applies to every
