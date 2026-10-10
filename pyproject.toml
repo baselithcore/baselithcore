@@ -311,6 +311,9 @@ test = [
   # only this group into a bare interpreter, where setuptools is absent.
   # Same floor as the image's build step.
   "setuptools>=83.0.0",
+  # scripts/migrate_namespace.py (the 1.0 namespace codemod) parses with
+  # libcst; tests/unit/scripts/test_migrate_namespace_*.py import it.
+  "libcst>=1.5.0",
 ]
 dev = [
   # Everything the test group installs, plus the toolchain.
