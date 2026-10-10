@@ -15,7 +15,7 @@ import threading
 
 import pytest
 
-from core.utils.concurrency import (
+from baselith.core.utils.concurrency import (
     _DEFAULT_INFERENCE_THREADS,
     _inference_thread_count,
     get_inference_executor,
@@ -130,7 +130,7 @@ class TestContextPropagation:
 
     @pytest.mark.asyncio
     async def test_tenant_context_reaches_the_worker(self) -> None:
-        from core.context import (
+        from baselith.core.context import (
             get_current_tenant_id,
             reset_tenant_context,
             set_tenant_context,

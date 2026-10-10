@@ -32,7 +32,7 @@ def golden_llm() -> Iterator[Callable[[str], RecordedLLMService | RecordingLLMSe
     def _open(name: str) -> RecordedLLMService | RecordingLLMService:
         service: RecordedLLMService | RecordingLLMService
         if recording:
-            from core.services.llm import get_llm_service
+            from baselith.core.services.llm import get_llm_service
 
             service = RecordingLLMService(get_llm_service(), name=name)
         else:

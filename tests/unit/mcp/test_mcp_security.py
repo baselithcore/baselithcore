@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.server import MCPServer
-from core.orchestration.autonomy import (
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.server import MCPServer
+from baselith.core.orchestration.autonomy import (
     ApprovalRequiredError,
     AutonomyLevel,
     AutonomyPolicy,
@@ -85,7 +85,7 @@ class TestCommandAllowlist:
     def test_allowlist_extensible_via_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import core.config.mcp as mcp_config_module
+        import baselith.core.config.mcp as mcp_config_module
 
         _fake_bin(tmp_path, "my-trusted-runner")
         _fake_bin(tmp_path, "node")
@@ -165,7 +165,7 @@ class TestAutonomyToolGate:
         assert "result" in response
 
     def test_builtin_tools_are_categorized(self) -> None:
-        from core.mcp.tools import create_mcp_server_with_tools
+        from baselith.core.mcp.tools import create_mcp_server_with_tools
 
         server = create_mcp_server_with_tools()
         assert server._tools["scrape_url"].category == "external_side_effect"

@@ -3,7 +3,7 @@ title: AI Transparency
 description: Article 50 disclosure and content-provenance primitives
 ---
 
-The `core/transparency` subsystem provides the two technical means **EU AI Act Article 50**
+The `baselith/core/transparency` subsystem provides the two technical means **EU AI Act Article 50**
 requires of AI systems that interact with people or emit synthetic content. It is
 **opt-in** (`TRANSPARENCY_ENABLED`, default off) and **additive** — nothing in the
 request path changes until a call site attaches a disclosure notice or a
@@ -18,7 +18,7 @@ Both are unified behind `TransparencyService` / `get_transparency_service()`.
 
 ## Configuration
 
-`core/config/transparency.py` (`get_transparency_config()`):
+`baselith/core/config/transparency.py` (`get_transparency_config()`):
 
 | Env var | Default | Purpose |
 | ------- | ------- | ------- |
@@ -31,7 +31,7 @@ Both are unified behind `TransparencyService` / `get_transparency_service()`.
 ## Disclosure (Art 50(1))
 
 ```python
-from core.transparency import get_transparency_service
+from baselith.core.transparency import get_transparency_service
 
 svc = get_transparency_service()
 if svc.should_disclose(obvious=False):       # §1 exemption: obvious=True suppresses
@@ -50,7 +50,7 @@ signing secret is configured — an HMAC-SHA256 signature. Marking is itself
 audited (`AUDIT | TRANSPARENCY | content marked …`).
 
 ```python
-from core.transparency import ContentClass, Modality, get_transparency_service
+from baselith.core.transparency import ContentClass, Modality, get_transparency_service
 
 svc = get_transparency_service()
 tag = svc.mark_content(answer_text, content_class=ContentClass.AI_GENERATED,
@@ -80,7 +80,7 @@ model provider at logit level.
 
 ## First-party wiring
 
-The framework's own chat surface (`plugins/api_routers/chat.py`) applies these
+The framework's own chat surface (`baselith/plugins/api_routers/chat.py`) applies these
 primitives when `TRANSPARENCY_ENABLED` is set:
 
 * `POST /chat` — adds the disclosure to `metadata.ai_disclosure`, sets

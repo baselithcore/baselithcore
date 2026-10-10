@@ -27,13 +27,13 @@ from typing import Any
 from pydantic import AliasChoices
 from pydantic_settings import BaseSettings
 
-import core.config
+import baselith.core.config
 
 
 def _bindings() -> dict[str, list[tuple[str, Any, Any]]]:
     seen: dict[str, list[tuple[str, Any, Any]]] = defaultdict(list)
-    for module_info in pkgutil.iter_modules(core.config.__path__):
-        module = importlib.import_module(f"core.config.{module_info.name}")
+    for module_info in pkgutil.iter_modules(baselith.core.config.__path__):
+        module = importlib.import_module(f"baselith.core.config.{module_info.name}")
         for name, cls in inspect.getmembers(module, inspect.isclass):
             if (
                 not issubclass(cls, BaseSettings)

@@ -15,9 +15,13 @@ from types import SimpleNamespace
 import pytest
 from pydantic import SecretStr
 
-from core.config.audit import AuditConfig, reset_audit_config
-from core.observability.audit import AuditEvent, AuditEventType, reset_audit_logger
-from core.observability.audit_chain import (
+from baselith.core.config.audit import AuditConfig, reset_audit_config
+from baselith.core.observability.audit import (
+    AuditEvent,
+    AuditEventType,
+    reset_audit_logger,
+)
+from baselith.core.observability.audit_chain import (
     GENESIS_HASH,
     AuditChainKeyError,
     SQLiteAuditSink,
@@ -49,7 +53,7 @@ def _clean_audit_config():
 def _config(monkeypatch, **kwargs):
     """Patch the audit config the sink resolves its key from."""
     monkeypatch.setattr(
-        "core.observability.audit_chain.get_audit_config",
+        "baselith.core.observability.audit_chain.get_audit_config",
         lambda: AuditConfig(**kwargs),
     )
 
@@ -195,7 +199,7 @@ class TestUnkeyedFallback:
         _config(monkeypatch)
         warnings: list[str] = []
         monkeypatch.setattr(
-            "core.observability.audit_chain.logger.warning",
+            "baselith.core.observability.audit_chain.logger.warning",
             lambda msg, *a, **k: warnings.append(str(msg)),
         )
         SQLiteAuditSink(tmp_path / "e.db").close()
@@ -205,7 +209,7 @@ class TestUnkeyedFallback:
         _config(monkeypatch)
         warnings: list[str] = []
         monkeypatch.setattr(
-            "core.observability.audit_chain.logger.warning",
+            "baselith.core.observability.audit_chain.logger.warning",
             lambda msg, *a, **k: warnings.append(str(msg)),
         )
         SQLiteAuditSink(tmp_path / "f.db", hash_chain=False).close()
@@ -272,14 +276,14 @@ class TestRequireKeyFailsClosed:
         pytest.fail("an unkeyed chain was opened despite AUDIT_CHAIN_REQUIRE_KEY")
 
     def test_configure_audit_logging_refuses_to_boot(self, tmp_path, monkeypatch):
-        from core.observability.audit_setup import configure_audit_logging
+        from baselith.core.observability.audit_setup import configure_audit_logging
 
         _require_key_env(monkeypatch, tmp_path, key=None)
         with pytest.raises(AuditChainKeyError):
             configure_audit_logging()
 
     def test_start_audit_trail_refuses_to_boot(self, tmp_path, monkeypatch):
-        from core.observability.audit_setup import start_audit_trail
+        from baselith.core.observability.audit_setup import start_audit_trail
 
         _require_key_env(monkeypatch, tmp_path, key=None)
         app = SimpleNamespace(state=SimpleNamespace())
@@ -289,7 +293,7 @@ class TestRequireKeyFailsClosed:
     def test_with_a_key_the_trail_boots_and_the_chain_is_keyed(
         self, tmp_path, monkeypatch
     ):
-        from core.observability.audit_setup import (
+        from baselith.core.observability.audit_setup import (
             configure_audit_logging,
             get_durable_audit_sink,
         )
@@ -311,7 +315,7 @@ class TestRequireKeyFailsClosed:
         """Only the require-key case stops the boot; nothing else changes."""
         monkeypatch.delenv("AUDIT_CHAIN_REQUIRE_KEY", raising=False)
         monkeypatch.setattr(
-            "core.observability.audit_chain.get_audit_config",
+            "baselith.core.observability.audit_chain.get_audit_config",
             lambda: (_ for _ in ()).throw(RuntimeError("config backend down")),
         )
         sink = SQLiteAuditSink(tmp_path / "degraded.db")

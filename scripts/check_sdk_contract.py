@@ -3,7 +3,7 @@
 The Python and TypeScript clients under ``sdk/`` are hand-written and cover a
 deliberate subset of the API — chat, streaming chat, feedback, health,
 readiness — not the full 100-route surface. Nothing checked that the subset was
-still *real*: a route renamed or a method changed in ``core/`` left the clients
+still *real*: a route renamed or a method changed in ``baselith/core/`` left the clients
 calling an endpoint that had stopped existing, and the failure surfaced in a
 consumer's application, not in this repo's CI.
 

@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.task_queue.monitor import QueueInfo, WorkerInfo, WorkerMonitor
-from core.task_queue.status import TaskInfo, TaskStatus, TaskTracker
+from baselith.core.task_queue.monitor import QueueInfo, WorkerInfo, WorkerMonitor
+from baselith.core.task_queue.status import TaskInfo, TaskStatus, TaskTracker
 
 RQ_AVAILABLE = importlib.util.find_spec("rq") is not None
 
@@ -135,46 +135,52 @@ class TestStatusFunctions:
 
     def test_get_task_tracker_singleton(self):
         """Test the lazy singleton get_task_tracker."""
-        import core.task_queue.status
+        import baselith.core.task_queue.status
 
-        with patch("core.task_queue.status._task_tracker", None):
-            with patch("core.task_queue.status.TaskTracker") as mock_tracker_cls:
-                with patch("core.task_queue.get_queue_redis_connection"):
-                    with patch("core.config.get_task_queue_config"):
-                        t1 = core.task_queue.status.get_task_tracker()
-                        t2 = core.task_queue.status.get_task_tracker()
+        with patch("baselith.core.task_queue.status._task_tracker", None):
+            with patch(
+                "baselith.core.task_queue.status.TaskTracker"
+            ) as mock_tracker_cls:
+                with patch("baselith.core.task_queue.get_queue_redis_connection"):
+                    with patch("baselith.core.config.get_task_queue_config"):
+                        t1 = baselith.core.task_queue.status.get_task_tracker()
+                        t2 = baselith.core.task_queue.status.get_task_tracker()
                         assert t1 == t2
                         mock_tracker_cls.assert_called_once()
 
     def test_status_getattr(self):
         """Test __getattr__ for task_tracker."""
-        import core.task_queue.status
+        import baselith.core.task_queue.status
 
-        assert core.task_queue.status.task_tracker is not None
+        assert baselith.core.task_queue.status.task_tracker is not None
 
         with pytest.raises(AttributeError):
-            core.task_queue.status.non_existent
+            baselith.core.task_queue.status.non_existent
 
     def test_update_job_progress(self):
         """Test update_job_progress helper."""
-        import core.task_queue.status
+        import baselith.core.task_queue.status
 
         mock_job = MagicMock()
         mock_job.id = "job-1"
 
-        with patch("core.task_queue.status.get_current_job", return_value=mock_job):
-            with patch("core.task_queue.status.get_task_tracker") as mock_get_tracker:
+        with patch(
+            "baselith.core.task_queue.status.get_current_job", return_value=mock_job
+        ):
+            with patch(
+                "baselith.core.task_queue.status.get_task_tracker"
+            ) as mock_get_tracker:
                 mock_tracker = MagicMock()
                 mock_get_tracker.return_value = mock_tracker
 
-                core.task_queue.status.update_job_progress(50.0, "Halfway")
+                baselith.core.task_queue.status.update_job_progress(50.0, "Halfway")
                 mock_tracker.update_progress.assert_called_with(
                     "job-1", 50.0, "Halfway"
                 )
 
     def test_get_job_status(self):
         """Test get_job_status combined logic."""
-        import core.task_queue.status
+        import baselith.core.task_queue.status
 
         job_id = "job-123"
         mock_job = MagicMock()
@@ -187,11 +193,13 @@ class TestStatusFunctions:
 
         tracker_data = {"status": "running", "progress": 42.0}
 
-        with patch("core.task_queue.status.Job.fetch", return_value=mock_job):
-            with patch("core.task_queue.status.get_task_tracker") as mock_get_tracker:
+        with patch("baselith.core.task_queue.status.Job.fetch", return_value=mock_job):
+            with patch(
+                "baselith.core.task_queue.status.get_task_tracker"
+            ) as mock_get_tracker:
                 mock_get_tracker.return_value.get_status.return_value = tracker_data
-                with patch("core.task_queue.get_queue_redis_connection"):
-                    res = core.task_queue.status.get_job_status(job_id)
+                with patch("baselith.core.task_queue.get_queue_redis_connection"):
+                    res = baselith.core.task_queue.status.get_job_status(job_id)
 
                     assert res["id"] == job_id
                     assert res["rq_status"] == "running"
@@ -200,29 +208,36 @@ class TestStatusFunctions:
 
     def test_get_job_status_not_found(self):
         """Test get_job_status when job exists neither in RQ nor Tracker."""
-        import core.task_queue.status
+        import baselith.core.task_queue.status
 
         with patch(
-            "core.task_queue.status.Job.fetch", side_effect=Exception("Not found")
+            "baselith.core.task_queue.status.Job.fetch",
+            side_effect=Exception("Not found"),
         ):
-            with patch("core.task_queue.status.get_task_tracker") as mock_get_tracker:
+            with patch(
+                "baselith.core.task_queue.status.get_task_tracker"
+            ) as mock_get_tracker:
                 mock_get_tracker.return_value.get_status.return_value = None
-                with patch("core.task_queue.get_queue_redis_connection"):
-                    assert core.task_queue.status.get_job_status("ghost") is None
+                with patch("baselith.core.task_queue.get_queue_redis_connection"):
+                    assert (
+                        baselith.core.task_queue.status.get_job_status("ghost") is None
+                    )
 
 
 class TestQueueInit:
-    """Tests for core/task_queue/__init__.py functions."""
+    """Tests for baselith/core/task_queue/__init__.py functions."""
 
     def test_get_queue_redis_connection(self):
         """Test getting Redis connection as a singleton."""
-        from core.task_queue import get_queue_redis_connection
+        from baselith.core.task_queue import get_queue_redis_connection
 
-        with patch("core.task_queue.BlockingConnectionPool.from_url") as mock_from_url:
+        with patch(
+            "baselith.core.task_queue.BlockingConnectionPool.from_url"
+        ) as mock_from_url:
             mock_from_url.return_value = MagicMock()
 
             # Use a fresh module state for isolation if possible, or just mock the cache
-            with patch("core.task_queue._redis_conn", None):
+            with patch("baselith.core.task_queue._redis_conn", None):
                 conn1 = get_queue_redis_connection()
                 conn2 = get_queue_redis_connection()
 
@@ -231,13 +246,15 @@ class TestQueueInit:
 
     def test_get_queue(self):
         """Test getting an RQ queue."""
-        from core.task_queue import get_queue
+        from baselith.core.task_queue import get_queue
 
-        with patch("core.task_queue.get_queue_redis_connection") as mock_get_conn:
+        with patch(
+            "baselith.core.task_queue.get_queue_redis_connection"
+        ) as mock_get_conn:
             mock_conn = MagicMock()
             mock_get_conn.return_value = mock_conn
 
-            with patch("core.task_queue.Queue") as mock_queue_cls:
+            with patch("baselith.core.task_queue.Queue") as mock_queue_cls:
                 get_queue("test-queue")
                 mock_queue_cls.assert_called_once_with(
                     "test-queue", connection=mock_conn
@@ -245,16 +262,18 @@ class TestQueueInit:
 
     def test_module_getattr(self):
         """Test __getattr__ for redis_conn."""
-        import core.task_queue
+        import baselith.core.task_queue
 
-        with patch("core.task_queue.get_queue_redis_connection") as mock_get_conn:
+        with patch(
+            "baselith.core.task_queue.get_queue_redis_connection"
+        ) as mock_get_conn:
             mock_conn = MagicMock()
             mock_get_conn.return_value = mock_conn
 
-            assert core.task_queue.redis_conn == mock_conn
+            assert baselith.core.task_queue.redis_conn == mock_conn
 
         with pytest.raises(AttributeError):
-            core.task_queue.non_existent_attr
+            baselith.core.task_queue.non_existent_attr
 
 
 class TestWorkerMonitor:
@@ -264,7 +283,7 @@ class TestWorkerMonitor:
         """Test getting workers when none exist."""
         mock_conn = MagicMock()
 
-        with patch("core.task_queue.monitor.Worker") as mock_worker_class:
+        with patch("baselith.core.task_queue.monitor.Worker") as mock_worker_class:
             mock_worker_class.all.return_value = []
 
             monitor = WorkerMonitor(conn=mock_conn)
@@ -276,7 +295,7 @@ class TestWorkerMonitor:
         """Test getting worker count."""
         mock_conn = MagicMock()
 
-        with patch("core.task_queue.monitor.Worker") as mock_worker_class:
+        with patch("baselith.core.task_queue.monitor.Worker") as mock_worker_class:
             mock_worker_class.count.return_value = 3
 
             monitor = WorkerMonitor(conn=mock_conn)
@@ -289,7 +308,7 @@ class TestWorkerMonitor:
         mock_conn = MagicMock()
 
         # Mock Queue class to avoid actual Redis connection
-        with patch("core.task_queue.monitor.Queue") as mock_queue_cls:
+        with patch("baselith.core.task_queue.monitor.Queue") as mock_queue_cls:
             mock_queue_instance = MagicMock()
             mock_queue_instance.job_count = 0
             # Setup registry counts
@@ -355,9 +374,9 @@ def test_queue_pool_blocks_instead_of_failing_when_exhausted():
     """At the queue pool cap an enqueue waits rather than raising at once."""
     from redis import BlockingConnectionPool
 
-    import core.task_queue as tq
+    import baselith.core.task_queue as tq
 
-    with patch("core.task_queue._redis_conn", None):
+    with patch("baselith.core.task_queue._redis_conn", None):
         conn = tq.get_queue_redis_connection()
         try:
             assert isinstance(conn.connection_pool, BlockingConnectionPool)
@@ -373,13 +392,13 @@ def test_queue_pool_bounds_every_socket_operation():
     from ``TASK_QUEUE_SOCKET_*``. The worker's blocking dequeue is unaffected:
     it opens its own connection.
     """
-    import core.task_queue as tq
-    from core.config.task_queue import TaskQueueConfig
+    import baselith.core.task_queue as tq
+    from baselith.core.config.task_queue import TaskQueueConfig
 
     config = TaskQueueConfig(socket_timeout=7.5, socket_connect_timeout=1.5)
     with (
-        patch("core.task_queue._redis_conn", None),
-        patch("core.task_queue.get_task_queue_config", return_value=config),
+        patch("baselith.core.task_queue._redis_conn", None),
+        patch("baselith.core.task_queue.get_task_queue_config", return_value=config),
     ):
         conn = tq.get_queue_redis_connection()
         try:
@@ -392,7 +411,7 @@ def test_queue_pool_bounds_every_socket_operation():
 
 def test_queue_socket_deadline_defaults_are_bounded():
     """Out of the box both deadlines are set (not ``None`` = wait forever)."""
-    from core.config.task_queue import TaskQueueConfig
+    from baselith.core.config.task_queue import TaskQueueConfig
 
     config = TaskQueueConfig()
     assert 0 < config.socket_connect_timeout <= config.socket_timeout

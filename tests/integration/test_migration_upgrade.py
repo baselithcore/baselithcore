@@ -49,7 +49,12 @@ import pytest
 pytestmark = [pytest.mark.integration]
 
 VERSIONS_DIR = (
-    Path(__file__).resolve().parents[2] / "core" / "db" / "migrations" / "versions"
+    Path(__file__).resolve().parents[2]
+    / "baselith"
+    / "core"
+    / "db"
+    / "migrations"
+    / "versions"
 )
 
 #: Every row this module writes carries it in a text column.
@@ -147,7 +152,7 @@ UNSEEDED: frozenset[str] = frozenset({"alembic_version"})
 def _script() -> Any:
     from alembic.script import ScriptDirectory
 
-    from core.db.migration_config import build_alembic_config
+    from baselith.core.db.migration_config import build_alembic_config
 
     return ScriptDirectory.from_config(build_alembic_config())
 
@@ -212,7 +217,7 @@ def test_seed_table_covers_every_shipped_table(head_schema: dict[str, Any]) -> N
 
 
 def _conninfo(dbname: str | None = None) -> str:
-    from core.config import get_storage_config
+    from baselith.core.config import get_storage_config
 
     config = get_storage_config()
     return (
@@ -272,7 +277,7 @@ def _alembic(dbname: str, *steps: tuple[str, str]) -> None:
     script = (
         "import sys\n"
         "from alembic import command\n"
-        "from core.db.migration_config import build_alembic_config\n"
+        "from baselith.core.db.migration_config import build_alembic_config\n"
         "cfg = build_alembic_config()\n"
         "args = sys.argv[1:]\n"
         "for cmd, rev in zip(args[::2], args[1::2]):\n"

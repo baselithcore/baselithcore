@@ -31,7 +31,7 @@ from anthropic.types import (
     ToolUseBlock,
 )
 
-from core.services.llm.providers._anthropic_streaming import _content_delta
+from baselith.core.services.llm.providers._anthropic_streaming import _content_delta
 
 
 def text_delta(text: str, *, index: int = 0) -> RawContentBlockDeltaEvent:
@@ -91,11 +91,13 @@ def _provider_with(events: list[Any], final: Any = None):
     client.messages.stream.return_value = manager
 
     with patch(
-        "core.services.llm.providers.anthropic_provider.anthropic"
+        "baselith.core.services.llm.providers.anthropic_provider.anthropic"
     ) as mock_anthropic:
         mock_anthropic.AsyncAnthropic.return_value = client
         mock_anthropic.NOT_GIVEN = "not_given"
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test")
         provider._ensure_client()
@@ -196,12 +198,12 @@ class TestStreamStructuredContract:
     """``stream_structured`` against real wire events."""
 
     async def test_emits_text_and_tool_call_events(self) -> None:
-        from core.services.llm.stream_events import (
+        from baselith.core.services.llm.stream_events import (
             StreamEnd,
             ToolCallDelta,
             ToolCallStarted,
         )
-        from core.services.llm.stream_events import (
+        from baselith.core.services.llm.stream_events import (
             TextDelta as NeutralTextDelta,
         )
 
@@ -233,7 +235,7 @@ class TestStreamStructuredContract:
 
     async def test_json_delta_without_an_open_tool_is_dropped(self) -> None:
         """An argument delta whose block never opened has no call to attribute."""
-        from core.services.llm.stream_events import ToolCallDelta
+        from baselith.core.services.llm.stream_events import ToolCallDelta
 
         provider = _provider_with(
             [json_delta('{"city":', index=7)], final=_final_message("")

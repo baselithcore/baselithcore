@@ -23,8 +23,8 @@ import pytest
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from core.api.versioning import DEPRECATION_HEADER_VALUE, versioned_routers
-from core.middleware.api_deprecation import APIDeprecationMiddleware
+from baselith.core.api.versioning import DEPRECATION_HEADER_VALUE, versioned_routers
+from baselith.core.middleware.api_deprecation import APIDeprecationMiddleware
 
 _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 
@@ -107,11 +107,11 @@ class TestApiRoutersPlugin:
     ) -> None:
         from types import SimpleNamespace
 
-        import core.config.compliance as compliance_cfg
-        import core.config.orchestration as orchestration_cfg
-        import core.config.privacy as privacy_cfg
-        import core.config.webhooks as webhooks_cfg
-        from plugins.api_routers.plugin import ApiRoutersPlugin
+        import baselith.core.config.compliance as compliance_cfg
+        import baselith.core.config.orchestration as orchestration_cfg
+        import baselith.core.config.privacy as privacy_cfg
+        import baselith.core.config.webhooks as webhooks_cfg
+        from baselith.plugins.api_routers.plugin import ApiRoutersPlugin
 
         on = SimpleNamespace(enabled=True, checkpoint_enabled=True)
         monkeypatch.setattr(webhooks_cfg, "get_webhook_config", lambda: on)
@@ -146,7 +146,7 @@ class TestApiRoutersPlugin:
 _CHILD = r"""
 import json
 from fastapi.testclient import TestClient
-from core.api.factory import create_app
+from baselith.core.api.factory import create_app
 
 app = create_app()
 paths = app.openapi()["paths"]

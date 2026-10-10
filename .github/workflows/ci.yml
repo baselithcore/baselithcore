@@ -936,7 +936,7 @@ jobs:
   # 🧪 TEST
   # ============================================================
   frontend_test:
-    # `core/static/frontend/js/api.js` is the SSE client the shipped chat UI
+    # `baselith/core/static/frontend/js/api.js` is the SSE client the shipped chat UI
     # runs: it reassembles `/chat/stream` frames across arbitrary chunk
     # boundaries. Its tests existed and nothing ran them, so the regressions
     # they pin (a CRLF line split exactly at the \r/\n boundary, `event: error`
@@ -972,9 +972,9 @@ jobs:
         # while verifying nothing, which is worse than the hole it closes. The
         # emptiness check below is the whole point of doing it this way.
         run: |
-          FILES="$(find core/static/frontend/js -name '*.test.mjs' | sort)"
+          FILES="$(find baselith/core/static/frontend/js -name '*.test.mjs' | sort)"
           if [ -z "$FILES" ]; then
-            echo "::error::no *.test.mjs found under core/static/frontend/js"
+            echo "::error::no *.test.mjs found under baselith/core/static/frontend/js"
             exit 1
           fi
           echo "Running:"
@@ -1069,7 +1069,7 @@ jobs:
           # The project itself, without deps: they all came from the lock above.
           uv pip install --system --no-deps -e .
           # Coverage XML on every run so PRs get a Codecov delta, not just main.
-          pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
+          pytest -n auto --cov=baselith/core --cov-report=xml:coverage.xml --cov-report=term -q
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.12'
         # Reporting, not gating: the 83% floor is enforced by pytest in the
@@ -1187,7 +1187,7 @@ jobs:
         # What an operator runs before the first boot; the suite then works
         # on the schema the packaged migrations produce, not on tables each
         # test creates for itself.
-        run: python -m core.db.migrate
+        run: python -m baselith.core.db.migrate
       - name: Run integration suite
         # tests/core/skill_evolution/test_store_postgres.py is the one
         # real-database module outside tests/integration/. --no-cov: the
@@ -1235,8 +1235,8 @@ jobs:
       # A full image build is ~30 minutes cold, so it is scoped to the inputs
       # that can actually change what the image CONTAINS: the Dockerfile, the
       # ignore file, and the dependency surface (pyproject.toml drives the
-      # extras, uv.lock pins the resolved set). A change under core/ or
-      # plugins/ only invalidates the thin source layers at the very top of the
+      # extras, uv.lock pins the resolved set). A change under baselith/core/ or
+      # baselith/plugins/ only invalidates the thin source layers at the very top of the
       # image, which the release build reproduces from cache in seconds — not
       # worth half an hour on every PR.
       #
@@ -1340,7 +1340,7 @@ jobs:
 
           # There must be exactly ONE importable copy of the source. The
           # project distribution is installed into /install-app for its entry
-          # points, and pip also materialises core/ and plugins/ there; with
+          # points, and pip also materialises baselith/core/ and baselith/plugins/ there; with
           # /install-app ahead of /app on PYTHONPATH, which copy won depended
           # on the working directory. The Dockerfile deletes them, so `core`
           # must resolve under /app from ANY cwd.
@@ -1349,8 +1349,8 @@ jobs:
               baselithcore:ci -c 'import core; print(core.__file__)')"
             echo "cwd=${wd} -> ${RESOLVED}"
             case "${RESOLVED}" in
-              /app/core/*) ;;
-              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/core"; exit 1 ;;
+              /app/baselith/core/*) ;;
+              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/baselith/core"; exit 1 ;;
             esac
           done
 
@@ -1367,7 +1367,7 @@ jobs:
 
           # Every capability the image installs must be able to RUN in it. The
           # spaCy stack is ~160MB and delivers nothing without its model: the
-          # image shipped for a long time with core/nlp falling back to a blank
+          # image shipped for a long time with baselith/core/nlp falling back to a blank
           # sentencizer, which no test could see.
           docker run --rm --entrypoint python baselithcore:ci -c '
           import spacy

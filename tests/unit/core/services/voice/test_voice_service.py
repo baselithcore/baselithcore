@@ -8,9 +8,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.services.voice.errors import VoiceNotConfiguredError
-from core.services.voice.models import VoiceProvider
-from core.services.voice.service import VoiceService
+from baselith.core.services.voice.errors import VoiceNotConfiguredError
+from baselith.core.services.voice.models import VoiceProvider
+from baselith.core.services.voice.service import VoiceService
 
 _REAL_HTTPX_CLIENT = httpx.AsyncClient
 
@@ -35,7 +35,7 @@ def _google_transport(payload: dict, seen: list[httpx.Request]) -> httpx.MockTra
 def voice_service():
     # VoiceConfig api_keys are typed `Optional[SecretStr]`; service calls
     # `.get_secret_value()`. Mock with real SecretStr instances.
-    with patch("core.services.voice.service.get_voice_config") as mock_config:
+    with patch("baselith.core.services.voice.service.get_voice_config") as mock_config:
         mock_config.return_value.openai_api_key = SecretStr("fake-key")
         mock_config.return_value.elevenlabs_api_key = SecretStr("fake-key")
         mock_config.return_value.google_api_key = SecretStr("fake-google-key")
@@ -59,7 +59,7 @@ async def test_init(voice_service):
 
 def test_default_provider_comes_from_voice_provider_setting():
     """VOICE_PROVIDER is honoured when no provider is passed explicitly."""
-    with patch("core.services.voice.service.get_voice_config") as mock_config:
+    with patch("baselith.core.services.voice.service.get_voice_config") as mock_config:
         mock_config.return_value.openai_api_key = None
         mock_config.return_value.elevenlabs_api_key = SecretStr("k")
         mock_config.return_value.provider = "elevenlabs"
@@ -207,7 +207,7 @@ async def test_convenience_methods(voice_service):
 @pytest.mark.asyncio
 async def test_missing_api_keys():
     # Patch config to return None
-    with patch("core.services.voice.service.get_voice_config") as mock_config:
+    with patch("baselith.core.services.voice.service.get_voice_config") as mock_config:
         mock_config.return_value.openai_api_key = None
         mock_config.return_value.elevenlabs_api_key = None
         mock_config.return_value.google_api_key = None

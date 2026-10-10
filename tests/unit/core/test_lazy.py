@@ -1,6 +1,6 @@
 """The lazy export helper, and the packages that use it.
 
-:mod:`core._lazy` is what lets a package advertise a wide ``__all__`` without
+:mod:`baselith.core._lazy` is what lets a package advertise a wide ``__all__`` without
 charging every importer for all of it. Two things have to hold for that to be
 safe: the resolver must behave exactly like the eager imports it replaced,
 including their side effect of binding submodules, and each package's lazy
@@ -13,21 +13,21 @@ import importlib
 
 import pytest
 
-import core.cli
-import core.orchestration
-import core.plugins
-from core._lazy import lazy_exports
+import baselith.core.cli
+import baselith.core.orchestration
+import baselith.core.plugins
+from baselith.core._lazy import lazy_exports
 
-LAZY_PACKAGES = (core.plugins, core.orchestration, core.cli)
+LAZY_PACKAGES = (baselith.core.plugins, baselith.core.orchestration, baselith.core.cli)
 
 
 class TestLazyExports:
     """The resolver itself."""
 
     def test_resolves_a_name_from_its_submodule(self) -> None:
-        getter = lazy_exports("core.plugins", {"SkillResult": "result"})
+        getter = lazy_exports("baselith.core.plugins", {"SkillResult": "result"})
 
-        from core.plugins.result import SkillResult
+        from baselith.core.plugins.result import SkillResult
 
         assert getter("SkillResult") is SkillResult
 
@@ -35,9 +35,9 @@ class TestLazyExports:
         """Second read must be a dict lookup, not another import."""
         import sys
 
-        package = sys.modules["core.plugins"]
+        package = sys.modules["baselith.core.plugins"]
         vars(package).pop("PluginHealth", None)
-        getter = lazy_exports("core.plugins", {"PluginHealth": "health"})
+        getter = lazy_exports("baselith.core.plugins", {"PluginHealth": "health"})
 
         resolved = getter("PluginHealth")
 
@@ -45,20 +45,22 @@ class TestLazyExports:
 
     def test_supports_a_renamed_export(self) -> None:
         """``from .api import router as plugin_management_router``."""
-        getter = lazy_exports("core.plugins", {"the_router": "api:router"})
+        getter = lazy_exports("baselith.core.plugins", {"the_router": "api:router"})
 
-        from core.plugins.api import router
+        from baselith.core.plugins.api import router
 
         assert getter("the_router") is router
 
     def test_falls_back_to_a_submodule(self) -> None:
         """Eager imports bound submodules as attributes; that must survive."""
-        getter = lazy_exports("core.plugins", {})
+        getter = lazy_exports("baselith.core.plugins", {})
 
-        assert getter("result") is importlib.import_module("core.plugins.result")
+        assert getter("result") is importlib.import_module(
+            "baselith.core.plugins.result"
+        )
 
     def test_unknown_name_raises_attribute_error(self) -> None:
-        getter = lazy_exports("core.plugins", {})
+        getter = lazy_exports("baselith.core.plugins", {})
 
         with pytest.raises(AttributeError, match="no attribute 'nope'"):
             getter("nope")

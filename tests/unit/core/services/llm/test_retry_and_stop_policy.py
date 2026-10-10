@@ -10,20 +10,20 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.errors import (
+from baselith.core.services.llm.errors import (
     LLMClientError,
     LLMConnectionError,
     LLMRefusalError,
     LLMServerError,
     LLMTimeoutError,
 )
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.service import LLMService
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.tool_calling import LLMResult
 
 
 def _service():
-    with patch("core.services.llm.service.get_llm_config") as mock_config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
         mock_config.return_value = Mock(
             provider="ollama",
             model="m",
@@ -169,7 +169,7 @@ class TestStructuredStopReasonPolicy:
 @pytest.mark.asyncio
 class TestExactUsageReachesTheSpan:
     async def test_structured_path_uses_the_metered_split(self):
-        from core.services.llm.usage import Usage
+        from baselith.core.services.llm.usage import Usage
 
         service = _service()
         service.provider = Mock()
@@ -182,7 +182,7 @@ class TestExactUsageReachesTheSpan:
         )
         recorded: list[dict] = []
         with patch(
-            "core.services.llm._accounting.record_genai_metrics",
+            "baselith.core.services.llm._accounting.record_genai_metrics",
             side_effect=lambda *a, **kw: recorded.append(kw),
         ):
             await service.generate("q")
@@ -210,7 +210,7 @@ class TestExactUsageReachesTheSpan:
             captured.append(kwargs)
             sink = kwargs.get("usage_sink")
             if sink is not None:
-                from core.services.llm.usage import Usage
+                from baselith.core.services.llm.usage import Usage
 
                 sink.append(Usage(input_tokens=900, output_tokens=3))
             return "hi", 903
@@ -218,7 +218,7 @@ class TestExactUsageReachesTheSpan:
         service.provider = SimpleNamespace(generate=_generate)
         recorded: list[tuple[int, int]] = []
         with patch(
-            "core.services.llm._generation.record_genai_metrics",
+            "baselith.core.services.llm._generation.record_genai_metrics",
             side_effect=lambda *a, **kw: recorded.append(
                 (kw["input_tokens"], kw["output_tokens"])
             ),
@@ -337,7 +337,7 @@ class TestBilledRefusalsAreAccountedFor:
         async def _generate(**kwargs):
             sink = kwargs.get("usage_sink")
             if sink is not None:
-                from core.services.llm.usage import Usage
+                from baselith.core.services.llm.usage import Usage
 
                 sink.append(Usage(input_tokens=500, output_tokens=9))
             raise LLMRefusalError(category="safety", explanation="no")
@@ -351,7 +351,7 @@ class TestBilledRefusalsAreAccountedFor:
 
         charged: list[tuple] = []
         with patch(
-            "core.orchestration.budget_context.charge_llm_cost",
+            "baselith.core.orchestration.budget_context.charge_llm_cost",
             side_effect=lambda *a, **kw: charged.append(a),
         ):
             with pytest.raises(LLMRefusalError):
@@ -365,7 +365,7 @@ class TestBilledRefusalsAreAccountedFor:
         service = _service()
         service.provider = Mock()
         service.provider.supports_native_tools = True
-        from core.services.llm.usage import Usage
+        from baselith.core.services.llm.usage import Usage
 
         service.provider.generate_structured = AsyncMock(
             return_value=LLMResult(
@@ -376,7 +376,7 @@ class TestBilledRefusalsAreAccountedFor:
 
         charged: list[tuple] = []
         with patch(
-            "core.orchestration.budget_context.charge_llm_cost",
+            "baselith.core.orchestration.budget_context.charge_llm_cost",
             side_effect=lambda *a, **kw: charged.append(a),
         ):
             with pytest.raises(LLMRefusalError):
@@ -391,7 +391,7 @@ class TestBilledRefusalsAreAccountedFor:
 
         recorded: list[tuple[int, int]] = []
         with patch(
-            "core.services.llm._accounting.record_genai_metrics",
+            "baselith.core.services.llm._accounting.record_genai_metrics",
             side_effect=lambda *a, **kw: recorded.append(
                 (kw["input_tokens"], kw["output_tokens"])
             ),
@@ -413,7 +413,7 @@ class TestTextPathRefusalAccounting:
         async def _generate(**kwargs):
             sink = kwargs.get("usage_sink")
             if sink is not None:
-                from core.services.llm.usage import Usage
+                from baselith.core.services.llm.usage import Usage
 
                 sink.append(Usage(input_tokens=500, output_tokens=9))
             raise LLMRefusalError(category="safety", explanation="no")
@@ -425,7 +425,7 @@ class TestTextPathRefusalAccounting:
         service = self._service_refusing_after_metering()
         charged: list[tuple] = []
         with patch(
-            "core.orchestration.budget_context.charge_llm_cost",
+            "baselith.core.orchestration.budget_context.charge_llm_cost",
             side_effect=lambda *a, **kw: charged.append(a),
         ):
             with pytest.raises(LLMRefusalError):
@@ -438,7 +438,7 @@ class TestTextPathRefusalAccounting:
         service = self._service_refusing_after_metering()
         recorded: list[tuple[int, int]] = []
         with patch(
-            "core.services.llm._accounting.record_genai_metrics",
+            "baselith.core.services.llm._accounting.record_genai_metrics",
             side_effect=lambda *a, **kw: recorded.append(
                 (kw["input_tokens"], kw["output_tokens"])
             ),

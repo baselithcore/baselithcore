@@ -5,9 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.api import _runtime_services
-from core.chat import service as chat_service_module
-from core.services.llm.providers._anthropic_request import forwardable_kwargs
+from baselith.core.api import _runtime_services
+from baselith.core.chat import service as chat_service_module
+from baselith.core.services.llm.providers._anthropic_request import forwardable_kwargs
 
 
 async def test_drain_orchestrator_awaits_aclose() -> None:
@@ -34,8 +34,11 @@ async def test_close_shared_clients_closes_both_and_survives_failures() -> None:
     close_llm = AsyncMock(side_effect=RuntimeError("llm"))
     close_vs = AsyncMock()
     with (
-        patch("core.services.llm.runtime.close_llm_services", close_llm),
-        patch("core.services.vectorstore.service.close_vectorstore_service", close_vs),
+        patch("baselith.core.services.llm.runtime.close_llm_services", close_llm),
+        patch(
+            "baselith.core.services.vectorstore.service.close_vectorstore_service",
+            close_vs,
+        ),
     ):
         await _runtime_services.close_shared_clients()
     close_llm.assert_awaited_once()

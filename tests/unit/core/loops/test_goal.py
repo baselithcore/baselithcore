@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from core.loops.goal import HardenedGoal, harden_goal
+from baselith.core.loops.goal import HardenedGoal, harden_goal
 
 pytestmark = [pytest.mark.unit]
 
@@ -23,14 +23,14 @@ class TestHardenedGoal:
     def test_render_carries_all_sections(self):
         goal = HardenedGoal(
             goal="pytest green",
-            scope="only core/loops",
+            scope="only baselith/core/loops",
             verifier_description="pytest -x returncode 0",
             budget="max 6 attempts",
             rollback_plan="git checkout -- .",
         )
         text = goal.render()
         assert "pytest green" in text
-        assert "only core/loops" in text
+        assert "only baselith/core/loops" in text
         assert "pytest -x returncode 0" in text
         assert "git checkout -- ." in text
 
@@ -39,16 +39,16 @@ class TestHardenGoal:
     async def test_parses_llm_questionnaire(self):
         payload = json.dumps(
             {
-                "goal": "pytest green on core/loops",
-                "scope": "core/loops only",
+                "goal": "pytest green on baselith/core/loops",
+                "scope": "baselith/core/loops only",
                 "verifier_description": "run pytest, exit code 0",
                 "budget": "6 attempts",
                 "rollback_plan": "revert the branch",
             }
         )
         hardened = await harden_goal("make tests pass", llm_service=_LLM(payload))
-        assert hardened.goal == "pytest green on core/loops"
-        assert hardened.scope == "core/loops only"
+        assert hardened.goal == "pytest green on baselith/core/loops"
+        assert hardened.scope == "baselith/core/loops only"
 
     async def test_malformed_response_fails_soft(self):
         hardened = await harden_goal("make tests pass", llm_service=_LLM("not json"))

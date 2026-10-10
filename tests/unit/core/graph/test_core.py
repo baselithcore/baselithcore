@@ -2,25 +2,25 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-from core.graph._cache import SyncTTLCache
-from core.graph.core import GraphDb
+from baselith.core.graph._cache import SyncTTLCache
+from baselith.core.graph.core import GraphDb
 
 
 @pytest.fixture
 def mock_dependencies():
     with (
-        patch("core.graph.core.Redis") as MockRedis,
-        patch("core.graph.core.create_sync_redis_client") as mock_sync_redis,
+        patch("baselith.core.graph.core.Redis") as MockRedis,
+        patch("baselith.core.graph.core.create_sync_redis_client") as mock_sync_redis,
         # The cache is a real SyncTTLCache, not a mock. Patching it with a
         # MagicMock is what let the async-cache-from-a-sync-method bug live
         # here undetected: a MagicMock's `get` is synchronous and truthy, so
         # these tests passed against code that handed callers a coroutine.
-        patch("core.graph.core.get_storage_config") as mock_get_config,
-        patch("core.graph.core.query_builder") as mock_qb,
-        patch("core.graph.core.operations") as mock_ops,
-        patch("core.graph.core.linking") as mock_linking,
-        patch("core.graph.core.retrieval") as mock_retrieval,
-        patch("core.context.get_current_tenant_id", return_value="default"),
+        patch("baselith.core.graph.core.get_storage_config") as mock_get_config,
+        patch("baselith.core.graph.core.query_builder") as mock_qb,
+        patch("baselith.core.graph.core.operations") as mock_ops,
+        patch("baselith.core.graph.core.linking") as mock_linking,
+        patch("baselith.core.graph.core.retrieval") as mock_retrieval,
+        patch("baselith.core.context.get_current_tenant_id", return_value="default"),
     ):
         # Setup Redis Client. The graph connection is built through the shared
         # bounded sync pool (``create_sync_redis_client``), not ``Redis.from_url``
@@ -137,9 +137,9 @@ def test_query_cache_key_is_tenant_scoped(mock_dependencies):
     real_get = g._cache.get
     g._cache.get = lambda key: seen.append(key) or real_get(key)  # type: ignore[method-assign]
 
-    with patch("core.context.get_current_tenant_id", return_value="tenant_a"):
+    with patch("baselith.core.context.get_current_tenant_id", return_value="tenant_a"):
         g.query("MATCH (n) RETURN n", {"id": "x"})
-    with patch("core.context.get_current_tenant_id", return_value="tenant_b"):
+    with patch("baselith.core.context.get_current_tenant_id", return_value="tenant_b"):
         g.query("MATCH (n) RETURN n", {"id": "x"})
 
     key_a, key_b = seen
@@ -186,7 +186,7 @@ def test_create_constraints(mock_dependencies):
 
 def test_lazy_connection_error(mock_dependencies):
     """Test error if redis package missing (simulated by None)."""
-    with patch("core.graph.core.Redis", None):
+    with patch("baselith.core.graph.core.Redis", None):
         g = GraphDb(enabled=True)
         with pytest.raises(RuntimeError, match="requires the redis package"):
             g._get_client()

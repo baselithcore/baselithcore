@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.evaluation.protocols import EvaluationResult, QualityLevel
-from core.evaluation.service import EvaluationService
-from core.events import EventNames, get_event_bus
-from core.orchestration.handlers.reasoning import ReasoningHandler
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.service import EvaluationService
+from baselith.core.events import EventNames, get_event_bus
+from baselith.core.orchestration.handlers.reasoning import ReasoningHandler
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ async def test_end_to_end_reasoning_flow(mock_llm_service, mock_evaluator):
     eval_service = EvaluationService(event_bus=event_bus, evaluator=mock_evaluator)
 
     # Force enable
-    with patch("core.config.evaluation.evaluation_config") as mock_config:
+    with patch("baselith.core.config.evaluation.evaluation_config") as mock_config:
         mock_config.enabled = True
         eval_service.start()
 
@@ -76,7 +76,7 @@ async def test_end_to_end_reasoning_flow(mock_llm_service, mock_evaluator):
         # Register Reasoning Handler manually (since we don't have full plugin registry in test)
         # We need to ensure get_llm_service returns our mock inside the handler
         with patch(
-            "core.orchestration.handlers.reasoning.get_llm_service",
+            "baselith.core.orchestration.handlers.reasoning.get_llm_service",
             return_value=mock_llm_service,
         ):
             handler = ReasoningHandler()

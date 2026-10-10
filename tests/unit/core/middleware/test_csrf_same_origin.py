@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from core.middleware.csrf import CSRFOriginMiddleware
+from baselith.core.middleware.csrf import CSRFOriginMiddleware
 
 EVIL = "https://evil.example.com"
 

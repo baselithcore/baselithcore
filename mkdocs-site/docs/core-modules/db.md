@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD046 -->
 
-The `core/db/` module manages persistent feedback and interaction data and
+The `baselith/core/db/` module manages persistent feedback and interaction data and
 owns the shared PostgreSQL connection pools (sync and async). It exposes a
 **function-based API** built on `psycopg` 3 — there are no repository
 classes here.
@@ -10,13 +10,13 @@ classes here.
 ## Module Structure
 
 ```txt
-core/db/
+baselith/core/db/
 ├── connection.py     # Sync + async connection / cursor helpers and pool management
 ├── session_setup.py  # Per-checkout session setup: timezone + system_tenant_scope
 ├── _tenant_binding.py # RLS tenant binding (app.tenant_id) per pooled connection
 ├── documents.py       # Document feedback aggregation helpers
 ├── feedback.py        # Feedback persistence and analytics functions
-├── migrate.py         # `python -m core.db.migrate`: what `baselith db migrate` runs
+├── migrate.py         # `python -m baselith.core.db.migrate`: what `baselith db migrate` runs
 ├── migration_config.py # Locates the packaged migrations; builds the Alembic Config
 ├── migrations/        # Alembic environment: env.py, script.py.mako, versions/
 ├── rls_posture.py     # Does row-level security actually apply to this role?
@@ -31,11 +31,11 @@ timezone-apply helpers and, now, `system_tenant_scope()` — split out purely to
 keep `connection.py` under the file-size cap. `connection.py` re-exports every
 name (`APP_TIMEZONE_NAME`, `SYSTEM_TENANT_ID`, `system_tenant_scope`, plus the
 private `_sync_apply_timezone`/`_async_apply_timezone`), so existing imports
-and test monkeypatches against `core.db.connection.<name>` are unaffected. The
+and test monkeypatches against `baselith.core.db.connection.<name>` are unaffected. The
 RLS tenant-binding helpers (`_current_tenant_for_session`,
 `_sync_apply_tenant`, `_async_apply_tenant`) moved to `_tenant_binding.py` for
 the same reason and are re-exported from `connection.py` the same way;
-`core.db.connection.DB_RLS_ENABLED` is still the one switch they read, at call
+`baselith.core.db.connection.DB_RLS_ENABLED` is still the one switch they read, at call
 time.
 
 ---
@@ -47,7 +47,7 @@ is no public `get_pool()` — the pools (`_get_pool` / `_get_async_pool`) are
 internal and opened lazily on first use.
 
 ```python
-from core.db.connection import (
+from baselith.core.db.connection import (
     get_connection,       # sync connection (context manager)
     get_cursor,           # sync cursor (context manager)
     get_async_connection, # async connection (async context manager)
@@ -101,15 +101,15 @@ unbound, and what that means now depends on the flag:
 | `DB_RLS_ENABLED` | Unbound caller |
 | --- | --- |
 | `false` (default) | Binds `"default"`, exactly as before |
-| `true` | Raises `core.context.TenantContextError` — no tenant is bound, so `app.tenant_id` cannot be set |
+| `true` | Raises `baselith.core.context.TenantContextError` — no tenant is bound, so `app.tenant_id` cannot be set |
 
-The check asks `core.context.tenant_is_bound()`, not what
+The check asks `baselith.core.context.tenant_is_bound()`, not what
 `get_current_tenant_id()` resolves to, so it fails closed regardless of
 `strict_tenant_isolation`. Work that legitimately runs outside a request wraps
 itself in `system_tenant_scope()` instead of being guessed at:
 
 ```python
-from core.db.connection import system_tenant_scope
+from baselith.core.db.connection import system_tenant_scope
 
 with system_tenant_scope():
     await run_maintenance()
@@ -164,12 +164,12 @@ the reason or `None`. `DB_RLS_TENANT_SCOPE=transaction` resolves it;
 
 ### Who creates the schema
 
-`core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
+`baselith.core.db.ddl` holds the schema-ownership policy: **Alembic owns every table**.
 A store that self-initializes its schema on the shared pool forces the runtime
 role to hold DDL privileges in production and leaves the table with no migration
 history. `skip_runtime_ddl()` gates the four stores that used to do it
-(`core.a2a.task_store_postgres`, `core.orchestration.checkpoint_postgres`,
-`core.prompts.store_postgres`, `core.storage.postgres`):
+(`baselith.core.a2a.task_store_postgres`, `baselith.core.orchestration.checkpoint_postgres`,
+`baselith.core.prompts.store_postgres`, `baselith.core.storage.postgres`):
 
 | `DB_RUNTIME_DDL` | Behaviour |
 |---|---|
@@ -193,12 +193,12 @@ for the two-role deployment that makes those policies effective.
 
 A plugin table with a `tenant_id` column is built by the plugin's
 `init_schema()`, not by the migrations, so it gets its policy from
-`core.db.rls_policy.tenant_isolation_ddl(tables)`: the same `tenant_isolation`
+`baselith.core.db.rls_policy.tenant_isolation_ddl(tables)`: the same `tenant_isolation`
 predicate as migration 010, owner-guarded and idempotent. `row_tenant_scope(key)`
 binds the key a plugin writes rows under when that is not the session tenant.
 It only binds a key the bound identity derives to — the tenant, or the user id
 under personal tenancy; any other key raises `ForeignTenantKeyError` (a
-`ValueError`, exported from `core.db.rls_policy`), so a plugin cannot reach
+`ValueError`, exported from `baselith.core.db.rls_policy`), so a plugin cannot reach
 another tenant's rows by passing its id.
 See [Plugin tables](../advanced/multi-tenancy.md#plugin-table-policies).
 
@@ -219,11 +219,11 @@ The default `DB_USER` is the role that owns everything Alembic creates, so a
 deployment can have RLS switched on in three places and no isolation at all,
 with nothing in the logs saying so.
 
-`core/db/rls_posture.py` closes that gap. At startup, when `DB_RLS_ENABLED` is
+`baselith/core/db/rls_posture.py` closes that gap. At startup, when `DB_RLS_ENABLED` is
 on, it reads the three vectors back from the catalogs and reports what it finds:
 
 ```python
-from core.db.rls_posture import describe_rls_bypass, probe_rls_posture
+from baselith.core.db.rls_posture import describe_rls_bypass, probe_rls_posture
 
 posture = await probe_rls_posture(conn)
 problem = describe_rls_bypass(posture)   # None when isolation really applies
@@ -272,7 +272,7 @@ starts returning 500s.
 
 ### Schema revision check at startup (`DB_SCHEMA_CHECK`)
 
-After the health probes, `core.api._schema_check.check_schema_revision()`
+After the health probes, `baselith.core.api._schema_check.check_schema_revision()`
 compares the database's Alembic revision with the packaged head:
 
 | `DB_SCHEMA_CHECK` | Behind the head |
@@ -305,7 +305,7 @@ default). With PostgreSQL down the checkpoint-store DDL and the health probe
 waited in series, and boot took ~40 s (~70 s with a plugin that created its
 schema in `initialize`) before the app came up degraded.
 
-`core.db.reachability.probe_postgres()` opens **one direct connection** (no
+`baselith.core.db.reachability.probe_postgres()` opens **one direct connection** (no
 pool, so no retry loop) bounded by a short connect timeout (`PROBE_TIMEOUT_S`,
 5 s), runs `SELECT 1` and records the outcome. The lifespan runs it once,
 before any schema work, and the later steps reuse it:
@@ -328,7 +328,7 @@ hint only: `last_postgres_probe()` is `None` in entry points that never probe
     returned 500 with `relation "chat_feedback" does not exist`.
 
 ```python
-from core.db import get_pool_stats
+from baselith.core.db import get_pool_stats
 
 for role, counters in get_pool_stats().items():
     print(role, counters.get("pool_available"), counters.get("requests_waiting"))
@@ -340,7 +340,7 @@ Set `DB_REPLICA_URL` to route **read-only** queries to a Postgres read replica
 and offload the primary. Use the dedicated read API:
 
 ```python
-from core.db import get_read_connection, get_async_read_connection
+from baselith.core.db import get_read_connection, get_async_read_connection
 
 async with get_async_read_connection() as conn:
     await conn.execute("SELECT ...")   # served by the replica when configured
@@ -361,11 +361,11 @@ Behaviour is **additive and safe**:
 
 ## Feedback Persistence
 
-`core/db/feedback.py` exposes async module functions. Tenant scoping is
+`baselith/core/db/feedback.py` exposes async module functions. Tenant scoping is
 applied automatically from the current tenant context.
 
 ```python
-from core.db.feedback import (
+from baselith.core.db.feedback import (
     insert_feedback,
     get_feedbacks,
     get_feedback_analytics,
@@ -400,11 +400,11 @@ analytics = await get_feedback_analytics(days=30, recent_limit=20, top_limit=10)
 
 ## Document Feedback Aggregation
 
-`core/db/documents.py` provides helpers that aggregate feedback per cited
+`baselith/core/db/documents.py` provides helpers that aggregate feedback per cited
 document — not a document CRUD repository.
 
 ```python
-from core.db.documents import (
+from baselith.core.db.documents import (
     fetch_document_feedback_rows,
     get_document_feedback_summary,
     build_document_stats,
@@ -429,7 +429,7 @@ looked up by whichever identifier it carries.
 The rollup reads **`chat_feedback`**, not `feedback`. The two tables are not
 interchangeable: `feedback` scores interactions and carries no citations, while
 the `feedback` / `sources` / `timestamp` columns this aggregation needs live on
-`chat_feedback` — the same source `core.db.feedback.get_feedback_analytics`
+`chat_feedback` — the same source `baselith.core.db.feedback.get_feedback_analytics`
 uses for its document rollup.
 
 !!! warning "Read-only result"
@@ -442,7 +442,7 @@ uses for its document rollup.
 
 ### Caching on the RAG hot path
 
-`RetrievalScoringMixin.apply_feedback` (`core/chat/mixins/retrieval_scoring.py`,
+`RetrievalScoringMixin.apply_feedback` (`baselith/core/chat/mixins/retrieval_scoring.py`,
 mixed into `RetrievalPipeline`) calls this rollup each time the feedback step
 runs — `score_documents` schedules it (`next_action = "apply_feedback"`) while
 `FEEDBACK_BOOST_ENABLED` is `true` (the default) — and each call scans up to
@@ -484,7 +484,7 @@ directly does not, so a caller invoking it outside `init_db()` under
 `DB_RLS_ENABLED=true` must bind its own tenant context first.
 
 ```python
-from core.db.schema import init_db, ensure_schema
+from baselith.core.db.schema import init_db, ensure_schema
 
 # Idempotent: applies pending Alembic migrations (skips if POSTGRES_ENABLED is false)
 await init_db()
@@ -493,7 +493,7 @@ await init_db()
 await ensure_schema()
 ```
 
-Migrations under `core/db/migrations/versions/` create the core tables, including
+Migrations under `baselith/core/db/migrations/versions/` create the core tables, including
 `tenants`, `chat_feedback`, and `interactions`.
 
 ### Where the migrations come from
@@ -501,16 +501,16 @@ Migrations under `core/db/migrations/versions/` create the core tables, includin
 The Alembic environment ships **inside the package**, so a `pip install
 baselith-core` deployment can migrate from any working directory — no
 checkout, no `alembic.ini` beside the process. Every code path that runs or
-inspects migrations resolves them through `core.db.migration_config`:
+inspects migrations resolves them through `baselith.core.db.migration_config`:
 
 | Name | What it does |
 | --- | --- |
-| `migrations_dir()` | The installed `core/db/migrations` directory; raises `MigrationsNotFoundError` when `env.py` or `versions/` is missing |
+| `migrations_dir()` | The installed `baselith/core/db/migrations` directory; raises `MigrationsNotFoundError` when `env.py` or `versions/` is missing |
 | `build_alembic_config()` | An Alembic `Config` whose `script_location` is that directory. It reads no `alembic.ini`, so it does not depend on the cwd |
 | `migration_heads()` | The head revision(s), after loading every revision module — the cheapest proof the scripts are importable |
 
 `schema.upgrade_head()` applies them under the migration advisory lock;
-`ensure_schema()` runs it in an executor, and `python -m core.db.migrate`
+`ensure_schema()` runs it in an executor, and `python -m baselith.core.db.migrate`
 (what `baselith db migrate` spawns) runs it in a child process. The production
 startup check compares the database revision against the same packaged head,
 and `baselith doctor` **fails** its `DB Migrations` check when the scripts
@@ -518,7 +518,7 @@ cannot be located or loaded.
 
 The repository-root `alembic.ini` remains for developers and for the Helm
 migration Job, which run the `alembic` CLI directly: its
-`script_location = %(here)s/core/db/migrations` points at the same directory,
+`script_location = %(here)s/baselith/core/db/migrations` points at the same directory,
 relative to the ini itself. New revisions still come from `alembic revision`
 at the repository root.
 
@@ -549,7 +549,7 @@ DB_TCP_USER_TIMEOUT_MS=60000       # Unacknowledged-data deadline (Linux; 0 = OS
 DB_SCHEMA_CHECK=                   # strict | warn | off; unset = strict in production — see below
 ```
 
-Feedback aggregation (read by `core/db/documents.py` at import time):
+Feedback aggregation (read by `baselith/core/db/documents.py` at import time):
 
 | Variable | Default | Effect |
 | -------- | ------- | ------ |
@@ -602,7 +602,7 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
     default of 20 per pool, four workers already claim 80 of PostgreSQL's
     default 100 `max_connections` before the migrations job, the RQ worker or
     a second replica connect. Once the startup health probe has reached the
-    database, `core.db.pool_budget.check_connection_budget()` reads
+    database, `baselith.core.db.pool_budget.check_connection_budget()` reads
     `max_connections` and `superuser_reserved_connections` from the server and
     logs `db_pool_budget_exceeds_max_connections` (with the per-worker size
     that would fit) when the budget overflows. It runs inside

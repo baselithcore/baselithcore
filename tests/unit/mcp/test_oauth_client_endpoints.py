@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.mcp.oauth_client import MCPOAuthError, OAuthClient
+from baselith.core.mcp.oauth_client import MCPOAuthError, OAuthClient
 
 from .fakes.oauth_server import ISSUER, FakeOAuth
 

@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from core.config import (
+from baselith.core.config import (
     AppConfig,
     ChatConfig,
     CoreConfig,
@@ -225,7 +225,9 @@ class TestApiKeyStrength:
 
     def _build(self, caplog, **overrides):
         with patch.dict(os.environ, {}, clear=True):
-            with caplog.at_level(logging.WARNING, logger="core.config.security"):
+            with caplog.at_level(
+                logging.WARNING, logger="baselith.core.config.security"
+            ):
                 SecurityConfig(_env_file=None, SECRET_KEY=self._SECRET, **overrides)
         return caplog.text
 

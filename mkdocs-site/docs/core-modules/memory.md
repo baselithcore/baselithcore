@@ -5,7 +5,7 @@ description: Multi-tier memory management with compression and persistence
 
 ## Overview
 
-The `core/memory` module is the **cognitive backbone** of BaselithCore, implementing an intelligent three-tier memory architecture that balances performance, semantic richness, and long-term knowledge retention.
+The `baselith/core/memory` module is the **cognitive backbone** of BaselithCore, implementing an intelligent three-tier memory architecture that balances performance, semantic richness, and long-term knowledge retention.
 
 **Key Benefits**:
 
@@ -34,7 +34,7 @@ The three-tier architecture solves these by combining **speed** (L1), **structur
 
 ## When to Use
 
-Use `core/memory` when building conversational agents that require:
+Use `baselith/core/memory` when building conversational agents that require:
 
 **When to Use Memory System For**:
 
@@ -56,7 +56,7 @@ Use `core/memory` when building conversational agents that require:
 
 **❌ Anti-Patterns**:
 
-- Using memory for **static documents** (use `plugins/document_sources` + Qdrant directly)
+- Using memory for **static documents** (use `baselith/plugins/document_sources` + Qdrant directly)
 - Storing **large files** in messages (use file storage + references)
 - Bypassing compression for **infinite history** (will cause OOM)
 
@@ -72,7 +72,7 @@ Use `core/memory` when building conversational agents that require:
 The `ContextFolder` reduces token usage by summarizing older conversation turns while keeping recent ones verbatim.
 
 ```python
-from core.memory.folding import ContextFolder, FoldingConfig
+from baselith.core.memory.folding import ContextFolder, FoldingConfig
 
 folder = ContextFolder(config=FoldingConfig(keep_latest_n=3))
 # history is a list[MemoryItem]
@@ -100,7 +100,7 @@ call for context that had not moved.
 Monitor memory system performance with `MemoryMetricsCollector`.
 
 ```python
-from core.memory.metrics import MemoryMetricsCollector
+from baselith.core.memory.metrics import MemoryMetricsCollector
 
 collector = MemoryMetricsCollector()
 with collector.track_operation("recall") as tracker:
@@ -161,7 +161,7 @@ graph TB
 - **Storage**: Vector store (Qdrant) via `VectorMemoryProvider`
 - **Purpose**: "Find all memories similar to current query"
 - **Retrieval**: Cosine similarity on embeddings (via shared
-  `core.utils.similarity`)
+  `baselith.core.utils.similarity`)
 
 **Memory Flow**:
 
@@ -177,7 +177,7 @@ graph TB
 ## Module Structure
 
 ```text
-core/memory/
+baselith/core/memory/
 ├── __init__.py        # Public exports
 ├── manager.py         # AgentMemory (the main coordinator)
 ├── mixins/            # storage / search / optimization / context mixins
@@ -195,7 +195,7 @@ core/memory/
 ├── embedding_compat.py      # encode_flexible — uniform sync/async embedder call
 └── interfaces.py            # MemoryProvider / ContextProvider protocols
 
-core/utils/
+baselith/core/utils/
 ├── __init__.py        # Public exports
 ├── similarity.py      # Shared numpy-based cosine similarity
 ├── text_canon.py      # canonicalize / canonical_key — Unicode canonicalization for keys
@@ -204,7 +204,7 @@ core/utils/
 
 !!! note "Embedders may be sync or async"
     Every embedder invocation in the memory layer goes through
-    `core.memory.embedding_compat.encode_flexible`: an async `encode` is
+    `baselith.core.memory.embedding_compat.encode_flexible`: an async `encode` is
     awaited, a plain sync `encode` is offloaded to a worker thread
     (`asyncio.to_thread`), and numpy output is normalized via `tolist()`.
     Call sites that previously awaited `embedder.encode(...)` directly either
@@ -213,7 +213,7 @@ core/utils/
 
 !!! note "Queries are embedded as queries"
     The search side (`_embed_query`, the provider search paths) embeds the
-    query text through `core.nlp.roles.aencode_query`. It calls the
+    query text through `baselith.core.nlp.roles.aencode_query`. It calls the
     embedder's `encode_query` when the embedder defines one, so
     `BASELITH_EMBEDDING_QUERY_PREFIX` applies to queries and the document
     prefix applies only to stored items. Embedders without `encode_query`
@@ -228,7 +228,7 @@ storage, search, optimization, and context mixins. A process-wide singleton is
 available via `get_memory()`.
 
 ```python
-from core.memory import AgentMemory, MemoryType
+from baselith.core.memory import AgentMemory, MemoryType
 
 memory = AgentMemory()  # provider/embedder optional; defaults to working memory
 
@@ -308,13 +308,13 @@ into a truncation of three of them — see
 
 ```python
 
-    async def compress_old_memories(
-        self,
-        days_threshold: int = 7,
-        strategy: str = "summarization",
-        batch_limit: int = 500,
-        prune: bool = False,
-    ) -> "CompressionResult" | None: ...
+async def compress_old_memories(
+    self,
+    days_threshold: int = 7,
+    strategy: str = "summarization",
+    batch_limit: int = 500,
+    prune: bool = False,
+) -> "CompressionResult" | None: ...
 ```
 
 ---
@@ -361,7 +361,7 @@ call `compress_old_memories(...)`; to drive compression directly, use the
 compressor with a list of `MemoryItem`s.
 
 ```python
-from core.memory.compression import MemoryCompressor, CompressionStrategy
+from baselith.core.memory.compression import MemoryCompressor, CompressionStrategy
 
 compressor = MemoryCompressor(llm_service=llm_service)
 
@@ -433,7 +433,7 @@ flowchart LR
 ### Relevance Calculator
 
 ```python
-from core.memory.compression import RelevanceCalculator
+from baselith.core.memory.compression import RelevanceCalculator
 
 calculator = RelevanceCalculator()
 
@@ -454,10 +454,10 @@ class CompressionStrategy(str, Enum):
     PRUNING = "pruning"              # Remove low-relevance items
 ```
 
-All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based).
+All similarity computations use the shared `baselith.core.utils.similarity.cosine_similarity` (numpy-based).
 For the clustering strategy, both the batched `encode()` pass and the
 pairwise-similarity/greedy-clustering pass run on the dedicated inference
-executor (`core.utils.concurrency.run_inference`), keeping the CPU-bound work
+executor (`baselith.core.utils.concurrency.run_inference`), keeping the CPU-bound work
 off the event loop. The offload carries the caller's `contextvars` (tenant,
 trace) into the worker — see
 [NLP › Where inference runs](nlp.md#where-inference-runs).
@@ -466,15 +466,15 @@ trace) into the worker — see
 
 ## Storage Providers
 
-`core/memory/providers.py` ships two `MemoryProvider` implementations.
+`baselith/core/memory/providers.py` ships two `MemoryProvider` implementations.
 
 ### VectorMemoryProvider
 
 Persists `MemoryItem`s to the vector store for semantic retrieval.
 
 ```python
-from core.memory.providers import VectorMemoryProvider
-from core.memory import MemoryItem, MemoryType
+from baselith.core.memory.providers import VectorMemoryProvider
+from baselith.core.memory import MemoryItem, MemoryType
 
 provider = VectorMemoryProvider(collection_name="agent_memory", embedder=embedder)
 
@@ -518,10 +518,10 @@ and one durability-acked upsert per item**, so the ack was amortized over
 nothing — a 500-item compaction meant 500 round trips. The same held for the
 delete side: `compress_old_memories()` used to issue up to 1000 sequential
 `provider.delete()` calls. Both directions now go through
-`core.memory.optimization_batch`:
+`baselith.core.memory.optimization_batch`:
 
 ```python
-from core.memory.optimization_batch import add_items, delete_items
+from baselith.core.memory.optimization_batch import add_items, delete_items
 
 # Uses provider.add_many(items) / provider.delete_many(item_ids) when the
 # provider has them; otherwise falls back to a bounded fan-out of single
@@ -532,7 +532,7 @@ await delete_items(provider, item_ids, fanout_limit=8)
 
 `add_many` and `delete_many` are **optional extensions**, discovered by duck
 typing — they are not part of the `MemoryProvider` protocol in
-`core/memory/interfaces.py`, so existing providers keep working unchanged.
+`baselith/core/memory/interfaces.py`, so existing providers keep working unchanged.
 Implement them when your backend can index or delete a batch in one call; skip
 them and you get the bounded fan-out (`_PROVIDER_FANOUT_LIMIT = 8` concurrent
 round trips, so a large compaction cannot open hundreds at once).
@@ -579,7 +579,7 @@ implements the item-at-a-time protocol plus `list_items`, so batch writes and
 deletes take the fan-out path above while compaction can still enumerate it.
 
 ```python
-from core.memory.providers import InMemoryProvider
+from baselith.core.memory.providers import InMemoryProvider
 
 provider = InMemoryProvider()
 memory = AgentMemory(provider=provider)
@@ -590,7 +590,7 @@ memory = AgentMemory(provider=provider)
 Cloud-native intelligent memory with automatic fact extraction and user profiles. See the dedicated **[Supermemory](supermemory.md)** page for full documentation.
 
 ```python
-from core.memory import SupermemoryProvider, SupermemoryContextProvider
+from baselith.core.memory import SupermemoryProvider, SupermemoryContextProvider
 
 # Drop-in MemoryProvider replacement — construct and pass it explicitly;
 # SUPERMEMORY_ENABLED does not make build_memory_provider() select it
@@ -614,8 +614,8 @@ Knowledge graph integration for entity relationship tracking and multi-hop reaso
     consulted only when you pass one to `AgentMemory(graph_provider=...)`.
 
 ```python
-from core.memory.graph_provider import SimpleGraphMemoryProvider
-from core.memory.manager import AgentMemory
+from baselith.core.memory.graph_provider import SimpleGraphMemoryProvider
+from baselith.core.memory.manager import AgentMemory
 
 # Create graph provider
 graph = SimpleGraphMemoryProvider()
@@ -673,7 +673,7 @@ neighbors = await graph.get_neighbors(
 ## Integration with the agent loop
 
 ```python
-from core.memory import AgentMemory, MemoryType
+from baselith.core.memory import AgentMemory, MemoryType
 
 # llm_service is what lets step 4 run; without it compaction returns None
 memory = AgentMemory(provider=provider, embedder=embedder, llm_service=llm_service)
@@ -704,7 +704,7 @@ await memory.compress_old_memories(days_threshold=7)
 (`similarity_threshold`, `short_term_limit`, `working_memory_limit`,
 `provider`, `graph_provider`, `embedder`, `context_folder`, `llm_service`).
 The only dedicated `MEMORY_*` environment variables are the runtime knobs on
-`MemoryRuntimeConfig` (`core/config/memory.py`, env prefix `MEMORY_`, read via
+`MemoryRuntimeConfig` (`baselith/core/config/memory.py`, env prefix `MEMORY_`, read via
 `get_memory_runtime_config()`):
 
 | Env var | Default | Purpose |
@@ -716,7 +716,7 @@ The only dedicated `MEMORY_*` environment variables are the runtime knobs on
 ### Persistence at bootstrap
 
 The `memory` and `hierarchical_memory` resources built by
-`core/bootstrap/lazy_init.py` are constructed **with** a
+`baselith/core/bootstrap/lazy_init.py` are constructed **with** a
 `VectorMemoryProvider` (collections `agent_memory` and `hierarchical_memory`)
 and an embedder, so long-term memories outlive the process and are shared
 between workers. Both used to be constructed with no provider at all, and that
@@ -742,7 +742,7 @@ the in-process deque, so every memory is lost on exit.
     stall in-flight requests.
 
 !!! warning "`get_memory()` is a separate, provider-less singleton"
-    `core.memory.get_memory()` still returns a bare `AgentMemory()`: no
+    `baselith.core.memory.get_memory()` still returns a bare `AgentMemory()`: no
     provider, no embedder, no `llm_service`. Persistence is wired on the
     lazily-initialized `memory` resource, so reach for it via the lazy
     registry (`get_lazy_registry().get_or_create("memory")`) or pass your own
@@ -771,7 +771,7 @@ from `StorageConfig` / `VectorStoreConfig`.
 
 ## Scratchpad — agent-written section memory
 
-`core/memory/scratchpad.py` provides a section-organized scratchpad
+`baselith/core/memory/scratchpad.py` provides a section-organized scratchpad
 that an agent writes during a run and re-reads to refocus on the goal.
 Distinct from STM/MTM/LTM because it is *written by the agent itself*
 and bounded per-section.
@@ -812,8 +812,8 @@ sniffs for `get_all` on the backend and prefers it, so a full scratchpad read
 costs one command instead of `HKEYS` plus one `HGET` per section.
 
 ```python
-from core.memory.scratchpad import Scratchpad
-from core.memory.scratchpad_redis import RedisScratchpadBackend
+from baselith.core.memory.scratchpad import Scratchpad
+from baselith.core.memory.scratchpad_redis import RedisScratchpadBackend
 
 pad = Scratchpad(RedisScratchpadBackend())   # cache Redis URL from config
 ```
@@ -821,7 +821,7 @@ pad = Scratchpad(RedisScratchpadBackend())   # cache Redis URL from config
 ### Example
 
 ```python
-from core.memory.scratchpad import Scratchpad
+from baselith.core.memory.scratchpad import Scratchpad
 
 pad = Scratchpad()
 pad.update_section("user-42", "goal", "synthesize Q3 report")
@@ -886,7 +886,7 @@ built, the failure is logged once and the async methods fall back to
 
 ## Hybrid retrieval — BM25 + Reciprocal Rank Fusion
 
-`core/memory/hybrid_search.py` complements dense vector search with a
+`baselith/core/memory/hybrid_search.py` complements dense vector search with a
 pure-Python BM25 index and a Reciprocal Rank Fusion (RRF) fuser. Dense
 retrieval misses exact matches (error codes, identifiers, rare terms);
 BM25 misses semantic neighbours. Fusing both catches both.
@@ -909,7 +909,7 @@ dense).
 ### Tokenization
 
 Documents and queries are canonicalized before splitting
-(`core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded,
+(`baselith.core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded,
 whitespace collapsed) and then tokenized with a Unicode-aware `\w+`. The
 previous ASCII-only pattern truncated `"perché"` to `perch` and dropped CJK
 text entirely; now accented and non-Latin memories index as whole words and an
@@ -940,13 +940,13 @@ Measured speedups per query shape (single rare term on a 50k-doc corpus:
 700x) are tabulated in
 [Performance Tuning](../advanced/performance-optimizations.md#sparse-bm25-scoring-and-heap-selection).
 
-Inside `HierarchicalMemory` recall (`core/memory/hierarchy_search.py`), the
+Inside `HierarchicalMemory` recall (`baselith/core/memory/hierarchy_search.py`), the
 whole fusion pass — tokenization, BM25 scoring, RRF — is pure CPU, so past a
 corpus of 64 items (`_FUSE_OFFLOAD_THRESHOLD`) it runs on the dedicated
-inference executor (`core.utils.concurrency.run_inference`) instead of inline
+inference executor (`baselith.core.utils.concurrency.run_inference`) instead of inline
 on the event loop; below the threshold the thread hand-off would cost more
 than the work, so it stays inline. The opt-in reranker already ran off-loop
-the same way, and scores through `core.nlp.rerank.score_pairs` so the
+the same way, and scores through `baselith.core.nlp.rerank.score_pairs` so the
 cross-encoder gets a device-sized batch (8 off CUDA, 32 on CUDA) instead of
 the library's padding-heavy default.
 
@@ -961,7 +961,7 @@ shim is gone.
 ### Example: fuse keyword + dense
 
 ```python
-from core.memory.hybrid_search import BM25Index, HybridSearcher, ScoredHit
+from baselith.core.memory.hybrid_search import BM25Index, HybridSearcher, ScoredHit
 
 bm25 = BM25Index()
 bm25.index({d.id: d.text for d in corpus})
@@ -975,5 +975,5 @@ fused = HybridSearcher().fuse(bm25=bm25_hits, dense=dense_hits, top_k=3)
 ```
 
 Feed `fused` into the existing reranker in
-[`core/chat/reranking.py`](https://github.com/baselithcore/baselithcore/blob/main/core/chat/reranking.py)
+[`baselith/core/chat/reranking.py`](https://github.com/baselithcore/baselithcore/blob/main/baselith/core/chat/reranking.py)
 for a final cross-encoder pass.

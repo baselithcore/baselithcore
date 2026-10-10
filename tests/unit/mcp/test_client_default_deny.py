@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from core.mcp.client import MCPClient
+from baselith.core.mcp.client import MCPClient
 
 from .fakes.http_server import (
     default_methods,

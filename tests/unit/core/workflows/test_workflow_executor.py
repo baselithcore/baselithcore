@@ -4,8 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.workflows.builder import WorkflowDefinition, WorkflowEdge, WorkflowNode
-from core.workflows.executor import (
+from baselith.core.workflows.builder import (
+    WorkflowDefinition,
+    WorkflowEdge,
+    WorkflowNode,
+)
+from baselith.core.workflows.executor import (
     ExecutionContext,
     ExecutionStatus,
     NodeResult,
@@ -347,7 +351,8 @@ class TestWorkflowExecutor:
         from unittest.mock import patch
 
         with patch(
-            "core.workflows.builder.WorkflowDefinition.validate", return_value=[]
+            "baselith.core.workflows.builder.WorkflowDefinition.validate",
+            return_value=[],
         ):
             result = await executor.execute(wf)
             assert result.status == ExecutionStatus.FAILED

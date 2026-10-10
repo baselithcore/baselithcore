@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Detect drift between manifest ``integrity_sha256`` and the plugin source tree.
 
-Iterates over every directory under ``plugins/`` (or the paths supplied on the
+Iterates over every directory under ``baselith/plugins/`` (or the paths supplied on the
 command line), computes the SHA-256 over each plugin's executable surface, and
 compares it to the value declared in the manifest.
 
@@ -15,11 +15,11 @@ Exit status:
 Run via pre-commit / CI:
 
     python scripts/check_plugin_integrity.py
-    python scripts/check_plugin_integrity.py --require-signed plugins/web_scraper
+    python scripts/check_plugin_integrity.py --require-signed baselith/plugins/web_scraper
 
 To re-sign after legitimate changes::
 
-    baselith plugin sign plugins/<name>
+    baselith plugin sign baselith/plugins/<name>
 """
 
 from __future__ import annotations
@@ -40,12 +40,12 @@ except ImportError:  # pragma: no cover - environment guard
 # Repository root.
 ROOT = Path(__file__).resolve().parent.parent
 
-# Load ``core/plugins/integrity.py`` directly without importing the
-# ``core.plugins`` package. The package's ``__init__`` pulls in the full
+# Load ``baselith/core/plugins/integrity.py`` directly without importing the
+# ``baselith.core.plugins`` package. The package's ``__init__`` pulls in the full
 # observability + config stack (pydantic, structlog, …) which is overkill for a
 # CI gate that only needs ``hashlib + pathlib``. Direct-load keeps the job
 # install footprint minimal (just PyYAML).
-_integrity_path = ROOT / "core" / "plugins" / "integrity.py"
+_integrity_path = ROOT / "baselith" / "core" / "plugins" / "integrity.py"
 _spec = importlib.util.spec_from_file_location("_integrity_check", _integrity_path)
 if _spec is None or _spec.loader is None:  # pragma: no cover - fs sanity
     print(f"Could not load {_integrity_path}", file=sys.stderr)
@@ -56,7 +56,7 @@ compute_plugin_hash = _integrity.compute_plugin_hash
 
 
 _MANIFEST_NAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
-_DEFAULT_PLUGIN_ROOT = ROOT / "plugins"
+_DEFAULT_PLUGIN_ROOT = ROOT / "baselith" / "plugins"
 
 
 def _iter_plugin_dirs(paths: list[Path]) -> list[Path]:
@@ -66,7 +66,12 @@ def _iter_plugin_dirs(paths: list[Path]) -> list[Path]:
     if not git:
         return []
     raw = subprocess.run(
-        [git, "ls-files", "plugins/*/manifest.y*ml", "plugins/*/manifest.json"],
+        [
+            git,
+            "ls-files",
+            "baselith/plugins/*/manifest.y*ml",
+            "baselith/plugins/*/manifest.json",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -104,7 +109,7 @@ def main() -> int:
         "paths",
         nargs="*",
         type=Path,
-        help="Plugin directories to check (default: plugins/*)",
+        help="Plugin directories to check (default: baselith/plugins/*)",
     )
     parser.add_argument(
         "--require-signed",

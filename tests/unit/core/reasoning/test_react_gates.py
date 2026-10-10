@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     ApprovalPendingError,
     AutonomyLevel,
     AutonomyPolicy,
 )
-from core.orchestration.contract import (
+from baselith.core.orchestration.contract import (
     AgentContract,
     Capabilities,
     ContractValidator,
 )
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 
 class _Approver:
@@ -154,7 +158,7 @@ class TestBudgetGate:
         assert calls == [1]
 
     async def test_ambient_budget_consumed(self) -> None:
-        from core.orchestration.budget_context import activate_budget
+        from baselith.core.orchestration.budget_context import activate_budget
 
         calls: list = []
         budget = LoopBudget(limits=LoopLimits(max_tool_calls=1))
@@ -166,7 +170,7 @@ class TestBudgetGate:
             with pytest.raises(BudgetExceededError):
                 await agent._execute_tool("t", "")
         finally:
-            from core.orchestration.budget_context import deactivate_budget
+            from baselith.core.orchestration.budget_context import deactivate_budget
 
             deactivate_budget(token)
 

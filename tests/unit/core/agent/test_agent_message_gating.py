@@ -8,10 +8,10 @@ injected service that predates the message API still gets.
 
 import pytest
 
-from core.agent import Agent
-from core.reasoning.react import ToolDefinition
-from core.services.llm.messages import Message, TextBlock
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.agent import Agent
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.messages import Message, TextBlock
+from baselith.core.services.llm.tool_calling import LLMResult
 from tests.unit.core.agent.test_agent_messages import (
     _call,
     _histories,
@@ -51,7 +51,7 @@ class TestGating:
             seen.append((tool_name, category, kwargs.get("args")))
 
         monkeypatch.setattr(
-            "core.orchestration.enforcement.enforce_tool_invocation", _spy
+            "baselith.core.orchestration.enforcement.enforce_tool_invocation", _spy
         )
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         agent = Agent(
@@ -77,7 +77,7 @@ class TestGating:
             seen.update(context)
 
         monkeypatch.setattr(
-            "core.orchestration.enforcement.enforce_tool_invocation", _spy
+            "baselith.core.orchestration.enforcement.enforce_tool_invocation", _spy
         )
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         policy = object()
@@ -94,7 +94,7 @@ class TestGating:
             seen.update(context)
 
         monkeypatch.setattr(
-            "core.orchestration.enforcement.enforce_tool_invocation", _spy
+            "baselith.core.orchestration.enforcement.enforce_tool_invocation", _spy
         )
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         agent = Agent(tools=[_pop], llm_service=svc)
@@ -106,7 +106,7 @@ class TestGating:
 
     async def test_no_policy_is_wired_by_default(self):
         """The docstring's ApprovalPendingError is unreachable without one."""
-        from core.agent._tool_dispatch import gate_context
+        from baselith.core.agent._tool_dispatch import gate_context
 
         assert "autonomy_policy" not in gate_context(Agent(llm_service=_service([])))
 
@@ -115,7 +115,7 @@ class TestGating:
             raise PermissionError("tool not allowed by contract")
 
         monkeypatch.setattr(
-            "core.orchestration.enforcement.enforce_tool_invocation", _deny
+            "baselith.core.orchestration.enforcement.enforce_tool_invocation", _deny
         )
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         agent = Agent(tools=[_pop], llm_service=svc)
@@ -126,7 +126,10 @@ class TestGating:
         assert "not allowed" in block.content
 
     async def test_a_budget_abort_is_never_swallowed(self, monkeypatch):
-        from core.orchestration.limits import BudgetExceededError, LoopBudgetSnapshot
+        from baselith.core.orchestration.limits import (
+            BudgetExceededError,
+            LoopBudgetSnapshot,
+        )
 
         async def _broke(context, tool_name, category="read_only", **kwargs):
             raise BudgetExceededError(
@@ -134,7 +137,7 @@ class TestGating:
             )
 
         monkeypatch.setattr(
-            "core.orchestration.enforcement.enforce_tool_invocation", _broke
+            "baselith.core.orchestration.enforcement.enforce_tool_invocation", _broke
         )
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         agent = Agent(tools=[_pop], llm_service=svc)
@@ -142,8 +145,11 @@ class TestGating:
             await agent.run("q")
 
     async def test_the_ambient_budget_counts_iterations_and_tool_calls(self):
-        from core.orchestration.budget_context import activate_budget, deactivate_budget
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         svc = _service([_call("_pop", {"city": "Rome"}), LLMResult(text="done")])
         agent = Agent(
@@ -164,7 +170,7 @@ class TestGating:
 class TestTheRealServiceTakesTheMessagePath:
     def test_llm_service_advertises_the_message_api(self):
         """Without this the default agent silently falls back to prompts."""
-        from core.services.llm.service import LLMService
+        from baselith.core.services.llm.service import LLMService
 
         assert LLMService.supports_messages is True
         assert callable(LLMService.generate_messages)

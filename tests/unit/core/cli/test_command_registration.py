@@ -2,8 +2,8 @@
 
 A core command whose module failed to import used to disappear from ``--help``
 without a word unless ``BASELITH_CLI_DEBUG`` was set, which reads as "no such
-feature". And ``core/cli/__init__.py`` imported ``__main__`` eagerly, so
-``python -m core.cli`` tripped runpy's "found in sys.modules" RuntimeWarning.
+feature". And ``baselith/core/cli/__init__.py`` imported ``__main__`` eagerly, so
+``python -m baselith.core.cli`` tripped runpy's "found in sys.modules" RuntimeWarning.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import core.cli.__main__ as cli_main
+import baselith.core.cli.__main__ as cli_main
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -51,7 +51,7 @@ class TestBrokenCommandIsReported:
 
 class TestLazyPackage:
     def test_importing_the_package_does_not_run_main_module(self):
-        code = "import sys, core.cli; print('core.cli.__main__' in sys.modules)"
+        code = "import sys, baselith.core.cli; print('baselith.core.cli.__main__' in sys.modules)"
         out = subprocess.run(
             [sys.executable, "-c", code],
             cwd=REPO_ROOT,
@@ -63,6 +63,6 @@ class TestLazyPackage:
         assert out.stdout.strip() == "False"
 
     def test_main_still_resolves(self):
-        from core.cli import main
+        from baselith.core.cli import main
 
         assert main is cli_main.main

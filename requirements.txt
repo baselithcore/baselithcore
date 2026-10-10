@@ -51,7 +51,7 @@ prometheus-client>=0.20.0,<1.0
 psycopg[binary,pool]>=3.2.1,<4.0
 pydantic-settings>=2.0.0
 PyJWT>=2.14.0,<3.0
-# Direct, unguarded import in core/config/env.py and backend.py — do not rely
+# Direct, unguarded import in baselith/core/config/env.py and backend.py — do not rely
 # on pydantic-settings pulling it transitively.
 python-dotenv>=1.0.0
 # >=0.0.30: CVE-2026-42561 + CVE-2026-53539

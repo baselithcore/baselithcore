@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugins.result import fail, ok, partial
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.plugins.result import fail, ok, partial
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 pytestmark = [pytest.mark.unit]
 
@@ -93,7 +93,7 @@ class TestArgumentValidation:
         the tool does not accept is a model error the gate should never see —
         it would otherwise consume an approval and a budget entry, then die on
         an opaque TypeError."""
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         calls: list = []
         budget = LoopBudget(limits=LoopLimits(max_tool_calls=5))
@@ -202,7 +202,7 @@ class TestArgumentValidation:
 
 
 def _permissive():
-    from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+    from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
     return AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)
 

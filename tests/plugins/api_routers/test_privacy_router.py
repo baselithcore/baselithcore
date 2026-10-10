@@ -6,11 +6,15 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from core.api.errors import install_error_handlers
-from core.auth.types import AuthRole, AuthUser
-from core.middleware import require_user
-from core.privacy import DataProviderRegistry, DataSubjectService, DictDataProvider
-from plugins.api_routers import privacy as pr
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.middleware import require_user
+from baselith.core.privacy import (
+    DataProviderRegistry,
+    DataSubjectService,
+    DictDataProvider,
+)
+from baselith.plugins.api_routers import privacy as pr
 
 
 def _service() -> DataSubjectService:

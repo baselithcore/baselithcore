@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.agent import (
+from baselith.core.agent import (
     Agent,
     Completed,
     Failed,
@@ -23,11 +23,14 @@ from core.agent import (
     ToolCallFinished,
     ToolCallStarted,
 )
-from core.reasoning.react import ToolDefinition
-from core.services.llm.exceptions import LLMProviderError, StreamInterruptedError
-from core.services.llm.stream_events import StreamEnd
-from core.services.llm.stream_events import TextDelta as StreamText
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.exceptions import (
+    LLMProviderError,
+    StreamInterruptedError,
+)
+from baselith.core.services.llm.stream_events import StreamEnd
+from baselith.core.services.llm.stream_events import TextDelta as StreamText
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class ScriptedProvider:
@@ -78,8 +81,8 @@ def _result(script: list[Any]) -> LLMResult:
 
 
 def _service(provider, *, stream: bool = True):
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider="ollama", model="m", fallback_chain="", stream_agent_text=stream
@@ -101,7 +104,9 @@ def _no_tenant_ledger(monkeypatch):
     async def _record(usd, **_kwargs):
         return None
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
 
 
 async def _collect(agent, prompt="q"):

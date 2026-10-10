@@ -21,7 +21,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `UVICORN_LIMIT_CONCURRENCY` | unset (no limit) | API (all three entry points) | Load shedding: above this many concurrent connections/tasks uvicorn answers `503` immediately instead of queueing work until the client or the proxy times out — an explicit "over capacity" the proxy and the HPA can act on, where unbounded queueing shows up as latency collapse across every request. Size it from a load test against one replica; leave unset to keep uvicorn's default. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
-| `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. With `ORCHESTRATOR_COMPACTION_SUMMARIZE=true` the native loop first condenses older complete turns into one untrusted summary turn (one LLM call, falls back to the deterministic pass on failure). |
+| `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`baselith/core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. With `ORCHESTRATOR_COMPACTION_SUMMARIZE=true` the native loop first condenses older complete turns into one untrusted summary turn (one LLM call, falls back to the deterministic pass on failure). |
 | `BASELITH_SCRATCHPAD_TTL_SECONDS` | `86400` | Memory | Sliding TTL for `RedisScratchpadBackend` threads (refreshed on write). `0` disables expiry. |
 | `BASELITH_MEMORY_DECAY_PRUNE` | `false` | Memory | Run relevance-decay pruning (`RelevanceCalculator`: exponential age decay × importance) during maintenance sweeps — items past `max_age_days` or under `pruning_threshold` are evicted from MTM/LTM. `prune_low_relevance()` stays callable directly either way. |
 | `BASELITH_MEMORY_RERANK` | `false` | Memory | Cross-encoder re-ordering of recalled top-k (reuses the chat reranker). Off by default: heavy optional dependency + hot-path latency. Fail-open; order-only (never changes which k items return). |
@@ -45,7 +45,7 @@ in batches of `INDEX_BATCH_SIZE` through a single `vectorstore.index(documents=�
 call (one embedding forward pass + one bulk upsert per batch) rather than one
 round-trip per document. A batch that fails is retried document-by-document so a
 single poison document cannot drop the whole batch. Stale-document deletion fans
-out through `core.utils.concurrency.bounded_gather` with an `INDEX_MAX_CONCURRENCY`
+out through `baselith.core.utils.concurrency.bounded_gather` with an `INDEX_MAX_CONCURRENCY`
 ceiling. The spaCy metadata pass in the filesystem source now runs in the
 executor (off the event loop) with the lemmatizer/attribute-ruler pipes disabled.
 
@@ -71,7 +71,7 @@ under-counted. Typically a large input-cost and latency win on long prefixes.
 
 ## Tool-output truncation
 
-`core.orchestration.truncate_tool_output` caps a tool result before it re-enters
+`baselith.core.orchestration.truncate_tool_output` caps a tool result before it re-enters
 the context window, keeping a **head and a tail** (the payload framing and the
 trailing status/error) and replacing the middle with a `… [truncated N chars] …`
 marker. The cut is deterministic so replayed trajectories stay stable. Wired into
@@ -125,7 +125,7 @@ It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
 The check that runs before every keyed request — replay a stored response, or
 claim the in-flight lock — is **one atomic Redis round trip** (a Lua script,
-registered once per process, in `core/middleware/_idempotency_store.py`). It
+registered once per process, in `baselith/core/middleware/_idempotency_store.py`). It
 used to be a `GET` followed by a `SET NX`, plus a third `GET` when the lock was
 held to cover the gap between the two; inside one script there is no gap, so
 the hot path costs a single Redis latency and the `409` needs no re-check.
@@ -258,7 +258,7 @@ upsert.
 
 ## Connection-pool drain on shutdown
 
-The teardown is an ordered list of named steps (`core.api._shutdown`):
+The teardown is an ordered list of named steps (`baselith.core.api._shutdown`):
 runtime services, orchestrator drain, background tasks, retention and
 regulatory subsystems, plugins, lazy registry, shared clients, usage sinks,
 pending audit events, sync inference, rate limiter, OpenTelemetry flush,
@@ -291,7 +291,7 @@ The budget the deployment has to grant, in order:
 |---|---|---|
 | `preStop` sleep (endpoint removal reaches the proxies) | 5 s | Helm `deployment.yaml` |
 | HTTP drain, then readiness already 503 | 30 s | `GRACEFUL_SHUTDOWN_TIMEOUT` (`backend.py`, the image `CMD`, `core-entrypoint.sh`) |
-| Lifespan teardown | 40 s | `core.api._shutdown.TEARDOWN_BUDGET_S` |
+| Lifespan teardown | 40 s | `baselith.core.api._shutdown.TEARDOWN_BUDGET_S` |
 | **`terminationGracePeriodSeconds`** | **80 s** | Helm `values.yaml` (5 + 30 + 40, plus 5 s to exit) |
 
 A unit test (`tests/unit/helm/test_helm_chart_shutdown_budget.py`) reads all
@@ -300,11 +300,11 @@ when the three entry points disagree on the drain default. Raise
 `terminationGracePeriodSeconds` whenever you raise `GRACEFUL_SHUTDOWN_TIMEOUT`.
 
 The FastAPI lifespan shutdown explicitly closes the shared Postgres
-connection pools (`core.db.connection.close_async_pool`) and the shared Redis
-pools (`core.cache.redis_cache.close_redis_pools`) instead of relying on
+connection pools (`baselith.core.db.connection.close_async_pool`) and the shared Redis
+pools (`baselith.core.cache.redis_cache.close_redis_pools`) instead of relying on
 garbage collection. uvicorn drains in-flight requests before running lifespan
 shutdown, so the close is safe and rolling deploys release server-side
-DB/Redis resources promptly. `core/resilience/shutdown.py` (`GracefulShutdown`)
+DB/Redis resources promptly. `baselith/core/resilience/shutdown.py` (`GracefulShutdown`)
 is deliberately **not** installed inside the FastAPI app: it would replace
 uvicorn's own SIGTERM/SIGINT handlers; it remains available for standalone
 (non-uvicorn) embeddings of the runtime.
@@ -338,7 +338,7 @@ platform on a runner of that architecture.
 
 The image precompiles the application tree (`python -m compileall
 --invalidation-mode checked-hash`) — pip already ships bytecode for
-site-packages, but `core/` and `plugins/` are copied as source and every
+site-packages, but `baselith/core/` and `plugins/` are copied as source and every
 worker recompiled them on boot. Hash-checked `.pyc` files stay valid
 regardless of mtimes and are re-validated against the source, so a bind-mounted
 edit in development is never served from a stale cache.
@@ -363,7 +363,7 @@ Outside the image — a VM or bare-metal host started with
 `baselith run --workers N`, or `uvicorn backend:app` with `WEB_CONCURRENCY=N` —
 nothing sets those variables, and each worker sized its pool to every core:
 four workers loading an embedding model at once ran 32 threads on 8 cores.
-`core.config.concurrency.share_cpu_threads()` now gives each worker
+`baselith.core.config.concurrency.share_cpu_threads()` now gives each worker
 `cpus // N` threads (at least one) through `OMP_NUM_THREADS`,
 `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS`. `backend.py` calls it before
 anything imports torch or numpy, and `baselith run` before it spawns the

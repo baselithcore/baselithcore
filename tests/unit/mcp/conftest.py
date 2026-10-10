@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-import core.config.mcp as mcp_config_module
+import baselith.core.config.mcp as mcp_config_module
 
 from .stdio_support import exe
 

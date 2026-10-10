@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.utils.media import sniff_audio_type, sniff_document_type
+from baselith.core.utils.media import sniff_audio_type, sniff_document_type
 
 # Minimal-but-real magic-byte heads per format.
 _PDF = b"%PDF-1.7\n%stuff"

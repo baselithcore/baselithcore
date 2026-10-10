@@ -44,7 +44,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.evaluation.fairness import evaluate_fairness  # noqa: E402
+from baselith.core.evaluation.fairness import evaluate_fairness  # noqa: E402
 
 
 class FairnessDatasetError(ValueError):

@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.client_errors import (
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.client_errors import (
     MCPAuthError,
     MCPClientError,
     MCPProtocolError,

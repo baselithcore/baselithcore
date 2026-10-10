@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock
 
-from core.learning.feedback import FeedbackItem, RedisFeedbackStore
+from baselith.core.learning.feedback import FeedbackItem, RedisFeedbackStore
 
 
 def _item_payload(item: FeedbackItem) -> bytes:

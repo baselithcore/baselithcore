@@ -1,4 +1,4 @@
-"""The retired ``core.services.evaluation`` shim."""
+"""The retired ``baselith.core.services.evaluation`` shim."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import core.services.evaluation as shim
-from core.evaluation import EvaluationService as LiveEvaluationService
+import baselith.core.services.evaluation as shim
+from baselith.core.evaluation import EvaluationService as LiveEvaluationService
 
 
 def test_shim_is_deprecated_alias_of_live_service() -> None:
-    with pytest.warns(DeprecationWarning, match="core.evaluation.EvaluationService"):
+    with pytest.warns(
+        DeprecationWarning, match="baselith.core.evaluation.EvaluationService"
+    ):
         service = shim.EvaluationService(event_bus=MagicMock())
     assert isinstance(service, LiveEvaluationService)
 
@@ -20,7 +22,9 @@ def test_shim_is_deprecated_alias_of_live_service() -> None:
 def test_get_evaluation_service_warns_and_is_cached(monkeypatch) -> None:
     monkeypatch.setattr(shim, "_eval_service", None)
     with (
-        patch("core.evaluation.service.get_event_bus", return_value=MagicMock()),
+        patch(
+            "baselith.core.evaluation.service.get_event_bus", return_value=MagicMock()
+        ),
         pytest.warns(DeprecationWarning),
     ):
         first = shim.get_evaluation_service()
@@ -50,8 +54,10 @@ async def test_evaluate_rag_uses_fresh_metrics_per_call() -> None:
         return factory
 
     with (
-        patch("core.evaluation.metrics.FaithfulnessEvaluator", make("f", 0.9)),
-        patch("core.evaluation.metrics.AnswerRelevancyEvaluator", make("r", 0.5)),
+        patch("baselith.core.evaluation.metrics.FaithfulnessEvaluator", make("f", 0.9)),
+        patch(
+            "baselith.core.evaluation.metrics.AnswerRelevancyEvaluator", make("r", 0.5)
+        ),
         pytest.warns(DeprecationWarning),
     ):
         service = shim.EvaluationService(event_bus=MagicMock())
@@ -67,8 +73,12 @@ async def test_evaluate_rag_reports_unavailable_without_metric() -> None:
     ev = MagicMock(threshold=0.7, metric=None)
     ev.measure.return_value = 0.0
     with (
-        patch("core.evaluation.metrics.FaithfulnessEvaluator", return_value=ev),
-        patch("core.evaluation.metrics.AnswerRelevancyEvaluator", return_value=ev),
+        patch(
+            "baselith.core.evaluation.metrics.FaithfulnessEvaluator", return_value=ev
+        ),
+        patch(
+            "baselith.core.evaluation.metrics.AnswerRelevancyEvaluator", return_value=ev
+        ),
         pytest.warns(DeprecationWarning),
     ):
         service = shim.EvaluationService(event_bus=MagicMock())

@@ -1,7 +1,7 @@
 """vLLM through the seams that are not the shared funnel.
 
 Plugins holding their own SDK read the pin from
-:func:`core.services.llm.governed.resolve_governed_client_config`, and an
+:func:`baselith.core.services.llm.governed.resolve_governed_client_config`, and an
 operator may store a vLLM key from the admin console through the credential
 seam. Both have to land on the same server with the same key the funnel would
 use — and neither may ever pick up the primary ``LLM_API_KEY``, which also
@@ -17,8 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.config.services import LLMConfig
-from core.services.llm.policy import PluginLLMPolicy, set_plugin_llm_policy_resolver
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.policy import (
+    PluginLLMPolicy,
+    set_plugin_llm_policy_resolver,
+)
 
 
 def _config(**kwargs) -> LLMConfig:
@@ -30,7 +33,7 @@ def _config(**kwargs) -> LLMConfig:
 @pytest.fixture
 def stored_key():
     """Register a credential resolver answering for vllm only."""
-    from core.services.llm import credentials
+    from baselith.core.services.llm import credentials
 
     credentials.set_llm_credential_resolver(
         lambda provider: "stored-tok" if provider == "vllm" else None
@@ -66,30 +69,33 @@ def _factory_config(**overrides):
 
 class TestStoredCredential:
     def test_factory_uses_a_console_stored_key(self, stored_key):
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(_factory_config())
         assert provider._api_key.get_secret_value() == "stored-tok"
 
     def test_the_environment_key_still_wins(self, stored_key):
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(_factory_config(vllm_api_key=SecretStr("env-tok")))
         assert provider._api_key.get_secret_value() == "env-tok"
 
     async def test_preflight_probes_with_the_stored_key(self, stored_key):
-        from core.services.llm._vllm_preflight import VLLMProbe, check_vllm_endpoints
+        from baselith.core.services.llm._vllm_preflight import (
+            VLLMProbe,
+            check_vllm_endpoints,
+        )
 
         config = _config(provider="vllm", model="qwen", api_base="http://gpu:8002")
         probe = AsyncMock(return_value=VLLMProbe("ok", {"qwen"}))
-        with patch("core.services.llm._vllm_preflight.probe_vllm", probe):
+        with patch("baselith.core.services.llm._vllm_preflight.probe_vllm", probe):
             assert await check_vllm_endpoints(config) == []
         assert probe.call_args.args[1] == "stored-tok"
 
 
 class TestGoverned:
     def test_a_vllm_pin_carries_the_openai_root(self, pin_vllm):
-        from core.services.llm.governed import resolve_governed_client_config
+        from baselith.core.services.llm.governed import resolve_governed_client_config
 
         config = _config(
             provider="openai",
@@ -97,9 +103,13 @@ class TestGoverned:
             env={"LLM_VLLM_API_BASE": "http://gpu:8002", "LLM_API_KEY": "sk-openai"},
         )
         with (
-            patch("core.services.llm.governed.get_llm_config", return_value=config),
             patch(
-                "core.services.llm.runtime.resolve_llm_credential", return_value=None
+                "baselith.core.services.llm.governed.get_llm_config",
+                return_value=config,
+            ),
+            patch(
+                "baselith.core.services.llm.runtime.resolve_llm_credential",
+                return_value=None,
             ),
         ):
             gov = resolve_governed_client_config("doc_review")
@@ -110,7 +120,7 @@ class TestGoverned:
         assert gov.api_key is None
 
     def test_a_vllm_default_never_hands_out_the_primary_key(self, pin_vllm):
-        from core.services.llm.governed import resolve_governed_client_config
+        from baselith.core.services.llm.governed import resolve_governed_client_config
 
         config = _config(
             provider="vllm",
@@ -119,9 +129,13 @@ class TestGoverned:
             env={"LLM_OPENAI_API_KEY": "sk-openai"},
         )
         with (
-            patch("core.services.llm.governed.get_llm_config", return_value=config),
             patch(
-                "core.services.llm.runtime.resolve_llm_credential", return_value=None
+                "baselith.core.services.llm.governed.get_llm_config",
+                return_value=config,
+            ),
+            patch(
+                "baselith.core.services.llm.runtime.resolve_llm_credential",
+                return_value=None,
             ),
         ):
             gov = resolve_governed_client_config("doc_review")
@@ -135,13 +149,13 @@ class TestOpenAIWire:
         [("openai", True), ("vllm", True), ("ollama", False), ("anthropic", False)],
     )
     def test_speaks_openai(self, provider, expected):
-        from core.services.llm.governed import GovernedClientConfig
+        from baselith.core.services.llm.governed import GovernedClientConfig
 
         gov = GovernedClientConfig(provider, "m", None, None)
         assert gov.speaks_openai is expected
 
     def test_vllm_key_falls_back_to_the_placeholder(self):
-        from core.services.llm.governed import GovernedClientConfig
+        from baselith.core.services.llm.governed import GovernedClientConfig
 
         assert GovernedClientConfig("vllm", "m", None, None).openai_key() == "EMPTY"
         assert (

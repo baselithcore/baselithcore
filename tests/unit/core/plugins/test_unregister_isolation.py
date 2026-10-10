@@ -22,9 +22,9 @@ from unittest.mock import patch
 
 import pytest
 
-from core.plugins import PluginRegistry
-from core.plugins.interface import Plugin, PluginMetadata
-from core.plugins.nursery import PluginTaskClosedError
+from baselith.core.plugins import PluginRegistry
+from baselith.core.plugins.interface import Plugin, PluginMetadata
+from baselith.core.plugins.nursery import PluginTaskClosedError
 
 pytestmark = [pytest.mark.unit]
 
@@ -102,7 +102,7 @@ class TestShutdownIsIsolated:
 
     async def test_any_shutdown_failure_is_logged_and_swallowed(self, registry):
         """Swallowed, never silent: the failure has to reach an operator."""
-        import core.plugins.registry as registry_module
+        import baselith.core.plugins.registry as registry_module
 
         await _register(registry, _RaisingShutdown())
 

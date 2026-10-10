@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.tenant import purge as purge_module
-from core.services.tenant import purge_stores
-from core.services.tenant.purge import TenantPurgeBlockedError, purge_tenant_data
+from baselith.core.services.tenant import purge as purge_module
+from baselith.core.services.tenant import purge_stores
+from baselith.core.services.tenant.purge import (
+    TenantPurgeBlockedError,
+    purge_tenant_data,
+)
 
 
 def _vector_service(collections: list[str] | None = None) -> SimpleNamespace:
@@ -42,14 +45,16 @@ class _FakeRedis:
 @pytest.fixture
 def redis_client():
     client = _FakeRedis(["cache:t1:response:a", "cache:t1:search:b"])
-    with patch("core.cache.redis_cache.create_redis_client", return_value=client):
+    with patch(
+        "baselith.core.cache.redis_cache.create_redis_client", return_value=client
+    ):
         yield client
 
 
 async def test_vectors_deleted_by_tenant_in_every_collection(redis_client) -> None:
     service = _vector_service(["documents", "memories"])
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=service,
     ):
         outcome = await purge_stores.purge_tenant_stores("t1")
@@ -66,7 +71,7 @@ async def test_vectors_deleted_by_tenant_in_every_collection(redis_client) -> No
 async def test_falls_back_to_configured_collection(redis_client) -> None:
     service = _vector_service(None)
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=service,
     ):
         outcome = await purge_stores.purge_tenant_stores("t1")
@@ -78,7 +83,7 @@ async def test_no_collections_means_nothing_to_purge(redis_client) -> None:
     # "collection not found" and block the whole erasure.
     service = _vector_service([])
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=service,
     ):
         outcome = await purge_stores.purge_tenant_stores("t1")
@@ -89,7 +94,7 @@ async def test_no_collections_means_nothing_to_purge(redis_client) -> None:
 
 async def test_redis_keyspace_of_the_tenant_is_dropped(redis_client) -> None:
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=_vector_service([]),
     ):
         outcome = await purge_stores.purge_tenant_stores("t1")
@@ -100,7 +105,7 @@ async def test_redis_keyspace_of_the_tenant_is_dropped(redis_client) -> None:
 
 async def test_glob_characters_in_tenant_are_escaped(redis_client) -> None:
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=_vector_service([]),
     ):
         await purge_stores.purge_tenant_stores("a*b")
@@ -111,7 +116,7 @@ async def test_unreachable_vector_store_is_reported(redis_client) -> None:
     service = _vector_service(["documents"])
     service.provider.delete_by_filter.side_effect = ConnectionError("down")
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=service,
     ):
         outcome = await purge_stores.purge_tenant_stores("t1")

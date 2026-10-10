@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.api import _recovery_startup
-from core.orchestration.checkpoint import (
+from baselith.core.api import _recovery_startup
+from baselith.core.orchestration.checkpoint import (
     STATUS_FAILED,
     STATUS_RUNNING,
     Checkpoint,
@@ -92,7 +92,7 @@ async def test_resume_off_schedules_only_the_stale_sweep(
 
     with (
         patch(
-            "core.config.orchestration.get_orchestration_config",
+            "baselith.core.config.orchestration.get_orchestration_config",
             return_value=_config(**overrides),
         ),
         patch.object(_recovery_startup, "stale_sweep_loop", _fake_loop),

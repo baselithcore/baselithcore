@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.config import get_core_config
-from core.lifecycle import (
+from baselith.core.config import get_core_config
+from baselith.core.lifecycle import (
     AgentHooks,
     AgentState,
     BaseFrameworkError,
@@ -13,7 +13,7 @@ from core.lifecycle import (
     LifecycleError,
     LifecycleMixin,
 )
-from core.lifecycle.deterministic import (
+from baselith.core.lifecycle.deterministic import (
     apply_deterministic_mode,
     get_llm_override_kwargs,
 )

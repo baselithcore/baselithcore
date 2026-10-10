@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from core.mcp.stdio_client_transport import (
+from baselith.core.mcp.stdio_client_transport import (
     resolve_command,
     spawn,
     validate_command,

@@ -5,7 +5,7 @@ Loads the completed checkpoint for ``run_id`` from the default checkpoint
 store, scrubs PII and indirect-injection artifacts, appends the replayable
 recording to ``evals/runs/recorded_runs.json``, and with ``--cases`` also
 writes a starter trajectory case into ``evals/cases/``. All logic lives in
-:mod:`core.evaluation.promotion` — this CLI stays thin.
+:mod:`baselith.core.evaluation.promotion` — this CLI stays thin.
 
 Usage:
     python scripts/promote_run.py <run_id> [--cases] \
@@ -22,8 +22,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.evaluation.promotion import PromotionError, promote_run  # noqa: E402
-from core.orchestration.checkpoint_factory import (  # noqa: E402
+from baselith.core.evaluation.promotion import PromotionError, promote_run  # noqa: E402
+from baselith.core.orchestration.checkpoint_factory import (  # noqa: E402
     initialize_default_checkpoint_store,
 )
 

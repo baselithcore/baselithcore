@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.integrity import (
+from baselith.core.plugins.integrity import (
     CURRENT_HASH_SURFACE,
     HashSurface,
     compute_plugin_hash,
@@ -183,7 +183,9 @@ def test_v4_signature_still_verifies_with_a_named_warning(
 ) -> None:
     v4 = compute_plugin_hash(signed_plugin, surface=HashSurface.V4_UI_EXPORT)
     assert v4 != compute_plugin_hash(signed_plugin)
-    with caplog.at_level(logging.WARNING, logger="core.plugins.integrity_policy"):
+    with caplog.at_level(
+        logging.WARNING, logger="baselith.core.plugins.integrity_policy"
+    ):
         assert verify_plugin_integrity(signed_plugin, v4, strict=False) is True
     assert "V4_UI_EXPORT" in caplog.text
     assert "manifest" in caplog.text.lower()
@@ -198,7 +200,7 @@ def test_v4_signature_refused_in_strict_mode(signed_plugin: Path) -> None:
 
 
 def test_read_declared_surface(signed_plugin: Path) -> None:
-    from core.plugins.integrity import read_declared_surface
+    from baselith.core.plugins.integrity import read_declared_surface
 
     assert read_declared_surface(signed_plugin) is None
     (signed_plugin / "manifest.yaml").write_text(
@@ -216,7 +218,7 @@ def test_read_declared_surface(signed_plugin: Path) -> None:
 
 
 def test_is_manifest_path() -> None:
-    from core.plugins.integrity import is_manifest_path
+    from baselith.core.plugins.integrity import is_manifest_path
 
     assert is_manifest_path(Path("plugins/demo/manifest.yaml")) is True
     assert is_manifest_path(Path("plugins/demo/manifest.yml")) is True
@@ -227,6 +229,6 @@ def test_is_manifest_path() -> None:
 
 def test_manifest_bytes_are_not_hashed_verbatim() -> None:
     """``is_hashed_path`` reports the raw-byte surface; the manifest is canonical."""
-    from core.plugins.integrity import is_hashed_path
+    from baselith.core.plugins.integrity import is_hashed_path
 
     assert is_hashed_path(Path("plugins/demo/manifest.yaml")) is False

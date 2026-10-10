@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.config.concurrency import (
+from baselith.core.config.concurrency import (
     WEB_CONCURRENCY_ENV,
     get_web_concurrency,
     set_web_concurrency,
@@ -49,7 +49,7 @@ class TestSharedCpuThreads:
 
     @pytest.fixture(autouse=True)
     def _clean_threads(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from core.config.concurrency import THREAD_POOL_ENV_VARS
+        from baselith.core.config.concurrency import THREAD_POOL_ENV_VARS
 
         for name in (*THREAD_POOL_ENV_VARS, "WEB_CONCURRENCY"):
             monkeypatch.delenv(name, raising=False)
@@ -57,7 +57,7 @@ class TestSharedCpuThreads:
     def test_workers_split_the_cpus(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import os
 
-        import core.config.concurrency as concurrency
+        import baselith.core.config.concurrency as concurrency
 
         monkeypatch.setattr(concurrency, "_available_cpus", lambda: 8)
         set_web_concurrency(4)
@@ -68,14 +68,14 @@ class TestSharedCpuThreads:
     def test_the_container_worker_count_counts_too(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import core.config.concurrency as concurrency
+        import baselith.core.config.concurrency as concurrency
 
         monkeypatch.setattr(concurrency, "_available_cpus", lambda: 8)
         monkeypatch.setenv("WEB_CONCURRENCY", "3")
         assert concurrency.share_cpu_threads() == 2
 
     def test_never_below_one_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import core.config.concurrency as concurrency
+        import baselith.core.config.concurrency as concurrency
 
         monkeypatch.setattr(concurrency, "_available_cpus", lambda: 2)
         set_web_concurrency(8)
@@ -84,7 +84,7 @@ class TestSharedCpuThreads:
     def test_an_operator_setting_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import os
 
-        import core.config.concurrency as concurrency
+        import baselith.core.config.concurrency as concurrency
 
         monkeypatch.setattr(concurrency, "_available_cpus", lambda: 8)
         monkeypatch.setenv("OMP_NUM_THREADS", "6")
@@ -95,7 +95,7 @@ class TestSharedCpuThreads:
     def test_a_single_process_is_left_alone(self) -> None:
         import os
 
-        import core.config.concurrency as concurrency
+        import baselith.core.config.concurrency as concurrency
 
         assert concurrency.share_cpu_threads() is None
         assert "OMP_NUM_THREADS" not in os.environ

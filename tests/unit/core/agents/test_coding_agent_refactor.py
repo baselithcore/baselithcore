@@ -2,12 +2,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.agents.coding.agent import CodeLanguage, CodingAgent
+from baselith.core.agents.coding.agent import CodeLanguage, CodingAgent
 
 
 @pytest.fixture
 def mock_sandbox_service():
-    with patch("core.services.sandbox.service.SandboxService") as MockService:
+    with patch("baselith.core.services.sandbox.service.SandboxService") as MockService:
         service_instance = AsyncMock()
         MockService.return_value = service_instance
         yield service_instance
@@ -15,7 +15,7 @@ def mock_sandbox_service():
 
 @pytest.fixture
 def mock_llm_service():
-    with patch("core.services.llm.service.LLMService") as MockService:
+    with patch("baselith.core.services.llm.service.LLMService") as MockService:
         service_instance = AsyncMock()
         MockService.return_value = service_instance
         yield service_instance
@@ -48,7 +48,7 @@ async def test_get_llm_success(mock_llm_service):
 @pytest.mark.asyncio
 async def test_get_sandbox_failure():
     """Test that missing SandboxService raises RuntimeError."""
-    with patch.dict("sys.modules", {"core.services.sandbox.service": None}):
+    with patch.dict("sys.modules", {"baselith.core.services.sandbox.service": None}):
         agent = CodingAgent()
         # Force re-import attempt by ensuring module is not in sys.modules or simulating import error
         # A simpler way is to mock the import failure within the method using patch
@@ -56,7 +56,7 @@ async def test_get_sandbox_failure():
             with patch(
                 "builtins.__import__",
                 side_effect=ImportError(
-                    "No module named core.services.sandbox.service"
+                    "No module named baselith.core.services.sandbox.service"
                 ),
             ):
                 # We need to target the specific import inside the method, which is tricky with basic patch

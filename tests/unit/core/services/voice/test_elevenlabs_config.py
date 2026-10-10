@@ -6,7 +6,7 @@ import pytest
 from elevenlabs_rig import KEY, VOICE
 from pydantic import SecretStr, ValidationError
 
-from core.config.multimodal import VoiceConfig
+from baselith.core.config.multimodal import VoiceConfig
 
 
 class TestConfig:

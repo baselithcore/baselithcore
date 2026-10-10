@@ -17,25 +17,25 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-import core.chat as chat_package
-import plugins.api_routers.approvals as approvals_module
-import plugins.api_routers.runs as runs_module
-import plugins.api_routers.webhooks as webhooks_module
-from core.auth.types import AuthRole, AuthUser
-from core.config.webhooks import WebhookConfig
-from core.context import set_tenant_context
-from core.middleware import require_user
-from core.orchestration.checkpoint import (
+import baselith.core.chat as chat_package
+import baselith.plugins.api_routers.approvals as approvals_module
+import baselith.plugins.api_routers.runs as runs_module
+import baselith.plugins.api_routers.webhooks as webhooks_module
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.config.webhooks import WebhookConfig
+from baselith.core.context import set_tenant_context
+from baselith.core.middleware import require_user
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from core.webhooks.dispatcher import WebhookDispatcher
-from core.webhooks.service import WebhookService
-from core.webhooks.store import InMemoryWebhookStore
-from core.webhooks.types import WebhookDelivery
-from plugins.api_routers.admin import verify_credentials
-from plugins.api_routers.tenant import router as tenant_router
+from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.service import WebhookService
+from baselith.core.webhooks.store import InMemoryWebhookStore
+from baselith.core.webhooks.types import WebhookDelivery
+from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.tenant import router as tenant_router
 from tests.unit.plugins_tests._wire_helpers import (
     WireSpy,
     assert_problem_documented,
@@ -218,7 +218,7 @@ def test_openapi_documents_typed_2xx_and_problem_errors() -> None:
 
 def _plugin_ws_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """The plugin's routers, with the chat_ws gate and chat service stubbed."""
-    from plugins.api_routers.plugin import ApiRoutersPlugin
+    from baselith.plugins.api_routers.plugin import ApiRoutersPlugin
     from tests.unit.plugins_tests.test_chat_ws import _client as ws_client
 
     # The chat_ws helper stubs credentials, gate and chat service; its

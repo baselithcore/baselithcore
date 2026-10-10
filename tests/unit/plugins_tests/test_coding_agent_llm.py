@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.services.llm.tool_calling import LLMResult
-from plugins.coding_agent.agent import CodingAgent
+from baselith.core.services.llm.tool_calling import LLMResult
+from baselith.plugins.coding_agent.agent import CodingAgent
 
 
 class FakeLLM:

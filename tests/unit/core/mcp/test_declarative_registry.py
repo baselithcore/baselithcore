@@ -10,11 +10,11 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-import core.config.mcp as mcp_config_module
-from core.config.mcp import MCPConfig, MCPServerSpec
-from core.mcp.client import MCPServerInfo
-from core.mcp.client_types import MCPToolInfo
-from core.mcp.declarative import make_mcp_tool_fns, mount_configured_servers
+import baselith.core.config.mcp as mcp_config_module
+from baselith.core.config.mcp import MCPConfig, MCPServerSpec
+from baselith.core.mcp.client import MCPServerInfo
+from baselith.core.mcp.client_types import MCPToolInfo
+from baselith.core.mcp.declarative import make_mcp_tool_fns, mount_configured_servers
 
 
 class _FakeClient:

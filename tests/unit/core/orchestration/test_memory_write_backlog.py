@@ -10,8 +10,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from core.orchestration.mixins import _memory_write
-from core.orchestration.mixins._memory_write import (
+from baselith.core.orchestration.mixins import _memory_write
+from baselith.core.orchestration.mixins._memory_write import (
     drain_memory_writes,
     schedule_memory_write,
 )
@@ -46,7 +46,7 @@ async def test_drops_are_counted_and_warned_rate_limited(monkeypatch):
     but a burst of drops must not flood the log with one line each."""
     from unittest.mock import MagicMock
 
-    from core.observability.metrics import MEMORY_WRITES_DROPPED_TOTAL
+    from baselith.core.observability.metrics import MEMORY_WRITES_DROPPED_TOTAL
 
     monkeypatch.setattr(_memory_write, "_MEMORY_WRITE_MAX_BACKLOG", 2)
     mock_logger = MagicMock()

@@ -1,4 +1,4 @@
-"""Matrice SSRF condivisa per core.security.ssrf."""
+"""Matrice SSRF condivisa per baselith.core.security.ssrf."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from core.security.ssrf import (
+from baselith.core.security.ssrf import (
     SsrfError,
     SsrfPolicy,
     assert_url_safe,

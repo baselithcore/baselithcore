@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from core.plugin_updates.apply.models import RunKind, RunState
-from core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.apply.models import RunKind, RunState
+from baselith.core.plugin_updates.apply.store import RunStore
 
 T0 = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 

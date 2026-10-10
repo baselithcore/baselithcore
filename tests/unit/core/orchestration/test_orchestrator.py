@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.events import EventNames
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.events import EventNames
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class TestOrchestratorEvents:
@@ -13,7 +13,7 @@ class TestOrchestratorEvents:
 
         # Patch get_event_bus to return our mock
         self.patcher = patch(
-            "core.orchestration.mixins.execution.get_event_bus",
+            "baselith.core.orchestration.mixins.execution.get_event_bus",
             return_value=self.mock_event_bus,
         )
         self.patcher.start()

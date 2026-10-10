@@ -2,7 +2,7 @@
 Tests for vectorstore chunking module.
 """
 
-from core.services.vectorstore.chunking import (
+from baselith.core.services.vectorstore.chunking import (
     DEFAULT_SPLITTER,
     chunk_point_id,
     chunk_text,

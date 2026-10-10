@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from core.config.storage import StorageConfig
-from core.db import connection
+from baselith.core.config.storage import StorageConfig
+from baselith.core.db import connection
 
 
 def test_storage_config_exposes_session_budgets():

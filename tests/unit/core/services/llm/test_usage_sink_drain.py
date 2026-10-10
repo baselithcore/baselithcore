@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 
-from core.services.llm.usage import Usage
-from core.services.llm.usage_sinks import (
+from baselith.core.services.llm.usage import Usage
+from baselith.core.services.llm.usage_sinks import (
     UsageReport,
     _pending_sink_tasks,
     drain_usage_sinks,

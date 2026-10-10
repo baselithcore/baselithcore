@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from core.orchestration.recovery import resume_interrupted_runs
+from baselith.core.orchestration.recovery import resume_interrupted_runs
 
 
 async def _seed(store, run_id, status, query="continue the work"):
@@ -73,7 +73,7 @@ class TestResumeInterruptedRuns:
 
 
 class _FakeLock:
-    """Minimal stand-in for core.resilience.distributed_lock.DistributedLock."""
+    """Minimal stand-in for baselith.core.resilience.distributed_lock.DistributedLock."""
 
     def __init__(self, acquirable: bool = True, fail: bool = False):
         self._acquirable = acquirable
@@ -144,7 +144,7 @@ class TestTenancyOnResume:
     """
 
     async def test_checkpoint_tenant_is_passed_and_bound(self):
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         store = InMemoryCheckpointStore()
         checkpoint = Checkpoint(run_id="t1", query="q", status="running")
@@ -166,7 +166,7 @@ class TestTenancyOnResume:
         assert seen["ambient"] == "acme"
 
     async def test_ambient_tenant_is_restored_after_the_run(self):
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         store = InMemoryCheckpointStore()
         checkpoint = Checkpoint(run_id="t2", query="q", status="running")
@@ -180,7 +180,7 @@ class TestTenancyOnResume:
         assert get_current_tenant_id() == before
 
     async def test_ambient_tenant_is_restored_after_a_failed_run(self):
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         store = InMemoryCheckpointStore()
         checkpoint = Checkpoint(run_id="t3", query="q", status="running")

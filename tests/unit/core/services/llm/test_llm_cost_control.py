@@ -6,8 +6,8 @@ Covers the CostTracker budget guard and the token estimation helper.
 
 import pytest
 
-from core.services.llm.cost_control import CostTracker, estimate_tokens
-from core.services.llm.exceptions import BudgetExceededError
+from baselith.core.services.llm.cost_control import CostTracker, estimate_tokens
+from baselith.core.services.llm.exceptions import BudgetExceededError
 
 
 class TestCostTracker:

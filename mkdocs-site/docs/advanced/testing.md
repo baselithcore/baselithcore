@@ -14,7 +14,7 @@ tests/
 ├── conftest.py            # Shared fixtures: tenant context, global-state reset
 ├── unit/                  # Fast, isolated tests; LLM auto-mocked (unit/conftest.py)
 │   ├── conftest.py
-│   ├── core/              # One subdirectory per core module
+│   ├── baselith/core/              # One subdirectory per core module
 │   │   ├── auth/
 │   │   ├── memory/
 │   │   ├── orchestration/
@@ -27,12 +27,12 @@ tests/
 ├── contracts/             # OpenAPI conformance (schemathesis) + service protocols
 ├── chaos/                 # Fault-injection resilience tests (marker: chaos)
 ├── golden/                # Real Agent loop driven by recorded LLM cassettes
-├── core/                  # Plugin-system and memory tests
+├── baselith/core/                  # Plugin-system and memory tests
 ├── plugins/               # Per-plugin suites (api_routers, ...)
 └── load/                  # Locust profile — not part of the pytest suite
 ```
 
-Unit tests mirror the `core/` tree: a test for `core/utils/tokens.py` lives in
+Unit tests mirror the `baselith/core/` tree: a test for `baselith/core/utils/tokens.py` lives in
 `tests/unit/core/utils/test_tokens.py`. There is no `e2e/` directory — HTTP
 tests drive the ASGI app in-process (see [HTTP tests](#http-tests)).
 
@@ -89,7 +89,7 @@ What that means in practice:
   fixture) runs on the event loop without a marker.
 - **`--strict-markers`** — a marker that is not declared above fails
   collection; add new markers to `pytest.ini` first.
-- **Coverage is always on**, measured over `core/` only, with a **83 %
+- **Coverage is always on**, measured over `baselith/core/` only, with a **83 %
   branch** gate (`[tool.coverage.run] branch = true` in `pyproject.toml`).
 - **`timeout = 120`** — a hung test fails itself instead of stalling the job.
 
@@ -109,8 +109,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.memory.manager import AgentMemory
-from core.memory.types import MemoryType
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.types import MemoryType
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ been initialized (mirrors `tests/core/test_plugin_system.py` and
 `tests/integration/test_plugin_loading.py`):
 
 ```python title="tests/core/test_plugin_system.py (excerpt)"
-from core.plugins import Plugin, PluginMetadata, PluginRegistry
+from baselith.core.plugins import Plugin, PluginMetadata, PluginRegistry
 
 
 class EchoPlugin(Plugin):
@@ -207,7 +207,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins import PluginLoader, PluginRegistry
 
 
 @pytest.fixture
@@ -255,7 +255,7 @@ while exercising the real pipeline — guardrails, budget, checkpointing
 ```python title="tests/integration/test_orchestrator_patterns.py (excerpt)"
 from unittest.mock import AsyncMock, MagicMock
 
-from core.orchestration import Orchestrator
+from baselith.core.orchestration import Orchestrator
 
 
 async def test_orchestrator_routes_to_handler():
@@ -290,7 +290,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from plugins.api_routers.status import router as status_router
+from baselith.plugins.api_routers.status import router as status_router
 
 
 @pytest.fixture
@@ -312,7 +312,7 @@ async def test_health_liveness(app: FastAPI):
 For a route that sits behind `Depends(require_admin)`, override the dependency
 on the app (`app.dependency_overrides[...]`) instead of minting credentials.
 When the whole middleware stack matters — security headers, CSRF, request-size
-limits — build the real application with `core.api.factory.create_app()`
+limits — build the real application with `baselith.core.api.factory.create_app()`
 (as `tests/unit/core/api/test_env_posture.py` does) and pass it to the same
 transport.
 
@@ -322,7 +322,7 @@ transport.
 
 Two `conftest.py` files supply the shared fixtures; none of them creates
 database tables — the relational schema is owned by Alembic (`alembic.ini`,
-`core/db/migrations/`), unit tests mock their storage, and the integration tests that
+`baselith/core/db/migrations/`), unit tests mock their storage, and the integration tests that
 need a live backend (`tests/integration/test_pgvector_integration.py`) use the
 Postgres, Redis and Qdrant services the `integration_test` CI job provides — see
 [Real-backend integration run](#real-backend-integration-run).
@@ -341,15 +341,15 @@ Postgres, Redis and Qdrant services the `integration_test` CI job provides — s
 
 | Fixture | Scope | What it does |
 | ------- | ----- | ------------ |
-| `mock_llm_service` | autouse | Patches `core.services.llm.get_llm_service` with a `MagicMock` whose `generate_response` is an `AsyncMock` — see [Mocking LLM Services](#mocking-llm-services) |
+| `mock_llm_service` | autouse | Patches `baselith.core.services.llm.get_llm_service` with a `MagicMock` whose `generate_response` is an `AsyncMock` — see [Mocking LLM Services](#mocking-llm-services) |
 | `reset_circuit_breakers` | autouse | Resets every global circuit breaker to `CLOSED` so a tripped breaker cannot leak into the next test |
 
 When a component resolves collaborators through the DI container, register a
-fake instance directly (`core/di/container.py`):
+fake instance directly (`baselith/core/di/container.py`):
 
 ```python
-from core.di import DependencyContainer
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import DependencyContainer
+from baselith.core.interfaces import LLMServiceProtocol
 
 
 class FakeLLM:
@@ -378,7 +378,7 @@ is the factory form; `TRANSIENT` and `SCOPED` lifetimes are covered in
 enforces the gate:
 
 ```bash
-# Full suite, gate enforced (83 % branch coverage over core/)
+# Full suite, gate enforced (83 % branch coverage over baselith/core/)
 pytest
 
 # Only unit tests
@@ -397,7 +397,7 @@ pytest --cov-fail-under=80
     order with `--randomly-seed=<seed>` from the run header), and applies a
     **120s per-test timeout** (`pytest-timeout`), so a hung async test fails
     itself instead of stalling the job. Property-based tests (`hypothesis`)
-    cover `core/resilience`; `tests/contracts/test_openapi_conformance.py`
+    cover `baselith/core/resilience`; `tests/contracts/test_openapi_conformance.py`
     (schemathesis) validates live responses against the exported OpenAPI spec.
 
 ### Report
@@ -415,7 +415,7 @@ pytest --cov-report=term-missing
 ## Coverage Requirements
 
 There is a single enforced gate: **`--cov-fail-under=83`**, measured as
-**branch** coverage over `core/` (`pytest.ini`). Plugins, scripts and
+**branch** coverage over `baselith/core/` (`pytest.ini`). Plugins, scripts and
 templates are reported when you ask for them but never gated.
 
 The number is a **ratchet**: it was set to the measured value minus a small
@@ -445,9 +445,9 @@ import pytest
 def mock_llm_service():
     """
     Mock LLMService for all unit tests to prevent real API calls and configuration errors.
-    This fixture automatically patches `core.services.llm.get_llm_service`.
+    This fixture automatically patches `baselith.core.services.llm.get_llm_service`.
     """
-    with patch("core.services.llm.get_llm_service") as mock_get:
+    with patch("baselith.core.services.llm.get_llm_service") as mock_get:
         mock_service = MagicMock()
         # generate_response is async on the real LLMService — mock it as such
         # so callers that `await` it get a value, not an un-awaitable Mock.
@@ -463,7 +463,7 @@ def mock_llm_service():
 
 The fixture yields the patched **getter**; the service is
 `mock_llm_service.return_value`. It only intercepts code that resolves the
-service lazily through `core.services.llm.get_llm_service` — integration tests
+service lazily through `baselith.core.services.llm.get_llm_service` — integration tests
 (`tests/integration/`) are outside its scope and build their own mocks.
 
 #### Custom LLM Mocking
@@ -474,7 +474,7 @@ which is both explicit and independent of the patch above:
 ```python
 from unittest.mock import AsyncMock, MagicMock
 
-from core.reasoning import ChainOfThought
+from baselith.core.reasoning import ChainOfThought
 
 
 async def test_chain_of_thought_uses_injected_llm():
@@ -494,13 +494,13 @@ async def test_chain_of_thought_uses_injected_llm():
 ### Golden Trajectories (Recorded LLM Cassettes)
 
 An `AsyncMock` proves the loop *calls* the service; it cannot prove the loop
-sent the right thing. `tests/golden/` drives the real `core.agent.Agent` with a
+sent the right thing. `tests/golden/` drives the real `baselith.core.agent.Agent` with a
 **cassette** — an ordered list of provider turns in
 `tests/golden/cassettes/<name>.json` — and every turn asserts what the loop
 sent before answering.
 
 The machinery itself lives in
-[`core/evaluation/cassette.py`](../core-modules/evaluation.md#cassettes);
+[`baselith/core/evaluation/cassette.py`](../core-modules/evaluation.md#cassettes);
 `tests/golden/cassette.py` re-exports it. It moved there when the eval
 regression gate gained a second use for it — `core` cannot import from the test
 tree, and two copies of a replay harness drift. Alongside `prompt_contains`,
@@ -591,7 +591,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rq.job import Job, JobStatus
 
-from core.task_queue.scheduler import TaskScheduler, schedule_task
+from baselith.core.task_queue.scheduler import TaskScheduler, schedule_task
 
 
 @pytest.fixture
@@ -607,13 +607,13 @@ def mock_queue():
 
 @pytest.fixture
 def mock_get_queue(mock_queue):
-    with patch("core.task_queue.scheduler.get_queue", return_value=mock_queue) as mock:
+    with patch("baselith.core.task_queue.scheduler.get_queue", return_value=mock_queue) as mock:
         yield mock
 
 
 @pytest.fixture(autouse=True)
 def mock_task_tracker():
-    with patch("core.task_queue.scheduler.get_task_tracker") as mock:
+    with patch("baselith.core.task_queue.scheduler.get_task_tracker") as mock:
         yield mock.return_value
 
 
@@ -638,7 +638,7 @@ whose coroutine methods are `AsyncMock`s (mirrors
 ```python
 from unittest.mock import AsyncMock, MagicMock
 
-from core.cache import RedisTTLCache
+from baselith.core.cache import RedisTTLCache
 
 
 async def test_set_writes_through_the_client():
@@ -653,10 +653,10 @@ async def test_set_writes_through_the_client():
 ```
 
 Code that builds its own client goes through
-`core.cache.create_redis_client(url)`; `tests/unit/core/cache/test_redis_cache.py`
-patches `ConnectionPool` and `Redis` on `core.cache.redis_cache` to keep that
+`baselith.core.cache.create_redis_client(url)`; `tests/unit/core/cache/test_redis_cache.py`
+patches `ConnectionPool` and `Redis` on `baselith.core.cache.redis_cache` to keep that
 path offline. The URL itself comes from `CACHE_REDIS_URL`
-(`core.config.cache.get_redis_cache_config().url`).
+(`baselith.core.config.cache.get_redis_cache_config().url`).
 
 ### Configuration Mocking
 
@@ -667,7 +667,7 @@ a test can build an explicit config without touching `os.environ` (mirrors
 ```python
 from unittest.mock import patch
 
-from core.config.storage import StorageConfig
+from baselith.core.config.storage import StorageConfig
 
 
 def test_storage_config_from_env_aliases():
@@ -680,14 +680,14 @@ def test_component_sees_the_override():
     config = StorageConfig(CACHE_REDIS_URL="redis://cache:6379/15")
 
     # Patch the getter where the code under test looks it up
-    with patch("core.config.storage.get_storage_config", return_value=config):
+    with patch("baselith.core.config.storage.get_storage_config", return_value=config):
         ...
 ```
 
 The `get_*_config()` getters are cached singletons: patch the getter at the
 import site the code under test actually uses (a component that does
-`from core.config import get_task_queue_config` inside a method needs
-`patch("core.config.get_task_queue_config", ...)`, as
+`from baselith.core.config import get_task_queue_config` inside a method needs
+`patch("baselith.core.config.get_task_queue_config", ...)`, as
 `tests/unit/core/task_queue/test_scheduler.py` does).
 
 ### Test Organization
@@ -698,8 +698,8 @@ Organize tests by functionality using classes (mirrors
 ```python
 import pytest
 
-from core.world_model.risk_assessor import RiskAssessor
-from core.world_model.types import Action, ActionType, RiskLevel
+from baselith.core.world_model.risk_assessor import RiskAssessor
+from baselith.core.world_model.types import Action, ActionType, RiskLevel
 
 
 class TestRiskAssessor:
@@ -733,7 +733,7 @@ keys the `lru_cache` (mirrors `tests/unit/core/utils/test_tokens.py`):
 ```python
 import pytest
 
-from core.utils.tokens import _classify_text
+from baselith.core.utils.tokens import _classify_text
 
 
 @pytest.mark.parametrize(
@@ -755,7 +755,7 @@ def test_classify_text_ratio(code_ratio, cjk_ratio, expected_chars_per_token):
 Always test edge cases and boundary conditions:
 
 ```python
-from core.utils.tokens import estimate_tokens
+from baselith.core.utils.tokens import estimate_tokens
 
 
 class TestTokenEstimation:
@@ -786,7 +786,7 @@ class TestTokenEstimation:
 ### Isolation
 
 ```python
-from core.memory.manager import AgentMemory
+from baselith.core.memory.manager import AgentMemory
 
 
 # ✅ Each test is isolated
@@ -843,13 +843,13 @@ mechanical half of that rule enforceable:
 - `scripts/check_docs_consistency.py` scans every page under
   `mkdocs-site/docs/` and verifies each provable claim against the
   repository: `from core… import` lines in Python fences really import,
-  `core/…`/`plugins/…`/`tests/…` paths exist, relative `.md` links resolve,
+  `baselith/core/…`/`plugins/…`/`tests/…` paths exist, relative `.md` links resolve,
   `NAME=` lines in env fences and `` `PREFIX_NAME` `` tokens name a real
   setting (aliases and `env_prefix` fields are derived from the config
   classes), `baselith <cmd> <sub>` chains exist in the CLI tree and, with
   `--routes`, every `METHOD /path` is served by the app (feature gates are
   opened while the app is built, so gated routers count too).
-- `scripts/check_docs_sync.py` lists the `core/` modules a change touched and
+- `scripts/check_docs_sync.py` lists the `baselith/core/` modules a change touched and
   fails when their documentation page was not edited in the same change. A
   commit whose message carries `[docs-sync: skip]` (with the reason) opts a
   range out explicitly.
@@ -860,7 +860,7 @@ Where they run:
 | ----- | ------- | ----- |
 | pre-commit hook `docs-consistency` | `python scripts/check_docs_consistency.py --fast` | paths, links, env, CLI |
 | CI job `docs_consistency` | `python scripts/check_docs_consistency.py --routes` | everything, imports and routes included |
-| CI job `docs_consistency` (pull requests) | `python scripts/check_docs_sync.py origin/<base>` | changed `core/` modules ↔ pages |
+| CI job `docs_consistency` (pull requests) | `python scripts/check_docs_sync.py origin/<base>` | changed `baselith/core/` modules ↔ pages |
 | unit suite | `tests/unit/test_docs_consistency.py` | the checker itself, plus the real docs tree (`slow`) |
 
 Tutorial scaffolds (`plugins/my-plugin/…`, `plugins/weather_agent/…`) and
@@ -923,7 +923,7 @@ The `integration_test` job (`Integration Tests`) runs `tests/integration/` plus
 `tests/core/skill_evolution/test_store_postgres.py` on Python 3.12 against real
 service containers — `pgvector/pgvector:0.8.1-pg16`, `redis:7-alpine` and
 `qdrant/qdrant:v1.19.1`, each pinned by digest — after applying the packaged
-migrations with `python -m core.db.migrate`. It runs beside `python_test`, and
+migrations with `python -m baselith.core.db.migrate`. It runs beside `python_test`, and
 `release` waits on both.
 
 | Variable | Effect |
@@ -954,7 +954,7 @@ export BASELITH_TEST_REAL_DB=1 BASELITH_TEST_REAL_REDIS=1 BASELITH_TEST_REAL_QDR
   BASELITH_TEST_INTEGRATION_STRICT=1 BASELITH_TEST_REDIS_URL=redis://localhost:56380/0 \
   DB_HOST=localhost DB_PORT=55433 DB_NAME=test_db DB_USER=baselith DB_PASSWORD=password \
   VECTORSTORE_HOST=localhost VECTORSTORE_PORT=56334
-python -m core.db.migrate
+python -m baselith.core.db.migrate
 pytest tests/integration tests/core/skill_evolution/test_store_postgres.py -m "not slow" --no-cov
 ```
 
@@ -967,7 +967,7 @@ a fresh venv with plain `pip` — no lock, no hashes — and runs
 `scripts/smoke_installed_wheel.py` from a temporary directory: `import baselith`
 and `from baselith import *` (from site-packages, never the checkout),
 `baselith --help`, `baselith db migrate` against a pgvector service, and an
-uvicorn boot of `core.api.factory:create_app` that must answer `/health` and
+uvicorn boot of `baselith.core.api.factory:create_app` that must answer `/health` and
 `/health/ready` with 200 and the database and Redis up. Run it locally the same
 way:
 
@@ -993,8 +993,8 @@ act on in its own change.
 | `mutation_testing` | which mutants of the security code survive the unit tests (report-only) |
 
 `mutation_testing` runs `mutmut` (pinned in the job, `3.8.0`) over three
-modules: `core/observability/redaction.py`, `core/security/secrets.py` and
-`core/guardrails/input_guard.py`, against their own unit tests only. The
+modules: `baselith/core/observability/redaction.py`, `baselith/core/security/secrets.py` and
+`baselith/core/guardrails/input_guard.py`, against their own unit tests only. The
 scope, the test selection and the pytest flags (`--no-cov`, because the
 repository-wide coverage gate cannot pass on a three-module selection) live in
 `[tool.mutmut]` in `pyproject.toml`. The job is `continue-on-error` and uploads

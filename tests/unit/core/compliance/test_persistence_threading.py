@@ -11,8 +11,8 @@ import sqlite3
 import threading
 from typing import Any
 
-from core.compliance.persistence import SQLiteAiSystemStore
-from core.compliance.types import AiSystem, RiskCategory
+from baselith.core.compliance.persistence import SQLiteAiSystemStore
+from baselith.core.compliance.types import AiSystem, RiskCategory
 
 
 class _ThreadRecordingConnection:

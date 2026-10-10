@@ -4,7 +4,7 @@ Each attack here walked past the input guard: the ``deobfuscated`` view's
 confusables fold turned Russian into Latin lookalikes before the Russian
 patterns could see the rejoined word, and the spacing collapse left
 Devanagari vowel signs (Unicode ``Mn``/``Mc``) behind. The ``native`` views
-in :mod:`core.guardrails.normalize` undo both. The benign corpus pins the
+in :mod:`baselith.core.guardrails.normalize` undo both. The benign corpus pins the
 other side: spaced or code-mixed ordinary text in those scripts stays
 allowed.
 """
@@ -15,12 +15,12 @@ import re
 
 import pytest
 
-from core.guardrails import GuardrailsConfig, InputGuard
-from core.guardrails.multilingual import (
+from baselith.core.guardrails import GuardrailsConfig, InputGuard
+from baselith.core.guardrails.multilingual import (
     COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
     squash_pattern,
 )
-from core.guardrails.normalize import matching_views
+from baselith.core.guardrails.normalize import matching_views
 
 # A Devanagari letter followed by its combining marks.
 _CLUSTER = re.compile(r"\S[ऀ-ःऺ-ॏ॑-ॗॢॣ]*")

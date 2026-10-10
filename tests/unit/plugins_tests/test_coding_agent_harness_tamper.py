@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.coding_agent.harness import (
+from baselith.plugins.coding_agent.harness import (
     build_test_script,
     parse_report,
     report_marker,
     screen,
     screen_texts,
 )
-from plugins.coding_agent.workspace_harness import build_workspace_script, stage
+from baselith.plugins.coding_agent.workspace_harness import (
+    build_workspace_script,
+    stage,
+)
 
 from .coding_agent_fakes import ADD_TESTS, BAD_ADD, GOOD_ADD, LocalSandbox
 

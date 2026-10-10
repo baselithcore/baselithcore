@@ -6,12 +6,12 @@ from a ``core.*`` package ``__init__``". Nothing enforced that: a symbol could
 vanish from an ``__all__`` in a ``fix:`` commit and ship as a patch release.
 
 This gate snapshots every literal ``__all__`` under ``baselith/`` (the curated
-public facade) and ``core/`` (the implementation) into
+public facade) and ``baselith/core/`` (the implementation) into
 ``scripts/public_api_baseline.json`` — the same shape as the OpenAPI drift
 gate, for the Python surface — and fails on any difference:
 
 - a **removed** symbol is reported with what its removal costs, which depends
-  on the tier its package declares in :data:`core.stability.PACKAGE_STABILITY`
+  on the tier its package declares in :data:`baselith.core.stability.PACKAGE_STABILITY`
   — MAJOR and a ``BREAKING CHANGE:`` footer for a ``stable`` package, a MINOR
   after a deprecation cycle for ``beta``, a plain MINOR for ``experimental``.
   Without tiers every one of the 1329 symbols carried the strictest of those,
@@ -48,11 +48,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-# ``core.stability`` is a data table on stdlib only — importing it costs
+# ``baselith.core.stability`` is a data table on stdlib only — importing it costs
 # nothing and is far less brittle than parsing the dict back out of the AST.
 # It is the one import this gate makes; the surface itself is still read
 # without importing a single module of the tree.
-from core.stability import (  # noqa: E402
+from baselith.core.stability import (  # noqa: E402
     PACKAGE_STABILITY,
     Stability,
     stability_of,
@@ -62,7 +62,9 @@ BASELINE_PATH = Path(__file__).resolve().parent / "public_api_baseline.json"
 #: Packages whose literal ``__all__`` is the public contract. ``baselith`` is
 #: the curated facade (the ``stable`` tier); ``core`` is the implementation,
 #: whose packages each declare their own tier.
-SCANNED_ROOTS = ("baselith", "core")
+SCANNED_ROOTS = ("baselith",)
+#: Inside the scanned package but not public API: the bundled plugins.
+EXCLUDED_PREFIXES = ("baselith/plugins/",)
 EXCLUDED_DIR_NAMES = frozenset({"__pycache__", "build", "dist", "node_modules"})
 POLICY_DOC = "mkdocs-site/docs/advanced/versioning-and-deprecation.md"
 
@@ -111,7 +113,9 @@ def collect_public_api(root: Path) -> dict[str, list[str]]:
     for scanned_root in SCANNED_ROOTS:
         for init_py in sorted((root / scanned_root).rglob("__init__.py")):
             relative = init_py.relative_to(root)
-            if any(part in EXCLUDED_DIR_NAMES for part in relative.parts):
+            if any(part in EXCLUDED_DIR_NAMES for part in relative.parts) or (
+                relative.as_posix().startswith(EXCLUDED_PREFIXES)
+            ):
                 continue
             names = read_literal_all(init_py)
             if names is not None:
@@ -127,6 +131,7 @@ def dynamic_packages(root: Path) -> list[str]:
         for scanned_root in SCANNED_ROOTS
         for init_py in (root / scanned_root).rglob("__init__.py")
         if "__pycache__" not in init_py.parts
+        and not init_py.relative_to(root).as_posix().startswith(EXCLUDED_PREFIXES)
         and _module_name(root, init_py) not in covered
     )
 
@@ -173,12 +178,12 @@ def top_level_packages(root: Path) -> set[str]:
         root_init = root / scanned_root / "__init__.py"
         if root_init.is_file():
             found.add(scanned_root)
-        for child in (root / scanned_root).glob("*/__init__.py"):
-            if child.parent.name not in EXCLUDED_DIR_NAMES:
-                found.add(f"{scanned_root}.{child.parent.name}")
-    # ``core`` itself is the namespace, not a classified surface: its
-    # ``__init__`` exports only ``__version__``.
-    return {name for name in found if name != "core"}
+    for child in (root / "baselith" / "core").glob("*/__init__.py"):
+        if child.parent.name not in EXCLUDED_DIR_NAMES:
+            found.add(f"baselith.core.{child.parent.name}")
+    # ``baselith.core`` itself is the namespace, not a classified surface:
+    # its ``__init__`` exports only ``__version__``.
+    return found
 
 
 def check_stability(root: Path, *, baseline_tiers: dict[str, str]) -> list[str]:
@@ -197,12 +202,12 @@ def check_stability_table(root: Path) -> list[str]:
     declared = set(PACKAGE_STABILITY)
     actual = top_level_packages(root)
     violations = [
-        f"{package} has no stability tier — classify it in core/stability.py "
+        f"{package} has no stability tier — classify it in baselith/core/stability.py "
         "(stable / beta / experimental / deprecated)"
         for package in sorted(actual - declared)
     ]
     violations.extend(
-        f"core/stability.py classifies {package}, which no longer exists — "
+        f"baselith/core/stability.py classifies {package}, which no longer exists — "
         "drop the entry"
         for package in sorted(declared - actual)
     )

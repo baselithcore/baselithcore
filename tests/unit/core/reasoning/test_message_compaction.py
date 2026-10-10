@@ -23,8 +23,8 @@ import random
 
 import pytest
 
-from core.reasoning.history import compact_message_history
-from core.services.llm.messages import (
+from baselith.core.reasoning.history import compact_message_history
+from baselith.core.services.llm.messages import (
     Message,
     TextBlock,
     ThinkingBlock,

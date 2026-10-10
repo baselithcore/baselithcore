@@ -4,7 +4,11 @@ from __future__ import annotations
 
 
 def test_sign_message_round_trip() -> None:
-    from core.plugins.signing import generate_keypair_hex, sign_message, verify_message
+    from baselith.core.plugins.signing import (
+        generate_keypair_hex,
+        sign_message,
+        verify_message,
+    )
 
     priv, pub = generate_keypair_hex()
     sig = sign_message(b"hello", priv)
@@ -15,7 +19,7 @@ def test_sign_message_round_trip() -> None:
 
 
 def test_plugin_hash_helpers_delegate_unchanged() -> None:
-    from core.plugins.signing import (
+    from baselith.core.plugins.signing import (
         generate_keypair_hex,
         sign_message,
         sign_plugin_hash,

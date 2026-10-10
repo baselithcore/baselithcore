@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.declarative import DeclarativeSkillLoader, SkillSandboxError
-from core.plugins.skill_scripts import (
+from baselith.core.plugins.declarative import DeclarativeSkillLoader, SkillSandboxError
+from baselith.core.plugins.skill_scripts import (
     RUN_SKILL_SCRIPT_TOOL_NAME,
     SkillScriptResult,
     make_run_skill_script_tool,

@@ -10,13 +10,13 @@ def _restore_cli_dispatch_map():
     """Undo plugin CLI registration on the process-wide dispatch map.
 
     A plugin's ``register_parser`` injects its handler straight into
-    ``core.cli.__main__.COMMAND_HANDLERS_MAP`` — that is how a plugin gets a
+    ``baselith.core.cli.__main__.COMMAND_HANDLERS_MAP`` — that is how a plugin gets a
     top-level command, and it is permanent for the process. A test that
     registers a parser therefore left its command in the map for every later
     test, which is how the CLI tenant-scope coverage test failed under one
     random order and passed under another.
     """
-    from core.cli.__main__ import COMMAND_HANDLERS_MAP
+    from baselith.core.cli.__main__ import COMMAND_HANDLERS_MAP
 
     snapshot = dict(COMMAND_HANDLERS_MAP)
     yield

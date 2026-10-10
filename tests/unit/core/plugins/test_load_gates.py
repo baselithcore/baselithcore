@@ -2,17 +2,17 @@
 
 import pytest
 
-from core.plugins.config_validation import (
+from baselith.core.plugins.config_validation import (
     is_config_enforcement_enabled,
     validate_plugin_config,
 )
-from core.plugins.interface import Plugin, PluginMetadata
-from core.plugins.load_gates import (
+from baselith.core.plugins.interface import Plugin, PluginMetadata
+from baselith.core.plugins.load_gates import (
     compat_gate,
     config_gate,
     is_config_gate_enforced,
 )
-from core.plugins.version import (
+from baselith.core.plugins.version import (
     check_plugin_compatibility,
     is_compat_enforcement_enabled,
 )

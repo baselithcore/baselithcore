@@ -2,11 +2,11 @@ import asyncio
 
 import pytest
 
-from core.events import EventBus, EventNames
-from core.learning.feedback import FeedbackCollector
-from core.optimization.loop import OptimizationLoop
-from core.swarm.colony import Colony
-from core.swarm.types import AgentProfile, Capability
+from baselith.core.events import EventBus, EventNames
+from baselith.core.learning.feedback import FeedbackCollector
+from baselith.core.optimization.loop import OptimizationLoop
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.types import AgentProfile, Capability
 
 
 @pytest.fixture

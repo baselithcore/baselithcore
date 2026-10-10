@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import Any
 
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.tool_calling import LLMResult
 
 
 class LocalSandbox:

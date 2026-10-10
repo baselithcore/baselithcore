@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.auth.api_keys import APIKeyValidator
-from core.auth.jwt import JWTHandler
-from core.auth.manager import AuthManager
-from core.auth.scopes import (
+from baselith.core.auth.api_keys import APIKeyValidator
+from baselith.core.auth.jwt import JWTHandler
+from baselith.core.auth.manager import AuthManager
+from baselith.core.auth.scopes import (
     ROLE_SCOPES,
     SUPERUSER_SCOPE,
     effective_scopes,
@@ -16,12 +16,12 @@ from core.auth.scopes import (
     scope_satisfied,
     scopes_satisfied,
 )
-from core.auth.types import (
+from baselith.core.auth.types import (
     AuthRole,
     AuthUser,
     InsufficientScopeError,
 )
-from core.config.security import SecurityConfig
+from baselith.core.config.security import SecurityConfig
 
 
 # === Matching grammar ===
@@ -168,7 +168,7 @@ class TestScopedApiKey:
         # a mere `.exists()` failure now fails the key *closed* (see
         # API_KEY_REVOCATION_FAIL_MODE), so these tests would depend on a
         # reachable Redis instead of the in-process registration they exercise.
-        with patch("core.cache.redis_cache.create_redis_client") as factory:
+        with patch("baselith.core.cache.redis_cache.create_redis_client") as factory:
             redis = AsyncMock()
             redis.exists.return_value = False
             factory.return_value = redis
@@ -206,7 +206,7 @@ class TestScopedApiKey:
 class TestJwtScopes:
     @pytest.mark.asyncio
     async def test_scopes_survive_token_round_trip(self):
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis
@@ -220,7 +220,7 @@ class TestJwtScopes:
 
     @pytest.mark.asyncio
     async def test_no_scopes_claim_is_empty(self):
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis
@@ -237,7 +237,7 @@ class TestEnforcement:
     @pytest.fixture
     def auth_manager(self):
         config = SecurityConfig(SECRET_KEY="x" * 40)
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis

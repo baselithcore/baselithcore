@@ -8,9 +8,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core.plugin_updates.apply import executor as executor_mod
-from core.plugin_updates.apply.models import ApplyRun, Expectation, RunKind, RunState
-from core.plugin_updates.apply.swap import current_target
+from baselith.core.plugin_updates.apply import executor as executor_mod
+from baselith.core.plugin_updates.apply.models import (
+    ApplyRun,
+    Expectation,
+    RunKind,
+    RunState,
+)
+from baselith.core.plugin_updates.apply.swap import current_target
 
 from ._executor_env import Env, served_text
 

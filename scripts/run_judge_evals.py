@@ -33,7 +33,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.evaluation.regression_runner import (  # noqa: E402
+from baselith.core.evaluation.regression_runner import (  # noqa: E402
     RegressionLoadError,
     load_cases,
     load_recorded_runs,
@@ -44,8 +44,8 @@ from core.evaluation.regression_runner import (  # noqa: E402
 def _provider_configured() -> bool:
     """Whether the central LLM config can actually serve judge calls."""
     try:
-        from core.config.services import get_llm_config
-        from core.services.llm.runtime import provider_configured
+        from baselith.core.config.services import get_llm_config
+        from baselith.core.services.llm.runtime import provider_configured
 
         config = get_llm_config()
         return provider_configured(config, config.provider)
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    from core.evaluation.judges import RelevanceEvaluator
+    from baselith.core.evaluation.judges import RelevanceEvaluator
 
     report = asyncio.run(
         run_regression_async(

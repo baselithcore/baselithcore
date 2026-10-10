@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.budget_context import (
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     charge_llm_cost,
     deactivate_budget,
     get_active_budget,
     standalone_budget,
 )
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
 
 pytestmark = [pytest.mark.unit]
 

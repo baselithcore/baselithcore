@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.batch import BatchCompletion, BatchPrompt, generate_batch
+from baselith.core.services.llm.batch import (
+    BatchCompletion,
+    BatchPrompt,
+    generate_batch,
+)
 
 # ---------------------------------------------------------------------------
 # generate_batch — Anthropic path (fully mocked SDK)
@@ -138,7 +142,7 @@ async def test_empty_batch_short_circuits():
 def test_record_genai_metrics_emits_histograms():
     from prometheus_client import REGISTRY
 
-    from core.services.llm._telemetry import record_genai_metrics
+    from baselith.core.services.llm._telemetry import record_genai_metrics
 
     record_genai_metrics(
         "anthropic",
@@ -170,14 +174,14 @@ def test_record_genai_metrics_emits_histograms():
 def test_record_genai_metrics_emits_usd_cost_for_priced_models():
     from prometheus_client import REGISTRY
 
-    from core.observability.metric_context import resolve_tenant_label
-    from core.services.llm._telemetry import record_genai_metrics
+    from baselith.core.observability.metric_context import resolve_tenant_label
+    from baselith.core.services.llm._telemetry import record_genai_metrics
 
     labels = {
         "gen_ai_provider_name": "anthropic",
         "gen_ai_request_model": "claude-opus-4-8",
         # The cost counter carries a bounded `tenant` label (see
-        # core.observability.metric_context). Which series this call lands on
+        # baselith.core.observability.metric_context). Which series this call lands on
         # depends on whether a tenant happens to be bound, so resolve it the
         # same way the emitter does rather than hard-coding a value that only
         # holds in one test order.
@@ -194,7 +198,7 @@ def test_record_genai_metrics_emits_usd_cost_for_priced_models():
 def test_record_genai_metrics_no_cost_for_unpriced_models():
     from prometheus_client import REGISTRY
 
-    from core.services.llm._telemetry import record_genai_metrics
+    from baselith.core.services.llm._telemetry import record_genai_metrics
 
     labels = {
         "gen_ai_provider_name": "ollama",
@@ -212,7 +216,7 @@ def test_record_genai_metrics_no_cost_for_unpriced_models():
 
 
 def _xfetch_cache(beta, ttl=100):
-    from core.cache.redis_cache import RedisTTLCache
+    from baselith.core.cache.redis_cache import RedisTTLCache
 
     cache = object.__new__(RedisTTLCache)  # skip __init__ (needs a client)
     cache._ttl = ttl
@@ -226,7 +230,7 @@ def test_xfetch_enabled_by_default(monkeypatch):
     beta defaults to the canonical 1.0, not disabled."""
     from unittest.mock import MagicMock
 
-    from core.cache.redis_cache import RedisTTLCache
+    from baselith.core.cache.redis_cache import RedisTTLCache
 
     monkeypatch.delenv("BASELITH_CACHE_XFETCH_BETA", raising=False)
     cache = RedisTTLCache(client=MagicMock())
@@ -281,7 +285,7 @@ def _success_with_usage(custom_id, text, usage):
 
 async def test_batch_records_usage_per_custom_id():
     """``message.usage`` was discarded, so a batch job could not be costed."""
-    from core.services.llm.usage import Usage
+    from baselith.core.services.llm.usage import Usage
 
     usage = SimpleNamespace(
         input_tokens=100,
@@ -326,7 +330,7 @@ async def test_batch_caller_max_tokens_is_honoured():
 
 async def test_sequential_fallback_records_usage_per_item():
     """The non-Anthropic path must cost its entries too, not just the batch API."""
-    from core.services.llm.usage import Usage
+    from baselith.core.services.llm.usage import Usage
 
     class SeqService:
         config = SimpleNamespace(provider="ollama", model="llama")

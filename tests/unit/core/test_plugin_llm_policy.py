@@ -1,29 +1,29 @@
 """Tests for the central per-plugin LLM policy.
 
 Covers the plugin identity context var, the policy resolver seam
-(``core.services.llm.policy``), the policy-aware service resolution
-(``core.services.llm.runtime``), the model pin, the plugin-context middleware
+(``baselith.core.services.llm.policy``), the policy-aware service resolution
+(``baselith.core.services.llm.runtime``), the model pin, the plugin-context middleware
 and the orchestrator dispatch binding.
 """
 
 import pytest
 
-from core.config.services import LLMConfig
-from core.context import (
+from baselith.core.config.services import LLMConfig
+from baselith.core.context import (
     get_current_plugin,
     reset_plugin_context,
     set_plugin_context,
 )
-from core.middleware.plugin_context import PluginContextMiddleware
-from core.services.llm import runtime
-from core.services.llm.governed import resolve_governed_client_config
-from core.services.llm.policy import (
+from baselith.core.middleware.plugin_context import PluginContextMiddleware
+from baselith.core.services.llm import runtime
+from baselith.core.services.llm.governed import resolve_governed_client_config
+from baselith.core.services.llm.policy import (
     PluginLLMPolicy,
     resolve_active_llm_policy,
     resolve_plugin_llm_policy,
     set_plugin_llm_policy_resolver,
 )
-from core.services.llm.runtime import (
+from baselith.core.services.llm.runtime import (
     api_key_for,
     get_llm_service,
     provider_configured,
@@ -64,8 +64,12 @@ def _clean_policy_state(monkeypatch):
     for var in _LLM_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     cfg = _config()
-    monkeypatch.setattr("core.services.llm.runtime.get_llm_config", lambda: cfg)
-    monkeypatch.setattr("core.services.llm.service.get_llm_config", lambda: cfg)
+    monkeypatch.setattr(
+        "baselith.core.services.llm.runtime.get_llm_config", lambda: cfg
+    )
+    monkeypatch.setattr(
+        "baselith.core.services.llm.service.get_llm_config", lambda: cfg
+    )
     set_plugin_llm_policy_resolver(None)
     reset_llm_service()
     yield
@@ -260,7 +264,7 @@ class TestConfigHelpers:
 
     def test_gemini_is_pinnable(self):
         """Gemini ships a provider + a dedicated key field, so it must be pinnable."""
-        from core.services.llm.policy import SUPPORTED_PROVIDERS as supported
+        from baselith.core.services.llm.policy import SUPPORTED_PROVIDERS as supported
 
         assert "gemini" in supported
         pinned = PluginLLMPolicy(provider="gemini", model="gemini-2.5-flash")
@@ -297,7 +301,9 @@ class TestGovernedClientConfig:
     """The plain-config seam vendored plugins use to honour a per-plugin pin."""
 
     def _pin(self, monkeypatch, cfg: LLMConfig) -> None:
-        monkeypatch.setattr("core.services.llm.governed.get_llm_config", lambda: cfg)
+        monkeypatch.setattr(
+            "baselith.core.services.llm.governed.get_llm_config", lambda: cfg
+        )
 
     def test_unpinned_returns_none(self, monkeypatch):
         self._pin(monkeypatch, _config())
@@ -400,7 +406,7 @@ class TestPluginContextMiddleware:
 
 class TestOrchestratorBinding:
     def test_bind_intent_plugin(self):
-        from core.orchestration.mixins.execution import ExecutionMixin
+        from baselith.core.orchestration.mixins.execution import ExecutionMixin
 
         class Host(ExecutionMixin):
             plugin_registry = _StubRegistry({"my_intent": "owner-plugin"})
@@ -414,7 +420,7 @@ class TestOrchestratorBinding:
         assert host._bind_intent_plugin("unknown_intent") is None
 
     def test_bind_without_registry_is_none(self):
-        from core.orchestration.mixins.execution import ExecutionMixin
+        from baselith.core.orchestration.mixins.execution import ExecutionMixin
 
         class Host(ExecutionMixin):
             plugin_registry = None

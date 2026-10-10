@@ -7,12 +7,12 @@ shape of a regenerated turn — and asserts the counts did not move.
 
 from __future__ import annotations
 
-from core.agent import Agent
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.idempotency import InMemoryToolLedger
-from core.reasoning.react import ToolDefinition
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.agent import Agent
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.idempotency import InMemoryToolLedger
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 from tests.unit.core.agent.test_agent import _mock_service
 
 

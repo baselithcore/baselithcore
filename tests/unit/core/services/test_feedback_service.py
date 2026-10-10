@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.services.feedback_service import FeedbackService
+from baselith.core.services.feedback_service import FeedbackService
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def feedback_service():
 @pytest.mark.asyncio
 async def test_feedback_service_insert(feedback_service):
     with patch(
-        "core.db.feedback.insert_feedback", new_callable=AsyncMock
+        "baselith.core.db.feedback.insert_feedback", new_callable=AsyncMock
     ) as mock_insert:
         await feedback_service.insert_feedback(
             query="test query",
@@ -37,7 +37,7 @@ async def test_feedback_service_insert(feedback_service):
 async def test_feedback_service_get_feedbacks(feedback_service):
     mock_results = [{"query": "q", "answer": "a", "feedback": "positive"}]
     with patch(
-        "core.db.feedback.get_feedbacks",
+        "baselith.core.db.feedback.get_feedbacks",
         new_callable=AsyncMock,
         return_value=mock_results,
     ) as mock_get:
@@ -50,7 +50,7 @@ async def test_feedback_service_get_feedbacks(feedback_service):
 async def test_feedback_service_get_analytics(feedback_service):
     mock_analytics = {"success_rate": 0.9}
     with patch(
-        "core.db.feedback.get_feedback_analytics",
+        "baselith.core.db.feedback.get_feedback_analytics",
         new_callable=AsyncMock,
         return_value=mock_analytics,
     ) as mock_analytics_call:
@@ -62,7 +62,7 @@ async def test_feedback_service_get_analytics(feedback_service):
 
 
 def test_get_feedback_service():
-    from core.services.feedback_service import get_feedback_service
+    from baselith.core.services.feedback_service import get_feedback_service
 
     service = get_feedback_service()
     assert isinstance(service, FeedbackService)

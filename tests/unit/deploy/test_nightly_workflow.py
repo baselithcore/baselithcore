@@ -67,7 +67,7 @@ def test_restore_drill_runs_every_phase_against_the_ci_postgres() -> None:
         assert f"backup_restore_drill.py {phase}" in runs, phase
     assert 'verify-backup.sh "${BACKUP_FILE}"\n' in runs
     assert 'verify-backup.sh "${BACKUP_FILE}" --drill' in runs
-    assert "core.db.migrate" in runs
+    assert "baselith.core.db.migrate" in runs
     # The same pinned pgvector image as ci.yml's database jobs, digest and all.
     image = job["services"]["postgres"]["image"]
     assert "@sha256:" in image
@@ -106,7 +106,7 @@ def test_mutation_testing_is_report_only_and_pinned() -> None:
 def test_mutation_scope_names_real_modules_and_tests() -> None:
     config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     mutmut = config["tool"]["mutmut"]
-    assert mutmut["only_mutate"], "an empty only_mutate mutates all of core/"
+    assert mutmut["only_mutate"], "an empty only_mutate mutates all of baselith/core/"
     for module in mutmut["only_mutate"]:
         assert (REPO_ROOT / module).is_file(), module
     for selection in mutmut["pytest_add_cli_args_test_selection"]:

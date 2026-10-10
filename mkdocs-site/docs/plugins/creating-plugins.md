@@ -7,8 +7,8 @@ description: Step-by-step tutorial for creating plugins
 
 A practical guide to plugin development.
 
-!!! tip "Importing from `core.plugins`"
-    Nothing changes for a plugin author: `from core.plugins import Plugin,
+!!! tip "Importing from `baselith.core.plugins`"
+    Nothing changes for a plugin author: `from baselith.core.plugins import Plugin,
     PluginMetadata, SkillResult` works exactly as before. The package now
     resolves each export on first access rather than importing every submodule
     up front, so a plugin that needs only the result envelope no longer pays
@@ -117,7 +117,7 @@ Alternatively, use `manifest.json`:
 ```python title="plugins/my-plugin/plugin.py"
 from typing import Any
 
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 
 from .agent import MyAgent
 
@@ -156,10 +156,10 @@ MyPlugin(Plugin, AgentPlugin)` is an MRO `TypeError`.
 | `frontend`              | For a UI | Frontend build contract read by `baselith plugin add <repository> --docker` and by `baselith doctor`: a mapping with `path` (relative to the plugin directory, default `ui`), `package_manager` (`npm`, `pnpm` or `yarn`), `build_command` and `output_dir` (relative to `path`, default `dist`), or `false` to disable frontend detection. Declare it whenever the plugin ships a UI — without it the installer falls back to guessing and `doctor` cannot tell a missing build from a plugin that has no frontend at all. See [Packaging › Docker installation contract](packaging.md#docker-installation-contract). |
 | `host_build_required`   | No | `true` when the release is not self-contained: a host-side build (a Node sidecar's `dist`, `node_modules`) must run before the plugin works. Such a release is never one-click installable. Default `false`. |
 | `health_endpoint`       | No       | Local HTTP path probed after a Docker installation. It must answer 200 with no authentication and no redirect; without it the installer probes the default `/<name>/`. |
-| `runtime_state_paths`   | No       | Paths **inside the plugin directory** that hold runtime state the update engine must carry over to a new version (relative, no `..`, no globs, never the manifest or a code/asset file or tree such as `ui`, `static`, `skills`; the engine never carries over a file the new release ships and re-verifies integrity after carry-over). Prefer keeping state in `core.plugins.data_dir("<name>")` (in production set `BASELITH_PLUGIN_DATA_DIR` explicitly, outside the code and release directories) and declaring nothing. An installed tree with files that neither shipped with the release nor sit under a declared path cannot be updated. |
+| `runtime_state_paths`   | No       | Paths **inside the plugin directory** that hold runtime state the update engine must carry over to a new version (relative, no `..`, no globs, never the manifest or a code/asset file or tree such as `ui`, `static`, `skills`; the engine never carries over a file the new release ships and re-verifies integrity after carry-over). Prefer keeping state in `baselith.core.plugins.data_dir("<name>")` (in production set `BASELITH_PLUGIN_DATA_DIR` explicitly, outside the code and release directories) and declaring nothing. An installed tree with files that neither shipped with the release nor sit under a declared path cannot be updated. |
 
 !!! danger "Unknown manifest keys are refused"
-    The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
+    The manifest schema (`baselith.core.plugins.manifest_model.PluginManifestModel`) is
     `extra="forbid"`. A key outside the table above — a typo, or a key from another
     framework — fails validation and the plugin is **refused in every environment**,
     with a did-you-mean hint:
@@ -263,8 +263,8 @@ The agent logic should reside in `agent.py` and implement the `AgentProtocol`:
 
 ```python title="plugins/my-plugin/agent.py"
 from typing import Optional, Dict, Any
-from core.lifecycle import LifecycleMixin, AgentState
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.lifecycle import LifecycleMixin, AgentState
+from baselith.core.orchestration.protocols import AgentProtocol
 import logging
 
 logger = logging.getLogger(__name__)
@@ -409,7 +409,7 @@ only to expose several routers):
 ```python title="plugins/my-plugin/plugin.py"
 from fastapi import APIRouter
 
-from core.plugins import AgentPlugin, RouterPlugin
+from baselith.core.plugins import AgentPlugin, RouterPlugin
 
 
 class MyPlugin(AgentPlugin, RouterPlugin):
@@ -436,8 +436,8 @@ When a plugin implements `create_router()`, its endpoints are automatically:
 * Tagged for easy discovery in Swagger UI
 
 Routes are not authenticated by default: add
-`dependencies=[Depends(require_user)]` (from `core.middleware`) to the `APIRouter`
-to require an authenticated user, as `plugins/example-plugin/router.py` does.
+`dependencies=[Depends(require_user)]` (from `baselith.core.middleware`) to the `APIRouter`
+to require an authenticated user, as `baselith/plugins/example-plugin/router.py` does.
 
 **Accessing endpoints:**
 
@@ -470,7 +470,7 @@ and no `config:` sub-key (a nested layout is never matched, and the plugin runs 
 it had no entry). The whole entry — `enabled` included — is passed to
 `initialize(config)`.
 
-Which plugins run follows one rule (`core.plugins.config_file.plugin_enabled`),
+Which plugins run follows one rule (`baselith.core.plugins.config_file.plugin_enabled`),
 shared by discovery, startup auto-activation and `baselith plugin sync`: with no
 config file every discovered plugin runs; once the file lists anything, only the
 listed plugins run, and an entry runs unless it says `enabled: false` — an entry
@@ -512,7 +512,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     The launcher records the worker count so children can see it:
 
     ```python
-    from core.config import get_web_concurrency
+    from baselith.core.config import get_web_concurrency
 
     if get_web_concurrency() > 1 and backend == "memory":
         # refuse, warn loudly, or select the durable backend
@@ -534,7 +534,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     ```python title="plugins/my-plugin/plugin.py"
     from pathlib import Path
 
-    from core.plugins.env import load_plugin_dotenv
+    from baselith.core.plugins.env import load_plugin_dotenv
 
     load_plugin_dotenv(Path(__file__).resolve().parent)
     ```
@@ -563,7 +563,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     Every key the `.env` exports is recorded as yours, so the startup
     environment drift check never flags it as a misspelled core setting. If
     your code writes a variable into `os.environ` directly instead, declare it
-    with `core.config.register_owned_env(name)` to get the same exemption.
+    with `baselith.core.config.register_owned_env(name)` to get the same exemption.
 
 ---
 
@@ -637,7 +637,7 @@ async `health()` hook to report what only your plugin knows — a stale upstream
 expired credential, a drained queue:
 
 ```python
-from core.plugins import AgentPlugin, PluginHealth
+from baselith.core.plugins import AgentPlugin, PluginHealth
 
 
 class MyPlugin(AgentPlugin):
@@ -663,8 +663,8 @@ shared state. Spawn through the registry instead, and the task is owned by your
 plugin — cancelled *and awaited* on unregister, reload and hot reload:
 
 ```python
-from core.di import ServiceRegistry
-from core.plugins import PluginRegistry
+from baselith.core.di import ServiceRegistry
+from baselith.core.plugins import PluginRegistry
 
 
 class MyPlugin(AgentPlugin):
@@ -722,7 +722,7 @@ baselith my-feature "Test Name"
 ```
 
 !!! tip "Professional Output"
-    Use the `core.cli.ui` components (like `console`, `print_success`, `Table`) within your custom commands to maintain the premium look and feel of the framework.
+    Use the `baselith.core.cli.ui` components (like `console`, `print_success`, `Table`) within your custom commands to maintain the premium look and feel of the framework.
 
 ### Test via API
 
@@ -755,9 +755,9 @@ curl -X POST http://localhost:8000/chat \
 
 ## 9. Add Unit Tests
 
-Keep tests inside the plugin, as `plugins/example-plugin/tests/` does, and load the
+Keep tests inside the plugin, as `baselith/plugins/example-plugin/tests/` does, and load the
 plugin through the real `PluginLoader` — a hyphenated directory such as
-`plugins/my-plugin/` is not importable as `plugins.my_plugin` until the loader has
+`plugins/my-plugin/` is not importable as `baselith.plugins.my_plugin` until the loader has
 registered it:
 
 ```python title="plugins/my-plugin/tests/test_plugin.py"
@@ -766,7 +766,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 
-from core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins import PluginLoader, PluginRegistry
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
@@ -901,7 +901,7 @@ then runs against the new schema. Keep `init_schema()` changes expand-only
 (add tables, columns and indexes; drop or rename only one release later), so
 the version before stays compatible. An overlay entry that is not newer than
 the bundled copy, or whose core bounds exclude the running core, is not loaded
-(`core.plugins._overlay_guard.overlay_refusal_code` names the reason; an
+(`baselith.core.plugins._overlay_guard.overlay_refusal_code` names the reason; an
 unreadable bundled version refuses too) — see
 [Executing a run](../core-modules/plugin-updates.md#executing-a-run).
 
@@ -1037,7 +1037,7 @@ After creating your plugin:
     `Retry-After` header, without the plugin being re-imported
 
     **Cause**: a lazy activation that fails (returns `False` or raises) is
-    remembered for 60 s (`core/plugins/_activation_backoff.py`). Within that
+    remembered for 60 s (`baselith/core/plugins/_activation_backoff.py`). Within that
     window request traffic does not retry it — the activator raises
     `PluginActivationBackoffError` and the middleware answers `503` — so an
     anonymous client looping on a broken plugin cannot keep the global

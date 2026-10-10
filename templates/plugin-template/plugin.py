@@ -6,10 +6,10 @@ Replace all 'MyPlugin'/'my-plugin' references throughout.
 """
 
 from typing import Any, Dict, List, Optional
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 
-from core.plugins.agent_plugin import AgentPlugin
-from core.plugins.interface import PluginMetadata
+from baselith.core.plugins.agent_plugin import AgentPlugin
+from baselith.core.plugins.interface import PluginMetadata
 
 logger = get_logger(__name__)
 

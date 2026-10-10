@@ -8,7 +8,7 @@ cannot stop a deployment, and every credential comes back wrapped in `SecretStr`
 
 from pydantic import SecretStr
 
-from core.config._security_parsers import (
+from baselith.core.config._security_parsers import (
     coerce_to_secret_set,
     parse_algorithms,
     parse_encryption_keys,

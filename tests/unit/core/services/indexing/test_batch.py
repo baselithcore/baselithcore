@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from core.services.indexing._batch import build_document, flush_index_batch
-from core.services.indexing.state import IndexedDocument, IndexingStats
-from core.utils.concurrency import bounded_gather
+from baselith.core.services.indexing._batch import build_document, flush_index_batch
+from baselith.core.services.indexing.state import IndexedDocument, IndexingStats
+from baselith.core.utils.concurrency import bounded_gather
 
 
 class _RecordingVectorstore:

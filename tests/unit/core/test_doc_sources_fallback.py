@@ -6,9 +6,15 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
 
-from core.utils import optional_import
+from baselith.core.utils import optional_import
 
-SHIM = Path(__file__).resolve().parents[3] / "core" / "doc_sources" / "__init__.py"
+SHIM = (
+    Path(__file__).resolve().parents[3]
+    / "baselith"
+    / "core"
+    / "doc_sources"
+    / "__init__.py"
+)
 
 
 def test_missing_plugin_accepts_space_filter(monkeypatch):
@@ -20,7 +26,7 @@ def test_missing_plugin_accepts_space_filter(monkeypatch):
 
 
 def test_present_plugin_keeps_module_identity(monkeypatch):
-    plugin = ModuleType("plugins.document_sources")
+    plugin = ModuleType("baselith.plugins.document_sources")
     monkeypatch.setattr(optional_import, "optional_module", Mock(return_value=plugin))
     monkeypatch.setitem(
         sys.modules, "_source_shim_test", ModuleType("_source_shim_test")

@@ -89,53 +89,59 @@ def test_detects_only_silent_broad_handlers(tmp_path: Path) -> None:
 
 
 def test_scan_tree_counts_per_file(tmp_path: Path) -> None:
-    (tmp_path / "core" / "pkg").mkdir(parents=True)
-    (tmp_path / "core" / "pkg" / "a.py").write_text(SAMPLE, encoding="utf-8")
-    (tmp_path / "core" / "pkg" / "clean.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "core" / "__pycache__").mkdir()
-    (tmp_path / "core" / "__pycache__" / "junk.py").write_text(SAMPLE, encoding="utf-8")
+    (tmp_path / "baselith" / "core" / "pkg").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "pkg" / "a.py").write_text(
+        SAMPLE, encoding="utf-8"
+    )
+    (tmp_path / "baselith" / "core" / "pkg" / "clean.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    (tmp_path / "baselith" / "core" / "__pycache__").mkdir()
+    (tmp_path / "baselith" / "core" / "__pycache__" / "junk.py").write_text(
+        SAMPLE, encoding="utf-8"
+    )
 
-    assert scan_tree(tmp_path) == {"core/pkg/a.py": 3}
+    assert scan_tree(tmp_path) == {"baselith/core/pkg/a.py": 3}
 
 
 def test_new_silent_handler_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
+    (tmp_path / "baselith" / "core").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
 
     violations = check_exception_hygiene(tmp_path, baseline={})
 
     assert len(violations) == 1
-    assert "core/a.py" in violations[0]
+    assert "baselith/core/a.py" in violations[0]
     assert "3 silent" in violations[0]
 
 
 def test_baselined_count_may_shrink_but_not_grow(tmp_path: Path) -> None:
-    (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
+    (tmp_path / "baselith" / "core").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
 
-    assert check_exception_hygiene(tmp_path, baseline={"core/a.py": 3}) == []
-    assert check_exception_hygiene(tmp_path, baseline={"core/a.py": 5}) == []
-    grew = check_exception_hygiene(tmp_path, baseline={"core/a.py": 2})
+    assert check_exception_hygiene(tmp_path, baseline={"baselith/core/a.py": 3}) == []
+    assert check_exception_hygiene(tmp_path, baseline={"baselith/core/a.py": 5}) == []
+    grew = check_exception_hygiene(tmp_path, baseline={"baselith/core/a.py": 2})
     assert len(grew) == 1 and "grew" in grew[0]
 
 
 def test_clean_file_must_leave_the_baseline(tmp_path: Path) -> None:
-    (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "baselith" / "core").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "a.py").write_text("x = 1\n", encoding="utf-8")
 
-    violations = check_exception_hygiene(tmp_path, baseline={"core/a.py": 2})
+    violations = check_exception_hygiene(tmp_path, baseline={"baselith/core/a.py": 2})
 
     assert len(violations) == 1
     assert "remove it" in violations[0]
 
 
 def test_write_and_load_baseline_roundtrip(tmp_path: Path) -> None:
-    (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
+    (tmp_path / "baselith" / "core").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "a.py").write_text(SAMPLE, encoding="utf-8")
     baseline_path = tmp_path / "baseline.json"
 
     assert write_baseline(tmp_path, baseline_path) == 3
-    assert load_baseline(baseline_path) == {"core/a.py": 3}
+    assert load_baseline(baseline_path) == {"baselith/core/a.py": 3}
 
 
 def test_repo_baseline_is_honest() -> None:

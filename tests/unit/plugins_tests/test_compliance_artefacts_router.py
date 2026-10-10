@@ -7,24 +7,27 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.api.errors import install_error_handlers
-from core.auth.types import AuthRole, AuthUser
-from core.compliance.artefact_services import (
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.compliance.artefact_services import (
     get_dpia_service,
     get_risk_management_service,
     reset_artefact_services,
 )
-from core.compliance.post_market_service import reset_post_market_service
-from core.compliance.registry import get_ai_system_registry, reset_ai_system_registry
-from core.compliance.types import AiSystem
-from core.middleware import require_user
-from core.privacy.automated_decisions import (
+from baselith.core.compliance.post_market_service import reset_post_market_service
+from baselith.core.compliance.registry import (
+    get_ai_system_registry,
+    reset_ai_system_registry,
+)
+from baselith.core.compliance.types import AiSystem
+from baselith.core.middleware import require_user
+from baselith.core.privacy.automated_decisions import (
     Art22Ground,
     AutomatedDecisionActivity,
     get_automated_decision_registry,
     reset_automated_decision_registry,
 )
-from plugins.api_routers.compliance import router
+from baselith.plugins.api_routers.compliance import router
 from tests.unit.core.compliance.test_artefacts import (  # reuse the fixtures
     _complete_dpia,
     _complete_risk_file,
@@ -100,7 +103,7 @@ class TestRiskManagement:
         assert client.get("/compliance/risk-management/nope").status_code == 404
 
     def test_review_over_open_risks_is_a_422(self, client):
-        from core.compliance.risk_management import RiskManagementSystem
+        from baselith.core.compliance.risk_management import RiskManagementSystem
         from tests.unit.core.compliance.test_artefacts import _closed_risk
 
         file = RiskManagementSystem(system_id="s", risks=[_closed_risk()])
@@ -192,7 +195,7 @@ class TestInstructions:
 
 class TestDpiaEndpoints:
     def test_completing_a_partial_dpia_is_a_422(self, client):
-        from core.compliance.dpia import DataProtectionImpactAssessment
+        from baselith.core.compliance.dpia import DataProtectionImpactAssessment
 
         dpia = DataProtectionImpactAssessment(name="x")
         anyio.run(lambda: get_dpia_service().save(dpia))

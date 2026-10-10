@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from core.finetuning.models import TrainingStatus
-from core.finetuning.providers import (
+from baselith.core.finetuning.models import TrainingStatus
+from baselith.core.finetuning.providers import (
     PROVIDER_TIMEOUT_S,
     OpenAIProvider,
     TogetherProvider,

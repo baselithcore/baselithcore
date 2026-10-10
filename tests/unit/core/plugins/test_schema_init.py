@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from core.cli.commands.plugin.schema_init import _declares_schema, _run
-from core.plugins.interface import Plugin
+from baselith.core.cli.commands.plugin.schema_init import _declares_schema, _run
+from baselith.core.plugins.interface import Plugin
 
 pytestmark = pytest.mark.unit
 
@@ -60,8 +60,8 @@ async def test_the_default_seam_does_nothing_and_says_so() -> None:
 
 def _arrange(monkeypatch, candidates: list[tuple[str, Any, dict[str, Any]]]) -> None:
     """Point the command at a fixed plugin set and a no-op tenant scope."""
-    import core.cli.commands.plugin.schema_init as module
-    import core.db.connection as conn_module
+    import baselith.core.cli.commands.plugin.schema_init as module
+    import baselith.core.db.connection as conn_module
 
     async def _loader(_name: str | None) -> list[tuple[str, Any, dict[str, Any]]]:
         return candidates
@@ -95,7 +95,7 @@ async def test_a_failure_becomes_the_exit_code(monkeypatch, capsys) -> None:
 
     assert await _run(None, json_output=False) == 1
     captured = capsys.readouterr()
-    # Errors go to stderr (core.cli.ui.print_error), so a Job's log keeps the
+    # Errors go to stderr (baselith.core.cli.ui.print_error), so a Job's log keeps the
     # failure separable from the progress.
     assert "permission denied for schema public" in captured.err
     # The one that worked is still reported: a partial run is not a silent one.
@@ -135,9 +135,9 @@ async def test_overlay_entries_register_before_discovery(monkeypatch) -> None:
     normally does it — so without an explicit call the old bundled plugin's
     schema would run.
     """
-    import core.plugins.loader as loader_mod
-    import core.plugins.overlay as overlay_mod
-    from core.cli.commands.plugin import schema_init as module
+    import baselith.core.plugins.loader as loader_mod
+    import baselith.core.plugins.overlay as overlay_mod
+    from baselith.core.cli.commands.plugin import schema_init as module
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -150,7 +150,7 @@ async def test_overlay_entries_register_before_discovery(monkeypatch) -> None:
 
     monkeypatch.setattr(loader_mod.PluginLoader, "discover_plugins", _discover)
     monkeypatch.setattr(
-        "core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
+        "baselith.core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
     )
     assert await module._load_enabled(None) == []
     assert calls == ["register", "discover"]
@@ -159,9 +159,9 @@ async def test_overlay_entries_register_before_discovery(monkeypatch) -> None:
 async def test_overlay_registration_failure_does_not_stop_schema_init(
     monkeypatch,
 ) -> None:
-    import core.plugins.loader as loader_mod
-    import core.plugins.overlay as overlay_mod
-    from core.cli.commands.plugin import schema_init as module
+    import baselith.core.plugins.loader as loader_mod
+    import baselith.core.plugins.overlay as overlay_mod
+    from baselith.core.cli.commands.plugin import schema_init as module
 
     def _boom() -> list[str]:
         raise RuntimeError("bad overlay")
@@ -169,6 +169,6 @@ async def test_overlay_registration_failure_does_not_stop_schema_init(
     monkeypatch.setattr(overlay_mod, "register_overlay_packages", _boom)
     monkeypatch.setattr(loader_mod.PluginLoader, "discover_plugins", lambda self: [])
     monkeypatch.setattr(
-        "core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
+        "baselith.core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
     )
     assert await module._load_enabled(None) == []

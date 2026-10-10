@@ -22,7 +22,7 @@ license-files = ["LICENSE", "LICENSE.exception", "NOTICE"]
 # 3.13 and (advisory) 3.14, so the trove list says the same thing: a classifier
 # set that stops at 3.12 makes PyPI's "Programming Language" facet under-report
 # what is actually tested. `Typing :: Typed` is the trove counterpart of the
-# `core/py.typed` marker shipped in the wheel — without it, tooling that filters
+# `baselith/core/py.typed` marker shipped in the wheel — without it, tooling that filters
 # on the classifier treats the package as untyped even though it ships PEP 561
 # inline types.
 classifiers = [
@@ -39,7 +39,7 @@ keywords = ["ai", "agents", "framework"]
 
 dependencies = [
   # The libraries a third-party plugin used to get for free — defusedxml,
-  # email-validator, markdown-it-py, networkx, sse-starlette — imported by nothing in core/ or the official
+  # email-validator, markdown-it-py, networkx, sse-starlette — imported by nothing in baselith/core/ or the official
   # plugins, moved to the `plugin-compat` extra: a plugin declares what it
   # imports, and every install stopped paying for what none of it uses.
   # <3.9.4: CVE-2024-23334 (static-route path traversal) and
@@ -48,8 +48,8 @@ dependencies = [
   "aiohttp>=3.9.4",
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
-  # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
-  # and core/world_model/mandates.py (Ed25519) import it.
+  # Runtime, not test-only: baselith/core/security/encryption.py, baselith/core/tenancy/encryption.py,
+  # and baselith/core/world_model/mandates.py (Ed25519) import it.
   # >=50.0.0: CVE-2026-69247 (GHSA-g6cj-pr64-35w5) — PKCS#7 EnvelopedData
   # decryption leaked a Bleichenbacher oracle via distinguishable errors and
   # timing; present in 44.0.0–49.0.0, fixed in 50.0.0. Not reachable from this
@@ -71,7 +71,7 @@ dependencies = [
   "opentelemetry-instrumentation-httpx>=0.42b0",
   "opentelemetry-instrumentation-redis>=0.42b0",
   "opentelemetry-sdk>=1.21.0",
-  # Declared rather than left transitive. core/observability/otel.py spells the
+  # Declared rather than left transitive. baselith/core/observability/otel.py spells the
   # resource attribute keys out as plain strings precisely so the *bootstrap*
   # does not depend on a semconv release, but every instrumentation package
   # above imports this one for its span attributes, and it is the package whose
@@ -80,7 +80,7 @@ dependencies = [
   # happened to pick — a dashboard breaking on an unrelated dependency bump.
   "opentelemetry-semantic-conventions>=0.42b0",
   "orjson>=3.11.7,<4.0",
-  # Direct import in core/plugins/version.py: PEP 440 parsing is what orders
+  # Direct import in baselith/core/plugins/version.py: PEP 440 parsing is what orders
   # plugin prereleases correctly (a string compare put `beta.10` before
   # `beta.2`). It arrives transitively via several deps today — declare it so a
   # resolver change cannot break plugin version comparison.
@@ -89,8 +89,8 @@ dependencies = [
   "psycopg[binary,pool]>=3.2.1,<4.0",
   "pydantic-settings>=2.0.0",
   "PyJWT>=2.14.0,<3.0",
-  # Direct, unguarded import in core/config/env.py, core/plugins/env.py,
-  # core/plugins/loader.py and backend.py. It used to arrive only transitively
+  # Direct, unguarded import in baselith/core/config/env.py, baselith/core/plugins/env.py,
+  # baselith/core/plugins/loader.py and backend.py. It used to arrive only transitively
   # via pydantic-settings — declare it so a future pydantic-settings release
   # cannot break the boot path by dropping it.
   "python-dotenv>=1.0.0",
@@ -100,7 +100,7 @@ dependencies = [
   "redis[hiredis]>=5.0.7,<6.0",
   "rq>=1.15.0",
   "sentry-sdk[fastapi]>=2.0.0",
-  # The Alembic environment (core/db/migrations/env.py) runs on an async
+  # The Alembic environment (baselith/core/db/migrations/env.py) runs on an async
   # engine, which needs greenlet; SQLAlchemy 2.x only pulls it in through the
   # `asyncio` extra, so a plain install could not migrate its database.
   "sqlalchemy[asyncio]>=2.0.0",
@@ -119,7 +119,7 @@ Changelog = "https://github.com/baselithcore/baselithcore/blob/main/CHANGELOG.md
 Marketplace = "https://marketplace.baselithcore.xyz"
 
 [project.scripts]
-baselith = "core.cli.__main__:main"
+baselith = "baselith.core.cli.__main__:main"
 
 [project.optional-dependencies]
 browser = [
@@ -185,24 +185,24 @@ rag = [
 nlp = [
   # Floor on the current 3.8.x patch (3.8.0 is from 2024) rather than `==`, so
   # the 3.8 patch stream stays reachable; <4 because spaCy 4 is a breaking
-  # rewrite and `core/nlp/spacy_utils.py` targets the v3 pipeline API.
+  # rewrite and `baselith/core/nlp/spacy_utils.py` targets the v3 pipeline API.
   "spacy>=3.8.15,<4",
 ]
 gemini = [
   "google-genai>=1.16.0,<2.0",
 ]
-# Exact token counting in `core/utils/tokens.py`. The import is guarded and
+# Exact token counting in `baselith/core/utils/tokens.py`. The import is guarded and
 # falls back to a character-class heuristic, so this stays opt-in — install it
 # when budget/cost accounting has to be exact rather than estimated.
 tokenizer = [
   "tiktoken>=0.7.0",
 ]
-# LLM-as-judge metrics in `core/evaluation/metrics.py` (guarded import, gated
+# LLM-as-judge metrics in `baselith/core/evaluation/metrics.py` (guarded import, gated
 # on `evaluation_config.is_enabled`).
 evaluation = [
   "deepeval>=2.0.0",
 ]
-# Docker-backed code sandbox in `core/services/sandbox/` (guarded import; the
+# Docker-backed code sandbox in `baselith/core/services/sandbox/` (guarded import; the
 # service degrades to unavailable without it).
 sandbox = [
   "docker>=7.0.0",
@@ -223,7 +223,7 @@ memory = [
 ]
 pii = [
   # NER-based PII redaction engine (BASELITH_PII_ENGINE=presidio); the
-  # regex redaction in core.guardrails needs no extra.
+  # regex redaction in baselith.core.guardrails needs no extra.
   "presidio-analyzer>=2.2.0",
   "presidio-anonymizer>=2.2.0",
 ]
@@ -245,7 +245,7 @@ computer_use = [
 # ------------------------------------------------------------------
 # Development dependency groups (PEP 735)
 # Libraries [project].dependencies carried for plugins until 0.41, though
-# nothing in core/ or the official plugins imports them. A plugin that relies
+# nothing in baselith/core/ or the official plugins imports them. A plugin that relies
 # on one should declare it itself; until it does, install
 # `baselith-core[plugin-compat]` to keep the old surface.
 plugin-compat = [
@@ -298,7 +298,7 @@ test = [
   # Random test order every run: surfaces order-dependence that -n auto
   # otherwise hides until it flakes. Reproduce with -p randomly --randomly-seed=<seed>.
   "pytest-randomly>=4.1.0",
-  # Property-based testing (core/resilience invariants).
+  # Property-based testing (baselith/core/resilience invariants).
   "hypothesis>=6.100",
   # Runtime OpenAPI conformance gate (tests/contracts).
   "schemathesis>=4.25",
@@ -359,8 +359,8 @@ conflicts = [
 
 # The `baselith init` starters live in `templates/`, outside every package, so
 # the wheel shipped none of them and a pip install offered only `minimal`.
-# This build_py hook copies the CLI's starters into `core/cli/scaffold_templates`
-# of the build tree (`core.cli.commands.init` looks there); MANIFEST.in puts the
+# This build_py hook copies the CLI's starters into `baselith/core/cli/scaffold_templates`
+# of the build tree (`baselith.core.cli.commands.init` looks there); MANIFEST.in puts the
 # hook and `templates/` in the sdist so a wheel built from it gets them too.
 # scripts/check_distribution_artifacts.py asserts them on the built wheel.
 [tool.setuptools]
@@ -368,9 +368,9 @@ cmdclass = { build_py = "build_support.scaffold_templates.BuildPy" }
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["baselith*", "core*", "plugins*"]
-# In-repo FIXTURES, not product. `plugins/example-plugin` is the reference
-# scaffold the authoring guide walks through and `plugins/test-project` is the
+include = ["baselith*"]
+# In-repo FIXTURES, not product. `baselith/plugins/example-plugin` is the reference
+# scaffold the authoring guide walks through and `baselith/plugins/test-project` is the
 # throwaway tree the plugin CLI tests scaffold against; `include = ["plugins*"]`
 # swept both into the distribution, so every `pip install baselith-core` shipped
 # a loadable plugin whose handlers exist to be asserted on. They stay in the
@@ -379,14 +379,14 @@ include = ["baselith*", "core*", "plugins*"]
 # artifact, because a pattern that silently stops matching is exactly how they
 # got shipped the first time.
 exclude = [
-    "plugins.example-plugin",
-    "plugins.example-plugin.*",
-    "plugins.test-project",
-    "plugins.test-project.*",
+    "baselith.plugins.example-plugin",
+    "baselith.plugins.example-plugin.*",
+    "baselith.plugins.test-project",
+    "baselith.plugins.test-project.*",
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "core._version.__version__"}
+version = {attr = "baselith.core._version.__version__"}
 
 [tool.setuptools.package-data]
 "*" = [
@@ -403,26 +403,26 @@ version = {attr = "core._version.__version__"}
 ]
 # The sandbox image recipe, scoped to its own package rather than added to the
 # `"*"` list above — nothing else in the tree has a Dockerfile to ship.
-# `core/services/sandbox/docker_factory.py` builds `agent-sandbox:latest` from
+# `baselith/core/services/sandbox/docker_factory.py` builds `agent-sandbox:latest` from
 # these at first use and fails closed when they are absent; before this entry
 # they were not in the wheel at all, so every pip-installed deployment either
 # lost the Docker sandbox provider to a RuntimeError or fell back to an
 # unreviewed base image. scripts/check_distribution_artifacts.py asserts both
 # on the built wheel and sdist.
-"core.services.sandbox" = [
+"baselith.core.services.sandbox" = [
     "Dockerfile.sandbox",
     "requirements.sandbox.txt",
 ]
-# The Alembic environment. `core/db/migrations` has no `__init__.py` (its
+# The Alembic environment. `baselith/core/db/migrations` has no `__init__.py` (its
 # revision modules are not importable names); namespace discovery happens to
 # pick up the `.py` files, but the requirement is stated here so it does not
 # hinge on the discovery mode, and the non-Python template only ships through
 # this entry. Before the move a wheel install had no migrations at all:
 # `baselith db migrate` and the startup upgrade needed a checkout in the cwd.
-# core.db.migration_config locates them through the package;
+# baselith.core.db.migration_config locates them through the package;
 # scripts/check_distribution_artifacts.py loads their heads from the installed
 # wheel.
-"core.db" = [
+"baselith.core.db" = [
     "migrations/env.py",
     "migrations/script.py.mako",
     "migrations/versions/*.py",
@@ -523,7 +523,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"core/observability/logging.py" = ["LOG004"]  # logging wrapper exception helper
+"baselith/core/observability/logging.py" = ["LOG004"]  # logging wrapper exception helper
 "__init__.py" = ["F401"]        # re-exports are intentional public surface
 # Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
 # dict()-literals and blocking sleeps are all fine in test code.
@@ -540,27 +540,27 @@ ignore = [
     # The RLS-isolation and ledger integration tests interpolate table names on
     # purpose: proving a tenant cannot read another's rows means issuing the
     # query the policy must refuse. A test is not attack surface, and the rule
-    # still gates core/, plugins/ and scripts/.
+    # still gates baselith/core/, baselith/plugins/ and scripts/.
     "S608",
 ]
 "sdk/python/tests/**" = ["S105", "S106", "S107"]
-"plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
+"baselith/plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
 # Documentation tooling, not shipped runtime.
 "mkdocs-site/**" = ["ASYNC230", "ASYNC240"]
-# ASYNC230/240 are enforced on `core/` only. The kernel is where a blocking
+# ASYNC230/240 are enforced on `baselith/core/` only. The kernel is where a blocking
 # read inside an async handler actually costs a request under load, and where
 # every site has been triaged (fixed, or annotated with why it is harmless).
 # Plugins — including third-party ones — are not held to a rule this project
 # has not triaged in their code; the same reasoning as the strict-typing
 # allowlist, which grows package by package rather than landing all at once.
-"plugins/**" = ["ASYNC230", "ASYNC240"]
+"baselith/plugins/**" = ["ASYNC230", "ASYNC240"]
 "scripts/**" = ["ASYNC250", "RUF013",
                 # One-off admin scripts: blocking file I/O is the point.
                 "ASYNC230", "ASYNC240",
                 # `git`/`python` resolved from PATH is how a dev script is
                 # meant to run; an absolute path would break every venv.
                 "S607"]                          # one-off admin scripts; blocking sleep is fine
-"core/db/migrations/**" = ["E402"]  # alembic env import ordering is fixed by the template
+"baselith/core/db/migrations/**" = ["E402"]  # alembic env import ordering is fixed by the template
 
 [tool.mypy]
 python_version = "3.12"
@@ -570,7 +570,7 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 disable_error_code = ["import-untyped", "import-not-found"]
 # Anchored: mypy matches these regexes anywhere in the path, so a bare
-# "plugins/" also swallowed core/plugins/ (the plugin *machinery*) and left
+# "baselith/plugins/" also swallowed baselith/core/plugins/ (the plugin *machinery*) and left
 # 10k lines of core unchecked. "^" pins each one to the repository root.
 exclude = [
     "^templates/",
@@ -578,7 +578,7 @@ exclude = [
     "^frontend/",
     "^build/",
     "^dist/",
-    "^plugins/",
+    "^baselith/plugins/",
     "^scripts/",
 ]
 
@@ -607,6 +607,9 @@ module = [
 ignore_errors = true
 
 [tool.coverage.run]
+# Bundled plugins sit inside `baselith/` since 1.0 but were never part of
+# the measured kernel; their own suites cover them.
+omit = ["baselith/plugins/*"]
 # Branch coverage: a line that only ever takes one side of its condition is
 # not "covered". The percentage drops vs line-only measurement — the gate in
 # pytest.ini is calibrated against branch numbers.
@@ -627,13 +630,13 @@ exclude_lines = [
 # surviving mutant says no test would notice if the regex stopped matching.
 # Deliberately narrow: three modules and the unit tests that own them, so the
 # run fits its nightly budget. mutmut copies `source_paths` into ./mutants and
-# mutates only the files `only_mutate` names; the rest of core/ is copied as is
+# mutates only the files `only_mutate` names; the rest of baselith/core/ is copied as is
 # so the tests import a complete package.
 source_paths = ["core"]
 only_mutate = [
-  "core/observability/redaction.py",
-  "core/security/secrets.py",
-  "core/guardrails/input_guard.py",
+  "baselith/core/observability/redaction.py",
+  "baselith/core/security/secrets.py",
+  "baselith/core/guardrails/input_guard.py",
 ]
 also_copy = ["pytest.ini", "baselith"]
 # pytest.ini's addopts carry the repository-wide --cov-fail-under gate, which a

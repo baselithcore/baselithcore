@@ -7,16 +7,19 @@ from unittest.mock import patch
 
 import pytest
 
-from core.compliance.artefact_services import (
+from baselith.core.compliance.artefact_services import (
     get_dpia_service,
     get_risk_management_service,
     reset_artefact_services,
 )
-from core.compliance.post_market_service import (
+from baselith.core.compliance.post_market_service import (
     get_post_market_service,
     reset_post_market_service,
 )
-from core.compliance.review_sweep import ComplianceReviewScheduler, sweep_summary
+from baselith.core.compliance.review_sweep import (
+    ComplianceReviewScheduler,
+    sweep_summary,
+)
 from tests.unit.core.compliance.test_artefacts import (
     _complete_dpia,
     _complete_risk_file,
@@ -47,7 +50,7 @@ class TestCoverage:
         # Patch the module logger instead of capturing stdout: the global
         # structlog sink is process-wide mutable state, so a stdout assert is
         # order-dependent under random test ordering.
-        with patch("core.compliance.review_sweep.logger") as log:
+        with patch("baselith.core.compliance.review_sweep.logger") as log:
             findings = await ComplianceReviewScheduler().sweep()
         assert findings["overdue_risk_reviews"] == [file.id]
         # The article behind the warning must be in the line, not just the id.
@@ -67,7 +70,7 @@ class TestCoverage:
         dpia = await service.save(_complete_dpia(residual_high=True))
         await service.complete(dpia.id)
 
-        with patch("core.compliance.review_sweep.logger") as log:
+        with patch("baselith.core.compliance.review_sweep.logger") as log:
             findings = await ComplianceReviewScheduler().sweep()
         assert findings["blocked_dpias"] == [dpia.id]
         logged = " ".join(str(c) for c in log.warning.call_args_list)
@@ -82,8 +85,8 @@ class TestCoverage:
         assert findings["blocked_dpias"] == []
 
     async def test_incomplete_artefacts_are_listed_without_urgency(self):
-        from core.compliance.dpia import DataProtectionImpactAssessment
-        from core.compliance.risk_management import RiskManagementSystem
+        from baselith.core.compliance.dpia import DataProtectionImpactAssessment
+        from baselith.core.compliance.risk_management import RiskManagementSystem
 
         await get_risk_management_service().save(RiskManagementSystem(system_id="s"))
         await get_dpia_service().save(DataProtectionImpactAssessment(name="x"))
@@ -123,7 +126,8 @@ class TestResilience:
             raise RuntimeError("store offline")
 
         monkeypatch.setattr(
-            "core.compliance.artefact_services.get_risk_management_service", _boom
+            "baselith.core.compliance.artefact_services.get_risk_management_service",
+            _boom,
         )
         findings = await ComplianceReviewScheduler().sweep()
         # The risk sweep failed; the post-market finding still came through.

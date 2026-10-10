@@ -13,8 +13,8 @@ from typing import Any
 import httpx
 import pytest
 
-from plugins.web_scraper.fetchers import httpx_fetcher as fetcher_module
-from plugins.web_scraper.fetchers.httpx_fetcher import HttpxFetcher
+from baselith.plugins.web_scraper.fetchers import httpx_fetcher as fetcher_module
+from baselith.plugins.web_scraper.fetchers.httpx_fetcher import HttpxFetcher
 
 _PINNED = "https://93.184.216.34/post"
 _ORIGINAL = "https://example.com/post"

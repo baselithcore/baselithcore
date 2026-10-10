@@ -19,8 +19,8 @@ import time
 
 import pytest
 
-from core.observability.audit import AuditEvent, AuditEventType
-from core.observability.audit_chain import SQLiteAuditSink
+from baselith.core.observability.audit import AuditEvent, AuditEventType
+from baselith.core.observability.audit_chain import SQLiteAuditSink
 
 
 def _payload(action: str) -> dict:

@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.orchestration import OrchestrationConfig
-from core.orchestration.checkpoint import (
+from baselith.core.config.orchestration import OrchestrationConfig
+from baselith.core.orchestration.checkpoint import (
     STATUS_RUNNING,
     Checkpoint,
     CheckpointManager,
     InMemoryCheckpointStore,
 )
-from core.orchestration.checkpoint_history import (
+from baselith.core.orchestration.checkpoint_history import (
     fork_run,
     get_state,
     get_state_history,
@@ -183,10 +183,12 @@ class TestPostgresHistory:
         return _ctx
 
     def _store(self, cursor, **kwargs):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         patcher = patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         )
         return PostgresCheckpointStore(**kwargs), patcher
@@ -319,8 +321,8 @@ class TestPostgresHistory:
 
 class TestFactoryWiring:
     def test_factory_passes_history_flags_to_memory_store(self, monkeypatch):
-        import core.config.orchestration as orch_config
-        from core.orchestration.checkpoint_factory import (
+        import baselith.core.config.orchestration as orch_config
+        from baselith.core.orchestration.checkpoint_factory import (
             get_default_checkpoint_store,
             reset_default_checkpoint_store,
         )
@@ -354,13 +356,15 @@ class TestHistoryFlag:
         assert InMemoryCheckpointStore().history_enabled is False
 
     def test_postgres_store_exposes_history_enabled(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         assert PostgresCheckpointStore(history_enabled=True).history_enabled is True
         assert PostgresCheckpointStore().history_enabled is False
 
     def test_sqlite_store_exposes_history_enabled(self, tmp_path):
-        from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+        from baselith.core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
 
         path = tmp_path / "cp.sqlite"
         assert SQLiteCheckpointStore(path, history_enabled=True).history_enabled is True

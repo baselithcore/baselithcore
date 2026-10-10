@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from core.workflows.builder import WorkflowDefinition
-from core.workflows.executor import ExecutionStatus, WorkflowResult
-from core.workflows.schedule import WorkflowScheduler
+from baselith.core.workflows.builder import WorkflowDefinition
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowResult
+from baselith.core.workflows.schedule import WorkflowScheduler
 
 
 def _dt(*args: int) -> datetime:

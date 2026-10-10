@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.cache.single_flight import (
+from baselith.core.cache.single_flight import (
     LayeredSingleFlight,
     RedisSingleFlight,
     build_single_flight,
 )
-from core.config.cache import CacheConfig
+from baselith.core.config.cache import CacheConfig
 
 
 class FakeAsyncRedis:
@@ -249,25 +249,25 @@ class TestBuildSingleFlight:
         # Even with the flag on, a process-local store gives a losing worker
         # nothing to read back, so the distributed layer must stay off.
         monkeypatch.setattr(
-            "core.config.get_cache_config",
+            "baselith.core.config.get_cache_config",
             lambda: SimpleNamespace(cross_worker_single_flight=True),
         )
         assert build_single_flight(shared_cache=False).is_distributed is False
 
     def test_disabled_without_opt_in_flag(self, monkeypatch):
         monkeypatch.setattr(
-            "core.config.get_cache_config",
+            "baselith.core.config.get_cache_config",
             lambda: SimpleNamespace(cross_worker_single_flight=False),
         )
         assert build_single_flight(shared_cache=True).is_distributed is False
 
     def test_enabled_when_flag_and_shared_cache(self, monkeypatch):
         monkeypatch.setattr(
-            "core.config.get_cache_config",
+            "baselith.core.config.get_cache_config",
             lambda: SimpleNamespace(cross_worker_single_flight=True),
         )
         monkeypatch.setattr(
-            "core.cache.single_flight.RedisSingleFlight",
+            "baselith.core.cache.single_flight.RedisSingleFlight",
             lambda **kwargs: object(),
         )
         assert build_single_flight(shared_cache=True).is_distributed is True
@@ -276,7 +276,7 @@ class TestBuildSingleFlight:
         def explode():
             raise RuntimeError("config unreadable")
 
-        monkeypatch.setattr("core.config.get_cache_config", explode)
+        monkeypatch.setattr("baselith.core.config.get_cache_config", explode)
         # Never let coordination setup break the caller.
         assert build_single_flight(shared_cache=True).is_distributed is False
 

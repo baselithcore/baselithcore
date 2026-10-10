@@ -18,10 +18,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from core.config import inference
-from core.config.inference import EmbeddingConfig, RerankConfig
-from core.nlp import _remote
-from core.services.inference.errors import InferenceConfigError
+from baselith.core.config import inference
+from baselith.core.config.inference import EmbeddingConfig, RerankConfig
+from baselith.core.nlp import _remote
+from baselith.core.services.inference.errors import InferenceConfigError
 
 
 class _Bridge:
@@ -50,7 +50,9 @@ class _Bridge:
 @pytest.fixture
 def bridge(monkeypatch: pytest.MonkeyPatch) -> _Bridge:
     fake = _Bridge()
-    monkeypatch.setattr("core.services.inference.get_sync_inference", lambda: fake)
+    monkeypatch.setattr(
+        "baselith.core.services.inference.get_sync_inference", lambda: fake
+    )
     return fake
 
 
@@ -131,8 +133,8 @@ def test_remote_model_routes_roles(
 async def test_cached_embedder_query_side_and_cache_scope(
     monkeypatch: pytest.MonkeyPatch, bridge: _Bridge
 ) -> None:
-    from core.nlp.models import CachedEmbedder
-    from core.nlp.roles import aencode_query
+    from baselith.core.nlp.models import CachedEmbedder
+    from baselith.core.nlp.roles import aencode_query
 
     _configure(monkeypatch, query_prefix="q: ")
     emb = CachedEmbedder(_remote.RemoteEmbeddingModel(), cache_backend="memory")
@@ -157,7 +159,7 @@ async def test_cached_embedder_query_side_and_cache_scope(
 async def test_aencode_query_falls_back_to_encode_for_plain_embedders() -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from core.nlp.roles import aencode_query
+    from baselith.core.nlp.roles import aencode_query
 
     async_mock = MagicMock()
     async_mock.encode = AsyncMock(return_value=[1.0])

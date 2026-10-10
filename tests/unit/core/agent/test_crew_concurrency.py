@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from core.agent.crew import DEFAULT_CREW_MAX_PARALLEL, Crew, Task
+from baselith.core.agent.crew import DEFAULT_CREW_MAX_PARALLEL, Crew, Task
 
 
 class _SpyAgent:
@@ -27,7 +27,7 @@ class _SpyAgent:
         self._delay = delay
 
     async def run(self, prompt: str):
-        from core.agent.agent import AgentResult
+        from baselith.core.agent.agent import AgentResult
 
         type(self).live += 1
         type(self).peak = max(type(self).peak, type(self).live)
@@ -66,7 +66,7 @@ class TestParallelFanOut:
         assert [r.name for r in result.task_results] == [f"t{i}" for i in range(6)]
 
     async def test_default_limit_comes_from_settings(self, monkeypatch) -> None:
-        import core.agent.crew as crew_mod
+        import baselith.core.agent.crew as crew_mod
 
         monkeypatch.setattr(crew_mod, "_configured_max_parallel", lambda: 2)
         crew = _crew(8)
@@ -96,7 +96,7 @@ class TestParallelFanOut:
 
 class TestSettings:
     def test_orchestration_config_exposes_crew_max_parallel(self) -> None:
-        from core.config.orchestration import OrchestrationConfig
+        from baselith.core.config.orchestration import OrchestrationConfig
 
         assert OrchestrationConfig().crew_max_parallel == 8
 

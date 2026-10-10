@@ -1,4 +1,4 @@
-"""Unit tests for ``core.orchestration.contract``."""
+"""Unit tests for ``baselith.core.orchestration.contract``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.orchestration.contract import (
+from baselith.core.orchestration.contract import (
     AgentContract,
     Capabilities,
     ContractValidator,

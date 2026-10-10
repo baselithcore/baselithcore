@@ -11,14 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.messages import (
+from baselith.core.services.llm.messages import (
     Message,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
-from core.services.llm.tool_calling import LLMToolSpec
+from baselith.core.services.llm.tool_calling import LLMToolSpec
 
 MODERN = "claude-opus-5"
 # Long enough to clear the provider's cacheable-prefix floor (4096 chars);
@@ -54,11 +54,13 @@ def _block(**fields):
 
 def _anthropic(client):
     with patch(
-        "core.services.llm.providers.anthropic_provider.anthropic"
+        "baselith.core.services.llm.providers.anthropic_provider.anthropic"
     ) as mock_anthropic:
         mock_anthropic.AsyncAnthropic.return_value = client
         mock_anthropic.NOT_GIVEN = "not_given"
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test")
         provider._ensure_client()
@@ -270,9 +272,11 @@ class TestAnthropicMessages:
 
 
 def _openai(client):
-    with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+    with patch(
+        "baselith.core.services.llm.providers.openai_provider.openai"
+    ) as mock_openai:
         mock_openai.AsyncOpenAI.return_value = client
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         provider = OpenAIProvider(api_key="sk-test")
         provider._ensure_client()
@@ -373,7 +377,8 @@ class TestProvidersWithoutAMessageAPI:
         import importlib
 
         provider_cls = getattr(
-            importlib.import_module(f"core.services.llm.providers.{module}"), name
+            importlib.import_module(f"baselith.core.services.llm.providers.{module}"),
+            name,
         )
         assert getattr(provider_cls, "supports_messages", False) is False
 

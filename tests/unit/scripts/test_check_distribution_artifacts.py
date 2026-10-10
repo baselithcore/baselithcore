@@ -44,22 +44,22 @@ def downgrade() -> None:
 
 
 def _install_integrity(root: Path) -> None:
-    target = root / "core" / "plugins"
+    target = root / "baselith" / "core" / "plugins"
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copy(REPO_ROOT / "core" / "plugins" / "integrity.py", target)
+    shutil.copy(REPO_ROOT / "baselith" / "core" / "plugins" / "integrity.py", target)
 
 
 def _signed_plugin(root: Path, name: str, files: dict[str, str]) -> str:
     """Write a plugin under ``root/plugins`` and sign it; return the digest."""
     import importlib.util
 
-    plugin = root / "plugins" / name
+    plugin = root / "baselith" / "plugins" / name
     plugin.mkdir(parents=True)
     for rel, text in files.items():
         (plugin / rel).write_text(text, encoding="utf-8")
     (plugin / "manifest.yaml").write_text(f"name: {name}\n", encoding="utf-8")
     spec = importlib.util.spec_from_file_location(
-        "_test_integrity", REPO_ROOT / "core" / "plugins" / "integrity.py"
+        "_test_integrity", REPO_ROOT / "baselith" / "core" / "plugins" / "integrity.py"
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -85,7 +85,7 @@ class TestInstalledPlugins:
         _signed_plugin(
             tmp_path, "demo", {"plugin.py": "X = 1\n", "requirements.txt": "a\n"}
         )
-        (tmp_path / "plugins" / "demo" / "requirements.txt").unlink()
+        (tmp_path / "baselith" / "plugins" / "demo" / "requirements.txt").unlink()
 
         (violation,) = check_installed_plugins(tmp_path, label="w.whl")
 
@@ -94,7 +94,7 @@ class TestInstalledPlugins:
 
     def test_unsigned_plugin_is_not_checked(self, tmp_path: Path) -> None:
         _install_integrity(tmp_path)
-        plugin = tmp_path / "plugins" / "loose"
+        plugin = tmp_path / "baselith" / "plugins" / "loose"
         plugin.mkdir(parents=True)
         (plugin / "manifest.yaml").write_text("name: loose\n", encoding="utf-8")
 
@@ -102,7 +102,7 @@ class TestInstalledPlugins:
 
 
 def _migrations(root: Path, revisions: dict[str, str | None]) -> None:
-    location = root / "core" / "db" / "migrations"
+    location = root / "baselith" / "core" / "db" / "migrations"
     (location / "versions").mkdir(parents=True)
     (location / "env.py").write_text("", encoding="utf-8")
     for rev, down in revisions.items():
@@ -127,7 +127,7 @@ class TestInstalledMigrations:
             tmp_path / "installed", source, label="w.whl"
         )
 
-        assert "core/db/migrations" in violation
+        assert "baselith/core/db/migrations" in violation
 
     def test_revision_missing_from_install_fails(self, tmp_path: Path) -> None:
         installed, source = tmp_path / "installed", tmp_path / "source"
@@ -161,7 +161,7 @@ class TestInstalledScaffoldTemplates:
         source = self._source(tmp_path)
         shutil.copytree(
             source / "templates",
-            tmp_path / "site" / "core" / "cli" / "scaffold_templates",
+            tmp_path / "site" / "baselith" / "core" / "cli" / "scaffold_templates",
         )
 
         assert (
@@ -183,7 +183,9 @@ class TestInstalledScaffoldTemplates:
 
     def test_missing_file_fails(self, tmp_path: Path) -> None:
         source = self._source(tmp_path)
-        installed = tmp_path / "site" / "core" / "cli" / "scaffold_templates"
+        installed = (
+            tmp_path / "site" / "baselith" / "core" / "cli" / "scaffold_templates"
+        )
         (installed / "rag-system").mkdir(parents=True)
         (installed / "rag-system" / "README.md").write_text("r")
 
@@ -192,18 +194,18 @@ class TestInstalledScaffoldTemplates:
         )
         assert found == [
             "w.whl: scaffold template file missing: "
-            "core/cli/scaffold_templates/rag-system/main.py"
+            "baselith/core/cli/scaffold_templates/rag-system/main.py"
         ]
 
 
 def test_unpacked_wheel_is_removed_afterwards(tmp_path: Path) -> None:
     wheel = tmp_path / "demo-1.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("core/x.py", "X = 1\n")
+        archive.writestr("baselith/core/x.py", "X = 1\n")
 
     with unpacked_wheel(wheel) as root:
         seen = root
-        content = (root / "core" / "x.py").read_bytes()
+        content = (root / "baselith" / "core" / "x.py").read_bytes()
 
     assert hashlib.sha256(content).hexdigest() == hashlib.sha256(b"X = 1\n").hexdigest()
     assert not seen.exists()

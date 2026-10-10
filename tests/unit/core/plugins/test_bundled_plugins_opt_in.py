@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.plugins import discovery
-from core.plugins.config_file import plugin_enabled
+from baselith.core.plugins import discovery
+from baselith.core.plugins.config_file import plugin_enabled
 
 pytestmark = [pytest.mark.unit]
 
@@ -92,7 +92,7 @@ class TestIsBundledInstallDir:
 
 class TestDiscovery:
     def test_fresh_install_discovers_nothing(self, bundle: Path) -> None:
-        from core.plugins.resource_analyzer import ResourceAnalyzer
+        from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
         # No ./plugins: the configured root *is* the installed package.
         assert ResourceAnalyzer(bundle).discover_plugins({}) == {}
@@ -100,20 +100,20 @@ class TestDiscovery:
     def test_user_plugins_still_run_without_config(
         self, bundle: Path, tmp_path: Path
     ) -> None:
-        from core.plugins.resource_analyzer import ResourceAnalyzer
+        from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
         user = tmp_path / "project" / "plugins"
         _plugin(user, "mine")
         assert set(ResourceAnalyzer(user).discover_plugins({})) == {"mine"}
 
     def test_named_bundled_plugin_is_discovered(self, bundle: Path) -> None:
-        from core.plugins.resource_analyzer import ResourceAnalyzer
+        from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
         found = ResourceAnalyzer(bundle).discover_plugins({"shipped": {}})
         assert set(found) == {"shipped"}
 
     def test_requirements_ignore_disabled_bundled(self, bundle: Path) -> None:
-        from core.plugins.resource_analyzer import ResourceAnalyzer
+        from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
         (bundle / "shipped" / "manifest.yaml").write_text(
             "name: shipped\nversion: 1.0.0\nrequired_resources: [postgres]\n"
@@ -123,8 +123,8 @@ class TestDiscovery:
 
 
 async def test_bulk_load_skips_disabled_bundled(bundle: Path, tmp_path: Path) -> None:
-    from core.plugins.loader import PluginLoader
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.plugins.loader import PluginLoader
+    from baselith.core.plugins.registry import PluginRegistry
 
     user = tmp_path / "project" / "plugins"
     _plugin(user, "mine")
@@ -138,8 +138,8 @@ async def test_bulk_load_skips_disabled_bundled(bundle: Path, tmp_path: Path) ->
 
 
 async def test_auto_activate_skips_disabled_bundled(bundle: Path) -> None:
-    from core.api._plugin_runtime import PluginRuntimeHooks
-    from core.plugins.resource_analyzer import ResourceAnalyzer
+    from baselith.core.api._plugin_runtime import PluginRuntimeHooks
+    from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
     analyzer = ResourceAnalyzer(bundle)
     discoveries = {
@@ -156,7 +156,7 @@ async def test_auto_activate_skips_disabled_bundled(bundle: Path) -> None:
 def test_app_middleware_skips_disabled_bundled(
     bundle: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugins import app_setup
+    from baselith.core.plugins import app_setup
 
     (bundle / "shipped" / "plugin.py").write_text(
         "class P:\n    def setup_app_middleware(self, app):\n        pass\n"
@@ -177,7 +177,9 @@ async def test_schema_init_skips_disabled_bundled(
 ) -> None:
     import importlib
 
-    schema_init = importlib.import_module("core.cli.commands.plugin.schema_init")
+    schema_init = importlib.import_module(
+        "baselith.core.cli.commands.plugin.schema_init"
+    )
     monkeypatch.chdir(tmp_path)
     seen: list[str] = []
 
@@ -221,7 +223,9 @@ class TestDoctor:
     def test_dependency_check_ignores_disabled_bundled(
         self, bundle: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.doctor_plugin_checks import check_plugin_dependencies
+        from baselith.core.cli.commands.doctor_plugin_checks import (
+            check_plugin_dependencies,
+        )
 
         self._env(bundle, tmp_path, monkeypatch)
         assert check_plugin_dependencies().passed
@@ -229,7 +233,9 @@ class TestDoctor:
     def test_dependency_check_covers_enabled_bundled(
         self, bundle: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.doctor_plugin_checks import check_plugin_dependencies
+        from baselith.core.cli.commands.doctor_plugin_checks import (
+            check_plugin_dependencies,
+        )
 
         self._env(bundle, tmp_path, monkeypatch)
         (tmp_path / "configs").mkdir()
@@ -247,7 +253,7 @@ class TestCliEnable:
     ) -> None:
         import yaml
 
-        from core.cli.commands.plugin.local_manage import enable_local_plugin
+        from baselith.core.cli.commands.plugin.local_manage import enable_local_plugin
 
         monkeypatch.chdir(tmp_path)
         assert enable_local_plugin("shipped") == 0
@@ -261,7 +267,7 @@ class TestCliEnable:
     ) -> None:
         import yaml
 
-        from core.cli.commands.plugin.local_manage import disable_local_plugin
+        from baselith.core.cli.commands.plugin.local_manage import disable_local_plugin
 
         monkeypatch.chdir(tmp_path)
         assert disable_local_plugin("shipped") == 0
@@ -272,7 +278,7 @@ class TestCliEnable:
     def test_unknown_plugin_still_fails(
         self, bundle: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.plugin.local_manage import enable_local_plugin
+        from baselith.core.cli.commands.plugin.local_manage import enable_local_plugin
 
         monkeypatch.chdir(tmp_path)
         assert enable_local_plugin("nope") == 1

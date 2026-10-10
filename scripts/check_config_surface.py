@@ -49,8 +49,8 @@ REFERENCE_PAGE = (
 )
 
 #: Families whose full name is built at runtime, so no literal exists to match:
-#: ``BASELITH_FLAG_<FLAG>`` (core/feature_flags/manager.py) and
-#: ``BASELITH_PROMPT_VARIANTS_<PROMPT>`` (core/prompts/catalog.py).
+#: ``BASELITH_FLAG_<FLAG>`` (baselith/core/feature_flags/manager.py) and
+#: ``BASELITH_PROMPT_VARIANTS_<PROMPT>`` (baselith/core/prompts/catalog.py).
 DYNAMIC_ENV_PREFIXES: tuple[str, ...] = (
     "BASELITH_FLAG_",
     "BASELITH_PROMPT_VARIANTS_",

@@ -11,7 +11,7 @@ decision, not an observability default.
 
 from __future__ import annotations
 
-from core.observability import (  # package re-exports: house convention
+from baselith.core.observability import (  # package re-exports: house convention
     MAX_CONTENT_CHARS,
     openinference_llm_attributes,
 )

@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import _overlay_guard, overlay
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.overlay_prune import prune_stale_overlay
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.plugins import _overlay_guard, overlay
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.overlay_prune import prune_stale_overlay
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +55,9 @@ def _signed_entry(
 def _register(
     root: Path, bundled: Path, public_hex: str, monkeypatch: pytest.MonkeyPatch
 ) -> list[str]:
-    import plugins  # noqa: F401  # the real package first, as in production
+    from baselith import (
+        plugins,  # noqa: F401  # the real package first, as in production
+    )
 
     monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     return overlay.register_overlay_packages(
@@ -73,7 +75,7 @@ def test_older_entry_refused_and_logged(
     _plugin(bundled, "guard_old", "guard_old", "1.5.0")
     root = tmp_path / "ov"
     _signed_entry(root, "guard_old", "1.3.0", keys[0])
-    with caplog.at_level(logging.WARNING, logger="core.plugins.overlay"):
+    with caplog.at_level(logging.WARNING, logger="baselith.core.plugins.overlay"):
         assert _register(root, bundled, keys[1], monkeypatch) == []
     assert (
         "guard_old refused (not_newer: overlay 1.3.0 <= bundled 1.5.0)" in caplog.text
@@ -97,7 +99,7 @@ def test_newer_entry_registered(
     _plugin(bundled, "guard_new", "guard_new", "1.3.0")
     root = tmp_path / "ov"
     _signed_entry(root, "guard_new", "1.4.0", keys[0])
-    monkeypatch.delitem(sys.modules, "plugins.guard_new", raising=False)
+    monkeypatch.delitem(sys.modules, "baselith.plugins.guard_new", raising=False)
     assert _register(root, bundled, keys[1], monkeypatch) == ["guard_new"]
 
 
@@ -106,7 +108,7 @@ def test_entry_without_bundled_counterpart_registered(
 ) -> None:
     root = tmp_path / "ov"
     _signed_entry(root, "guard_only", "0.1.0", keys[0])
-    monkeypatch.delitem(sys.modules, "plugins.guard_only", raising=False)
+    monkeypatch.delitem(sys.modules, "baselith.plugins.guard_only", raising=False)
     assert _register(root, tmp_path / "bundled", keys[1], monkeypatch) == ["guard_only"]
 
 
@@ -120,7 +122,7 @@ def test_incompatible_core_refused(
     _plugin(bundled, "guard_core", "guard_core", "1.0.0")
     root = tmp_path / "ov"
     _signed_entry(root, "guard_core", "2.0.0", keys[0], "min_core_version: 99.0.0\n")
-    with caplog.at_level(logging.WARNING, logger="core.plugins.overlay"):
+    with caplog.at_level(logging.WARNING, logger="baselith.core.plugins.overlay"):
         assert _register(root, bundled, keys[1], monkeypatch) == []
     assert "guard_core refused (incompatible_core" in caplog.text
 
@@ -144,10 +146,12 @@ def test_invalid_entry_version_refuses(tmp_path: Path) -> None:
 def test_default_bundled_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pkg = tmp_path / "plugins"
     monkeypatch.setitem(
-        sys.modules, "plugins", types.SimpleNamespace(__file__=str(pkg / "__init__.py"))
+        sys.modules,
+        "baselith.plugins",
+        types.SimpleNamespace(__file__=str(pkg / "__init__.py")),
     )
     assert _overlay_guard.default_bundled_root() == pkg.resolve()
-    monkeypatch.setitem(sys.modules, "plugins", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "baselith.plugins", types.SimpleNamespace())
     assert _overlay_guard.default_bundled_root() is None
 
 

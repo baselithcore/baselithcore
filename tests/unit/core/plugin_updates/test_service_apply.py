@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from core._core_version import CORE_VERSION
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.apply import eligibility
-from core.plugin_updates.apply.models import RunKind, UpdaterHeartbeat
-from core.plugin_updates.apply.store import RunStore
-from core.plugin_updates.cache import UpdateCache
-from core.plugin_updates.models import (
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.apply import eligibility
+from baselith.core.plugin_updates.apply.models import RunKind, UpdaterHeartbeat
+from baselith.core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.cache import UpdateCache
+from baselith.core.plugin_updates.models import (
     CheckReport,
     ReleaseInfo,
     SignedAssets,

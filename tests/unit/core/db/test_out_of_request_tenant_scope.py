@@ -6,7 +6,7 @@ connection without a request behind it has to say what it is. The API boot path
 and the RQ worker already did; these paths did not, and raised
 ``TenantContextError`` on the first connection checkout:
 
-* :func:`core.services.tenant.purge.purge_tenant_data` — cross-tenant by
+* :func:`baselith.core.services.tenant.purge.purge_tenant_data` — cross-tenant by
   construction, so it cannot borrow the tenant it is erasing;
 * the self-initializing stores' idempotent DDL, whose first touch is routinely
   an import-time bootstrap, a worker or a script.
@@ -23,12 +23,12 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from core import context as core_context
-from core.context import get_current_tenant_id
-from core.db import connection as db_connection
-from core.db.session_setup import SYSTEM_TENANT_ID
-from core.services.tenant import purge as purge_module
-from core.services.tenant.purge import TenantPurgeBlockedError
+from baselith.core import context as core_context
+from baselith.core.context import get_current_tenant_id
+from baselith.core.db import connection as db_connection
+from baselith.core.db.session_setup import SYSTEM_TENANT_ID
+from baselith.core.services.tenant import purge as purge_module
+from baselith.core.services.tenant.purge import TenantPurgeBlockedError
 
 pytestmark = [pytest.mark.unit]
 
@@ -36,7 +36,7 @@ pytestmark = [pytest.mark.unit]
 @pytest.fixture(autouse=True)
 def _no_store_purge():
     """These tests cover the SQL path; the vector/cache purge has its own."""
-    from core.services.tenant import purge_stores
+    from baselith.core.services.tenant import purge_stores
 
     with patch.object(
         purge_stores,
@@ -90,9 +90,11 @@ class TestTenantPurge:
         cursor.fetchall = AsyncMock(return_value=[("interactions",)])
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", cursor.factory),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor", cursor.factory
+            ),
         ):
-            from core.services.tenant.purge import purge_tenant_data
+            from baselith.core.services.tenant.purge import purge_tenant_data
 
             await purge_tenant_data("doomed-tenant")
 
@@ -103,9 +105,11 @@ class TestTenantPurge:
         cursor, seen = _recording_cursor()
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", cursor.factory),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor", cursor.factory
+            ),
         ):
-            from core.services.tenant.purge import tenant_scoped_tables
+            from baselith.core.services.tenant.purge import tenant_scoped_tables
 
             await tenant_scoped_tables()
 
@@ -114,8 +118,10 @@ class TestTenantPurge:
     async def test_the_callers_tenant_is_restored(self):
         cursor, seen = _recording_cursor()
         cursor.fetchall = AsyncMock(return_value=[])
-        with patch("core.services.tenant.purge.get_async_cursor", cursor.factory):
-            from core.services.tenant.purge import purge_tenant_data
+        with patch(
+            "baselith.core.services.tenant.purge.get_async_cursor", cursor.factory
+        ):
+            from baselith.core.services.tenant.purge import purge_tenant_data
 
             await purge_tenant_data("doomed-tenant")
 
@@ -126,13 +132,18 @@ class TestSelfInitializingStores:
     """Idempotent DDL is deployment work, not a tenant's."""
 
     async def test_a2a_task_store(self):
-        from core.a2a.task_store_postgres import PostgresTaskStore
+        from baselith.core.a2a.task_store_postgres import PostgresTaskStore
 
         cursor, seen = _recording_cursor()
         with (
             no_tenant(),
-            patch("core.a2a.task_store_postgres.get_async_cursor", cursor.factory),
-            patch("core.a2a.task_store_postgres.skip_runtime_ddl", return_value=False),
+            patch(
+                "baselith.core.a2a.task_store_postgres.get_async_cursor", cursor.factory
+            ),
+            patch(
+                "baselith.core.a2a.task_store_postgres.skip_runtime_ddl",
+                return_value=False,
+            ),
         ):
             await PostgresTaskStore().initialize()
 
@@ -140,13 +151,18 @@ class TestSelfInitializingStores:
         assert core_context._tenant_context.get() == "default"
 
     async def test_prompt_store(self):
-        from core.prompts.store_postgres import PostgresPromptBackend
+        from baselith.core.prompts.store_postgres import PostgresPromptBackend
 
         cursor, seen = _recording_cursor()
         with (
             no_tenant(),
-            patch("core.prompts.store_postgres.get_async_cursor", cursor.factory),
-            patch("core.prompts.store_postgres.skip_runtime_ddl", return_value=False),
+            patch(
+                "baselith.core.prompts.store_postgres.get_async_cursor", cursor.factory
+            ),
+            patch(
+                "baselith.core.prompts.store_postgres.skip_runtime_ddl",
+                return_value=False,
+            ),
         ):
             await PostgresPromptBackend().initialize()
 
@@ -157,13 +173,15 @@ class TestSelfInitializingStores:
         and the reader is a background refresh loop. Unscoped, every tick raised
         into ``PromptSynchronizer.refresh``'s fail-open handler, so prompt sync
         logged a warning and silently never synced."""
-        from core.prompts.store_postgres import PostgresPromptBackend
+        from baselith.core.prompts.store_postgres import PostgresPromptBackend
 
         cursor, seen = _recording_cursor()
         cursor.fetchall = AsyncMock(return_value=[])
         with (
             no_tenant(),
-            patch("core.prompts.store_postgres.get_async_cursor", cursor.factory),
+            patch(
+                "baselith.core.prompts.store_postgres.get_async_cursor", cursor.factory
+            ),
         ):
             versions, labels = await PostgresPromptBackend().fetch_all()
 
@@ -171,17 +189,19 @@ class TestSelfInitializingStores:
         assert seen == [SYSTEM_TENANT_ID]
 
     async def test_checkpoint_store(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor, seen = _recording_cursor()
         with (
             no_tenant(),
             patch(
-                "core.orchestration.checkpoint_postgres.get_async_cursor",
+                "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
                 cursor.factory,
             ),
             patch(
-                "core.orchestration.checkpoint_postgres.skip_runtime_ddl",
+                "baselith.core.orchestration.checkpoint_postgres.skip_runtime_ddl",
                 return_value=False,
             ),
         ):
@@ -240,7 +260,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
             pytest.raises(TenantPurgeBlockedError, match="0 of 2"),
         ):
             await purge_module.purge_tenant_data("doomed-tenant")
@@ -250,7 +273,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
             pytest.raises(TenantPurgeBlockedError) as excinfo,
         ):
             await purge_module.purge_tenant_data("doomed-tenant")
@@ -264,7 +290,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
         ):
             result = await purge_module.purge_tenant_data("doomed-tenant")
 
@@ -276,7 +305,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
         ):
             assert await purge_module.purge_tenant_data("doomed") == {"interactions": 0}
 
@@ -288,7 +320,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
         ):
             await purge_module.purge_tenant_data("doomed-tenant")
 
@@ -302,7 +337,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
         ):
             await purge_module.purge_tenant_data("doomed-tenant")
 
@@ -314,7 +352,9 @@ class TestPurgeRefusesToBeInvisible:
         no pre-count is issued."""
         cursor, statements = self._purge_cursor(visible=0, removed=0)
 
-        with patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)):
+        with patch(
+            "baselith.core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)
+        ):
             await purge_module.purge_tenant_data("doomed-tenant")
 
         assert not any(sql.startswith("SELECT count(*)") for sql, _ in statements)
@@ -326,7 +366,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
         ):
             assert await purge_module.purge_tenant_data("doomed") == {"interactions": 0}
 
@@ -350,7 +393,10 @@ class TestPurgeRefusesToBeInvisible:
 
         with (
             no_tenant(),
-            patch("core.services.tenant.purge.get_async_cursor", _cursor_ctx(cursor)),
+            patch(
+                "baselith.core.services.tenant.purge.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
             pytest.raises(TenantPurgeBlockedError) as excinfo,
         ):
             await purge_module.purge_tenant_data("doomed-tenant")

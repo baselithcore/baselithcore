@@ -11,11 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.messages import Message
-from core.services.llm.providers._openai_messages_stream import stream_messages
-from core.services.llm.reasoning_text import ReasoningStreamFilter
-from core.services.llm.stream_events import StreamEnd, TextDelta
-from core.services.llm.tool_calling import LLMToolSpec
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.providers._openai_messages_stream import stream_messages
+from baselith.core.services.llm.reasoning_text import ReasoningStreamFilter
+from baselith.core.services.llm.stream_events import StreamEnd, TextDelta
+from baselith.core.services.llm.tool_calling import LLMToolSpec
 
 HISTORY = [Message.user("hi")]
 
@@ -221,7 +221,7 @@ async def test_abandoning_the_generator_closes_the_connection():
 async def _vllm_events(model, chunks):
     from unittest.mock import AsyncMock, patch
 
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     provider = VLLMProvider(api_base="http://gpu:8002")
     stream = FakeStream(chunks)
@@ -247,7 +247,7 @@ async def test_vllm_streams_a_plain_model_live_and_holds_a_reasoner_to_its_close
 
 
 def test_only_known_non_reasoners_stream_live():
-    from core.services.llm.reasoning_text import can_stream_live
+    from baselith.core.services.llm.reasoning_text import can_stream_live
 
     assert can_stream_live("qwen2.5:7b-instruct") and can_stream_live("llama3.1")
     # Unknown or reasoning-capable names are held until the closing tag.

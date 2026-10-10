@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
-from core.services.llm.service import LLMService
-from core.services.llm.tool_calling import LLMResult, LLMToolSpec
+from baselith.core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.tool_calling import LLMResult, LLMToolSpec
 
 HISTORY = [
     Message.user("population of Rome?"),
@@ -25,7 +25,7 @@ HISTORY = [
 
 
 def _service(enable_native_tools=True):
-    with patch("core.services.llm.service.get_llm_config") as mock_config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
         # A stub provider is swapped in below; "ollama" only keeps the factory
         # from building a real client during construction.
         mock_config.return_value = Mock(
@@ -117,7 +117,7 @@ class TestDegradation:
         )
 
         result = await service.generate_messages(HISTORY)
-        from core.services.llm.messages import message_from_result
+        from baselith.core.services.llm.messages import message_from_result
 
         assert message_from_result(result).text == "done"
 
@@ -147,8 +147,8 @@ class TestCrossProviderFailover:
         return service
 
     async def test_a_failing_primary_is_served_by_the_next_stage(self, monkeypatch):
-        from core.services.llm import fallback_runtime
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm import fallback_runtime
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         fallback_runtime.reset_fallback_services()
         service = self._chained("anthropic:claude-sonnet-5")
@@ -166,8 +166,8 @@ class TestCrossProviderFailover:
         stage.generate_messages.assert_awaited_once()
 
     async def test_a_stage_without_a_message_api_is_skipped(self, monkeypatch):
-        from core.services.llm import fallback_runtime
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm import fallback_runtime
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         fallback_runtime.reset_fallback_services()
         service = self._chained("ollama:llama3.2")
@@ -195,8 +195,11 @@ class TestCrossProviderFailover:
 @pytest.mark.asyncio
 class TestAccounting:
     async def test_the_turn_is_charged_against_the_ambient_budget_once(self):
-        from core.orchestration.budget_context import activate_budget, deactivate_budget
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         service = _service()
         # A PAID provider on purpose: a turn served locally is priced at zero

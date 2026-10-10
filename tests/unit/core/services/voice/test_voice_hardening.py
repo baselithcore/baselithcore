@@ -20,22 +20,22 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.services.voice import _audio_input
-from core.services.voice.errors import (
+from baselith.core.services.voice import _audio_input
+from baselith.core.services.voice.errors import (
     VoiceInputError,
     VoiceLimitError,
     VoiceTimeoutError,
     VoiceUpstreamError,
 )
-from core.services.voice.models import STTRequest, VoiceProvider
-from core.services.voice.service import VoiceService
+from baselith.core.services.voice.models import STTRequest, VoiceProvider
+from baselith.core.services.voice.service import VoiceService
 
 _GOOGLE_KEY = "AIza-test-google-key"
 
 
 @pytest.fixture
 def cfg() -> Iterator[MagicMock]:
-    with patch("core.services.voice.service.get_voice_config") as factory:
+    with patch("baselith.core.services.voice.service.get_voice_config") as factory:
         config = factory.return_value
         config.openai_api_key = SecretStr("fake-key")
         config.elevenlabs_api_key = None

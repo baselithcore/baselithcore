@@ -1,4 +1,4 @@
-"""Perimeter guards on the A2A JSON-RPC endpoint (core.a2a.guards).
+"""Perimeter guards on the A2A JSON-RPC endpoint (baselith.core.a2a.guards).
 
 The dispatcher's only authentication is an optional HMAC signature, and
 unsigned requests are allowed outright outside production — so the per-source-IP
@@ -14,17 +14,17 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core.a2a import guards  # noqa: E402
-from core.a2a.agent_card import AgentCard  # noqa: E402
-from core.a2a.guards import (  # noqa: E402
+from baselith.core.a2a import guards  # noqa: E402
+from baselith.core.a2a.agent_card import AgentCard  # noqa: E402
+from baselith.core.a2a.guards import (  # noqa: E402
     DEFAULT_A2A_MAX_BODY_BYTES,
     DEFAULT_A2A_RATE_LIMIT_PER_MINUTE,
     A2ARateLimitGuard,
     a2a_max_body_bytes,
     a2a_rate_limit_per_minute,
 )
-from core.a2a.router import create_a2a_router  # noqa: E402
-from core.a2a.server import EchoA2AServer  # noqa: E402
+from baselith.core.a2a.router import create_a2a_router  # noqa: E402
+from baselith.core.a2a.server import EchoA2AServer  # noqa: E402
 
 PAYLOAD = (
     b'{"jsonrpc": "2.0", "method": "message/send", "id": "1", '
@@ -34,7 +34,7 @@ PAYLOAD = (
 
 
 class _CountingLimiter:
-    """Stand-in for ``core.middleware.rate_limiter.RateLimiter``.
+    """Stand-in for ``baselith.core.middleware.rate_limiter.RateLimiter``.
 
     Same contract (429 ``HTTPException`` with ``Retry-After``), deterministic
     and free of Redis so the wiring can be asserted exactly.
@@ -65,7 +65,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, limiter=None) -> TestClient:
     """Router wired with an injected limiter (one guard per router)."""
     if limiter is not None:
         monkeypatch.setattr(
-            "core.a2a.router.A2ARateLimitGuard",
+            "baselith.core.a2a.router.A2ARateLimitGuard",
             lambda: A2ARateLimitGuard(limiter=limiter),
         )
     card = AgentCard(name="echo", description="echo agent")
@@ -180,7 +180,7 @@ class TestRateLimit:
             "_get_limiter",
             lambda: None,  # e.g. no redis package / unreadable config
         )
-        monkeypatch.setattr("core.a2a.router.A2ARateLimitGuard", lambda: guard)
+        monkeypatch.setattr("baselith.core.a2a.router.A2ARateLimitGuard", lambda: guard)
         card = AgentCard(name="echo", description="echo agent")
         app = FastAPI()
         app.include_router(create_a2a_router(EchoA2AServer(card)))
@@ -194,7 +194,7 @@ class TestRateLimit:
         Exercises the actual ``RateLimiter`` the SecurityManager uses, forced
         onto its in-memory fixed window so the test needs no Redis.
         """
-        from core.middleware.rate_limiter import RateLimiter
+        from baselith.core.middleware.rate_limiter import RateLimiter
 
         monkeypatch.setenv("BASELITH_A2A_RATE_LIMIT_PER_MINUTE", "2")
         limiter = RateLimiter()

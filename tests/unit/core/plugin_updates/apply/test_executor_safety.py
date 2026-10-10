@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from core.plugin_updates.apply import executor as executor_mod
-from core.plugin_updates.apply.models import RunState
-from core.plugin_updates.release_manifest import sign_release_manifest
-from core.plugin_updates.sources import SourceError
+from baselith.core.plugin_updates.apply import executor as executor_mod
+from baselith.core.plugin_updates.apply.models import RunState
+from baselith.core.plugin_updates.release_manifest import sign_release_manifest
+from baselith.core.plugin_updates.sources import SourceError
 
 from ._executor_env import Env, served_text
 

@@ -6,20 +6,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.config.task_queue import TaskQueueConfig
-from core.task_queue.worker import start_worker
+from baselith.core.config.task_queue import TaskQueueConfig
+from baselith.core.task_queue.worker import start_worker
 
 # Skip module if optional dependency not installed
 pytest.importorskip("rq")
 
 
 class TestWorkerModule:
-    """Tests for core.task_queue.worker module."""
+    """Tests for baselith.core.task_queue.worker module."""
 
-    @patch("core.task_queue.worker.Redis")
-    @patch("core.task_queue.worker.Queue")
-    @patch("core.task_queue.worker.TenantAwareWorker")
-    @patch("core.task_queue.worker.get_task_queue_config")
+    @patch("baselith.core.task_queue.worker.Redis")
+    @patch("baselith.core.task_queue.worker.Queue")
+    @patch("baselith.core.task_queue.worker.TenantAwareWorker")
+    @patch("baselith.core.task_queue.worker.get_task_queue_config")
     def test_start_worker(
         self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis
     ):
@@ -77,10 +77,10 @@ class TestWorkerModule:
 class TestSchedulerAndConcurrency:
     """The two properties that make delayed jobs actually run."""
 
-    @patch("core.task_queue.worker.Redis")
-    @patch("core.task_queue.worker.Queue")
-    @patch("core.task_queue.worker.TenantAwareWorker")
-    @patch("core.task_queue.worker.get_task_queue_config")
+    @patch("baselith.core.task_queue.worker.Redis")
+    @patch("baselith.core.task_queue.worker.Queue")
+    @patch("baselith.core.task_queue.worker.TenantAwareWorker")
+    @patch("baselith.core.task_queue.worker.get_task_queue_config")
     def test_worker_runs_with_scheduler(
         self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis
     ):
@@ -95,23 +95,23 @@ class TestSchedulerAndConcurrency:
 
         worker.work.assert_called_once_with(with_scheduler=True)
 
-    @patch("core.task_queue.worker.Redis")
-    @patch("core.task_queue.worker.Queue")
-    @patch("core.task_queue.worker.TenantAwareWorker")
+    @patch("baselith.core.task_queue.worker.Redis")
+    @patch("baselith.core.task_queue.worker.Queue")
+    @patch("baselith.core.task_queue.worker.TenantAwareWorker")
     def test_build_worker_registers_dead_letter_handler(
         self, mock_worker_cls, mock_queue_cls, mock_redis
     ):
-        from core.task_queue.dead_letter import dead_letter_handler
-        from core.task_queue.worker import build_worker
+        from baselith.core.task_queue.dead_letter import dead_letter_handler
+        from baselith.core.task_queue.worker import build_worker
 
         build_worker(["default"], MagicMock())
 
         _args, kwargs = mock_worker_cls.call_args
         assert kwargs["exception_handlers"] == [dead_letter_handler]
 
-    @patch("core.task_queue.worker.Process")
-    @patch("core.task_queue.worker.WorkerSupervisor")
-    @patch("core.task_queue.worker.get_task_queue_config")
+    @patch("baselith.core.task_queue.worker.Process")
+    @patch("baselith.core.task_queue.worker.WorkerSupervisor")
+    @patch("baselith.core.task_queue.worker.get_task_queue_config")
     def test_concurrency_runs_a_supervisor_over_n_children(
         self, mock_get_config, mock_supervisor, mock_process
     ):
@@ -131,11 +131,11 @@ class TestSchedulerAndConcurrency:
         assert p_kwargs["args"] == ("redis://test:6379/2", ["default"], True)
         assert p_kwargs["daemon"] is False
 
-    @patch("core.task_queue.worker.Process")
-    @patch("core.task_queue.worker.Redis")
-    @patch("core.task_queue.worker.Queue")
-    @patch("core.task_queue.worker.TenantAwareWorker")
-    @patch("core.task_queue.worker.get_task_queue_config")
+    @patch("baselith.core.task_queue.worker.Process")
+    @patch("baselith.core.task_queue.worker.Redis")
+    @patch("baselith.core.task_queue.worker.Queue")
+    @patch("baselith.core.task_queue.worker.TenantAwareWorker")
+    @patch("baselith.core.task_queue.worker.get_task_queue_config")
     def test_single_worker_spawns_no_children(
         self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis, mock_process
     ):
@@ -154,7 +154,7 @@ class TestQueueUrlResolution:
 
     def test_producer_and_consumer_agree(self, monkeypatch):
         """Enqueueing where no worker listens is a silent, total failure."""
-        import core.task_queue as tq
+        import baselith.core.task_queue as tq
 
         cfg = TaskQueueConfig(queue_redis_url="redis://queue-host:6379/7")
         monkeypatch.setattr(tq, "get_task_queue_config", lambda: cfg)
@@ -169,7 +169,7 @@ class TestQueueUrlResolution:
         monkeypatch.setattr(tq.BlockingConnectionPool, "from_url", fake_from_url)
         tq.get_queue_redis_connection()
 
-        # The consumer side (core.task_queue.worker) resolves via get_redis_url().
+        # The consumer side (baselith.core.task_queue.worker) resolves via get_redis_url().
         assert captured["url"] == cfg.get_redis_url() == "redis://queue-host:6379/7"
 
 
@@ -183,9 +183,9 @@ class TestJobContextRestoration:
 
     def _run_and_capture(self, monkeypatch, meta):
         """Run perform_job with a stubbed super() and capture ambient context."""
-        from core.context import get_current_plugin, get_current_tenant_id
-        from core.services.llm.policy import get_bound_llm_policy
-        from core.task_queue.worker import TenantAwareWorker
+        from baselith.core.context import get_current_plugin, get_current_tenant_id
+        from baselith.core.services.llm.policy import get_bound_llm_policy
+        from baselith.core.task_queue.worker import TenantAwareWorker
 
         seen: dict[str, object] = {}
 
@@ -217,8 +217,8 @@ class TestJobContextRestoration:
         assert seen["policy"].model == "llama3.2"
 
     def test_context_is_cleared_after_the_job(self, monkeypatch):
-        from core.context import get_current_plugin
-        from core.services.llm.policy import get_bound_llm_policy
+        from baselith.core.context import get_current_plugin
+        from baselith.core.services.llm.policy import get_bound_llm_policy
 
         self._run_and_capture(
             monkeypatch,

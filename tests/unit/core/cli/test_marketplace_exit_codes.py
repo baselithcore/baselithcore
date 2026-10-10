@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.cli.commands import plugin as plugin_pkg
-from core.cli.commands.plugin import marketplace as m
+from baselith.core.cli.commands import plugin as plugin_pkg
+from baselith.core.cli.commands.plugin import marketplace as m
 
 
 def _result(status: str, **extra):
@@ -234,7 +234,7 @@ class TestTheDispatcherPassesItOn:
     """`dispatch_plugin` must not swallow the code it now receives."""
 
     def test_a_failing_command_reaches_the_shell(self):
-        from core.cli import handlers_plugin
+        from baselith.core.cli import handlers_plugin
 
         args = MagicMock()
         args.plugin_command = "marketplace"
@@ -242,13 +242,13 @@ class TestTheDispatcherPassesItOn:
         args.plugin_id = "absent"
 
         # dispatch_plugin resolves the command through the PACKAGE
-        # (`from core.cli.commands import plugin`), so patching the module
+        # (`from baselith.core.cli.commands import plugin`), so patching the module
         # that defines it leaves the package's own binding untouched.
         with patch.object(plugin_pkg, "info_plugin", return_value=1):
             assert handlers_plugin.dispatch_plugin(args) == 1
 
     def test_a_succeeding_command_reaches_the_shell(self):
-        from core.cli import handlers_plugin
+        from baselith.core.cli import handlers_plugin
 
         args = MagicMock()
         args.plugin_command = "marketplace"

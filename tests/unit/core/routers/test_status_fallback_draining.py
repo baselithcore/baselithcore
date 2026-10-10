@@ -11,18 +11,20 @@ from unittest.mock import patch
 import pytest
 from fastapi import APIRouter, Response
 
-from core.lifecycle import drain
+from baselith.core.lifecycle import drain
 
-_SHIM = Path(__file__).resolve().parents[4] / "core" / "routers" / "status.py"
+_SHIM = (
+    Path(__file__).resolve().parents[4] / "baselith" / "core" / "routers" / "status.py"
+)
 
 
 def _load_fallback() -> Any:
-    """Execute the shim as if ``plugins.api_routers`` were not installed."""
+    """Execute the shim as if ``baselith.plugins.api_routers`` were not installed."""
     spec = importlib.util.spec_from_file_location("_status_fallback", _SHIM)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     with patch(
-        "core.utils.optional_import.optional_router",
+        "baselith.core.utils.optional_import.optional_router",
         return_value=(None, APIRouter()),
     ):
         spec.loader.exec_module(module)

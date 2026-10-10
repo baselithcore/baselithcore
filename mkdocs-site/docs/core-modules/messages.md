@@ -4,7 +4,7 @@ description: Provider-independent conversation types for the message-based agent
 ---
 <!-- markdownlint-disable MD046 -->
 
-`core/services/llm/messages.py` is the provider-independent shape of a
+`baselith/core/services/llm/messages.py` is the provider-independent shape of a
 conversation. An agentic loop does not have a prompt, it has a **history**: the
 model asks for tools, the tools answer, the model reads the answers and decides
 again. Sending that as a string throws away everything the next turn needs —
@@ -13,7 +13,7 @@ wants replayed verbatim — and rewrites the prompt prefix on every iteration, s
 nothing before it can ever be served from the provider's prompt cache.
 
 ```python
-from core.services.llm.messages import (
+from baselith.core.services.llm.messages import (
     Message,
     ToolResultBlock,
     message_from_result,
@@ -142,7 +142,7 @@ not part of the conversation being measured.
 ## Provider capability
 
 Speaking messages is a **capability**, not a requirement. It is declared by a
-separate protocol, `core.services.llm.interfaces.MessageCapableProvider`, rather
+separate protocol, `baselith.core.services.llm.interfaces.MessageCapableProvider`, rather
 than by adding members to `LLMProviderProtocol` — folding it into the base
 protocol would make every message-less provider fail a type check for a method it
 is not expected to have.
@@ -180,7 +180,7 @@ class MessageCapableProvider(Protocol):
 ## The service seam
 
 `LLMService.generate_messages(...)` is the entry point; `LLMService` sets
-`supports_messages = True`. `core.services.llm.message_runtime.supports_message_api(service)`
+`supports_messages = True`. `baselith.core.services.llm.message_runtime.supports_message_api(service)`
 decides the mode per request, and **both halves matter**:
 
 - **Native** — when `LLM_ENABLE_NATIVE_TOOLS` is on (default `true`) *and* the
@@ -256,9 +256,9 @@ never spent on nothing.
 ## In the agent loop
 
 Both loops keep the history and only ever append to it — the typed
-`core/agent/agent.py` and the ReAct loop the orchestrator runs
-(`core/reasoning/react_native.py`), through the one round trip in
-[`core/services/llm/message_transport.py`](services.md#one-round-trip-for-a-message-history):
+`baselith/core/agent/agent.py` and the ReAct loop the orchestrator runs
+(`baselith/core/reasoning/react_native.py`), through the one round trip in
+[`baselith/core/services/llm/message_transport.py`](services.md#one-round-trip-for-a-message-history):
 
 ```text
 user(prompt)

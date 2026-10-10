@@ -6,19 +6,19 @@ from typing import Any
 
 import pytest
 
-from core.context import get_current_plugin
-from core.observability.agent_spans import (
+from baselith.core.context import get_current_plugin
+from baselith.core.observability.agent_spans import (
     AGENT_ID_KEY,
     AGENT_KIND_KEY,
     PLUGIN_KEY,
     current_agent_id,
 )
-from core.observability.span_sink import (
+from baselith.core.observability.span_sink import (
     SpanRecord,
     register_span_sink,
     unregister_span_sink,
 )
-from core.orchestration.mixins._agent_attribution import (
+from baselith.core.orchestration.mixins._agent_attribution import (
     dispatch_attribution,
     intent_owner,
 )
@@ -110,7 +110,7 @@ class TestDispatchAttribution:
 
     def test_sub_agent_edge_is_recorded(self, spans: list[SpanRecord]) -> None:
         """A swarm sub-agent inside a dispatch records the dispatch as parent."""
-        from core.observability.agent_spans import AGENT_PARENT_KEY, agent_span
+        from baselith.core.observability.agent_spans import AGENT_PARENT_KEY, agent_span
 
         orchestrator = _Orchestrator(_Registry({"collaborative_task": "core_swarm"}))
 

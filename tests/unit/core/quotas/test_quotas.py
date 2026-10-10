@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core.config.quotas import QuotaConfig, set_key_quota
-from core.quotas import (
+from baselith.core.config.quotas import QuotaConfig, set_key_quota
+from baselith.core.quotas import (
     InMemoryQuotaStore,
     QuotaExceededError,
     QuotaManager,

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.agents.coding import CodeLanguage, CodingAgent
+from baselith.core.agents.coding import CodeLanguage, CodingAgent
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ async def test_init(coding_agent):
 async def test_run_tests_reads_the_report_the_sandbox_printed(
     coding_agent, monkeypatch
 ):
-    from plugins.coding_agent import agent as agent_module
-    from plugins.coding_agent.harness import report_marker
+    from baselith.plugins.coding_agent import agent as agent_module
+    from baselith.plugins.coding_agent.harness import report_marker
 
     monkeypatch.setattr(agent_module, "new_run_key", lambda: "k" * 32)
     line = (
@@ -79,7 +79,7 @@ class _SandboxStub:
 
 
 def _exec_result(stdout="", stderr="", exit_code=0, execution_time=0.0):
-    # Mirrors core.services.sandbox.service.ExecutionResult without importing
+    # Mirrors baselith.core.services.sandbox.service.ExecutionResult without importing
     # the module (its docker dependency is unavailable in some test envs).
     return MagicMock(
         stdout=stdout,

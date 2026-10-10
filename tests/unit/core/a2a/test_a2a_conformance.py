@@ -19,14 +19,14 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core.a2a.agent_card import AgentCapabilities, AgentCard  # noqa: E402
-from core.a2a.protocol import A2AMethod, ErrorCode  # noqa: E402
-from core.a2a.router import (  # noqa: E402
+from baselith.core.a2a.agent_card import AgentCapabilities, AgentCard  # noqa: E402
+from baselith.core.a2a.protocol import A2AMethod, ErrorCode  # noqa: E402
+from baselith.core.a2a.router import (  # noqa: E402
     create_a2a_router,
     create_wellknown_router,
 )
-from core.a2a.server import EchoA2AServer  # noqa: E402
-from core.a2a.types import TaskState  # noqa: E402
+from baselith.core.a2a.server import EchoA2AServer  # noqa: E402
+from baselith.core.a2a.types import TaskState  # noqa: E402
 
 
 def _card() -> AgentCard:
@@ -156,7 +156,7 @@ class TestTaskStates:
         assert TaskState("unknown") is TaskState.UNKNOWN
 
     def test_new_states_are_not_terminal(self) -> None:
-        from core.a2a.types import Task
+        from baselith.core.a2a.types import Task
 
         for state in (TaskState.AUTH_REQUIRED, TaskState.UNKNOWN):
             task = Task.create(state=state)
@@ -186,7 +186,7 @@ class TestAgentCardShape:
 
     def test_discovery_matches_a_card_that_only_declares_a_transport(self) -> None:
         """A 0.3.0 peer carries preferredTransport, not the old protocols list."""
-        from core.a2a.discovery import AgentDiscovery
+        from baselith.core.a2a.discovery import AgentDiscovery
 
         card = _card()
         card.protocols = []
@@ -257,7 +257,7 @@ class TestAgentCardShape:
 class TestStreamKeepalive:
     async def test_quiet_stream_emits_keepalive_comments(self, monkeypatch) -> None:
         """An idle SSE stream that says nothing is dropped by intermediaries."""
-        import core.a2a.router as router_module
+        import baselith.core.a2a.router as router_module
 
         monkeypatch.setattr(router_module, "SSE_KEEPALIVE_SECONDS", 0.01)
 
@@ -287,7 +287,7 @@ class TestStreamKeepalive:
         last ``put``: the event stays queued while the wait is cancelled, so
         ending the stream on ``producer.done()`` alone loses the final event of
         every stream that was quiet long enough to need one keepalive."""
-        import core.a2a.router as router_module
+        import baselith.core.a2a.router as router_module
 
         produced = asyncio.Event()
 
@@ -318,7 +318,7 @@ class TestStreamKeepalive:
 
     async def test_producer_is_cancelled_when_the_consumer_leaves(self) -> None:
         """Client gone: the work behind the stream must not keep running."""
-        import core.a2a.router as router_module
+        import baselith.core.a2a.router as router_module
 
         cancelled = asyncio.Event()
 
@@ -341,7 +341,7 @@ class TestStreamKeepalive:
     async def test_producer_waits_once_the_buffer_is_full(self) -> None:
         """Backpressure: an agent emitting faster than the peer reads must be
         made to wait, not buffered without limit."""
-        import core.a2a.router as router_module
+        import baselith.core.a2a.router as router_module
 
         emitted = 0
 
@@ -364,7 +364,7 @@ class TestStreamKeepalive:
 
     async def test_every_event_survives_the_bounded_queue(self) -> None:
         """Backpressure must slow the producer, never drop an event."""
-        import core.a2a.router as router_module
+        import baselith.core.a2a.router as router_module
 
         total = router_module._STREAM_BUFFER * 3
 

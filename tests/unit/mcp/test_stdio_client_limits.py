@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.client_errors import MCPTransportError
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.client_errors import MCPTransportError
 
 STDIO = str(Path(__file__).parent / "fakes" / "stdio_server.py")
 

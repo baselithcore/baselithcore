@@ -6,10 +6,10 @@ Regression: both were declared, but the policy hard-coded ``network_mode:
 
 from unittest.mock import MagicMock
 
-import core.config.sandbox as sandbox_config
-from core.config.sandbox import SandboxConfig
-from core.services.sandbox import docker_factory
-from core.services.sandbox.policy import build_sandbox_runtime_kwargs
+import baselith.core.config.sandbox as sandbox_config
+from baselith.core.config.sandbox import SandboxConfig
+from baselith.core.services.sandbox import docker_factory
+from baselith.core.services.sandbox.policy import build_sandbox_runtime_kwargs
 
 
 def _use(monkeypatch, **fields) -> None:

@@ -4,9 +4,9 @@ Tests for Tenant Middleware.
 
 import pytest
 
-from core.auth import AuthRole, AuthUser
-from core.context import get_current_tenant_id
-from core.middleware.tenant import TenantMiddleware
+from baselith.core.auth import AuthRole, AuthUser
+from baselith.core.context import get_current_tenant_id
+from baselith.core.middleware.tenant import TenantMiddleware
 
 
 async def _drive_middleware(middleware, scope) -> str:
@@ -61,7 +61,7 @@ class _FakeManager:
 @pytest.fixture
 def fake_auth(monkeypatch):
     """Patch the shared auth-memo helper's manager lookup."""
-    from core.middleware import _auth_memo
+    from baselith.core.middleware import _auth_memo
 
     def _install(user: AuthUser | None) -> _FakeManager:
         manager = _FakeManager(user)
@@ -154,7 +154,7 @@ class TestTenantIdentityResolution:
 
     @pytest.mark.asyncio
     async def test_a_failing_credential_falls_back_to_default(self, monkeypatch):
-        from core.middleware import _auth_memo
+        from baselith.core.middleware import _auth_memo
 
         class _Boom:
             async def authenticate(self, header: str):
@@ -187,7 +187,7 @@ class TestReservedTenantIsRefused:
     @staticmethod
     async def _drive(scope) -> tuple[list[dict], list[str]]:
         """Run the middleware, capturing the response and any tenant it bound."""
-        from core.middleware.tenant import TenantMiddleware
+        from baselith.core.middleware.tenant import TenantMiddleware
 
         bound: list[str] = []
         messages: list[dict] = []
@@ -247,7 +247,7 @@ class TestReservedTenantIsRefused:
         validation nit: someone issued that token."""
         recorded: list[tuple] = []
 
-        from core.observability import audit as audit_module
+        from baselith.core.observability import audit as audit_module
 
         monkeypatch.setattr(
             audit_module,
@@ -274,7 +274,7 @@ class TestReservedTenantIsRefused:
         half did not, so ``security_events_total{reason="reserved_tenant"}``
         showed only WebSocket refusals — a dashboard that exists to surface
         exactly this event, silently missing half of it."""
-        from core.middleware import _security_metrics
+        from baselith.core.middleware import _security_metrics
 
         labelled: list[str] = []
 
@@ -299,8 +299,8 @@ class TestReservedTenantIsRefused:
         """One label, so one query answers "is anyone trying this?"."""
         import inspect
 
-        from core.middleware import security as security_module
-        from core.middleware import tenant as tenant_module
+        from baselith.core.middleware import security as security_module
+        from baselith.core.middleware import tenant as tenant_module
 
         marker = 'SECURITY_EVENTS.labels(reason="reserved_tenant").inc()'
         assert marker in inspect.getsource(tenant_module)
@@ -353,7 +353,7 @@ class TestTheNonHttpScopeHole:
     async def test_a_websocket_scope_passes_straight_through(self):
         """Pinning the shape of the hole: the middleware binds nothing here, so
         the second binding site is the one that must refuse."""
-        from core.middleware.tenant import TenantMiddleware
+        from baselith.core.middleware.tenant import TenantMiddleware
 
         called: list[str] = []
 
@@ -378,8 +378,8 @@ class TestTheNonHttpScopeHole:
         """The guard that actually covers the socket path."""
         from fastapi import HTTPException
 
-        from core.context import get_current_tenant_id
-        from core.middleware.security import SecurityManager
+        from baselith.core.context import get_current_tenant_id
+        from baselith.core.middleware.security import SecurityManager
 
         manager = SecurityManager.__new__(SecurityManager)
         user = AuthUser(user_id="u1", tenant_id="system", roles={AuthRole.USER})
@@ -396,8 +396,8 @@ class TestTheNonHttpScopeHole:
     async def test_the_socket_refusal_is_audited(self, monkeypatch):
         from fastapi import HTTPException
 
-        from core.middleware.security import SecurityManager
-        from core.observability import audit as audit_module
+        from baselith.core.middleware.security import SecurityManager
+        from baselith.core.observability import audit as audit_module
 
         recorded: list[tuple] = []
         monkeypatch.setattr(
@@ -424,8 +424,8 @@ class TestTheNonHttpScopeHole:
         the principal is bound through that call and not the plain setter."""
         import inspect
 
-        from core.middleware import security as security_module
-        from core.middleware.security import SecurityManager
+        from baselith.core.middleware import security as security_module
+        from baselith.core.middleware.security import SecurityManager
 
         source = inspect.getsource(SecurityManager.enforce_auth)
         assert "_bind_principal_tenant(user.tenant_id)" in source
@@ -436,7 +436,7 @@ class TestTheNonHttpScopeHole:
         sibling checkout can follow rather than a rule it has to remember."""
         import inspect
 
-        from core.middleware import tenant as tenant_module
+        from baselith.core.middleware import tenant as tenant_module
 
         source = inspect.getsource(tenant_module)
         assert "bind_principal_tenant(tenant_id)" in source

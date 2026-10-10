@@ -1,0 +1,219 @@
+"""
+Reranking Utilities.
+
+Provides hit reranking with cross-encoder models and optional caching.
+Migrated from app/chat/reranking.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Sequence
+from typing import Any, Protocol
+
+from baselith.core.cache.protocols import AnyCache as CacheProtocol
+from baselith.core.interfaces import ScoreRerankerProtocol
+from baselith.core.nlp.rerank import score_pairs
+from baselith.core.observability.logging import get_logger
+from baselith.core.utils.concurrency import run_inference
+
+logger = get_logger(__name__)
+
+HitType = Any
+RankedHit = tuple[HitType, float]
+
+# Alias for backward compatibility within this module
+RerankerProtocol = ScoreRerankerProtocol
+
+
+class MetricsProtocol(Protocol):
+    """Protocol for metrics collection."""
+
+    def inc(self) -> None:
+        """Increment counter."""
+        ...
+
+    def time(self) -> Any:
+        """Context manager for timing."""
+        ...
+
+
+class TelemetryProtocol(Protocol):
+    """Protocol for telemetry."""
+
+    def increment(self, key: str) -> None:
+        """Increment telemetry counter."""
+        ...
+
+
+# Null implementations for when dependencies are not available
+class NullMetrics:
+    """No-op metrics implementation."""
+
+    def inc(self) -> None:
+        """No-op increment."""
+        pass
+
+    def time(self) -> Any:
+        """No-op timing context manager."""
+        from contextlib import nullcontext
+
+        return nullcontext()
+
+
+class NullTelemetry:
+    """No-op telemetry implementation."""
+
+    def increment(self, key: str) -> None:
+        """No-op telemetry increment."""
+        pass
+
+
+_null_metrics = NullMetrics()
+_null_telemetry = NullTelemetry()
+
+
+def _build_cache_key(
+    normalized_query: str,
+    payload: dict,
+    hit_id: Any,
+) -> tuple[str, str, str, str] | None:
+    """Build cache key for a hit."""
+    fingerprint = payload.get("fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return None
+
+    chunk_index = payload.get("chunk_index")
+    document_id = payload.get("document_id") or hit_id
+
+    return (
+        normalized_query,
+        fingerprint,
+        str(chunk_index) if chunk_index is not None else "",
+        str(document_id),
+    )
+
+
+async def rerank_hits(
+    user_query: str,
+    normalized_query: str,
+    hits: Sequence[HitType],
+    *,
+    reranker: RerankerProtocol,
+    cache: CacheProtocol | None = None,
+    metrics_requests: MetricsProtocol | None = None,
+    metrics_latency: MetricsProtocol | None = None,
+    metrics_cache_hit: MetricsProtocol | None = None,
+    metrics_cache_miss: MetricsProtocol | None = None,
+    telemetry: TelemetryProtocol | None = None,
+) -> list[RankedHit]:
+    """
+    Rerank hits using a cross-encoder model.
+
+    Args:
+        user_query: Original user query
+        normalized_query: Normalized query for caching
+        hits: List of hits to rerank
+        reranker: Cross-encoder model
+        cache: Optional cache for scores
+        metrics_*: Optional Prometheus metrics
+        telemetry: Optional telemetry tracker
+
+    Returns:
+        List of (hit, score) tuples sorted by score descending
+    """
+    # Use null implementations if not provided
+    m_requests = metrics_requests or _null_metrics
+    m_latency = metrics_latency or _null_metrics
+    m_cache_hit = metrics_cache_hit or _null_metrics
+    m_cache_miss = metrics_cache_miss or _null_metrics
+    telem = telemetry or _null_telemetry
+
+    m_requests.inc()
+    rerank_entries: list[RankedHit | None] = [None] * len(hits)
+    uncached_pairs: list[tuple[str, str]] = []
+    uncached_meta: list[tuple[int, HitType, tuple[str, str, str, str] | None]] = []
+
+    # First pass: resolve a cache key per hit — no I/O yet.
+    prepared: list[tuple[int, HitType, str, tuple[str, str, str, str] | None]] = []
+    lookup_keys: list[tuple[str, str, str, str]] = []
+    for idx, hit in enumerate(hits):
+        payload = getattr(hit, "payload", None) or {}
+        raw_chunk_text = payload.get("text") or ""
+        cache_key = None
+        if cache is not None and raw_chunk_text.strip():
+            cache_key = _build_cache_key(
+                normalized_query, payload, getattr(hit, "id", "")
+            )
+            if cache_key is not None:
+                lookup_keys.append(cache_key)
+        prepared.append((idx, hit, raw_chunk_text, cache_key))
+
+    # One batched cache read (MGET) instead of N serial GETs on the RAG path.
+    # Fall back to serial gets for a cache that does not implement get_many.
+    cached_scores: dict[tuple[str, str, str, str], Any] = {}
+    if cache is not None and lookup_keys:
+        get_many = getattr(cache, "get_many", None)
+        if get_many is not None:
+            results = await get_many(lookup_keys)
+            cached_scores = {
+                key: value
+                for key, value in zip(lookup_keys, results, strict=True)
+                if value is not None
+            }
+        else:
+            for key in lookup_keys:
+                value = await cache.get(key)
+                if value is not None:
+                    cached_scores[key] = value
+
+    for idx, hit, raw_chunk_text, cache_key in prepared:
+        cached_score = cached_scores.get(cache_key) if cache_key is not None else None
+        if cached_score is not None:
+            rerank_entries[idx] = (hit, cached_score)
+            telem.increment("rerank_cache.hit")
+            m_cache_hit.inc()
+            continue
+
+        uncached_pairs.append((user_query, raw_chunk_text))
+        uncached_meta.append((idx, hit, cache_key))
+
+    if uncached_pairs:
+        # Cross-encoder inference is sync CPU/GPU-bound work — run it off the
+        # event loop so concurrent requests are not stalled behind it.
+        # ``score_pairs`` picks the device's batch size (see baselith.core.nlp.rerank).
+        with m_latency.time():
+            predicted_scores = (
+                await run_inference(score_pairs, reranker, uncached_pairs)
+            ).tolist()
+        cache_writes = []
+        for (idx, hit, cache_key), score in zip(
+            uncached_meta, predicted_scores, strict=True
+        ):
+            if cache_key and cache is not None:
+                cache_writes.append(cache.set(cache_key, score))
+                telem.increment("rerank_cache.write")
+            telem.increment("rerank_cache.miss")
+            m_cache_miss.inc()
+            rerank_entries[idx] = (hit, score)
+        if cache_writes:
+            # Flush score-cache writes concurrently instead of one await per hit.
+            await asyncio.gather(*cache_writes)
+
+    ranked_hits = [entry for entry in rerank_entries if entry is not None]
+    if not ranked_hits:
+        ranked_hits = [(hit, 0.0) for hit in hits]
+
+    ranked_hits = sorted(ranked_hits, key=lambda item: item[1], reverse=True)
+    return ranked_hits
+
+
+__all__ = [
+    "CacheProtocol",
+    "HitType",
+    "MetricsProtocol",
+    "RankedHit",
+    "RerankerProtocol",
+    "TelemetryProtocol",
+    "rerank_hits",
+]

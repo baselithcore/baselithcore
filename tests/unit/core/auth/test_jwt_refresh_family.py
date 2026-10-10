@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 import jwt as pyjwt
 import pytest
 
-from core.auth.jwt import JWTHandler
-from core.auth.types import AuthRole, InvalidTokenError
+from baselith.core.auth.jwt import JWTHandler
+from baselith.core.auth.types import AuthRole, InvalidTokenError
 
 SECRET = "test-secret-with-at-least-thirty-two-chars"
 
@@ -36,7 +36,7 @@ def redis():
 
 @pytest.fixture
 def handler(redis):
-    with patch("core.auth.jwt.create_redis_client", return_value=redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=redis):
         yield JWTHandler(secret_key=SECRET, algorithm="HS256")
 
 

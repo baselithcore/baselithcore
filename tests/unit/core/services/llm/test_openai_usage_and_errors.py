@@ -10,14 +10,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.errors import (
+from baselith.core.services.llm.errors import (
     LLMClientError,
     LLMRateLimitError,
     LLMRefusalError,
     LLMServerError,
     LLMTimeoutError,
 )
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.usage import Usage
 
 
 # Stand-ins for the SDK's exception shape (both SDKs declare it identically):
@@ -61,9 +61,11 @@ def _completion(content="ok", finish_reason="stop", usage=None, refusal=None):
 def _openai(create=None):
     client = MagicMock()
     client.chat.completions.create = create or AsyncMock(return_value=_completion())
-    with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+    with patch(
+        "baselith.core.services.llm.providers.openai_provider.openai"
+    ) as mock_openai:
         mock_openai.AsyncOpenAI.return_value = client
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         provider = OpenAIProvider(api_key="sk-test")
         provider._ensure_client()
@@ -93,9 +95,13 @@ class TestOpenAITokenCap:
 
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=_empty())
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             async for _ in provider.generate_stream("hi", "gpt-5", max_tokens=64):
@@ -172,9 +178,13 @@ class TestOpenAIStreamErrorMapping:
         client.chat.completions.create = AsyncMock(
             side_effect=APIStatusError("slow down", 429)
         )
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             with pytest.raises(LLMRateLimitError):
@@ -186,7 +196,7 @@ class TestOpenAIStreamErrorMapping:
 class TestOpenAIRefusalLogging:
     async def test_a_refusal_is_not_logged_as_a_generation_error(self):
         """Symmetric with Anthropic: a refusal is a model decision."""
-        from core.services.llm.providers import openai_provider as module
+        from baselith.core.services.llm.providers import openai_provider as module
 
         provider, _ = _openai(
             create=AsyncMock(
@@ -199,7 +209,7 @@ class TestOpenAIRefusalLogging:
         error_log.assert_not_called()
 
     async def test_a_real_failure_is_still_logged_as_an_error(self):
-        from core.services.llm.providers import openai_provider as module
+        from baselith.core.services.llm.providers import openai_provider as module
 
         provider, _ = _openai(create=AsyncMock(side_effect=APIStatusError("x", 500)))
         with patch.object(module.logger, "error") as error_log:

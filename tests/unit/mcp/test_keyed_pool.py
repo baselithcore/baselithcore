@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client_errors import MCPClientError
-from core.mcp.keyed_pool import KeyedMCPClientPool, MCPPoolExhaustedError
+from baselith.core.mcp.client_errors import MCPClientError
+from baselith.core.mcp.keyed_pool import KeyedMCPClientPool, MCPPoolExhaustedError
 
 
 class FakeClient:

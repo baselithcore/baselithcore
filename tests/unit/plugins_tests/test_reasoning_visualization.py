@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # Add plugins to path for testing
-plugin_path = Path(__file__).parent.parent.parent.parent / "plugins"
+plugin_path = Path(__file__).parent.parent.parent.parent / "baselith" / "plugins"
 if str(plugin_path) not in sys.path:
     sys.path.insert(0, str(plugin_path))
 
 from reasoning_agent.reasoning_agent import ReasoningAgent  # noqa: E402
 
-from core.reasoning.tot import ThoughtNode  # noqa: E402
+from baselith.core.reasoning.tot import ThoughtNode  # noqa: E402
 
 
 @pytest.mark.asyncio

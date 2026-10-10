@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rq.job import Job, JobStatus
 
-from core.config.task_queue import TaskQueueConfig
-from core.task_queue.scheduler import (
+from baselith.core.config.task_queue import TaskQueueConfig
+from baselith.core.task_queue.scheduler import (
     TaskScheduler,
     ambient_job_meta,
     retry_intervals,
@@ -36,13 +36,15 @@ def mock_queue():
 
 @pytest.fixture
 def mock_get_queue(mock_queue):
-    with patch("core.task_queue.scheduler.get_queue", return_value=mock_queue) as mock:
+    with patch(
+        "baselith.core.task_queue.scheduler.get_queue", return_value=mock_queue
+    ) as mock:
         yield mock
 
 
 @pytest.fixture(autouse=True)
 def mock_task_tracker():
-    with patch("core.task_queue.scheduler.get_task_tracker") as mock:
+    with patch("baselith.core.task_queue.scheduler.get_task_tracker") as mock:
         yield mock.return_value
 
 
@@ -54,7 +56,7 @@ def mock_config():
         default_retry_delay=60,
         job_timeout=3600,
     )
-    with patch("core.config.get_task_queue_config", return_value=config):
+    with patch("baselith.core.config.get_task_queue_config", return_value=config):
         yield config
 
 

@@ -7,12 +7,12 @@ ask for the same effects in a different order replays them.
 
 from __future__ import annotations
 
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.idempotency import InMemoryToolLedger
-from core.reasoning.react import ReActAgent, ToolDefinition
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.idempotency import InMemoryToolLedger
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 from tests.unit.core.reasoning.test_react_native import ScriptedNativeLLM
 
 

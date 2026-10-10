@@ -3,7 +3,7 @@ title: MCP Integration
 description: Model Context Protocol client and server
 ---
 
-The `core/mcp` module implements the **Model Context Protocol** (MCP) to dynamically extend agent capabilities with external tools.
+The `baselith/core/mcp` module implements the **Model Context Protocol** (MCP) to dynamically extend agent capabilities with external tools.
 
 ## What is MCP
 
@@ -65,7 +65,7 @@ IDEs.
 
 - **Server** — `MCP_HTTP_TRANSPORT_ENABLED=true` mounts the MCP server on the
   API surface at `MCP_HTTP_PATH` (default `/mcp`,
-  `core/mcp/http_transport.py`). One JSON-RPC message per `POST` (batching was
+  `baselith/core/mcp/http_transport.py`). One JSON-RPC message per `POST` (batching was
   removed in 2025-06-18; arrays get `400`), `GET` returns `405` (no
   server-initiated stream). `create_app()` keeps the server on
   `app.state.mcp_server`; each plugin's `get_mcp_tools()` is registered on it
@@ -73,7 +73,7 @@ IDEs.
 - **Modern requests (2026-07-28)** are **stateless**: no session is required or
   minted, and a stale `Mcp-Session-Id` is ignored. They must carry the standard
   headers, validated against the body
-  (`core/mcp/http_headers.py`) — a proxy routing on `Mcp-Name` while the server
+  (`baselith/core/mcp/http_headers.py`) — a proxy routing on `Mcp-Name` while the server
   executes the body value is the confused-deputy split this closes:
 
     | Header | Mirrors | Required for |
@@ -94,7 +94,7 @@ IDEs.
   `MCP-Protocol-Version` (unsupported → `400`); `DELETE` terminates the
   session.
 - **Client** — `MCPClient(url="https://host/mcp", http_headers={...})`
-  (`core/mcp/http_client_transport.py`): session capture/echo, negotiated
+  (`baselith/core/mcp/http_client_transport.py`): session capture/echo, negotiated
   protocol-version header, JSON and SSE response bodies, best-effort `DELETE`
   on `disconnect()`.
 
@@ -160,7 +160,7 @@ IDEs.
 
 ### Capability gate
 
-Admission for the HTTP transport lives in `core/mcp/http_authz.py`
+Admission for the HTTP transport lives in `baselith/core/mcp/http_authz.py`
 (`build_gate`), which `http_transport.py` calls once per request: origin →
 authentication → capability → metering. The capability step exists because
 authentication alone said nothing about *what* the caller may do — every
@@ -182,7 +182,7 @@ scopes at all:
 API_KEYS_SCOPED="sk_mcp=mcp:invoke|chat:read"
 ```
 
-The scope is declared in `core/auth/scopes.py` (`SCOPE_MCP_INVOKE`) and is part
+The scope is declared in `baselith/core/auth/scopes.py` (`SCOPE_MCP_INVOKE`) and is part
 of `KNOWN_SCOPES`, so it validates like any other capability — see [Auth ›
 Capability Scopes](auth.md#capability-scopes-fine-grained-authorization).
 
@@ -224,7 +224,7 @@ compared against, so advertised and enforced cannot drift.
 ### Session storage {#session-storage}
 
 The legacy era mints an `Mcp-Session-Id` at `initialize` and expects every later
-request to present it. `build_session_store()` (`core/mcp/http_sessions.py`) picks
+request to present it. `build_session_store()` (`baselith/core/mcp/http_sessions.py`) picks
 the backing store automatically — no new setting to discover:
 
 | Deployment | Store | Behaviour |
@@ -241,11 +241,11 @@ the session across replicas is lost.
 !!! warning "`SessionStore` methods are now async"
     Both stores implement one **async** interface, so `create`, `touch`,
     `terminate` and friends must be awaited. `SessionStore` keeps its name and its
-    `core.mcp.http_transport` import path; only the call shape changed.
+    `baselith.core.mcp.http_transport` import path; only the call shape changed.
 
 ## Protocol eras
 
-The server is **dual-era** (`core/mcp/modern.py`). It serves:
+The server is **dual-era** (`baselith/core/mcp/modern.py`). It serves:
 
 | Era | Versions | Selected by |
 |-----|----------|-------------|
@@ -503,7 +503,7 @@ sampling or a roots listing raises `InputRequired`; `tools/call`,
 the client retries the original request with the answers:
 
 ```python
-from core.mcp.mrtr import InputRequired, get_input_responses
+from baselith.core.mcp.mrtr import InputRequired, get_input_responses
 
 async def login(repo: str) -> str:
     answers = get_input_responses()
@@ -656,7 +656,7 @@ Handlers report progress with `report_progress()`, which reads the request's
 accept a reporter argument:
 
 ```python
-from core.mcp import report_progress
+from baselith.core.mcp import report_progress
 
 @server.tool(name="index_corpus", description="Index a corpus")
 async def index_corpus(path: str) -> str:
@@ -696,7 +696,7 @@ request against the next replica.
 ## Structure
 
 ```plaintext
-core/mcp/
+baselith/core/mcp/
 ├── __init__.py                 # exports: MCPClient, MCPConnectionPool, MCPServer, MCPToolAdapter,
 │                               #   MCPToolError, make_mcp_tool_fns, mount_configured_servers, report_progress
 ├── client.py                   # MCPClient (consume tools; stdio + HTTP)
@@ -742,7 +742,7 @@ core/mcp/
 The package exports eight public symbols:
 
 ```python
-from core.mcp import (
+from baselith.core.mcp import (
     MCPClient, MCPConnectionPool, MCPServer, MCPToolAdapter, MCPToolError,
     make_mcp_tool_fns, mount_configured_servers, report_progress,
 )
@@ -769,7 +769,7 @@ best used as an async context manager so the child process / HTTP session is
 always torn down.
 
 ```python
-from core.mcp import MCPClient
+from baselith.core.mcp import MCPClient
 
 # Spawn a local server script over stdio (absolute path, inside an approved
 # directory: MCP_STDIO_ALLOWED_DIRS - see "Command Allowlist" below)
@@ -822,7 +822,7 @@ exposes `list_resources()` and `read_resource(uri)`.
 ### Era detection
 
 The client is dual-era too. `connect()` probes with `server/discover`
-(`core/mcp/client_handshake.py`):
+(`baselith/core/mcp/client_handshake.py`):
 
 - a `DiscoverResult` naming a mutually supported modern version ⇒ **modern**.
   `client.is_modern` is `True`, no `initialize` and no
@@ -864,7 +864,7 @@ it.
 To manage several servers at once, use `MCPConnectionPool`:
 
 ```python
-from core.mcp import MCPConnectionPool
+from baselith.core.mcp import MCPConnectionPool
 
 async with MCPConnectionPool() as pool:
     await pool.add_server("weather", "/srv/mcp/weather_server.py")
@@ -879,7 +879,7 @@ A custom `command` can originate from a plugin manifest or operator config, so
 the same as allowing what that program can be made to run: `python -c`,
 `python -m http.server`, `node -e`, `deno run https://…`, `bun -e`,
 `uv run --with evil` are all "allowlisted binaries" running arbitrary code. The
-gate (`plan_launch`, `core/mcp/stdio_client_transport.py`) is therefore a
+gate (`plan_launch`, `baselith/core/mcp/stdio_client_transport.py`) is therefore a
 launch policy, not a name list, and it runs again on **every spawn** (a file or
 symlink changed since configuration was loaded is judged as it is now):
 
@@ -979,13 +979,13 @@ set (validated at construction) — plus `autonomy_category` (default
 `external_side_effect` | `self_modify`). Do not put credentials in `env`
 entries (plain strings) — prefer the server reading its own secret store.
 
-`mount_configured_servers(pool)` (`core/mcp/declarative.py`, exported from
-`core.mcp`) connects every configured server into an `MCPConnectionPool` (via
+`mount_configured_servers(pool)` (`baselith/core/mcp/declarative.py`, exported from
+`baselith.core.mcp`) connects every configured server into an `MCPConnectionPool` (via
 the new `pool.add_client(name, client, env=)` seam for pre-built clients) and
 returns `{server_name: [tool names]}` for the ones that mounted:
 
 ```python
-from core.mcp import MCPConnectionPool, make_mcp_tool_fns, mount_configured_servers
+from baselith.core.mcp import MCPConnectionPool, make_mcp_tool_fns, mount_configured_servers
 
 async with MCPConnectionPool() as pool:
     mounted = await mount_configured_servers(pool)
@@ -1024,7 +1024,7 @@ message, so a failure can never be handed back to the model dressed as data —
 catch it and feed `str(exc)` to the model for self-correction:
 
 ```python
-from core.mcp import MCPClient, MCPToolError
+from baselith.core.mcp import MCPClient, MCPToolError
 
 try:
     result = await client.call_tool("get_weather", {"cty": "Rome"})
@@ -1042,13 +1042,13 @@ the [typed errors](#typed-errors) below tell the cases apart.
 
 Every request to an external server is bounded by
 `MCP_CLIENT_REQUEST_TIMEOUT` (seconds, default `30.0`, see
-`core.config.mcp.MCPConfig`) — a total deadline, not a per-frame one. If a
+`baselith.core.config.mcp.MCPConfig`) — a total deadline, not a per-frame one. If a
 server hangs, the read aborts with an `MCPTransportError` and the client is
 marked disconnected. Tool calls are **not** auto-retried: retrying a non-idempotent
 tool could double-execute a side effect.
 
 Responses are demultiplexed on the JSON-RPC `id`
-(`core/mcp/stdio_client_transport.py`, `core/mcp/reply_matching.py`): a server
+(`baselith/core/mcp/stdio_client_transport.py`, `baselith/core/mcp/reply_matching.py`): a server
 may interleave notifications (`notifications/message`,
 `notifications/progress`) with replies, and a late reply to an abandoned
 request may still be in the pipe. Frames that are not the awaited response are
@@ -1061,7 +1061,7 @@ Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
 sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
 **Every** text part is scanned (`scan_content_parts` in
-`core/mcp/client_operations.py`): a multi-part `tools/call` result, the text of
+`baselith/core/mcp/client_operations.py`): a multi-part `tools/call` result, the text of
 an embedded `resource` part, and the `contents` of `resources/read`. Only a
 lone text item used to be scanned, so text beside an image — or a second text
 part — reached the model unscanned. Binary parts (`image`, `audio`, `blob`)
@@ -1091,8 +1091,8 @@ alongside it.
 ### SSRF guard (Streamable HTTP transport)
 
 `HTTPClientTransport` (the client side of the Streamable HTTP transport)
-builds its `httpx.AsyncClient` via `core.security.http.create_hardened_async_client`,
-so every request is re-validated and IP-pinned against `core.security.ssrf`
+builds its `httpx.AsyncClient` via `baselith.core.security.http.create_hardened_async_client`,
+so every request is re-validated and IP-pinned against `baselith.core.security.ssrf`
 before it reaches the wire. Private/loopback/link-local/metadata-service hosts
 are rejected by default, and **redirects are never followed**: a 3xx is an
 `MCPTransportError`. Set `MCP_ALLOW_INTERNAL_ENDPOINTS=true` only for trusted
@@ -1177,7 +1177,7 @@ client = MCPClient(url=server_url, auth=headers, on_unauthorized=refresh,
                    allowed_hosts=["mcp.example.com"])
 ```
 
-`core.mcp.oauth_client.OAuthClient` is the library for obtaining those tokens —
+`baselith.core.mcp.oauth_client.OAuthClient` is the library for obtaining those tokens —
 no storage, no UI, typed in and out, every call bounded (deadline
 `MCP_OAUTH_TIMEOUT_SECONDS` 15, cap `MCP_OAUTH_MAX_RESPONSE_BYTES` 256 KiB),
 SSRF-guarded, `https` only, no redirects:
@@ -1273,7 +1273,7 @@ stdin and writes responses to stdout until the stream closes.
 
 ```python
 import asyncio
-from core.mcp import MCPServer
+from baselith.core.mcp import MCPServer
 
 server = MCPServer(name="my-tools")
 
@@ -1325,7 +1325,7 @@ enforces human approval (e.g. Claude Desktop's per-tool prompts), or pass
 `MCPServer(autonomy_policy=AutonomyPolicy(level=...))` explicitly. Built-in
 tools are pre-categorized — `execute_code` and `index_document` are
 `mutating`, `scrape_url` is `external_side_effect`. For in-process agent
-loops with a human channel, use `core.orchestration.enforce_approval`
+loops with a human channel, use `baselith.core.orchestration.enforce_approval`
 instead.
 
 !!! warning "Breaking change in 0.27"
@@ -1343,7 +1343,7 @@ helpers (`register_scraper_tools`, `register_rag_tools`,
 `register_reasoning_tools`, `register_plugin_tools`, `register_all_tools`).
 
 ```python
-from core.mcp import MCPServer, MCPToolAdapter
+from baselith.core.mcp import MCPServer, MCPToolAdapter
 
 server = MCPServer()
 adapter = MCPToolAdapter(server)
@@ -1362,14 +1362,14 @@ before any plugin activates, so it is fed per plugin instead — next section.
 Plugins expose tools through `get_mcp_tools()`, a list of dicts with `name`,
 `description`, `input_schema`, `handler` (async, called with the tool
 arguments as keyword arguments) and an optional `category`.
-`core.mcp.plugin_tools` puts them on a server and takes them off again:
+`baselith.core.mcp.plugin_tools` puts them on a server and takes them off again:
 
 | Function | Behaviour |
 | -------- | --------- |
 | `register_plugin_mcp_tools(server, plugin)` | Registers every well-formed entry and returns the registered names. An entry without `name` or `handler` is skipped with a warning; a `get_mcp_tools()` that raises contributes nothing. Neither stops the caller. An undeclared `category` registers the tool as `destructive`. |
 | `unregister_plugin_mcp_tools(server, names)` | Calls `server.unregister_tool()` for each name. |
 
-In the app, the plugin runtime hooks (`core/api/_plugin_runtime.py`) call these
+In the app, the plugin runtime hooks (`baselith/core/api/_plugin_runtime.py`) call these
 on the server stored at `app.state.mcp_server`: registration on every activation
 — startup auto-activation and hot reload, replacing the plugin's previous set —
 and withdrawal on the plugin's `on_after_disable` hook. Each change announces
@@ -1386,7 +1386,7 @@ every plugin tool not declared `read_only`.
 ### The bundled tools call the real services
 
 The implementations behind the bundled RAG and reasoning tools live in
-`core/mcp/_builtin_tools.py`:
+`baselith/core/mcp/_builtin_tools.py`:
 
 | Tool | What it now does | When the service is unavailable |
 | --- | --- | --- |
@@ -1427,7 +1427,7 @@ request context and applies it to every read and write — see
 
 ## Documentation MCP Server
 
-BaselithCore provides a specialized MCP Server to explore and search the documentation directly from your agentic IDE (e.g., Claude Desktop, Cursor, etc.). It is implemented at [`mkdocs-site/mcp/main.py`](https://github.com/baselithcore) on top of `core.mcp.MCPServer`.
+BaselithCore provides a specialized MCP Server to explore and search the documentation directly from your agentic IDE (e.g., Claude Desktop, Cursor, etc.). It is implemented at [`mkdocs-site/mcp/main.py`](https://github.com/baselithcore) on top of `baselith.core.mcp.MCPServer`.
 
 ### Connection Instructions
 
@@ -1484,7 +1484,7 @@ every page used to sit beside it; at over half a million tokens nothing could
 read it, so it is gone.
 
 !!! tip "Verified end to end"
-    The docs server runs on `core.mcp.MCPServer`, so it inherits the dual-era
+    The docs server runs on `baselith.core.mcp.MCPServer`, so it inherits the dual-era
     behaviour: legacy clients get the `initialize` handshake, and a modern
     client can call `server/discover` and issue stateless requests against the
     same process without any change to `mkdocs-site/mcp/`.
@@ -1501,8 +1501,8 @@ calls back through the client. `list_tools()` returns `MCPToolInfo`
 straight through and the provider mapping fails on the missing attribute:
 
 ```python
-from core.mcp import MCPClient
-from core.services.llm import LLMToolSpec, ToolChoice, get_llm_service
+from baselith.core.mcp import MCPClient
+from baselith.core.services.llm import LLMToolSpec, ToolChoice, get_llm_service
 
 llm = get_llm_service()
 
@@ -1538,7 +1538,7 @@ registry.
 
 ## Configuration
 
-MCP settings live in `core.config.mcp.MCPConfig` (read via `get_mcp_config()`).
+MCP settings live in `baselith.core.config.mcp.MCPConfig` (read via `get_mcp_config()`).
 The relevant environment variables:
 
 ```env title=".env"

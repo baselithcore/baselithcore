@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from core.connectors import (
+from baselith.core.connectors import (
     BaseConnector,
     ConnectorSpec,
     get_connector_registry,
     reset_connector_registry,
 )
-from core.plugins import Plugin
-from core.plugins._metadata import PluginMetadata
-from core.plugins.registry import PluginRegistry
+from baselith.core.plugins import Plugin
+from baselith.core.plugins._metadata import PluginMetadata
+from baselith.core.plugins.registry import PluginRegistry
 
 
 class Crm(BaseConnector):

@@ -19,9 +19,9 @@ from unittest.mock import patch
 
 import pytest
 
-import core.config.orchestration as orchestration_config
-from core.orchestration.idempotency import InMemoryToolLedger
-from core.orchestration.ledger_factory import (
+import baselith.core.config.orchestration as orchestration_config
+from baselith.core.orchestration.idempotency import InMemoryToolLedger
+from baselith.core.orchestration.ledger_factory import (
     BoundedLedger,
     DurableLedgerUnavailable,
     get_tool_ledger,
@@ -37,7 +37,8 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> Any:
         monkeypatch.setenv("ORCHESTRATOR_TOOL_LEDGER", value)
         monkeypatch.setattr(orchestration_config, "_orchestration_config", None)
         monkeypatch.setattr(
-            "core.orchestration.ledger_factory._postgres_enabled", lambda: postgres
+            "baselith.core.orchestration.ledger_factory._postgres_enabled",
+            lambda: postgres,
         )
         reset_tool_ledger()
 
@@ -46,7 +47,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def _postgres_ledger_type() -> type:
-    from core.orchestration.idempotency_postgres import PostgresToolLedger
+    from baselith.core.orchestration.idempotency_postgres import PostgresToolLedger
 
     return PostgresToolLedger
 
@@ -89,7 +90,7 @@ class TestFailureIsNotSilent:
 
         with (
             patch(
-                "core.orchestration.idempotency_postgres.PostgresToolLedger",
+                "baselith.core.orchestration.idempotency_postgres.PostgresToolLedger",
                 side_effect=RuntimeError("no driver"),
             ),
             pytest.raises(DurableLedgerUnavailable, match="no driver"),
@@ -101,7 +102,7 @@ class TestFailureIsNotSilent:
         backend("auto", postgres=True)
 
         with patch(
-            "core.orchestration.idempotency_postgres.PostgresToolLedger",
+            "baselith.core.orchestration.idempotency_postgres.PostgresToolLedger",
             side_effect=RuntimeError("no driver"),
         ):
             ledger = get_tool_ledger()
@@ -112,7 +113,7 @@ class TestFailureIsNotSilent:
         """Degrading in silence is how this went unnoticed for so long."""
         backend("auto", postgres=False)
 
-        with patch("core.orchestration.ledger_factory.logger") as log:
+        with patch("baselith.core.orchestration.ledger_factory.logger") as log:
             get_tool_ledger()
 
         warned = [call.args[0] for call in log.warning.call_args_list]
@@ -121,7 +122,7 @@ class TestFailureIsNotSilent:
     def test_switching_it_off_is_warned_too(self, backend: Any) -> None:
         backend("off", postgres=True)
 
-        with patch("core.orchestration.ledger_factory.logger") as log:
+        with patch("baselith.core.orchestration.ledger_factory.logger") as log:
             get_tool_ledger()
 
         assert "tool_ledger_disabled" in [
@@ -150,8 +151,8 @@ class TestADeadLedgerDoesNotStallTheLoop:
 
     async def test_the_loop_proceeds_when_the_ledger_times_out(self) -> None:
         """Fail open: the call runs unrecorded rather than not at all."""
-        from core.reasoning.react import ToolDefinition
-        from core.reasoning.react_tool_gate import claim_ledger_entry
+        from baselith.core.reasoning.react import ToolDefinition
+        from baselith.core.reasoning.react_tool_gate import claim_ledger_entry
 
         class Hangs:
             async def begin(self, key: str, *, run_id: str, tool: str) -> None:
@@ -173,7 +174,7 @@ class TestADeadLedgerDoesNotStallTheLoop:
         Without the breaker every effectful call keeps paying the full
         deadline for as long as the database is down.
         """
-        from core.resilience.circuit_breaker import _circuit_breakers
+        from baselith.core.resilience.circuit_breaker import _circuit_breakers
 
         _circuit_breakers.pop("tool_ledger", None)
         attempts = {"n": 0}
@@ -213,7 +214,7 @@ class TestDemandingPostgresIsNotSwallowed:
 
     async def test_the_typed_agent_propagates_it(self, backend: Any) -> None:
         """Answering with no ledger at all is worse than the auto fallback."""
-        from core.agent import Agent
+        from baselith.core.agent import Agent
 
         backend("postgres", postgres=False)
 
@@ -241,9 +242,9 @@ class TestTheLedgerIsShared:
 
     async def test_two_agents_share_one_claim(self, backend: Any) -> None:
         """The property, not the identity: the effect happens once."""
-        from core.agent import Agent
-        from core.reasoning.react import ToolDefinition
-        from core.services.llm.tool_calling import LLMResult, ToolCall
+        from baselith.core.agent import Agent
+        from baselith.core.reasoning.react import ToolDefinition
+        from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
         from tests.unit.core.agent.test_agent import _mock_service
 
         backend("memory", postgres=False)

@@ -11,10 +11,10 @@ from typing import Any
 import httpx
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.client_errors import MCPProtocolError
-from core.mcp.reply_matching import is_reply
-from core.mcp.stdio_client_transport import read_response
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.client_errors import MCPProtocolError
+from baselith.core.mcp.reply_matching import is_reply
+from baselith.core.mcp.stdio_client_transport import read_response
 
 from .fakes.http_server import (
     default_methods,

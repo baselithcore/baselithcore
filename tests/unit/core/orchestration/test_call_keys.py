@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.call_keys import (
+from baselith.core.orchestration.call_keys import (
     CallOccurrences,
     call_step_key,
     canonical_arguments,
     derive_call_key,
 )
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager, step_key
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.idempotency import (
+from baselith.core.orchestration.checkpoint import (
+    Checkpoint,
+    CheckpointManager,
+    step_key,
+)
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.idempotency import (
     InMemoryToolLedger,
     ToolOutcome,
     claim_call,

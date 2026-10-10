@@ -13,12 +13,12 @@ import time
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_FAILED,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from core.orchestration.recovery import recovery_sweep_loop, run_recovery_cycle
+from baselith.core.orchestration.recovery import recovery_sweep_loop, run_recovery_cycle
 
 pytestmark = [pytest.mark.unit]
 
@@ -97,7 +97,7 @@ class TestRunRecoveryCycle:
         assert orchestrator.calls == []
 
     async def test_resume_after_seconds_defaults_to_the_setting(self) -> None:
-        from core.config.orchestration import get_orchestration_config
+        from baselith.core.config.orchestration import get_orchestration_config
 
         assert get_orchestration_config().recovery_resume_after_seconds == 300.0
         store = InMemoryCheckpointStore()
@@ -112,7 +112,7 @@ class TestRunRecoveryCycle:
     async def test_direct_callers_keep_the_unguarded_contract(self) -> None:
         """``resume_interrupted_runs`` without an explicit idle threshold is
         still the boot-time sweep it always was."""
-        from core.orchestration.recovery import resume_interrupted_runs
+        from baselith.core.orchestration.recovery import resume_interrupted_runs
 
         store = InMemoryCheckpointStore()
         await _seed_running(store, "fresh", age_seconds=1.0)
@@ -189,7 +189,9 @@ class TestRecoverySweepLoop:
             raise RuntimeError("sweep exploded")
 
         monkeypatch.setattr(
-            "core.orchestration.recovery.run_recovery_cycle", _boom, raising=True
+            "baselith.core.orchestration.recovery.run_recovery_cycle",
+            _boom,
+            raising=True,
         )
         await recovery_sweep_loop(
             _Orchestrator(),

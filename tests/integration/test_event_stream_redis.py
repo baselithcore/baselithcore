@@ -24,8 +24,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from core.events.stream_redis import RedisEventStream
-from core.events.types import Event
+from baselith.core.events.stream_redis import RedisEventStream
+from baselith.core.events.types import Event
 
 pytestmark = [pytest.mark.integration]
 
@@ -180,8 +180,8 @@ class TestBridgeOverRedis:
         """The end-to-end path a second replica would take."""
         import asyncio
 
-        from core.events.bus import EventBus
-        from core.events.durable import DurableEventBridge
+        from baselith.core.events.bus import EventBus
+        from baselith.core.events.durable import DurableEventBridge
 
         seen: list[dict] = []
         arrived = asyncio.Event()

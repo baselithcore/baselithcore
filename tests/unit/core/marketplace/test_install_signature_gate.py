@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.marketplace.installer import PluginInstaller
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.marketplace.installer import PluginInstaller
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 @pytest.fixture

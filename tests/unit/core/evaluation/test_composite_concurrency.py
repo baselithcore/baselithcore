@@ -12,8 +12,8 @@ import asyncio
 
 import pytest
 
-from core.evaluation.judges import CompositeEvaluator
-from core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.judges import CompositeEvaluator
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
 
 
 class _SlowEvaluator:

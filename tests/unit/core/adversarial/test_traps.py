@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.adversarial.traps import HallucinationTrap
-from core.adversarial.types import AttackStatus
+from baselith.core.adversarial.traps import HallucinationTrap
+from baselith.core.adversarial.types import AttackStatus
 
 
 @pytest.mark.asyncio

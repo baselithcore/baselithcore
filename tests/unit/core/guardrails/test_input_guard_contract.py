@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.guardrails.config import GuardrailsConfig
-from core.guardrails.input_guard import InputGuard
+from baselith.core.guardrails.config import GuardrailsConfig
+from baselith.core.guardrails.input_guard import InputGuard
 
 
 class TestVerdict:

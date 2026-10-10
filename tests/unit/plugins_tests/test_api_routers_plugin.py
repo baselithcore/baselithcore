@@ -1,8 +1,8 @@
-from core.routers.admin import router as core_admin_router
-from core.routers.chat import router as core_chat_router
-from core.routers.tenant import CreateTenantRequest as CoreCreateTenantRequest
-from plugins.api_routers import admin, chat, tenant
-from plugins.api_routers.plugin import ApiRoutersPlugin
+from baselith.core.routers.admin import router as core_admin_router
+from baselith.core.routers.chat import router as core_chat_router
+from baselith.core.routers.tenant import CreateTenantRequest as CoreCreateTenantRequest
+from baselith.plugins.api_routers import admin, chat, tenant
+from baselith.plugins.api_routers.plugin import ApiRoutersPlugin
 
 
 def test_legacy_core_router_imports_resolve_to_plugin_exports() -> None:

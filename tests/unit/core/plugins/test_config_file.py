@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.config_file import (
+from baselith.core.plugins.config_file import (
     PLUGIN_CONFIG_PATH_ENV,
     plugin_enabled,
     read_plugin_configs,
@@ -96,14 +96,14 @@ class TestMissingFileLogLevel:
 
     def test_default_path_missing_logs_info(self, tmp_path, monkeypatch, caplog):
         monkeypatch.delenv(PLUGIN_CONFIG_PATH_ENV, raising=False)
-        with caplog.at_level("INFO", logger="core.plugins.config_file"):
+        with caplog.at_level("INFO", logger="baselith.core.plugins.config_file"):
             assert read_plugin_configs(tmp_path) == {}
         levels = [r.levelname for r in caplog.records if "not found" in r.message]
         assert levels == ["INFO"]
 
     def test_explicit_path_missing_warns(self, tmp_path, monkeypatch, caplog):
         monkeypatch.setenv(PLUGIN_CONFIG_PATH_ENV, "configs/custom.yaml")
-        with caplog.at_level("INFO", logger="core.plugins.config_file"):
+        with caplog.at_level("INFO", logger="baselith.core.plugins.config_file"):
             assert read_plugin_configs(tmp_path) == {}
         levels = [r.levelname for r in caplog.records if "not found" in r.message]
         assert levels == ["WARNING"]

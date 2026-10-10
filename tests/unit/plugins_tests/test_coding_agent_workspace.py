@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.coding_agent import CodingAgent, Workspace
+from baselith.plugins.coding_agent import CodingAgent, Workspace
 
 from .coding_agent_fakes import LocalSandbox, ScriptedLLM
 

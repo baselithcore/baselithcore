@@ -40,14 +40,14 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.evaluation.regression_runner import (  # noqa: E402
+from baselith.core.evaluation.regression_runner import (  # noqa: E402
     RecordedRun,
     RegressionLoadError,
     load_cases,
     load_recorded_runs,
     run_regression,
 )
-from core.evaluation.replay import (  # noqa: E402
+from baselith.core.evaluation.replay import (  # noqa: E402
     ReplayError,
     load_scenarios,
     replay_scenario,

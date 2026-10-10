@@ -3,14 +3,14 @@ title: Adversarial
 description: Adversarial scenario simulation and robustness testing
 ---
 
-**Module**: `core/adversarial/`
+**Module**: `baselith/core/adversarial/`
 
 The Adversarial module provides built-in mechanisms for red-teaming and robustness testing. It enables developers to simulate adversarial scenarios against agents to ensure guardrails and self-correction loops are functioning correctly in production environments.
 
 !!! note "Library API — not wired by default"
-    `core/adversarial` is a testing toolkit you run yourself; the default app
+    `baselith/core/adversarial` is a testing toolkit you run yourself; the default app
     never invokes `RedTeamAgent` or the fuzzer. The red-team regression gate
-    that runs in CI is `core/evaluation/red_team.py` (see
+    that runs in CI is `baselith/core/evaluation/red_team.py` (see
     [Evaluation](evaluation.md)).
 
 ---
@@ -18,7 +18,7 @@ The Adversarial module provides built-in mechanisms for red-teaming and robustne
 ## Module Structure
 
 ```text
-core/adversarial/
+baselith/core/adversarial/
 ├── __init__.py           # Public exports
 ├── red_team.py           # RedTeamAgent (orchestrator)
 ├── fuzzer.py             # PromptFuzzer (generates attack prompts)
@@ -27,10 +27,10 @@ core/adversarial/
 └── types.py              # AttackVector, AttackResult, Vulnerability, SecurityReport, AttackCategory, Severity, AttackStatus
 ```
 
-Public exports from `core.adversarial`:
+Public exports from `baselith.core.adversarial`:
 
 ```python
-from core.adversarial import (
+from baselith.core.adversarial import (
     AttackVector, AttackResult, Vulnerability, SecurityReport,
     AttackCategory, Severity, AttackStatus,   # types
     RedTeamAgent, PromptFuzzer, HallucinationTrap, BoundaryTester,  # agents
@@ -58,7 +58,7 @@ succeeded:
 ## Example Usage
 
 ```python
-from core.adversarial import RedTeamAgent, AttackCategory
+from baselith.core.adversarial import RedTeamAgent, AttackCategory
 
 # Use LLM-based detection (default: True)
 agent = RedTeamAgent(llm_detection=True)

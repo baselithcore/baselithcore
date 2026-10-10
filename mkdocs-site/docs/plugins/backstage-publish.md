@@ -74,7 +74,7 @@ catalog:
    zips + submits the bundle to
    `{OFFICIAL_MARKETPLACE_URL}/api/marketplace/plugins/submit`; the
    `registry_url` in the request body is ignored. This is the canonical
-   submission path (wraps `core.marketplace.publisher.PluginPublisher.publish`).
+   submission path (wraps `baselith.core.marketplace.publisher.PluginPublisher.publish`).
 4. *(optional)* `publish:github` mirrors the scaffolded bundle to a
    dedicated repo (only when `mirrorToGithub=true`).
 5. *(optional)* `catalog:register` registers the mirror in the Backstage

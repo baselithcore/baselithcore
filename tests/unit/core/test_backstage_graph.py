@@ -19,9 +19,9 @@ from backstage_test_utils import (
     make_provider as _provider,
 )
 
-from core.plugins.exporters import entity_model as em
-from core.plugins.exporters.backstage_provider import BackstageProvider
-from core.plugins.lifecycle import PluginState
+from baselith.core.plugins.exporters import entity_model as em
+from baselith.core.plugins.exporters.backstage_provider import BackstageProvider
+from baselith.core.plugins.lifecycle import PluginState
 
 # ── export_all / get_provider_payload ─────────────────────────────────────────
 

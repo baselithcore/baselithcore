@@ -1,6 +1,6 @@
 """Golden trajectories for the typed ``Agent`` loop.
 
-Each test drives the real :class:`core.agent.Agent` with a recorded cassette.
+Each test drives the real :class:`baselith.core.agent.Agent` with a recorded cassette.
 The cassette asserts, turn by turn, what the loop sent to the provider — the
 tools offered, the shape of the conversation, the tool results fed back, the
 validation-retry wording — so a change in prompt assembly fails here even
@@ -20,9 +20,9 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from core.agent import Agent
-from core.orchestration.tool_output import unwrap_untrusted
-from core.services.llm.messages import ToolResultBlock
+from baselith.core.agent import Agent
+from baselith.core.orchestration.tool_output import unwrap_untrusted
+from baselith.core.services.llm.messages import ToolResultBlock
 from tests.golden.cassette import (
     CASSETTE_DIR,
     Cassette,

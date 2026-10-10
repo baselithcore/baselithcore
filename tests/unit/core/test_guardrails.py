@@ -6,7 +6,7 @@ Tests for safety patterns:
 - OutputGuard (PII redaction, content filtering)
 """
 
-from core.guardrails import (
+from baselith.core.guardrails import (
     GuardrailsConfig,
     InputGuard,
     OutputGuard,

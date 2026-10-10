@@ -5,7 +5,7 @@ description: Ship static assets or a built dashboard with a plugin and expose th
 
 <!-- docs-consistency: skip routes -->
 
-The **Frontend Integration** surface lets a plugin ship its own static assets — JavaScript, CSS, images, or a compiled single-page app — and describe them to whatever frontend the operator runs, **without touching `core/`**. The framework serves the files and publishes a machine-readable manifest; rendering is the host frontend's job.
+The **Frontend Integration** surface lets a plugin ship its own static assets — JavaScript, CSS, images, or a compiled single-page app — and describe them to whatever frontend the operator runs, **without touching `baselith/core/`**. The framework serves the files and publishes a machine-readable manifest; rendering is the host frontend's job.
 
 !!! info "What the framework does — and does not — do"
     - **Serves** each plugin's static directory at `/plugins/{name}/static` and, when that directory contains an `index.html`, the whole directory as an SPA at `/{name}`.
@@ -35,9 +35,9 @@ sequenceDiagram
 
 | Component | Where | Responsibility |
 |-----------|-------|----------------|
-| **Static mount** | `core/api/_plugin_runtime.py` | Mounts the static directory at `/plugins/{name}/static`; adds an SPA mount at `/{name}` |
-| **Frontend manifest** | `core/plugins/lookup.py`, served by `core/api/factory.py` | Lists every plugin's assets and UI tabs at `GET /api/plugins/frontend-manifest` |
-| **Resource analyzer** | `core/plugins/resource_analyzer.py` | Reads the same hooks statically for plugins that are discovered but not yet activated |
+| **Static mount** | `baselith/core/api/_plugin_runtime.py` | Mounts the static directory at `/plugins/{name}/static`; adds an SPA mount at `/{name}` |
+| **Frontend manifest** | `baselith/core/plugins/lookup.py`, served by `baselith/core/api/factory.py` | Lists every plugin's assets and UI tabs at `GET /api/plugins/frontend-manifest` |
+| **Resource analyzer** | `baselith/core/plugins/resource_analyzer.py` | Reads the same hooks statically for plugins that are discovered but not yet activated |
 
 ---
 
@@ -50,7 +50,7 @@ Each plugin can include static files (JavaScript, CSS, images) that are served a
 ```python title="plugin.py"
 from pathlib import Path
 
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class MyPlugin(Plugin):
@@ -87,7 +87,7 @@ class MyPlugin(Plugin):
 !!! note "Keep the return values literal"
     Plugins are discovered before they are activated. For a plugin that is not active yet,
     the registry reads `get_stylesheets()`, `get_scripts()` and `get_ui_tabs()`
-    **statically** from the source (`core/plugins/resource_analyzer.py`), so only literal
+    **statically** from the source (`baselith/core/plugins/resource_analyzer.py`), so only literal
     list returns are picked up. The static directory of a discovered plugin is `static/`
     next to `plugin.py`; once the plugin is active, `get_static_assets_path()` is used.
     Return `Path(__file__).parent / "static"` so the two agree.
@@ -125,7 +125,7 @@ refused and logged as an error.
 ### SPA mount
 
 If the static directory contains an `index.html`, the same directory is also mounted at
-`/{plugin_name}` through `SPAStaticFiles` (`core/api/spa.py`). A deep link whose last
+`/{plugin_name}` through `SPAStaticFiles` (`baselith/core/api/spa.py`). A deep link whose last
 segment has no file extension (`/my-plugin/settings`) is served `index.html` so a
 client-side router can take over; a missing real asset (`/my-plugin/assets/app.js`) still
 returns 404. `index.html` is served with `Cache-Control: no-cache` so a redeploy never
@@ -145,7 +145,7 @@ Plugins can declare navigation entries for a host dashboard by implementing
 `get_ui_tabs()`:
 
 ```python title="plugin.py"
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class MyPlugin(Plugin):
@@ -166,7 +166,7 @@ class MyPlugin(Plugin):
         ]
 ```
 
-Tabs are stored per plugin (`core/plugins/registration.py`) and surfaced in the frontend
+Tabs are stored per plugin (`baselith/core/plugins/registration.py`) and surfaced in the frontend
 manifest as `ui_tabs`. The framework does not render them: `id` is an opaque key the host
 frontend maps to a route or panel, and `label` is the text it shows.
 
@@ -197,7 +197,7 @@ yet activated are listed too.
 
 ### Consuming it from a host frontend
 
-Nothing under `core/static/` reads this manifest. The loader below is the kind of code a
+Nothing under `baselith/core/static/` reads this manifest. The loader below is the kind of code a
 host frontend has to provide:
 
 ```javascript title="host-frontend/plugin-loader.js"

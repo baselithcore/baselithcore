@@ -3,7 +3,7 @@
 ``image.tag`` defaults to empty in ``values.yaml``, so ``Chart.appVersion`` is
 not documentation — it is the image tag a plain ``helm install`` pulls. It had
 drifted a release behind the codebase (``0.31.0`` against ``0.32.0``) because
-semantic-release rewrote only ``core/_version.py``: the chart silently
+semantic-release rewrote only ``baselith/core/_version.py``: the chart silently
 deployed the previous release's image, and nothing in CI compared the two.
 
 ``.releaserc`` now rewrites the chart in the same release commit. These tests
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core._version import __version__
+from baselith.core._version import __version__
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHART_DIR = REPO_ROOT / "deploy" / "helm" / "baselithcore"
@@ -342,7 +342,7 @@ class TestRuntimeRoleJob:
     migration 008 deliberately does not set. `DB_USER` out of the box is the
     owner, so `DB_RLS_ENABLED=true` can be on with nothing isolated. This Job
     provisions the least-privilege role that makes the policies apply, and
-    `core.db.rls_posture` refuses to boot in production without one.
+    `baselith.core.db.rls_posture` refuses to boot in production without one.
     """
 
     @staticmethod

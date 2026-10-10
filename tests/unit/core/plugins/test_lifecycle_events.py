@@ -1,4 +1,4 @@
-"""Lifecycle event topic/state matrix (core.plugins.lifecycle_events)."""
+"""Lifecycle event topic/state matrix (baselith.core.plugins.lifecycle_events)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from core.plugins import lifecycle_events as mod
+from baselith.core.plugins import lifecycle_events as mod
 
 
 class _FakeBus:
@@ -21,7 +21,7 @@ class _FakeBus:
 @pytest.fixture
 def bus(monkeypatch: pytest.MonkeyPatch) -> _FakeBus:
     fake = _FakeBus()
-    monkeypatch.setattr("core.events.bus.get_event_bus", lambda: fake)
+    monkeypatch.setattr("baselith.core.events.bus.get_event_bus", lambda: fake)
     return fake
 
 
@@ -60,5 +60,5 @@ async def test_emit_failure_never_raises(monkeypatch: pytest.MonkeyPatch) -> Non
     def _boom() -> Any:
         raise RuntimeError("bus down")
 
-    monkeypatch.setattr("core.events.bus.get_event_bus", _boom)
+    monkeypatch.setattr("baselith.core.events.bus.get_event_bus", _boom)
     await mod.emit_lifecycle_event("enable", "demo", True)  # must not raise

@@ -7,13 +7,13 @@ import logging
 import httpx
 import pytest
 
-from core.connectors import ConnectorHttp
-from core.connectors.errors import (
+from baselith.core.connectors import ConnectorHttp
+from baselith.core.connectors.errors import (
     ConnectorError,
     error_for_response,
     redact,
 )
-from core.observability.redaction import redact_secrets, safe_snippet
+from baselith.core.observability.redaction import redact_secrets, safe_snippet
 
 BEARER = "ya29.BEARER-TOKEN-ECHOED-0123456789"
 REFRESH = "1//REFRESH-TOKEN-ECHOED-abcdef"

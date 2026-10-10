@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch  # noqa: E402
 
 import pytest  # noqa: E402
 
-from core.services.indexing.service import IndexingService  # noqa: E402
+from baselith.core.services.indexing.service import IndexingService  # noqa: E402
 
 
 @pytest.fixture
@@ -54,19 +54,20 @@ def mock_config():
 def indexing_service(mock_vectorstore, mock_embedder, mock_config):
     with (
         patch(
-            "core.services.indexing.service.get_vectorstore_config",
+            "baselith.core.services.indexing.service.get_vectorstore_config",
             return_value=mock_config,
         ),
         patch(
-            "core.services.indexing.service.get_processing_config",
+            "baselith.core.services.indexing.service.get_processing_config",
             return_value=MagicMock(),
         ),
         patch(
-            "core.services.indexing.service.get_vectorstore_service",
+            "baselith.core.services.indexing.service.get_vectorstore_service",
             return_value=mock_vectorstore,
         ),
         patch(
-            "core.services.indexing.service.get_embedder", return_value=mock_embedder
+            "baselith.core.services.indexing.service.get_embedder",
+            return_value=mock_embedder,
         ),
     ):
         service = IndexingService(

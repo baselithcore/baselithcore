@@ -8,9 +8,12 @@ import asyncio
 import json
 import logging
 
-from core.config.evaluation import evaluation_config
-from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
-from core.observability.logging import get_logger
+from baselith.core.config.evaluation import evaluation_config
+from baselith.core.evaluation.metrics import (
+    AnswerRelevancyEvaluator,
+    FaithfulnessEvaluator,
+)
+from baselith.core.observability.logging import get_logger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

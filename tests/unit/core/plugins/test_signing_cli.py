@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.cli.commands.plugin.sign import SIGNING_KEY_ENV, sign_plugin
-from core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
-from core.plugins.signing import generate_keypair_hex, verify_plugin_signature
+from baselith.core.cli.commands.plugin.sign import SIGNING_KEY_ENV, sign_plugin
+from baselith.core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, verify_plugin_signature
 
 pytestmark = [pytest.mark.unit]
 

@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.auth.manager import AuthManager, get_auth_manager
-from core.auth.types import AuthRole, AuthUser, InsufficientPermissionsError
-from core.config.security import SecurityConfig
+from baselith.core.auth.manager import AuthManager, get_auth_manager
+from baselith.core.auth.types import AuthRole, AuthUser, InsufficientPermissionsError
+from baselith.core.config.security import SecurityConfig
 
 
 @pytest.fixture
@@ -24,9 +24,9 @@ class TestAuthManager:
         # (the shared revocation denylist) needs its own mock, or an unmocked
         # `.exists()` failure now fails the key *closed* instead of open.
         with (
-            patch("core.auth.jwt.create_redis_client") as mock_redis_factory,
+            patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory,
             patch(
-                "core.cache.redis_cache.create_redis_client"
+                "baselith.core.cache.redis_cache.create_redis_client"
             ) as mock_cache_redis_factory,
         ):
             mock_redis = AsyncMock()
@@ -111,9 +111,9 @@ class TestJWTHandlerAndAPIKeys:
     # Testing the underlying components briefly to ensure coverage
     @pytest.mark.asyncio
     async def test_jwt_create_and_verify(self):
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -130,9 +130,9 @@ class TestJWTHandlerAndAPIKeys:
     async def test_tenant_id_not_forgeable_via_extra_claims(self):
         """tenant_id is a reserved claim: it can only be set via the first-class
         parameter, never injected/overridden through extra_claims."""
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -151,9 +151,9 @@ class TestJWTHandlerAndAPIKeys:
 
     @pytest.mark.asyncio
     async def test_rotate_refresh_token_preserves_roles_and_tenant(self):
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -184,10 +184,10 @@ class TestJWTHandlerAndAPIKeys:
     @pytest.mark.asyncio
     async def test_refresh_token_rejected_on_access_path(self):
         """A refresh token must not authenticate as a bearer access token."""
-        from core.auth.jwt import JWTHandler
-        from core.auth.types import InvalidTokenError
+        from baselith.core.auth.jwt import JWTHandler
+        from baselith.core.auth.types import InvalidTokenError
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -209,9 +209,9 @@ class TestJWTHandlerAndAPIKeys:
     async def test_jwt_accepts_secretstr_key(self):
         from pydantic import SecretStr
 
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -228,10 +228,10 @@ class TestJWTHandlerAndAPIKeys:
         """A token missing `exp` would never expire and could not be revoked."""
         import jwt as pyjwt
 
-        from core.auth.jwt import JWTHandler
-        from core.auth.types import InvalidTokenError
+        from baselith.core.auth.jwt import JWTHandler
+        from baselith.core.auth.types import InvalidTokenError
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -253,9 +253,9 @@ class TestJWTHandlerAndAPIKeys:
             assert "exp" in str(exc_info.value.__cause__)
 
     def test_jwt_rejects_none_algorithm(self):
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis_factory.return_value = AsyncMock()
             for bad in ("none", "None", "NONE", ""):
                 with pytest.raises(ValueError, match="not allowed"):
@@ -268,13 +268,15 @@ class TestJWTHandlerAndAPIKeys:
     async def test_api_key_validator_revocation(self, security_config):
         from uuid import uuid4
 
-        from core.auth.api_keys import APIKeyValidator
+        from baselith.core.auth.api_keys import APIKeyValidator
 
         # This round trip is process-local (see the assertions below): revoke
         # removes the key from in-process state directly, so the mocked
         # denylist Redis only needs to stay out of the way, not model real
         # persistence. The unique key just avoids collisions across tests.
-        with patch("core.cache.redis_cache.create_redis_client") as mock_redis_factory:
+        with patch(
+            "baselith.core.cache.redis_cache.create_redis_client"
+        ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.exists.return_value = False
             mock_redis_factory.return_value = mock_redis
@@ -311,16 +313,16 @@ class TestReservedTenantCannotBeMinted:
 
     @pytest.fixture
     def handler(self):
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
             yield JWTHandler(secret_key="secret-with-at-least-thirty-two-chars")
 
     def test_an_access_token_cannot_assert_it(self, handler):
-        from core.context import ReservedTenantError
+        from baselith.core.context import ReservedTenantError
 
         with pytest.raises(ReservedTenantError, match="reserved"):
             handler.create_token("u1", roles={AuthRole.USER}, tenant_id="system")
@@ -328,7 +330,7 @@ class TestReservedTenantCannotBeMinted:
     def test_a_refresh_token_cannot_assert_it_either(self, handler):
         """Rotation preserves the tenant, so the refresh path is a second door
         into the same claim."""
-        from core.context import ReservedTenantError
+        from baselith.core.context import ReservedTenantError
 
         with pytest.raises(ReservedTenantError):
             handler.create_refresh_token(
@@ -339,9 +341,9 @@ class TestReservedTenantCannotBeMinted:
     async def test_the_manager_refuses_too(self, security_config):
         """``AuthManager.create_token`` is the door most callers use; it mints
         through the handler, so the guard covers it."""
-        from core.context import ReservedTenantError
+        from baselith.core.context import ReservedTenantError
 
-        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.get.return_value = None
             mock_redis_factory.return_value = mock_redis
@@ -364,6 +366,6 @@ class TestReservedTenantCannotBeMinted:
     def test_it_is_a_value_error(self):
         """So a provisioning endpoint that already answers 400 on ``ValueError``
         keeps doing the right thing."""
-        from core.context import ReservedTenantError
+        from baselith.core.context import ReservedTenantError
 
         assert issubclass(ReservedTenantError, ValueError)

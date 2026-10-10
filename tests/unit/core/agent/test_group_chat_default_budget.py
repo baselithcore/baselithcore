@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.agent.group_chat import ChatMessage, GroupChat, RoundRobinSelector
-from core.orchestration.budget_context import (
+from baselith.core.agent.group_chat import ChatMessage, GroupChat, RoundRobinSelector
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     deactivate_budget,
     get_active_budget,
 )
-from core.orchestration.limits import BudgetExceededError, LoopBudget
+from baselith.core.orchestration.limits import BudgetExceededError, LoopBudget
 
 pytestmark = [pytest.mark.unit]
 

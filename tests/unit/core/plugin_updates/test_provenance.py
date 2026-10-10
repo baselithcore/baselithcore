@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from core.plugin_updates.checker import run_check
-from core.plugin_updates.models import Refusal
-from core.plugin_updates.provenance import RELEASE_WORKFLOW_AUTHOR
+from baselith.core.plugin_updates.checker import run_check
+from baselith.core.plugin_updates.models import Refusal
+from baselith.core.plugin_updates.provenance import RELEASE_WORKFLOW_AUTHOR
 
 from .provenance_fake import (
     OTHER,
@@ -166,7 +166,7 @@ async def test_commit_link_only_on_a_known_web_host(
 
 
 async def test_run_check_selects_the_trust_mode(tmp_path: Any) -> None:
-    from core.plugin_updates.cache import UpdateCache
+    from baselith.core.plugin_updates.cache import UpdateCache
 
     fake = FakeGitHub()
     report = await run_check(

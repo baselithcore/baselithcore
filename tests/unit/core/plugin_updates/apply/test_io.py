@@ -9,16 +9,16 @@ from pathlib import Path
 import httpx
 import pytest
 
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.plugin_updates.apply._io import (
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.plugin_updates.apply._io import (
     GitHubReleaseFetcher,
     SchemaEnvError,
     http_probe,
     schema_env,
     subprocess_runner,
 )
-from core.plugin_updates.models import ReleaseInfo
-from core.plugin_updates.sources import SourceError
+from baselith.core.plugin_updates.models import ReleaseInfo
+from baselith.core.plugin_updates.sources import SourceError
 
 
 def test_subprocess_runner_returns_the_exit_code(tmp_path: Path) -> None:

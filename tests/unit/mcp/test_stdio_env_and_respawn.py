@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.stdio_client_transport import (
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.stdio_client_transport import (
     build_child_env,
     spawn,
     validate_command,

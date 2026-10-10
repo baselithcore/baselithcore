@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.reasoning.tot.cache import get_thought_cache
-from core.reasoning.tot.engine import TreeOfThoughtsAsync
+from baselith.core.reasoning.tot.cache import get_thought_cache
+from baselith.core.reasoning.tot.engine import TreeOfThoughtsAsync
 
 
 @pytest.fixture(autouse=True)

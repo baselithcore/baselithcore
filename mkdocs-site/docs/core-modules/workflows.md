@@ -1,11 +1,11 @@
 # Workflow Engine
 
-The `core/workflows/` module provides a **graph-based workflow engine** for building, serializing, and executing baselith-core pipelines. Workflows are defined as directed graphs of typed nodes, with support for branching, parallelism, loops, and human-in-the-loop steps.
+The `baselith/core/workflows/` module provides a **graph-based workflow engine** for building, serializing, and executing baselith-core pipelines. Workflows are defined as directed graphs of typed nodes, with support for branching, parallelism, loops, and human-in-the-loop steps.
 
 ## Module Structure
 
 ```txt
-core/workflows/
+baselith/core/workflows/
 ├── builder.py        # WorkflowDefinition, WorkflowNode, WorkflowEdge
 ├── executor.py       # WorkflowExecutor — async graph execution
 ├── node_handlers.py  # Default handlers per NodeType
@@ -33,7 +33,7 @@ node to the previous one.
 definition in place. `add_edge` takes a single `WorkflowEdge`:
 
 ```python
-from core.workflows.builder import (
+from baselith.core.workflows.builder import (
     WorkflowDefinition,
     WorkflowNode,
     WorkflowEdge,
@@ -75,7 +75,7 @@ wf2 = WorkflowDefinition.from_json(json_str)
 ### Fluent: `WorkflowBuilder`
 
 ```python
-from core.workflows.builder import WorkflowBuilder
+from baselith.core.workflows.builder import WorkflowBuilder
 
 wf = (
     WorkflowBuilder(name="research-pipeline")
@@ -165,21 +165,21 @@ explicit rather than silently truncating if it were ever violated.
 Executes a `WorkflowDefinition` asynchronously, step by step.
 
 Default handlers cover every node type (bodies in
-`core/workflows/node_handlers.py`); `LOOP`'s default fails closed (see the
+`baselith/core/workflows/node_handlers.py`); `LOOP`'s default fails closed (see the
 node-fields note above). `register_handler` is a regular method (not a
 decorator). Handlers receive `(node, context)` and may be sync or async —
 registering one overrides the default for that type.
 
 `AGENT` nodes resolve `config["agent"]` (any object with `async run(prompt)`,
-e.g. [`core.agent.Agent`](agent.md)) or their `agent_id` in the executor's
+e.g. [`baselith.core.agent.Agent`](agent.md)) or their `agent_id` in the executor's
 `agents` registry; the prompt is `config["prompt"]` with `{input}` replaced
 by the upstream output, or the upstream output itself. `TOOL` nodes resolve
 `config["fn"]` or their `tool_id` in the `tools` registry and are called with
 the upstream output:
 
 ```python
-from core.agent import Agent
-from core.workflows.executor import WorkflowExecutor
+from baselith.core.agent import Agent
+from baselith.core.workflows.executor import WorkflowExecutor
 
 executor = WorkflowExecutor(
     agents={"analysis-agent": Agent(system_prompt="You analyze data.")},
@@ -207,16 +207,16 @@ carries `node_id`, `status`, `output`, `error`, and `duration_ms`.
 The AGENT-node contract is `async run(prompt)` returning an object with
 `.output`. A [`Crew`](agent.md#multi-agent-crews-crew-task) speaks a different
 dialect — `async run(inputs)` returning a `CrewResult` — so
-`CrewNodeAdapter` (`core/workflows/adapters.py`, exported from
-`core.workflows`) bridges it onto the contract: the node's prompt is bound
+`CrewNodeAdapter` (`baselith/core/workflows/adapters.py`, exported from
+`baselith.core.workflows`) bridges it onto the contract: the node's prompt is bound
 under `input_key` (default `"input"`, referenced by task descriptions as
 `{input}`), and `CrewResult.final` becomes the node output. A whole crew then
 composes into a graph — and inherits durable execution — as one node:
 
 ```python
-from core.agent import Agent, Crew, Task
-from core.workflows import CrewNodeAdapter, WorkflowExecutor
-from core.workflows.builder import WorkflowBuilder
+from baselith.core.agent import Agent, Crew, Task
+from baselith.core.workflows import CrewNodeAdapter, WorkflowExecutor
+from baselith.core.workflows.builder import WorkflowBuilder
 
 crew = Crew(
     agents=[Agent(system_prompt="You are a meticulous researcher.")],
@@ -239,7 +239,7 @@ result = await executor.execute(wf, initial_input="vector databases")
 [`Colony`](swarm.md#colony) speaks yet another dialect: a swarm `Task`
 auctioned to the best-bidding agent and executed through
 `execute_batch(tasks, execute_fn)`. `ColonyNodeAdapter`
-(`core/workflows/adapters.py`, exported from `core.workflows`) bridges it onto
+(`baselith/core/workflows/adapters.py`, exported from `baselith.core.workflows`) bridges it onto
 the AGENT-node contract: the node's prompt becomes a `Task`
 (`description=prompt`, filtered by the adapter's `required_capabilities`), the
 colony's auction picks the executing agent, and the caller-supplied
@@ -249,9 +249,9 @@ output; a failed **or unassigned** task (no agent won the auction) raises, so
 the graph's per-node retry/error semantics apply:
 
 ```python
-from core.swarm import AgentProfile, Capability, Colony, Task
-from core.workflows import ColonyNodeAdapter, WorkflowExecutor
-from core.workflows.builder import WorkflowBuilder
+from baselith.core.swarm import AgentProfile, Capability, Colony, Task
+from baselith.core.workflows import ColonyNodeAdapter, WorkflowExecutor
+from baselith.core.workflows.builder import WorkflowBuilder
 
 colony = Colony()
 colony.register_agent(AgentProfile(
@@ -289,7 +289,7 @@ the executing agent should be chosen by the auction per task.
 | **Per-node retry**      | `retries` + `retry_backoff` fields: extra attempts with exponential backoff; timeouts are never retried |
 | **Parallel + fan-in**   | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather`; branches halt at their convergence `MERGE` node, which then executes **once** with the list of branch outputs and the chain continues past it. Branches must converge on the same `MERGE` (or none). In [durable mode](#durable-execution-checkpoint-replay) branches run sequentially in edge order |
 | **Subgraphs**           | `SUBGRAPH` nodes run a nested `WorkflowDefinition` (own context and `max_steps` budget); the nested output becomes the node output and a failed nested run fails the node |
-| **Condition branching** | Safe AST-based expression evaluation (`core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
+| **Condition branching** | Safe AST-based expression evaluation (`baselith/core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
 | **Cycles / evaluation loops** | Traversal is iterative, so a CONDITION edge looping back to an earlier node (generate → evaluate → refine) executes correctly; `WorkflowExecutor(max_steps=...)` (default 1000) fails a loop that never converges |
 | **Fail-fast**           | A failed node (after its retries) is recorded then re-raised, halting the run (status `FAILED`) |
 | **Context propagation** | Each node reads upstream output via `context.get_last_output()`; non-condition/parallel nodes follow the first outgoing edge |
@@ -332,7 +332,7 @@ Without a `checkpoint` argument, execution behavior is unchanged.
 ### Human approval gates (`HUMAN` nodes)
 
 A `HUMAN` node is a **durable approval gate** in the graph
-(`handle_human` in `core/workflows/node_handlers.py`). It reuses the pause
+(`handle_human` in `baselith/core/workflows/node_handlers.py`). It reuses the pause
 contract of the ReAct autonomy gate — persist `awaiting_approval`, raise
 `ApprovalPendingError` — so the same
 [`/approvals` API](orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
@@ -376,7 +376,7 @@ Semantics, in execution order:
 ### ExecutionStatus Values
 
 ```python
-from core.workflows.executor import ExecutionStatus
+from baselith.core.workflows.executor import ExecutionStatus
 
 ExecutionStatus.PENDING
 ExecutionStatus.RUNNING
@@ -402,7 +402,7 @@ first pass, and verifies it on every resume. The pin lives in
 and a checkpoint written before this existed simply has no pin and gets one.
 
 ```python
-from core.workflows import definition_fingerprint, pin_version
+from baselith.core.workflows import definition_fingerprint, pin_version
 
 pin_version(workflow)
 # WorkflowVersion(version='1.0.0', fingerprint='9f2c…')
@@ -458,14 +458,14 @@ by `to_dict()`/`from_dict()`:
 - `on_failure` — a webhook event name (e.g. `"workflow.failed"`) emitted when
   a scheduled run of this workflow fails.
 
-`WorkflowScheduler` (`core/workflows/schedule.py`, exported from
-`core.workflows`) keeps a registry of scheduled definitions and executes the
+`WorkflowScheduler` (`baselith/core/workflows/schedule.py`, exported from
+`baselith.core.workflows`) keeps a registry of scheduled definitions and executes the
 due ones through a `WorkflowExecutor`:
 
 ```python
 import asyncio
-from core.workflows import WorkflowDefinition, WorkflowExecutor, WorkflowScheduler
-from core.webhooks import get_webhook_service
+from baselith.core.workflows import WorkflowDefinition, WorkflowExecutor, WorkflowScheduler
+from baselith.core.webhooks import get_webhook_service
 
 nightly = WorkflowDefinition(
     name="nightly-report",
@@ -511,14 +511,14 @@ Design points, all verified behavior:
 
 ## Orchestrator Bridge — `WorkflowFlowHandler`
 
-`WorkflowFlowHandler` (`core/workflows/flow_handler.py`, exported from
-`core.workflows`) exposes a `WorkflowDefinition` behind the standard
+`WorkflowFlowHandler` (`baselith/core/workflows/flow_handler.py`, exported from
+`baselith.core.workflows`) exposes a `WorkflowDefinition` behind the standard
 [`FlowHandler` protocol](orchestration.md#flow-handler-protocol), so a
 declarative graph can be registered for an intent exactly like any imperative
 handler:
 
 ```python
-from core.workflows import WorkflowFlowHandler
+from baselith.core.workflows import WorkflowFlowHandler
 
 orchestrator.register_handler("report_pipeline", WorkflowFlowHandler(wf))
 ```

@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.apply.models import RunState
-from core.plugin_updates.apply.reconcile import reconcile
-from core.plugin_updates.apply.swap import current_target, point_to
-from core.plugins.overlay import OVERLAY_ENV
+from baselith.core.plugin_updates.apply.models import RunState
+from baselith.core.plugin_updates.apply.reconcile import reconcile
+from baselith.core.plugin_updates.apply.swap import current_target, point_to
+from baselith.core.plugins.overlay import OVERLAY_ENV
 
 from ._executor_env import Env
 
@@ -94,7 +94,7 @@ async def test_migration_failure_never_touched_the_running_api(
         moves.append(target)
         point_to(overlay_root, plugin, target, run_id=run_id)
 
-    monkeypatch.setattr("core.plugin_updates.apply._activation.point_to", spy)
+    monkeypatch.setattr("baselith.core.plugin_updates.apply._activation.point_to", spy)
     env.runner.schema_rc = 3
     done = await env.ex.execute(env.run)
     assert done.state is RunState.FAILED and done.failure == "migration_failed"
@@ -192,7 +192,9 @@ async def test_a_refused_switch_fails_without_a_restart(
     def refuse(*_a, **_k):  # type: ignore[no-untyped-def]
         raise OSError("read-only overlay")
 
-    monkeypatch.setattr("core.plugin_updates.apply._activation.point_to", refuse)
+    monkeypatch.setattr(
+        "baselith.core.plugin_updates.apply._activation.point_to", refuse
+    )
     done = await env.ex.execute(env.run)
     assert done.state is RunState.FAILED and done.failure == "overlay_refused"
     assert "schema changes from 1.2.0 remain" in done.message

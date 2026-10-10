@@ -3,10 +3,10 @@ title: Loop Engineering
 description: Verifier-owned iteration, futility detection, lesson compaction and escalation
 ---
 
-**Module**: `core/loops/`
+**Module**: `baselith/core/loops/`
 
 A retry loop driven by a human is not a loop — it is a person pasting error
-output back into a prompt. `core/loops/` encodes the four jobs that person
+output back into a prompt. `baselith/core/loops/` encodes the four jobs that person
 was doing for free: firing the next attempt, judging whether the goal is met,
 remembering what already failed, and deciding when to stop and page someone.
 
@@ -15,7 +15,7 @@ remembering what already failed, and deciding when to stop and page someone.
 ## Module Structure
 
 ```text
-core/loops/
+baselith/core/loops/
 ├── __init__.py
 ├── fingerprint.py    # failure_fingerprint / failure_lines
 ├── stall.py          # StallGuard, StallVerdict  (futility detection)
@@ -36,7 +36,7 @@ termination condition a shell script can check beats a smarter generator
 every time, because the model never gets to declare victory on its own word.
 
 ```python
-from core.loops import EngineeredLoop
+from baselith.core.loops import EngineeredLoop
 
 async def verify() -> tuple[bool, str]:
     """Machine-checkable termination condition + evidence."""
@@ -62,7 +62,7 @@ alive, busy, billing, and getting nowhere: the *failure fingerprint* has not
 changed for N attempts.
 
 ```python
-from core.loops import StallGuard, failure_fingerprint
+from baselith.core.loops import StallGuard, failure_fingerprint
 
 failure_fingerprint("FAILED test_orders.py::test_total - AssertionError")
 # 'a41c92f0b3d7'  — stable across reruns, different per failure
@@ -90,7 +90,7 @@ each — what was tried, how it failed — so attempt six is smarter than attemp
 one instead of merely further from the top of the context window.
 
 ```python
-from core.loops import LessonLog
+from baselith.core.loops import LessonLog
 
 log = LessonLog(max_lessons=10)
 log.record(attempt=1, evidence=pytest_output, fingerprint="a41c92f0b3d7")
@@ -132,7 +132,7 @@ loop = EngineeredLoop(act=act, verify=verify, escalate=page_oncall,
 !!! note "Library API — not wired by default"
     Nothing in the default app registers a `LoopFlowHandler`; the intent below
     exists only once your host code registers it. (`StallGuard` is also used by
-    the ReAct loop in `core/reasoning/react.py` when it is given a
+    the ReAct loop in `baselith/core/reasoning/react.py` when it is given a
     `stall_threshold`.)
 
 The bare primitive above has no path to the orchestrator's machinery.
@@ -142,7 +142,7 @@ an `EngineeredLoop` becomes a flow handler registered for an intent like any
 other:
 
 ```python
-from core.loops import LoopFlowHandler
+from baselith.core.loops import LoopFlowHandler
 
 def act_factory(goal: str, context: dict):
     async def act(ctx):                     # ctx: AttemptContext
@@ -207,7 +207,7 @@ BM25 (over `title + summary` — no embeddings needed) and renders the top
 hits as a compact, bounded context block:
 
 ```python
-from core.loops import prime_lessons
+from baselith.core.loops import prime_lessons
 
 primer = await prime_lessons("fix the flaky checkout tests", pattern_store, k=3)
 # "Lessons from past campaigns:\n- [failure] …: …\n- [strategy] …: …"
@@ -237,7 +237,7 @@ into an LLM-graded score, and `rubric_verifier` adapts it to the loop's
 `Verifier` signature:
 
 ```python
-from core.loops import rubric_verifier
+from baselith.core.loops import rubric_verifier
 
 verify = rubric_verifier(
     "Every claim cites a source.\nThe summary is under 300 words.",
@@ -264,7 +264,7 @@ request into a `HardenedGoal` with explicit scope, machine-checkable
 termination, budget and rollback plan:
 
 ```python
-from core.loops import LoopFlowHandler, harden_goal
+from baselith.core.loops import LoopFlowHandler, harden_goal
 
 hardened = await harden_goal("fix the flaky checkout tests")
 result = await LoopFlowHandler(act_factory, verify_factory).handle(

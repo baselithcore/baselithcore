@@ -81,8 +81,8 @@ In BaselithCore, a single request can:
 ### Implementation in Code
 
 ```python
-from core.observability import get_tracer
-from core.context import get_current_tenant_id
+from baselith.core.observability import get_tracer
+from baselith.core.context import get_current_tenant_id
 
 # Create a tracer for your module/plugin
 tracer = get_tracer("my-plugin")
@@ -166,7 +166,7 @@ SERVICE_VERSION=                    # service.version (defaults to package versi
 ```
 
 !!! info "Provider setup"
-    Provider configuration is centralized in `core/observability/otel.py`:
+    Provider configuration is centralized in `baselith/core/observability/otel.py`:
     a rich `Resource` (`service.name/version/namespace/instance.id`,
     `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP
     span + metric + log export, FastAPI/HTTPX/Redis/psycopg
@@ -272,12 +272,12 @@ Metrics are numerical values aggregated over time. They are ideal for monitoring
 ### Built-in metrics
 
 The framework pre-defines its Prometheus instruments in
-`core/observability/metrics.py`. **All built-in metric names use the `mas_`
+`baselith/core/observability/metrics.py`. **All built-in metric names use the `mas_`
 prefix** (e.g. `mas_chat_requests_total`, `mas_llm_latency_seconds`,
 `mas_plugin_call_latency_seconds`). Import and use them directly:
 
 ```python
-from core.observability.metrics import (
+from baselith.core.observability.metrics import (
     CHAT_REQUESTS_TOTAL,       # mas_chat_requests_total
     LLM_LATENCY_SECONDS,       # mas_llm_latency_seconds
     LLM_FALLBACK_SERVED_TOTAL, # mas_llm_fallback_served_total
@@ -296,7 +296,7 @@ Update notices are exported as `baselith_update_available{component,security}`
 ### HTTP RED metrics (automatic)
 
 Every HTTP request is instrumented automatically by
-`core.middleware.http_metrics.HTTPMetricsMiddleware` — a pure-ASGI middleware
+`baselith.core.middleware.http_metrics.HTTPMetricsMiddleware` — a pure-ASGI middleware
 wired as the outermost layer in `create_app()`. It emits the three golden
 "RED" signals on the standard Prometheus names (no `mas_` prefix, so community
 dashboards and SLO rules apply unchanged):
@@ -453,7 +453,7 @@ For manual error capture within your plugins:
 
 ```python
 import sentry_sdk
-from core.observability import get_logger
+from baselith.core.observability import get_logger
 
 logger = get_logger(__name__)
 
@@ -484,7 +484,7 @@ The framework automatically unifies all system logs. Whether a message comes fro
 Always use the framework-specific `get_logger` function. This ensures your logs are correctly integrated into the unified pipeline.
 
 ```python
-from core.observability import get_logger
+from baselith.core.observability import get_logger
 
 # Create logger with module name
 logger = get_logger(__name__)
@@ -511,7 +511,7 @@ In development mode (`LOG_JSON=false`), BaselithCore integrates with **Rich** to
 Use `bind_context` to automatically add metadata to every log message within a specific scope (e.g., a function or a request).
 
 ```python
-from core.observability.logging import bind_context
+from baselith.core.observability.logging import bind_context
 
 async def process_user_data(user_id: str):
     with bind_context(user_id=user_id):
@@ -610,7 +610,7 @@ uvicorn backend:app --log-config log_config.yaml
 ```
 
 !!! note "CLI Synchronization"
-    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
+    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`baselith/core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
 
 ---
 
@@ -730,7 +730,7 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
 
 !!! note "Prometheus `/metrics`"
     The Prometheus metrics endpoint is mounted by the API at `/metrics` (see
-    `plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
+    `baselith/plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
     it on the same host/port as the backend.
 
     **Auth** — the endpoint requires admin basic auth by default. Either give

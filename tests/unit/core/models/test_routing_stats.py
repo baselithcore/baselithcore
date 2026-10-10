@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.models.routing import Complexity, RoutingPolicy, TaskCategory
-from core.models.routing_stats import LearnedModelRouter, RoutingScoreboard
+from baselith.core.models.routing import Complexity, RoutingPolicy, TaskCategory
+from baselith.core.models.routing_stats import LearnedModelRouter, RoutingScoreboard
 
 
 def _feed(board, category, model, *, attempts, successes):

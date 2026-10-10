@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from core._core_version import CORE_VERSION
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.cache import CACHE_FORMAT, UpdateCache
-from core.plugin_updates.models import (
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.cache import CACHE_FORMAT, UpdateCache
+from baselith.core.plugin_updates.models import (
     CheckReport,
     ReleaseInfo,
     SystemUpdate,
@@ -155,7 +155,7 @@ def test_purge_legacy_removes_the_old_tarballs(tmp_path: Path) -> None:
 async def test_start_serves_no_stale_update_and_drops_old_tarballs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugin_updates.metrics import publish_update_metrics
+    from baselith.core.plugin_updates.metrics import publish_update_metrics
 
     src = tmp_path / "m.yaml"
     src.write_text("mirrors:\n  demo:\n    repo: git@github.com:o/r.git\n")

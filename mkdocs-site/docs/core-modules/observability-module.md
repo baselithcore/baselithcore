@@ -1,11 +1,11 @@
 # Observability
 
-The `core/observability/` module provides structured logging, OpenTelemetry-compatible distributed tracing, Prometheus metrics, audit logging, and a thread-safe telemetry collector — all wired together with zero external dependencies required (graceful degradation when optional packages are absent).
+The `baselith/core/observability/` module provides structured logging, OpenTelemetry-compatible distributed tracing, Prometheus metrics, audit logging, and a thread-safe telemetry collector — all wired together with zero external dependencies required (graceful degradation when optional packages are absent).
 
 ## Module Structure
 
 ```txt
-core/observability/
+baselith/core/observability/
 ├── logging.py    # Structured logging (structlog / stdlib fallback) + trace↔log correlation
 ├── tracing.py    # Tracer API (homegrown spans bridged into the OTel SDK)
 ├── span_exporters.py # Where homegrown spans go (console / memory / OTel bridge)
@@ -67,7 +67,7 @@ graph TD
 Always use the framework-provided `get_logger` to ensure logs are correctly processed:
 
 ```python
-from core.observability.logging import get_logger, bind_context
+from baselith.core.observability.logging import get_logger, bind_context
 
 # Get a module-level logger
 log = get_logger(__name__)
@@ -91,13 +91,13 @@ with bind_context(request_id="req-456"):
 
 ## Distributed Tracing (OpenTelemetry)
 
-Tracing is built on the **OpenTelemetry SDK**. `core/observability/otel.py` is
+Tracing is built on the **OpenTelemetry SDK**. `baselith/core/observability/otel.py` is
 the single source of truth for provider configuration; the `Tracer` API in
 `tracing.py` is an ergonomic wrapper whose spans are **bridged into the OTel
 SDK** so they reach the collector alongside auto-instrumentation spans.
 
 ```python
-from core.observability.tracing import get_tracer
+from baselith.core.observability.tracing import get_tracer
 
 tracer = get_tracer("my-service")
 
@@ -256,7 +256,7 @@ be read, the span simply omits the key.
 ### GenAI semantic conventions (`genai_semconv.py`)
 
 Every LLM and embedding span takes its `gen_ai.*` keys from
-`core/observability/genai_semconv.py`, which tracks the
+`baselith/core/observability/genai_semconv.py`, which tracks the
 [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
 (`docs/registry/attributes/gen-ai.md`; the GenAI conventions left the core
 `semantic-conventions` repository after v1.41). The attributes the LLM service
@@ -336,7 +336,7 @@ never an observability default: prompts routinely carry user PII, and span
 storage outlives the request. On streaming spans only the prompt side is
 captured — the completion text is not retained chunk-by-chunk.
 
-The wiring lives in `core/services/llm/_generation.py` and `_streaming.py`
+The wiring lives in `baselith/core/services/llm/_generation.py` and `_streaming.py`
 (see [Services › OpenInference span enrichment](services.md#openinference-span-enrichment-phoenixarize));
 `openinference_llm_attributes()` returns `{}` when the switch is off, so the
 disabled cost is one env check.
@@ -348,7 +348,7 @@ the missing fan-out, mirroring the `register_token_sink` pattern of the LLM
 layer:
 
 ```python
-from core.observability.span_sink import SpanRecord, register_span_sink
+from baselith.core.observability.span_sink import SpanRecord, register_span_sink
 
 def collect(record: SpanRecord) -> None:
     # provider-neutral: same shape whether the SDK or the homegrown tracer
@@ -388,7 +388,7 @@ backends (Langfuse, Phoenix, Datadog LLM Observability, a plain OTel collector)
 light up on the same data any in-house reader uses.
 
 ```python
-from core.observability.agent_spans import agent_span, tool_span
+from baselith.core.observability.agent_spans import agent_span, tool_span
 
 with agent_span("researcher", plugin="my_plugin", kind="handler"):
     with tool_span("web_search"):
@@ -462,7 +462,7 @@ span is active or the SDK is absent.
 Thread-safe event counters with optional **Prometheus** export.
 
 ```python
-from core.observability.telemetry import TelemetryCollector
+from baselith.core.observability.telemetry import TelemetryCollector
 
 telemetry = TelemetryCollector()
 
@@ -494,7 +494,7 @@ When `prometheus-client` is installed, all counters are automatically exported t
 ## Prometheus Metrics
 
 Pre-defined metrics exposed at `/metrics` (Prometheus scrape endpoint). All
-metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
+metrics use the `mas_` prefix (defined in `baselith/core/observability/metrics.py`):
 
 | Metric                            | Type      | Description                       |
 | --------------------------------- | --------- | -------------------------------- |
@@ -519,8 +519,8 @@ calls, feedback, etc.).
 ### Guardrail metrics
 
 Emitted from the orchestrator guard pipeline
-(`core/orchestration/guard_pipeline.py`) and the tool rate limiter
-(`core/orchestration/rate_limit.py`):
+(`baselith/core/orchestration/guard_pipeline.py`) and the tool rate limiter
+(`baselith/core/orchestration/rate_limit.py`):
 
 | Metric | Type | Labels | Description |
 | ------ | ---- | ------ | ----------- |
@@ -538,7 +538,7 @@ Emitted from the orchestrator guard pipeline
 ### Update-notice metric
 
 `baselith_update_available{component,security}` (Gauge, `UPDATE_AVAILABLE`) is
-written by `core/plugin_updates` on every check: `1` while an update is
+written by `baselith/core/plugin_updates` on every check: `1` while an update is
 available, `0` otherwise. `component` is `core` or `plugin:<name>`; `security`
 is `"true"` only for a framework update a published advisory affects. The gauge
 uses `multiprocess_mode="mostrecent"` and series are never removed, so a
@@ -555,7 +555,7 @@ Immutable, append-only log for security-relevant events:
 `log` method is async and keyword-only past the event type:
 
 ```python
-from core.observability.audit import AuditLogger, AuditEventType
+from baselith.core.observability.audit import AuditLogger, AuditEventType
 
 audit = AuditLogger()  # or use get_audit_logger() for the shared instance
 
@@ -596,7 +596,7 @@ result for `cache_ttl` seconds (default `30`). Use `get_health_checker()` to
 obtain the shared instance:
 
 ```python
-from core.observability.health import get_health_checker
+from baselith.core.observability.health import get_health_checker
 
 checker = get_health_checker(cache_ttl=30)
 
@@ -683,7 +683,7 @@ the local part, and the credentials inside it redacted:
 
 **One vocabulary.** The key pass, the message pass, the Sentry scrubber and
 `redact_secrets` below all read the same keyword list
-(`_CREDENTIAL_KEYWORDS` in `core/observability/redaction.py`): password,
+(`_CREDENTIAL_KEYWORDS` in `baselith/core/observability/redaction.py`): password,
 `passwd`, `pwd`, secret and `secret_key`, token, `api_key`, `private_key`,
 `access_key`, authorization, bearer, credential(s), session, `jwt`, assertion,
 verifier — with their `-`/`_`/camelCase spellings. A name added there is masked
@@ -710,7 +710,7 @@ anchored to `\b` it restarted at every dot of `a.a.a.…`, and `"a." * 50000`
 cost seconds per log entry. `tests/unit/core/observability/test_redaction_vocabulary.py`
 pins the linearity.
 
-The stdlib `SensitiveDataFilter` (`core.observability.setup`) applies the same
+The stdlib `SensitiveDataFilter` (`baselith.core.observability.setup`) applies the same
 masking to the handlers it guards. `redact_url_credentials(url)` drops the
 userinfo from a connection string, including a username-only token
 (`https://<token>@host`). When the URL cannot be parsed it still strips
@@ -720,14 +720,14 @@ everything up to the authority's last `@`, for scheme-relative URLs
 
 ## Redacting third-party text
 
-`core.observability.redaction.redact_secrets(text, secrets=())` and
+`baselith.core.observability.redaction.redact_secrets(text, secrets=())` and
 `safe_snippet(text, secrets=(), limit=200)` mask credentials in free text that
 may echo one back, such as a provider's error body or a transport error. They
 apply the message pass above — the same vocabulary, the same `key=value`, JSON,
 Python-repr and `key <credential-shaped value>` forms, bearer tokens and JWTs —
 plus OAuth `code` values (a numeric `code`, an HTTP status, is kept).
 `safe_snippet` redacts before it truncates, collapses control characters to a
-single line and bounds the length. `core.connectors` builds every error message
+single line and bounds the length. `baselith.core.connectors` builds every error message
 with them.
 
 The patterns run on text an outside party controls, so they are written to stay
@@ -736,5 +736,5 @@ so a key of any length is seen, a non-credential pair never swallows a
 credential behind it (`status=token=…`), and nothing backtracks quadratically.
 In addition
 callers bound the input first — `safe_snippet` cuts at 4096 characters, and
-`describe_exception` (`core.services.llm.exceptions`) does the same before it
+`describe_exception` (`baselith.core.services.llm.exceptions`) does the same before it
 redacts an upstream error.

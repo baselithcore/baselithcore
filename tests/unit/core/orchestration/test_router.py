@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.config import RouterConfig
-from core.orchestration.router import Router, RouteRequest
+from baselith.core.config import RouterConfig
+from baselith.core.orchestration.router import Router, RouteRequest
 
 
 class TestRouter:

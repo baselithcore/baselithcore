@@ -39,7 +39,7 @@ baselith plugin create weather_agent --type agent
 ```
 
 !!! tip "Use an underscore in the directory name"
-    The loader imports a plugin as `plugins.<directory-name>` verbatim, so `weather_agent` can be imported from tests with a plain `from plugins.weather_agent.agent import ...`. A hyphenated directory (`weather-agent`) still loads at runtime, but cannot be imported with an `import` statement. Keep the manifest `name` identical to the directory name.
+    The loader imports a plugin as `plugins.<directory-name>` verbatim, so `weather_agent` can be imported from tests with a plain `from baselith.plugins.weather_agent.agent import ...`. A hyphenated directory (`weather-agent`) still loads at runtime, but cannot be imported with an `import` statement. Keep the manifest `name` identical to the directory name.
 
 This creates the following structure:
 
@@ -87,10 +87,10 @@ Replace `agent.py` with the agent logic. The agent receives its LLM service thro
 
 from typing import Any
 
-from core.interfaces import LLMServiceProtocol
-from core.lifecycle import AgentState, LifecycleMixin
-from core.observability.logging import get_logger
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.interfaces import LLMServiceProtocol
+from baselith.core.lifecycle import AgentState, LifecycleMixin
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
 
@@ -149,8 +149,8 @@ Replace `plugin.py`. The plugin creates the agent in `initialize()` with the sha
 
 from typing import Any
 
-from core.plugins.agent_plugin import AgentPlugin
-from core.services.llm import get_llm_service
+from baselith.core.plugins.agent_plugin import AgentPlugin
+from baselith.core.services.llm import get_llm_service
 
 from .agent import WeatherAgent
 
@@ -326,15 +326,15 @@ curl http://localhost:8000/api/weather_agent/weather/status
 
 ## 8. Add Tests
 
-Keep unit tests next to the plugin, as `plugins/example-plugin/tests/` does, and inject a fake LLM service: `ServiceRegistry` is only populated while the application lifespan runs, so a test must never resolve services globally. Remember to start the agent — before `startup()` it is `UNINITIALIZED` and `execute()` refuses to run:
+Keep unit tests next to the plugin, as `baselith/plugins/example-plugin/tests/` does, and inject a fake LLM service: `ServiceRegistry` is only populated while the application lifespan runs, so a test must never resolve services globally. Remember to start the agent — before `startup()` it is `UNINITIALIZED` and `execute()` refuses to run:
 
 ```python title="plugins/weather_agent/tests/test_agent.py"
 """Unit tests for the weather agent."""
 
 import pytest
 
-from plugins.weather_agent.agent import WeatherAgent
-from plugins.weather_agent.plugin import WeatherAgentPlugin
+from baselith.plugins.weather_agent.agent import WeatherAgent
+from baselith.plugins.weather_agent.plugin import WeatherAgentPlugin
 
 
 class FakeLLM:

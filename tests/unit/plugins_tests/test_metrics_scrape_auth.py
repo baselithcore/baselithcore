@@ -12,8 +12,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-import plugins.api_routers.metrics as metrics_mod
-from core.config.security import SecurityConfig
+import baselith.plugins.api_routers.metrics as metrics_mod
+from baselith.core.config.security import SecurityConfig
 
 
 class _Manager:
@@ -51,7 +51,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, manager: _Manager) -> TestClient:
     )
     monkeypatch.setattr(metrics_mod, "get_security_config", lambda: config)
     monkeypatch.setattr(
-        "core.middleware.security.get_security_manager", lambda: manager
+        "baselith.core.middleware.security.get_security_manager", lambda: manager
     )
     monkeypatch.setattr(
         metrics_mod, "_render_metrics", lambda accept: (b"# ok\n", "text/plain")

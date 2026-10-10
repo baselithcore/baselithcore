@@ -7,9 +7,9 @@ runs — the read path a run explorer needs.
 
 import pytest
 
-from core.orchestration.checkpoint import Checkpoint
-from core.orchestration.checkpoint_history import list_runs
-from core.orchestration.checkpoint_memory import (
+from baselith.core.orchestration.checkpoint import Checkpoint
+from baselith.core.orchestration.checkpoint_history import list_runs
+from baselith.core.orchestration.checkpoint_memory import (
     InMemoryCheckpointStore,
     summarize_run,
 )
@@ -110,7 +110,7 @@ async def test_postgres_run_list_has_no_nullable_catch_all() -> None:
     still defeated the tenant index once psycopg prepared the statement and
     Postgres picked a generic plan (EXPLAIN: seq scan over every tenant).
     """
-    from core.orchestration.checkpoint_postgres import _run_list_query
+    from baselith.core.orchestration.checkpoint_postgres import _run_list_query
 
     sql, params = _run_list_query(None, None, 50)
     assert "IS NULL" not in sql.upper()
@@ -130,7 +130,7 @@ async def test_postgres_run_list_strips_heavy_keys_server_side() -> None:
     """Only the summary crosses the wire; the trajectory length is kept."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from core.orchestration.checkpoint_postgres import (
+    from baselith.core.orchestration.checkpoint_postgres import (
         PostgresCheckpointStore,
         _run_list_query,
     )
@@ -159,7 +159,7 @@ async def test_postgres_run_list_strips_heavy_keys_server_side() -> None:
 
     store = PostgresCheckpointStore.__new__(PostgresCheckpointStore)
     with patch(
-        "core.orchestration.checkpoint_postgres.get_async_cursor",
+        "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
         lambda **_: _Ctx(),
     ):
         rows = await store.list_runs(tenant_id="t1", limit=10)

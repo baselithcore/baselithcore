@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.models.pricing import (
+from baselith.core.models.pricing import (
     LOCAL_PRICE,
     UNKNOWN_PRICE,
     get_price,
@@ -68,8 +68,8 @@ class TestPricingRules:
 
 
 def _service(chain: str, provider: str = "openai", model: str = "gpt-4o-mini"):
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider=provider,
@@ -85,7 +85,7 @@ def _service(chain: str, provider: str = "openai", model: str = "gpt-4o-mini"):
 @pytest.fixture(autouse=True)
 def _isolated_token_ledger():
     """Keep these token reports out of the process-wide cost context."""
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -97,8 +97,11 @@ def _isolated_token_ledger():
 @pytest.mark.asyncio
 class TestTurnIsBilledToWhoeverAnswered:
     async def _run_with_budget(self, service, clone_result):
-        from core.orchestration.budget_context import activate_budget, deactivate_budget
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         clone = AsyncMock()
         clone._generate_with_retry = AsyncMock(return_value=clone_result)
@@ -112,7 +115,7 @@ class TestTurnIsBilledToWhoeverAnswered:
                     AsyncMock(side_effect=RuntimeError("primary down")),
                 ),
                 patch(
-                    "core.services.llm.fallback_runtime._clone_service",
+                    "baselith.core.services.llm.fallback_runtime._clone_service",
                     return_value=clone,
                 ),
             ):
@@ -135,7 +138,7 @@ class TestTurnIsBilledToWhoeverAnswered:
         service = _service("openai:gpt-4o", model="gpt-4o-mini")
         budget = await self._run_with_budget(service, ("saved", 2_000))
 
-        from core.models.pricing import estimate_cost
+        from baselith.core.models.pricing import estimate_cost
 
         # Booked at the FALLBACK's rate. The primary's rate would be ~16x
         # cheaper, i.e. a ledger that quietly understates every failover.
@@ -171,9 +174,10 @@ class TestTurnIsBilledToWhoeverAnswered:
                 AsyncMock(side_effect=RuntimeError("primary down")),
             ),
             patch(
-                "core.services.llm.fallback_runtime._clone_service", return_value=clone
+                "baselith.core.services.llm.fallback_runtime._clone_service",
+                return_value=clone,
             ),
-            patch("core.observability.get_tracer", return_value=_Tracer()),
+            patch("baselith.core.observability.get_tracer", return_value=_Tracer()),
         ):
             await service.generate_response("hello")
 

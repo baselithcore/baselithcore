@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.services.sandbox.service import ExecutionResult, SandboxService
+from baselith.core.services.sandbox.service import ExecutionResult, SandboxService
 
 
 @pytest.mark.asyncio

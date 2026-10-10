@@ -16,7 +16,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.testclient import TestClient
 
-from core.api.spa import SPAStaticFiles
+from baselith.core.api.spa import SPAStaticFiles
 
 
 @pytest.fixture

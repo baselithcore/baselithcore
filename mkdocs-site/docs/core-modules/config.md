@@ -6,7 +6,7 @@ description: Centralized configuration system with Pydantic Settings
 
 ## Overview
 
-The `core/config` module is the **foundation** of BaselithCore's runtime behavior and operational parameters. It provides a type-safe, centralized configuration management system built on Pydantic Settings, eliminating the anti-pattern of scattered environment variable access throughout the codebase.
+The `baselith/core/config` module is the **foundation** of BaselithCore's runtime behavior and operational parameters. It provides a type-safe, centralized configuration management system built on Pydantic Settings, eliminating the anti-pattern of scattered environment variable access throughout the codebase.
 
 **Key Benefits**:
 
@@ -19,7 +19,7 @@ The `core/config` module is the **foundation** of BaselithCore's runtime behavio
 **Core Capabilities**:
 
 1. **Lazy Loading** - Configuration objects created only when first accessed, improving startup time
-1. **Single `.env` Parse** - Importing `core.config` loads the `.env` files into `os.environ` exactly once (`core.config.env.load_project_env`, `override=False` so real env vars win): first the `.env` of the **current working directory** — the project being run, and under `pip install` the only one that exists — then the `.env` at the root of the checkout `core` was imported from, when that is a different file. A key set in both keeps the working directory's value. The working directory is a trusted input — `./plugins` and `configs/plugins.yaml` come from it too — so run the framework from your own project directory. A `.env` is opened once, without following symlinks and without blocking (a FIFO cannot stall the import), and checked on the open descriptor, so the file inspected is the file parsed: it must be a regular file and, on POSIX, belong to the running user (or root) and not be group- or world-writable; a symlinked or otherwise refused file is skipped with a warning, because another local user could point the plugin path, the database or the LLM endpoint elsewhere. `baselith init` writes it with mode `0600`. Config classes no longer declare `env_file`, removing 20+ redundant file parses (~230ms → ~7ms to instantiate all settings classes)
+1. **Single `.env` Parse** - Importing `baselith.core.config` loads the `.env` files into `os.environ` exactly once (`baselith.core.config.env.load_project_env`, `override=False` so real env vars win): first the `.env` of the **current working directory** — the project being run, and under `pip install` the only one that exists — then the `.env` at the root of the checkout `core` was imported from, when that is a different file. A key set in both keeps the working directory's value. The working directory is a trusted input — `./plugins` and `configs/plugins.yaml` come from it too — so run the framework from your own project directory. A `.env` is opened once, without following symlinks and without blocking (a FIFO cannot stall the import), and checked on the open descriptor, so the file inspected is the file parsed: it must be a regular file and, on POSIX, belong to the running user (or root) and not be group- or world-writable; a symlinked or otherwise refused file is skipped with a warning, because another local user could point the plugin path, the database or the LLM endpoint elsewhere. `baselith init` writes it with mode `0600`. Config classes no longer declare `env_file`, removing 20+ redundant file parses (~230ms → ~7ms to instantiate all settings classes)
 1. **Singleton Pattern** - Same config instance shared across the application, ensuring consistency
 1. **Startup Validation** - Pydantic catches misconfigurations before deployment, preventing runtime failures
 1. **Secret Management** - Built-in protection against accidental exposure in logs or error messages
@@ -33,12 +33,12 @@ In baselith-cores, configuration sprawl is a critical failure point. Without cen
 - **Security Risks**: Secrets appear in stack traces, logs, and monitoring tools
 - **Testing Difficulty**: Hard-coded `os.getenv()` calls are nearly impossible to mock properly
 
-The `core/config` architecture solves these by providing **strongly-typed configuration contracts** that are validated at application startup, not at runtime failure.
+The `baselith/core/config` architecture solves these by providing **strongly-typed configuration contracts** that are validated at application startup, not at runtime failure.
 
 ## Module Structure
 
 ```text
-core/config/
+baselith/core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, CHAT_GUARDRAILS_*)
@@ -60,7 +60,7 @@ core/config/
 ├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, CORE_UPDATE_REPO, SYSTEM_UPGRADE_GUIDE_URL)
 ├── plugin_update_apply.py # UpdateApplyConfig (UPDATE_APPLY_ prefix, one-click plugin updates)
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
-├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
+├── environment.py        # re-export of baselith/core/utils/runtime_env.py (stdlib-only)
 ├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
@@ -90,7 +90,7 @@ read by `get_plugin_update_config()` are listed under
 
 ## When to Use
 
-Use `core/config` for defining **static application parameters** that are set at deployment time and remain constant during execution.
+Use `baselith/core/config` for defining **static application parameters** that are set at deployment time and remain constant during execution.
 
 **When to Use Configuration For**:
 
@@ -137,7 +137,7 @@ All configuration MUST be accessed via **factory functions**, never direct `os.g
 
 ```python
 # ✅ Correct
-from core.config import get_llm_config
+from baselith.core.config import get_llm_config
 config = get_llm_config()
 model = config.model
 
@@ -171,7 +171,7 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
 
-from core.config._collections import csv_list
+from baselith.core.config._collections import csv_list
 
 
 class ObservabilityConfig(BaseSettings):
@@ -188,7 +188,7 @@ class ObservabilityConfig(BaseSettings):
         return csv_list(value)
 ```
 
-`csv_list` (`core/config/_collections.py`) normalises to a list of trimmed,
+`csv_list` (`baselith/core/config/_collections.py`) normalises to a list of trimmed,
 non-empty strings:
 
 | Input | Result |
@@ -225,9 +225,9 @@ value still raises `SettingsError` out of the whole settings class:
 
 | Setting | Shape | Module |
 |---|---|---|
-| `MCP_SERVERS` | `dict[str, MCPServerSpec]` | `core/config/mcp.py` |
-| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | `core/config/plugins.py` |
-| `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` | `core/config/world_model.py` |
+| `MCP_SERVERS` | `dict[str, MCPServerSpec]` | `baselith/core/config/mcp.py` |
+| `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` | `baselith/core/config/plugins.py` |
+| `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` | `baselith/core/config/world_model.py` |
 
 ```bash
 # Raises SettingsError out of the whole MCPConfig
@@ -248,11 +248,11 @@ If a future nested-object setting needs a friendlier spelling, give it its own
 ## Factory Functions
 
 Each domain module exposes a factory function. The most commonly used ones
-exported from `core.config` (the full set also covers events, MCP, processing,
+exported from `baselith.core.config` (the full set also covers events, MCP, processing,
 reasoning, sandbox, scraper, swarm, webhooks, world-model, vision and voice):
 
 ```python
-from core.config import (
+from baselith.core.config import (
     get_core_config,          # CoreConfig
     get_app_config,           # AppConfig
     get_llm_config,           # LLMConfig
@@ -282,7 +282,7 @@ result is a single shared instance per process.
 `CoreConfig` uses the `CORE_` env prefix.
 
 ```python
-from core.config import get_core_config
+from baselith.core.config import get_core_config
 
 config = get_core_config()
 
@@ -317,11 +317,11 @@ CORE_DETERMINISTIC_MODE=false
 `AppConfig` holds server, multi-tenancy, telemetry, cost-control, and
 chat settings. Fields use explicit aliases (no shared prefix). Its
 `CHAT_GUARDRAILS_*` fields configure only the keyword guard of the opt-in
-`core/chat` RAG pipeline; the guards every request runs read `GUARDRAILS_*`
-(`core/config/guardrails.py`).
+`baselith/core/chat` RAG pipeline; the guards every request runs read `GUARDRAILS_*`
+(`baselith/core/config/guardrails.py`).
 
 ```python
-from core.config import get_app_config
+from baselith.core.config import get_app_config
 
 config = get_app_config()
 
@@ -378,15 +378,15 @@ SSE_HEARTBEAT_SECONDS=15           # silence before a `: keepalive` comment
 
 ### Services Config (LLM / VectorStore / Chat)
 
-These live in `core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
+These live in `baselith/core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
 `VectorStoreConfig` the `VECTORSTORE_` prefix, and `ChatConfig` the `CHAT_`
 prefix. `VectorStoreConfig` and `ChatConfig` themselves now live in
-`core/config/vectorstore.py` and `core/config/chat.py` (extracted for the
-file-size cap); `core.config.services` re-exports both, so existing imports are
+`baselith/core/config/vectorstore.py` and `baselith/core/config/chat.py` (extracted for the
+file-size cap); `baselith.core.config.services` re-exports both, so existing imports are
 unchanged.
 
 ```python
-from core.config import get_llm_config, get_vectorstore_config
+from baselith.core.config import get_llm_config, get_vectorstore_config
 
 llm = get_llm_config()
 print(llm.provider)            # "ollama"     (LLM_PROVIDER)
@@ -495,7 +495,7 @@ VECTORSTORE_SEARCH_CACHE_TTL=300     # Cached result lifetime in seconds (>= 1)
 
 ### Processing Config
 
-`ProcessingConfig` (`core/config/processing.py`) holds document ingestion, web
+`ProcessingConfig` (`baselith/core/config/processing.py`) holds document ingestion, web
 crawling, OCR, and NLP settings. Filesystem PDF ingestion uses
 `DOCUMENTS_PDF_READER=auto` by default: Docling is included in the `documents`
 extra and full Docker image, while the legacy pypdf/OCR path remains the
@@ -518,12 +518,12 @@ runtime indexing behavior.
 
 ### Orchestration Config
 
-`OrchestrationConfig` (`core/config/orchestration.py`) uses the
+`OrchestrationConfig` (`baselith/core/config/orchestration.py`) uses the
 `ORCHESTRATOR_` env prefix. The same module holds `RouterConfig` (`ROUTER_`
 prefix) for the semantic router.
 
 ```python
-from core.config import get_orchestration_config
+from baselith.core.config import get_orchestration_config
 
 config = get_orchestration_config()
 
@@ -598,7 +598,7 @@ Redis instances. Fields use explicit aliases. The `conninfo` property builds a
 PostgreSQL DSN from `database_url` (if set) or the discrete `DB_*` fields.
 
 ```python
-from core.config import get_storage_config
+from baselith.core.config import get_storage_config
 
 config = get_storage_config()
 
@@ -672,12 +672,12 @@ config.model_dump()["cache_redis_url"]   # redis://cache:6379/1      (redacted)
 
 ### Cache Config
 
-`core/config/cache.py` holds three settings classes: `CacheConfig` (`CACHE_`
+`baselith/core/config/cache.py` holds three settings classes: `CacheConfig` (`CACHE_`
 prefix), `RedisCacheConfig` (`REDIS_` prefix) and `SemanticCacheConfig`
 (`SEMANTIC_CACHE_` prefix), each with its own factory.
 
 ```python
-from core.config import get_cache_config, get_redis_cache_config
+from baselith.core.config import get_cache_config, get_redis_cache_config
 
 cache = get_cache_config()
 print(cache.ttl_default)                  # 300.0  (CACHE_TTL_DEFAULT)
@@ -733,7 +733,7 @@ SEMANTIC_CACHE_FINGERPRINT_THRESHOLD=0.8  # Min Jaccard of word n-gram fingerpri
 `ResilienceConfig` uses the `RESILIENCE_` prefix.
 
 ```python
-from core.config import get_resilience_config
+from baselith.core.config import get_resilience_config
 
 config = get_resilience_config()
 
@@ -754,8 +754,8 @@ print(config.retry_base_delay)        # 1.0
 
 ### Quota Config
 
-`QuotaConfig` (`core/config/quotas.py`) drives the persistent usage budgets in
-[`core/quotas`](quotas.md). Fields use explicit `QUOTA*` aliases; everything
+`QuotaConfig` (`baselith/core/config/quotas.py`) drives the persistent usage budgets in
+[`baselith/core/quotas`](quotas.md). Fields use explicit `QUOTA*` aliases; everything
 defaults to off/unlimited.
 
 ```env
@@ -786,7 +786,7 @@ or key's plan can be raised or lowered without redeploying. See
 headers. Fields use explicit aliases.
 
 ```python
-from core.config import get_security_config
+from baselith.core.config import get_security_config
 
 config = get_security_config()
 
@@ -855,7 +855,7 @@ See [SecurityHeadersMiddleware](middleware.md#securityheadersmiddleware).
     is an insecure default, or if `ALLOW_ORIGINS` contains `*` while
     `ADMIN_PASS` is set.
     Two further checks run later, in the app lifespan
-    (`core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
+    (`baselith.core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
     **refuses to start** when `AUTH_REQUIRED=true` (opt out with
     `BASELITH_ALLOW_UNBOUND_JWT=true`), and production with an empty
     `TRUSTED_HOSTS` **refuses to start** too (`UnvalidatedHostConfigError`) —
@@ -874,18 +874,18 @@ signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host deny,
 admin lockout when Redis is unreachable, the JWT `iss`/`aud` startup check, and
 whether `/docs` is served anonymously.
 
-The logic lives in `core/utils/runtime_env.py` and is deliberately
-**stdlib-only**: `core.plugins.integrity` and `core.a2a.security` run on paths
-that must not pull pydantic in through `core.config`'s package init, so each
-used to carry its own hand-rolled copy of the check. `core/config/environment.py`
+The logic lives in `baselith/core/utils/runtime_env.py` and is deliberately
+**stdlib-only**: `baselith.core.plugins.integrity` and `baselith.core.a2a.security` run on paths
+that must not pull pydantic in through `baselith.core.config`'s package init, so each
+used to carry its own hand-rolled copy of the check. `baselith/core/config/environment.py`
 is now a thin re-export of that module, and the private copies are gone — the
 three implementations can no longer drift apart.
 
 ```python
-from core.config import get_runtime_environment, is_production_env
+from baselith.core.config import get_runtime_environment, is_production_env
 
 # Or, from a module that must stay free of the config package:
-from core.utils.runtime_env import is_known_environment, is_production_env
+from baselith.core.utils.runtime_env import is_known_environment, is_production_env
 
 get_runtime_environment()               # "production" when APP_ENV=prod
 is_production_env()                     # True
@@ -940,7 +940,7 @@ hardening gate.
 
 ### Web concurrency and CPU thread pools
 
-`core/config/concurrency.py` is stdlib-only, like the runtime-environment
+`baselith/core/config/concurrency.py` is stdlib-only, like the runtime-environment
 helpers, because it runs before anything heavy is imported.
 `set_web_concurrency(n)` records the server's process count in
 `BASELITH_WEB_CONCURRENCY` (children inherit it), and `get_web_concurrency()`
@@ -960,7 +960,7 @@ value the operator set always wins, and returns the per-worker count, or
 torch or numpy is imported: `backend.py` and `baselith run` call it at startup.
 
 ```python
-from core.config.concurrency import set_web_concurrency, share_cpu_threads
+from baselith.core.config.concurrency import set_web_concurrency, share_cpu_threads
 
 set_web_concurrency(4)
 share_cpu_threads()   # 2 on an 8-core host: OMP/MKL/OPENBLAS_NUM_THREADS=2
@@ -974,7 +974,7 @@ Configuration for the [Supermemory](supermemory.md) intelligent memory layer.
 All fields use the `SUPERMEMORY_` prefix. This factory uses `lru_cache`.
 
 ```python
-from core.config import get_supermemory_config
+from baselith.core.config import get_supermemory_config
 
 config = get_supermemory_config()
 
@@ -1013,10 +1013,10 @@ SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
 `MemoryRuntimeConfig` holds the runtime behaviour of the in-process agent
 memory (`AgentMemory`). All fields use the `MEMORY_` prefix. The factory is
 `lru_cache`d and lives in the module — it is **not** re-exported from
-`core.config`.
+`baselith.core.config`.
 
 ```python
-from core.config.memory import get_memory_runtime_config
+from baselith.core.config.memory import get_memory_runtime_config
 
 config = get_memory_runtime_config()
 
@@ -1035,7 +1035,7 @@ MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS=2000  # Below this, the verbatim fast-path r
 
 !!! warning "Persistence off means every memory dies with the process"
     `MEMORY_PERSISTENCE_ENABLED` defaults to `true`: the memory managers built
-    by `core/bootstrap/lazy_init.py` receive a `VectorMemoryProvider` over the
+    by `baselith/core/bootstrap/lazy_init.py` receive a `VectorMemoryProvider` over the
     configured vector store, so long-term memories survive a restart and are
     shared between workers. Set it `false` — or leave the provider unbuildable,
     which is a warning rather than a startup failure — and the long-term tier
@@ -1054,14 +1054,14 @@ process carry variables meant for another, and it is also why a misspelled
 variable produces no error: `CORE_LOG_LEVL=DEBUG` is accepted, ignored, and the
 operator sees the default with no hint why.
 
-`core/config/drift.py` closes that gap by reporting *suspected typos* rather
+`baselith/core/config/drift.py` closes that gap by reporting *suspected typos* rather
 than unknown variables. A name that closely resembles a declared setting without
 matching one is almost always a mistake; a name that resembles nothing is
 usually a variable read through `os.getenv`, so it stays silent. Precision is
 the point — a check that cries wolf gets ignored.
 
 ```python
-from core.config.drift import suspected_typos
+from baselith.core.config.drift import suspected_typos
 
 suspected_typos({"CORE_LOG_LEVL": "DEBUG"})
 # [EnvSuspect(name='CORE_LOG_LEVL', suggestion='CORE_LOG_LEVEL')]
@@ -1080,7 +1080,7 @@ mistake. The plugin loader declares every key it exports, and a plugin that
 writes a name itself declares it the same way:
 
 ```python
-from core.config import register_owned_env
+from baselith.core.config import register_owned_env
 
 register_owned_env("SECRETS_KEY")
 ```
@@ -1127,7 +1127,7 @@ python scripts/check_config_surface.py --write   # restamp the reference page
 ```
 
 The gate reads the sources with `ast` rather than importing them: importing
-`core.config` loads the repository `.env`, which would publish a developer's
+`baselith.core.config` loads the repository `.env`, which would publish a developer's
 local overrides as the shipped defaults.
 
 It found real drift when introduced. `VISION_ANTHROPIC_API_KEY`,
@@ -1139,7 +1139,7 @@ Use `validation_alias=AliasChoices("PREFIXED_NAME", "BARE_NAME")` whenever a
 field should answer to both.
 
 A second guard, `tests/unit/core/config/test_env_binding_uniqueness.py`, walks
-every `BaseSettings` class under `core/config/` and fails when a variable bound
+every `BaseSettings` class under `baselith/core/config/` and fails when a variable bound
 by several classes carries more than one concrete default (a `None` default
 defers to the class's own fallback and is not compared). Sharing a variable on
 purpose is fine — a provider API key read by several integrations — as long as
@@ -1290,18 +1290,18 @@ Mock configurations in tests by patching the factory:
 ```python
 import pytest
 from unittest.mock import patch
-from core.config import LLMConfig
+from baselith.core.config import LLMConfig
 
 
 @pytest.fixture
 def mock_llm_config():
-    with patch("core.config.get_llm_config") as mock:
+    with patch("baselith.core.config.get_llm_config") as mock:
         mock.return_value = LLMConfig(provider="ollama", model="test-model")
         yield mock
 
 
 def test_with_config(mock_llm_config):
-    from core.config import get_llm_config
+    from baselith.core.config import get_llm_config
     config = get_llm_config()
     assert config.model == "test-model"
 ```
@@ -1312,7 +1312,7 @@ Or using environment variables with `monkeypatch`:
 def test_with_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "test-model")
     # Build a fresh config instance directly to bypass the cached singleton
-    from core.config import LLMConfig
+    from baselith.core.config import LLMConfig
     config = LLMConfig()
     assert config.model == "test-model"
 ```
@@ -1351,7 +1351,7 @@ mode, with a warning rather than a failed boot. See
 
 ## One-click plugin updates
 
-`UpdateApplyConfig` (`core.config.plugin_update_apply`, prefix
+`UpdateApplyConfig` (`baselith.core.config.plugin_update_apply`, prefix
 `UPDATE_APPLY_`) holds the settings of host-side one-click plugin updates;
 its kill switch `UPDATE_APPLY_ENABLED` is off by default.
 `UPDATE_APPLY_APPROVAL_TTL_SECONDS` is the expiry of approval requests
@@ -1363,7 +1363,7 @@ updates off. See
 
 ## Inference services settings
 
-`core.config.inference` holds the settings of the embedding, rerank and Qdrant
+`baselith.core.config.inference` holds the settings of the embedding, rerank and Qdrant
 services: `BASELITH_EMBEDDING_*`, `BASELITH_RERANK_*` and `BASELITH_QDRANT_*`.
 `remote` (Hugging Face TEI) is the default backend; `local` is a development
 opt-in. The Qdrant URL and key also bind from the unprefixed `QDRANT_URL` /

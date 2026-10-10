@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import plugins.browser_agent.agent as agent_mod
-import plugins.browser_agent.ssrf as guards_mod
-from plugins.browser_agent.agent import (
+import baselith.plugins.browser_agent.agent as agent_mod
+import baselith.plugins.browser_agent.ssrf as guards_mod
+from baselith.plugins.browser_agent.agent import (
     BrowserAgent,
     _hostname_is_blocked,
     _hostname_resolves_to_internal,
@@ -148,7 +148,7 @@ class TestSsrfRouteGuard:
 
     @pytest.fixture
     def guard_agent(self) -> BrowserAgent:
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         agent = BrowserAgent.__new__(BrowserAgent)
         agent._ssrf_host_cache = SsrfVerdictCache()
@@ -264,15 +264,15 @@ class TestSsrfVerdictCacheTtl:
     leaves a single-page app holding a stale 'allowed' verdict indefinitely."""
 
     def test_verdict_is_served_while_fresh(self) -> None:
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         cache = SsrfVerdictCache(ttl_seconds=60.0)
         cache.set("cdn.example.com", False)
         assert cache.get("cdn.example.com") is False
 
     def test_verdict_expires_after_the_ttl(self, monkeypatch) -> None:
-        import plugins.browser_agent.ssrf as ssrf_mod
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        import baselith.plugins.browser_agent.ssrf as ssrf_mod
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         clock = {"t": 1000.0}
         monkeypatch.setattr(ssrf_mod.time, "monotonic", lambda: clock["t"])
@@ -286,21 +286,24 @@ class TestSsrfVerdictCacheTtl:
 
     def test_ttl_zero_disables_caching_entirely(self) -> None:
         """The strictest in-process posture: every request re-resolves."""
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         cache = SsrfVerdictCache(ttl_seconds=0.0)
         cache.set("cdn.example.com", False)
         assert cache.get("cdn.example.com") is None
 
     def test_unknown_host_is_a_miss(self) -> None:
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         assert SsrfVerdictCache().get("never-seen.example.com") is None
 
     def test_cache_does_not_grow_without_bound(self) -> None:
         """A page touching thousands of hosts must not leak memory for the
         lifetime of the browser context."""
-        from plugins.browser_agent.ssrf import _MAX_CACHED_HOSTS, SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import (
+            _MAX_CACHED_HOSTS,
+            SsrfVerdictCache,
+        )
 
         cache = SsrfVerdictCache(ttl_seconds=3600.0)
         for i in range(_MAX_CACHED_HOSTS + 50):
@@ -308,13 +311,13 @@ class TestSsrfVerdictCacheTtl:
         assert len(cache._entries) <= _MAX_CACHED_HOSTS
 
     def test_env_var_overrides_the_default_ttl(self, monkeypatch) -> None:
-        from plugins.browser_agent.ssrf import SsrfVerdictCache
+        from baselith.plugins.browser_agent.ssrf import SsrfVerdictCache
 
         monkeypatch.setenv("BASELITH_BROWSER_SSRF_CACHE_TTL", "5")
         assert SsrfVerdictCache()._ttl == 5.0
 
     def test_malformed_ttl_env_falls_back_to_the_default(self, monkeypatch) -> None:
-        from plugins.browser_agent.ssrf import (
+        from baselith.plugins.browser_agent.ssrf import (
             _DEFAULT_VERDICT_TTL_SECONDS,
             SsrfVerdictCache,
         )

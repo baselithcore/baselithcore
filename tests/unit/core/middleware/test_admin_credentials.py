@@ -5,8 +5,8 @@ import hashlib
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.middleware._admin_credentials import verify_pbkdf2_sha256
-from core.middleware.security import SecurityManager
+from baselith.core.middleware._admin_credentials import verify_pbkdf2_sha256
+from baselith.core.middleware.security import SecurityManager
 
 
 def _encoded(password: str, iterations: int) -> str:
@@ -21,18 +21,18 @@ class TestPBKDF2IterationBand:
     an under-hardened admin credential forever."""
 
     def test_below_floor_rejected_with_error(self):
-        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+        with patch("baselith.core.middleware._admin_credentials.logger") as mock_logger:
             assert verify_pbkdf2_sha256(_encoded("pw", 50_000), "pw") is False
         mock_logger.error.assert_called_once()
 
     def test_band_verifies_but_warns(self):
-        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+        with patch("baselith.core.middleware._admin_credentials.logger") as mock_logger:
             assert verify_pbkdf2_sha256(_encoded("pw", 100_000), "pw") is True
         mock_logger.warning.assert_called_once()
         assert "600" in str(mock_logger.warning.call_args)
 
     def test_recommended_iterations_verify_silently(self):
-        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+        with patch("baselith.core.middleware._admin_credentials.logger") as mock_logger:
             assert verify_pbkdf2_sha256(_encoded("pw", 600_000), "pw") is True
         mock_logger.warning.assert_not_called()
         mock_logger.error.assert_not_called()
@@ -43,7 +43,7 @@ class TestVerifiedCredentialCache:
     dashboard polls don't re-run the KDF; wrong passwords are never cached."""
 
     _ITER = 100_000
-    _KDF = "core.middleware.security.verify_pbkdf2_sha256"
+    _KDF = "baselith.core.middleware.security.verify_pbkdf2_sha256"
 
     def _encoded_hash(self, password: str) -> str:
         import os
@@ -61,7 +61,7 @@ class TestVerifiedCredentialCache:
         )
         mock_security_config.admin_pass = None
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = None
             return SecurityManager(mock_security_config)
@@ -103,7 +103,7 @@ class TestPBKDF2IterationFloor:
         mock_security_config.admin_pass_hashed = MagicMock()
         mock_security_config.admin_pass_hashed.get_secret_value.return_value = encoded
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = AsyncMock()
             return SecurityManager(mock_security_config)

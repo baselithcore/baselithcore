@@ -33,10 +33,11 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_check
+        from baselith.core.cli.commands.plugin.deps import deps_check
 
         with patch(
-            "core.cli.commands.plugin.deps._check_python_dep", return_value=True
+            "baselith.core.cli.commands.plugin.deps._check_python_dep",
+            return_value=True,
         ):
             result = deps_check("test-plugin")
             assert result == 0
@@ -55,7 +56,7 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_check
+        from baselith.core.cli.commands.plugin.deps import deps_check
 
         result = deps_check("test-plugin")
         assert result == 1
@@ -74,7 +75,7 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_check
+        from baselith.core.cli.commands.plugin.deps import deps_check
 
         result = deps_check("test-plugin")
         assert result == 1
@@ -93,7 +94,7 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_check
+        from baselith.core.cli.commands.plugin.deps import deps_check
 
         result = deps_check("test-plugin", json_output=True)
         assert result == 0
@@ -106,7 +107,7 @@ class TestPluginDeps:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "plugins").mkdir()
 
-        from core.cli.commands.plugin.deps import deps_check
+        from baselith.core.cli.commands.plugin.deps import deps_check
 
         result = deps_check("nonexistent")
         assert result == 1
@@ -125,10 +126,11 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_install
+        from baselith.core.cli.commands.plugin.deps import deps_install
 
         with patch(
-            "core.cli.commands.plugin.deps._check_python_dep", return_value=True
+            "baselith.core.cli.commands.plugin.deps._check_python_dep",
+            return_value=True,
         ):
             result = deps_install("test-plugin")
             assert result == 0
@@ -147,20 +149,21 @@ class TestPluginDeps:
             },
         )
 
-        from core.cli.commands.plugin.deps import deps_install
+        from baselith.core.cli.commands.plugin.deps import deps_install
 
         with (
             patch(
-                "core.cli.commands.plugin.deps._check_python_dep", return_value=False
+                "baselith.core.cli.commands.plugin.deps._check_python_dep",
+                return_value=False,
             ),
-            patch("core.cli.commands.plugin.deps.subprocess.run") as mock_run,
+            patch("baselith.core.cli.commands.plugin.deps.subprocess.run") as mock_run,
         ):
             result = deps_install("evil-plugin", yes=True)
             assert result == 1
             mock_run.assert_not_called()  # pip is never invoked
 
     def test_is_valid_requirement(self):
-        from core.cli.commands.plugin.deps import _is_valid_requirement
+        from baselith.core.cli.commands.plugin.deps import _is_valid_requirement
 
         assert _is_valid_requirement("requests>=2.0")
         assert _is_valid_requirement("mineru[pipeline]>=3.4.4,<4")

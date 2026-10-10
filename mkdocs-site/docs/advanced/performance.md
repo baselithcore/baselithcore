@@ -38,7 +38,7 @@ The framework implements lazy loading to minimize startup time and memory usage.
 
 Plugins are **discovered** at startup in lazy-import mode (manifest metadata
 only, no module import). What happens next depends on `PLUGIN_AUTO_LOAD`
-(`core/api/lifespan.py`):
+(`baselith/core/api/lifespan.py`):
 
 - `PLUGIN_AUTO_LOAD=true` (the default): every plugin that
   `configs/plugins.yaml` enables — listed without `enabled: false`, or every
@@ -46,7 +46,7 @@ only, no module import). What happens next depends on `PLUGIN_AUTO_LOAD`
   handlers are mounted before the first request lands. Plugins left disabled in
   the config stay discovered-but-unloaded and cost nothing until an admin
   enables them at runtime through the admin plugin API
-  (`POST /api/plugins/{plugin_name}/enable`, `core/plugins/api.py`).
+  (`POST /api/plugins/{plugin_name}/enable`, `baselith/core/plugins/api.py`).
 - `PLUGIN_AUTO_LOAD=false`: startup stops at discovery. Every plugin endpoint is
   404 until the plugin is enabled through that same admin call — faster boot,
   but the activation cost moves to the first operator action instead of
@@ -65,17 +65,17 @@ PLUGIN_ENABLED=true     # Default: true
 ### Service Lazy Loading
 
 Heavy services (LLM clients, DB connections) are initialized on-demand via the
-`LazyServiceRegistry` (`core/di/lazy_registry.py`). See
+`LazyServiceRegistry` (`baselith/core/di/lazy_registry.py`). See
 [Lazy Loading](lazy-loading.md) for the full reference.
 
 ```python
-from core.di import get_lazy_registry
+from baselith.core.di import get_lazy_registry
 
 registry = get_lazy_registry()
 
 # Factories are registered under string keys — "postgres", "vectorstore", "llm",
 # "graph", "redis", "memory", "hierarchical_memory", "evaluation", "evolution"
-# (RESOURCE_FACTORIES in core/bootstrap/lazy_init.py). The API lifespan registers
+# (RESOURCE_FACTORIES in baselith/core/bootstrap/lazy_init.py). The API lifespan registers
 # the ones the installed plugins declare; get_or_create() raises KeyError for a
 # key without a factory. The resource is created ONLY on first access, then memoized.
 llm = await registry.get_or_create("llm")
@@ -95,11 +95,11 @@ Caching is the most effective tool for improving performance. The framework offe
 
 ### In-process Cache (`TTLCache`)
 
-`TTLCache` (`core/cache/local_cache.py`) is an async-safe, in-memory LRU cache
+`TTLCache` (`baselith/core/cache/local_cache.py`) is an async-safe, in-memory LRU cache
 with a per-instance TTL:
 
 ```python
-from core.cache import TTLCache
+from baselith.core.cache import TTLCache
 
 # ttl is in seconds and maxsize bounds memory; both fall back to CacheConfig
 # (ttl_default=300.0, maxsize_default=256) when omitted. metrics_name labels
@@ -118,13 +118,13 @@ if cached_data is None:
 
 ### Redis Cache (`RedisTTLCache`)
 
-`RedisTTLCache` (`core/cache/redis_cache.py`) shares the same `get`/`set`
+`RedisTTLCache` (`baselith/core/cache/redis_cache.py`) shares the same `get`/`set`
 interface, backed by Redis. The TTL and key prefix are configured on the
 instance, not per call:
 
 ```python
-from core.cache import RedisTTLCache, create_redis_client
-from core.config.cache import get_redis_cache_config
+from baselith.core.cache import RedisTTLCache, create_redis_client
+from baselith.core.config.cache import get_redis_cache_config
 
 # The URL is required; pools are shared per (url, decode_responses) pair
 client = create_redis_client(get_redis_cache_config().url)  # CACHE_REDIS_URL
@@ -146,11 +146,11 @@ result = await cache.get("foo:42")  # None on miss
 ### LLM Response Caching (`SemanticLLMCache`)
 
 LLM responses are expensive (time and money). `SemanticLLMCache`
-(`core/cache/semantic_cache.py`) caches responses by semantic similarity of the
+(`baselith/core/cache/semantic_cache.py`) caches responses by semantic similarity of the
 prompt and is **tenant-partitioned** (keyed by `get_current_tenant_id()`):
 
 ```python
-from core.cache import SemanticLLMCache
+from baselith.core.cache import SemanticLLMCache
 
 llm_cache = SemanticLLMCache()
 
@@ -176,7 +176,7 @@ Database connections are expensive resources. Pooling reuses them.
 ### PostgreSQL
 
 ```env
-# Pool configuration in .env (see core/config/storage.py)
+# Pool configuration in .env (see baselith/core/config/storage.py)
 DB_POOL_MIN_SIZE=1     # Minimum pooled connections (psycopg_pool)
 DB_POOL_MAX_SIZE=20    # Maximum pooled connections
 DB_POOL_TIMEOUT=30     # Seconds to wait for a free connection
@@ -214,7 +214,7 @@ LLM calls are often the biggest bottleneck. Strategies to reduce latency and cos
 | Embedding             | text-embedding-3-small            | 50-100ms        |
 
 ```python
-from core.services.llm import get_llm_service
+from baselith.core.services.llm import get_llm_service
 
 llm = get_llm_service()
 
@@ -241,7 +241,7 @@ embeddings = await embed_batch(documents)  # 5-10x faster
 Use streaming for long responses. User sees first tokens immediately:
 
 ```python
-from core.services.llm import get_llm_service
+from baselith.core.services.llm import get_llm_service
 
 llm = get_llm_service()
 
@@ -255,7 +255,7 @@ async for chunk in llm.generate_response_stream("Explain relativity"):
 More context = more processing time:
 
 ```python
-from core.memory import AgentMemory
+from baselith.core.memory import AgentMemory
 
 memory = AgentMemory()
 
@@ -277,7 +277,7 @@ There is no built-in `@profile` decorator. Wrap hot paths in tracer spans (see
 [Observability](observability.md)) to time them within a distributed trace:
 
 ```python
-from core.observability import get_tracer
+from baselith.core.observability import get_tracer
 
 tracer = get_tracer("my-handler")
 
@@ -366,7 +366,7 @@ Before going to production:
 
 ```python
 # Example: bound an in-process cache
-from core.cache import TTLCache
+from baselith.core.cache import TTLCache
 
 # Max 1000 entries (LRU eviction), each expiring after 300 seconds
 local_cache: TTLCache[str, object] = TTLCache(maxsize=1000, ttl=300)

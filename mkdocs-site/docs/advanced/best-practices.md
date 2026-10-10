@@ -6,9 +6,9 @@ To ensure your agents and plugins are high-quality, performant, and maintainable
 
 ## 1. Sacred Core
 
-The `core/` directory is agnostic. Never put domain-specific logic there.
+The `baselith/core/` directory is agnostic. Never put domain-specific logic there.
 
-- ❌ **Bad**: Adding `process_jira_ticket()` to `core.utils`.
+- ❌ **Bad**: Adding `process_jira_ticket()` to `baselith.core.utils`.
 - ✅ **Good**: Creating a `jira-plugin` that implements the logic.
 
 ---
@@ -55,15 +55,15 @@ class MyAgent(LifecycleMixin, AgentProtocol):
 Use the global DI container to resolve services like LLM or VectorStores.
 
 ```python
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol
 
 llm = ServiceRegistry.get(LLMServiceProtocol)
 ```
 
 ### IV. Agent Protocol
 
-All agents must implement `AgentProtocol` (`core.orchestration.protocols`) to be pluggable into the orchestrator.
+All agents must implement `AgentProtocol` (`baselith.core.orchestration.protocols`) to be pluggable into the orchestrator.
 
 ```python
 from typing import Any
@@ -103,7 +103,7 @@ longer imports.
    concrete service.
 6. **Structured errors** — failures carry a `FrameworkErrorCode` a caller can
    branch on.
-7. **No domain logic in core** — the behaviour lives in the example; `core/`
+7. **No domain logic in core** — the behaviour lives in the example; `baselith/core/`
    stays domain-agnostic.
 
 ---
@@ -123,11 +123,11 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Domain-Specific Agents in Core**
 
-**Example**: `core/agents/browser_agent.py`, `core/agents/coding/`
+**Example**: `baselith/core/agents/browser_agent.py`, `baselith/core/agents/coding/`
 
 **Why it's wrong**: These implement specific agent behaviors (browser automation, code generation), not generic orchestration infrastructure.
 
-**Fix**: Move to `plugins/browser_agent/` and `plugins/coding_agent/`
+**Fix**: Move to `baselith/plugins/browser_agent/` and `baselith/plugins/coding_agent/`
 
 **Impact**: Browser and coding agents are application-specific features, not core framework capabilities.
 
@@ -135,11 +135,11 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Document Processing Logic in Core**
 
-**Example**: `core/doc_sources/web.py`, `core/doc_sources/readers.py`
+**Example**: `baselith/core/doc_sources/web.py`, `baselith/core/doc_sources/readers.py`
 
 **Why it's wrong**: Web crawling, PDF parsing, and OCR are domain-specific document workflows, not agnostic infrastructure.
 
-**Fix**: Move to `plugins/document_sources/`
+**Fix**: Move to `baselith/plugins/document_sources/`
 
 **Rationale**: Document processing strategies vary by application. Core should provide the *interface* for document sources, not specific implementations.
 
@@ -147,11 +147,11 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Specific Scrapers in Core**
 
-**Example**: `core/scraper/extractors/`, `core/scraper/fetchers/`
+**Example**: `baselith/core/scraper/extractors/`, `baselith/core/scraper/fetchers/`
 
 **Why it's wrong**: HTML/DOM extraction and web-specific fetching are not agnostic infrastructure.
 
-**Fix**: Move to `plugins/web_scraper/`
+**Fix**: Move to `baselith/plugins/web_scraper/`
 
 **Rationale**: Scraping is a specialized capability. Some apps need it, others don't.
 
@@ -159,11 +159,11 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Application Endpoints in Core**
 
-**Example**: `core/routers/chat.py`, `core/routers/feedback.py`, `core/routers/admin.py`
+**Example**: `baselith/core/routers/chat.py`, `baselith/core/routers/feedback.py`, `baselith/core/routers/admin.py`
 
 **Why it's wrong**: These implement specific API endpoints for chat/feedback/admin applications.
 
-**Fix**: Move to application layer or `plugins/api_routers/`
+**Fix**: Move to application layer or `baselith/plugins/api_routers/`
 
 **Rationale**: API endpoints are application-specific. Core provides routing infrastructure, not specific routes.
 
@@ -171,7 +171,7 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Hard-coded Domain Personas**
 
-**Example**: `core/personas/defaults.py` with `HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`
+**Example**: `baselith/core/personas/defaults.py` with `HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`
 
 **Why it's wrong**: These are domain-specific personality templates, not infrastructure.
 
@@ -187,16 +187,16 @@ Run these commands to detect potential violations:
 
 ```bash
 # Check for hardcoded domain prompts
-rg "SYSTEM_PROMPT|user_agent|crawl" core/ --type py
+rg "SYSTEM_PROMPT|user_agent|crawl" baselith/core/ --type py
 
 # Check for specific integrations that should be plugins
-rg "playwright|tesseract|beautifulsoup|selenium" core/ --type py
+rg "playwright|tesseract|beautifulsoup|selenium" baselith/core/ --type py
 
 # Check for re-exports from plugins (circular dependency)
-rg "from plugins\." core/ --type py
+rg "from plugins\." baselith/core/ --type py
 
 # Find domain-specific file formats
-rg "\.pdf|\.docx|\.xlsx|\.html" core/ --type py --ignore-case
+rg "\.pdf|\.docx|\.xlsx|\.html" baselith/core/ --type py --ignore-case
 
 # Run the enforced architecture boundary check
 python scripts/check_architecture_boundaries.py
@@ -245,7 +245,7 @@ entry appearing there is a regression to fix rather than debt to record.
 
 #### The core strict-typing ratchet
 
-The repo-wide `mypy core/` run is deliberately lenient (`disallow_untyped_defs`
+The repo-wide `mypy baselith/core/` run is deliberately lenient (`disallow_untyped_defs`
 and `warn_return_any` are off): a big-bang switch to strict mode across the
 whole tree would never land. `scripts/check_core_strict_typing.py` is the
 ratchet that gets there one package at a time. Every package in its
@@ -258,10 +258,10 @@ core packages carry their real types) on every commit and in the
 - a package **enters** the allowlist once it passes, and never leaves — an
   entry that starts failing is a regression in that package, not a reason to
   drop the entry. Every package a request touches on the way in and out is
-  already covered: `core.api`, `core.auth`, `core.config`, `core.db`,
-  `core.cache`, `core.chat`, `core.memory`, `core.middleware`,
-  `core.observability`, `core.orchestration`, `core.plugins`, `core.di`,
-  `core.services.llm` and `core.services.vectorstore`, alongside the rest of
+  already covered: `baselith.core.api`, `baselith.core.auth`, `baselith.core.config`, `baselith.core.db`,
+  `baselith.core.cache`, `baselith.core.chat`, `baselith.core.memory`, `baselith.core.middleware`,
+  `baselith.core.observability`, `baselith.core.orchestration`, `baselith.core.plugins`, `baselith.core.di`,
+  `baselith.core.services.llm` and `baselith.core.services.vectorstore`, alongside the rest of
   the allowlist;
 - `python scripts/check_core_strict_typing.py --candidates` runs the strict
   flags on every package not yet listed and prints the ones that already pass,
@@ -280,12 +280,12 @@ core packages carry their real types) on every commit and in the
   /tmp/gate/bin/python scripts/check_core_strict_typing.py
   ```
 
-- a parent package that is only partly covered (`core.services`) is never
+- a parent package that is only partly covered (`baselith.core.services`) is never
   listed by `--candidates`; its subpackages are listed instead, because the
   parent as a whole will not go green.
 
 The ratchet superseded the earlier file-level `check_core_resilience_typing.py`
-gate; `core.resilience` is allowlisted as a whole package.
+gate; `baselith.core.resilience` is allowlisted as a whole package.
 
 #### Exception policy and the silent-handler ratchet
 
@@ -311,7 +311,7 @@ except Exception:
 The rules, in order of preference:
 
 1. **Catch the narrowest exception** the call can actually raise.
-2. **Re-raise** (or wrap in a typed `core.exceptions` error) unless the caller
+2. **Re-raise** (or wrap in a typed `baselith.core.exceptions` error) unless the caller
    is documented as best-effort.
 3. **Best-effort paths log** — `logger.debug(..., exc_info=True)` at minimum
    — or emit a metric; a hot path may use `debug` so the trace is there when
@@ -329,7 +329,7 @@ and its body contains no call, `raise`, `await` or `yield`.
 - a baselined file may shrink but never grow;
 - once a file reaches zero its entry must be deleted.
 
-The baseline is now **empty**: `core/` has no silent handler left, so any new
+The baseline is now **empty**: `baselith/core/` has no silent handler left, so any new
 one fails the build outright. The few deliberate ones (inside the logging
 pipeline, where logging the failure would recurse, and on SQLite `close()`
 paths) carry a `silent-ok:` reason.
@@ -358,10 +358,10 @@ When reviewing code for Sacred Core compliance:
 
 ### Migration Checklist
 
-When moving code from `core/` to `plugins/`:
+When moving code from `baselith/core/` to `plugins/`:
 
 1. [ ] **Create plugin structure**: `plugins/my-plugin/`
-2. [ ] **Implement plugin interface**: the `FlowHandler` protocol (`core.orchestration.protocols`; subclass `BaseFlowHandler` for the shared plumbing) plus `LifecycleMixin`
+2. [ ] **Implement plugin interface**: the `FlowHandler` protocol (`baselith.core.orchestration.protocols`; subclass `BaseFlowHandler` for the shared plumbing) plus `LifecycleMixin`
 3. [ ] **Update imports** across codebase
 4. [ ] **Move tests**: `tests/unit/core/` → `tests/unit/plugins_tests/`
 5. [ ] **Update documentation** references
@@ -373,14 +373,14 @@ When moving code from `core/` to `plugins/`:
 
 ### Migration Status
 
-The highest-priority Sacred Core violations have already been migrated out of `core/` and now live in official plugins with backward-compatible shims where necessary:
+The highest-priority Sacred Core violations have already been migrated out of `baselith/core/` and now live in official plugins with backward-compatible shims where necessary:
 
 | Legacy Area | Current State | Canonical Location |
 |-------------|---------------|--------------------|
-| `core/agents/` | Compatibility shims | `plugins/browser_agent/`, `plugins/coding_agent/` |
-| `core/doc_sources/` | Compatibility shims | `plugins/document_sources/` |
-| `core/scraper/` | Compatibility shims | `plugins/web_scraper/` |
-| `core/routers/` | Compatibility shims | `plugins/api_routers/` |
+| `baselith/core/agents/` | Compatibility shims | `baselith/plugins/browser_agent/`, `baselith/plugins/coding_agent/` |
+| `baselith/core/doc_sources/` | Compatibility shims | `baselith/plugins/document_sources/` |
+| `baselith/core/scraper/` | Compatibility shims | `baselith/plugins/web_scraper/` |
+| `baselith/core/routers/` | Compatibility shims | `baselith/plugins/api_routers/` |
 
 The remaining work is mainly incremental quality hardening, not large-scale Sacred Core extraction.
 

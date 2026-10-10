@@ -17,7 +17,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from core.task_queue.trace_context import (
+from baselith.core.task_queue.trace_context import (
     TRACE_CARRIER_KEYS,
     consumer_span,
     extract_trace_context,
@@ -144,7 +144,9 @@ class TestConsumerSpan:
 
     def test_yields_none_when_otel_is_unavailable(self, monkeypatch):
         monkeypatch.setattr(
-            "core.task_queue.trace_context._tracer", lambda: None, raising=False
+            "baselith.core.task_queue.trace_context._tracer",
+            lambda: None,
+            raising=False,
         )
         with consumer_span(_job(), "documents") as span:
             assert span is None

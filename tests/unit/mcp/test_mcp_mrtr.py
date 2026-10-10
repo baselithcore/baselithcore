@@ -13,10 +13,14 @@ from typing import Any
 
 import pytest
 
-from core.mcp.errors import MissingRequiredClientCapability
-from core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
-from core.mcp.mrtr import InputRequired, RequestStateSealer, get_input_responses
-from core.mcp.server import MCPServer
+from baselith.core.mcp.errors import MissingRequiredClientCapability
+from baselith.core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
+from baselith.core.mcp.mrtr import (
+    InputRequired,
+    RequestStateSealer,
+    get_input_responses,
+)
+from baselith.core.mcp.server import MCPServer
 
 _ELICIT = {
     "method": "elicitation/create",
@@ -212,7 +216,7 @@ class TestClientRoundTrip:
 
     @staticmethod
     def _client(server: MCPServer, provider: Any) -> Any:
-        from core.mcp.client import MCPClient
+        from baselith.core.mcp.client import MCPClient
 
         client = MCPClient(input_provider=provider)
         client._connected = True
@@ -260,7 +264,7 @@ class TestClientRoundTrip:
 
     @pytest.mark.asyncio
     async def test_without_a_provider_the_ask_is_an_error(self) -> None:
-        from core.mcp.client import MCPToolError
+        from baselith.core.mcp.client import MCPToolError
 
         client = self._client(_server(), None)
         client.client_capabilities = {"elicitation": {}}

@@ -34,10 +34,10 @@
       "ok",
       "partial"
     ],
-    "core": [
+    "baselith.core": [
       "__version__"
     ],
-    "core.a2a": [
+    "baselith.core.a2a": [
       "A2AClient",
       "A2AClientConfig",
       "A2AClientPool",
@@ -90,7 +90,7 @@
       "part_from_dict",
       "verify_signature"
     ],
-    "core.adversarial": [
+    "baselith.core.adversarial": [
       "AttackCategory",
       "AttackResult",
       "AttackStatus",
@@ -103,7 +103,7 @@
       "Severity",
       "Vulnerability"
     ],
-    "core.agent": [
+    "baselith.core.agent": [
       "Agent",
       "AgentEvent",
       "AgentIterationLimitError",
@@ -133,11 +133,11 @@
       "ToolCallFinished",
       "ToolCallStarted"
     ],
-    "core.agents": [
+    "baselith.core.agents": [
       "BrowserAgent",
       "CodingAgent"
     ],
-    "core.agents.coding": [
+    "baselith.core.agents.coding": [
       "CodeExecutionResult",
       "CodeLanguage",
       "CodingAgent",
@@ -145,11 +145,11 @@
       "CodingTaskType",
       "register_coding_tools"
     ],
-    "core.api": [
+    "baselith.core.api": [
       "AgentEvent",
       "EventType"
     ],
-    "core.auth": [
+    "baselith.core.auth": [
       "APIKeyValidator",
       "AuthError",
       "AuthManager",
@@ -182,7 +182,7 @@
       "verify_totp",
       "verify_totp_matched_counter"
     ],
-    "core.auth.oauth": [
+    "baselith.core.auth.oauth": [
       "ACCESS_TOKEN_TYPE",
       "AccessDeniedError",
       "AuthorizationRequest",
@@ -216,7 +216,7 @@
       "validate_redirect_uri",
       "verify_code_challenge"
     ],
-    "core.bootstrap": [
+    "baselith.core.bootstrap": [
       "RESOURCE_FACTORIES",
       "initialize_evaluation",
       "initialize_evolution",
@@ -227,7 +227,7 @@
       "initialize_redis",
       "initialize_vectorstore"
     ],
-    "core.cache": [
+    "baselith.core.cache": [
       "AnyCache",
       "BatchCacheProtocol",
       "CacheProtocol",
@@ -242,7 +242,7 @@
       "create_redis_client",
       "create_sync_redis_client"
     ],
-    "core.chat": [
+    "baselith.core.chat": [
       "AgentState",
       "CONVERSATION_SYSTEM_PROMPT",
       "ChatService",
@@ -254,10 +254,10 @@
       "get_chat_service",
       "initialize_chat_service_with_plugins"
     ],
-    "core.cli": [
+    "baselith.core.cli": [
       "main"
     ],
-    "core.cli.commands": [
+    "baselith.core.cli.commands": [
       "cache",
       "config",
       "db",
@@ -274,7 +274,7 @@
       "test",
       "verify"
     ],
-    "core.cli.commands.plugin": [
+    "baselith.core.cli.commands.plugin": [
       "add_plugin",
       "config_get",
       "config_reset",
@@ -309,7 +309,7 @@
       "update_plugin_cmd",
       "validate_local_plugin"
     ],
-    "core.compliance": [
+    "baselith.core.compliance": [
       "AiSystem",
       "AiSystemNotFoundError",
       "AiSystemRegistry",
@@ -381,7 +381,7 @@
       "screen_practices",
       "sweep_summary"
     ],
-    "core.config": [
+    "baselith.core.config": [
       "AppConfig",
       "AuctionConfig",
       "CacheConfig",
@@ -458,7 +458,7 @@
       "suspected_typos",
       "warn_on_suspected_typos"
     ],
-    "core.connectors": [
+    "baselith.core.connectors": [
       "ActionResult",
       "ActionSpec",
       "BaseConnector",
@@ -504,7 +504,7 @@
       "set_credential_resolver",
       "vendor_provider_id"
     ],
-    "core.db": [
+    "baselith.core.db": [
       "close_pool",
       "get_async_read_connection",
       "get_document_feedback_summary",
@@ -515,7 +515,7 @@
       "init_db",
       "insert_feedback"
     ],
-    "core.di": [
+    "baselith.core.di": [
       "DependencyContainer",
       "LazyServiceRegistry",
       "ResourceType",
@@ -527,11 +527,11 @@
       "get_lazy_registry",
       "reset_lazy_registry"
     ],
-    "core.doc_sources": [
+    "baselith.core.doc_sources": [
       "DocumentSourceError",
       "create_document_sources"
     ],
-    "core.evaluation": [
+    "baselith.core.evaluation": [
       "BakeOffResult",
       "BaseLLMEvaluator",
       "CaseResult",
@@ -557,7 +557,7 @@
       "run_bake_off",
       "scrub_text"
     ],
-    "core.events": [
+    "baselith.core.events": [
       "AsyncHandler",
       "DEFAULT_CONSUMER_GROUP",
       "DEFAULT_STREAM_MAXLEN",
@@ -581,13 +581,13 @@
       "get_schema_registry",
       "reset_event_bus"
     ],
-    "core.exploration": [
+    "baselith.core.exploration": [
       "ExplorationResult",
       "Hypothesis",
       "HypothesisGenerator",
       "ProactiveExplorer"
     ],
-    "core.feature_flags": [
+    "baselith.core.feature_flags": [
       "EnvFeatureFlagProvider",
       "FeatureFlag",
       "FeatureFlagManager",
@@ -597,7 +597,7 @@
       "register_flag_provider",
       "reset_feature_flags"
     ],
-    "core.finetuning": [
+    "baselith.core.finetuning": [
       "DatasetBuilder",
       "DatasetFormat",
       "FineTuneConfig",
@@ -606,16 +606,16 @@
       "FineTuningPipeline",
       "TrainingStatus"
     ],
-    "core.goals": [
+    "baselith.core.goals": [
       "Goal",
       "GoalStatus",
       "GoalTracker"
     ],
-    "core.graph": [
+    "baselith.core.graph": [
       "GraphDb",
       "graph_db"
     ],
-    "core.guardrails": [
+    "baselith.core.guardrails": [
       "CodeReview",
       "CodeReviewComment",
       "GuardrailsConfig",
@@ -634,7 +634,7 @@
       "review_code",
       "scan_external_content"
     ],
-    "core.human": [
+    "baselith.core.human": [
       "DEFAULT_MAX_RECENT_REQUESTS",
       "HumanIntervention",
       "HumanRequest",
@@ -643,7 +643,7 @@
       "get_hitl_executor",
       "shutdown_hitl_executor"
     ],
-    "core.incidents": [
+    "baselith.core.incidents": [
       "AiActIncidentNotFoundError",
       "AiActIncidentService",
       "AiActIncidentStatus",
@@ -685,7 +685,7 @@
       "get_dora_incident_service",
       "get_incident_service"
     ],
-    "core.interfaces": [
+    "baselith.core.interfaces": [
       "AsyncEmbedderProtocol",
       "ChatServiceProtocol",
       "DocumentRerankerProtocol",
@@ -695,7 +695,7 @@
       "ScoreRerankerProtocol",
       "VectorStoreProtocol"
     ],
-    "core.learning": [
+    "baselith.core.learning": [
       "AutoFineTuneConfig",
       "AutoFineTuningService",
       "ContinuousLearner",
@@ -704,7 +704,7 @@
       "FeedbackItem",
       "PersistentLearner"
     ],
-    "core.lifecycle": [
+    "baselith.core.lifecycle": [
       "AgentError",
       "AgentHooks",
       "AgentLifecycle",
@@ -721,7 +721,7 @@
       "mark_draining",
       "wait_for_drain"
     ],
-    "core.loops": [
+    "baselith.core.loops": [
       "AttemptContext",
       "EngineeredLoop",
       "FAILURE_MARKERS",
@@ -744,7 +744,7 @@
       "prime_lessons",
       "rubric_verifier"
     ],
-    "core.marketplace": [
+    "baselith.core.marketplace": [
       "InstallResult",
       "InstallStatus",
       "MarketplacePlugin",
@@ -756,7 +756,7 @@
       "ValidationIssue",
       "ValidationResult"
     ],
-    "core.mcp": [
+    "baselith.core.mcp": [
       "MCPClient",
       "MCPConnectionPool",
       "MCPServer",
@@ -766,7 +766,7 @@
       "mount_configured_servers",
       "report_progress"
     ],
-    "core.memory": [
+    "baselith.core.memory": [
       "AgentMemory",
       "ContextFolder",
       "ContextProvider",
@@ -787,7 +787,7 @@
       "current_memory_tenant",
       "get_memory"
     ],
-    "core.meta": [
+    "baselith.core.meta": [
       "DebateResult",
       "DebateRound",
       "InternalDebate",
@@ -796,7 +796,7 @@
       "PersonaEnsemble",
       "Perspective"
     ],
-    "core.middleware": [
+    "baselith.core.middleware": [
       "APIDeprecationMiddleware",
       "BudgetExceededError",
       "CSRFOriginMiddleware",
@@ -827,7 +827,7 @@
       "verify_admin_password",
       "verify_admin_password_async"
     ],
-    "core.models": [
+    "baselith.core.models": [
       "ChatRequest",
       "ChatResponse",
       "Document",
@@ -835,7 +835,7 @@
       "FeedbackRequest",
       "SearchResult"
     ],
-    "core.nlp": [
+    "baselith.core.nlp": [
       "CachedEmbedder",
       "LazyEmbedder",
       "LazyReranker",
@@ -845,7 +845,7 @@
       "get_pipeline",
       "get_reranker"
     ],
-    "core.observability": [
+    "baselith.core.observability": [
       "AuditEvent",
       "AuditEventType",
       "AuditLogger",
@@ -878,7 +878,7 @@
       "telemetry",
       "unregister_span_sink"
     ],
-    "core.optimization": [
+    "baselith.core.optimization": [
       "Candidate",
       "CandidateArchive",
       "CompiledPrompt",
@@ -901,7 +901,7 @@
       "get_semantic_cache",
       "review_candidate"
     ],
-    "core.optimization.evolution": [
+    "baselith.core.optimization.evolution": [
       "Candidate",
       "CandidateArchive",
       "Evaluator",
@@ -911,7 +911,7 @@
       "Mutator",
       "ReflectiveMutator"
     ],
-    "core.orchestration": [
+    "baselith.core.orchestration": [
       "AdaptiveConfig",
       "AdaptiveController",
       "AgentProtocol",
@@ -963,7 +963,7 @@
       "unwrap_untrusted",
       "wrap_untrusted"
     ],
-    "core.orchestration.handlers": [
+    "baselith.core.orchestration.handlers": [
       "BaseFlowHandler",
       "BaseStreamHandler",
       "FlowHandler",
@@ -973,7 +973,7 @@
       "SwarmHandler",
       "VisionHandler"
     ],
-    "core.personas": [
+    "baselith.core.personas": [
       "CREATIVE_WRITER",
       "DEFAULT_EXAMPLES_PATH",
       "FewShotExample",
@@ -984,7 +984,7 @@
       "TECHNICAL_EXPERT",
       "load_library"
     ],
-    "core.planning": [
+    "baselith.core.planning": [
       "BudgetRemaining",
       "Plan",
       "PlanCostEstimate",
@@ -997,7 +997,7 @@
       "plan_to_workflow",
       "render_plan_for_review"
     ],
-    "core.plugin_updates": [
+    "baselith.core.plugin_updates": [
       "Advisory",
       "AnnouncementGate",
       "CheckReport",
@@ -1027,7 +1027,7 @@
       "verify_release",
       "verify_release_manifest"
     ],
-    "core.plugin_updates.apply": [
+    "baselith.core.plugin_updates.apply": [
       "ApplyRun",
       "Expectation",
       "RELEASING_STATES",
@@ -1041,7 +1041,7 @@
       "UpdaterHeartbeat",
       "rollback_failed_payload"
     ],
-    "core.plugin_updates.upgrade": [
+    "baselith.core.plugin_updates.upgrade": [
       "Deployment",
       "MAX_INSTRUCTIONS_BYTES",
       "TemplateContext",
@@ -1059,7 +1059,7 @@
       "render_instructions",
       "upgrade_path"
     ],
-    "core.plugins": [
+    "baselith.core.plugins": [
       "AgentPlugin",
       "BackstageExporter",
       "BackstageProvider",
@@ -1129,12 +1129,12 @@
       "validate_manifest_data",
       "validate_plugin_config"
     ],
-    "core.plugins.exporters": [
+    "baselith.core.plugins.exporters": [
       "BackstageProvider",
       "backstage_exporter_router",
       "set_backstage_provider"
     ],
-    "core.prioritization": [
+    "baselith.core.prioritization": [
       "DependencyGraph",
       "PriorityQueue",
       "PriorityScore",
@@ -1142,7 +1142,7 @@
       "TaskPrioritizer",
       "TaskStatus"
     ],
-    "core.privacy": [
+    "baselith.core.privacy": [
       "Art22Ground",
       "AutomatedDecisionActivity",
       "AutomatedDecisionRegistry",
@@ -1178,7 +1178,7 @@
       "reset_automated_decision_registry",
       "reset_consent_service"
     ],
-    "core.prompts": [
+    "baselith.core.prompts": [
       "InMemoryPromptStore",
       "PromptError",
       "PromptLoadError",
@@ -1196,7 +1196,7 @@
       "render_template",
       "resolve_catalog_prompt"
     ],
-    "core.quotas": [
+    "baselith.core.quotas": [
       "CostBudgetExceededError",
       "CostWindowStatus",
       "InMemoryQuotaStore",
@@ -1214,7 +1214,7 @@
       "llm_call_cost_usd",
       "record_tenant_llm_cost"
     ],
-    "core.realtime": [
+    "baselith.core.realtime": [
       "AudioDelta",
       "DEFAULT_IDLE_TIMEOUT",
       "DuplexEvent",
@@ -1231,7 +1231,7 @@
       "close_pubsub",
       "iter_messages"
     ],
-    "core.reasoning": [
+    "baselith.core.reasoning": [
       "AgentPattern",
       "ChainOfThought",
       "ComplexityAssessment",
@@ -1251,7 +1251,7 @@
       "TreeOfThoughts",
       "TreeOfThoughtsAsync"
     ],
-    "core.reasoning.tot": [
+    "baselith.core.reasoning.tot": [
       "ThoughtCache",
       "ThoughtNode",
       "TreeOfThoughts",
@@ -1265,7 +1265,7 @@
       "mcts_search_async",
       "uct_select"
     ],
-    "core.reflection": [
+    "baselith.core.reflection": [
       "DefaultEvaluator",
       "DefaultRefiner",
       "EvaluationResult",
@@ -1273,10 +1273,10 @@
       "ReflectionAgent",
       "SelfEvaluator"
     ],
-    "core.registries": [
+    "baselith.core.registries": [
       "BaseRegistry"
     ],
-    "core.resilience": [
+    "baselith.core.resilience": [
       "Bulkhead",
       "CircuitBreaker",
       "CircuitBreakerConfig",
@@ -1300,7 +1300,7 @@
       "retry",
       "timeout"
     ],
-    "core.security": [
+    "baselith.core.security": [
       "DecryptionError",
       "EncryptionError",
       "EnvSecretsProvider",
@@ -1323,7 +1323,7 @@
       "reset_secrets_provider",
       "resolve_pinned_target"
     ],
-    "core.services.chat": [
+    "baselith.core.services.chat": [
       "ChatService",
       "ChatServiceConfig",
       "ChatServiceError",
@@ -1333,28 +1333,28 @@
       "StreamingError",
       "get_chat_service"
     ],
-    "core.services.chat.utils": [
+    "baselith.core.services.chat.utils": [
       "ChatHistoryManager",
       "build_cached_stream",
       "build_fallback_stream",
       "stream_answer"
     ],
-    "core.services.evaluation": [
+    "baselith.core.services.evaluation": [
       "EvaluationService",
       "get_evaluation_service"
     ],
-    "core.services.graph": [
+    "baselith.core.services.graph": [
       "GraphService"
     ],
-    "core.services.graph.ops": [
+    "baselith.core.services.graph.ops": [
       "DocumentOperations",
       "current_timestamp"
     ],
-    "core.services.indexing": [
+    "baselith.core.services.indexing": [
       "IndexingService",
       "get_indexing_service"
     ],
-    "core.services.inference": [
+    "baselith.core.services.inference": [
       "EmbeddingService",
       "InferenceConfigError",
       "InferenceError",
@@ -1367,7 +1367,7 @@
       "get_sync_inference",
       "shutdown_sync_inference"
     ],
-    "core.services.llm": [
+    "baselith.core.services.llm": [
       "ANY",
       "AUTO",
       "BudgetExceededError",
@@ -1430,7 +1430,7 @@
       "unregister_token_sink",
       "unregister_usage_sink"
     ],
-    "core.services.sandbox": [
+    "baselith.core.services.sandbox": [
       "ExecutionResult",
       "PoolConfig",
       "PooledContainer",
@@ -1439,7 +1439,7 @@
       "StreamFrame",
       "build_sandbox_runtime_kwargs"
     ],
-    "core.services.tenant": [
+    "baselith.core.services.tenant": [
       "DEFAULT_TENANT_PAGE_SIZE",
       "MAX_TENANT_PAGE_SIZE",
       "ReservedTenantIdError",
@@ -1453,7 +1453,7 @@
       "purge_tenant_stores",
       "tenant_scoped_tables"
     ],
-    "core.services.vectorstore": [
+    "baselith.core.services.vectorstore": [
       "ChildChunk",
       "ExpandedParent",
       "HierarchicalChunker",
@@ -1472,7 +1472,7 @@
       "parent_chunk_id",
       "select_splitter"
     ],
-    "core.services.vision": [
+    "baselith.core.services.vision": [
       "AudioContent",
       "DocumentContent",
       "ImageContent",
@@ -1482,7 +1482,7 @@
       "VisionResponse",
       "VisionService"
     ],
-    "core.services.voice": [
+    "baselith.core.services.voice": [
       "STTRequest",
       "SpeechContext",
       "SpeechTuning",
@@ -1510,7 +1510,7 @@
       "VoiceUnavailableError",
       "VoiceUpstreamError"
     ],
-    "core.skill_evolution": [
+    "baselith.core.skill_evolution": [
       "EvidenceRef",
       "GateDecision",
       "InMemoryPatternStore",
@@ -1533,7 +1533,7 @@
       "patterns_to_few_shot",
       "sync_strategies_to_library"
     ],
-    "core.storage": [
+    "baselith.core.storage": [
       "Feedback",
       "FeedbackRepository",
       "Interaction",
@@ -1543,7 +1543,7 @@
       "get_storage",
       "init_db"
     ],
-    "core.swarm": [
+    "baselith.core.swarm": [
       "AgentProfile",
       "AgentStatus",
       "AuctionConfig",
@@ -1565,7 +1565,7 @@
       "TeamFormationEngine",
       "compress_handoff_context"
     ],
-    "core.task_queue": [
+    "baselith.core.task_queue": [
       "CronExpression",
       "enqueue_task",
       "get_dead_letter_queue",
@@ -1573,7 +1573,7 @@
       "get_queue_redis_connection",
       "schedule_task"
     ],
-    "core.tenancy": [
+    "baselith.core.tenancy": [
       "CrossTenantError",
       "derive_tenant_key_material",
       "require_tenant_context",
@@ -1581,7 +1581,7 @@
       "tenant_field_encryptor",
       "tenants_match"
     ],
-    "core.thirdparty": [
+    "baselith.core.thirdparty": [
       "ContractualArrangement",
       "DataSensitivity",
       "FunctionCriticality",
@@ -1598,7 +1598,7 @@
       "build_register",
       "get_register"
     ],
-    "core.transparency": [
+    "baselith.core.transparency": [
       "ContentClass",
       "DEFAULT_DISCLOSURE_TEXT",
       "DisclosureNotice",
@@ -1612,7 +1612,7 @@
       "get_transparency_service",
       "sha256_hex"
     ],
-    "core.utils": [
+    "baselith.core.utils": [
       "canonical_key",
       "canonicalize",
       "cosine_similarity",
@@ -1624,7 +1624,7 @@
       "sniff_document_type",
       "sniff_image_type"
     ],
-    "core.webhooks": [
+    "baselith.core.webhooks": [
       "DeliveryStatus",
       "InMemoryWebhookStore",
       "SIGNATURE_HEADER",
@@ -1641,7 +1641,7 @@
       "validate_webhook_url",
       "verify_signature"
     ],
-    "core.workflows": [
+    "baselith.core.workflows": [
       "ColonyNodeAdapter",
       "CrewNodeAdapter",
       "ExecutionContext",
@@ -1659,7 +1659,7 @@
       "definition_fingerprint",
       "pin_version"
     ],
-    "core.world_model": [
+    "baselith.core.world_model": [
       "Action",
       "DelegatedPurchaseAgent",
       "DelegationRegistryFullError",
@@ -1682,73 +1682,73 @@
   },
   "stability": {
     "baselith": "stable",
-    "core.a2a": "beta",
-    "core.adversarial": "experimental",
-    "core.agent": "stable",
-    "core.agents": "deprecated",
-    "core.api": "stable",
-    "core.auth": "beta",
-    "core.bootstrap": "beta",
-    "core.cache": "beta",
-    "core.chat": "beta",
-    "core.cli": "beta",
-    "core.compliance": "beta",
-    "core.config": "stable",
-    "core.connectors": "experimental",
-    "core.db": "beta",
-    "core.di": "beta",
-    "core.doc_sources": "deprecated",
-    "core.evaluation": "beta",
-    "core.events": "beta",
-    "core.exploration": "experimental",
-    "core.feature_flags": "beta",
-    "core.finetuning": "experimental",
-    "core.goals": "deprecated",
-    "core.graph": "beta",
-    "core.guardrails": "beta",
-    "core.human": "experimental",
-    "core.incidents": "beta",
-    "core.interfaces": "beta",
-    "core.learning": "experimental",
-    "core.lifecycle": "beta",
-    "core.loops": "experimental",
-    "core.marketplace": "experimental",
-    "core.mcp": "beta",
-    "core.memory": "beta",
-    "core.meta": "experimental",
-    "core.middleware": "beta",
-    "core.models": "beta",
-    "core.nlp": "experimental",
-    "core.observability": "beta",
-    "core.optimization": "experimental",
-    "core.orchestration": "beta",
-    "core.personas": "beta",
-    "core.planning": "experimental",
-    "core.plugin_updates": "beta",
-    "core.plugins": "stable",
-    "core.prioritization": "experimental",
-    "core.privacy": "beta",
-    "core.prompts": "beta",
-    "core.quotas": "beta",
-    "core.realtime": "experimental",
-    "core.reasoning": "beta",
-    "core.reflection": "experimental",
-    "core.registries": "beta",
-    "core.resilience": "beta",
-    "core.routers": "deprecated",
-    "core.scraper": "deprecated",
-    "core.security": "beta",
-    "core.services": "beta",
-    "core.skill_evolution": "experimental",
-    "core.storage": "beta",
-    "core.swarm": "experimental",
-    "core.task_queue": "beta",
-    "core.tenancy": "beta",
-    "core.thirdparty": "experimental",
-    "core.transparency": "experimental",
-    "core.utils": "beta",
-    "core.webhooks": "beta",
-    "core.workflows": "beta",
-    "core.world_model": "beta"
+    "baselith.core.a2a": "beta",
+    "baselith.core.adversarial": "experimental",
+    "baselith.core.agent": "stable",
+    "baselith.core.agents": "deprecated",
+    "baselith.core.api": "stable",
+    "baselith.core.auth": "beta",
+    "baselith.core.bootstrap": "beta",
+    "baselith.core.cache": "beta",
+    "baselith.core.chat": "beta",
+    "baselith.core.cli": "beta",
+    "baselith.core.compliance": "beta",
+    "baselith.core.config": "stable",
+    "baselith.core.connectors": "experimental",
+    "baselith.core.db": "beta",
+    "baselith.core.di": "beta",
+    "baselith.core.doc_sources": "deprecated",
+    "baselith.core.evaluation": "beta",
+    "baselith.core.events": "beta",
+    "baselith.core.exploration": "experimental",
+    "baselith.core.feature_flags": "beta",
+    "baselith.core.finetuning": "experimental",
+    "baselith.core.goals": "deprecated",
+    "baselith.core.graph": "beta",
+    "baselith.core.guardrails": "beta",
+    "baselith.core.human": "experimental",
+    "baselith.core.incidents": "beta",
+    "baselith.core.interfaces": "beta",
+    "baselith.core.learning": "experimental",
+    "baselith.core.lifecycle": "beta",
+    "baselith.core.loops": "experimental",
+    "baselith.core.marketplace": "experimental",
+    "baselith.core.mcp": "beta",
+    "baselith.core.memory": "beta",
+    "baselith.core.meta": "experimental",
+    "baselith.core.middleware": "beta",
+    "baselith.core.models": "beta",
+    "baselith.core.nlp": "experimental",
+    "baselith.core.observability": "beta",
+    "baselith.core.optimization": "experimental",
+    "baselith.core.orchestration": "beta",
+    "baselith.core.personas": "beta",
+    "baselith.core.planning": "experimental",
+    "baselith.core.plugin_updates": "beta",
+    "baselith.core.plugins": "stable",
+    "baselith.core.prioritization": "experimental",
+    "baselith.core.privacy": "beta",
+    "baselith.core.prompts": "beta",
+    "baselith.core.quotas": "beta",
+    "baselith.core.realtime": "experimental",
+    "baselith.core.reasoning": "beta",
+    "baselith.core.reflection": "experimental",
+    "baselith.core.registries": "beta",
+    "baselith.core.resilience": "beta",
+    "baselith.core.routers": "deprecated",
+    "baselith.core.scraper": "deprecated",
+    "baselith.core.security": "beta",
+    "baselith.core.services": "beta",
+    "baselith.core.skill_evolution": "experimental",
+    "baselith.core.storage": "beta",
+    "baselith.core.swarm": "experimental",
+    "baselith.core.task_queue": "beta",
+    "baselith.core.tenancy": "beta",
+    "baselith.core.thirdparty": "experimental",
+    "baselith.core.transparency": "experimental",
+    "baselith.core.utils": "beta",
+    "baselith.core.webhooks": "beta",
+    "baselith.core.workflows": "beta",
+    "baselith.core.world_model": "beta"
   }
 }

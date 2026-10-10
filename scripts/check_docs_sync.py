@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Report `core/` changes whose documentation page was left untouched.
+"""Report `baselith/core/` changes whose documentation page was left untouched.
 
 CLAUDE.md: "Code and docs ship together — no merge with stale docs." This maps
-each changed `core/` module to the page that documents it and flags the ones
+each changed `baselith/core/` module to the page that documents it and flags the ones
 nobody edited.
 
 The mapping is intentionally blunt — it names the page a reviewer would expect
@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS_ROOT = "mkdocs-site/docs"
 CORE_MODULES_DIR = f"{DOCS_ROOT}/core-modules"
 
-# Modules whose page name does not follow `core/<module>` -> `<module>.md`.
+# Modules whose page name does not follow `baselith/core/<module>` -> `<module>.md`.
 EXPLICIT_PAGES: dict[str, tuple[str, ...]] = {
     "api": (f"{DOCS_ROOT}/api/rest.md",),
     "routers": (f"{DOCS_ROOT}/api/rest.md",),
@@ -198,11 +198,13 @@ def main() -> int:
         {
             path.split("/")[1]
             for path in paths
-            if path.startswith("core/") and path.endswith(".py") and "/" in path[5:]
+            if path.startswith("baselith/core/")
+            and path.endswith(".py")
+            and "/" in path[5:]
         }
     )
     if not changed_modules:
-        print("No core/ modules changed — docs sync not applicable.")
+        print("No baselith/core/ modules changed — docs sync not applicable.")
         return 0
 
     stale: list[str] = []
@@ -218,9 +220,9 @@ def main() -> int:
         # change rarely owes both: demanding every page taught people to pad
         # the secondary one or to reach for the skip marker.
         if not any(page in touched_docs for page in pages):
-            stale.append(f"  core/{module}/ -> {' or '.join(pages)}")
+            stale.append(f"  baselith/core/{module}/ -> {' or '.join(pages)}")
         if module in AGENTIC_MODULES and AGENTIC_PAGE not in touched_docs:
-            stale.append(f"  core/{module}/ -> {AGENTIC_PAGE}")
+            stale.append(f"  baselith/core/{module}/ -> {AGENTIC_PAGE}")
 
     print(f"Changed core modules: {', '.join(changed_modules)}")
     print(f"Touched docs: {', '.join(sorted(touched_docs)) or '(none)'}")

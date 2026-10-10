@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.evaluation.service import EvaluationService
-from core.events import EventNames
+from baselith.core.evaluation.service import EvaluationService
+from baselith.core.events import EventNames
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def mock_event_bus():
 
 def test_evaluation_service_startup_enabled(mock_event_bus):
     """Test that service starts and subscribes when enabled via config."""
-    with patch("core.config.evaluation.evaluation_config") as mock_config:
+    with patch("baselith.core.config.evaluation.evaluation_config") as mock_config:
         mock_config.enabled = True
 
         service = EvaluationService(event_bus=mock_event_bus)
@@ -28,7 +28,7 @@ def test_evaluation_service_startup_enabled(mock_event_bus):
 
 def test_evaluation_service_startup_disabled(mock_event_bus):
     """Test that service does not start when disabled via config."""
-    with patch("core.config.evaluation.evaluation_config") as mock_config:
+    with patch("baselith.core.config.evaluation.evaluation_config") as mock_config:
         mock_config.enabled = False
 
         service = EvaluationService(event_bus=mock_event_bus)

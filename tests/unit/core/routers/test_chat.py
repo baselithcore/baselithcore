@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from core.models.chat import ChatRequest, ChatResponse
+from baselith.core.models.chat import ChatRequest, ChatResponse
 
 
 @pytest.fixture
 def chat_router_module():
-    import core.chat.service as chat_service_module
-    import core.routers.chat as chat_router_module
+    import baselith.core.chat.service as chat_service_module
+    import baselith.core.routers.chat as chat_router_module
 
     # Ensure no previous test leaves behind a resolved global chat service.
     chat_service_module._chat_service = None

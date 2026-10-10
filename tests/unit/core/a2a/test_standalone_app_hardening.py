@@ -1,6 +1,6 @@
 """``create_standalone_app`` is a documented deployment shape, not a demo.
 
-It faces peer agents directly without the middleware stack ``core.api.factory``
+It faces peer agents directly without the middleware stack ``baselith.core.api.factory``
 builds, so it must at least carry the two perimeter guards a bare FastAPI has
 no equivalent for: a bound on the request body (an unbounded one is a trivial
 memory-exhaustion vector) and baseline security headers.
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.a2a import AgentCard
-from core.a2a.router import create_standalone_app
-from core.a2a.server import A2AServer
+from baselith.core.a2a import AgentCard
+from baselith.core.a2a.router import create_standalone_app
+from baselith.core.a2a.server import A2AServer
 
 
 class _Server(A2AServer):
@@ -66,7 +66,7 @@ def test_oversized_body_is_rejected_with_security_headers(app) -> None:
     """The end-to-end consequence of the ordering above."""
     from fastapi.testclient import TestClient
 
-    from core.config import get_security_config
+    from baselith.core.config import get_security_config
 
     limit = getattr(get_security_config(), "max_request_size_bytes", 10 * 1024 * 1024)
     if not limit:

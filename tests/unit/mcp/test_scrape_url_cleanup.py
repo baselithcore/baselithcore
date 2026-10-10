@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.mcp.server import MCPServer
-from core.mcp.tools import MCPToolAdapter
+from baselith.core.mcp.server import MCPServer
+from baselith.core.mcp.tools import MCPToolAdapter
 
 
 class _FakeScraper:
@@ -58,7 +58,7 @@ def _reset() -> None:
 
 @pytest.mark.parametrize("use_js", [False, True])
 async def test_fetcher_is_closed_after_a_successful_scrape(use_js: bool) -> None:
-    with patch("core.scraper.scraper.Scraper", _FakeScraper):
+    with patch("baselith.core.scraper.scraper.Scraper", _FakeScraper):
         result = await _scrape_tool()("https://example.com", wait_for_js=use_js)
 
     assert result["status"] == "success"
@@ -68,7 +68,9 @@ async def test_fetcher_is_closed_after_a_successful_scrape(use_js: bool) -> None
 
 
 async def test_fetcher_is_closed_when_the_scrape_fails() -> None:
-    with patch("core.scraper.scraper.Scraper", lambda: _FakeScraper(fail=True)):
+    with patch(
+        "baselith.core.scraper.scraper.Scraper", lambda: _FakeScraper(fail=True)
+    ):
         result = await _scrape_tool()("https://example.com")
 
     assert result["status"] == "error"
@@ -78,7 +80,7 @@ async def test_fetcher_is_closed_when_the_scrape_fails() -> None:
 
 
 async def test_close_fetchers_keeps_going_past_a_failing_fetcher() -> None:
-    from core.scraper.scraper import Scraper
+    from baselith.core.scraper.scraper import Scraper
 
     broken = SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("boom")))
     healthy = SimpleNamespace(close=AsyncMock())
@@ -86,7 +88,7 @@ async def test_close_fetchers_keeps_going_past_a_failing_fetcher() -> None:
     scraper._httpx_fetcher = broken  # type: ignore[assignment]
     scraper._playwright_fetcher = healthy  # type: ignore[assignment]
 
-    with patch("plugins.web_scraper._http_pool.close_robots_client") as robots:
+    with patch("baselith.plugins.web_scraper._http_pool.close_robots_client") as robots:
         await scraper.close_fetchers()
 
     healthy.close.assert_awaited_once()

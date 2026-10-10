@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.config.incidents import IncidentReportingConfig
-from core.incidents.ai_act import (
+from baselith.core.config.incidents import IncidentReportingConfig
+from baselith.core.incidents.ai_act import (
     DEADLINE_DAYS_CRITICAL_INFRASTRUCTURE,
     DEADLINE_DAYS_DEATH,
     DEADLINE_DAYS_DEFAULT,
@@ -16,12 +16,12 @@ from core.incidents.ai_act import (
     SeriousIncidentCategory,
     report_deadline_days,
 )
-from core.incidents.ai_act_service import (
+from baselith.core.incidents.ai_act_service import (
     AiActIncidentNotFoundError,
     AiActIncidentService,
 )
-from core.incidents.persistence import SQLiteAiActIncidentStore
-from core.incidents.types import AiActMilestoneKind
+from baselith.core.incidents.persistence import SQLiteAiActIncidentStore
+from baselith.core.incidents.types import AiActMilestoneKind
 
 CATEGORY = SeriousIncidentCategory
 

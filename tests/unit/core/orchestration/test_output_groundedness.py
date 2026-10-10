@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from core.evaluation.protocols import EvaluationResult, QualityLevel
-from core.orchestration import guard_groundedness
-from core.orchestration.guard_pipeline import guard_output_async
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.orchestration import guard_groundedness
+from baselith.core.orchestration.guard_pipeline import guard_output_async
 
 
 class _StubJudge:

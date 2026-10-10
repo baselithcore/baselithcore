@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.orchestration import (
+from baselith.core.orchestration import (
     BaseFlowHandler,
     BaseStreamHandler,
     FlowHandler,

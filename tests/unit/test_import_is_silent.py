@@ -20,7 +20,7 @@ _PROBE = """
 import baselith
 for name in baselith.__all__:
     getattr(baselith, name)
-from core.config.plugins import get_plugin_config
+from baselith.core.config.plugins import get_plugin_config
 get_plugin_config()
 """
 
@@ -49,7 +49,7 @@ def test_app_logging_setup_still_emits(tmp_path: Path) -> None:
     """Configuring logging after import still routes framework loggers."""
     probe = """
 import io
-from core.observability.logging import configure_logging, get_logger, _stop_log_listener
+from baselith.core.observability.logging import configure_logging, get_logger, _stop_log_listener
 log = get_logger("probe")  # created before the app configures logging
 buf = io.StringIO()
 configure_logging(level="INFO", json_output=True, stream=buf)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.observability.redaction import redact_secrets, safe_snippet
+from baselith.core.observability.redaction import redact_secrets, safe_snippet
 
 
 class TestKnownSecrets:

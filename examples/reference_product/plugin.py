@@ -4,8 +4,8 @@ Plugin entry point for FAQ Agent.
 
 from typing import Any
 
-from core.plugins.agent_plugin import AgentPlugin
-from core.plugins.interface import PluginMetadata
+from baselith.core.plugins.agent_plugin import AgentPlugin
+from baselith.core.plugins.interface import PluginMetadata
 
 from .agent import FAQAgent
 

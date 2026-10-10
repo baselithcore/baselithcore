@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.evaluation.fairness import FOUR_FIFTHS, evaluate_fairness
+from baselith.core.evaluation.fairness import FOUR_FIFTHS, evaluate_fairness
 
 
 class TestSelectionMetrics:

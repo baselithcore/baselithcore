@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import numpy as np
 import pytest
 
-from core.cache.semantic_cache import SemanticLLMCache
-from core.services.llm import LLMService
+from baselith.core.cache.semantic_cache import SemanticLLMCache
+from baselith.core.services.llm import LLMService
 
 
 @pytest.fixture
 def semantic_cache():
-    with patch("core.nlp.models.get_embedder") as mock_get:
+    with patch("baselith.core.nlp.models.get_embedder") as mock_get:
         embedder = MagicMock()
         embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
         mock_get.return_value = embedder
@@ -34,7 +34,7 @@ async def test_namespace_partitions_similarity_lookups(semantic_cache):
 
 
 @pytest.mark.asyncio
-@patch("core.services.llm.service.get_llm_config")
+@patch("baselith.core.services.llm.service.get_llm_config")
 async def test_system_prompt_change_misses_semantic_cache(mock_config, semantic_cache):
     mock_config.return_value = Mock(
         provider="ollama",

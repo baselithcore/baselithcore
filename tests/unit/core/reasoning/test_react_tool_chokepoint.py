@@ -1,7 +1,7 @@
 """The ReAct loop must use the one enforcement chokepoint, not its own copy.
 
 ``react_tools`` re-implemented contract → autonomy → budget by hand, so every
-control added to ``core.orchestration.enforcement`` (plugin capability check,
+control added to ``baselith.core.orchestration.enforcement`` (plugin capability check,
 tool rate limit, pre-hooks, tool audit trail) applied to orchestrated handlers
 and silently skipped the ReAct loop — the path that actually calls tools.
 """
@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-from core.orchestration.hooks import (
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.orchestration.hooks import (
     ToolHookEvent,
     ToolHookRegistry,
     reset_tool_hook_registry,
 )
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 pytestmark = [pytest.mark.unit]
 
@@ -134,7 +134,7 @@ class TestGateStillBehaves:
         assert calls == []
 
     async def test_budget_records_exactly_one_call_per_invocation(self) -> None:
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         calls: list = []
         budget = LoopBudget(limits=LoopLimits(max_tool_calls=5))

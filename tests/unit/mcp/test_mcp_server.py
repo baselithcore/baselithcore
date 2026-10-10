@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from core.mcp.server import MCPServer, create_default_server
+from baselith.core.mcp.server import MCPServer, create_default_server
 
 
 class TestMCPServer:
@@ -251,7 +251,7 @@ class TestMCPSpec20251125:
 
     @pytest.mark.asyncio
     async def test_latest_is_2025_11_25(self) -> None:
-        from core.mcp.handlers import (
+        from baselith.core.mcp.handlers import (
             LATEST_PROTOCOL_VERSION,
             SUPPORTED_PROTOCOL_VERSIONS,
         )
@@ -330,7 +330,7 @@ class TestMCPSpecRefresh:
 
     @pytest.mark.asyncio
     async def test_unknown_version_offers_latest(self) -> None:
-        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+        from baselith.core.mcp.handlers import LATEST_PROTOCOL_VERSION
 
         server = MCPServer()
         resp = await self._init(server, "1999-01-01")
@@ -359,7 +359,7 @@ class TestMCPSpecRefresh:
         assert tools["deleter"]["destructiveHint"] is True
 
     def test_tool_annotations_mapping(self) -> None:
-        from core.mcp.tool_handlers import _tool_annotations
+        from baselith.core.mcp.tool_handlers import _tool_annotations
 
         assert _tool_annotations("read_only") == {
             "readOnlyHint": True,

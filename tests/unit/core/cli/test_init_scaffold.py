@@ -9,7 +9,7 @@ directory under ``templates/`` and simply errored.
 What ``minimal`` did produce was also not a BaselithCore project: it declared
 fastapi, uvicorn and pydantic but **not** ``baselith-core``, pinned
 ``requires-python = ">=3.11"`` against a framework that needs 3.12, stamped the
-framework's own version as the new project's, and documented a ``core/``
+framework's own version as the new project's, and documented a ``baselith/core/``
 directory it never created.
 """
 
@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from core import __version__ as FRAMEWORK_VERSION
-from core.cli.commands.init import (
+from baselith.core import __version__ as FRAMEWORK_VERSION
+from baselith.core.cli.commands.init import (
     PROJECT_TEMPLATES,
     available_templates,
     run_init,
@@ -61,7 +61,7 @@ class TestOnlyWorkingTemplatesAreOffered:
     def test_help_offers_exactly_the_available_templates(self) -> None:
         import argparse
 
-        from core.cli.commands.init import register_parser
+        from baselith.core.cli.commands.init import register_parser
 
         parser = argparse.ArgumentParser()
         init = register_parser(parser.add_subparsers(), argparse.HelpFormatter)
@@ -73,7 +73,7 @@ class TestOnlyWorkingTemplatesAreOffered:
     def test_checkout_templates_found_outside_the_checkout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.init import templates_root
+        from baselith.core.cli.commands.init import templates_root
 
         checkout_templates = Path(__file__).resolve().parents[4] / "templates"
         monkeypatch.chdir(tmp_path)
@@ -84,7 +84,7 @@ class TestOnlyWorkingTemplatesAreOffered:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A wheel ships the starters inside the package, not as ``templates/``."""
-        from core.cli.commands import init
+        from baselith.core.cli.commands import init
 
         packaged = tmp_path / "site" / "core" / "cli" / "scaffold_templates"
         (packaged / "rag-system").mkdir(parents=True)
@@ -110,7 +110,7 @@ class TestOnlyWorkingTemplatesAreOffered:
     def test_a_checkout_in_the_cwd_wins_over_the_package(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands import init
+        from baselith.core.cli.commands import init
 
         packaged = tmp_path / "pkg"
         packaged.mkdir()
@@ -144,7 +144,7 @@ class TestOnlyWorkingTemplatesAreOffered:
 def test_next_steps_fit_the_template(
     files: dict[str, str], expected: list[str]
 ) -> None:
-    from core.cli.commands.init_setup import next_steps
+    from baselith.core.cli.commands.init_setup import next_steps
 
     steps = next_steps(files)
     assert len(steps) == len(expected)
@@ -179,7 +179,7 @@ class TestGeneratedProject:
         source = (project / "app" / "agent.py").read_text()
 
         assert "from baselith import Agent" in source
-        assert "core." not in source
+        assert "baselith.core." not in source
 
     def test_the_readme_describes_the_layout_that_exists(self, project: Path) -> None:
         readme = (project / "README.md").read_text()
@@ -188,7 +188,7 @@ class TestGeneratedProject:
             assert named in readme
             assert (project / named.rstrip("/")).exists()
         # The old README advertised a vendored framework directory.
-        assert "core/          #" not in readme
+        assert "baselith/core/          #" not in readme
 
     def test_the_scaffolded_test_reads_a_public_attribute(self, project: Path) -> None:
         """A starter project must not have to reach into a private dict."""

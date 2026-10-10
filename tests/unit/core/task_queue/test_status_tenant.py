@@ -8,9 +8,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rq.job import Job
 
-from core.config.task_queue import TaskQueueConfig
-from core.task_queue.scheduler import ScheduledTask, TaskScheduler, enqueue_task
-from core.task_queue.status import TaskStatus, TaskTracker
+from baselith.core.config.task_queue import TaskQueueConfig
+from baselith.core.task_queue.scheduler import (
+    ScheduledTask,
+    TaskScheduler,
+    enqueue_task,
+)
+from baselith.core.task_queue.status import TaskStatus, TaskTracker
 
 pytestmark = [pytest.mark.unit]
 
@@ -90,9 +94,11 @@ def queue_mocks():
         redis_url="redis://localhost:6379/0", default_queue="priority"
     )
     with (
-        patch("core.task_queue.scheduler.get_queue", return_value=queue) as get_q,
-        patch("core.task_queue.scheduler.get_task_tracker") as get_tracker,
-        patch("core.config.get_task_queue_config", return_value=config),
+        patch(
+            "baselith.core.task_queue.scheduler.get_queue", return_value=queue
+        ) as get_q,
+        patch("baselith.core.task_queue.scheduler.get_task_tracker") as get_tracker,
+        patch("baselith.core.config.get_task_queue_config", return_value=config),
     ):
         yield get_q, get_tracker.return_value
 
@@ -105,7 +111,8 @@ class TestSchedulerRecordsTenant:
     def test_enqueue_records_the_enqueuing_tenant(self, queue_mocks) -> None:
         _, tracker = queue_mocks
         with patch(
-            "core.task_queue.scheduler.get_current_tenant_id", return_value="acme"
+            "baselith.core.task_queue.scheduler.get_current_tenant_id",
+            return_value="acme",
         ):
             enqueue_task(_task)
         assert tracker.set_status.call_args.kwargs["tenant_id"] == "acme"

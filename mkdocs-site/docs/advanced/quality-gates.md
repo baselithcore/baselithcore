@@ -97,11 +97,11 @@ clean `git push` accepted.
 | `Package Smoke Test` | a built wheel and sdist, Postgres (pgvector), Redis | the distribution contains what it claims; then the wheel alone, installed into a clean venv with only its declared dependencies, imports, runs `baselith --help` and `baselith db migrate`, boots, and answers `/health` and `/health/ready` with 200 ([`scripts/smoke_installed_wheel.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/smoke_installed_wheel.py)) |
 | `Container Image Build` | Docker, multi-arch | the image builds on amd64 and arm64 |
 | `Python Tests` | minutes, every supported Python | the suite with psycopg mocked and no service containers, on every supported Python (3.12 only on pull requests into `develop`), with the coverage gate |
-| `Integration Tests` | Postgres (pgvector), Redis, Qdrant | `tests/integration/` against real backends on Python 3.12, after `python -m core.db.migrate`: the Postgres stores, row-level security, pgvector, the Redis event stream, the Qdrant provider and the migration upgrade path. A skip fails the job |
+| `Integration Tests` | Postgres (pgvector), Redis, Qdrant | `tests/integration/` against real backends on Python 3.12, after `python -m baselith.core.db.migrate`: the Postgres stores, row-level security, pgvector, the Redis event stream, the Qdrant provider and the migration upgrade path. A skip fails the job |
 | `Frontend JS Tests` | node | the shipped SSE client |
 | `Helm Chart` | kubeconform | the chart renders to valid Kubernetes objects |
 | `Workflow Lint (zizmor)` | — | the workflow definitions themselves |
-| `Docs sync` (pull requests only) | the merge base | a changed `core/` module touched its docs page. Its commit-time half is the `docs-sync` **commit-msg** hook, which is also where the `[docs-sync: skip]` opt-out is read |
+| `Docs sync` (pull requests only) | the merge base | a changed `baselith/core/` module touched its docs page. Its commit-time half is the `docs-sync` **commit-msg** hook, which is also where the `[docs-sync: skip]` opt-out is read |
 
 ## When each job runs
 
@@ -123,7 +123,7 @@ The other jobs run only when their inputs changed:
 
 - **The suite, evals, OpenAPI and package checks** are skipped only when every
   changed file is prose: `mkdocs-site/`, root-level Markdown, plugin `docs/`,
-  READMEs and changelogs. Prompt templates under `core/` are Markdown, but they
+  READMEs and changelogs. Prompt templates under `baselith/core/` are Markdown, but they
   count as code.
 - **The Helm chart, frontend JS, client SDK and workflow lint
   jobs** run when their own tree changed.

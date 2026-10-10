@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from core.context import (
+from baselith.core.context import (
     get_current_tenant_id,
     reset_tenant_context,
     set_tenant_context,
 )
-from core.security.encryption import DecryptionError
-from core.tenancy import (
+from baselith.core.security.encryption import DecryptionError
+from baselith.core.tenancy import (
     CrossTenantError,
     derive_tenant_key_material,
     require_tenant_match,

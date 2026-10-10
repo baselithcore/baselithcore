@@ -15,24 +15,24 @@ PAGE = Path("docs/page.md")
 def test_extract_imports_handles_parenthesised_lists_and_comments() -> None:
     text = (
         "```python\n"
-        "from core.prioritization import (\n"
+        "from baselith.core.prioritization import (\n"
         "    Task,          # one, two\n"
         "    PriorityQueue,\n"
         ")\n"
-        "import core.events\n"
+        "import baselith.core.events\n"
         "```\n"
     )
     claims = scan.extract_imports(PAGE, text)
     assert [(c.value, c.extra) for c in claims] == [
-        ("core.prioritization", "Task,PriorityQueue"),
-        ("core.events", ""),
+        ("baselith.core.prioritization", "Task,PriorityQueue"),
+        ("baselith.core.events", ""),
     ]
 
 
 def test_extract_paths_ignores_placeholders_and_finds_root_files() -> None:
-    text = "See core/api/factory.py, plugins/<name>/plugin.py, compose.prod.yaml and tests/x.py."
+    text = "See baselith/core/api/factory.py, baselith/plugins/<name>/plugin.py, compose.prod.yaml and tests/x.py."
     assert [c.value for c in scan.extract_paths(PAGE, text)] == [
-        "core/api/factory.py",
+        "baselith/core/api/factory.py",
         "tests/x.py",
         "compose.prod.yaml",
     ]
@@ -81,8 +81,8 @@ def test_python_imports_are_not_cli_invocations() -> None:
 
 
 def test_settings_fields_derive_prefixed_env_names(tmp_path: Path) -> None:
-    (tmp_path / "core" / "config").mkdir(parents=True)
-    (tmp_path / "core" / "config" / "demo.py").write_text(
+    (tmp_path / "baselith" / "core" / "config").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "config" / "demo.py").write_text(
         "class DemoConfig(BaseSettings):\n"
         '    model_config = SettingsConfigDict(env_prefix="DEMO_")\n'
         "    timeout: int = 5\n"
@@ -100,7 +100,7 @@ def test_check_page_reports_missing_path_link_env_and_cli(tmp_path: Path) -> Non
     page = tmp_path / "docs" / "page.md"
     page.parent.mkdir(parents=True)
     page.write_text(
-        "See [other](other.md) and core/nope.py.\n"
+        "See [other](other.md) and baselith/core/nope.py.\n"
         "```env\nAUTH_NOPE=1\n```\n"
         "Run `baselith plugin explode`.\n"
     )
@@ -115,7 +115,7 @@ def test_check_page_reports_missing_path_link_env_and_cli(tmp_path: Path) -> Non
     )
     messages = "\n".join(findings)
     assert "other.md does not resolve" in messages
-    assert "core/nope.py does not exist" in messages
+    assert "baselith/core/nope.py does not exist" in messages
     assert "AUTH_NOPE is not a known setting" in messages
     assert "`baselith plugin explode` is not a command" in messages
 

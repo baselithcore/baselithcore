@@ -59,14 +59,14 @@ Authentication verifies **who you are**. The framework supports multiple strateg
 
 JWT is the recommended method for web applications and APIs. Tokens are cryptographically signed and contain verifiable claims.
 
-The `AuthManager` singleton (`core/auth/manager.py`) owns the `JWTHandler`;
+The `AuthManager` singleton (`baselith/core/auth/manager.py`) owns the `JWTHandler`;
 `AuthManager.create_token` is `async` because it stamps the user's current
 token epoch into the claim set (see [Incident Response](#incident-response)),
 and `JWTHandler.verify_token` is `async` because it consults the Redis
 blacklist.
 
 ```python
-from core.auth import AuthRole, InvalidTokenError, TokenExpiredError, get_auth_manager
+from baselith.core.auth import AuthRole, InvalidTokenError, TokenExpiredError, get_auth_manager
 
 auth = get_auth_manager()
 
@@ -91,7 +91,7 @@ except InvalidTokenError:
     ...  # tampered, revoked, wrong key, or a refresh token on the access path
 ```
 
-`verify_token` returns an `AuthUser` (`core/auth/types.py`); the decoded
+`verify_token` returns an `AuthUser` (`baselith/core/auth/types.py`); the decoded
 payload is kept on `user.metadata`. `tenant_id`, `exp` and `act` are
 **reserved claims**: they are stripped from `extra_claims`, so pass them as the
 first-class parameters shown above or they are silently dropped.
@@ -128,7 +128,7 @@ For server-to-server integrations or scripts, use API Keys. They're simpler but 
 
 Keys are **operator-minted**: there is no generator endpoint. Mint a random
 token, put it in the environment, and `APIKeyValidator`
-(`core/auth/api_keys.py`) registers it at startup with the role its variable
+(`baselith/core/auth/api_keys.py`) registers it at startup with the role its variable
 implies:
 
 | Variable          | Role(s) granted                                  | Format                                   |
@@ -143,7 +143,7 @@ The same validator is available for runtime registration and for checks
 outside the HTTP path:
 
 ```python
-from core.auth import AuthRole, get_auth_manager
+from baselith.core.auth import AuthRole, get_auth_manager
 
 auth = get_auth_manager()
 
@@ -177,7 +177,7 @@ restart (re-trusting the same value needs an explicit `reinstate_key`).
     - Every authenticated request is already audit-logged (`AUDIT | AUTH`)
 
 !!! warning "Keys must be random tokens, not passwords"
-    Configured keys are indexed by a **SHA-256** hash (`core/auth/api_keys.py`),
+    Configured keys are indexed by a **SHA-256** hash (`baselith/core/auth/api_keys.py`),
     not by a password KDF: the lookup runs on every authenticated request, and a
     slow KDF buys nothing for a high-entropy random token. That reasoning only
     holds while the key *is* random — `SecurityConfig` therefore warns at startup
@@ -193,7 +193,7 @@ capability **scopes** (`resource:action`) are the fine-grained one.
 
 ### Role-Based Access Control (RBAC)
 
-`AuthRole` (`core/auth/types.py`) is a `str` enum:
+`AuthRole` (`baselith/core/auth/types.py`) is a `str` enum:
 
 | Role        | Meaning                                                                                   |
 | ----------- | ----------------------------------------------------------------------------------------- |
@@ -205,15 +205,15 @@ capability **scopes** (`resource:action`) are the fine-grained one.
 | `JOB`       | Automated job/scheduler access                                                            |
 | `SCOPED`    | Pure capability identity: grants nothing on its own, only its explicit scopes apply       |
 
-On FastAPI routes, use the dependencies from `core.middleware.security`
-(re-exported by `core.middleware`). Each one authenticates the request,
+On FastAPI routes, use the dependencies from `baselith.core.middleware.security`
+(re-exported by `baselith.core.middleware`). Each one authenticates the request,
 applies the per-role rate limit, binds the tenant context, and returns the
 **role** that matched (`"anonymous"` on an auth-disabled deployment):
 
 ```python
 from fastapi import APIRouter, Depends
 
-from core.middleware import require_admin, require_admin_or_job, require_user
+from baselith.core.middleware import require_admin, require_admin_or_job, require_user
 
 router = APIRouter()
 
@@ -241,7 +241,7 @@ or `current_user` keyword argument and raises `InsufficientPermissionsError`;
 `roles` means *any of*:
 
 ```python
-from core.auth import AuthRole, AuthUser, get_auth_manager
+from baselith.core.auth import AuthRole, AuthUser, get_auth_manager
 
 auth = get_auth_manager()
 
@@ -253,14 +253,14 @@ async def delete_tenant(tenant_id: str, *, user: AuthUser) -> None:
 
 ### Scope-Based Access
 
-Scopes (`core/auth/scopes.py`) are `resource:action` strings — `chat:read`,
+Scopes (`baselith/core/auth/scopes.py`) are `resource:action` strings — `chat:read`,
 `memory:write`, `webhooks:write`, `plugins:manage`, `mcp:invoke`, … (the full
 set is `KNOWN_SCOPES`). An identity's effective scopes are the ones its roles
 imply (`ROLE_SCOPES`) plus any explicit grant from a scoped API key or a JWT
 `scopes` claim; `"*"` and `"resource:*"` wildcards are honoured.
 
 ```python
-from core.auth import AuthUser, get_auth_manager
+from baselith.core.auth import AuthUser, get_auth_manager
 
 auth = get_auth_manager()
 
@@ -280,7 +280,7 @@ auth.enforce_scopes(user, "chat:read", "memory:read", require_all=True)
 For conditional logic, ask the `AuthUser` directly:
 
 ```python
-from core.auth import AuthRole, scope_satisfied
+from baselith.core.auth import AuthRole, scope_satisfied
 
 
 async def process_request(user, request):
@@ -334,7 +334,7 @@ For LLM inputs, use Guardrails to prevent prompt injection:
 ```python
 from fastapi import HTTPException
 
-from core.guardrails import InputGuard
+from baselith.core.guardrails import InputGuard
 
 guard = InputGuard()  # GuardrailsConfig from the environment by default
 
@@ -387,7 +387,7 @@ PII and harmful-content filtering happen on the **output** side
 
 `InputGuard` only sees the **user prompt**. Instructions hidden inside content
 the agent fetches itself — web pages, tool output, documents — bypass it. The
-`IndirectInjectionScanner` (`core/guardrails/indirect.py`) catches those:
+`IndirectInjectionScanner` (`baselith/core/guardrails/indirect.py`) catches those:
 zero-width/bidi unicode, instruction-bearing HTML comments, hidden CSS, and
 agent-directed phrases.
 
@@ -397,7 +397,7 @@ framework's untrusted-content boundaries — external MCP tool results
 (`MCPClient.call_tool`) and scraped pages (both web-scraper fetchers):
 
 ```python
-from core.guardrails import scan_external_content
+from baselith.core.guardrails import scan_external_content
 
 text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
 ```
@@ -411,22 +411,22 @@ comments are stripped from flagged content before it reaches the model. Set
 
 Anything that reaches a log line from outside the process — plugin manifest
 fields, filenames, header values — can carry newlines or terminal escapes and
-forge additional log entries. `sanitize_log_value` (`core/utils/logsafe.py`)
+forge additional log entries. `sanitize_log_value` (`baselith/core/utils/logsafe.py`)
 escapes every non-printable character (`\n` becomes the literal `\x0a`, so the
 evidence survives) and caps the length, keeping one record on one line. It is
 applied at every boundary where outside text meets a log line — the plugin
 gates and loader, the plugin admin API, the tenant router, and the `SafeLogger`
-fallback in `core/observability/logging.py`, which also replaces values whose
+fallback in `baselith/core/observability/logging.py`, which also replaces values whose
 key marks them a secret:
 
 ```python
-from core.utils import sanitize_log_value
+from baselith.core.utils import sanitize_log_value
 
 logger.error("Refusing plugin %s: integrity check failed", sanitize_log_value(name))
 ```
 
 It is stdlib-only by design — the plugin integrity and signature gates
-(`core/plugins/integrity.py`, `core/plugins/signing.py`) use it before the
+(`baselith/core/plugins/integrity.py`, `baselith/core/plugins/signing.py`) use it before the
 observability stack is available, and `PluginLoader` escapes every
 manifest-supplied name it logs.
 
@@ -435,11 +435,11 @@ manifest-supplied name it logs.
 A plugin identifier names a directory under the plugins root, and it arrives
 from outside: an HTTP path parameter (`/api/plugins/{plugin_name}/reload`), a
 CLI argument, a manifest field. `safe_plugin_path`
-(`core/plugins/_resolve.py`) is the only sanctioned way to turn one into a
+(`baselith/core/plugins/_resolve.py`) is the only sanctioned way to turn one into a
 path — a whitelist on the identifier plus a containment check on the result:
 
 ```python
-from core.plugins._resolve import safe_plugin_path
+from baselith.core.plugins._resolve import safe_plugin_path
 
 plugin_dir = safe_plugin_path(self.plugins_dir, plugin_name)  # ValueError if it escapes
 ```
@@ -454,14 +454,14 @@ realpath-and-prefix check against `PLUGIN_PUBLISH_WORKSPACE_ROOT` and pass the
 
 ### Agent-Initiated Commerce Replay Protection
 
-Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
+Signed mandate chains (`baselith/core/world_model/mandates.py`) authorize autonomous
 purchases. **Replay protection is on by default**: `verify_chain(...)` consumes
 each intent exactly once, so a valid signed chain cannot be re-submitted within
 its expiry window. Passing `replay_guard=None` is the explicit opt-in to
 stateless verification.
 
 The default guard is resolved lazily by
-`core.world_model.replay_guard.build_default_replay_guard()`: a Redis-backed
+`baselith.core.world_model.replay_guard.build_default_replay_guard()`: a Redis-backed
 `RedisReplayGuard` (`SET key value NX EX`, atomic across workers and replicas)
 when `CACHE_REDIS_URL` is configured, otherwise the process-local
 `InMemoryReplayGuard` — which logs an ERROR in production, because with
@@ -550,9 +550,9 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_PLUGIN_PERMISSIONS` | `warn` | How strictly a plugin's declared `permissions:` block is applied: `off` (parsed, never consulted), `warn` (a call outside the declared set is logged once and proceeds), `enforce` (refused). Integrity proves *which code* runs; this decides what it may do. Egress, `tools` and `secrets` are enforced at their chokepoints; `filesystem` is documentation only. A plugin that declared **nothing** is never refused, even under `enforce` — see [Packaging › Permissions](../plugins/packaging.md#permissions). |
 | `BASELITH_WORKFLOW_VERSION_PINNING` | **`enforce`** | A durable workflow run is pinned to the definition it started on (declared version + structural fingerprint). `enforce` fails a resume whose definition changed mid-flight rather than replaying recorded outputs into an edited graph; `warn` logs and continues; `off` records the pin but ignores mismatches. Safe as a default because a run with no pin gets one on first sight and cannot mismatch retroactively. |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
-| `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
+| `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`baselith.core.webhooks`) to target loopback/private/link-local hosts. |
 | `A2A_ALLOW_INTERNAL_ENDPOINTS` | **dev on / prod off** | `A2AClientConfig.allow_internal_endpoints` default. Unset, it is environment-aware: allowed in development (meshes commonly run peer agents internally), denied in production (a peer endpoint cannot be steered at cloud metadata/Redis/Postgres). An explicit `true`/`false` overrides in both directions — set `true` to opt a private-mesh production deployment back in. |
-| `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
+| `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`baselith.core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
 | `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. This covers both a Redis that fails mid-request and one that was never reachable at all, so the client was never built — the second case used to drop silently to per-process counting for the life of the process. Only applies when `CACHE_BACKEND=redis` is actually declared: a deployment with no Redis runs the in-process counter by design. Set true to prefer availability over the control. |
@@ -689,7 +689,7 @@ dependency is finally fixed and the entry deleted.
 
     | Query | Why | What still catches it |
     | ----- | --- | --------------------- |
-    | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | the operator password goes through PBKDF2-SHA256 (`core/middleware/_admin_credentials.py`); `SecurityConfig` warns on short API keys |
+    | `py/weak-sensitive-data-hashing` | `baselith/core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | the operator password goes through PBKDF2-SHA256 (`baselith/core/middleware/_admin_credentials.py`); `SecurityConfig` warns on short API keys |
     | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
     | `js/clear-text-storage-of-sensitive-data` | the operator console keeps the API key the operator pastes in `sessionStorage`; a client-held bearer credential has no more-secure browser store (httpOnly cookies need a server-side session the console does not have) | the key is write-only in the UI — never read back into the DOM, dropped when the tab closes — and `API_KEYS_SCOPED` bounds what a leaked key can reach |
 
@@ -724,7 +724,7 @@ dependency is finally fixed and the entry deleted.
     again, and forcing it would have meant rebuilding the 1.89GB dependency copy
     and the 1.39GB Chromium install below it. Last, it sits downstream of the
     source `COPY`s, which change on every release because semantic-release
-    rewrites `core/_version.py`; the layer is therefore rebuilt every release
+    rewrites `baselith/core/_version.py`; the layer is therefore rebuilt every release
     for free and is the only one that is. It also sits downstream of the ~60
     apt packages the Chromium step installs, which an upgrade placed earlier
     could never reach — on a fresh build that costs nothing, since apt installs
@@ -802,7 +802,7 @@ dependency is finally fixed and the entry deleted.
 
 `integrity_sha256` proves the tree matches what was signed; `signature_ed25519`
 proves **who** signed it. The set of publishers a deployment accepts comes from two
-sources (`core/plugins/signing.py`), merged:
+sources (`baselith/core/plugins/signing.py`), merged:
 
 | Source | Shape | Limits |
 | ------ | ----- | ------ |
@@ -883,7 +883,7 @@ set). `TrustedKey.rejection_reason()` returns `"revoked"`,
 
 ```python
 # ✅ Correct: use config
-from core.config import get_security_config
+from baselith.core.config import get_security_config
 
 config = get_security_config()
 secret = config.secret_key
@@ -926,7 +926,7 @@ logger.info(f"Using API key: {api_key}")  # NO!
     `conninfo` is a plain `@property`, not a `computed_field` — as a computed
     field the assembled DSN would be dumped with the password in clear,
     defeating the `SecretStr` on `DB_PASSWORD`. `RedisCacheConfig.url`
-    (`core/config/cache.py`, env `CACHE_REDIS_URL`) follows the identical
+    (`baselith/core/config/cache.py`, env `CACHE_REDIS_URL`) follows the identical
     contract.
 
 ### Pluggable Secrets Backend
@@ -941,7 +941,7 @@ SECRETS_DIR=/run/secrets        # reads /run/secrets/DB_PASSWORD, honours DB_PAS
 ```
 
 ```python
-from core.security import get_secret
+from baselith.core.security import get_secret
 
 db_password = get_secret("DB_PASSWORD")   # SecretStr | None
 ```
@@ -962,7 +962,7 @@ the Postgres webhook store uses it (endpoint secrets and headers); your own
 columns are encrypted by calling the encryptor:
 
 ```python
-from core.security import get_field_encryptor
+from baselith.core.security import get_field_encryptor
 
 enc = get_field_encryptor()               # None if not configured
 if enc:
@@ -1105,7 +1105,7 @@ Following security best practices and the CORS specification, **credentials (coo
 
 ## CSRF Protection
 
-`CSRFOriginMiddleware` (pure ASGI, `core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+`CSRFOriginMiddleware` (pure ASGI, `baselith/core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
 
 1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS` — **or** the request must be same-origin: `Sec-Fetch-Site: same-origin`, or an `Origin` whose scheme, host and port equal the request's own (scheme + `Host` header; the fallback for browsers without Fetch metadata). A page served by the deployment itself — the `/admin` dashboard — therefore needs no `ALLOW_ORIGINS` entry. A *sibling* host (`Sec-Fetch-Site: same-site` with a foreign `Origin`) is **not** implicitly trusted: `same-site` also covers subdomains the operator may not control (user-content hosts, third-party-hosted subdomains), so split `api.`/`app.` deployments list the app origin in `ALLOW_ORIGINS`. Pin `TRUSTED_HOSTS` in production so the `Host` the comparison reads is one you serve.
 2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, the origin check is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)) and the Fetch-metadata fallback below still applies.
@@ -1192,7 +1192,7 @@ hostname. Starlette compares the `Host` up to the first `:`, so the port is
 ignored and an IPv6 literal (`[::1]`) can never match.
 
 !!! danger "Startup check: empty `TRUSTED_HOSTS` in production is fail-closed"
-    `core.api.startup_checks._warn_missing_trusted_hosts` — run from
+    `baselith.core.api.startup_checks._warn_missing_trusted_hosts` — run from
     `warm_auth_singletons()` during lifespan — **refuses to start** the app in
     production when `TRUSTED_HOSTS` is empty (`UnvalidatedHostConfigError`,
     with remediation in the message), the same posture as the JWT trust
@@ -1202,7 +1202,7 @@ ignored and an IPv6 literal (`[::1]`) can never match.
     downgrades the check to an ERROR log. Outside production it is silent.
 
 !!! danger "Startup check: an RLS policy that applies to nobody is fail-closed"
-    `core.db.rls_posture.enforce_rls_posture` — run from
+    `baselith.core.db.rls_posture.enforce_rls_posture` — run from
     `run_startup_health_checks()` — **refuses to start** the app in production
     when `DB_RLS_ENABLED=true` and the role the pool authenticates as defeats
     the policies (`RlsBypassError`). PostgreSQL skips a policy for a
@@ -1278,7 +1278,7 @@ The scraper validates all outgoing URLs against a private-IP blocklist. Hostname
 
 ```python
 # Internal helper — used automatically by HttpxFetcher
-from core.scraper.utils import get_pinned_url_for_host
+from baselith.core.scraper.utils import get_pinned_url_for_host
 
 result = get_pinned_url_for_host("https://example.com/page")
 if result is None:
@@ -1294,11 +1294,11 @@ scraped page cannot smuggle an SSRF probe through a same-origin
 SSRF Protection](../core-modules/scraper.md#security-ssrf-protection).
 
 !!! note "Canonical location"
-    `core.scraper.utils` is a compatibility shim that re-exports from the canonical
-    module `plugins.web_scraper.utils`, whose SSRF checks now delegate to the
-    unified `core.security.ssrf` module (see [Security & Encryption
+    `baselith.core.scraper.utils` is a compatibility shim that re-exports from the canonical
+    module `baselith.plugins.web_scraper.utils`, whose SSRF checks now delegate to the
+    unified `baselith.core.security.ssrf` module (see [Security & Encryption
     §SSRF Protection](../core-modules/security.md#ssrf-protection)). New code
-    should import from `plugins.web_scraper.utils` or `core.security.ssrf`
+    should import from `baselith.plugins.web_scraper.utils` or `baselith.core.security.ssrf`
     directly.
 
 ---
@@ -1324,15 +1324,15 @@ The framework provides protections for main OWASP vulnerabilities:
 
 ## Security Audit Logging
 
-Security events go through the audit logger (`core/observability/audit.py`),
+Security events go through the audit logger (`baselith/core/observability/audit.py`),
 not the application logger. `get_audit_logger()` returns the process-wide
 `AuditLogger`, which fans each `AuditEvent` out to its sinks — a
 `LoggerAuditSink` by default; add the hash-chained `SQLiteAuditSink`
-(`core/observability/audit_chain.py`) with `add_sink(...)` when the trail has
+(`baselith/core/observability/audit_chain.py`) with `add_sink(...)` when the trail has
 to be evidence rather than telemetry.
 
 ```python
-from core.observability import AuditEventType, audit_emit, get_audit_logger
+from baselith.core.observability import AuditEventType, audit_emit, get_audit_logger
 
 audit = get_audit_logger()
 
@@ -1418,7 +1418,7 @@ Most of the controls on this page are *conditional on the runtime environment*:
 plugin signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host
 deny, admin lockout on Redis loss, the JWT `iss`/`aud` startup check and the
 anonymous `/docs` gate all ask `is_production_env()` first. That answer now has
-exactly one implementation — `core/utils/runtime_env.py`, stdlib-only so the
+exactly one implementation — `baselith/core/utils/runtime_env.py`, stdlib-only so the
 plugin-integrity and A2A paths can share it — instead of the three
 near-identical copies that previously drifted.
 
@@ -1434,7 +1434,7 @@ near-identical copies that previously drifted.
 - **Undeclared environments harden when the config smells like prod.** When
   `AUTH_REQUIRED` is on but neither `APP_ENV` nor `ENVIRONMENT` was declared,
   `create_app()` arms `assume_production_when_undeclared()`
-  (`core.utils.runtime_env`) and logs a startup warning: `is_production_env()`
+  (`baselith.core.utils.runtime_env`) and logs a startup warning: `is_production_env()`
   then answers `True`, so *every* gate above fails closed — plugin signature
   enforcement, unsigned-A2A rejection, the A2A SSRF internal-host deny, `/docs`
   off. Previously only `/docs` applied this heuristic while everything else
@@ -1456,7 +1456,7 @@ near-identical copies that previously drifted.
 ### Agentic loop enforcement
 
 The orchestration safety primitives are enforced on the hot path, not merely
-declared. `core.orchestration.enforcement` exposes two chokepoint helpers that
+declared. `baselith.core.orchestration.enforcement` exposes two chokepoint helpers that
 handlers call around each loop step and tool invocation:
 
 - `enforce_iteration(context)` — advances the per-request `LoopBudget` (iteration
@@ -1494,12 +1494,12 @@ so the address checked is the address connected to (defeats DNS rebinding):
   shorter-lived), gated by `ScraperConfig.block_private_ips` (default `True`).
   See [Web Scraper](../core-modules/scraper.md#security-ssrf-protection).
 
-`core.security.ssrf` (`assert_url_safe`/`assert_url_safe_async`) and
-`core.security.http.create_hardened_async_client` are the unified guard other
+`baselith.core.security.ssrf` (`assert_url_safe`/`assert_url_safe_async`) and
+`baselith.core.security.http.create_hardened_async_client` are the unified guard other
 outbound call sites build on — full API reference in [Security & Encryption
 §SSRF Protection](../core-modules/security.md#ssrf-protection):
 
-- **OIDC discovery** (`core.auth.oidc`) — the issuer and the `jwks_uri` read
+- **OIDC discovery** (`baselith.core.auth.oidc`) — the issuer and the `jwks_uri` read
   back from its discovery document (attacker-influenced if the issuer or its
   DNS is ever compromised) are both screened via `_assert_issuer_safe()`
   before any HTTP call. Every OIDC HTTP call goes through the pinning path —
@@ -1511,19 +1511,19 @@ outbound call sites build on — full API reference in [Security & Encryption
   single-flight across concurrent verifications, and a failed fetch is not
   retried for **5 s**. A forged token therefore cannot turn into an outbound
   IdP call; a genuine key rotation is picked up at most 60 s late.
-- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
+- **A2A client** (`baselith.core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
   gated by `A2AClientConfig.allow_internal_endpoints` (env
   `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:
   internal hosts stay allowed in development for peer meshes but are denied in
   production, matching the MCP/webhook deny-by-default posture. An explicit env
   var overrides in both directions.
-- **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
+- **MCP Streamable HTTP transport** (`baselith.core.mcp.http_client_transport`) — see
   [MCP](../core-modules/mcp.md#ssrf-guard-streamable-http-transport); gated by
   `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).
-- **Fine-tuning providers** (`core.finetuning.providers.TogetherProvider`) —
+- **Fine-tuning providers** (`baselith.core.finetuning.providers.TogetherProvider`) —
   hardcoded public SaaS endpoints; the guard is defense-in-depth with no
   functional impact.
-- **Plugin exporters** (`core.plugins.exporters.router`) — the GitHub →
+- **Plugin exporters** (`baselith.core.plugins.exporters.router`) — the GitHub →
   marketplace JWT exchange always targets `OFFICIAL_MARKETPLACE_URL`, now
   additionally hardened against a compromised/misconfigured marketplace URL.
 
@@ -1531,7 +1531,7 @@ outbound call sites build on — full API reference in [Security & Encryption
 
 This release replaced two independent, partially-overlapping SSRF
 implementations (browser agent, webhook dispatcher) with the single
-`core.security.ssrf`/`core.security.http` module documented above, and
+`baselith.core.security.ssrf`/`baselith.core.security.http` module documented above, and
 adopted it on every outbound-URL call site the audit found. Practical
 consequences when upgrading:
 
@@ -1558,8 +1558,8 @@ consequences when upgrading:
   unaffected — it still resolves DNS and blocks on the resolved IP — so this
   only matters for code calling `is_private_ip()` directly as an offline
   heuristic.
-- **`core/webhooks/ssrf.py` is now a deprecated shim** over
-  `core.security.ssrf` (see [Security & Encryption §Deprecated
+- **`baselith/core/webhooks/ssrf.py` is now a deprecated shim** over
+  `baselith.core.security.ssrf` (see [Security & Encryption §Deprecated
   shims](../core-modules/security.md#deprecated-shims)); existing imports
   keep working unchanged.
 - **Hardened clients no longer honor `HTTP_PROXY`/`HTTPS_PROXY` from the
@@ -1646,7 +1646,7 @@ cached entry.
   `"Internal error"` with no `data`. The exception text — psycopg/redis
   internals, filesystem paths — is logged with `logger.exception` instead of
   being serialized back to the peer, matching what
-  `core.api.errors.unhandled_exception_handler` does on the HTTP surface. See
+  `baselith.core.api.errors.unhandled_exception_handler` does on the HTTP surface. See
   [A2A › Error disclosure](../core-modules/a2a.md#error-disclosure).
 
 ### Plugin install
@@ -1662,7 +1662,7 @@ a host resolving to a loopback/private/metadata address is rejected unless
 `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
 
 Both admission checks now also cover the **synchronous app-middleware
-pre-discovery** (`core.plugins.app_setup.apply_plugin_app_middleware`), which
+pre-discovery** (`baselith.core.plugins.app_setup.apply_plugin_app_middleware`), which
 imports plugins at app-construction time — before the async loader runs — so a
 plugin declaring `setup_app_middleware` reached `exec_module` with
 `BASELITH_REQUIRE_PLUGIN_SIGNATURES` entirely bypassed. See [Plugins ›
@@ -1683,7 +1683,7 @@ In case of suspected breach:
 Revocation has three radii, all on the `AuthManager`:
 
 ```python
-from core.auth import get_auth_manager
+from baselith.core.auth import get_auth_manager
 
 auth = get_auth_manager()
 

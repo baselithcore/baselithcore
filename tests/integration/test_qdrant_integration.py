@@ -41,8 +41,10 @@ async def qdrant() -> AsyncIterator[tuple[Any, str]]:
     if not _enabled():
         pytest.skip("set BASELITH_TEST_REAL_QDRANT=1 (and run Qdrant) to enable")
     pytest.importorskip("qdrant_client")
-    from core.config import get_vectorstore_config
-    from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+    from baselith.core.config import get_vectorstore_config
+    from baselith.core.services.vectorstore.providers.qdrant_provider import (
+        QdrantProvider,
+    )
 
     config = get_vectorstore_config()
     provider = QdrantProvider(host=config.host, port=config.port, timeout=10)

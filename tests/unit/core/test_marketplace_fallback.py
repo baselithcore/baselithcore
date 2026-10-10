@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from core.api.factory import create_app
+from baselith.core.api.factory import create_app
 
 
 def test_app_startup_with_marketplace():
@@ -18,14 +18,14 @@ def test_app_startup_with_marketplace():
 
 def test_marketplace_cli_check():
     """Verify marketplace CLI check function returns a boolean."""
-    from core.cli.commands.plugin.marketplace import _check_marketplace
+    from baselith.core.cli.commands.plugin.marketplace import _check_marketplace
 
     result = _check_marketplace()
     assert isinstance(result, bool)
 
 
 def test_trusted_host_middleware_blocks_unlisted_hosts(monkeypatch):
-    from core.api import factory as factory_module
+    from baselith.core.api import factory as factory_module
 
     monkeypatch.setattr(
         factory_module,
@@ -51,7 +51,7 @@ def test_trusted_host_middleware_blocks_unlisted_hosts(monkeypatch):
 
 def test_publish_uses_marketplace_api_key_env(monkeypatch):
     """`--key` > MARKETPLACE_API_KEY > stored credentials when publishing."""
-    from core.cli.commands.plugin import marketplace as mp
+    from baselith.core.cli.commands.plugin import marketplace as mp
 
     calls: dict[str, object] = {}
 
@@ -71,12 +71,12 @@ def test_publish_uses_marketplace_api_key_env(monkeypatch):
     monkeypatch.setattr(mp, "PluginPublisher", _Publisher)
     monkeypatch.setenv("MARKETPLACE_API_KEY", "env-key")
 
-    mp.publish_plugin_cmd("plugins/example-plugin")
+    mp.publish_plugin_cmd("baselith/plugins/example-plugin")
     assert calls["admin_key"] == "env-key"
 
-    mp.publish_plugin_cmd("plugins/example-plugin", key="flag-key")
+    mp.publish_plugin_cmd("baselith/plugins/example-plugin", key="flag-key")
     assert calls["admin_key"] == "flag-key"
 
     monkeypatch.delenv("MARKETPLACE_API_KEY")
-    mp.publish_plugin_cmd("plugins/example-plugin")
+    mp.publish_plugin_cmd("baselith/plugins/example-plugin")
     assert calls["admin_key"] == "stored-key"

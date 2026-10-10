@@ -21,7 +21,7 @@ BaselithCore has undergone comprehensive optimization focusing on:
 
 ### Connection Pool Lazy Initialization
 
-**Location:** [`core/db/connection.py`](../../core/db/connection.py)
+**Location:** [`baselith/core/db/connection.py`](../../baselith/core/db/connection.py)
 
 **Problem:** The database connection pool was calling `pool.check()` on every connection acquisition, adding unnecessary latency even when the pool was already open.
 
@@ -62,7 +62,7 @@ def get_connection() -> Iterator[Connection[object]]:
 
 ### Metrics Collection System
 
-**Location:** [`core/cache/metrics.py`](../../core/cache/metrics.py)
+**Location:** [`baselith/core/cache/metrics.py`](../../baselith/core/cache/metrics.py)
 
 **Problem:** No visibility into cache performance - impossible to optimize without data on hit rates, evictions, and TTL effectiveness.
 
@@ -100,7 +100,7 @@ async def get(self, key: K) -> Optional[V]:
 **Usage:**
 
 ```python
-from core.cache.metrics import get_metrics_collector
+from baselith.core.cache.metrics import get_metrics_collector
 
 collector = get_metrics_collector()
 
@@ -126,7 +126,7 @@ print(f"Overall hit rate: {summary['overall_hit_rate']:.2%}")
 
 ### Shared Redis Connection Pools
 
-**Location:** [`core/cache/redis_cache.py`](../../core/cache/redis_cache.py)
+**Location:** [`baselith/core/cache/redis_cache.py`](../../baselith/core/cache/redis_cache.py)
 
 **Problem:** Multiple core modules were constructing independent Redis clients for the same URL, which duplicated connection-pool setup and increased socket churn.
 
@@ -171,7 +171,7 @@ Connection Pools* under the 0.14 optimizations below.
 
 ### Lazy Chat Service Bootstrap
 
-**Location:** [`core/chat/service.py`](../../core/chat/service.py)
+**Location:** [`baselith/core/chat/service.py`](../../baselith/core/chat/service.py)
 
 **Problem:** The chat service singleton was instantiated at import time, which forced initialization of heavy dependencies such as embedder, reranker, and cache clients during application startup.
 
@@ -191,7 +191,7 @@ def get_chat_service(plugin_registry: Optional[Any] = None) -> ChatService:
 
 ### Native Async Streaming Path
 
-**Location:** [`core/services/chat/service.py`](../../core/services/chat/service.py)
+**Location:** [`baselith/core/services/chat/service.py`](../../baselith/core/services/chat/service.py)
 
 **Problem:** The async streaming path was bridging a synchronous iterator with `run_in_executor()` for every streamed chunk, adding scheduler overhead and unnecessary thread-pool traffic.
 
@@ -218,11 +218,11 @@ async def handle_chat_stream_async(self, req: ChatRequest) -> AsyncIterator[str]
 
 **Locations:**
 
-- [`core/cache/protocols.py`](../../core/cache/protocols.py)
-- [`core/cache/local_cache.py`](../../core/cache/local_cache.py)
-- [`core/cache/redis_cache.py`](../../core/cache/redis_cache.py)
-- [`core/nlp/models.py`](../../core/nlp/models.py)
-- [`core/services/vectorstore/embedding_cache.py`](../../core/services/vectorstore/embedding_cache.py)
+- [`baselith/core/cache/protocols.py`](../../baselith/core/cache/protocols.py)
+- [`baselith/core/cache/local_cache.py`](../../baselith/core/cache/local_cache.py)
+- [`baselith/core/cache/redis_cache.py`](../../baselith/core/cache/redis_cache.py)
+- [`baselith/core/nlp/models.py`](../../baselith/core/nlp/models.py)
+- [`baselith/core/services/vectorstore/embedding_cache.py`](../../baselith/core/services/vectorstore/embedding_cache.py)
 
 **Problem:** Embedding cache lookups and writes were performed one key at a time, turning a batch encode into N Redis round-trips for reads and N more for writes.
 
@@ -242,7 +242,7 @@ await cache.set_many(cache_updates)
 
 ### Batch Vector Retrieval
 
-**Location:** [`core/memory/providers.py`](../../core/memory/providers.py)
+**Location:** [`baselith/core/memory/providers.py`](../../baselith/core/memory/providers.py)
 
 **Problem:** Retrieving multiple memory items required N individual vector store calls, causing significant latency for batch operations.
 
@@ -289,7 +289,7 @@ items = await memory.get_many(item_ids)
 
 ### Single-Round-Trip Rate Limiting
 
-The distributed rate limiter (`core/middleware/rate_limiter.py`) executes one
+The distributed rate limiter (`baselith/core/middleware/rate_limiter.py`) executes one
 atomic Lua script per check (`INCR` + first-hit `EXPIRE`) instead of the
 previous `SET NX EX` + `INCR` pair — half the Redis latency on **every
 authenticated request**, with the same TOCTOU-free semantics.
@@ -347,7 +347,7 @@ same query — the dominant recall cost with remote embedders).
 
 STM/MTM tier scoring and `AgentMemory` working-memory search score all stored
 embeddings against the query with one NumPy matmul
-(`core.utils.similarity.cosine_similarity_many`) instead of a Python-level
+(`baselith.core.utils.similarity.cosine_similarity_many`) instead of a Python-level
 `cosine_similarity` call per item — which also re-converted the same query
 vector and recomputed its norm on every comparison. Invalid entries (empty,
 `None`, mismatched dimension) still score `0.0`, bit-compatible with the
@@ -357,7 +357,7 @@ scalar path.
 
 When plugin analysis shows a memory tier in play, the lifespan warms the
 sentence-transformer embedder via `asyncio.to_thread` at startup
-(`core.api.startup_checks.warm_memory_embedder`). Its lazy first-load is a
+(`baselith.core.api.startup_checks.warm_memory_embedder`). Its lazy first-load is a
 multi-second **synchronous** model load that previously stalled the entire
 event loop on the first recall/RAG request after each deploy.
 
@@ -382,8 +382,8 @@ in RAM. Every other provider already streamed correctly.
 
 ### Single `.env` Parse at Import
 
-`core.config` loads the repository `.env` into `os.environ` exactly once at
-package import (`core.config.env.load_project_env`). Settings classes no
+`baselith.core.config` loads the repository `.env` into `os.environ` exactly once at
+package import (`baselith.core.config.env.load_project_env`). Settings classes no
 longer declare `env_file`, so instantiating the ~30 config classes dropped
 from ~230ms (each re-reading and re-parsing the same file) to ~7ms.
 
@@ -433,7 +433,7 @@ which now awaits async embedders and offloads sync ones to a thread.
 `CrossEncoder.predict` defaults to `batch_size=32`. Off CUDA that only adds
 padding: sentence-transformers sorts pairs by length and maps scores back, so
 the batch size never changes scores or ranking. All core rerank paths score
-through `core.nlp.rerank.score_pairs`, which uses 8 on CPU/MPS and 32 on CUDA.
+through `baselith.core.nlp.rerank.score_pairs`, which uses 8 on CPU/MPS and 32 on CUDA.
 Measured on 50 candidates on CPU: `ms-marco-MiniLM-L-6-v2` 723 ms → 623 ms,
 `bge-reranker-v2-m3` 8.0 s → 6.6 s, with scores equal to within 1.2e-6.
 
@@ -663,7 +663,7 @@ wait on their own timeouts.
 
 ### Cached Handler Resolution
 
-**Location:** [`core/events/bus.py`](../../core/events/bus.py)
+**Location:** [`baselith/core/events/bus.py`](../../baselith/core/events/bus.py)
 
 **Problem:** On every `emit()`, the event bus rebuilt the handler list, rescanned wildcard subscriptions, and re-sorted handlers by priority even when subscriptions had not changed.
 
@@ -689,7 +689,7 @@ def _get_handlers(self, event_name: str) -> tuple[Handler, ...]:
 
 ### Fixed-Size Event History with `deque`
 
-**Location:** [`core/events/bus.py`](../../core/events/bus.py)
+**Location:** [`baselith/core/events/bus.py`](../../baselith/core/events/bus.py)
 
 **Problem:** History trimming used list slicing after every append once the buffer exceeded `max_history`.
 
@@ -708,8 +708,8 @@ def _get_handlers(self, event_name: str) -> tuple[Handler, ...]:
 
 **Locations:**
 
-- [`core/cli/commands/cache.py`](../../core/cli/commands/cache.py)
-- [`core/cli/commands/db.py`](../../core/cli/commands/db.py)
+- [`baselith/core/cli/commands/cache.py`](../../baselith/core/cli/commands/cache.py)
+- [`baselith/core/cli/commands/db.py`](../../baselith/core/cli/commands/db.py)
 
 **Problem:** Long-running operations (cache flush, database reset) provided no feedback, leaving users uncertain if the system was working or frozen.
 
@@ -747,7 +747,7 @@ with Progress(
 
 ### Command Dispatch Refactoring
 
-**Location:** [`core/cli/handlers.py`](../../core/cli/handlers.py)
+**Location:** [`baselith/core/cli/handlers.py`](../../baselith/core/cli/handlers.py)
 
 **Problem:** CLI command handling used 103 lines of cascading if/elif statements with high cyclomatic complexity.
 
@@ -786,7 +786,7 @@ if handler:
 
 ### Path Traversal Prevention
 
-**Location:** [`core/cli/commands/init.py`](../../core/cli/commands/init.py)
+**Location:** [`baselith/core/cli/commands/init.py`](../../baselith/core/cli/commands/init.py)
 
 **Problem:** CRITICAL - Project name input was not validated, allowing path traversal attacks (`../../etc/passwd`).
 
@@ -817,7 +817,7 @@ def is_valid_project_name(name: str) -> bool:
 
 ### Property Validation in Graph Queries
 
-**Location:** [`core/graph/retrieval.py`](../../core/graph/retrieval.py)
+**Location:** [`baselith/core/graph/retrieval.py`](../../baselith/core/graph/retrieval.py)
 
 **Problem:** Property name validation rejected valid identifiers like `created_at`, `user_id`.
 
@@ -845,7 +845,7 @@ if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', prop):
 
 ### AgentMemory Type Hints
 
-**Location:** [`core/memory/manager.py`](../../core/memory/manager.py)
+**Location:** [`baselith/core/memory/manager.py`](../../baselith/core/memory/manager.py)
 
 **Problem:** Constructor parameters used overly generic `Optional[Any]` type hints.
 
@@ -966,7 +966,7 @@ async def long_running_operation(items):
 Monitor these metrics in production:
 
 ```python
-from core.db import get_pool_stats
+from baselith.core.db import get_pool_stats
 
 # psycopg_pool counters per pool role (primary / primary_async / replica /
 # replica_async); pools that were never built are absent. Never opens a pool,
@@ -1062,7 +1062,7 @@ baselith doctor --json
 
 The built-in benchmark script covers these hot paths:
 
-- cold import of `core.chat.service`
+- cold import of `baselith.core.chat.service`
 - cached vs uncached `EventBus.emit()` resolution
 - scalar vs batched local cache operations
 - cold vs warm Redis client factory creation

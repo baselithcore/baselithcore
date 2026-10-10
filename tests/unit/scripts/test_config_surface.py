@@ -1,6 +1,6 @@
 """The configuration-surface gate reads sources instead of importing them.
 
-Importing ``core.config`` loads the repository ``.env`` into ``os.environ``, so
+Importing ``baselith.core.config`` loads the repository ``.env`` into ``os.environ``, so
 an import-based reader would publish a developer's local overrides as the
 shipped defaults. Everything is therefore parsed with ``ast``, which also gives
 the reference page better labels than a runtime repr would.
@@ -41,8 +41,10 @@ class WidgetConfig(BaseSettings):
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    (tmp_path / "core" / "config").mkdir(parents=True)
-    (tmp_path / "core" / "config" / "widget.py").write_text(SETTINGS_MODULE)
+    (tmp_path / "baselith" / "core" / "config").mkdir(parents=True)
+    (tmp_path / "baselith" / "core" / "config" / "widget.py").write_text(
+        SETTINGS_MODULE
+    )
     return tmp_path
 
 
@@ -95,13 +97,15 @@ class TestEnvLiterals:
     """Source literals cover the variables read without a settings field."""
 
     def test_collects_upper_snake_tokens(self, repo):
-        (repo / "core" / "reader.py").write_text('os.getenv("WIDGET_DEBUG")\n')
+        (repo / "baselith" / "core" / "reader.py").write_text(
+            'os.getenv("WIDGET_DEBUG")\n'
+        )
 
         assert "WIDGET_DEBUG" in env_literals(repo)
 
     def test_plugin_manifests_declare_bound_keys(self, repo):
         """A manifest key is injected by the loader with no Python literal."""
-        manifest = repo / "plugins" / "widget"
+        manifest = repo / "baselith" / "plugins" / "widget"
         manifest.mkdir(parents=True)
         (manifest / "manifest.yaml").write_text("config:\n  WIDGET_MANIFEST_KEY: 1\n")
 
@@ -153,7 +157,7 @@ def _setting(**overrides: object) -> Setting:
     fields: dict[str, object] = {
         "env": "WIDGET_HOST",
         "alternatives": (),
-        "module": "core/config/widget.py",
+        "module": "baselith/core/config/widget.py",
         "section": "Widget configuration",
         "class_name": "WidgetSettings",
         "type_label": "str",

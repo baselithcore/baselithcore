@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.optimization.evolution import Candidate, ReflectiveMutator
+from baselith.core.optimization.evolution import Candidate, ReflectiveMutator
 
 pytestmark = [pytest.mark.unit]
 

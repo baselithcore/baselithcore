@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS_DIR = REPO_ROOT / "core" / "db" / "migrations" / "versions"
+MIGRATIONS_DIR = REPO_ROOT / "baselith" / "core" / "db" / "migrations" / "versions"
 MIGRATION_PATH = MIGRATIONS_DIR / "010_system_tenant_rls_exemption.py"
 
 pytestmark = [pytest.mark.unit]
@@ -114,13 +114,13 @@ class TestRevisionChain:
 
 class TestConstantsStayInStep:
     def test_the_system_tenant_id_matches_the_runtime(self, migration):
-        from core.db.session_setup import SYSTEM_TENANT_ID
+        from baselith.core.db.session_setup import SYSTEM_TENANT_ID
 
         assert migration.SYSTEM_TENANT_ID == SYSTEM_TENANT_ID
 
     def test_it_covers_every_protected_table(self, migration):
         """010 widened every table that existed; later ones are born widened."""
-        from core.db.ddl import RLS_PROTECTED_TABLES
+        from baselith.core.db.ddl import RLS_PROTECTED_TABLES
 
         later = set().union(*(m.TENANT_SCOPED_TABLES for m in _later_migrations()))
         assert set(migration.TENANT_SCOPED_TABLES) == set(RLS_PROTECTED_TABLES) - later

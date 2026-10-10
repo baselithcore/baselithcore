@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import PluginLoader, PluginRegistry
-from core.plugins.load_gates import missing_dependency_hint
+from baselith.core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins.load_gates import missing_dependency_hint
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +24,7 @@ def _clean_sys_modules():
     before = set(sys.modules)
     yield
     for key in set(sys.modules) - before:
-        if key.startswith("plugins."):
+        if key.startswith("baselith.plugins."):
             del sys.modules[key]
 
 
@@ -35,7 +35,7 @@ def _write_plugin(root: Path, name: str, imported: str) -> Path:
         f"name: {name}\nversion: 1.0.0\n", encoding="utf-8"
     )
     (plugin_dir / "plugin.py").write_text(
-        f"import {imported}\n\nfrom core.plugins import Plugin\n\n\n"
+        f"import {imported}\n\nfrom baselith.core.plugins import Plugin\n\n\n"
         "class P(Plugin):\n    pass\n",
         encoding="utf-8",
     )
@@ -78,7 +78,7 @@ def test_no_hint_for_anything_else(error: BaseException):
 
 @pytest.mark.asyncio
 async def test_loader_error_carries_the_hint(tmp_path, monkeypatch):
-    from core.plugins import loader as loader_module
+    from baselith.core.plugins import loader as loader_module
 
     messages: list[str] = []
     monkeypatch.setattr(
@@ -89,7 +89,7 @@ async def test_loader_error_carries_the_hint(tmp_path, monkeypatch):
     # A module name that is certainly not installed, routed through the same
     # table as the five real ones.
     monkeypatch.setitem(
-        sys.modules["core.plugins.load_gates"].MOVED_TO_PLUGIN_COMPAT,
+        sys.modules["baselith.core.plugins.load_gates"].MOVED_TO_PLUGIN_COMPAT,
         "baselith_test_absent_mod",
         "baselith-test-absent",
     )

@@ -2,9 +2,9 @@
 
 from datetime import UTC, datetime, timedelta
 
-import core.config.incidents as cfg
-import core.incidents.dora_service as svc_mod
-from core.incidents import (
+import baselith.core.config.incidents as cfg
+import baselith.core.incidents.dora_service as svc_mod
+from baselith.core.incidents import (
     DoraClassification,
     DoraImpactAssessment,
     DoraIncident,
@@ -12,7 +12,7 @@ from core.incidents import (
     IncidentSeverity,
     InMemoryDoraIncidentStore,
 )
-from core.incidents.persistence import SQLiteDoraIncidentStore
+from baselith.core.incidents.persistence import SQLiteDoraIncidentStore
 
 T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC)
 

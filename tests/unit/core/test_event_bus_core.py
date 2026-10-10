@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.events import (
+from baselith.core.events import (
     EventBus,
     EventNames,
     get_event_bus,
@@ -28,7 +28,7 @@ class TestEventBus:
         """Reset global event bus before each test."""
         reset_event_bus()
 
-    @patch("core.events._singleton.get_events_config")
+    @patch("baselith.core.events._singleton.get_events_config")
     def test_creation(self, mock_get_config):
         """Create event bus with defaults."""
         mock_config = Mock()
@@ -158,7 +158,7 @@ class TestEventBus:
         """With validation on, emit() raises and no handler runs."""
         from pydantic import BaseModel
 
-        from core.events import EventSchemaRegistry, EventValidationError
+        from baselith.core.events import EventSchemaRegistry, EventValidationError
 
         class UserCreated(BaseModel):
             user_id: str
@@ -264,7 +264,7 @@ class TestEventBus:
     @pytest.mark.asyncio
     async def test_handler_error_dlq(self):
         """Error handling with Dead Letter Queue."""
-        from core.events.validation import DeadLetterQueue
+        from baselith.core.events.validation import DeadLetterQueue
 
         dlq = DeadLetterQueue(max_size=10)
         bus = EventBus(enable_dlq=True, dlq=dlq)

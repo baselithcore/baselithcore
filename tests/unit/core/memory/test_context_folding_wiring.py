@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from core.config.memory import get_memory_runtime_config
-from core.memory.folding import ContextFolder
-from core.memory.manager import AgentMemory
+from baselith.core.config.memory import get_memory_runtime_config
+from baselith.core.memory.folding import ContextFolder
+from baselith.core.memory.manager import AgentMemory
 
 
 def _clear_config_cache():

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 _WEATHER_OUTPUT_SCHEMA = {
     "type": "object",

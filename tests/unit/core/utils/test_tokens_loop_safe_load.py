@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import core.utils.tokens as tokens_module
+import baselith.core.utils.tokens as tokens_module
 
 
 @pytest.fixture

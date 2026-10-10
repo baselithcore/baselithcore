@@ -9,7 +9,7 @@ import types
 
 import pytest
 
-from core.task_queue.dead_letter import (
+from baselith.core.task_queue.dead_letter import (
     DeadLetterError,
     DeadLetterQueue,
     DeadLetterRecord,
@@ -225,7 +225,7 @@ class TestHandler:
                 return None
 
         monkeypatch.setattr(
-            "core.task_queue.dead_letter.get_dead_letter_queue", lambda: _DLQ()
+            "baselith.core.task_queue.dead_letter.get_dead_letter_queue", lambda: _DLQ()
         )
         job = _fake_job()
         job.retries_left = 0
@@ -241,7 +241,7 @@ class TestHandler:
                 called["n"] += 1
 
         monkeypatch.setattr(
-            "core.task_queue.dead_letter.get_dead_letter_queue", lambda: _DLQ()
+            "baselith.core.task_queue.dead_letter.get_dead_letter_queue", lambda: _DLQ()
         )
         job = _fake_job()
         job.retries_left = 2  # will be retried -> not dead-lettered
@@ -252,7 +252,9 @@ class TestHandler:
         def _boom():
             raise RuntimeError("dlq down")
 
-        monkeypatch.setattr("core.task_queue.dead_letter.get_dead_letter_queue", _boom)
+        monkeypatch.setattr(
+            "baselith.core.task_queue.dead_letter.get_dead_letter_queue", _boom
+        )
         job = _fake_job()
         # Must swallow internal errors and still return True.
         assert dead_letter_handler(job, ValueError, ValueError("x"), None) is True

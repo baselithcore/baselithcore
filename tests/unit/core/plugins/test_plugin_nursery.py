@@ -16,9 +16,9 @@ import asyncio
 
 import pytest
 
-from core.plugins import PluginRegistry
-from core.plugins.health import PluginHealth
-from core.plugins.interface import Plugin, PluginMetadata
+from baselith.core.plugins import PluginRegistry
+from baselith.core.plugins.health import PluginHealth
+from baselith.core.plugins.interface import Plugin, PluginMetadata
 
 
 class _StubPlugin(Plugin):
@@ -161,7 +161,7 @@ class TestBoundedCancellation:
 
     @pytest.mark.asyncio
     async def test_uncooperative_task_does_not_hang_teardown(self, registry):
-        from core.plugins.nursery import PluginTaskNursery
+        from baselith.core.plugins.nursery import PluginTaskNursery
 
         registry._nursery = PluginTaskNursery(cancel_timeout=0.05)
         await _register(registry, _StubPlugin())
@@ -202,7 +202,7 @@ class TestBoundedCancellation:
 
     @pytest.mark.asyncio
     async def test_zero_timeout_does_not_wait(self, registry):
-        from core.plugins.nursery import PluginTaskNursery
+        from baselith.core.plugins.nursery import PluginTaskNursery
 
         registry._nursery = PluginTaskNursery(cancel_timeout=0)
         await _register(registry, _StubPlugin())
@@ -217,7 +217,10 @@ class TestBoundedCancellation:
     @pytest.mark.asyncio
     async def test_spawn_is_refused_while_tearing_down(self, registry):
         """A task started mid-teardown must not outlive the cancellation."""
-        from core.plugins.nursery import PluginTaskClosedError, PluginTaskNursery
+        from baselith.core.plugins.nursery import (
+            PluginTaskClosedError,
+            PluginTaskNursery,
+        )
 
         nursery = PluginTaskNursery(cancel_timeout=0.05)
         registry._nursery = nursery
@@ -276,7 +279,7 @@ class TestBoundedCancellation:
         assert first.get_name() != second.get_name()
 
     def test_timeout_reads_the_environment(self, monkeypatch):
-        from core.plugins.nursery import (
+        from baselith.core.plugins.nursery import (
             DEFAULT_CANCEL_TIMEOUT_SECONDS,
             get_cancel_timeout_seconds,
         )
@@ -302,7 +305,7 @@ class TestClosingWindow:
         plugin owned nothing, and the window closed before ``shutdown()`` ran
         either way, so this task escaped teardown entirely.
         """
-        from core.plugins.nursery import PluginTaskClosedError
+        from baselith.core.plugins.nursery import PluginTaskClosedError
 
         refused: list[bool] = []
 
@@ -349,7 +352,7 @@ class TestClosingWindow:
 
     @pytest.mark.asyncio
     async def test_reload_also_closes_the_window(self, registry):
-        from core.plugins.nursery import PluginTaskClosedError
+        from baselith.core.plugins.nursery import PluginTaskClosedError
 
         refused: list[bool] = []
 

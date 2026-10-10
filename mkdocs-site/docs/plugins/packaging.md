@@ -104,7 +104,7 @@ hash_surface_version: 5           # Written by `baselith plugin sign`. Advisory.
 | `description`           | ✅        | Brief description                                |
 | `author`                | ❌        | Author name or organization                      |
 | `license`               | ❌        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
-| `min_core_version`      | ❌        | Minimum public core release (`CORE_VERSION` in `core/_core_version.py`) — full SemVer `MAJOR.MINOR.PATCH` (e.g. `0.29.0`) |
+| `min_core_version`      | ❌        | Minimum public core release (`CORE_VERSION` in `baselith/core/_core_version.py`) — full SemVer `MAJOR.MINOR.PATCH` (e.g. `0.29.0`) |
 | `max_core_version`      | ❌        | Maximum public core release, same format        |
 | `python_dependencies`   | ❌        | Pip-style (PEP 440) package requirements         |
 | `plugin_dependencies`   | ❌        | Mapping of plugin name → version constraint      |
@@ -114,16 +114,16 @@ hash_surface_version: 5           # Written by `baselith plugin sign`. Advisory.
 | `environment_variables` | ❌        | Required environment variables: names, or mappings with `name`, `description`, `required` |
 | `entry_point`           | ❌        | Which class to instantiate, as `module:Class` (also `:Class` or a bare `Class`). The module half resolves inside the plugin's own package. Without it the loader falls back to finding the single concrete `Plugin` subclass in `plugin.py` — see [Entry points](#entry-point). |
 | `permissions`           | ❌        | What the plugin is allowed to do — see [Permissions](#permissions). `integrity_sha256` proves *which code* runs; this declares what that code may do. |
-| `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs, **this manifest included** — see [What is hashed](#integrity) for the exact surface. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs, **this manifest included** — see [What is hashed](#integrity) for the exact surface. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `baselith.core.plugins.integrity.compute_plugin_hash()`. |
 | `signature_ed25519`     | ❌        | Hex Ed25519 signature over `integrity_sha256`, written by the signing tools. Checked against the trust roots / trust store when `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true` — see [Trusted publishers](../advanced/security.md#plugin-trust-store). |
 | `hash_surface_version`  | ❌        | Which generation of the hashed surface `integrity_sha256` was computed under — currently `5`. **Advisory only**: it is written after the digest and excluded from it, so verification never reads it. Use it for display and "needs re-signing" nudges. |
 | `x-…`                   | ❌        | **Vendor extensions.** Any top-level key prefixed `x-` is legal, carried verbatim and never interpreted by the core — see [Vendor extensions](#vendor-extensions). |
 
 The class in `plugin.py` carries no identity of its own: `name`, `version` and every other
-field are read from the manifest next to it (`core/plugins/_metadata.py`).
+field are read from the manifest next to it (`baselith/core/plugins/_metadata.py`).
 
 !!! warning "Unknown keys are refused"
-    The manifest schema (`core.plugins.manifest_model.PluginManifestModel`) is
+    The manifest schema (`baselith.core.plugins.manifest_model.PluginManifestModel`) is
     `extra="forbid"`: a key outside the table above fails validation and the plugin is
     refused in every environment, with a did-you-mean hint —
     `unknown manifest key(s): 'min_core_verison' (did you mean 'min_core_version'?)`.
@@ -268,13 +268,13 @@ Two different grammars apply:
   `plugin-compat` extra), and a plugin that had relied on them without declaring
   them stopped importing.
 - `min_core_version`, `max_core_version` and every `plugin_dependencies` constraint are
-  parsed by `core/plugins/version.py`: a **full** `MAJOR.MINOR.PATCH` version with at most
+  parsed by `baselith/core/plugins/version.py`: a **full** `MAJOR.MINOR.PATCH` version with at most
   one operator — `==`, `!=`, `>`, `>=`, `<`, `<=`, `^` (same major) or `~` (same
   major.minor). `^1.0` or `>=1.0,<2.0` are rejected as invalid versions.
 
 !!! warning "Fail-closed by default"
     Core-version bounds and `plugin_dependencies` are checked when the plugin loads
-    (`core/plugins/load_gates.py`), and an unsatisfied declaration **skips the plugin**.
+    (`baselith/core/plugins/load_gates.py`), and an unsatisfied declaration **skips the plugin**.
     `BASELITH_ENFORCE_PLUGIN_COMPAT=false` (or `0`/`no`/`off`) is the explicit downgrade
     back to warn-only, meant for booting a deployment while a manifest is corrected —
     setting it to `true` changes nothing, because that is already the default.
@@ -287,8 +287,8 @@ Two different grammars apply:
 !!! note "Declare against the public core, from the manifest alone"
     The public core project is the reference a plugin is written for, wherever it is
     developed. Core bounds name a **public core release** — the gate compares them with
-    `CORE_VERSION` from `core/_core_version.py`, never with a downstream distribution's
-    own `core/_version.py` — so a floor above the latest public release refuses the
+    `CORE_VERSION` from `baselith/core/_core_version.py`, never with a downstream distribution's
+    own `baselith/core/_version.py` — so a floor above the latest public release refuses the
     plugin everywhere. Likewise `python_dependencies` must list every third-party package
     the plugin imports on its load path that the public core does not install: a
     distribution whose base install is larger hides the gap until the plugin is
@@ -342,25 +342,25 @@ cannot brick plugins written before the block existed. Same shape as
 
 | Block | Enforced | Chokepoint |
 | --- | --- | --- |
-| `network.egress` | ✅ | `core/security/ssrf.py` — every screened outbound URL |
-| `tools` | ✅ | `core.orchestration.enforcement.enforce_tool_invocation` |
-| `secrets` | ✅ | `core.security.secrets.get_secret` |
+| `network.egress` | ✅ | `baselith/core/security/ssrf.py` — every screened outbound URL |
+| `tools` | ✅ | `baselith.core.orchestration.enforcement.enforce_tool_invocation` |
+| `secrets` | ✅ | `baselith.core.security.secrets.get_secret` |
 | `filesystem` | ❌ | parsed and surfaced only — see below |
 
 **Egress.** Every outbound plugin request already passes the SSRF guard, which
 is where the per-plugin decision is made — the guard screens the *address*, the
 permission screens *which plugin* may reach it. A refused call raises
-`core.plugins.egress.EgressNotPermittedError`, a subclass of `SsrfError`, so
+`baselith.core.plugins.egress.EgressNotPermittedError`, a subclass of `SsrfError`, so
 callers that already handle a blocked outbound target handle this too.
 
 **Tools.** `enforce_tool_invocation` is the gate every orchestrated tool call
 passes; the permission check sits beside the contract check, because both
 answer "may this tool run at all?" before the approval and budget questions of
-whether it should. A refusal raises `core.plugins.access.ToolNotPermittedError`.
+whether it should. A refusal raises `baselith.core.plugins.access.ToolNotPermittedError`.
 
 **Secrets.** `get_secret` consults the declaration before resolving the value,
 so a refused read never materialises the credential. A refusal raises
-`core.plugins.access.SecretNotPermittedError`.
+`baselith.core.plugins.access.SecretNotPermittedError`.
 
 **`filesystem` is still not enforced.** A plugin's file access has no
 comparable chokepoint — it is `open()` — so a guard would imply a guarantee
@@ -376,7 +376,7 @@ declaration buys is that **the framework's own paths** are held to it, and that
 an operator reading a manifest knows what a plugin says it needs. Real
 containment requires process isolation, which is a different design.
 
-Guards are installed at startup by `core.plugins.guards.install_plugin_guards`,
+Guards are installed at startup by `baselith.core.plugins.guards.install_plugin_guards`,
 which points them at the loaded registry. The mode is resolved per call, so a
 deployment can move from `warn` to `enforce` without a restart.
 
@@ -453,7 +453,7 @@ signed plugin's egress without breaking either the hash or the Ed25519 signature
 over it.
 
 From V5 the digest covers a **canonical projection** of the manifest rather than
-its bytes (`core.plugins.integrity.canonical_manifest_bytes`): the file is parsed,
+its bytes (`baselith.core.plugins.integrity.canonical_manifest_bytes`): the file is parsed,
 `integrity_sha256`, `signature_ed25519` and `hash_surface_version` are dropped, and
 what remains is dumped as compact JSON with sorted keys and appended last under a
 reserved label. So:
@@ -480,7 +480,7 @@ exactly as it did under V4.
 ### Hash surface generations
 
 The hashed surface has widened several times. Each generation is a superset of the
-previous one and is named by `core.plugins.integrity.HashSurface`:
+previous one and is named by `baselith.core.plugins.integrity.HashSurface`:
 
 | Surface         | Releases  | Adds                                                                                   |
 | --------------- | --------- | --------------------------------------------------------------------------------------- |
@@ -529,7 +529,7 @@ automatically for any staged change to a hashed path *or* to a manifest.
 
 A plugin installed as a wheel has no directory under `plugins/`, so the filesystem
 scan never saw it. A distribution can now advertise itself through the standard
-`baselith.plugins` entry-point group (`core/plugins/discovery.py`):
+`baselith.plugins` entry-point group (`baselith/core/plugins/discovery.py`):
 
 ```toml title="pyproject.toml"
 [project.entry-points."baselith.plugins"]
@@ -575,7 +575,7 @@ The entry point may be `plugin.py` or, for a disabled plugin, `plugin.disabled`.
 
 ### Validation Checks
 
-The report has one row per check (`core/cli/commands/plugin/local_validate.py`):
+The report has one row per check (`baselith/core/cli/commands/plugin/local_validate.py`):
 
 1. **Python Syntax**: `plugin.py` parses (AST) without errors
 2. **Plugin Class**: a class whose bases include `Plugin`, `AgentPlugin`, `RouterPlugin` or `GraphPlugin` by name
@@ -608,7 +608,7 @@ description: Brief description
 **"Plugin Class — No class extending Plugin, AgentPlugin, RouterPlugin, GraphPlugin"**
 
 The check matches base-class **names** in the source, so `class MyPlugin(Plugin)` and
-`class MyPlugin(core.plugins.Plugin)` both pass; an aliased import (`from core.plugins
+`class MyPlugin(baselith.core.plugins.Plugin)` both pass; an aliased import (`from baselith.core.plugins
 import Plugin as Base`) does not.
 
 **"Python Deps — Missing: httpx>=0.25,<1.0"**
@@ -820,7 +820,7 @@ names**, and each entry is reported as an unmet plugin dependency.
 **Solution**: Ensure `plugin.py` contains a class extending one of the framework bases:
 
 ```python
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class MyPlugin(Plugin):
@@ -899,7 +899,7 @@ the strict schema exists to prevent.
 
     **No patching the framework (§3(b)).** Registering handlers, routers,
     middleware, services or configuration through the published extension points is
-    *use* of the framework. Modifying, patching or replacing files under `core/`
+    *use* of the framework. Modifying, patching or replacing files under `baselith/core/`
     makes a modified framework — governed by AGPL-3.0-only whatever directory it
     ships in.
 

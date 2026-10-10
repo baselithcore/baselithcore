@@ -13,8 +13,8 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.mcp.client_errors import MCPClientError, MCPTransportError
-from core.mcp.oauth_client import (
+from baselith.core.mcp.client_errors import MCPClientError, MCPTransportError
+from baselith.core.mcp.oauth_client import (
     MCPOAuthError,
     OAuthClient,
     generate_pkce,
@@ -338,7 +338,7 @@ async def test_redirects_are_not_followed() -> None:
 async def test_ssrf_guard_blocks_internal_issuers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import core.config.mcp as cfg
+    import baselith.core.config.mcp as cfg
 
     monkeypatch.setenv("MCP_ALLOW_INTERNAL_ENDPOINTS", "false")
     monkeypatch.setattr(cfg, "_mcp_config", None)

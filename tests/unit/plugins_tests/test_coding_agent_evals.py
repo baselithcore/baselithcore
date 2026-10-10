@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.coding_agent import CodingAgent
-from plugins.coding_agent.evals import CASES, run_eval
-from plugins.coding_agent.evals.__main__ import main
-from plugins.coding_agent.evals.runner import run_workspace_eval
-from plugins.coding_agent.evals.workspace_cases import WORKSPACE_CASES
+from baselith.plugins.coding_agent import CodingAgent
+from baselith.plugins.coding_agent.evals import CASES, run_eval
+from baselith.plugins.coding_agent.evals.__main__ import main
+from baselith.plugins.coding_agent.evals.runner import run_workspace_eval
+from baselith.plugins.coding_agent.evals.workspace_cases import WORKSPACE_CASES
 
 from .coding_agent_fakes import ADD_TESTS, GOOD_ADD, LocalSandbox, ScriptedLLM
 

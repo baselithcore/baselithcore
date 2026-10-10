@@ -6,11 +6,12 @@ import importlib.util
 import sys
 from pathlib import Path
 
-# Load the module by file path: importing the core.services.sandbox package
+# Load the module by file path: importing the baselith.core.services.sandbox package
 # pulls in the docker SDK, which is unavailable/broken in some test envs, and
 # static analysis itself is dependency-free (stdlib ast only).
 _MODULE_PATH = (
     Path(__file__).resolve().parents[5]
+    / "baselith"
     / "core"
     / "services"
     / "sandbox"

@@ -6,18 +6,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.compliance.persistence import SQLitePostMarketStore
-from core.compliance.post_market import (
+from baselith.core.compliance.persistence import SQLitePostMarketStore
+from baselith.core.compliance.post_market import (
     MonitoringMetric,
     PostMarketMonitoringPlan,
     ThresholdDirection,
 )
-from core.compliance.post_market_service import (
+from baselith.core.compliance.post_market_service import (
     PostMarketService,
     get_post_market_service,
     reset_post_market_service,
 )
-from core.compliance.review_sweep import ComplianceReviewScheduler
+from baselith.core.compliance.review_sweep import ComplianceReviewScheduler
 
 
 def _plan(system_id: str = "sys-1") -> PostMarketMonitoringPlan:

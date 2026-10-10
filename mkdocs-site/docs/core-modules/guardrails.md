@@ -3,7 +3,7 @@ title: Guardrails
 description: Input/output protection for security and quality
 ---
 
-The `core/guardrails` module protects the system by validating input and filtering output, preventing attacks and ensuring safe responses.
+The `baselith/core/guardrails` module protects the system by validating input and filtering output, preventing attacks and ensuring safe responses.
 
 ## Why Guardrails Are Critical
 
@@ -30,11 +30,11 @@ Guardrails act as a **bidirectional firewall**:
 ## Structure
 
 ```text
-core/guardrails/
+baselith/core/guardrails/
 ├── __init__.py
 ├── code_review.py      # review_code, CodeReview, CodeReviewComment (generated code)
 ├── config.py           # GuardrailsConfig (plain dataclass) + regex pattern tables
-│                       #   (env surface: core/config/guardrails.py, GUARDRAILS_*)
+│                       #   (env surface: baselith/core/config/guardrails.py, GUARDRAILS_*)
 ├── input_guard.py      # InputGuard, InputValidationResult (direct user input)
 ├── normalize.py        # matching views: NFKC, invisibles, homoglyphs, leet, spacing
 ├── decode.py           # decode-and-rescan: base64 / hex / percent-encoding
@@ -48,7 +48,7 @@ core/guardrails/
 Public exports:
 
 ```python
-from core.guardrails import (
+from baselith.core.guardrails import (
     InputGuard, InputValidationResult, InputClassification,
     OutputGuard, OutputFilterResult,
     GuardrailsConfig,
@@ -57,10 +57,10 @@ from core.guardrails import (
     scan_external_content,
     review_code, CodeReview, CodeReviewComment,
 )
-from core.guardrails.moderation import (
+from baselith.core.guardrails.moderation import (
     ModerationVerdict, OpenAIModerator, get_moderator,
 )
-from core.guardrails.pii import PIIEngine, PresidioEngine, get_pii_engine
+from baselith.core.guardrails.pii import PIIEngine, PresidioEngine, get_pii_engine
 ```
 
 ---
@@ -69,10 +69,10 @@ from core.guardrails.pii import PIIEngine, PresidioEngine, get_pii_engine
 
 `GuardrailsConfig` is a plain `@dataclass` — the value object the guards
 consume. Its environment surface is `GuardrailsSettings`
-(`core/config/guardrails.py`, prefix `GUARDRAILS_`), and
-`core.guardrails.moderation.get_guardrails_config()` builds the dataclass from
+(`baselith/core/config/guardrails.py`, prefix `GUARDRAILS_`), and
+`baselith.core.guardrails.moderation.get_guardrails_config()` builds the dataclass from
 it. That function is the one construction site for the guards the running app
-uses: the orchestrator's guard pair (`core/orchestration/guard_pipeline.py`,
+uses: the orchestrator's guard pair (`baselith/core/orchestration/guard_pipeline.py`,
 built once per process), the content-moderation layer, and `ChatService`'s
 `InputGuard`. An `InputGuard()` / `OutputGuard()` constructed **without** a
 config still uses the dataclass defaults and ignores the environment.
@@ -96,7 +96,7 @@ config still uses the dataclass defaults and ignores the environment.
 dataclass and pass it to a guard:
 
 ```python
-from core.guardrails import GuardrailsConfig
+from baselith.core.guardrails import GuardrailsConfig
 
 config = GuardrailsConfig(
     # input validation
@@ -121,7 +121,7 @@ config = GuardrailsConfig(
 
 !!! note "`GUARDRAILS_*` versus `CHAT_GUARDRAILS_*`"
     `CHAT_GUARDRAILS_*` (on `AppConfig`) configure only the keyword guard of
-    the opt-in `core/chat` RAG pipeline (`core/chat/guardrails.py`, used by
+    the opt-in `baselith/core/chat` RAG pipeline (`baselith/core/chat/guardrails.py`, used by
     `RagWorkflowHandler` — see
     [Chat › RAG Workflow](chat.md#rag-workflow)); they do not touch the guards
     above. Two further env-driven switches sit outside `GuardrailsConfig`: the
@@ -140,7 +140,7 @@ run over the original text **and** over normalised and decoded views of it
 (see [Evasion resistance](#evasion-resistance-normalised-and-decoded-views)).
 
 ```python
-from core.guardrails import InputGuard
+from baselith.core.guardrails import InputGuard
 
 guard = InputGuard()  # or InputGuard(config)
 
@@ -185,7 +185,7 @@ a pattern cannot silently start rejecting real users. See
 [Evaluation](evaluation.md#red-team-regression-gate).
 
 The multilingual patterns are a data table —
-`MULTILINGUAL_INJECTION_PATTERNS` in `core/guardrails/multilingual.py`, one
+`MULTILINGUAL_INJECTION_PATTERNS` in `baselith/core/guardrails/multilingual.py`, one
 key per language code. Adding a language is adding a key; every pattern is
 NFKC-normalised at compile time and must stay anchored to an *instruction*
 noun or to the assistant's own prompt, because the bare verbs ("ignora",
@@ -352,7 +352,7 @@ clean = guard.sanitize(user_input)
 
 ## Content Moderation
 
-`core/guardrails/moderation.py` is the consumer for
+`baselith/core/guardrails/moderation.py` is the consumer for
 `GuardrailsConfig.moderation_enabled` / `moderation_threshold`: a pluggable
 moderator invoked from the orchestrator guard pipeline
 (`guard_input_async` — see
@@ -368,7 +368,7 @@ key comes from the central LLM config: `OPENAI_API_KEY`, or `LLM_API_KEY`
 when `LLM_PROVIDER=openai`.
 
 ```python
-from core.guardrails.moderation import get_moderator
+from baselith.core.guardrails.moderation import get_moderator
 
 moderator = get_moderator()          # None when moderation is off
 if moderator is not None:
@@ -402,7 +402,7 @@ Two properties matter operationally:
   verdict blocks the request.
 
 `get_moderator()` is `lru_cache`d (resolved once per process). Custom
-providers are a plugin concern: `core/` ships the seam and the OpenAI
+providers are a plugin concern: `baselith/core/` ships the seam and the OpenAI
 implementation; anything provider-specific beyond that belongs under
 `plugins/`.
 
@@ -415,7 +415,7 @@ over-long output, redacts PII, and replaces harmful-content matches. The single
 entry point is the synchronous `filter(text)` returning an `OutputFilterResult`.
 
 ```python
-from core.guardrails import OutputGuard
+from baselith.core.guardrails import OutputGuard
 
 guard = OutputGuard()  # or OutputGuard(config)
 
@@ -497,7 +497,7 @@ patterns without producing a result.
 
 Regexes are layer 1: fast and dependency-free, but blind to
 context-dependent PII — names, addresses, locations carry no fixed shape.
-`core/guardrails/pii.py` is the seam for swapping in an NER engine
+`baselith/core/guardrails/pii.py` is the seam for swapping in an NER engine
 (Microsoft Presidio) behind the same redaction step:
 
 ```bash
@@ -526,7 +526,7 @@ redaction, never to no redaction:
 `get_moderator()`. `PIIEngine` is a `Protocol`, and `PresidioEngine` builds
 its analyzer/anonymizer lazily on first construction so the heavy models load
 once. `presidio` is the only engine name the env switch recognizes today —
-`core/` ships the seam and this one reference implementation; anything
+`baselith/core/` ships the seam and this one reference implementation; anything
 wrapping a different NER stack belongs under `plugins/`.
 
 ---
@@ -534,7 +534,7 @@ wrapping a different NER stack belongs under `plugins/`.
 ## Complete Pipeline
 
 ```python
-from core.guardrails import InputGuard, OutputGuard
+from baselith.core.guardrails import InputGuard, OutputGuard
 
 input_guard = InputGuard()
 output_guard = OutputGuard()
@@ -563,10 +563,10 @@ async def safe_chat(user_input: str) -> str:
 ## Prometheus Metrics
 
 The orchestrator guard pipeline instruments every layer it runs. The metrics
-are defined in `core/observability/metrics.py`; the input and PII/moderation
-layers emit them from `core/orchestration/guard_pipeline.py`, while the
+are defined in `baselith/core/observability/metrics.py`; the input and PII/moderation
+layers emit them from `baselith/core/orchestration/guard_pipeline.py`, while the
 `output_groundedness` layer emits its own from
-`core/orchestration/guard_groundedness.py`:
+`baselith/core/orchestration/guard_groundedness.py`:
 
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
@@ -589,7 +589,7 @@ content. See also
 
 `InputGuard` inspects what the **user** typed. It does not see instructions smuggled inside content the agent fetches itself — web pages, emails, documents, tool output. **Indirect prompt injection** hides agent directives in that data so they never pass through the user prompt.
 
-`IndirectInjectionScanner` (`core/guardrails/indirect.py`) scans any blob of untrusted external content **before it enters the model's context window**. It is cheap (pure regex + unicode inspection) and detection-first: you decide whether to block, redact, or flag.
+`IndirectInjectionScanner` (`baselith/core/guardrails/indirect.py`) scans any blob of untrusted external content **before it enters the model's context window**. It is cheap (pure regex + unicode inspection) and detection-first: you decide whether to block, redact, or flag.
 
 It catches:
 
@@ -603,7 +603,7 @@ It catches:
 | `exfil_link`     | Zero-click exfiltration channels: a markdown *image* whose URL carries a query string (fetched by any renderer), or a markdown link whose query names a sensitive value (`secret=`, `token=`, `conversation=`, …) |
 
 ```python
-from core.guardrails import IndirectInjectionScanner
+from baselith.core.guardrails import IndirectInjectionScanner
 
 scanner = IndirectInjectionScanner()
 
@@ -627,7 +627,7 @@ one-call entry point for ingestion boundaries. It scans, logs any findings with
 the `source` label for triage, and returns the content:
 
 ```python
-from core.guardrails import scan_external_content
+from baselith.core.guardrails import scan_external_content
 
 text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
 ```
@@ -643,10 +643,10 @@ It is already wired into the framework's untrusted-content boundaries:
 
 | Boundary | Location | `source` label |
 |----------|----------|----------------|
-| External MCP tool results | `core/mcp/client_operations.py` (`OperationsMixin.call_tool`, mixed into `MCPClient`) | `mcp_tool:<name>` |
-| Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
-| Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
-| Every tool observation (**on by default**) | `core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop, the typed `Agent` loop and the parallel executor | `<tool name>` |
+| External MCP tool results | `baselith/core/mcp/client_operations.py` (`OperationsMixin.call_tool`, mixed into `MCPClient`) | `mcp_tool:<name>` |
+| Scraped pages (HTTP) | `baselith/plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
+| Scraped pages (rendered) | `baselith/plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
+| Every tool observation (**on by default**) | `baselith/core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop, the typed `Agent` loop and the parallel executor | `<tool name>` |
 
 ### Scanning every tool observation (`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`)
 
@@ -678,13 +678,13 @@ rather than an instruction is the other half, and it lives in the
 
 An agent that writes code can leak a credential or ship an `eval()` on user
 input just as easily as it can leak PII in prose. `review_code`
-(`core/guardrails/code_review.py`) is the outbound rail for **generated code
+(`baselith/core/guardrails/code_review.py`) is the outbound rail for **generated code
 and diffs**: a purely deterministic, LLM-free pass — precompiled regexes plus
 a Shannon-entropy check, no network, no model inference — so a verdict is
 reproducible byte-for-byte.
 
 ```python
-from core.guardrails import review_code
+from baselith.core.guardrails import review_code
 
 review = review_code(generated_code)   # or a diff; filename= is caller
                                        # context only, it changes no checks
@@ -744,6 +744,6 @@ calls are deliberately **not** flagged — only dynamic input reaches the
 The `coding_agent` plugin funnels **every code-returning path** through this
 review before a result leaves the agent: a `high` verdict withholds the code
 outright, lower severities ride along as advisory findings — see
-[Agents › CodingAgent](agents.md#deterministic-security-review). `core/`
+[Agents › CodingAgent](agents.md#deterministic-security-review). `baselith/core/`
 ships this deterministic rail only; anything wrapping an external SAST tool
 or a language-aware (AST) analyzer belongs under `plugins/`.

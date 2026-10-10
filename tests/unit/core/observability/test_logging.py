@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from core.observability.logging import (
+from baselith.core.observability.logging import (
     SafeLogger,
     bind_context,
     configure_logging,
@@ -22,7 +22,7 @@ def test_safe_logger_formatting():
     mock_logger.info.assert_called_with("Test message [key=value]")
 
 
-@patch("core.observability.logging.structlog")
+@patch("baselith.core.observability.logging.structlog")
 def test_configure_logging_uses_structlog_if_available(mock_structlog):
     # configure_logging also mutates the REAL stdlib root logger; with
     # structlog mocked its handlers/formatters become MagicMocks, and leaving
@@ -35,7 +35,7 @@ def test_configure_logging_uses_structlog_if_available(mock_structlog):
     saved_handlers = root.handlers[:]
     saved_level = root.level
     try:
-        with patch("core.observability.logging.STRUCTLOG_AVAILABLE", True):
+        with patch("baselith.core.observability.logging.STRUCTLOG_AVAILABLE", True):
             configure_logging(level="DEBUG")
             assert mock_structlog.configure.called
     finally:
@@ -51,7 +51,7 @@ def test_configure_logging_uses_queue_handler_and_delivers():
     import logging as _logging
     from logging.handlers import QueueHandler
 
-    from core.observability import logging as log_mod
+    from baselith.core.observability import logging as log_mod
 
     root = _logging.getLogger()
     saved_handlers = root.handlers[:]
@@ -77,7 +77,7 @@ def test_configure_logging_uses_queue_handler_and_delivers():
 
 def test_stop_log_listener_is_idempotent():
     """Stopping when no listener is active must be a harmless no-op."""
-    from core.observability import logging as log_mod
+    from baselith.core.observability import logging as log_mod
 
     log_mod._stop_log_listener()
     log_mod._stop_log_listener()  # second call must not raise

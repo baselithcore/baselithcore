@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._metadata import PluginMetadata
-from core.plugins.manifest_model import (
+from baselith.core.plugins._metadata import PluginMetadata
+from baselith.core.plugins.manifest_model import (
     ManifestValidationError,
     PluginManifestModel,
     known_manifest_keys,
@@ -22,7 +22,7 @@ from core.plugins.manifest_model import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PLUGINS_DIR = REPO_ROOT / "plugins"
+PLUGINS_DIR = REPO_ROOT / "baselith" / "plugins"
 
 
 def _shipped_manifests() -> list[Path]:

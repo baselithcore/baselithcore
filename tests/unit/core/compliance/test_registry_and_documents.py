@@ -7,32 +7,32 @@ from unittest.mock import patch
 
 import pytest
 
-from core.compliance.annex_iv import (
+from baselith.core.compliance.annex_iv import (
     AnnexIVSection,
     TechnicalDocumentation,
     draft_from_system,
 )
-from core.compliance.documents import (
+from baselith.core.compliance.documents import (
     FriaService,
     RopaService,
     TechnicalDocumentationService,
 )
-from core.compliance.fria import FriaRisk, FundamentalRightsImpactAssessment
-from core.compliance.persistence import (
+from baselith.core.compliance.fria import FriaRisk, FundamentalRightsImpactAssessment
+from baselith.core.compliance.persistence import (
     SQLiteAiSystemStore,
     SQLiteFriaStore,
     SQLiteRopaStore,
     SQLiteTechnicalDocumentationStore,
 )
-from core.compliance.post_market import (
+from baselith.core.compliance.post_market import (
     MonitoringMetric,
     PostMarketMonitoringPlan,
     ThresholdDirection,
 )
-from core.compliance.prohibited import ProhibitedPractice
-from core.compliance.registry import AiSystemNotFoundError, AiSystemRegistry
-from core.compliance.ropa import ProcessingActivity, ProcessingRole
-from core.compliance.types import (
+from baselith.core.compliance.prohibited import ProhibitedPractice
+from baselith.core.compliance.registry import AiSystemNotFoundError, AiSystemRegistry
+from baselith.core.compliance.ropa import ProcessingActivity, ProcessingRole
+from baselith.core.compliance.types import (
     AiSystem,
     AnnexIIIArea,
     ConformityRecord,
@@ -215,7 +215,7 @@ class TestAnnexIVDocumentation:
         # Patch the module logger instead of capturing stdout: the global
         # structlog sink is process-wide mutable state, so a stdout assert
         # is order-dependent under random test ordering.
-        with patch("core.compliance.documents.logger") as log:
+        with patch("baselith.core.compliance.documents.logger") as log:
             approved = await service.approve(doc.id, "quality-lead")
         assert approved.approved_by == "quality-lead"
         logged = " ".join(str(c) for c in log.warning.call_args_list)
@@ -318,7 +318,7 @@ class TestRopa:
         assert self._complete().is_complete is True
 
     def test_a_transfer_without_safeguards_is_incomplete(self):
-        from core.compliance.ropa import InternationalTransfer
+        from baselith.core.compliance.ropa import InternationalTransfer
 
         activity = self._complete()
         activity.transfers = [InternationalTransfer(destination="US")]

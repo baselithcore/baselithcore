@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.adversarial.red_team import RedTeamAgent
-from core.adversarial.types import (
+from baselith.core.adversarial.red_team import RedTeamAgent
+from baselith.core.adversarial.types import (
     AttackCategory,
     AttackResult,
     AttackStatus,
@@ -57,10 +57,10 @@ async def test_llm_detection_verdict():
     mock_llm = AsyncMock()
     mock_llm.generate_response.return_value = " SUCCESS "  # Test trimming
 
-    from core.adversarial.red_team import RedTeamAgent as RTA
+    from baselith.core.adversarial.red_team import RedTeamAgent as RTA
 
     # Patch the actual location where get_llm_service is imported or used
-    with patch("core.services.llm.get_llm_service", return_value=mock_llm):
+    with patch("baselith.core.services.llm.get_llm_service", return_value=mock_llm):
         agent = RTA(llm_detection=True)
         # Force llm_service load
         _ = agent.llm_service

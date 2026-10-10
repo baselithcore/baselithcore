@@ -19,7 +19,7 @@ from .test_http_transport import (
 async def test_scoped_key_without_mcp_scope_is_refused(monkeypatch):
     """Authenticating is not authorizing: a least-privilege key minted for an
     unrelated resource used to reach the whole tool catalog and tools/call."""
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     scoped = _user("key-1", scopes=("webhooks:write",))
     monkeypatch.setattr(
@@ -40,7 +40,7 @@ async def test_scoped_key_without_mcp_scope_is_refused(monkeypatch):
 async def test_identity_without_capability_api_is_refused(monkeypatch):
     """An identity type that cannot answer a scope question is refused rather
     than granted the whole surface by default."""
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     legacy = SimpleNamespace(user_id="legacy", is_authenticated=True)
     monkeypatch.setattr(
@@ -56,7 +56,7 @@ async def test_identity_without_capability_api_is_refused(monkeypatch):
 
 
 async def test_empty_required_scope_disables_the_capability_check(monkeypatch):
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     scoped = _user("key-1", scopes=("webhooks:write",))
     monkeypatch.setattr(
@@ -74,7 +74,7 @@ async def test_empty_required_scope_disables_the_capability_check(monkeypatch):
 async def test_requests_are_metered_per_identity(monkeypatch):
     """Every request spawns server-side work, so an authenticated caller must
     not be able to flood the endpoint unmetered."""
-    from core.mcp import http_authz
+    from baselith.core.mcp import http_authz
 
     metered: list[tuple[str, int, int]] = []
 
@@ -94,7 +94,7 @@ async def test_requests_are_metered_per_identity(monkeypatch):
 async def test_over_budget_request_gets_jsonrpc_429(monkeypatch):
     from fastapi import HTTPException
 
-    from core.mcp import http_authz
+    from baselith.core.mcp import http_authz
 
     class _Limiter:
         async def check(self, key, limit, window):
@@ -114,7 +114,7 @@ async def test_over_budget_request_gets_jsonrpc_429(monkeypatch):
 async def test_sessions_are_owner_scoped_when_auth_is_disabled():
     """With auth off every caller used to share one ``None`` owner bucket, so
     any client could ride or terminate another's session."""
-    from core.mcp.http_authz import build_gate
+    from baselith.core.mcp.http_authz import build_gate
 
     config = _config(mcp_http_require_auth=False)
     gate = build_gate(config, "/mcp", frozenset())

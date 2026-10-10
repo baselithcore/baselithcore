@@ -4,15 +4,15 @@ description: Orchestrator, Intent Classifier, and Flow Router
 ---
 <!-- markdownlint-disable MD046 -->
 
-The `core/orchestration` module manages request routing to appropriate plugins.
+The `baselith/core/orchestration` module manages request routing to appropriate plugins.
 
 ## Module Structure
 
 !!! info "Exports resolve on first access"
     `__init__.py` maps each exported name to the submodule that defines it and
     resolves it on first read ([PEP 562](https://peps.python.org/pep-0562/),
-    via `core._lazy.lazy_exports`). Import sites are unchanged — `from core.orchestration
-    import AutonomyPolicy` and `core.orchestration.checkpoint` both still work — but importing one name no
+    via `baselith.core._lazy.lazy_exports`). Import sites are unchanged — `from baselith.core.orchestration
+    import AutonomyPolicy` and `baselith.core.orchestration.checkpoint` both still work — but importing one name no
     longer costs the whole package. Reaching `AutonomyPolicy` used to pull the whole handler graph and the LLM service with it — 3 209 modules; it now loads 95.
 
     Adding an export means adding it to **both** `_EXPORTS` and the literal
@@ -21,7 +21,7 @@ The `core/orchestration` module manages request routing to appropriate plugins.
     [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
 
 ```text
-core/orchestration/
+baselith/core/orchestration/
 ├── __init__.py              # Public exports
 ├── orchestrator.py          # Main Orchestrator (mixin-composed)
 ├── intent_classifier.py     # IntentClassifier + ClassificationResult
@@ -59,7 +59,7 @@ core/orchestration/
 └── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
 
-Public exports (`from core.orchestration import ...`): `Orchestrator`,
+Public exports (`from baselith.core.orchestration import ...`): `Orchestrator`,
 `IntentClassifier`, `BaseFlowHandler`, `BaseStreamHandler`, the protocols
 (`AgentProtocol`, `FlowHandler`, `StreamHandler`, `IntentClassifierProtocol`,
 `OrchestratorProtocol`), and the efficiency modules (`ParallelToolExecutor`,
@@ -84,7 +84,7 @@ entry points are `process()` and `process_stream()` (provided by
 `ExecutionMixin`).
 
 ```python
-from core.orchestration import Orchestrator
+from baselith.core.orchestration import Orchestrator
 
 orchestrator = Orchestrator()
 
@@ -109,7 +109,7 @@ the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
 
 These primitives are **enforced**, not just injected. Handlers call the
-chokepoint helpers in `core/orchestration/enforcement.py`:
+chokepoint helpers in `baselith/core/orchestration/enforcement.py`:
 
 - `enforce_iteration(context)` — one `LoopBudget.tick()` per loop step.
 - `await enforce_tool_invocation(context, tool_name, category, cost_usd=...,
@@ -232,7 +232,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 `process_stream` yields real, guarded output on every path:
 
 - **Streaming handler registered** — `stream_with_loop_controls`
-  (`core/orchestration/mixins/_streaming.py`) runs the handler under the same
+  (`baselith/core/orchestration/mixins/_streaming.py`) runs the handler under the same
   per-request controls as `process()`: a fresh `LoopBudget` bound at
   `context["loop_budget"]` and as the ambient budget — so the token/USD caps
   (charged when the LLM stream ends) and the `max_seconds` deadline of the LLM
@@ -240,7 +240,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   modality annotation, memory recall (when the orchestrator has a memory
   manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
   injection. Chunks pass through the streaming output guard
-  (`core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
+  (`baselith/core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
   streaming moderation) before they reach the caller; see
   [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
   memory manager, the background memory write is scheduled only when the
@@ -256,7 +256,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   never.
 
 The default `qa_docs` intent streams out of the box. `StandardRagStreamHandler`
-(`core/orchestration/handlers/rag_stream.py`) is the streaming twin of
+(`baselith/core/orchestration/handlers/rag_stream.py`) is the streaming twin of
 `StandardRagHandler`, registered automatically alongside it — only when the
 builtin flow handler is used; a plugin overriding `qa_docs` owns its own
 streaming story. Retrieval is delegated to `StandardRagHandler.retrieve()` and
@@ -275,7 +275,7 @@ source of facts, and retrieval runs on the raw query.
 
 The history itself is untrusted too: an earlier assistant turn can quote a
 tool result or a document. `build_rag_user_prompt` renders it through
-`render_history_context` (`core/orchestration/history_context.py`), which
+`render_history_context` (`baselith/core/orchestration/history_context.py`), which
 scans it with `scan_external_content` (source `conversation_history`, same
 `BASELITH_SANITIZE_EXTERNAL_CONTENT` policy) and seals it in **one**
 `<untrusted_tool_output tool="conversation_history">` envelope, keeping the
@@ -309,18 +309,18 @@ current Question is the user's request.
 
 Labels can lie — a browser's `Content-Type` is whatever the client sent, a
 filename whatever the uploader chose — so
-`core/orchestration/modality_router.py` detects what an attachment *actually*
+`baselith/core/orchestration/modality_router.py` detects what an attachment *actually*
 is, layered by trustworthiness: **magic bytes** first (raster images, `%PDF`,
 audio/video containers incl. RIFF and ISO-BMFF disambiguation), then the
 declared **MIME type**, then the **filename extension**, and finally `"text"`
 for anything undetectable. The PDF and audio signatures are delegated to
-`core/utils/media.py` (`sniff_document_type`, `sniff_audio_type`) — the same
+`baselith/core/utils/media.py` (`sniff_document_type`, `sniff_audio_type`) — the same
 sniffers the vision service's
 [native document/audio path](services.md#native-documents-audio) fails closed
 on, so the signature knowledge lives in exactly one place.
 
 ```python
-from core.orchestration import Modality, annotate_context, detect_modality
+from baselith.core.orchestration import Modality, annotate_context, detect_modality
 
 detect_modality(raw_bytes, filename="report.pdf", mime="application/pdf")
 # -> "image" | "pdf" | "audio" | "video" | "text"
@@ -349,7 +349,7 @@ runs a tiered pipeline: LLM (if enabled and above the confidence threshold) →
 keyword pattern match → default intent.
 
 ```python
-from core.orchestration import IntentClassifier
+from baselith.core.orchestration import IntentClassifier
 
 classifier = IntentClassifier()
 
@@ -379,7 +379,7 @@ whenever an intent is registered or unregistered); a failed or unparseable
 call (`None`) is never cached, so a provider blip does not pin that input to
 the default intent.
 The swarm task-decomposition prompt
-(`core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
+(`baselith/core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
 is catalog-served the same way.
 
 ### Registering intents
@@ -418,7 +418,7 @@ when the `Orchestrator` builds the classifier itself; see
 
 ## Router
 
-`core/orchestration/router.py` provides a semantic `Router` that maps a query
+`baselith/core/orchestration/router.py` provides a semantic `Router` that maps a query
 to candidate agents using vector similarity. It is a separate component from
 the `Orchestrator` (there is no `FlowRouter`).
 
@@ -427,8 +427,8 @@ the `Orchestrator` (there is no `FlowRouter`).
     in the default app constructs one. Use it from your own handler.
 
 ```python
-from core.orchestration.router import Router, RouteRequest
-from core.config import get_router_config
+from baselith.core.orchestration.router import Router, RouteRequest
+from baselith.core.config import get_router_config
 
 router = Router(
     config=get_router_config(),
@@ -455,7 +455,7 @@ Handlers implement the `FlowHandler` protocol. `handle` is async and returns a
 
 ```python
 from typing import Any, AsyncGenerator
-from core.orchestration.protocols import FlowHandler, StreamHandler
+from baselith.core.orchestration.protocols import FlowHandler, StreamHandler
 
 
 class MyFlowHandler:  # structural match for FlowHandler
@@ -500,7 +500,7 @@ gates through the same `/approvals` API) like any other handler — see
 `OrchestrationConfig` uses the `ORCHESTRATOR_` env prefix.
 
 ```python
-from core.config import get_orchestration_config
+from baselith.core.config import get_orchestration_config
 
 config = get_orchestration_config()
 
@@ -553,7 +553,7 @@ fire before any tool is dispatched and any LLM call leaves the process.
 ### Content guard pipeline (`guard_pipeline.py`)
 
 Every `Orchestrator.process` call passes through
-`core/orchestration/guard_pipeline.py` (on by default,
+`baselith/core/orchestration/guard_pipeline.py` (on by default,
 `BASELITH_ORCHESTRATOR_GUARDRAILS=false` to bypass): inbound queries hit
 `InputGuard`'s synchronous regex validation **before any budget or LLM spend**
 — a blocked query returns a structured result
@@ -589,7 +589,7 @@ The outbound gate is `guard_output_async`, awaited by `process()` on the final
 result. The synchronous `guard_output` (PII redaction, harmful-content
 patterns) always applies first. The **groundedness rail** then applies when
 enabled (`BASELITH_OUTPUT_GROUNDEDNESS=off` default | `annotate` | `block` —
-`core/orchestration/guard_groundedness.py`): a response whose result dict
+`baselith/core/orchestration/guard_groundedness.py`): a response whose result dict
 carries non-empty retrieved source material (`sources` or `context`) is
 judged against it by `FaithfulnessEvaluator` — one extra LLM call per sourced
 response, which is why the default is off. `annotate` surfaces
@@ -611,7 +611,7 @@ surfaced under `result["guardrails"]["moderation"]` (`blocked`, `provider`,
 `Orchestrator.process_stream` applies the same inbound gate (regex + optional
 moderation) before intent classification — a blocked query yields a single
 blocked chunk and terminates. On the way out, every stream handler is wrapped in
-`guard_stream` (`core/orchestration/stream_guard.py`): the same `OutputGuard`
+`guard_stream` (`baselith/core/orchestration/stream_guard.py`): the same `OutputGuard`
 (PII redaction, harmful-content patterns, cumulative output-length cap)
 applied on the wire, chunk by chunk, with a **holdback window**
 (`DEFAULT_HOLDBACK = 128` characters). Text is emitted only once it is at
@@ -641,7 +641,7 @@ as everywhere else in the pipeline.
 
 ### `LoopBudget` — iteration, cost + token cap
 
-`core/orchestration/limits.py` enforces hard caps so a runaway loop
+`baselith/core/orchestration/limits.py` enforces hard caps so a runaway loop
 cannot burn budget. A fresh `LoopBudget` is instantiated per request
 by `ExecutionMixin.process` — and by `process_stream` when the intent has a
 stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed as
@@ -667,8 +667,8 @@ per-call timeout (`ToolCall.timeout_seconds`, else the executor default) at
 already clamped the same way. Override at construction:
 
 ```python
-from core.orchestration import Orchestrator
-from core.orchestration.limits import LoopLimits
+from baselith.core.orchestration import Orchestrator
+from baselith.core.orchestration.limits import LoopLimits
 
 orchestrator = Orchestrator(
     loop_limits=LoopLimits(
@@ -693,7 +693,7 @@ budget.charge(0.0008)                  # after each LLM completion
 `LLMService`) records every call's input+output tokens against the budget for
 **all** models — including self-hosted/unpriced ones absent from the pricing
 table — so `max_tokens` is enforced even where `budget_usd` can't be. Token
-counting uses the tiered tokenizer in `core/utils/tokens` (tiktoken when
+counting uses the tiered tokenizer in `baselith/core/utils/tokens` (tiktoken when
 installed, a content-aware heuristic otherwise), the same counter memory context
 assembly (`HierarchicalMemory.get_context`) now budgets by — replacing the old
 character-length heuristic.
@@ -754,11 +754,11 @@ a snapshot of the state at the breach.
 
 #### Ambient budget & enforced USD cost
 
-`core/orchestration/budget_context.py` publishes the per-request `LoopBudget`
+`baselith/core/orchestration/budget_context.py` publishes the per-request `LoopBudget`
 as a `ContextVar`. `ExecutionMixin.process` binds it at request start, so code
 far from the handler — notably `LLMService` — can charge against it without
 threading the budget through every call. After each generation `LLMService`
-charges the call's **real USD cost** (via `core/models/pricing`), which makes
+charges the call's **real USD cost** (via `baselith/core/models/pricing`), which makes
 `LoopLimits.budget_usd` an **enforced** cap rather than advisory. The charge
 follows the model that actually **served** the turn, which is not always the one
 the caller asked for: with `LLM_FALLBACK_CHAIN` configured, another provider's
@@ -795,7 +795,7 @@ still just reuses the ambient budget.
 ### Durable checkpointing & resume
 
 A crash mid-request otherwise loses the entire run and re-runs side effects on
-retry. `core/orchestration/checkpoint.py` adds a durable checkpoint (wired on
+retry. `baselith/core/orchestration/checkpoint.py` adds a durable checkpoint (wired on
 by default in the app — see
 [below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)): a
 JSON-serializable snapshot of run state (query, intent, budget, trajectory,
@@ -807,8 +807,8 @@ Wire a store into the orchestrator; `process()` then persists run state and
 supports `resume`:
 
 ```python
-from core.orchestration import InMemoryCheckpointStore, Orchestrator
-from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+from baselith.core.orchestration import InMemoryCheckpointStore, Orchestrator
+from baselith.core.orchestration.checkpoint_postgres import PostgresCheckpointStore
 
 store = PostgresCheckpointStore()      # durable across restarts
 await store.initialize()               # idempotent CREATE TABLE IF NOT EXISTS
@@ -865,7 +865,7 @@ through `run_step` (see [Durable resume of the typed `Agent`](#durable-resume-of
 **Step keys are content-addressed, not positional.** A step is keyed
 `v2:<tool>:<args-hash>:<occurrence>`, where *occurrence* counts how many
 identical `(tool, args)` steps the current pass already requested
-(`core/orchestration/call_keys.py`). An LLM-driven loop does not replay
+(`baselith/core/orchestration/call_keys.py`). An LLM-driven loop does not replay
 deterministically — a resumed run regenerates its turns, and the model may ask
 for the same effects in another order or with an extra read in between. The
 old `(replay-cursor, tool, args-hash)` key re-executed every recorded step the
@@ -919,7 +919,7 @@ deployment run lately*, completed and failed runs included. That is
 `list_runs`:
 
 ```python
-from core.orchestration import list_runs
+from baselith.core.orchestration import list_runs
 
 rows = await list_runs(store, tenant_id="acme", status=None, limit=50)
 # [{"run_id": ..., "query": ..., "status": "completed", "step": 4,
@@ -946,11 +946,11 @@ redelivers, an operator replays a dead-lettered job, a second replica picks up
 the work. For a read that costs a wasted round trip. For a payment, an outbound
 webhook or an email-sending skill it is a defect the end user sees.
 
-`core/orchestration/idempotency.py` records the intent before the call and the
+`baselith/core/orchestration/idempotency.py` records the intent before the call and the
 outcome after it, keyed by a value derived from the call itself:
 
 ```python
-from core.orchestration.idempotency import CallOccurrences, derive_call_key
+from baselith.core.orchestration.idempotency import CallOccurrences, derive_call_key
 
 occurrences = CallOccurrences()                     # one per pass of the run
 n = occurrences.next(tool, args)                    # 0, then 1 for a repeat
@@ -1008,7 +1008,7 @@ pre-upgrade effect once — the positional key is the thing that cannot match
 it. The extra lookup costs one round trip per first-time effectful call and
 only matters until the ledger's retention window has passed.
 
-The table is created by `core/db/migrations/versions/009_tool_invocations.py`, is
+The table is created by `baselith/core/db/migrations/versions/009_tool_invocations.py`, is
 tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
 window, not an audit log. The sweep bounds `created_at` as well as
@@ -1041,7 +1041,7 @@ The ledger needs a durable backend to dedupe across a restart. A run that
 already has a checkpoint can resume through it instead — or as well:
 
 ```python
-from core.orchestration.checkpoint import init_checkpoint
+from baselith.core.orchestration.checkpoint import init_checkpoint
 
 manager = await init_checkpoint(store, prompt, {"tenant_id": "acme"}, None,
                                 budget, run_id="order-7", resume=True)
@@ -1069,10 +1069,10 @@ inside one worker — and stops helping with a second replica or after a
 restart, which is precisely when a redelivered task re-runs a payment or an
 outbound webhook. The gap only opens where it is hardest to notice.
 
-`core/orchestration/ledger_factory.py` makes the choice explicit:
+`baselith/core/orchestration/ledger_factory.py` makes the choice explicit:
 
 ```python
-from core.orchestration.ledger_factory import get_tool_ledger, reset_tool_ledger
+from baselith.core.orchestration.ledger_factory import get_tool_ledger, reset_tool_ledger
 
 ledger = get_tool_ledger()   # None when the ledger is switched off
 ```
@@ -1132,7 +1132,7 @@ channel exists:
 2. **Decide** — an operator (or approval UI) records the reviewer's verdict:
 
     ```python
-    from core.orchestration import ApprovalPrincipal, record_approval_decision
+    from baselith.core.orchestration import ApprovalPrincipal, record_approval_decision
 
     # HTTP surface: build the principal from the AUTHENTICATED identity
     await record_approval_decision(
@@ -1186,16 +1186,16 @@ calls and graph gates.
 active end-to-end in a stock deployment — durable runs, durable HITL pause,
 and the `/approvals` API. Set it to `false` to run without checkpointing:
 
-- `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
+- `baselith/core/orchestration/checkpoint_factory.py` resolves a process-wide store —
   `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `sqlite`, `memory`, or
   `auto` (the default: postgres when Postgres storage is enabled, else
   memory). The app lifespan runs the store's idempotent schema init at
   startup. When the boot reachability probe
-  ([`core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
+  ([`baselith.core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
   already saw PostgreSQL down, `initialize_default_checkpoint_store()` raises
   `CheckpointStoreUnavailableError` at once instead of waiting out
   `DB_POOL_TIMEOUT`; boot continues degraded and a background task
-  (`core.api._recovery_startup`) re-probes with backoff (2 s doubling to 30 s),
+  (`baselith.core.api._recovery_startup`) re-probes with backoff (2 s doubling to 30 s),
   initializes the store once the database answers, then starts the recovery
   sweep. `is_default_checkpoint_store_initialized()` reports which state the
   process is in.
@@ -1228,7 +1228,7 @@ and the `/approvals` API. Set it to `false` to run without checkpointing:
 
 #### Crash recovery (`ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`)
 
-With checkpointing on, `core/orchestration/recovery.py` closes the always-on
+With checkpointing on, `baselith/core/orchestration/recovery.py` closes the always-on
 loop: `resume_interrupted_runs` consumes `list_resumable()` and re-enters
 runs left in the `running` state by a crash/restart (completed tool steps
 replay from the store, so recovery is idempotent). Runs paused
@@ -1238,7 +1238,7 @@ as a background task at app startup (default off).
 
 **Orphans are failed even with resume off.** Auto resume stays opt-in because
 re-entering a run repeats LLM calls and side effects. With it off, the startup
-wiring runs `stale_sweep_loop` (`core/api/_recovery_startup.py`) instead: every
+wiring runs `stale_sweep_loop` (`baselith/core/api/_recovery_startup.py`) instead: every
 `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` it calls `sweep_stale_runs` and
 marks a `running` checkpoint whose last progress is older than
 `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` (default 1800 s) as `failed`, with
@@ -1256,7 +1256,7 @@ a keyword-only `lock` (anything `DistributedLock`-compatible:
 race skips the sweep entirely and returns an empty report, while an
 acquisition *error* fails **open** — the sweep still runs, because recovery
 matters more than exclusion and the worst case is the old duplicate sweep. The
-startup wiring in `core/api/_recovery_startup.py` (extracted from the app
+startup wiring in `baselith/core/api/_recovery_startup.py` (extracted from the app
 lifespan) passes the Redis-backed `DistributedLock` named
 `checkpoint_recovery_sweep` (TTL 60 s, `auto_renew=True` — resumed runs
 re-enter full agent loops, so a sweep can legitimately hold the lock for
@@ -1291,7 +1291,7 @@ and a run not yet in the store falls back to a full `save`.
 #### Stale-run sweep (`sweep_stale_runs`)
 
 Resume handles runs a crash left behind; `sweep_stale_runs` (also in
-`core/orchestration/recovery.py`) handles the other failure mode — a process
+`baselith/core/orchestration/recovery.py`) handles the other failure mode — a process
 that is still *alive* but wedged. A liveness probe answers HTTP while an agent
 loop hangs on a dead connection; the checkpoint knows better. A run's last
 progress is the **newer** of its `updated_at` (bumped on every step save) and
@@ -1304,7 +1304,7 @@ instead of an eternally "running" ghost. Runs `awaiting_approval` are **never**
 swept — they are waiting on a human, not stuck.
 
 ```python
-from core.orchestration.recovery import sweep_stale_runs
+from baselith.core.orchestration.recovery import sweep_stale_runs
 
 report = await sweep_stale_runs(
     store,                      # the shared CheckpointStore
@@ -1326,11 +1326,11 @@ the past is overwritten on every save. With
 `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=true` (requires
 `ORCHESTRATOR_CHECKPOINT_ENABLED`), both stores additionally append an
 **immutable snapshot at every version**, and
-`core/orchestration/checkpoint_history.py` turns them into LangGraph-style
+`baselith/core/orchestration/checkpoint_history.py` turns them into LangGraph-style
 time-travel primitives:
 
 ```python
-from core.orchestration import fork_run, get_state, get_state_history
+from baselith.core.orchestration import fork_run, get_state, get_state_history
 
 history = await get_state_history(store, "run-42")
 # [{"version": 1, "status": "running", "step": 0, "updated_at": ...}, ...]
@@ -1370,8 +1370,8 @@ The `api_routers` plugin mounts the operator-facing **`/runs` API** alongside
 ### Structured run-event streaming (astream-events equivalent)
 
 Token streaming tells a client what the agent is *saying*; the structured
-event stream tells it what the agent is *doing*. `core/orchestration/run_events.py`
-fans out `AgentEvent`s (`core/api/events.py`) per `run_id`: `run_started`,
+event stream tells it what the agent is *doing*. `baselith/core/orchestration/run_events.py`
+fans out `AgentEvent`s (`baselith/core/api/events.py`) per `run_id`: `run_started`,
 `tool_call` / `tool_result` (emitted by `CheckpointManager.run_step`,
 including replays flagged `replayed: true`), `final`, `error`, and `human`
 (durable approval pause). Publishing with zero subscribers is a no-op, so the
@@ -1380,7 +1380,7 @@ loop pays nothing when nobody listens.
 Library-level consumption — run a query and iterate its events:
 
 ```python
-from core.orchestration import stream_run_events
+from baselith.core.orchestration import stream_run_events
 
 async for event in stream_run_events(orchestrator, "analyze X"):
     print(event.type, event.data)        # run_started → tool_call → ... → final
@@ -1415,17 +1415,17 @@ default 2+-replica HPA: `GET /runs/{run_id}/events` only saw events when the
 SSE connection happened to land on the replica executing the run. Setting
 `BASELITH_RUN_EVENTS_BRIDGE=redis` (documented in `.env.example`; read by the
 app lifespan at startup) starts `RedisRunEventsBridge`
-(`core/orchestration/run_events_bridge.py`), which closes the gap:
+(`baselith/core/orchestration/run_events_bridge.py`), which closes the gap:
 
 - **Publish** — the bridge installs itself as the stream's broadcaster
-  (`set_run_event_broadcaster` in `core.orchestration.run_events`); every
+  (`set_run_event_broadcaster` in `baselith.core.orchestration.run_events`); every
   `publish_run_event` is serialized and published to the Redis channel
   `events:run:<run_id>` as a fire-and-forget task off the running loop.
 - **Listen** — one pattern subscription per process re-injects every received
   event into the local stream, **including on the publishing replica**: one
   Redis round trip of latency buys symmetry with no dedup machinery, and any
   replica can serve any run's SSE feed. It reads via
-  `core.realtime.subscriptions.iter_messages`, not the raw
+  `baselith.core.realtime.subscriptions.iter_messages`, not the raw
   `pubsub.listen()`, so an idle gap can't trip the shared pool's
   `socket_timeout` and force a reconnect; each reconnect attempt also closes
   its old subscription (`close_pubsub`) so it returns its connection to the
@@ -1442,7 +1442,7 @@ single replica, and zero Redis traffic.
 
 ### `AgentContract` — declarative spec
 
-`core/orchestration/contract.py` loads a YAML file describing the
+`baselith/core/orchestration/contract.py` loads a YAML file describing the
 agent's identity, allowed/forbidden tools, output contract, and quality
 gates. When a contract is wired into the orchestrator, the runtime
 `ContractValidator` is exposed at `context["contract_validator"]`.
@@ -1465,8 +1465,8 @@ quality_gates:
 ```
 
 ```python
-from core.orchestration import Orchestrator
-from core.orchestration.contract import load_contract
+from baselith.core.orchestration import Orchestrator
+from baselith.core.orchestration.contract import load_contract
 
 contract = load_contract("agent.yaml")
 orchestrator = Orchestrator(agent_contract=contract)
@@ -1485,7 +1485,7 @@ validator construction.
 
 ### `AutonomyPolicy` — three-tier spectrum
 
-`core/orchestration/autonomy.py` provides a coarse-grained policy that
+`baselith/core/orchestration/autonomy.py` provides a coarse-grained policy that
 governs which tool categories require human approval.
 
 | Level | Read-only | Mutating | Destructive | External side-effect | Self-modify |
@@ -1508,7 +1508,7 @@ rate, red-team pass rate, and successful-run count all clear their
 thresholds (default 0.90 → 0.98).
 
 ```python
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     AutonomyLevel, AutonomyPolicy, AutonomyUpgradeGate,
 )
 
@@ -1527,13 +1527,13 @@ allowed, reasons = gate.can_upgrade_to(AutonomyLevel.FULLY_AUTONOMOUS)
 
 The matrix above is enforced (not just declared) via
 `enforce_approval(policy, category, tool_name, human_intervention=None)`,
-exported from `core.orchestration`. Semantics are **fail-closed**: when the
+exported from `baselith.core.orchestration`. Semantics are **fail-closed**: when the
 category requires approval at the active level, a missing approval channel or
 a human denial raises `ApprovalRequiredError` (a `PermissionError` subclass)
 instead of letting the tool run.
 
 ```python
-from core.orchestration import ApprovalRequiredError, enforce_approval
+from baselith.core.orchestration import ApprovalRequiredError, enforce_approval
 
 try:
     await enforce_approval(
@@ -1596,7 +1596,7 @@ with asymmetric semantics — by design:
   broken audit/lint hook can never break the agent loop.
 
 ```python
-from core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
+from baselith.core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
 
 async def forbid_demo_writes(event: ToolHookEvent) -> None:
     if event.tenant_id == "prod-demo":
@@ -1664,7 +1664,7 @@ indirect prompt injection exploits. `wrap_untrusted` gives the content an
 explicit provenance boundary:
 
 ```python
-from core.orchestration.tool_output import (
+from baselith.core.orchestration.tool_output import (
     UNTRUSTED_OUTPUT_SYSTEM_RULE,
     sanitize_tool_output,
     truncate_tool_output,
@@ -1726,7 +1726,7 @@ Wiring the envelope without the rule is decoration.
 
 ### `TaskClassifier` — short-circuit deterministic tasks
 
-`core/orchestration/task_classifier.py` is a lightweight heuristic that
+`baselith/core/orchestration/task_classifier.py` is a lightweight heuristic that
 returns one of `AGENTIC` / `DETERMINISTIC` / `AMBIGUOUS` for a task
 description. It is conservative: when in doubt the recommendation is
 `AGENTIC`. Use it at the front of the orchestrator to skip the loop on
@@ -1737,7 +1737,7 @@ clearly deterministic requests.
     exists only where your handler or entry point invokes it.
 
 ```python
-from core.orchestration.task_classifier import (
+from baselith.core.orchestration.task_classifier import (
     RoutingRecommendation, TaskClassifier,
 )
 

@@ -5,11 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.plugin_updates.apply.eligibility import apply_status
-from core.plugin_updates.apply.models import ApplyRun, RunKind, UpdaterHeartbeat
-from core.plugin_updates.apply.store import RunStore
-from core.plugin_updates.models import (
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.plugin_updates.apply.eligibility import apply_status
+from baselith.core.plugin_updates.apply.models import (
+    ApplyRun,
+    RunKind,
+    UpdaterHeartbeat,
+)
+from baselith.core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.models import (
     ApplyBlocker,
     Refusal,
     ReleaseInfo,

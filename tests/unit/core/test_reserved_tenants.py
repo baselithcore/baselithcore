@@ -18,16 +18,16 @@ from __future__ import annotations
 
 import pytest
 
-from core.context import RESERVED_TENANT_IDS, is_reserved_tenant
+from baselith.core.context import RESERVED_TENANT_IDS, is_reserved_tenant
 
 pytestmark = [pytest.mark.unit]
 
 
 def test_the_reserved_set_matches_the_identity_the_framework_binds():
-    """``core.context`` cannot import ``core.db.session_setup`` (psycopg, app
+    """``baselith.core.context`` cannot import ``baselith.core.db.session_setup`` (psycopg, app
     config), so the literal is duplicated. This is the seam that keeps the two
     copies honest."""
-    from core.db.session_setup import SYSTEM_TENANT_ID
+    from baselith.core.db.session_setup import SYSTEM_TENANT_ID
 
     assert SYSTEM_TENANT_ID in RESERVED_TENANT_IDS
 
@@ -39,6 +39,7 @@ def test_the_migration_exempts_exactly_the_reserved_identity():
 
     path = (
         Path(__file__).resolve().parents[3]
+        / "baselith"
         / "core"
         / "db"
         / "migrations"
@@ -84,7 +85,7 @@ class TestBindPrincipalTenant:
     check somebody remembered to write next to it.
 
     Round 2b reasoned that the two in-repo binding sites covered everything
-    worth covering. True of this repository; false of a deployment. ``core/`` is
+    worth covering. True of this repository; false of a deployment. ``baselith/core/`` is
     shared with a sibling checkout whose own pure-ASGI context bridges
     authenticate a bearer themselves — including a WebSocket ``?token=`` — and
     bind the claim. Neither of this repo's guards reaches those files. A helper
@@ -92,14 +93,14 @@ class TestBindPrincipalTenant:
     """
 
     def test_it_refuses_the_reserved_identity(self):
-        from core.context import ReservedTenantError, bind_principal_tenant
+        from baselith.core.context import ReservedTenantError, bind_principal_tenant
 
         with pytest.raises(ReservedTenantError, match="reserved"):
             bind_principal_tenant("system")
 
     def test_nothing_is_bound_when_it_refuses(self):
-        from core import context as core_context
-        from core.context import ReservedTenantError, bind_principal_tenant
+        from baselith.core import context as core_context
+        from baselith.core.context import ReservedTenantError, bind_principal_tenant
 
         before = core_context._tenant_context.get()
         with pytest.raises(ReservedTenantError):
@@ -107,7 +108,7 @@ class TestBindPrincipalTenant:
         assert core_context._tenant_context.get() == before
 
     def test_an_ordinary_tenant_binds_and_restores(self):
-        from core.context import (
+        from baselith.core.context import (
             bind_principal_tenant,
             get_current_tenant_id,
             reset_tenant_context,
@@ -126,14 +127,14 @@ class TestBindPrincipalTenant:
         metadata, an event record, a checkpoint's stored tenant — and those may
         legitimately be ``system``. Guarding it would break replaying an event
         emitted inside a maintenance scope."""
-        from core.context import get_current_tenant_id
-        from core.db.connection import system_tenant_scope
+        from baselith.core.context import get_current_tenant_id
+        from baselith.core.db.connection import system_tenant_scope
 
         with system_tenant_scope():
             assert get_current_tenant_id() == "system"
 
     def test_it_is_exported_for_the_sibling_to_follow(self):
         """The point of the helper is that another checkout can import it."""
-        from core import context as core_context
+        from baselith.core import context as core_context
 
         assert callable(core_context.bind_principal_tenant)

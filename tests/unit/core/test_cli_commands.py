@@ -1,13 +1,13 @@
 from unittest.mock import MagicMock, patch
 
-from core.cli.commands.config import show_config, validate_config
-from core.cli.commands.plugin import create_plugin, status_local_plugins
-from core.cli.commands.verify import run_verify
+from baselith.core.cli.commands.config import show_config, validate_config
+from baselith.core.cli.commands.plugin import create_plugin, status_local_plugins
+from baselith.core.cli.commands.verify import run_verify
 
 
 class TestCLIPlugins:
-    @patch("core.cli.commands.plugin.local_status.Path")
-    @patch("core.cli.commands.plugin.local_status.console")
+    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_no_dir(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = False
         assert status_local_plugins() == 0
@@ -17,8 +17,8 @@ class TestCLIPlugins:
             for call in mock_console.print.call_args_list
         )
 
-    @patch("core.cli.commands.plugin.local_status.Path")
-    @patch("core.cli.commands.plugin.local_status.console")
+    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_empty(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = True
         mock_path.return_value.iterdir.return_value = []
@@ -30,8 +30,8 @@ class TestCLIPlugins:
             for call in mock_console.print.call_args_list
         )
 
-    @patch("core.cli.commands.plugin.local_status.Path")
-    @patch("core.cli.commands.plugin.local_status.console")
+    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_success(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = True
 
@@ -75,8 +75,8 @@ class TestCLIPlugins:
     # Registration writes configs/plugins.yaml relative to the cwd, which in a
     # test run is the checkout: unpatched, it flipped the tracked file's
     # ``my-plugin`` entry to enabled.
-    @patch("core.cli.commands.plugin.create._register_plugin_config")
-    @patch("core.cli.commands.plugin.create.Path")
+    @patch("baselith.core.cli.commands.plugin.create._register_plugin_config")
+    @patch("baselith.core.cli.commands.plugin.create.Path")
     @patch("builtins.print")
     def test_create_plugin_success(self, mock_print, mock_path, mock_register):
         plugins_dir = MagicMock()
@@ -93,8 +93,8 @@ class TestCLIPlugins:
         # Should write at least 3 files
         assert new_plugin_dir.__truediv__.call_count >= 3
 
-    @patch("core.cli.commands.plugin.create.Path")
-    @patch("core.cli.commands.plugin.create.print_error")
+    @patch("baselith.core.cli.commands.plugin.create.Path")
+    @patch("baselith.core.cli.commands.plugin.create.print_error")
     def test_create_plugin_exists(self, mock_err, mock_path):
         plugins_dir = MagicMock()
         mock_path.return_value = plugins_dir
@@ -107,11 +107,11 @@ class TestCLIPlugins:
         mock_err.assert_called_once()
         assert "already exists" in mock_err.call_args[0][0]
 
-    @patch("core.cli.commands.plugin.local_manage.Path")
-    @patch("core.cli.commands.plugin.local_manage.shutil")
+    @patch("baselith.core.cli.commands.plugin.local_manage.Path")
+    @patch("baselith.core.cli.commands.plugin.local_manage.shutil")
     @patch("builtins.input", return_value="y")
     def test_delete_plugin_success(self, mock_input, mock_shutil, mock_path):
-        from core.cli.commands.plugin import delete_local_plugin
+        from baselith.core.cli.commands.plugin import delete_local_plugin
 
         plugins_dir = MagicMock()
         mock_path.return_value = plugins_dir
@@ -125,10 +125,10 @@ class TestCLIPlugins:
         mock_shutil.rmtree.assert_called_once_with(target_plugin)
 
     # Without this the sync writes the checkout's configs/plugins.yaml.
-    @patch("core.cli.commands.plugin.local_manage._sync_config_enabled")
-    @patch("core.cli.commands.plugin.local_manage.Path")
+    @patch("baselith.core.cli.commands.plugin.local_manage._sync_config_enabled")
+    @patch("baselith.core.cli.commands.plugin.local_manage.Path")
     def test_disable_plugin_success(self, mock_path, mock_sync):
-        from core.cli.commands.plugin import disable_local_plugin
+        from baselith.core.cli.commands.plugin import disable_local_plugin
 
         plugins_dir = MagicMock()
         mock_path.return_value = plugins_dir
@@ -149,12 +149,12 @@ class TestCLIPlugins:
 
 class TestCLIConfig:
     # Patch the SOURCE modules because config.py uses local imports
-    @patch("core.config.get_core_config")
-    @patch("core.config.get_llm_config")
-    @patch("core.config.get_chat_config")
-    @patch("core.config.get_vectorstore_config")
-    @patch("core.cli.commands.config.console")
-    @patch("core.cli.commands.config.print_header")
+    @patch("baselith.core.config.get_core_config")
+    @patch("baselith.core.config.get_llm_config")
+    @patch("baselith.core.config.get_chat_config")
+    @patch("baselith.core.config.get_vectorstore_config")
+    @patch("baselith.core.cli.commands.config.console")
+    @patch("baselith.core.cli.commands.config.print_header")
     def test_show_config(
         self, mock_header, mock_console, mock_vs, mock_chat, mock_llm, mock_core
     ):
@@ -179,12 +179,12 @@ class TestCLIConfig:
         mock_header.assert_called_once()
         mock_console.print.assert_called()
 
-    @patch("core.config.get_core_config")
-    @patch("core.config.get_llm_config")
-    @patch("core.config.get_chat_config")
-    @patch("core.config.get_vectorstore_config")
-    @patch("core.cli.commands.config.console")
-    @patch("core.cli.commands.config.print_header")
+    @patch("baselith.core.config.get_core_config")
+    @patch("baselith.core.config.get_llm_config")
+    @patch("baselith.core.config.get_chat_config")
+    @patch("baselith.core.config.get_vectorstore_config")
+    @patch("baselith.core.cli.commands.config.console")
+    @patch("baselith.core.cli.commands.config.print_header")
     def test_validate_config_success(
         self, mock_header, mock_console, mock_vs, mock_chat, mock_llm, mock_core
     ):
@@ -192,9 +192,9 @@ class TestCLIConfig:
         assert validate_config() == 0
         mock_console.print.assert_called()
 
-    @patch("core.config.get_core_config")
-    @patch("core.cli.commands.config.console")
-    @patch("core.cli.commands.config.print_header")
+    @patch("baselith.core.config.get_core_config")
+    @patch("baselith.core.cli.commands.config.console")
+    @patch("baselith.core.cli.commands.config.print_header")
     def test_validate_config_failure(self, mock_header, mock_console, mock_core):
         mock_core.side_effect = Exception("Config missing")
         assert validate_config() == 1
@@ -202,10 +202,10 @@ class TestCLIConfig:
 
 
 class TestCLIVerify:
-    @patch("core.cli.commands.verify.console")
-    @patch("core.cli.commands.verify.print_header")
-    @patch("core.cli.commands.verify.sys")
-    @patch("core.cli.commands.verify.Path")
+    @patch("baselith.core.cli.commands.verify.console")
+    @patch("baselith.core.cli.commands.verify.print_header")
+    @patch("baselith.core.cli.commands.verify.sys")
+    @patch("baselith.core.cli.commands.verify.Path")
     def test_run_verify_success(self, mock_path, mock_sys, mock_header, mock_console):
         mock_sys.version_info = MagicMock(major=3, minor=12, micro=0)
         # Using a logic that allows the test to pass
@@ -238,9 +238,9 @@ class TestCLIVerify:
 
         assert run_verify() == 0
 
-    @patch("core.cli.commands.verify.console")
-    @patch("core.cli.commands.verify.print_header")
-    @patch("core.cli.commands.verify.sys")
+    @patch("baselith.core.cli.commands.verify.console")
+    @patch("baselith.core.cli.commands.verify.print_header")
+    @patch("baselith.core.cli.commands.verify.sys")
     def test_run_verify_python_version_fail(self, mock_sys, mock_header, mock_console):
         # Using a tuple smaller than (3, 11)
         from collections import namedtuple

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._resolve import (
+from baselith.core.plugins._resolve import (
     is_valid_plugin_name,
     safe_plugin_path,
     sort_by_dependencies,

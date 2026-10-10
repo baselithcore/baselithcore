@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import core.config.reasoning as reasoning_config
-from core.config.reasoning import ReasoningConfig
-from core.orchestration.handlers.reasoning import ReasoningHandler
+import baselith.core.config.reasoning as reasoning_config
+from baselith.core.config.reasoning import ReasoningConfig
+from baselith.core.orchestration.handlers.reasoning import ReasoningHandler
 
 
 def _handler() -> ReasoningHandler:

@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.agent import (
+from baselith.core.agent import (
     Agent,
     AgentIterationLimitError,
     AgentLoopError,
     RepeatedToolCallError,
 )
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 def _svc(results):

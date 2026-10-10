@@ -1,4 +1,4 @@
-"""Unit tests for ``core.plugins.declarative``."""
+"""Unit tests for ``baselith.core.plugins.declarative``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.declarative import (
+from baselith.core.plugins.declarative import (
     DeclarativeSkillLoader,
     SkillCard,
     SkillLoadError,

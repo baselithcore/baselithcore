@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugin_updates.github import repo_slug
+from baselith.core.plugin_updates.github import repo_slug
 
 
 @pytest.mark.parametrize(

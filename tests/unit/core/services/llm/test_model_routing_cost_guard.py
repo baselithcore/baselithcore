@@ -1,4 +1,4 @@
-"""Unit tests for the cost-guard passthrough in ``core.services.llm.model_routing``.
+"""Unit tests for the cost-guard passthrough in ``baselith.core.services.llm.model_routing``.
 
 ``routed_model`` resolves a router decision for LLMService; these tests cover
 only the new ``routing_max_cost_per_1k_usd`` duck-typed config hint, which is
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.services.llm.model_routing import routed_model
+from baselith.core.services.llm.model_routing import routed_model
 
 
 def _config(**overrides: object) -> SimpleNamespace:
@@ -40,7 +40,7 @@ class TestCostGuardPassthrough:
 
 class TestCostCapIsConfigurable:
     def test_env_var_reaches_the_router(self, monkeypatch) -> None:
-        from core.config.services import LLMConfig
+        from baselith.core.config.services import LLMConfig
 
         monkeypatch.setenv("LLM_ROUTING_ENABLED", "true")
         monkeypatch.setenv("LLM_ROUTING_MAX_COST_PER_1K_USD", "0.005")
@@ -49,7 +49,7 @@ class TestCostCapIsConfigurable:
         assert routed_model(config, "planning") == "claude-haiku-4-5"
 
     def test_unset_means_no_cap(self, monkeypatch) -> None:
-        from core.config.services import LLMConfig
+        from baselith.core.config.services import LLMConfig
 
         monkeypatch.delenv("LLM_ROUTING_MAX_COST_PER_1K_USD", raising=False)
         assert LLMConfig().routing_max_cost_per_1k_usd is None

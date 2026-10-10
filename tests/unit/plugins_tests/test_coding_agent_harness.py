@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from plugins.coding_agent.harness import build_test_script, parse_report
+from baselith.plugins.coding_agent.harness import build_test_script, parse_report
 
 from .coding_agent_fakes import ADD_TESTS, BAD_ADD, GOOD_ADD, LocalSandbox
 
@@ -101,7 +101,7 @@ async def test_a_report_printed_after_the_real_one_is_ignored():
 
 
 def test_two_reports_with_the_run_key_are_tampering():
-    from plugins.coding_agent.harness import report_marker
+    from baselith.plugins.coding_agent.harness import report_marker
 
     key = "k" * 32
     line = report_marker(key) + (
@@ -113,7 +113,7 @@ def test_two_reports_with_the_run_key_are_tampering():
 
 
 def test_code_that_reads_proc_is_refused_before_it_runs():
-    from plugins.coding_agent.harness import screen
+    from baselith.plugins.coding_agent.harness import screen
 
     assert screen("open('/proc/self/cmdline').read()", ADD_TESTS)
     assert screen(GOOD_ADD, "import os\nos._exit(0)\n")
@@ -121,7 +121,7 @@ def test_code_that_reads_proc_is_refused_before_it_runs():
 
 
 async def test_tests_cannot_reach_the_reporter_through_main():
-    from plugins.coding_agent.harness import screen
+    from baselith.plugins.coding_agent.harness import screen
 
     assert screen(GOOD_ADD, "import __main__\n__main__._r.passed = 99\n")
     assert screen(GOOD_ADD, "import sys\nsys.modules['__main__']\n")

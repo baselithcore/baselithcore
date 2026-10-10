@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from core.evaluation.base import BaseLLMEvaluator, judge_unavailable
-from core.evaluation.regression_runner import RecordedRun, run_regression_async
+from baselith.core.evaluation.base import BaseLLMEvaluator, judge_unavailable
+from baselith.core.evaluation.regression_runner import RecordedRun, run_regression_async
 
 
 class _Judge(BaseLLMEvaluator):

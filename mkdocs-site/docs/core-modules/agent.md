@@ -3,13 +3,13 @@ title: Agent API (typed)
 description: The one-import typed Agent — Pydantic-validated output, plain-Python tools, automatic retry
 ---
 
-`core/agent/` is the **developer-facing entry point** for building agents on
+`baselith/core/agent/` is the **developer-facing entry point** for building agents on
 BaselithCore: declare a model, an optional Pydantic `output_type`, and
 plain-Python tools — then `await agent.run(...)` and get a validated result.
 
 ```python
 from pydantic import BaseModel
-from core.agent import Agent
+from baselith.core.agent import Agent
 
 class CityInfo(BaseModel):
     city: str
@@ -56,7 +56,7 @@ result.iterations        # LLM round-trips used
   sent, oldest first. A service that predates the message API still works — the
   history is flattened into a transcript for it. The round trip itself is
   [`generate_over_messages`](services.md#one-round-trip-for-a-message-history)
-  (`core/services/llm/message_transport.py`), now shared with the
+  (`baselith/core/services/llm/message_transport.py`), now shared with the
   [ReAct loop](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) —
   same transport, same degradation, no behaviour change on this side.
 - **Conversations** — `agent.run(prompt, history=[...])` continues a stored
@@ -103,7 +103,7 @@ result.iterations        # LLM round-trips used
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
 | `autonomy_policy` | standalone guard | Left at its default, tools **explicitly declared** `category="destructive"` are refused (see [Safe defaults for a standalone run](#safe-defaults-for-a-standalone-run)); every other tool runs as before. An `AutonomyPolicy` replaces the guard with the real approval gate: tools whose category needs approval at the active level go through the enforcement chokepoint. `None` is the explicit opt-out — no guard, gate inert. |
-| `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
+| `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`baselith/core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
 | `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
 | `loop_limits` | orchestrator defaults | Caps for a run with no ambient `LoopBudget`: by default the orchestrator's `LoopLimits()` (`budget_usd`, `max_tool_calls`, `ORCHESTRATOR_LOOP_MAX_TOKENS`, `ORCHESTRATOR_LOOP_MAX_SECONDS`) with the iteration cap widened to `max_iterations`. An explicit `LoopLimits` replaces them; `None` disables the default budget. Under an ambient budget the default and `None` reuse it, while an explicit `LoopLimits` is still enforced through a nested child budget that also charges the ambient one (once). |
 
@@ -126,7 +126,7 @@ Both loop errors derive from `AgentLoopError`, itself a `RuntimeError` (so an ex
 
 The last two are new failure modes for callers that previously only had to handle
 validation and iteration exhaustion. Both come from the shared enforcement
-chokepoint (`core.orchestration.enforcement`), so an `Agent` embedded in an
+chokepoint (`baselith.core.orchestration.enforcement`), so an `Agent` embedded in an
 orchestrated request is subject to exactly the same caps as any other path.
 
 !!! note "Effectful tools are deduplicated by default now"
@@ -134,7 +134,7 @@ orchestrated request is subject to exactly the same caps as any other path.
     a payment or an outbound webhook on every retry of the same `run_id` — the
     deduplication the runtime documents, missing from the surface the
     quickstart teaches. It now falls back to the process-wide ledger from
-    `core/orchestration/ledger_factory.py`: durable where Postgres is
+    `baselith/core/orchestration/ledger_factory.py`: durable where Postgres is
     configured, in-process (with a warning naming the consequence) where it is
     not. Set `ORCHESTRATOR_TOOL_LEDGER=off` to get the old behaviour back
     deployment-wide — see
@@ -150,7 +150,7 @@ orchestrated request is subject to exactly the same caps as any other path.
 !!! info "A retry may take a different path — it still replays"
     Ledger keys are content-addressed: tool, canonical arguments, tenant, the
     `run_id`, and how many identical calls the run already requested
-    (`core/orchestration/call_keys.py`). A retried run whose model asks for
+    (`baselith/core/orchestration/call_keys.py`). A retried run whose model asks for
     `notify` before `charge_card` this time — or adds a lookup in between —
     replays both instead of charging again, while two deliberately identical
     calls in one run stay two effects. Rows written under the old positional
@@ -199,7 +199,7 @@ else changes:
 **A run with no ambient budget gets one.** Without a `LoopBudget` an
 `Agent.run` was bounded by `max_iterations` alone — no dollar, token or
 wall-clock cap. Now the run binds a budget built from the orchestrator's
-defaults as the ambient one (`core.orchestration.budget_context.standalone_budget`),
+defaults as the ambient one (`baselith.core.orchestration.budget_context.standalone_budget`),
 so every LLM call is charged to it and every tool call counted; the iteration
 cap is widened to `max_iterations`, so that stays the cap that governs the
 loop. Inside an orchestrated request — or nested in another standalone run —
@@ -237,13 +237,13 @@ and OpenAI constrain the emitted arguments to the schema. Any other tool (an
 optional argument, an untyped or bare `object` parameter, a `pattern` or
 `minLength` constraint) is sent exactly as before. Providers without strict
 tools (Ollama, Gemini) drop the flag; an OpenAI-compatible endpoint receives
-the standard `strict` field (`core/agent/_strict_tools.py`).
+the standard `strict` field (`baselith/core/agent/_strict_tools.py`).
 
 ## How a tool call runs
 
 Resolution, argument validation and the gates live in
-`core/agent/_tool_dispatch.py`; the execution itself lives in
-`core/agent/_tool_runtime.py`, which gives the typed loop the three properties
+`baselith/core/agent/_tool_dispatch.py`; the execution itself lives in
+`baselith/core/agent/_tool_runtime.py`, which gives the typed loop the three properties
 the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
 
 - **Off the event loop.** A synchronous tool runs in a worker thread
@@ -259,7 +259,7 @@ the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
 - **Overlapped.** When one turn carries several tool calls, the model emitted
   all of them before seeing any result, so they are independent by
   construction. The approved ones run concurrently under a semaphore of
-  `MAX_PARALLEL_TOOL_CALLS = 8` (`core/reasoning/react_tools.py`), so the turn
+  `MAX_PARALLEL_TOOL_CALLS = 8` (`baselith/core/reasoning/react_tools.py`), so the turn
   costs the slowest call instead of the sum. Each result is written back at
   the index of the call that produced it, so the `tool_result` blocks stay in
   the order the model asked regardless of completion order.
@@ -298,7 +298,7 @@ budget and guardrails.
 The declarative collaborative counterpart — a crew in ten lines:
 
 ```python
-from core.agent import Agent, Crew, Task
+from baselith.core.agent import Agent, Crew, Task
 
 researcher = Agent(system_prompt="You are a meticulous researcher.")
 writer = Agent(system_prompt="You write crisp executive summaries.")
@@ -334,7 +334,7 @@ result.task_results   # per-task: name, output, text, agent_index,
   aborts the crew with `BudgetExceededError`.
 
 For auction-based allocation, capability matching, and structured handoffs,
-use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
+use the platform surface in [`baselith/core/swarm`](swarm.md) instead — `Crew` is the
 deliberate low-ceremony subset.
 
 ### Hierarchical process (manager-led)
@@ -342,7 +342,7 @@ deliberate low-ceremony subset.
 `Crew(process="hierarchical", manager=Agent(...))` — `manager` is required
 (and only used) for this process; its absence raises `ValueError` at
 construction. Each task runs a bounded delegate → execute → review cycle
-(`core/agent/crew_hierarchical.py`):
+(`baselith/core/agent/crew_hierarchical.py`):
 
 1. **Delegate** — the manager writes a short delegation brief from the task
    prompt; the brief is appended to the worker's prompt.
@@ -360,7 +360,7 @@ order, with each accepted output threading into the next task's context as in
 the sequential process.
 
 ```python
-from core.agent import Agent, Crew, Task
+from baselith.core.agent import Agent, Crew, Task
 
 manager = Agent(system_prompt="You are an exacting engineering manager.")
 crew = Crew(
@@ -398,19 +398,19 @@ for agent_index, usage in result.breakdown().items():
 ```
 
 `AgentUsage`, `CostFn`, `ReviewDecision`, and `ReviewVerdict` are exported
-from `core.agent` alongside the existing crew types.
+from `baselith.core.agent` alongside the existing crew types.
 
 ## Group chat (`GroupChat` + speaker selection)
 
 The collaboration topologies above are structured — `Crew` is a task DAG, the
 [swarm](swarm.md) is a task market. `GroupChat`
-(`core/agent/group_chat.py`) is the emergent third shape: participants share
+(`baselith/core/agent/group_chat.py`) is the emergent third shape: participants share
 one growing transcript and a *speaker selector* decides who talks next, so
 coordination arises from the conversation itself rather than a pre-planned
 graph.
 
 ```python
-from core.agent import Agent, ChatMessage, GroupChat, LLMManagerSelector
+from baselith.core.agent import Agent, ChatMessage, GroupChat, LLMManagerSelector
 
 class AgentParticipant:
     """Adapt an Agent to the Participant protocol."""
@@ -480,4 +480,4 @@ bounded by:
 
 All group-chat symbols (`GroupChat`, `GroupChatResult`, `ChatMessage`,
 `Participant`, `SpeakerSelector` and the three selectors) are exported from
-`core.agent`.
+`baselith.core.agent`.

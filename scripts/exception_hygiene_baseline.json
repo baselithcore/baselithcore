@@ -1,4 +1,4 @@
 {
-  "_comment": "Silent broad except handlers per core/ file when the gate was introduced. Counts may shrink but never grow; delete an entry once the file reaches zero. Regenerate with: python scripts/check_exception_hygiene.py --update-baseline",
+  "_comment": "Silent broad except handlers per baselith/core/ file when the gate was introduced. Counts may shrink but never grow; delete an entry once the file reaches zero. Regenerate with: python scripts/check_exception_hygiene.py --update-baseline",
   "files": {}
 }

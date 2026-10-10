@@ -3,11 +3,11 @@
 The starters live in ``templates/`` at the repository root, outside every
 package, so the wheel used to carry none of them and ``pip install
 baselith-core`` offered only the built-in ``minimal`` template. Moving them
-under ``core/`` would put scaffold code (with ``{project_name}`` placeholders
-and its own tests) in front of every ``core/`` gate, so they stay where they
+under ``baselith/core/`` would put scaffold code (with ``{project_name}`` placeholders
+and its own tests) in front of every ``baselith/core/`` gate, so they stay where they
 are and this ``build_py`` hook copies them into
-``core/cli/scaffold_templates/`` of the build tree, which is where
-``core.cli.commands.init`` looks in an installed package.
+``baselith/core/cli/scaffold_templates/`` of the build tree, which is where
+``baselith.core.cli.commands.init`` looks in an installed package.
 
 Wired through ``[tool.setuptools] cmdclass`` in ``pyproject.toml``;
 ``MANIFEST.in`` puts this module and ``templates/`` in the sdist so a wheel
@@ -34,7 +34,7 @@ SCAFFOLD_TEMPLATES = (
     "rag-system",
 )
 #: Where the starters land inside the built tree (POSIX, repository-relative).
-PACKAGE_TARGET = "core/cli/scaffold_templates"
+PACKAGE_TARGET = "baselith/core/cli/scaffold_templates"
 _SKIPPED_NAMES = frozenset({"__pycache__", ".DS_Store"})
 _SKIPPED_SUFFIXES = (".pyc", ".pyo")
 

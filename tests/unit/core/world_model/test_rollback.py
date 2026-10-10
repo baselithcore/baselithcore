@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.world_model.rollback import RollbackPlanner
-from core.world_model.types import Action, ActionType, RiskLevel, State
+from baselith.core.world_model.rollback import RollbackPlanner
+from baselith.core.world_model.types import Action, ActionType, RiskLevel, State
 
 
 @pytest.fixture

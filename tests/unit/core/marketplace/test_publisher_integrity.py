@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.marketplace.publisher import _inject_integrity
-from core.plugins.integrity import (
+from baselith.core.marketplace.publisher import _inject_integrity
+from baselith.core.plugins.integrity import (
     compute_plugin_hash,
     verify_plugin_integrity,
 )

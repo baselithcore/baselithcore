@@ -18,10 +18,10 @@ from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from core.api._plugin_runtime import PluginRuntimeHooks
-from core.middleware.plugin_activation import PluginActivationMiddleware
-from core.plugins import PluginState
-from core.plugins._activation_backoff import (
+from baselith.core.api._plugin_runtime import PluginRuntimeHooks
+from baselith.core.middleware.plugin_activation import PluginActivationMiddleware
+from baselith.core.plugins import PluginState
+from baselith.core.plugins._activation_backoff import (
     ActivationBackoff,
     PluginActivationBackoffError,
 )

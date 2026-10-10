@@ -8,15 +8,15 @@ canvas node gets switched off, and then it guards nothing.
 
 import pytest
 
-from core.workflows.builder import (
+from baselith.core.workflows.builder import (
     NodePosition,
     NodeType,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
 )
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
-from core.workflows.versioning import (
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.workflows.versioning import (
     WORKFLOW_VERSION_KEY,
     VersionMismatchError,
     VersionPinning,
@@ -264,7 +264,7 @@ def _executor() -> WorkflowExecutor:
 
 def _manager():
     """A real durable-run façade, so the executor takes its durable path."""
-    from core.orchestration.checkpoint import (
+    from baselith.core.orchestration.checkpoint import (
         Checkpoint,
         CheckpointManager,
         InMemoryCheckpointStore,

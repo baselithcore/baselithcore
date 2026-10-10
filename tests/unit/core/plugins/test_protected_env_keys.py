@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugins._env import (
+from baselith.core.plugins._env import (
     EnvKeyVerdict,
     classify_plugin_env_key,
     is_protected_env_key,

@@ -4,7 +4,7 @@ Unit Tests for SimpleGraphMemoryProvider
 
 import pytest
 
-from core.memory.graph_provider import SimpleGraphMemoryProvider
+from baselith.core.memory.graph_provider import SimpleGraphMemoryProvider
 
 
 @pytest.mark.asyncio

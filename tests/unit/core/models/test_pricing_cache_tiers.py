@@ -11,7 +11,7 @@ whole point is a long cached prefix — is inflated by the largest single term.
 
 import pytest
 
-from core.models.pricing import DEFAULT_PRICING, get_price
+from baselith.core.models.pricing import DEFAULT_PRICING, get_price
 
 pytestmark = pytest.mark.unit
 

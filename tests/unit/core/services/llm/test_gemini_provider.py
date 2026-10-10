@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.providers.gemini_provider import GeminiProvider
-from core.services.llm.tool_calling import LLMToolSpec, ResponseFormat
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.providers.gemini_provider import GeminiProvider
+from baselith.core.services.llm.tool_calling import LLMToolSpec, ResponseFormat
 
 
 def _response(text="hello", prompt_tokens=10, out_tokens=5, function_calls=None):
@@ -118,8 +118,8 @@ class TestServiceWiring:
     def test_create_provider_requires_api_key(self, monkeypatch):
         from unittest.mock import patch
 
-        from core.config.services import LLMConfig
-        from core.services.llm.service import LLMService
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.service import LLMService
 
         for var in (
             "LLM_API_KEY",
@@ -130,7 +130,9 @@ class TestServiceWiring:
             monkeypatch.delenv(var, raising=False)
         config = LLMConfig(provider="gemini", model="gemini-2.5-flash", api_key=None)
         with (
-            patch("core.services.llm.service.get_llm_config", return_value=config),
+            patch(
+                "baselith.core.services.llm.service.get_llm_config", return_value=config
+            ),
             pytest.raises(LLMProviderError, match="Gemini API key"),
         ):
             LLMService(config=config, enable_cache=False)
@@ -138,8 +140,8 @@ class TestServiceWiring:
     def test_create_provider_builds_gemini(self):
         from pydantic import SecretStr
 
-        from core.config.services import LLMConfig
-        from core.services.llm.service import LLMService
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.service import LLMService
 
         config = LLMConfig(
             provider="gemini", model="gemini-2.5-flash", LLM_API_KEY=SecretStr("k")
@@ -150,9 +152,9 @@ class TestServiceWiring:
     def test_api_key_for_gemini_dedicated_field(self, monkeypatch):
         from pydantic import SecretStr
 
-        from core.config.services import LLMConfig
-        from core.services.llm import runtime
-        from core.services.llm.runtime import api_key_for, provider_configured
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm import runtime
+        from baselith.core.services.llm.runtime import api_key_for, provider_configured
 
         config = LLMConfig(provider="ollama", LLM_GEMINI_API_KEY=SecretStr("gk"))
         key = api_key_for(config, "gemini")
@@ -169,9 +171,9 @@ class TestServiceWiring:
         """
         from pydantic import SecretStr
 
-        from core.config.services import LLMConfig
-        from core.services.llm import runtime
-        from core.services.llm.runtime import provider_configured
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm import runtime
+        from baselith.core.services.llm.runtime import provider_configured
 
         config = LLMConfig(provider="ollama", LLM_GEMINI_API_KEY=SecretStr("gk"))
         monkeypatch.setattr(runtime, "_gemini_sdk_available", lambda: False)

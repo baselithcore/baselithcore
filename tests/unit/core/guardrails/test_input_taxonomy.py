@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from core.guardrails.config import GuardrailsConfig
-from core.guardrails.input_guard import (
+from baselith.core.guardrails.config import GuardrailsConfig
+from baselith.core.guardrails.input_guard import (
     InputClassification,
     InputGuard,
     InputValidationResult,
@@ -39,7 +39,7 @@ class _StubLLM:
 
 
 def _install_llm(monkeypatch: pytest.MonkeyPatch, stub: _StubLLM) -> None:
-    monkeypatch.setattr("core.services.llm.get_llm_service", lambda: stub)
+    monkeypatch.setattr("baselith.core.services.llm.get_llm_service", lambda: stub)
 
 
 def _verdict(intent: str, confidence: float = 0.95, reason: str = "because") -> str:
@@ -217,8 +217,8 @@ class _StubTaxonomyGuard:
 def _install_pipeline(
     monkeypatch: pytest.MonkeyPatch, guard: _StubTaxonomyGuard
 ) -> None:
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration import guard_pipeline
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration import guard_pipeline
 
     monkeypatch.setattr(guard_pipeline, "_guards", lambda: (guard, None))
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: None)
@@ -235,7 +235,7 @@ class TestPipelineWiring:
     """guard_input_async taxonomy rail behind BASELITH_INPUT_GUARD_TAXONOMY."""
 
     async def test_default_off_never_classifies(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.delenv("BASELITH_INPUT_GUARD_TAXONOMY", raising=False)
         guard = _StubTaxonomyGuard(
@@ -248,7 +248,7 @@ class TestPipelineWiring:
 
     @pytest.mark.parametrize("intent", ["jailbreak", "harmful"])
     async def test_blocks_and_emits_metric(self, monkeypatch, intent):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -266,7 +266,7 @@ class TestPipelineWiring:
         assert _blocks(intent) == before + 1
 
     async def test_in_scope_passes(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -278,7 +278,7 @@ class TestPipelineWiring:
         assert guard.classify_calls == 1
 
     async def test_below_threshold_passes(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -289,7 +289,7 @@ class TestPipelineWiring:
         assert await guard_input_async("borderline request") is None
 
     async def test_threshold_env_override(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY_THRESHOLD", "0.4")
@@ -303,7 +303,7 @@ class TestPipelineWiring:
         assert blocked["intent"] == "blocked_by_taxonomy"
 
     async def test_out_of_scope_blocks_only_with_allowed_topics(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         classification = InputClassification(
@@ -324,7 +324,7 @@ class TestPipelineWiring:
         assert blocked["intent"] == "blocked_by_taxonomy"
 
     async def test_master_kill_switch_bypasses_taxonomy(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         monkeypatch.setenv("BASELITH_ORCHESTRATOR_GUARDRAILS", "off")

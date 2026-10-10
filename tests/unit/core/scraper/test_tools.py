@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.scraper.tools import (
+from baselith.core.scraper.tools import (
     SCRAPER_TOOLS,
     extract_structured_data,
     web_crawl,
@@ -86,7 +86,7 @@ def mock_crawler(mock_crawl_result):
 
 @pytest.mark.asyncio
 async def test_web_scrape_defaults(mock_scraper):
-    with patch("core.scraper.tools.Scraper", return_value=mock_scraper):
+    with patch("baselith.core.scraper.tools.Scraper", return_value=mock_scraper):
         result = await web_scrape("http://example.com")
 
         mock_scraper.scrape.assert_called_once()
@@ -106,7 +106,7 @@ async def test_web_scrape_defaults(mock_scraper):
 
 @pytest.mark.asyncio
 async def test_web_scrape_full(mock_scraper):
-    with patch("core.scraper.tools.Scraper", return_value=mock_scraper):
+    with patch("baselith.core.scraper.tools.Scraper", return_value=mock_scraper):
         result = await web_scrape(
             "http://example.com", extract=["images", "schema_org"], use_javascript=True
         )
@@ -122,7 +122,9 @@ async def test_web_scrape_full(mock_scraper):
 
 @pytest.mark.asyncio
 async def test_web_crawl(mock_crawler):
-    with patch("core.scraper.tools.CrawlEngine", return_value=mock_crawler) as mock_cls:
+    with patch(
+        "baselith.core.scraper.tools.CrawlEngine", return_value=mock_crawler
+    ) as mock_cls:
         try:
             result = await web_crawl("http://example.com", max_pages=5)
             # print(f"DEBUG: result={result}")
@@ -138,11 +140,13 @@ async def test_web_crawl(mock_crawler):
 
 @pytest.mark.asyncio
 async def test_extract_structured_data(mock_scraper):
-    with patch("core.scraper.tools.Scraper", return_value=mock_scraper):
+    with patch("baselith.core.scraper.tools.Scraper", return_value=mock_scraper):
         # We also need to patch the CssSelectorExtractor import locally if we were strict,
         # but since we are mocking Scraper instance behavior, we verify logic.
 
-        with patch("core.scraper.extractors.CssSelectorExtractor") as mock_css_cls:
+        with patch(
+            "baselith.core.scraper.extractors.CssSelectorExtractor"
+        ) as mock_css_cls:
             mock_css_instance = MagicMock()
             mock_css_cls.return_value = mock_css_instance
 

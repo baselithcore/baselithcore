@@ -20,7 +20,7 @@ from starlette.routing import WebSocketRoute
 from starlette.testclient import TestClient, WebSocketDenialResponse
 from starlette.websockets import WebSocket
 
-from core.middleware.csrf import CSRFOriginMiddleware
+from baselith.core.middleware.csrf import CSRFOriginMiddleware
 
 ALLOWED = "https://app.example.com"
 EVIL = "https://evil.example.com"

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from core.cli.commands.doctor_plugin_checks import check_plugins, local_plugins
+from baselith.core.cli.commands.doctor_plugin_checks import check_plugins, local_plugins
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_local_plugins_skips_residue(checkout: Path) -> None:
 def test_doctor_and_info_agree(
     checkout: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from core.cli.commands.info import run_info
+    from baselith.core.cli.commands.info import run_info
 
     assert check_plugins().message == "2 plugin(s) found"
     run_info(json_output=True)
@@ -58,8 +58,8 @@ def test_an_installed_framework_counts_its_bundled_plugins(
     ``doctor`` used to fail "plugins/ directory not found" on every wheel
     install run from a project directory.
     """
-    import core.config.plugins as plugins_config
-    from core.plugins import discovery
+    import baselith.core.config.plugins as plugins_config
+    from baselith.core.plugins import discovery
 
     site = tmp_path / "site-packages"
     bundled = site / "plugins"

@@ -1,6 +1,6 @@
 """Crash recovery has to declare an identity under row-level security.
 
-The recovery sweep is started at boot (``core.api._recovery_startup``) and loops
+The recovery sweep is started at boot (``baselith.core.api._recovery_startup``) and loops
 forever on a timer. It is also cross-tenant by construction: it is looking for
 *whose* runs were interrupted, so it cannot borrow the identity of a run it has
 not found yet. With ``DB_RLS_ENABLED=true`` the pool refuses to invent a tenant,
@@ -20,16 +20,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core import context as core_context
-from core.context import TenantContextError, get_current_tenant_id
-from core.db.session_setup import SYSTEM_TENANT_ID
-from core.orchestration.checkpoint import (
+from baselith.core import context as core_context
+from baselith.core.context import TenantContextError, get_current_tenant_id
+from baselith.core.db.session_setup import SYSTEM_TENANT_ID
+from baselith.core.orchestration.checkpoint import (
     STATUS_FAILED,
     STATUS_RUNNING,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from core.orchestration.recovery import resume_interrupted_runs, sweep_stale_runs
+from baselith.core.orchestration.recovery import (
+    resume_interrupted_runs,
+    sweep_stale_runs,
+)
 
 pytestmark = [pytest.mark.unit]
 

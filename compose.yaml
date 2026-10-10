@@ -85,7 +85,7 @@ services:
     build:
       context: .
     container_name: baselith-core-worker
-    command: python -m core.task_queue.worker
+    command: python -m baselith.core.task_queue.worker
     env_file: configs/.env.production
     volumes:
       - ./documents:/app/documents:ro

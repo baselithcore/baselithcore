@@ -13,13 +13,13 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from core.plugin_updates.provenance import (
+from baselith.core.plugin_updates.provenance import (
     RELEASE_WORKFLOW_AUTHOR,
     RELEASE_WORKFLOW_AUTHOR_ID,
     RELEASE_WORKFLOW_AUTHOR_TYPE,
     check_plugin_provenance,
 )
-from core.plugin_updates.sources import GitHubReleaseSource
+from baselith.core.plugin_updates.sources import GitHubReleaseSource
 
 SHA = "a" * 40
 OTHER = "b" * 40

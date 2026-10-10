@@ -4,7 +4,7 @@ Unit Tests for Core A2A Module - Agent Card, Capabilities and Skills
 Tests for the AgentCard descriptor plus its capability/skill members.
 """
 
-from core.a2a import (
+from baselith.core.a2a import (
     AgentCapability,
     AgentCard,
 )
@@ -150,7 +150,7 @@ class TestAgentSkill:
 
     def test_creation(self):
         """Basic creation."""
-        from core.a2a import AgentSkill
+        from baselith.core.a2a import AgentSkill
 
         skill = AgentSkill(
             id="search",
@@ -165,7 +165,7 @@ class TestAgentSkill:
 
     def test_with_tags_and_examples(self):
         """Creation with tags and examples."""
-        from core.a2a import AgentSkill
+        from baselith.core.a2a import AgentSkill
 
         skill = AgentSkill(
             id="analyze",
@@ -180,7 +180,7 @@ class TestAgentSkill:
 
     def test_serialization(self):
         """Test to_dict and from_dict."""
-        from core.a2a import AgentSkill
+        from baselith.core.a2a import AgentSkill
 
         original = AgentSkill(
             id="test",

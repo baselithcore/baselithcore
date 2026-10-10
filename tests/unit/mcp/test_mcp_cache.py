@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from core.mcp.cache import ResultCache, cache_key
+from baselith.core.mcp.cache import ResultCache, cache_key
 
 
 def _result(ttl_ms: int = 60000, **extra: Any) -> dict[str, Any]:
@@ -128,7 +128,7 @@ class TestClientIntegration:
     async def test_a_second_list_does_not_reach_the_server(self) -> None:
         from types import SimpleNamespace
 
-        from core.mcp.client import MCPClient
+        from baselith.core.mcp.client import MCPClient
 
         calls: list[str] = []
         client = MCPClient()

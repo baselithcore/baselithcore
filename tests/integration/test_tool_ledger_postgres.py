@@ -30,7 +30,7 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.idempotency import (
+from baselith.core.orchestration.idempotency import (
     claim_call,
     derive_call_key,
     derive_idempotency_key,
@@ -40,11 +40,11 @@ pytestmark = [pytest.mark.integration]
 
 TABLE = "tool_invocations"
 POLICY = "tenant_isolation"
-MODULE = "core.orchestration.idempotency_postgres"
+MODULE = "baselith.core.orchestration.idempotency_postgres"
 
 
 def _conninfo() -> str:
-    from core.config import get_storage_config
+    from baselith.core.config import get_storage_config
 
     config = get_storage_config()
     return (
@@ -156,7 +156,7 @@ def _real_cursor_factory() -> Any:
 @pytest.fixture
 def ledger(monkeypatch, ledger_table: str) -> Any:
     """A ``PostgresToolLedger`` talking to the live table."""
-    from core.orchestration.idempotency_postgres import PostgresToolLedger
+    from baselith.core.orchestration.idempotency_postgres import PostgresToolLedger
 
     monkeypatch.setattr(f"{MODULE}.get_async_cursor", _real_cursor_factory())
     return PostgresToolLedger(tenant_id="default")
@@ -305,7 +305,7 @@ class TestPurge:
 class TestTenantIsolation:
     async def test_rows_carry_the_ledgers_tenant(self, monkeypatch, ledger_table):
         """The RLS policy in migration 009 has nothing to filter on otherwise."""
-        from core.orchestration.idempotency_postgres import PostgresToolLedger
+        from baselith.core.orchestration.idempotency_postgres import PostgresToolLedger
 
         monkeypatch.setattr(f"{MODULE}.get_async_cursor", _real_cursor_factory())
         key = derive_idempotency_key(ledger_table, 11, "t", {})

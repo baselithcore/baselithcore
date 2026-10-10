@@ -52,7 +52,7 @@ ROUTE_GATES = (
 
 def _include_lifespan_routers(app) -> None:
     """Add the plugin-mounted routers a bare ``create_app()`` has not seen."""
-    from plugins.api_routers.plugin import ApiRoutersPlugin
+    from baselith.plugins.api_routers.plugin import ApiRoutersPlugin
 
     plugin = ApiRoutersPlugin()
     prefix = plugin.get_router_prefix()
@@ -65,7 +65,7 @@ def export(out_path: Path) -> dict:
     for gate in ROUTE_GATES:
         os.environ.setdefault(gate, "true")
 
-    from core.api.factory import create_app
+    from baselith.core.api.factory import create_app
 
     app = create_app()
     _include_lifespan_routers(app)

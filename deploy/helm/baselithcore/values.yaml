@@ -246,7 +246,7 @@ tmpVolumes:
 # Graceful shutdown budget. Kubernetes counts the preStop hook against this
 # grace, then sends SIGTERM; uvicorn drains HTTP (GRACEFUL_SHUTDOWN_TIMEOUT)
 # and only then runs the lifespan teardown, which has its own deadline
-# (core.api._shutdown.TEARDOWN_BUDGET_S) with the usage-ledger, audit,
+# (baselith.core.api._shutdown.TEARDOWN_BUDGET_S) with the usage-ledger, audit,
 # telemetry and pool flushes reserved inside it. SIGKILL lands at the grace:
 #
 #   terminationGracePeriodSeconds >= preStop (5) + drain (30) + teardown (40)
@@ -307,7 +307,7 @@ tolerations: []
 affinity: {}
 
 # -------------------------------------------------------------------------
-# Background worker (core.task_queue RQ worker) — optional separate Deployment.
+# Background worker (baselith.core.task_queue RQ worker) — optional separate Deployment.
 # -------------------------------------------------------------------------
 worker:
   enabled: false
@@ -495,7 +495,7 @@ config:
   APP_ENV: production
   AUTH_REQUIRED: "true"
   SECURITY_HEADERS_ENABLED: "true"
-  # The update checker (core/plugin_updates) caches its last report, the
+  # The update checker (baselith/core/plugin_updates) caches its last report, the
   # announced-versions set and verified release tarballs. Its default,
   # data/plugin_updates, sits in the read-only image tree, so every check would
   # fail to persist; /tmp is the pod's writable emptyDir (tmpVolumes, 256Mi),
@@ -535,7 +535,7 @@ secrets:
     # QDRANT_API_KEY: "..."
 
 # -------------------------------------------------------------------------
-# Inference services (core.services.inference)
+# Inference services (baselith.core.services.inference)
 # -------------------------------------------------------------------------
 # Embedding, reranking and vector search are services of the core: plugins that
 # use them load no model and open no Qdrant client in the API pod. They need
@@ -728,7 +728,7 @@ seedResources:
 # click in a pod, and the running state can never drift from the manifest.
 #
 # The map is the plugins.yaml content verbatim: plugin name -> its block. Note
-# the loader's rule (core/plugins/config_file.py): when the file has any entries, a
+# the loader's rule (baselith/core/plugins/config_file.py): when the file has any entries, a
 # plugin absent from it is NOT loaded, so list every plugin the release needs,
 # system plugins included.
 #
@@ -905,7 +905,7 @@ database:
   # table lacks FORCE ROW LEVEL SECURITY — which migration 008 deliberately
   # does not set. Connecting the app as the owning role (what `DB_USER` is out
   # of the box, and what the bundled Postgres creates) therefore leaves
-  # DB_RLS_ENABLED=true with no isolation whatsoever. `core.db.rls_posture`
+  # DB_RLS_ENABLED=true with no isolation whatsoever. `baselith.core.db.rls_posture`
   # refuses to boot in production when that is the case; this Job is the
   # remedy it points at.
   #
@@ -944,7 +944,7 @@ database:
     #
     # Off by default, because DDL is what the role exists not to have. Turn it
     # on only for a deployment whose plugins build their own schema at first
-    # use (against `core.db.ddl`'s "Alembic owns every table"): without it they
+    # use (against `baselith.core.db.ddl`'s "Alembic owns every table"): without it they
     # fail activation with `permission denied for schema public`. The supported
     # answer is `database.pluginSchemaInit`, which runs that DDL as the owner
     # at deploy time instead.

@@ -5,7 +5,7 @@ import base64
 import pytest
 from pydantic import SecretStr
 
-from core.security.encryption import (
+from baselith.core.security.encryption import (
     DecryptionError,
     EncryptionError,
     FieldEncryptor,

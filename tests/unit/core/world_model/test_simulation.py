@@ -1,8 +1,8 @@
 import pytest
 
-from core.config.world_model import WorldModelConfig
-from core.world_model.simulation import MCTSSimulator
-from core.world_model.types import Action, State
+from baselith.core.config.world_model import WorldModelConfig
+from baselith.core.world_model.simulation import MCTSSimulator
+from baselith.core.world_model.types import Action, State
 
 
 @pytest.fixture

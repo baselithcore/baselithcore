@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from core.marketplace.auth import CredentialsManager
+from baselith.core.marketplace.auth import CredentialsManager
 
 
 class TestCredentialsFileIsNotTrusted:

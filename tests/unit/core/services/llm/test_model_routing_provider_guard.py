@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.model_routing import routed_model
+from baselith.core.services.llm.model_routing import routed_model
 
 pytestmark = pytest.mark.unit
 

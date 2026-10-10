@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.evaluation.protocols import EvaluationResult, QualityLevel
-from core.evaluation.service import EvaluationService
-from core.events import EventBus, EventNames
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.service import EvaluationService
+from baselith.core.events import EventBus, EventNames
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ async def test_evaluation_service_flow(mock_event_bus, mock_evaluator):
     # Let's rely on the service logic which checks config inside start()
     # We will patch the config check in the test to be safe.
 
-    with patch("core.config.evaluation.evaluation_config") as mock_config:
+    with patch("baselith.core.config.evaluation.evaluation_config") as mock_config:
         mock_config.enabled = True
 
         service.start()

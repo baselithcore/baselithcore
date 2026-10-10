@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.agent import Agent, Crew, Task
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.agent import Agent, Crew, Task
+from baselith.core.services.llm.tool_calling import LLMResult
 
 
 def _mock_service(results):

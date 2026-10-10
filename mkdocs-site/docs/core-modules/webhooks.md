@@ -3,7 +3,7 @@ title: Webhooks
 description: Outbound event delivery with HMAC signing, retries, and dead-lettering
 ---
 
-The `core/webhooks` subsystem delivers framework events to external consumers
+The `baselith/core/webhooks` subsystem delivers framework events to external consumers
 over HTTP. It signs every payload (HMAC-SHA256), enforces an SSRF guard on
 target URLs, retries with backoff, and dead-letters deliveries that exhaust
 their attempts so they can be inspected and replayed.
@@ -38,13 +38,13 @@ where the `agent.*` events are emitted — so an endpoint registered through the
 API can silently never fire in a multi-process deployment.
 `get_webhook_service()` reads `WEBHOOK_STORE` once, when it builds the global
 service: `memory` (the default) keeps the in-memory store, `postgres` selects
-`PostgresWebhookStore` (`core/webhooks/store_postgres.py`).
+`PostgresWebhookStore` (`baselith/core/webhooks/store_postgres.py`).
 
 - **Schema.** The `webhook_endpoints` and `webhook_deliveries` tables are
-  created only by `core/db/migrations/versions/011_webhooks.py` — the store runs no DDL,
+  created only by `baselith/core/db/migrations/versions/011_webhooks.py` — the store runs no DDL,
   so apply the migration first. Both tables carry the `tenant_isolation`
   row-level-security policy, including the system-tenant escape, and are listed
-  in `core.db.ddl.RLS_PROTECTED_TABLES` (see
+  in `baselith.core.db.ddl.RLS_PROTECTED_TABLES` (see
   [Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)).
 - **Secrets at rest.** An endpoint's signing `secret` and its `headers` (which
   routinely carry an `Authorization` value) are encrypted with the process field
@@ -65,7 +65,7 @@ service: `memory` (the default) keeps the in-memory store, `postgres` selects
 ```python
 import time
 
-from core.webhooks.store_postgres import PostgresWebhookStore
+from baselith.core.webhooks.store_postgres import PostgresWebhookStore
 
 store = PostgresWebhookStore()
 removed = await store.purge_deliveries_before(time.time() - 30 * 86400)
@@ -78,7 +78,7 @@ Set `WEBHOOKS_ENABLED=true`. Register endpoints over the API or in code.
 ### Programmatic
 
 ```python
-from core.webhooks import get_webhook_service
+from baselith.core.webhooks import get_webhook_service
 
 service = get_webhook_service()
 endpoint = await service.register_endpoint(
@@ -151,7 +151,7 @@ shared secret and compare in constant time, rejecting stale timestamps to defeat
 replays. A verification helper ships with the SDK contract:
 
 ```python
-from core.webhooks import verify_signature
+from baselith.core.webhooks import verify_signature
 
 ok = verify_signature(
     secret="whsec_...",
@@ -210,7 +210,7 @@ An endpoint's static `headers` are sent with every delivery, but a fixed set of
 names belongs to the dispatcher and can never be supplied by a subscriber:
 `X-Baselith-Signature`, `Host`, `Content-Type`, `Content-Length`,
 `Transfer-Encoding`, `Connection` and `User-Agent`
-(`core.webhooks.signing.RESERVED_DELIVERY_HEADERS`, matched case-insensitively).
+(`baselith.core.webhooks.signing.RESERVED_DELIVERY_HEADERS`, matched case-insensitively).
 The signature is the receiver's only proof of origin, the framing headers
 describe the signed body, and `Host` is the SSRF pin — letting any of them be
 overridden would let a tenant forge or strip exactly the guarantees the

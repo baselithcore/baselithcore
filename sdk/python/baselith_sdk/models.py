@@ -1,6 +1,6 @@
 """Typed request/response models for the BaselithCore SDK.
 
-Mirrors the server's public contract (``core.models.chat``). Kept as a small,
+Mirrors the server's public contract (``baselith.core.models.chat``). Kept as a small,
 self-contained set of Pydantic v2 models so the SDK has no dependency on the
 server package.
 """

@@ -275,7 +275,7 @@ services:
       context: .
     container_name: baselith-core-worker
     env_file: configs/.env.production
-    command: python -m core.task_queue.worker
+    command: python -m baselith.core.task_queue.worker
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.config.orchestration import OrchestrationConfig
-from core.orchestration.limits import (
+from baselith.core.config.orchestration import OrchestrationConfig
+from baselith.core.orchestration.limits import (
     DEFAULT_CONTEXT_WINDOW_TOKENS,
     DEFAULT_MAX_SECONDS,
     DEFAULT_MAX_TOKENS,
@@ -43,8 +43,8 @@ class TestSettingsBackedDefaults:
         assert LoopBudget(limits=limits).remaining_seconds() is None
 
     def test_zero_setting_disables_the_cap(self, monkeypatch) -> None:
-        import core.config.orchestration as config_module
-        import core.orchestration.limits as limits_module
+        import baselith.core.config.orchestration as config_module
+        import baselith.core.orchestration.limits as limits_module
 
         monkeypatch.setattr(config_module, "_orchestration_config", None)
         monkeypatch.setenv("ORCHESTRATOR_LOOP_MAX_TOKENS", "0")

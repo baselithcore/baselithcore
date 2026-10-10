@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.cache import redis_cache, single_flight
+from baselith.core.cache import redis_cache, single_flight
 
 
 def test_redis_single_flight_uses_shared_pool(monkeypatch):

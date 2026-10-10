@@ -294,7 +294,7 @@ services:
       context: .
     container_name: baselith-core-worker
     env_file: configs/.env.production
-    command: python -m core.task_queue.worker
+    command: python -m baselith.core.task_queue.worker
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
@@ -594,7 +594,7 @@ A later pass took it further, to **4.02GB** — see
 
 Two further changes to the same effect:
 
-- **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
+- **`torchvision` is no longer installed.** Nothing in `baselith/core/` or `plugins/`
   imports it (the tree's only `torch` import is the Hugging Face provider, and
   `sentence-transformers` needs torchvision only for image models, which no
   plugin loads). The only thing in `uv.lock` that wanted it was mineru's
@@ -624,14 +624,14 @@ the container can execute. Measured on `linux/arm64`: **4.94GB → 4.02GB**.
 |---|---:|---|
 | `chromium` (the full browser) | 641MB | `playwright install chromium` fetches two binaries, and with no channel set `launch(headless=True)` resolves the *headless shell*, not this one. The full browser is what `headless=False` would start — and no stage installs Xvfb or an X client, so a headed launch fails with `Target page, context or browser has been closed`. Verified both ways. The install now passes `--only-shell` |
 | `cuda-bindings`, `cuda-pathfinder` | 27MB | CUDA Python bindings in a CPU-only image. They are linux dependencies of the PyPI `torch` wheel, and the filter that strips the GPU stack matched `^nvidia-` and `^triton` only. The post-install guard missed them too — it checked `site-packages` for a directory starting with `nvidia`, and these install one called `cuda`, so it reported success on every build |
-| the second copy of `core/` and `plugins/` | 25MB | `pip install .` materialises them inside `/install-app` alongside the console script, and `/install-app` precedes `/app` on `PYTHONPATH`. Which copy won depended on the working directory — `/app/core` from `WORKDIR`, `/install-app/…/core` from anywhere else. Since `baselith plugin enable` *writes* `configs/plugins.yaml`, the CLI run from the wrong directory edited a tree the API never read. Only the entry point and its `dist-info` are kept |
+| the second copy of `baselith/core/` and `plugins/` | 25MB | `pip install .` materialises them inside `/install-app` alongside the console script, and `/install-app` precedes `/app` on `PYTHONPATH`. Which copy won depended on the working directory — `/app/core` from `WORKDIR`, `/install-app/…/core` from anywhere else. Since `baselith plugin enable` *writes* `configs/plugins.yaml`, the CLI run from the wrong directory edited a tree the API never read. Only the entry point and its `dist-info` are kept |
 | `pytesseract`, `pdf2image` | ~10MB | Wrappers around the `tesseract` and `pdftoppm` binaries, neither of which the image installs. `pytesseract.get_tesseract_version()` raised `TesseractNotFoundError` in the released image; the plugin caught it and degraded, so the capability was never delivered and never complained |
 | `pyautogui`, `mss` | ~5MB | Both need an X11 display: `KeyError: 'DISPLAY'` and `Cannot connect to display` in a headless container |
 
 One thing was *added* in the same pass, for the opposite reason. spaCy and its
 compiled stack are ~160MB and `enable_spacy_documents` defaults to **on**, but
 no model was baked — so `spacy.load("en_core_web_sm")` raised `E050` and
-`core/nlp/` silently fell back to a blank sentencizer with no NER. The 15MB
+`baselith/core/nlp/` silently fell back to a blank sentencizer with no NER. The 15MB
 model is now installed at a pinned version, and the build fails if the
 installed spaCy cannot load it.
 
@@ -1394,7 +1394,7 @@ SENTRY_DSN=${SENTRY_DSN}
     from it would silently encrypt production credentials with the
     developer's key. Credential, log, SQLite and cache patterns carry a `**/`
     prefix — Docker matches a bare `*.key` only at the context root, so it
-    never reached the `COPY core/` and `COPY plugins/` trees.
+    never reached the `COPY baselith/core/` and `COPY plugins/` trees.
 
 ### Environment naming
 

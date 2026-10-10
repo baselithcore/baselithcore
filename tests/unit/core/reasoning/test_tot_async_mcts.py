@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
-from core.reasoning.tot.cache import get_thought_cache
-from core.reasoning.tot.mcts import mcts_search_async
+from baselith.core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
+from baselith.core.reasoning.tot.cache import get_thought_cache
+from baselith.core.reasoning.tot.mcts import mcts_search_async
 
 
 @pytest.fixture(autouse=True)
@@ -151,14 +151,14 @@ class TestAsyncMCTSBounds:
         assert calls["n"] == 6
 
     async def test_expired_budget_deadline_stops_the_search(self, monkeypatch):
-        from core.orchestration.limits import BudgetExceededError
+        from baselith.core.orchestration.limits import BudgetExceededError
 
         class _ExpiredBudget:
             def check_deadline(self):
                 raise BudgetExceededError("max_seconds", None)
 
         monkeypatch.setattr(
-            "core.orchestration.budget_context.get_active_budget",
+            "baselith.core.orchestration.budget_context.get_active_budget",
             lambda: _ExpiredBudget(),
         )
 

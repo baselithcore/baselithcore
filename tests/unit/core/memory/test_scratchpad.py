@@ -1,10 +1,10 @@
-"""Unit tests for ``core.memory.scratchpad``."""
+"""Unit tests for ``baselith.core.memory.scratchpad``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.memory.scratchpad import (
+from baselith.core.memory.scratchpad import (
     DEFAULT_MAX_SECTION_BYTES,
     InMemoryScratchpadBackend,
     Scratchpad,

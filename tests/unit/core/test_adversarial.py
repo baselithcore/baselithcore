@@ -6,7 +6,7 @@ Tests for red team, fuzzer, hallucination traps, and boundary testing.
 
 import pytest
 
-from core.adversarial import (
+from baselith.core.adversarial import (
     AttackResult,
     AttackVector,
     BoundaryTester,
@@ -16,7 +16,7 @@ from core.adversarial import (
     SecurityReport,
     Vulnerability,
 )
-from core.adversarial.types import AttackCategory, AttackStatus, Severity
+from baselith.core.adversarial.types import AttackCategory, AttackStatus, Severity
 
 # ============================================================================
 # Types Tests

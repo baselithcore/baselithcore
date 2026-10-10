@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     DEFAULT_RESUMABLE_LIMIT,
     MAX_RESUMABLE_LIMIT,
     STATUS_AWAITING_APPROVAL,
@@ -33,13 +33,15 @@ def _cursor_ctx(cursor):
 @pytest.mark.asyncio
 class TestPostgresResumableLimit:
     async def _execute(self, limit=None, tenant_id=None):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         cursor.fetchall = AsyncMock(return_value=[])
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             _cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()
@@ -102,7 +104,7 @@ class TestInMemoryResumableLimit:
 @pytest.mark.asyncio
 async def test_recovery_sweep_stays_bounded_by_the_page():
     """The startup sweep composes both bounds: one page, then ``max_runs``."""
-    from core.orchestration.recovery import resume_interrupted_runs
+    from baselith.core.orchestration.recovery import resume_interrupted_runs
 
     store = InMemoryCheckpointStore()
     for i in range(30):

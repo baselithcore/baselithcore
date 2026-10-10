@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.api import _shutdown
-from core.api._shutdown import ShutdownStep, run_shutdown_steps
+from baselith.core.api import _shutdown
+from baselith.core.api._shutdown import ShutdownStep, run_shutdown_steps
 
 
 async def test_a_failing_early_step_does_not_skip_later_steps() -> None:
@@ -76,20 +76,22 @@ async def test_shutdown_application_still_closes_pools_when_early_steps_raise() 
     shutdown_telemetry = MagicMock()
     with (
         patch(
-            "core.api._runtime_services.stop_runtime_services",
+            "baselith.core.api._runtime_services.stop_runtime_services",
             AsyncMock(side_effect=RuntimeError("x")),
         ),
         patch(
-            "core.api._runtime_services.drain_orchestrator",
+            "baselith.core.api._runtime_services.drain_orchestrator",
             AsyncMock(side_effect=RuntimeError("y")),
         ),
         patch(
-            "core.di.lazy_registry.LazyServiceRegistry.shutdown_all",
+            "baselith.core.di.lazy_registry.LazyServiceRegistry.shutdown_all",
             AsyncMock(side_effect=ValueError("z")),
         ),
-        patch("core.services.bootstrap.bootstrapper.shutdown", AsyncMock()),
-        patch("core.observability.otel.shutdown_telemetry", shutdown_telemetry),
-        patch("core.db.connection.close_async_pool", close_pool),
+        patch("baselith.core.services.bootstrap.bootstrapper.shutdown", AsyncMock()),
+        patch(
+            "baselith.core.observability.otel.shutdown_telemetry", shutdown_telemetry
+        ),
+        patch("baselith.core.db.connection.close_async_pool", close_pool),
     ):
         failed = await _shutdown.shutdown_application(app, set())
 

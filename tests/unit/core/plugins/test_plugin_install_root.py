@@ -5,7 +5,7 @@ installed distribution when the cwd has no ``plugins/`` — right for *reading*
 the bundled plugins, wrong for *writing*: a marketplace install would land in
 ``site-packages``, be wiped by the next ``pip install -U`` and need write access
 to the interpreter. Installs therefore resolve their own root
-(:func:`core.config.plugins.plugin_install_root`), and discovery adds the
+(:func:`baselith.core.config.plugins.plugin_install_root`), and discovery adds the
 bundled package as a second, lower-precedence root so a project's
 ``./plugins`` does not hide the plugins the framework ships.
 """
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from core.config.plugins import PluginConfig, plugin_install_root
-from core.plugins import discovery
+from baselith.core.config.plugins import PluginConfig, plugin_install_root
+from baselith.core.plugins import discovery
 
 pytestmark = [pytest.mark.unit]
 
@@ -83,8 +83,8 @@ def test_init_argument_counts_as_explicit(
 async def test_marketplace_installer_targets_the_install_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import core.config.plugins as plugins_config
-    from core.marketplace.installer import PluginInstaller
+    import baselith.core.config.plugins as plugins_config
+    from baselith.core.marketplace.installer import PluginInstaller
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(plugins_config, "_plugin_config", None)
@@ -150,8 +150,8 @@ def test_a_checkout_is_not_a_second_root(
 def test_loader_discovers_user_and_bundled_plugins(
     tmp_path: Path, installed_bundle: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugins.loader import PluginLoader
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.plugins.loader import PluginLoader
+    from baselith.core.plugins.registry import PluginRegistry
 
     monkeypatch.setenv("BASELITH_DISABLE_PLUGIN_ENTRY_POINTS", "1")
     user = tmp_path / "project" / "plugins"
@@ -165,7 +165,7 @@ def test_loader_discovers_user_and_bundled_plugins(
 def test_resource_analyzer_sees_bundled_plugins(
     tmp_path: Path, installed_bundle: Path
 ) -> None:
-    from core.plugins.resource_analyzer import ResourceAnalyzer
+    from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
     user = tmp_path / "project" / "plugins"
     _plugin(user, "mine")

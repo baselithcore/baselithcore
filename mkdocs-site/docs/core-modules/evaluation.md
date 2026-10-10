@@ -3,7 +3,7 @@ title: Evaluation
 description: LLM response quality evaluation via RAG metrics
 ---
 
-**Module**: `core/evaluation/`
+**Module**: `baselith/core/evaluation/`
 
 The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailored for Retrieval-Augmented Generation (RAG) metrics. It integrates with the event system to enable automated continuous optimization of agentic performance.
 
@@ -12,7 +12,7 @@ The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailore
 ## Module Structure
 
 ```text
-core/evaluation/               # the evaluation toolkit
+baselith/core/evaluation/               # the evaluation toolkit
 ├── __init__.py                # Public exports
 ├── base.py                    # BaseLLMEvaluator, JUDGE_UNAVAILABLE, judge_unavailable
 ├── protocols.py               # Evaluator protocol, EvaluationResult, QualityLevel
@@ -32,12 +32,12 @@ core/evaluation/               # the evaluation toolkit
 └── data/golden_qa.json        # bundled golden QA set
 ```
 
-!!! warning "`core.services.evaluation` is deprecated"
-    The former `core/services/evaluation/` DeepEval wrapper — a second class
+!!! warning "`baselith.core.services.evaluation` is deprecated"
+    The former `baselith/core/services/evaluation/` DeepEval wrapper — a second class
     named `EvaluationService` that nothing in the runtime used — is retired.
     The package is now a deprecation shim (announced in 0.40.0, removed in
     0.41.0): its `EvaluationService` subclasses the event-driven
-    `core.evaluation.EvaluationService` and keeps `evaluate_rag_response()`
+    `baselith.core.evaluation.EvaluationService` and keeps `evaluate_rag_response()`
     backed by the metric evaluators below. See
     [Services › Evaluation Service](services.md#evaluation-service).
 
@@ -71,7 +71,7 @@ as an unfaithful answer.
 
 The RAG metrics are `FaithfulnessEvaluator` (how well the answer is grounded
 in the retrieved context) and `AnswerRelevancyEvaluator` (how relevant it is to
-the query), in `core/evaluation/metrics.py`. Build a fresh evaluator per
+the query), in `baselith/core/evaluation/metrics.py`. Build a fresh evaluator per
 concurrent measurement: a DeepEval metric stores its score and reason on the
 instance.
 
@@ -84,7 +84,7 @@ pip install "baselith-core[evaluation]"   # deepeval; also set EVAL_ENABLED=true
 ```python
 import asyncio
 
-from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
+from baselith.core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
 query = "How does the caching work?"
 answer = "The system uses a Redis-based cache with TTL."
@@ -106,12 +106,12 @@ print(f"Faithfulness: {faithfulness:.2f}  Relevancy: {relevancy:.2f}")
 ## Integration with Optimization Loop
 
 The class that closes the loop is the **event-driven**
-`core.evaluation.service.EvaluationService` (exported from `core.evaluation`).
+`baselith.core.evaluation.service.EvaluationService` (exported from `baselith.core.evaluation`).
 It subscribes to `FLOW_COMPLETED`, judges
 each successful flow in a background task, and emits the verdict:
 
 ```python
-from core.evaluation import EvaluationService
+from baselith.core.evaluation import EvaluationService
 
 service = EvaluationService()   # evaluator defaults to CompositeEvaluator()
 service.start()                 # subscribes; a no-op unless EVAL_ENABLED=true
@@ -146,8 +146,8 @@ adds an opt-in judge pass over cases that already passed the deterministic
 checks:
 
 ```python
-from core.evaluation.judges import CompositeEvaluator
-from core.evaluation.regression_runner import run_regression_async
+from baselith.core.evaluation.judges import CompositeEvaluator
+from baselith.core.evaluation.regression_runner import run_regression_async
 
 report = await run_regression_async(
     cases, recorded, judge=CompositeEvaluator(), judge_min_score=0.7
@@ -179,7 +179,7 @@ Deterministically failed cases are not judged (no wasted LLM calls).
     `report.judge_errors`.
 
 ```python
-from core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
+from baselith.core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
 
 outcome = await judge.evaluate(answer, question)
 judge_unavailable(outcome)           # True -> no judgement was made
@@ -209,7 +209,7 @@ report = await run_regression_async(
 ```
 
 Every `(case, sample)` pair is flattened into **one** bounded fan-out via
-`core.utils.concurrency.bounded_gather`, so `judge_concurrency` caps the total
+`baselith.core.utils.concurrency.bounded_gather`, so `judge_concurrency` caps the total
 number of judge calls in flight across the whole suite — not per case — no
 matter how many samples or cases the run has.
 
@@ -218,7 +218,7 @@ matter how many samples or cases the run has.
 The `PromptEvaluator` runs a suite of `EvalCase` objects against a prompt and produces an aggregated report.
 
 ```python
-from core.evaluation.prompt_eval import EvalCase, PromptEvaluator
+from baselith.core.evaluation.prompt_eval import EvalCase, PromptEvaluator
 
 cases = [
     EvalCase(
@@ -267,13 +267,13 @@ print(report_str)
 
 Model choice decided by vibes is the portability anti-pattern: the routing
 policy deserves the same evidence discipline as any other change.
-`run_bake_off` (`core/evaluation/bake_off.py`, exported from
-`core.evaluation`) runs a single `EvalCase` suite against every candidate
+`run_bake_off` (`baselith/core/evaluation/bake_off.py`, exported from
+`baselith.core.evaluation`) runs a single `EvalCase` suite against every candidate
 model — one `PromptEvaluator` per model, the **system prompt held constant**
 — and returns a ranked comparison matrix:
 
 ```python
-from core.evaluation import run_bake_off
+from baselith.core.evaluation import run_bake_off
 
 result = await run_bake_off(
     system_prompt="You are a research assistant...",
@@ -292,14 +292,14 @@ Models run **sequentially** (per-model case concurrency via
 `BakeOffResult.rows` holds one `ModelRunReport` per model (`model`,
 `report`, optional `cost_usd`); the cost column is filled only when a
 `cost_estimator` (`(model, report) -> USD`, typically an adapter over
-`core.models.pricing`) is supplied. The matrix is ready to feed a
+`baselith.core.models.pricing`) is supplied. The matrix is ready to feed a
 routing-policy decision — see [Models](models.md).
 
 ---
 
 ## Trajectory-aware evaluation
 
-`core/evaluation/trajectory.py` adds a second evaluator that scores a
+`baselith/core/evaluation/trajectory.py` adds a second evaluator that scores a
 run not only on its final answer but on the *sequence of tool calls*
 the agent made to get there. It is provider-agnostic and pure: it
 takes a `TrajectoryCase`, the captured run output and trajectory, and
@@ -333,7 +333,7 @@ An ungrounded answer raises the `reference_fact_ungrounded` violation.
 ### Example
 
 ```python
-from core.evaluation.trajectory import TrajectoryEvaluator, TrajectoryCase
+from baselith.core.evaluation.trajectory import TrajectoryEvaluator, TrajectoryCase
 
 case: TrajectoryCase = {
     "case_id": "search_then_summarize",
@@ -380,7 +380,7 @@ assert not result.passed  # 0.07 > 0.05
 
 ## Regression runner (CI integration)
 
-`core/evaluation/regression_runner.py` turns the trajectory evaluator
+`baselith/core/evaluation/regression_runner.py` turns the trajectory evaluator
 into a deterministic CI job. Cases are YAML files; the runs graded against
 them come from two places — a [replayed scenario](#replayed-scenarios) driven
 through the real agent loop, or a hand-written recording in a JSON capture
@@ -407,7 +407,7 @@ the build when the pass rate dips below the configured gate.
 
 ```python
 from pathlib import Path
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     load_cases, load_recorded_runs, run_regression,
 )
 
@@ -466,7 +466,7 @@ go red for a change to the agent, to prompt assembly, to the router, to tool
 schemas or to output parsing. Only an edited YAML file or a bug in the
 evaluator could fail it. That is a floor, not a guard.
 
-`core/evaluation/replay.py` closes the gap without putting an API key in CI. A
+`baselith/core/evaluation/replay.py` closes the gap without putting an API key in CI. A
 **scenario** carries the provider's half of a conversation plus the tools the
 agent had; replaying it drives the *real* loop — real prompt assembly, real
 tool dispatch with its gates and
@@ -529,7 +529,7 @@ loop actually passed, and that recording *is* the graded trajectory.
 ```python
 from pathlib import Path
 
-from core.evaluation.replay import load_scenarios, replay_scenario
+from baselith.core.evaluation.replay import load_scenarios, replay_scenario
 
 scenarios = load_scenarios(Path("evals/scenarios"))
 run = await replay_scenario(scenarios[0])   # a RecordedRun, ready to grade
@@ -549,7 +549,7 @@ run = await replay_scenario(scenarios[0])   # a RecordedRun, ready to grade
     Model quality stays the [LLM-as-judge](#llm-as-judge-gate-opt-in) pass's
     job: credentials, a schedule, and a median over samples.
 
-Neither `replay` nor `cassette` is re-exported from `core.evaluation`; import
+Neither `replay` nor `cassette` is re-exported from `baselith.core.evaluation`; import
 them from their own modules, as above.
 
 ### What the replay gate actually catches {#what-replay-catches}
@@ -581,7 +581,7 @@ deleting the fixture in the same change.
 
 ### Cassettes: the shared replay machinery {#cassettes}
 
-`core/evaluation/cassette.py` is what plays a provider script through the
+`baselith/core/evaluation/cassette.py` is what plays a provider script through the
 `LLMService` surface the agent loop calls. It used to live in
 `tests/golden/cassette.py` and moved because `core` cannot import from the test
 tree and both consumers need the same machinery: the
@@ -616,7 +616,7 @@ optional:
 
 The durable checkpoint store already persists everything a regression
 recording needs — query, final answer, and the ordered tool trajectory.
-`core/evaluation/promotion.py` exploits that: `promote_run` converts a
+`baselith/core/evaluation/promotion.py` exploits that: `promote_run` converts a
 **completed** checkpoint into the exact JSON shape `load_recorded_runs`
 replays, so real production behavior becomes a deterministic CI fixture. A
 promoted run lands under `evals/runs/`, so it is exactly that — a fixture. It
@@ -626,7 +626,7 @@ rejects a case served by both.
 
 ```python
 from pathlib import Path
-from core.evaluation.promotion import promote_run
+from baselith.core.evaluation.promotion import promote_run
 
 result = await promote_run(
     store,                                   # any CheckpointStore
@@ -679,8 +679,8 @@ borderline cases: one grade is a sample of one. `ConsensusEvaluator` runs the
 **same** question past several independent judges and aggregates the panel.
 
 ```python
-from core.evaluation import ConsensusEvaluator
-from core.evaluation.judges import RelevanceEvaluator
+from baselith.core.evaluation import ConsensusEvaluator
+from baselith.core.evaluation.judges import RelevanceEvaluator
 
 panel = ConsensusEvaluator([
     RelevanceEvaluator(llm_service=sonnet),
@@ -730,7 +730,7 @@ notice.
 evals/red_team/guardrails.yaml           # volume 1: canonical jailbreaks, extraction, PII
 evals/red_team/injection_variants.yaml   # volume 2: paraphrases, multilingual, exfil links, secrets
 scripts/run_red_team_evals.py            # the gate  (CI job: "Red-Team Gate")
-core/evaluation/red_team.py              # loader + runner + report
+baselith/core/evaluation/red_team.py              # loader + runner + report
 ```
 
 Every case that failed when a volume was added is a guardrail gap, not a
@@ -778,14 +778,14 @@ python scripts/run_red_team_evals.py --report red-team-report.json
 
 ## Bias examination (group fairness)
 
-`core/evaluation/fairness.py` computes the standard group-fairness quantities
+`baselith/core/evaluation/fairness.py` computes the standard group-fairness quantities
 over labelled outcomes — the measurement behind the AI Act Art. 10(2)(f)/(g)
 bias examination and the Art. 15 accuracy-across-groups obligation.
 `evaluate_fairness` takes aligned sequences and returns a `FairnessReport`
 holding one `GroupOutcome` per protected-attribute value:
 
 ```python
-from core.evaluation import evaluate_fairness
+from baselith.core.evaluation import evaluate_fairness
 
 report = evaluate_fairness(
     groups=["a", "a", "b", "b"],

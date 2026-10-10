@@ -9,14 +9,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.services.llm import LLMService
+from baselith.core.services.llm import LLMService
 
 
 class TestModelRoutingResolution:
     def _service(self, **config_kwargs):
         from unittest.mock import AsyncMock
 
-        from core.config.services import LLMConfig
+        from baselith.core.config.services import LLMConfig
 
         config = LLMConfig(provider="ollama", model="llama3.2", **config_kwargs)
         with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
@@ -56,7 +56,7 @@ class TestFallbackWiring:
     async def test_generate_response_uses_fallback_runtime_when_configured(self):
         from unittest.mock import AsyncMock
 
-        from core.config.services import LLMConfig
+        from baselith.core.config.services import LLMConfig
 
         config = LLMConfig(
             provider="ollama", model="llama3.2", fallback_chain="openai:gpt-4o-mini"
@@ -64,7 +64,7 @@ class TestFallbackWiring:
         with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
             service = LLMService(config=config, enable_cache=False)
         with patch(
-            "core.services.llm.fallback_runtime.run_with_fallback",
+            "baselith.core.services.llm.fallback_runtime.run_with_fallback",
             AsyncMock(return_value=("saved", 5, "openai", "gpt-4o-mini")),
         ) as rwf:
             result = await service.generate_response("hello")
@@ -75,7 +75,7 @@ class TestFallbackWiring:
     async def test_no_chain_configured_keeps_direct_path(self):
         from unittest.mock import AsyncMock
 
-        from core.config.services import LLMConfig
+        from baselith.core.config.services import LLMConfig
 
         config = LLMConfig(provider="ollama", model="llama3.2", fallback_chain="")
         with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
@@ -85,7 +85,8 @@ class TestFallbackWiring:
                 service, "_generate_with_retry", AsyncMock(return_value=("hi", 3))
             ) as direct,
             patch(
-                "core.services.llm.fallback_runtime.run_with_fallback", AsyncMock()
+                "baselith.core.services.llm.fallback_runtime.run_with_fallback",
+                AsyncMock(),
             ) as rwf,
         ):
             result = await service.generate_response("hello")
@@ -119,7 +120,7 @@ class TestThinkingEffortPropagation:
         return service, mock_provider
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_effort_derived_from_category_when_enabled(self, mock_config):
         service, provider = self._service_with_mock_provider(
             mock_config, thinking_enabled=True
@@ -128,7 +129,7 @@ class TestThinkingEffortPropagation:
         assert provider.generate.call_args.kwargs.get("effort") == "high"
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_no_effort_when_disabled(self, mock_config):
         service, provider = self._service_with_mock_provider(
             mock_config, thinking_enabled=False
@@ -137,7 +138,7 @@ class TestThinkingEffortPropagation:
         assert "effort" not in provider.generate.call_args.kwargs
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_off_category_adds_no_kwarg(self, mock_config):
         service, provider = self._service_with_mock_provider(
             mock_config, thinking_enabled=True
@@ -146,7 +147,7 @@ class TestThinkingEffortPropagation:
         assert "effort" not in provider.generate.call_args.kwargs
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_explicit_effort_wins_over_category(self, mock_config):
         service, provider = self._service_with_mock_provider(
             mock_config, thinking_enabled=True

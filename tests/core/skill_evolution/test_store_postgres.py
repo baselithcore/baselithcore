@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _pattern(fingerprint: str):
-    from core.skill_evolution.types import Pattern, PatternKind
+    from baselith.core.skill_evolution.types import Pattern, PatternKind
 
     return Pattern(
         fingerprint=fingerprint,
@@ -35,7 +35,7 @@ def unique_fp() -> str:
 
 
 async def test_upsert_dedups_by_fingerprint(unique_fp: str) -> None:
-    from core.skill_evolution.store_postgres import PostgresPatternStore
+    from baselith.core.skill_evolution.store_postgres import PostgresPatternStore
 
     store = PostgresPatternStore()
     first = await store.upsert(_pattern(unique_fp))
@@ -45,8 +45,8 @@ async def test_upsert_dedups_by_fingerprint(unique_fp: str) -> None:
 
 
 async def test_get_and_status_round_trip(unique_fp: str) -> None:
-    from core.skill_evolution.store_postgres import PostgresPatternStore
-    from core.skill_evolution.types import PatternStatus
+    from baselith.core.skill_evolution.store_postgres import PostgresPatternStore
+    from baselith.core.skill_evolution.types import PatternStatus
 
     store = PostgresPatternStore()
     saved = await store.upsert(_pattern(unique_fp))
@@ -57,7 +57,7 @@ async def test_get_and_status_round_trip(unique_fp: str) -> None:
 
 
 async def test_list_orders_by_occurrences(unique_fp: str) -> None:
-    from core.skill_evolution.store_postgres import PostgresPatternStore
+    from baselith.core.skill_evolution.store_postgres import PostgresPatternStore
 
     store = PostgresPatternStore()
     other = f"fp-{uuid.uuid4().hex[:12]}"

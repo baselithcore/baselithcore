@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 
-from core.exploration.explorer import (
+from baselith.core.exploration.explorer import (
     ExplorationResult,
     KnowledgeSource,
     ProactiveExplorer,
@@ -66,7 +66,7 @@ async def test_explore_no_llm(mock_knowledge_source):
     """Test exploration without LLM (should fallback to simple query expansion)."""
     # We mock the property to return None, simulating that LLM service is unavailable
     with patch(
-        "core.exploration.explorer.ProactiveExplorer.llm_service",
+        "baselith.core.exploration.explorer.ProactiveExplorer.llm_service",
         new_callable=PropertyMock,
     ) as mock_service_prop:
         mock_service_prop.return_value = None

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from plugins.api_routers.status import _check_vectorstore
+from baselith.plugins.api_routers.status import _check_vectorstore
 
 
 def _service(exists: AsyncMock) -> SimpleNamespace:
@@ -17,7 +17,7 @@ def _service(exists: AsyncMock) -> SimpleNamespace:
 
 async def _probe(exists: AsyncMock) -> bool:
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=_service(exists),
     ):
         return await _check_vectorstore()
@@ -40,7 +40,7 @@ async def test_provider_without_probe_reports_ready() -> None:
         provider=SimpleNamespace(), config=SimpleNamespace(collection_name="d")
     )
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=service,
     ):
         assert await _check_vectorstore() is True

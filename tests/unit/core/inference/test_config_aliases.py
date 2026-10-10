@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.config.inference import QdrantServerConfig
+from baselith.core.config.inference import QdrantServerConfig
 
 
 @pytest.fixture(autouse=True)

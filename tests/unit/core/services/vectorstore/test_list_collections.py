@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.services.vectorstore.providers.pgvector_provider import PgVectorProvider
+from baselith.core.services.vectorstore.providers.pgvector_provider import (
+    PgVectorProvider,
+)
 
 
 async def test_pgvector_lists_vs_tables_without_prefix() -> None:
@@ -19,7 +21,7 @@ async def test_pgvector_lists_vs_tables_without_prefix() -> None:
         yield cursor
 
     with patch(
-        "core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
+        "baselith.core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
         factory,
     ):
         assert await PgVectorProvider().list_collections() == [
@@ -30,20 +32,22 @@ async def test_pgvector_lists_vs_tables_without_prefix() -> None:
     assert "information_schema.tables" in sql and "'vs_'" in sql
 
 
-@patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+@patch("baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
 async def test_qdrant_lists_collection_names(mock_client_cls) -> None:
     client = AsyncMock()
     client.get_collections.return_value = SimpleNamespace(
         collections=[SimpleNamespace(name="a"), SimpleNamespace(name="b")]
     )
     mock_client_cls.return_value = client
-    from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+    from baselith.core.services.vectorstore.providers.qdrant_provider import (
+        QdrantProvider,
+    )
 
     assert await QdrantProvider().list_collections() == ["a", "b"]
 
 
 async def test_service_aclose_closes_provider_client() -> None:
-    from core.services.vectorstore.service import VectorStoreService
+    from baselith.core.services.vectorstore.service import VectorStoreService
 
     client = MagicMock()
     client.close = AsyncMock()
@@ -54,14 +58,14 @@ async def test_service_aclose_closes_provider_client() -> None:
 
 
 async def test_service_aclose_without_client_is_noop() -> None:
-    from core.services.vectorstore.service import VectorStoreService
+    from baselith.core.services.vectorstore.service import VectorStoreService
 
     service = VectorStoreService(config=MagicMock(), provider=SimpleNamespace())
     await service.aclose()
 
 
 async def test_close_vectorstore_service_drops_singleton(monkeypatch) -> None:
-    from core.services.vectorstore import service as vs_module
+    from baselith.core.services.vectorstore import service as vs_module
 
     fake = MagicMock()
     fake.aclose = AsyncMock()

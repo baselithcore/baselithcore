@@ -6,14 +6,17 @@ import hashlib
 
 import pytest
 
-from core.compliance.registry import get_ai_system_registry, reset_ai_system_registry
-from plugins.coding_agent.compliance import (
+from baselith.core.compliance.registry import (
+    get_ai_system_registry,
+    reset_ai_system_registry,
+)
+from baselith.plugins.coding_agent.compliance import (
     SYSTEM_ID,
     mark_generated,
     register_ai_system,
 )
-from plugins.coding_agent.tools import build_coding_tool_definitions
-from plugins.coding_agent.types import CodingResult
+from baselith.plugins.coding_agent.tools import build_coding_tool_definitions
+from baselith.plugins.coding_agent.types import CodingResult
 
 
 @pytest.fixture(autouse=True)
@@ -35,12 +38,12 @@ async def test_registration_is_idempotent_and_refreshes_its_facts():
 
 
 async def test_a_broken_registry_never_fails(monkeypatch):
-    import core.compliance
+    import baselith.core.compliance
 
     def boom():
         raise RuntimeError("store down")
 
-    monkeypatch.setattr(core.compliance, "get_ai_system_registry", boom)
+    monkeypatch.setattr(baselith.core.compliance, "get_ai_system_registry", boom)
     assert await register_ai_system("1.1.0") is None
 
 
@@ -72,7 +75,7 @@ async def test_mcp_tools_return_the_proof_with_the_code(monkeypatch):
             tests_reproduce_bug=True,
         )
 
-    from plugins.coding_agent.agent import CodingAgent
+    from baselith.plugins.coding_agent.agent import CodingAgent
 
     monkeypatch.setattr(CodingAgent, "fix_code", fake_fix)
     out = await tools["fix_code"]["handler"]("bad", "err", language="python")

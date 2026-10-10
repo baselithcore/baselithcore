@@ -13,8 +13,8 @@ from unittest.mock import patch
 import jwt as pyjwt
 import pytest
 
-from core.auth._token_epoch import NO_EPOCH
-from core.auth.types import InvalidTokenError
+from baselith.core.auth._token_epoch import NO_EPOCH
+from baselith.core.auth.types import InvalidTokenError
 
 SECRET = "epoch-test-secret-with-at-least-thirty-two-chars"
 
@@ -44,10 +44,10 @@ class _FakeRedis:
 
 @pytest.fixture
 def handler():
-    from core.auth.jwt import JWTHandler
+    from baselith.core.auth.jwt import JWTHandler
 
     redis = _FakeRedis()
-    with patch("core.auth.jwt.create_redis_client", return_value=redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=redis):
         h = JWTHandler(secret_key=SECRET)
     h._fake_redis = redis  # exposed so tests can simulate an outage
     return h
@@ -142,10 +142,10 @@ async def test_a_failed_bump_reports_failure(handler):
 
 
 async def test_manager_reports_whether_the_invalidation_landed():
-    from core.auth.manager import AuthManager
+    from baselith.core.auth.manager import AuthManager
 
     redis = _FakeRedis()
-    with patch("core.auth.jwt.create_redis_client", return_value=redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=redis):
         manager = AuthManager(secret_key=SECRET)
 
     assert await manager.revoke_user_tokens("u-1") is True
@@ -154,10 +154,10 @@ async def test_manager_reports_whether_the_invalidation_landed():
 
 
 async def test_manager_stamps_the_current_epoch_on_new_tokens():
-    from core.auth.manager import AuthManager
+    from baselith.core.auth.manager import AuthManager
 
     redis = _FakeRedis()
-    with patch("core.auth.jwt.create_redis_client", return_value=redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=redis):
         manager = AuthManager(secret_key=SECRET)
 
     await manager.revoke_user_tokens("u-1")
@@ -166,10 +166,10 @@ async def test_manager_stamps_the_current_epoch_on_new_tokens():
 
 
 async def test_manager_revocation_ends_existing_tokens():
-    from core.auth.manager import AuthManager
+    from baselith.core.auth.manager import AuthManager
 
     redis = _FakeRedis()
-    with patch("core.auth.jwt.create_redis_client", return_value=redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=redis):
         manager = AuthManager(secret_key=SECRET)
 
     token = await manager.create_token("u-1")

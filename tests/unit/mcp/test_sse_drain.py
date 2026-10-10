@@ -3,7 +3,7 @@
 A ``subscriptions/listen`` stream only ends when the client leaves, so a
 rolling restart would otherwise wait out ``--timeout-graceful-shutdown`` and
 then cancel it. The stream races its queue against
-:func:`core.lifecycle.drain.wait_for_drain`, flushes what is already queued,
+:func:`baselith.core.lifecycle.drain.wait_for_drain`, flushes what is already queued,
 and returns.
 """
 
@@ -14,8 +14,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from core.lifecycle import drain
-from core.mcp.sse import SSEStream, encode_event
+from baselith.core.lifecycle import drain
+from baselith.core.mcp.sse import SSEStream, encode_event
 
 
 @pytest.fixture(autouse=True)

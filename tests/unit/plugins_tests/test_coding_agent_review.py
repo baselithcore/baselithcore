@@ -9,7 +9,7 @@ review is checked on code that passed its tests — no network, no Docker.
 
 from __future__ import annotations
 
-from plugins.coding_agent import CodingAgent
+from baselith.plugins.coding_agent import CodingAgent
 
 from .coding_agent_fakes import LocalSandbox, ScriptedLLM
 

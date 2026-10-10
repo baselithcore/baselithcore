@@ -1,5 +1,5 @@
 """
-Tests for sync core.db refactoring to async.
+Tests for sync baselith.core.db refactoring to async.
 """
 
 from contextlib import asynccontextmanager
@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.db import connection as db_connection
-from core.db import documents, feedback, schema
+from baselith.core.db import connection as db_connection
+from baselith.core.db import documents, feedback, schema
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,9 @@ async def test_insert_feedback_async():
     async def get_conn_gen():
         yield mock_conn
 
-    with patch("core.db.feedback.get_async_connection", side_effect=get_conn_gen):
+    with patch(
+        "baselith.core.db.feedback.get_async_connection", side_effect=get_conn_gen
+    ):
         await feedback.insert_feedback(
             query="test query",
             answer="test answer",
@@ -73,7 +75,9 @@ async def test_get_feedbacks_async():
     async def get_conn_gen():
         yield mock_conn
 
-    with patch("core.db.feedback.get_async_connection", side_effect=get_conn_gen):
+    with patch(
+        "baselith.core.db.feedback.get_async_connection", side_effect=get_conn_gen
+    ):
         results = await feedback.get_feedbacks(limit=10)
 
         mock_cursor.execute.assert_awaited()
@@ -109,7 +113,9 @@ async def test_get_feedback_analytics_always_applies_time_bound():
         mock_conn.cursor = MagicMock(side_effect=cursor_gen)
         yield mock_conn
 
-    with patch("core.db.feedback.get_async_connection", side_effect=get_conn_gen):
+    with patch(
+        "baselith.core.db.feedback.get_async_connection", side_effect=get_conn_gen
+    ):
         result = await feedback.get_feedback_analytics(days=None)
 
     # Every analytics query must carry a datetime lower bound (the window).
@@ -140,8 +146,10 @@ async def test_get_document_feedback_summary_async():
     async def get_conn_gen():
         yield mock_conn
 
-    with patch("core.db.documents.POSTGRES_ENABLED", True):
-        with patch("core.db.documents.get_async_connection", side_effect=get_conn_gen):
+    with patch("baselith.core.db.documents.POSTGRES_ENABLED", True):
+        with patch(
+            "baselith.core.db.documents.get_async_connection", side_effect=get_conn_gen
+        ):
             summary = await documents.get_document_feedback_summary()
 
             mock_cursor.execute.assert_awaited()
@@ -185,8 +193,10 @@ async def test_ensure_schema_async():
 @pytest.mark.asyncio
 async def test_init_db_async():
     """Test init_db calls ensure_schema."""
-    with patch("core.db.schema.ensure_schema", new_callable=AsyncMock) as mock_ensure:
-        with patch("core.db.schema.POSTGRES_ENABLED", True):
+    with patch(
+        "baselith.core.db.schema.ensure_schema", new_callable=AsyncMock
+    ) as mock_ensure:
+        with patch("baselith.core.db.schema.POSTGRES_ENABLED", True):
             await schema.init_db()
             mock_ensure.assert_called_once()
 
@@ -197,7 +207,7 @@ def test_sync_pool_open_failure_does_not_mark_pool_opened():
     mock_pool.open.side_effect = RuntimeError("db unavailable")
     mock_pool.closed = True
 
-    with patch("core.db.connection._get_pool", return_value=mock_pool):
+    with patch("baselith.core.db.connection._get_pool", return_value=mock_pool):
         original = db_connection._POOL_OPENED
         db_connection._POOL_OPENED = False
         try:
@@ -216,7 +226,7 @@ async def test_async_pool_open_failure_does_not_mark_pool_opened():
     mock_pool.open = AsyncMock(side_effect=RuntimeError("db unavailable"))
     mock_pool.closed = True
 
-    with patch("core.db.connection._get_async_pool", return_value=mock_pool):
+    with patch("baselith.core.db.connection._get_async_pool", return_value=mock_pool):
         original = db_connection._ASYNC_POOL_OPENED
         db_connection._ASYNC_POOL_OPENED = False
         try:
@@ -235,7 +245,7 @@ class TestWarmAsyncPool:
     async def test_opens_pool_waiting_for_min_size(self, monkeypatch):
         from unittest.mock import AsyncMock
 
-        from core.db import connection as conn_mod
+        from baselith.core.db import connection as conn_mod
 
         pool = AsyncMock()
         monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", True)
@@ -254,7 +264,7 @@ class TestWarmAsyncPool:
     async def test_failure_is_soft(self, monkeypatch):
         from unittest.mock import AsyncMock
 
-        from core.db import connection as conn_mod
+        from baselith.core.db import connection as conn_mod
 
         pool = AsyncMock()
         pool.open = AsyncMock(side_effect=OSError("db down"))
@@ -267,7 +277,7 @@ class TestWarmAsyncPool:
         assert conn_mod._ASYNC_POOL_OPENED is False
 
     async def test_disabled_postgres_is_a_noop(self, monkeypatch):
-        from core.db import connection as conn_mod
+        from baselith.core.db import connection as conn_mod
 
         monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", False)
         assert await conn_mod.warm_async_pool() is False
@@ -298,7 +308,7 @@ class TestTenantBindingMemo:
         return conn
 
     async def test_same_tenant_reapply_is_skipped(self, monkeypatch):
-        from core.db import connection as conn_mod
+        from baselith.core.db import connection as conn_mod
 
         executed: list = []
         conn = self._connection(executed)
@@ -308,7 +318,7 @@ class TestTenantBindingMemo:
         assert len(executed) == 1  # second checkout: no extra round-trip
 
     async def test_tenant_change_reapplies(self, monkeypatch):
-        from core.db import connection as conn_mod
+        from baselith.core.db import connection as conn_mod
 
         executed: list = []
         conn = self._connection(executed)

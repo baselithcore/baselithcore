@@ -5,8 +5,8 @@ description: The complete path of a request through the system
 <!-- markdownlint-disable MD046 -->
 
 This guide illustrates the path of a request from client to final response,
-using the real names from `plugins/api_routers/chat.py`,
-`core/services/chat/service.py` and `core/orchestration/`.
+using the real names from `baselith/plugins/api_routers/chat.py`,
+`baselith/core/services/chat/service.py` and `baselith/core/orchestration/`.
 
 ---
 
@@ -52,18 +52,18 @@ sequenceDiagram
 
 ### Entry Point Endpoint
 
-The chat routes live in `plugins/api_routers/chat.py`. They are mounted
+The chat routes live in `baselith/plugins/api_routers/chat.py`. They are mounted
 **without** an `/api` prefix (a `/v1` alias is mounted additively) and the
 router declares `require_user` as a dependency, so every call is authenticated
 and rate-limited before the route body runs. The routes delegate to
-`chat_service` (`core.chat.chat_service`), which owns the `Orchestrator`.
+`chat_service` (`baselith.core.chat.chat_service`), which owns the `Orchestrator`.
 
-```python title="plugins/api_routers/chat.py (trimmed)"
+```python title="baselith/plugins/api_routers/chat.py (trimmed)"
 from fastapi import APIRouter, Depends, Request, Response
 
-from core.chat import chat_service
-from core.middleware import require_user
-from core.models.chat import ChatRequest
+from baselith.core.chat import chat_service
+from baselith.core.middleware import require_user
+from baselith.core.models.chat import ChatRequest
 
 router = APIRouter(dependencies=[Depends(require_user)])
 
@@ -97,7 +97,7 @@ the class, so the OpenAPI schema documents the right content type — see
 
 ### Request Model
 
-The body is `ChatRequest` (`core/models/chat.py`):
+The body is `ChatRequest` (`baselith/core/models/chat.py`):
 
 | Field                 | Type           | Default | Notes                                               |
 | --------------------- | -------------- | ------- | --------------------------------------------------- |
@@ -121,12 +121,12 @@ curl -X POST http://localhost:8000/chat \
 
 ### Middleware Chain
 
-All HTTP middleware in `core/middleware/` is implemented as **pure ASGI**
+All HTTP middleware in `baselith/core/middleware/` is implemented as **pure ASGI**
 (`async def __call__(scope, receive, send)`); `BaseHTTPMiddleware` is
 explicitly forbidden because it wraps every request in an extra anyio task
 and breaks streaming/cancellation. The order below is the inbound execution
 sequence derived from the `add_middleware` calls in
-`core/api/factory.py:create_app()` (in Starlette the *last* middleware added
+`baselith/core/api/factory.py:create_app()` (in Starlette the *last* middleware added
 is the *outermost*, so it runs first on the way in).
 
 ```mermaid
@@ -169,12 +169,12 @@ first-call `EXPIRE` Lua script — one round trip per request.
 
 ## Phase 2: Bridging to the Orchestrator
 
-`ChatService.handle_chat_async` (`core/services/chat/service.py`) validates the
+`ChatService.handle_chat_async` (`baselith/core/services/chat/service.py`) validates the
 query with `InputGuard`, loads the conversation's prior turns, builds the
 orchestration context from the request and hands off to `self.agent` — a lazily constructed
 `Orchestrator(plugin_registry=..., checkpoint_store=get_default_checkpoint_store())`:
 
-```python title="core/services/chat/service.py (trimmed)"
+```python title="baselith/core/services/chat/service.py (trimmed)"
 async def handle_chat_async(self, req: ChatRequest) -> ChatResponse:
     guard_result = InputGuard().validate(req.query)
     if not guard_result.is_valid:
@@ -203,7 +203,7 @@ async def handle_chat_async(self, req: ChatRequest) -> ChatResponse:
 ```
 
 The orchestrator entry point is `Orchestrator.process`
-(`core/orchestration/mixins/execution.py`):
+(`baselith/core/orchestration/mixins/execution.py`):
 
 ```python
 async def process(
@@ -243,7 +243,7 @@ durable checkpointing when a `checkpoint_store` is configured
 Memory recall and intent classification both consume only the query, so the
 orchestrator overlaps them instead of paying both latencies in series:
 
-```python title="core/orchestration/mixins/execution.py (excerpt)"
+```python title="baselith/core/orchestration/mixins/execution.py (excerpt)"
 if not intent:
     _, intent = await asyncio.gather(
         inject_memory_context(self, query, context, budget),
@@ -255,9 +255,9 @@ else:
 
 ### Memory Context
 
-`inject_memory_context` (`core/orchestration/mixins/_context_assembly.py`)
+`inject_memory_context` (`baselith/core/orchestration/mixins/_context_assembly.py`)
 uses the orchestrator's `memory_manager` — an `AgentMemory` from
-`core.memory`, passed at construction time — and returns early when none is
+`baselith.core.memory`, passed at construction time — and returns early when none is
 configured. `ChatService` builds its orchestrator without one, so the `/chat`
 route skips this step unless you construct the `Orchestrator` yourself with
 `memory_manager=...`.
@@ -295,7 +295,7 @@ feedback and skills-catalog facades to the context.
 
 `classify_intent_async(query)` delegates to
 `IntentClassifier.classify(text) -> str`
-(`core/orchestration/intent_classifier.py`), a thin wrapper over
+(`baselith/core/orchestration/intent_classifier.py`), a thin wrapper over
 `classify_with_confidence(text) -> ClassificationResult`:
 
 ```python
@@ -323,7 +323,7 @@ The strategies run in order, cheapest first:
 ### Pattern Registration
 
 Plugins declare their intents from `get_intent_patterns()`. The registry keys
-each entry by its `name` (`core/plugins/registration.py`) and the classifier
+each entry by its `name` (`baselith/core/plugins/registration.py`) and the classifier
 pulls them lazily on the first query via
 `PluginRegistry.get_all_intent_patterns()`:
 
@@ -362,7 +362,7 @@ Plugins expose handlers from `get_flow_handlers()` as an
 each one in a `_LazyFlowHandlerProxy`, so importing the plugin's heavy
 dependencies is deferred until the handler is first invoked:
 
-```python title="core/plugins/registry.py (excerpt)"
+```python title="baselith/core/plugins/registry.py (excerpt)"
 class PluginRegistry:
     def get_flow_handler(self, intent_name: str) -> Any | None:
         """Retrieve the workflow handler responsible for an intent."""
@@ -379,7 +379,7 @@ The orchestrator copies every registry handler into its own table at
 construction (`_load_plugin_handlers()` → `register_handler(intent, handler)`)
 and resolves the intent against that table at request time:
 
-```python title="core/orchestration/mixins/execution.py (excerpt)"
+```python title="baselith/core/orchestration/mixins/execution.py (excerpt)"
 handler = self._flow_handlers.get(intent)
 
 if not handler:
@@ -407,13 +407,13 @@ and request-time lookups are serialized.
 ## Phase 5: Handler Execution
 
 A flow handler satisfies the `FlowHandler` protocol
-(`core/orchestration/protocols.py`):
+(`baselith/core/orchestration/protocols.py`):
 `async def handle(query, context) -> dict[str, Any]`. The orchestrator binds
 the owning plugin's context around the call (so the per-plugin LLM policy
 attributes the spend correctly), then stamps `intent` and a `budget` snapshot
 onto the result:
 
-```python title="core/orchestration/mixins/execution.py (excerpt)"
+```python title="baselith/core/orchestration/mixins/execution.py (excerpt)"
 plugin_token = self._bind_intent_plugin(intent)
 try:
     result = await handler.handle(query, context)
@@ -429,12 +429,12 @@ An illustrative handler:
 ```python title="plugins/weather_agent/handlers.py (illustrative)"
 from typing import Any
 
-from core.di import get_lazy_registry
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import get_lazy_registry
+from baselith.core.interfaces import LLMServiceProtocol
 
 
 class WeatherFlowHandler:
-    """Structural match for core.orchestration.protocols.FlowHandler."""
+    """Structural match for baselith.core.orchestration.protocols.FlowHandler."""
 
     async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         context["loop_budget"].tick()  # one agent-loop step against the request budget
@@ -459,8 +459,8 @@ Handlers resolve services through the lazy DI registry rather than importing
 concrete implementations:
 
 ```python
-from core.di import get_lazy_registry
-from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
+from baselith.core.di import get_lazy_registry
+from baselith.core.interfaces import LLMServiceProtocol, VectorStoreProtocol
 
 
 class MyHandler:
@@ -475,7 +475,7 @@ class MyHandler:
 ## Phase 6: Memory Write
 
 After the handler returns, the interaction is persisted **off the request
-path**: `_schedule_memory_write` (`core/orchestration/mixins/_memory_write.py`)
+path**: `_schedule_memory_write` (`baselith/core/orchestration/mixins/_memory_write.py`)
 spawns a background task, bounded by a semaphore of 32 concurrent writes, that
 stores the query and the response as two independent `remember()` calls:
 
@@ -506,7 +506,7 @@ the handler runs it publishes `RUN_STARTED` on the structured run-event stream
 (`publish_run_event`) and `EventNames.FLOW_STARTED` on the event bus; after the
 handler it emits `EventNames.FLOW_COMPLETED`:
 
-```python title="core/orchestration/mixins/execution.py (excerpt)"
+```python title="baselith/core/orchestration/mixins/execution.py (excerpt)"
 get_event_bus().emit_sync(
     EventNames.FLOW_COMPLETED,
     {
@@ -521,11 +521,11 @@ get_event_bus().emit_sync(
 )
 ```
 
-`EventListener` (`core/events/listener.py`) subscribes to `FLOW_COMPLETED` to
+`EventListener` (`baselith/core/events/listener.py`) subscribes to `FLOW_COMPLETED` to
 collect metrics. From your own async code prefer the awaitable form:
 
 ```python
-from core.events import EventNames, get_event_bus
+from baselith.core.events import EventNames, get_event_bus
 
 await get_event_bus().emit(EventNames.FLOW_COMPLETED, {"intent": "weather"})
 ```
@@ -539,7 +539,7 @@ await get_event_bus().emit(EventNames.FLOW_COMPLETED, {"intent": "weather"})
 `process()` returns a plain dict — `response`, `intent`, `budget`, plus
 whatever the handler added (`sources`, `metadata`, `error`) — after
 `guard_output_async` has applied PII redaction and the harmful-content filter.
-`ChatService` maps it onto `ChatResponse` (`core/models/chat.py`):
+`ChatService` maps it onto `ChatResponse` (`baselith/core/models/chat.py`):
 
 ```python
 class ChatResponse(BaseModel):
@@ -610,7 +610,7 @@ full answer as a single chunk — still SSE-framed.
 Intents without a `StreamHandler` still stream — the orchestrator runs the
 full non-streaming pipeline and emits its final response as one chunk:
 
-```python title="core/orchestration/mixins/execution.py (excerpt)"
+```python title="baselith/core/orchestration/mixins/execution.py (excerpt)"
 handler = self._stream_handlers.get(intent)
 
 if not handler:

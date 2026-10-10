@@ -3,7 +3,7 @@ title: Connectors
 description: One contract for integrations with external systems — capabilities, egress, retries, credentials, audited tools, DORA
 ---
 
-The `core/connectors` package is the contract every integration with an
+The `baselith/core/connectors` package is the contract every integration with an
 external system implements: a CRM, a ticketing system, a threat-intel feed,
 a payment provider. The package holds the contract and the machinery around
 it. The concrete connectors live in plugins.
@@ -23,14 +23,14 @@ The contract supplies all of them once, built from pieces core already has:
 
 | Concern | Built on |
 |---|---|
-| Egress allowlist, SSRF, DNS pinning | `core.security.http.create_hardened_async_client` + `SsrfPolicy(allowed_hosts=...)` |
-| Retry with `Retry-After` | `core.resilience.retry` |
-| Outage isolation | `core.resilience.get_circuit_breaker("connector.<name>")` |
-| Credentials | `core.security.secrets` (env, `*_FILE`, secrets dir, Vault backends) |
-| Registry | `core.registries.BaseRegistry` |
-| Audit of actions | `core.observability.audit` (`TOOL_INVOKE`, with the actor) |
-| Agent / MCP tools | `core.reasoning.react_types.ToolDefinition`, `Plugin.get_mcp_tools()` |
-| DORA Art. 28 register | `core.thirdparty` |
+| Egress allowlist, SSRF, DNS pinning | `baselith.core.security.http.create_hardened_async_client` + `SsrfPolicy(allowed_hosts=...)` |
+| Retry with `Retry-After` | `baselith.core.resilience.retry` |
+| Outage isolation | `baselith.core.resilience.get_circuit_breaker("connector.<name>")` |
+| Credentials | `baselith.core.security.secrets` (env, `*_FILE`, secrets dir, Vault backends) |
+| Registry | `baselith.core.registries.BaseRegistry` |
+| Audit of actions | `baselith.core.observability.audit` (`TOOL_INVOKE`, with the actor) |
+| Agent / MCP tools | `baselith.core.reasoning.react_types.ToolDefinition`, `Plugin.get_mcp_tools()` |
+| DORA Art. 28 register | `baselith.core.thirdparty` |
 
 The package is **experimental** (see [API Stability Tiers](../advanced/api-stability.md)).
 
@@ -56,7 +56,7 @@ Every connector also satisfies `Connector`, meaning it has a `spec`,
 from collections.abc import Mapping
 from typing import Any
 
-from core.connectors import (
+from baselith.core.connectors import (
     ActionResult,
     ActionSpec,
     BaseConnector,
@@ -212,7 +212,7 @@ swallows it.
 
 A `CredentialResolver` returns a connector's credentials for a tenant. The
 default, `SecretsCredentialResolver`, reads them through
-`core.security.secrets.get_secret` and tries the most specific name first:
+`baselith.core.security.secrets.get_secret` and tries the most specific name first:
 
 ```text
 CONNECTOR_<NAME>__<TENANT>__<FIELD>   # per-tenant override
@@ -249,7 +249,7 @@ returns a snapshot that is safe to show in a UI (`configured`, `missing`,
 ## Registry and construction
 
 ```python
-from core.connectors import create_connector, get_connector_registry
+from baselith.core.connectors import create_connector, get_connector_registry
 
 get_connector_registry().register_connector(TicketsConnector)
 
@@ -283,7 +283,7 @@ Every action runs through `invoke_action(connector, action, params)`:
 Two bridges adapt that path:
 
 ```python
-from core.connectors import connector_mcp_tools, connector_tool_definitions
+from baselith.core.connectors import connector_mcp_tools, connector_tool_definitions
 
 # ReAct agent tools, named "<connector>.<action>" like mounted MCP tools
 tools = connector_tool_definitions(connector)
@@ -295,7 +295,7 @@ def get_mcp_tools(self) -> list[dict]:
 
 Both carry the action's autonomy `category`, so the approval gate applies. An
 action that declares no category is gated as `destructive`. That default stays
-recognisably *undeclared* (`core.orchestration._categories.UNDECLARED_DESTRUCTIVE`,
+recognisably *undeclared* (`baselith.core.orchestration._categories.UNDECLARED_DESTRUCTIVE`,
 equal to the string `"destructive"` everywhere), so a standalone typed `Agent`
 — which refuses only tools explicitly declared destructive (see
 [Agent › Safe defaults](agent.md#safe-defaults-for-a-standalone-run)) — still
@@ -309,7 +309,7 @@ A connector that names a `vendor` is an ICT third-party dependency.
 [ICT Third-Party Register](thirdparty.md):
 
 ```python
-from core.connectors import declare_ict_providers
+from baselith.core.connectors import declare_ict_providers
 
 provider_ids = await declare_ict_providers()
 ```
@@ -335,7 +335,7 @@ The machinery enforces what it can. The rest is on the connector author:
   that call, so a provider echoing the bearer back in an error body cannot leak
   it through the exception, the retry log lines or the health detail. Error
   excerpts and exception text are also scrubbed by pattern with
-  `core.observability.redaction.redact_secrets`: `Bearer` and `Authorization`
+  `baselith.core.observability.redaction.redact_secrets`: `Bearer` and `Authorization`
   values, `access_token`/`refresh_token`/`client_secret`/`password`/`api_key`
   pairs, OAuth `code` values (`key=value` and JSON forms), JWTs and Google
   `ya29.`/`1//` tokens. A numeric `code` (a status) is kept.

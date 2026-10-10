@@ -1,6 +1,6 @@
 """Enabling evaluation after import must actually enable the DeepEval metrics.
 
-``core.evaluation.metrics`` decided whether DeepEval was usable **at import
+``baselith.core.evaluation.metrics`` decided whether DeepEval was usable **at import
 time**, from ``evaluation_config.is_enabled`` — which defaults to ``False``.
 ``scripts/run_eval.py`` imports the module first and flips
 ``evaluation_config.enabled = True`` afterwards, so by then the decision was
@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from core.config.evaluation import evaluation_config
-from core.evaluation import metrics
+from baselith.core.config.evaluation import evaluation_config
+from baselith.core.evaluation import metrics
 
 pytestmark = pytest.mark.unit
 

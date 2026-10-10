@@ -59,7 +59,7 @@ Because the plugin registers an intent pattern, any user message containing keyw
 ### 3. Programmatic Usage
 
 ```python
-from plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+from baselith.plugins.reasoning_agent.reasoning_agent import ReasoningAgent
 
 agent = ReasoningAgent(service=my_llm_service, sandbox_service=my_sandbox)
 
@@ -78,7 +78,7 @@ print(result["tree_visualization"]) # Shows the branching paths evaluated
 
 ## Technical Details
 
-`ReasoningAgent` wraps `core.reasoning.tot.TreeOfThoughtsAsync`. `solve()` forwards the request as `tot_engine.solve(problem=..., k=branching_factor, max_steps=max_steps, tools=[sandbox])` (the `tools` list is empty when no `SandboxService` was injected) and does not override the engine's `strategy` argument, so the search runs with the engine default, `"mcts"` — Monte Carlo Tree Search over the thought tree (`"bfs"` is the alternative). Each generated thought is scored by an LLM call built from `THOUGHT_EVALUATION_PROMPT`; sibling evaluations are fanned out concurrently and routed through the shared `ThoughtCache`, so identical thoughts reuse an earlier score, and a failed evaluation scores `0.0`. The result dict carries `best_solution`, `steps` (the path from the root to the best leaf) and `tree_visualization` (a Mermaid export of the whole tree).
+`ReasoningAgent` wraps `baselith.core.reasoning.tot.TreeOfThoughtsAsync`. `solve()` forwards the request as `tot_engine.solve(problem=..., k=branching_factor, max_steps=max_steps, tools=[sandbox])` (the `tools` list is empty when no `SandboxService` was injected) and does not override the engine's `strategy` argument, so the search runs with the engine default, `"mcts"` — Monte Carlo Tree Search over the thought tree (`"bfs"` is the alternative). Each generated thought is scored by an LLM call built from `THOUGHT_EVALUATION_PROMPT`; sibling evaluations are fanned out concurrently and routed through the shared `ThoughtCache`, so identical thoughts reuse an earlier score, and a failed evaluation scores `0.0`. The result dict carries `best_solution`, `steps` (the path from the root to the best leaf) and `tree_visualization` (a Mermaid export of the whole tree).
 
 !!! tip "Sandbox Integration"
-    For technical tasks, provide a `SandboxService` to the agent — `ReasoningAgentPlugin.create_agent()` does so automatically when `core.services.sandbox.service` is importable. The sandbox is handed to the ToT engine in its `tools` list, which the engine can use during thought execution.
+    For technical tasks, provide a `SandboxService` to the agent — `ReasoningAgentPlugin.create_agent()` does so automatically when `baselith.core.services.sandbox.service` is importable. The sandbox is handed to the ToT engine in its `tools` list, which the engine can use during thought execution.

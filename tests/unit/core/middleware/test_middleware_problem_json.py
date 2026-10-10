@@ -17,21 +17,21 @@ from typing import Any
 import orjson
 import pytest
 
-from core.middleware._idempotency_replay import (
+from baselith.core.middleware._idempotency_replay import (
     StoredResponse,
     idempotency_problem,
     replay_entry,
     request_target_digest,
 )
-from core.middleware.cost_control import (
+from baselith.core.middleware.cost_control import (
     BudgetExceededError,
     CostController,
     CostControlMiddleware,
 )
-from core.middleware.csrf import CSRFOriginMiddleware
-from core.middleware.observability import RequestIdMiddleware
-from core.middleware.plugin_activation import PluginActivationMiddleware
-from core.plugins._activation_backoff import PluginActivationBackoffError
+from baselith.core.middleware.csrf import CSRFOriginMiddleware
+from baselith.core.middleware.observability import RequestIdMiddleware
+from baselith.core.middleware.plugin_activation import PluginActivationMiddleware
+from baselith.core.plugins._activation_backoff import PluginActivationBackoffError
 
 PROBLEM = b"application/problem+json"
 

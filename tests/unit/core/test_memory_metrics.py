@@ -5,7 +5,7 @@ Unit Tests for Memory Metrics.
 import time
 from datetime import UTC, datetime, timedelta
 
-from core.memory.metrics import MemoryMetricsCollector, OperationRecord
+from baselith.core.memory.metrics import MemoryMetricsCollector, OperationRecord
 
 
 class TestMemoryMetrics:

@@ -4,10 +4,10 @@ import asyncio
 
 import pytest
 
-from core.config.swarm import AuctionConfig, SwarmConfig
-from core.orchestration.limits import BudgetExceededError, LoopBudgetSnapshot
-from core.swarm.colony import Colony
-from core.swarm.types import AgentProfile, Capability, MessageType, Task
+from baselith.core.config.swarm import AuctionConfig, SwarmConfig
+from baselith.core.orchestration.limits import BudgetExceededError, LoopBudgetSnapshot
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.types import AgentProfile, Capability, MessageType, Task
 
 pytestmark = [pytest.mark.contract]
 
@@ -67,7 +67,7 @@ class TestHandoff:
         assert await colony.handoff("a1", "nope") is None
 
     async def test_to_message_roundtrip(self):
-        from core.swarm.types import Handoff
+        from baselith.core.swarm.types import Handoff
 
         ho = Handoff(task_id="t1", from_agent="a", to_agent="b", reason="r")
         msg = ho.to_message()
@@ -196,7 +196,7 @@ class TestBatchBudgetCancellation:
 @pytest.mark.asyncio
 class TestHandoffBrief:
     async def test_brief_travels_in_message_payload(self):
-        from core.swarm.types import HandoffBrief
+        from baselith.core.swarm.types import HandoffBrief
 
         colony = _colony()
         task = Task(description="t", required_capabilities=["cap1"])
@@ -232,7 +232,7 @@ class TestHandoffBrief:
         assert record.context["count"] == 42
 
     async def test_brief_render_is_prompt_ready(self):
-        from core.swarm.types import HandoffBrief
+        from baselith.core.swarm.types import HandoffBrief
 
         text = HandoffBrief(
             objective="obj", facts=["f1"], attempted=["a1"], constraints=[]

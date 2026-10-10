@@ -9,7 +9,7 @@ import httpx
 import pytest
 from elevenlabs_rig import TARGET, VOICE, client, make_service
 
-from core.services.voice import SpeechContext, SpeechTuning
+from baselith.core.services.voice import SpeechContext, SpeechTuning
 
 
 def _ok(seen: list[httpx.Request], request_id: str | None = "req_1") -> Any:
@@ -212,7 +212,7 @@ class TestTuningPrecedence:
     async def test_admin_override_model_beats_the_tuning(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.services.voice import VoiceOverrides
+        from baselith.core.services.voice import VoiceOverrides
 
         seen: list[httpx.Request] = []
         svc = make_service(

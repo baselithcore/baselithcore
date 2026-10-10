@@ -1,9 +1,9 @@
-"""Unit tests for ``core.orchestration.budget_context``.
+"""Unit tests for ``baselith.core.orchestration.budget_context``.
 
 Covers the ambient ``LoopBudget`` charging seam: cache/batch kwarg
-passthrough to :func:`core.models.pricing.estimate_cost` for priced models,
+passthrough to :func:`baselith.core.models.pricing.estimate_cost` for priced models,
 and unknown-model handling for unpriced models — routed through
-:func:`core.quotas.cost_enforcement.price_unknown_model` so both charging
+:func:`baselith.core.quotas.cost_enforcement.price_unknown_model` so both charging
 seams (this one and tenant/identity metering) share one
 ``BASELITH_UNKNOWN_MODEL_COST_POLICY`` policy (default ``charge``, i.e.
 ``UNKNOWN_PRICE``). The once-per-model-id warning fires regardless of
@@ -16,14 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
-from core.orchestration import budget_context as bc_mod
-from core.orchestration.budget_context import (
+from baselith.core.orchestration import budget_context as bc_mod
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     charge_llm_cost,
     deactivate_budget,
 )
-from core.orchestration.limits import LoopBudget, LoopLimits
-from core.quotas import cost_enforcement as ce_mod
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.quotas import cost_enforcement as ce_mod
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ def _reset_unknown_model_state(monkeypatch):
 
 class TestChargeKnownModel:
     def test_threads_cache_and_batch_kwargs(self):
-        from core.models.pricing import DEFAULT_PRICING
+        from baselith.core.models.pricing import DEFAULT_PRICING
 
         model = next(iter(DEFAULT_PRICING))
         price = DEFAULT_PRICING[model]
@@ -62,8 +62,8 @@ class TestChargeKnownModel:
 class TestUnpricedModelCharging:
     def test_charges_unknown_price_by_default(self):
         """The brief requires UNKNOWN_PRICE charging here too, not just in
-        core.quotas.cost_enforcement — default policy is 'charge'."""
-        from core.models.pricing import UNKNOWN_PRICE
+        baselith.core.quotas.cost_enforcement — default policy is 'charge'."""
+        from baselith.core.models.pricing import UNKNOWN_PRICE
 
         budget = LoopBudget(limits=LoopLimits(budget_usd=1000.0, max_tokens=1000))
         token = activate_budget(budget)

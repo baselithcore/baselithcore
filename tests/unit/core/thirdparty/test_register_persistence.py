@@ -3,9 +3,9 @@
 import threading
 from datetime import date
 
-import core.config.thirdparty as cfg
-import core.thirdparty.register as reg_mod
-from core.thirdparty import (
+import baselith.core.config.thirdparty as cfg
+import baselith.core.thirdparty.register as reg_mod
+from baselith.core.thirdparty import (
     ContractualArrangement,
     DataSensitivity,
     FunctionCriticality,
@@ -16,7 +16,7 @@ from core.thirdparty import (
     ServiceAssessment,
     Substitutability,
 )
-from core.thirdparty.persistence import SQLiteRegisterStore
+from baselith.core.thirdparty.persistence import SQLiteRegisterStore
 
 
 class _ThreadRecordingConnection:

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
-from core.cache.redis_cache import RedisTTLCache, _json_default
+from baselith.core.cache.redis_cache import RedisTTLCache, _json_default
 
 
 def _cache() -> RedisTTLCache:

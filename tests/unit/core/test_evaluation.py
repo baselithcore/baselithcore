@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
-from core.evaluation.protocols import EvaluationResult, QualityLevel
-from core.evaluation.service import EvaluationService
-from core.events import EventNames
+from baselith.core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.service import EvaluationService
+from baselith.core.events import EventNames
 
 
 class MockLLMService:
@@ -91,10 +91,10 @@ class TestEvaluationService:
 @pytest.mark.asyncio
 async def test_service_stop_unsubscribes_from_bus(monkeypatch):
     """stop() releases the FLOW_COMPLETED subscription taken by start()."""
-    from core.events import EventBus
+    from baselith.core.events import EventBus
 
     monkeypatch.setattr(
-        "core.config.evaluation.evaluation_config.enabled", True, raising=False
+        "baselith.core.config.evaluation.evaluation_config.enabled", True, raising=False
     )
     bus = EventBus()
     service = EvaluationService(event_bus=bus, evaluator=CompositeEvaluator([]))

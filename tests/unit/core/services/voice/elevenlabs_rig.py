@@ -8,9 +8,9 @@ from typing import Any
 import httpx
 import pytest
 
-from core.config.multimodal import VoiceConfig
-from core.services.voice import VoiceOverrides, VoiceService
-from core.services.voice._elevenlabs import ElevenLabsClient, ElevenLabsTarget
+from baselith.core.config.multimodal import VoiceConfig
+from baselith.core.services.voice import VoiceOverrides, VoiceService
+from baselith.core.services.voice._elevenlabs import ElevenLabsClient, ElevenLabsTarget
 
 KEY = "xi-secret-key-0123456789"  # gitleaks:allow (fake fixture)
 LEAK = "sk-body-secret-987654"
@@ -74,7 +74,9 @@ def make_service(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     config = VoiceConfig()
-    monkeypatch.setattr("core.services.voice.service.get_voice_config", lambda: config)
+    monkeypatch.setattr(
+        "baselith.core.services.voice.service.get_voice_config", lambda: config
+    )
     service = VoiceService(elevenlabs_api_key=key, overrides=overrides)
     service._eleven = client(
         handler, max_request_bytes=10_000, max_response_bytes=10_000

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from core.loops.lessons import Lesson
-from core.skill_evolution.maintainer import WikiMaintainer
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import PatternKind
+from baselith.core.loops.lessons import Lesson
+from baselith.core.skill_evolution.maintainer import WikiMaintainer
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import PatternKind
 
 FAILURE_EVENT = {
     "score": 0.1,

@@ -1,8 +1,8 @@
-"""Unit tests for ``core.config.multimodal``."""
+"""Unit tests for ``baselith.core.config.multimodal``."""
 
 from __future__ import annotations
 
-from core.config.multimodal import VisionConfig
+from baselith.core.config.multimodal import VisionConfig
 
 
 class TestVisionConfigDefaults:

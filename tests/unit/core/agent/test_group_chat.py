@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from core.agent.group_chat import (
+from baselith.core.agent.group_chat import (
     CapabilitySelector,
     ChatMessage,
     GroupChat,
     LLMManagerSelector,
     RoundRobinSelector,
 )
-from core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
 pytestmark = [pytest.mark.unit]
 

@@ -16,7 +16,7 @@ and can be shown to be **unaltered**:
 | **NIS2 Art. 21(2)(b)** | An evidence trail behind each incident filing |
 | **GDPR Art. 5(2)** | Accountability — being able to *demonstrate* compliance |
 
-`core/observability/audit*.py` turns the existing log lines into retained
+`baselith/core/observability/audit*.py` turns the existing log lines into retained
 records. It is **opt-in** (`AUDIT_ENABLED`, default off) and **additive**: with
 the flag unset the historical logger-only behaviour is byte-for-byte unchanged.
 
@@ -29,7 +29,7 @@ the flag unset the historical logger-only behaviour is byte-for-byte unchanged.
 | `_audit_models.py` | `ChainVerification`, `AuditQuery` and the internal row type — re-exported from `audit_chain.py`, so the public import path is unchanged |
 | `audit_digest.py` | `compute_entry_hash`, `coerce_chain_key`, `AuditChainKeyError`, `require_chain_key_from_env` — re-exported from `audit_chain.py`, so the public import path is unchanged |
 | `audit_setup.py` | Builds the logger from config; owns the retention sweep |
-| `core/config/audit.py` | `AuditConfig` / `get_audit_config()` |
+| `baselith/core/config/audit.py` | `AuditConfig` / `get_audit_config()` |
 
 ## Configuration
 
@@ -61,20 +61,20 @@ original log line *and* emits a structured event:
 
 | Event type | Source |
 | ---------- | ------ |
-| `auth.failed` | `core/middleware/security.py` — unauthorized / forbidden |
-| `plugin.load` | `core/plugins/loader.py` — a plugin finished `initialize()` (`resource` is `plugin:<name>`, `details` carry its version and directory) |
-| `plugin.unload` | `core/plugins/registry.py` — `unregister()` removed a plugin and ran its `shutdown()` |
-| `privacy.export` / `privacy.erase` / `privacy.rectify` / `privacy.restrict` / `privacy.object` / `privacy.retention` | `core/privacy/service.py` — one event per data-subject request (`resource` is the subject id; `action` is `export`, `erase`, `rectify`, `restrict`/`release`, `object` or `retention_sweep`) |
-| `privacy.consent` | `core/privacy/consent.py` — `action="grant"` on `ConsentService.grant`, `action="withdraw"` on `withdraw` (`details.purpose` names the processing purpose) |
-| `transparency.mark` | `core/transparency/service.py` |
-| `incident.open` / `incident.milestone` / `incident.close` | `core/incidents/service.py` |
-| `tool.invoke` / `tool.blocked` | `core/orchestration/enforcement.py` — every tool invocation gated by `enforce_tool_invocation` |
-| `self_modify.propose` | `core/skill_evolution/service.py` — a skill synthesis proposal enters the gate; `core/optimization/evolution/evolve.py` — an evolutionary mutation is accepted into the archive |
-| `self_modify.apply` / `self_modify.reject` | `core/skill_evolution/gating.py` (skill gate decisions), `core/optimization/tune_gate.py` (auto-tune eval gate) and `core/optimization/compile.py` (prompt-compilation landing) |
-| `self_modify.rollback` | `core/skill_evolution/service.py` — a skill passed the eval gate but the `self_modify` autonomy approval was refused; the write is rolled back and audited with `success=False` (`action="skill_evolution.approval_rollback"`, `details.reason`, `details.rolled_back`) |
-| `compliance.register` | `core/compliance/registry.py` — `action="register"` when an AI system enters the register (`success=False` for an Art. 5 prohibited category), `action="lifecycle"` on `advance_lifecycle` |
-| `compliance.assessment` | `core/compliance/prohibited.py` (`art5_screening`, `success=False` when prohibited), `core/compliance/registry.py` (`reclassify`), `core/compliance/artefact_services.py` (`risk_management`, `instructions_for_use`, `dpia`), `core/compliance/documents.py` (`annex_iv_documentation`, `fria`, `ropa_entry`), `core/compliance/post_market_service.py` (`post_market_plan`, `post_market_observation`), `core/compliance/review_sweep.py` (`compliance_review_sweep`) |
-| `payment.executed` / `payment.failed` | `core/world_model/payments.py` — every `execute_payment` outcome: `executed` for a captured charge, `failed` for a decline or an executor error (`resource` is the merchant id, `action` the intent id; `details` carry `transaction_id`, `amount_cents`, `status`, `psp`). See [World Model — AP2 Payment Execution](world-model.md#ap2-payment-execution-execute_payment) |
+| `auth.failed` | `baselith/core/middleware/security.py` — unauthorized / forbidden |
+| `plugin.load` | `baselith/core/plugins/loader.py` — a plugin finished `initialize()` (`resource` is `plugin:<name>`, `details` carry its version and directory) |
+| `plugin.unload` | `baselith/core/plugins/registry.py` — `unregister()` removed a plugin and ran its `shutdown()` |
+| `privacy.export` / `privacy.erase` / `privacy.rectify` / `privacy.restrict` / `privacy.object` / `privacy.retention` | `baselith/core/privacy/service.py` — one event per data-subject request (`resource` is the subject id; `action` is `export`, `erase`, `rectify`, `restrict`/`release`, `object` or `retention_sweep`) |
+| `privacy.consent` | `baselith/core/privacy/consent.py` — `action="grant"` on `ConsentService.grant`, `action="withdraw"` on `withdraw` (`details.purpose` names the processing purpose) |
+| `transparency.mark` | `baselith/core/transparency/service.py` |
+| `incident.open` / `incident.milestone` / `incident.close` | `baselith/core/incidents/service.py` |
+| `tool.invoke` / `tool.blocked` | `baselith/core/orchestration/enforcement.py` — every tool invocation gated by `enforce_tool_invocation` |
+| `self_modify.propose` | `baselith/core/skill_evolution/service.py` — a skill synthesis proposal enters the gate; `baselith/core/optimization/evolution/evolve.py` — an evolutionary mutation is accepted into the archive |
+| `self_modify.apply` / `self_modify.reject` | `baselith/core/skill_evolution/gating.py` (skill gate decisions), `baselith/core/optimization/tune_gate.py` (auto-tune eval gate) and `baselith/core/optimization/compile.py` (prompt-compilation landing) |
+| `self_modify.rollback` | `baselith/core/skill_evolution/service.py` — a skill passed the eval gate but the `self_modify` autonomy approval was refused; the write is rolled back and audited with `success=False` (`action="skill_evolution.approval_rollback"`, `details.reason`, `details.rolled_back`) |
+| `compliance.register` | `baselith/core/compliance/registry.py` — `action="register"` when an AI system enters the register (`success=False` for an Art. 5 prohibited category), `action="lifecycle"` on `advance_lifecycle` |
+| `compliance.assessment` | `baselith/core/compliance/prohibited.py` (`art5_screening`, `success=False` when prohibited), `baselith/core/compliance/registry.py` (`reclassify`), `baselith/core/compliance/artefact_services.py` (`risk_management`, `instructions_for_use`, `dpia`), `baselith/core/compliance/documents.py` (`annex_iv_documentation`, `fria`, `ropa_entry`), `baselith/core/compliance/post_market_service.py` (`post_market_plan`, `post_market_observation`), `baselith/core/compliance/review_sweep.py` (`compliance_review_sweep`) |
+| `payment.executed` / `payment.failed` | `baselith/core/world_model/payments.py` — every `execute_payment` outcome: `executed` for a captured charge, `failed` for a decline or an executor error (`resource` is the merchant id, `action` the intent id; `details` carry `transaction_id`, `amount_cents`, `status`, `psp`). See [World Model — AP2 Payment Execution](world-model.md#ap2-payment-execution-execute_payment) |
 
 Successful per-request authentication is deliberately **not** emitted as an
 audit record — it is a per-request hot path, and the volume would drown the
@@ -112,7 +112,7 @@ candidate prompt version. See
 From async code:
 
 ```python
-from core.observability.audit import AuditEventType, get_audit_logger
+from baselith.core.observability.audit import AuditEventType, get_audit_logger
 
 await get_audit_logger().log(
     AuditEventType.ADMIN_ACTION,
@@ -127,7 +127,7 @@ From synchronous code, `audit_emit()` is fire-and-forget — audit recording mus
 never change the control flow of the code it observes:
 
 ```python
-from core.observability.audit import AuditEventType, audit_emit
+from baselith.core.observability.audit import AuditEventType, audit_emit
 
 audit_emit(AuditEventType.CONFIG_CHANGE, action="reload")
 ```
@@ -145,7 +145,7 @@ still pending after the timeout are cancelled and reported as
 
 Every record stores `prev_hash` (its predecessor's `entry_hash`), and the digest
 is **keyed** when `AUDIT_CHAIN_HMAC_KEY` is set
-(`core.observability.audit_digest.compute_entry_hash`):
+(`baselith.core.observability.audit_digest.compute_entry_hash`):
 
 ```text
 # with a key — tamper-evident against an attacker
@@ -160,7 +160,7 @@ depends on the data and never on dict ordering or formatting. Editing or deletin
 a record breaks every downstream link:
 
 ```python
-from core.observability.audit_setup import get_durable_audit_sink
+from baselith.core.observability.audit_setup import get_durable_audit_sink
 
 result = get_durable_audit_sink().verify_chain()
 if not result.ok:
@@ -225,8 +225,8 @@ prefer external orchestration can leave `AUDIT_RETENTION_DAYS=0` and drive
 ## Querying
 
 ```python
-from core.observability.audit_chain import AuditQuery
-from core.observability.audit_setup import get_durable_audit_sink
+from baselith.core.observability.audit_chain import AuditQuery
+from baselith.core.observability.audit_setup import get_durable_audit_sink
 
 sink = get_durable_audit_sink()
 rows = sink.query(AuditQuery(event_type="privacy.erase", tenant_id="acme", limit=50))
@@ -237,7 +237,7 @@ back newest-first with `details` already decoded.
 
 ## Design notes
 
-- **Storage is stdlib `sqlite3`**, matching `core/incidents/persistence.py`:
+- **Storage is stdlib `sqlite3`**, matching `baselith/core/incidents/persistence.py`:
   zero new dependencies, no infrastructure, single-writer semantics that suit an
   append-only workload. Writes are offloaded to the default executor so a
   disk-bound append never blocks the request path.

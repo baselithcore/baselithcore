@@ -16,8 +16,8 @@ import logging
 import pytest
 from opentelemetry.sdk.resources import Resource
 
-from core.observability import otel_logs
-from core.observability.otel_exporters import PROTOCOL_GRPC
+from baselith.core.observability import otel_logs
+from baselith.core.observability.otel_exporters import PROTOCOL_GRPC
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +105,7 @@ class TestExporterLoopSuppression:
             "opentelemetry.exporter.otlp.proto.grpc",
             "urllib3.connectionpool",
             "grpc._channel",
-            "core.observability.otel",
+            "baselith.core.observability.otel",
         ],
     )
     def test_export_path_loggers_are_dropped(self, name):
@@ -114,7 +114,11 @@ class TestExporterLoopSuppression:
 
     @pytest.mark.parametrize(
         "name",
-        ["core.orchestration.orchestrator", "uvicorn.access", "plugins.examplebot"],
+        [
+            "baselith.core.orchestration.orchestrator",
+            "uvicorn.access",
+            "baselith.plugins.examplebot",
+        ],
     )
     def test_application_loggers_pass(self, name):
         record = logging.LogRecord(name, logging.INFO, __file__, 1, "x", None, None)

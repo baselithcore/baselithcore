@@ -14,8 +14,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from core.observability import otel
-from core.observability.otel_exporters import PROTOCOL_GRPC
+from baselith.core.observability import otel
+from baselith.core.observability.otel_exporters import PROTOCOL_GRPC
 
 pytestmark = [pytest.mark.unit]
 

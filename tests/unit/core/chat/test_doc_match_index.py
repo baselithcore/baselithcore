@@ -5,9 +5,9 @@ import string
 
 import pytest
 
-import core.chat.mixins._doc_match_index as index_module
-from core.chat.mixins._doc_match_index import get_doc_match_index
-from core.chat.mixins.retrieval_search import _doc_match_fields
+import baselith.core.chat.mixins._doc_match_index as index_module
+from baselith.core.chat.mixins._doc_match_index import get_doc_match_index
+from baselith.core.chat.mixins.retrieval_search import _doc_match_fields
 
 
 def _items(entries):

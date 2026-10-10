@@ -3,7 +3,7 @@
 ``CoreConfig`` leaves logging to whoever owns the process. Nothing owned it in
 the CLI, so structlog stayed unconfigured and every command printed library
 DEBUG records ahead of its own output while ``LOG_LEVEL_CONSOLE`` was ignored.
-See :func:`core.cli.__main__._configure_cli_logging`.
+See :func:`baselith.core.cli.__main__._configure_cli_logging`.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
-from core.cli.__main__ import _configure_cli_logging
+from baselith.core.cli.__main__ import _configure_cli_logging
 
 
 class _Config:
@@ -26,8 +26,8 @@ class _Config:
 def _call_with(config: _Config) -> dict[str, Any]:
     """Run the setup against ``config``, returning the kwargs it passed on."""
     with (
-        patch("core.config.get_app_config", return_value=config),
-        patch("core.observability.logging.configure_logging") as configure,
+        patch("baselith.core.config.get_app_config", return_value=config),
+        patch("baselith.core.observability.logging.configure_logging") as configure,
     ):
         _configure_cli_logging()
     assert configure.call_count == 1
@@ -72,8 +72,10 @@ def test_json_only_when_asked_for() -> None:
 def test_a_broken_setup_does_not_break_the_command() -> None:
     """The CLI must still run; the only cost is the noise left in place."""
     with (
-        patch("core.config.get_app_config", side_effect=RuntimeError("no config")),
-        patch("core.cli.__main__._debug_log") as debug_log,
+        patch(
+            "baselith.core.config.get_app_config", side_effect=RuntimeError("no config")
+        ),
+        patch("baselith.core.cli.__main__._debug_log") as debug_log,
     ):
         _configure_cli_logging()
     assert debug_log.call_count == 1

@@ -1,0 +1,324 @@
+"""
+Core Observability Metrics Module.
+
+Provides Prometheus metrics for monitoring the baselith-core.
+All metrics use the 'mas_' prefix (Baselith-Core).
+"""
+
+from __future__ import annotations
+
+from prometheus_client import Counter, Gauge, Histogram
+
+from baselith.core.observability.metric_context import (
+    ExemplarHistogram,
+    TenantLabeledCounter,
+)
+
+# === Billing observers ===
+USAGE_SINK_FAILURES_TOTAL = Counter(
+    "mas_usage_sink_failures_total",
+    "Billed-turn reports a registered usage sink failed to accept "
+    "(a lost ledger write, surfaced per sink).",
+    ["sink"],
+)
+
+# === Chat Metrics ===
+CHAT_REQUESTS_TOTAL = Counter(
+    "mas_chat_requests_total",
+    "Total number of chat requests received.",
+    ["route"],
+)
+CHAT_REQUEST_LATENCY_SECONDS = Histogram(
+    "mas_chat_request_latency_seconds",
+    "Distribution of chat request latency.",
+    ["route"],
+)
+CHAT_REQUEST_ERRORS_TOTAL = Counter(
+    "mas_chat_request_errors_total",
+    "Total number of failed chat requests.",
+    ["route", "reason"],
+)
+
+# === Rerank Metrics ===
+RERANK_REQUESTS_TOTAL = Counter(
+    "mas_rerank_requests_total",
+    "Total number of rerank requests.",
+)
+RERANK_LATENCY_SECONDS = Histogram(
+    "mas_rerank_latency_seconds",
+    "Distribution of reranker (CrossEncoder) latency.",
+)
+RERANK_CACHE_HIT_TOTAL = Counter(
+    "mas_rerank_cache_hit_total",
+    "Total rerank cache hits.",
+)
+RERANK_CACHE_MISS_TOTAL = Counter(
+    "mas_rerank_cache_miss_total",
+    "Total rerank cache misses.",
+)
+
+# === Indexing Metrics ===
+INDEXING_RUNS_TOTAL = Counter(
+    "mas_indexing_runs_total",
+    "Total number of document indexing runs.",
+    ["mode"],
+)
+INDEXING_DURATION_SECONDS = Histogram(
+    "mas_indexing_duration_seconds",
+    "Distribution of indexing duration.",
+    ["mode"],
+)
+RETRIEVAL_LATENCY_SECONDS = Histogram(
+    "mas_retrieval_latency_seconds",
+    "Distribution of retrieval latency.",
+)
+INDEXED_DOCUMENTS_TOTAL = Counter(
+    "mas_indexed_documents_total",
+    "Cumulative count of documents indexed.",
+)
+INDEXED_DOCUMENTS_GAUGE = Gauge(
+    "mas_indexed_documents_current",
+    "Current number of indexed documents available.",
+)
+
+# === LLM Metrics ===
+# OTel Gen AI semantic-convention metrics (the standard names semconv-aware
+# dashboards expect). Emitted from the LLM service call sites via
+# baselith.core.services.llm._telemetry.record_genai_metrics. The legacy ``mas_llm_*``
+# family below is kept registered for scrape-config compatibility but was
+# never wired to an emit site — prefer these for new dashboards.
+# Wrapped in ``ExemplarHistogram``: each observation carries the active
+# ``trace_id`` as an OpenMetrics exemplar, so a slow bucket in Grafana links
+# straight to the trace that produced it. The proxy is transparent — the
+# ``.labels(...).observe(...)`` call sites are unchanged.
+# The provider label is ``gen_ai_provider_name`` (semconv attribute
+# ``gen_ai.provider.name``); it replaced the deprecated ``gen_ai_system`` label
+# in place — same position, same values, same cardinality — so positional
+# ``.labels(provider, model, ...)`` callers need no change. Queries on the old
+# label can bridge with ``label_replace`` (see the observability docs).
+GEN_AI_TOKEN_USAGE = ExemplarHistogram(
+    Histogram(
+        "gen_ai_client_token_usage",
+        "Tokens used per Gen AI client call (semconv gen_ai.client.token.usage).",
+        ["gen_ai_provider_name", "gen_ai_request_model", "gen_ai_token_type"],
+        buckets=(16, 64, 256, 1024, 4096, 16384, 65536, 262144),
+    )
+)
+GEN_AI_OPERATION_DURATION = ExemplarHistogram(
+    Histogram(
+        "gen_ai_client_operation_duration_seconds",
+        "Gen AI client call duration (semconv gen_ai.client.operation.duration).",
+        ["gen_ai_provider_name", "gen_ai_request_model", "gen_ai_operation_name"],
+        buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+    )
+)
+# USD cost per call, derived from baselith.core.models.pricing at emit time. Extension
+# metric (no semconv name exists for cost yet); powers the Grafana cost panel.
+#
+# ``tenant`` answers *who* spent it — chargeback and abuse triage both need it —
+# without unbounded cardinality: the label is resolved through
+# ``METRICS_TENANT_LABEL_ALLOWLIST`` (listed tenants keep their id, everything
+# else collapses to ``other``). ``TenantLabeledCounter`` back-fills the value
+# from the ambient tenant context, so two-argument ``.labels(system, model)``
+# call sites keep working unchanged.
+GEN_AI_COST_USD = TenantLabeledCounter(
+    Counter(
+        "gen_ai_client_cost_usd_total",
+        "Estimated USD cost of Gen AI client calls (from the pricing table).",
+        ["gen_ai_provider_name", "gen_ai_request_model", "tenant"],
+    )
+)
+LLM_REQUESTS_TOTAL = Counter(
+    "mas_llm_requests_total",
+    "Total number of LLM requests.",
+    ["model", "operation"],
+)
+LLM_TOKENS_TOTAL = Counter(
+    "mas_llm_tokens_total",
+    "Total tokens consumed by LLM calls.",
+    ["model", "token_type"],  # token_type: input/output
+)
+LLM_LATENCY_SECONDS = Histogram(
+    "mas_llm_latency_seconds",
+    "Distribution of LLM request latency.",
+    ["model"],
+)
+LLM_ERRORS_TOTAL = Counter(
+    "mas_llm_errors_total",
+    "Total number of LLM errors.",
+    ["model", "error_type"],
+)
+# A chain that quietly carries production traffic looks exactly like a healthy
+# primary: the request still returns 200, and the only trace is a warning in a
+# log nobody greps. This is the alertable signal — inference moving to another
+# provider (often a local one, on whichever host happens to run it) is an
+# operational event, not an implementation detail.
+LLM_FALLBACK_SERVED_TOTAL = Counter(
+    "mas_llm_fallback_served_total",
+    "LLM calls answered by a fallback stage instead of the configured primary.",
+    ["primary", "served_by", "path"],  # path: text/structured/messages/stream
+)
+
+# === Plugin Metrics ===
+PLUGIN_LOAD_TOTAL = Counter(
+    "mas_plugin_load_total",
+    "Total number of plugins loaded.",
+    ["plugin_name", "status"],
+)
+PLUGIN_CALL_LATENCY_SECONDS = Histogram(
+    "mas_plugin_call_latency_seconds",
+    "Distribution of plugin call latency.",
+    ["plugin_name", "operation"],
+)
+
+# === Agent Metrics ===
+AGENT_STEPS_TOTAL = Counter(
+    "mas_agent_steps_total",
+    "Total number of agent execution steps.",
+    ["agent_type", "step_type"],
+)
+AGENT_TOOL_CALLS_TOTAL = Counter(
+    "mas_agent_tool_calls_total",
+    "Total number of tool calls by agents.",
+    ["agent_type", "tool_name"],
+)
+# Emitted from baselith.core.orchestration.mixins._memory_write when the background
+# memory-write backlog is full and a turn is not persisted.
+MEMORY_WRITES_DROPPED_TOTAL = Counter(
+    "mas_memory_writes_dropped_total",
+    "Post-response memory writes dropped because the background backlog was "
+    "full (the turn is not persisted to memory).",
+)
+
+# === Guardrail Metrics ===
+# Emitted from baselith.core.orchestration.guard_pipeline (request in/out guards) and
+# baselith.core.orchestration.rate_limit. Reasons are low-cardinality category slugs
+# (pattern-family prefixes, moderation category), never raw content.
+GUARDRAIL_BLOCKS_TOTAL = Counter(
+    "mas_guardrail_blocks_total",
+    "Requests/responses blocked by a guardrail layer.",
+    ["layer", "reason"],
+)
+GUARDRAIL_REDACTIONS_TOTAL = Counter(
+    "mas_guardrail_redactions_total",
+    "Redactions applied to outbound responses, by layer.",
+    ["layer"],
+)
+GUARDRAIL_LATENCY_SECONDS = Histogram(
+    "mas_guardrail_latency_seconds",
+    "Wall-clock cost of each guardrail layer per invocation.",
+    ["layer"],
+    buckets=(0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
+)
+TOOL_RATE_LIMITED_TOTAL = Counter(
+    "mas_tool_rate_limited_total",
+    "Tool invocations refused by the sliding-window rate limiter.",
+    ["tool_name"],
+)
+
+# === Authentication Metrics ===
+AUTH_REQUESTS_TOTAL = Counter(
+    "mas_auth_requests_total",
+    "Total number of authentication requests.",
+    ["method", "status"],
+)
+AUTH_TOKEN_VALIDATION_SECONDS = Histogram(
+    "mas_auth_token_validation_seconds",
+    "Distribution of token validation latency.",
+    ["method"],
+)
+
+# === Feedback Metrics ===
+FEEDBACK_RECEIVED_TOTAL = Counter(
+    "mas_feedback_total",
+    "Total feedback received by sentiment.",
+    ["sentiment"],
+)
+
+# === HTTP Server Metrics (RED: Rate, Errors, Duration) ===
+# Emitted by ``baselith.core.middleware.http_metrics.HTTPMetricsMiddleware``. Names follow
+# the de-facto Prometheus HTTP convention (``http_requests_total`` /
+# ``http_request_duration_seconds``) so standard SLO/alert rules and community
+# dashboards apply unchanged. The ``route`` label is the low-cardinality path
+# *template* (e.g. ``/api/plugins/{plugin_name}``), never the raw URL.
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests handled by the API.",
+    ["method", "route", "status"],
+)
+HTTP_REQUEST_DURATION_SECONDS = ExemplarHistogram(
+    Histogram(
+        "http_request_duration_seconds",
+        "HTTP request latency (seconds).",
+        ["method", "route"],
+        buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    )
+)
+HTTP_REQUESTS_IN_PROGRESS = Gauge(
+    "http_requests_in_progress",
+    "In-flight HTTP requests currently being served.",
+    ["method"],
+)
+
+# === Update notices ===
+# Set from baselith.core.plugin_updates.metrics.publish_update_metrics: every known
+# (component, security) series is written on each check, 1 while an update is
+# available and 0 once it is not. ``component`` is ``core`` or ``plugin:<name>``.
+# Series are never removed: in multiprocess mode ``remove()`` does not touch the
+# mmap files, so a removed series would keep exporting its last 1. ``mostrecent``
+# makes the newest write across the workers' files win, so a recycled worker's
+# fresh 0 supersedes the dead worker's stale 1 without anyone calling
+# ``mark_process_dead`` (nothing here does; a live-only mode would need it).
+# Every worker publishes the same value, so two workers never sum. Outside
+# multiprocess mode the mode is ignored.
+UPDATE_AVAILABLE = Gauge(
+    "baselith_update_available",
+    "1 while a framework or plugin update is available.",
+    ["component", "security"],
+    multiprocess_mode="mostrecent",
+)
+
+
+__all__ = [
+    "UPDATE_AVAILABLE",
+    # Chat
+    "CHAT_REQUESTS_TOTAL",
+    "CHAT_REQUEST_LATENCY_SECONDS",
+    "CHAT_REQUEST_ERRORS_TOTAL",
+    # Rerank
+    "RERANK_REQUESTS_TOTAL",
+    "RERANK_LATENCY_SECONDS",
+    "RERANK_CACHE_HIT_TOTAL",
+    "RERANK_CACHE_MISS_TOTAL",
+    # Indexing
+    "INDEXING_RUNS_TOTAL",
+    "INDEXING_DURATION_SECONDS",
+    "RETRIEVAL_LATENCY_SECONDS",
+    "INDEXED_DOCUMENTS_TOTAL",
+    "INDEXED_DOCUMENTS_GAUGE",
+    # LLM (OTel Gen AI semconv + cost extension)
+    "GEN_AI_TOKEN_USAGE",
+    "GEN_AI_OPERATION_DURATION",
+    "GEN_AI_COST_USD",
+    "LLM_REQUESTS_TOTAL",
+    "LLM_TOKENS_TOTAL",
+    "LLM_LATENCY_SECONDS",
+    "LLM_ERRORS_TOTAL",
+    "LLM_FALLBACK_SERVED_TOTAL",
+    # Plugin
+    "PLUGIN_LOAD_TOTAL",
+    "PLUGIN_CALL_LATENCY_SECONDS",
+    # Agent
+    "AGENT_STEPS_TOTAL",
+    "AGENT_TOOL_CALLS_TOTAL",
+    "MEMORY_WRITES_DROPPED_TOTAL",
+    # Auth
+    "AUTH_REQUESTS_TOTAL",
+    "AUTH_TOKEN_VALIDATION_SECONDS",
+    # Feedback
+    "FEEDBACK_RECEIVED_TOTAL",
+    # HTTP (RED)
+    "HTTP_REQUESTS_TOTAL",
+    "HTTP_REQUEST_DURATION_SECONDS",
+    "HTTP_REQUESTS_IN_PROGRESS",
+]

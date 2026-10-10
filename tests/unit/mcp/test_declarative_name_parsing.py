@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.mcp.client_types import MCPToolInfo
-from core.mcp.declarative import make_mcp_tool_fns
+from baselith.core.mcp.client_types import MCPToolInfo
+from baselith.core.mcp.declarative import make_mcp_tool_fns
 
 BAD = [
     "tool\n",

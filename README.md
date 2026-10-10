@@ -216,7 +216,7 @@ graph TD
     A -.->|gated by| GOV
 ```
 
-Two rules hold the shape: `core/` stays domain-agnostic, and everything
+Two rules hold the shape: `baselith/core/` stays domain-agnostic, and everything
 domain-specific is a plugin. The [architecture
 docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 
@@ -265,7 +265,7 @@ space the project uses. Questions belong in
 **AGPL-3.0-only** — see [LICENSE](https://github.com/baselithcore/baselithcore/blob/main/LICENSE).
 [LICENSE.exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception) adds a permission under AGPL section 7:
 a plugin that uses the framework as a library — rather than patching files under
-`core/` — may be licensed under any terms you choose, including closed ones, and
+`baselith/core/` — may be licensed under any terms you choose, including closed ones, and
 section 13 never reaches it. Offered to everyone on identical terms; your plugin
 carries the notice described in section 3(c), and [plugin
 packaging](https://docs.baselithcore.xyz/plugins/packaging/) says what it must say.

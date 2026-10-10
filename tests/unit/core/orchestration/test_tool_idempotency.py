@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.idempotency import (
+from baselith.core.orchestration.idempotency import (
     InMemoryToolLedger,
     ToolOutcome,
     derive_idempotency_key,

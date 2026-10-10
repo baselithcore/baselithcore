@@ -5,7 +5,7 @@ components:
       description: 'The agent card as served at the discovery endpoints.
 
 
-        Mirrors :meth:`core.a2a.agent_card.AgentCard.to_dict`; unknown members are
+        Mirrors :meth:`baselith.core.a2a.agent_card.AgentCard.to_dict`; unknown members are
 
         passed through untouched.'
       properties:
@@ -702,7 +702,7 @@ components:
       type: apiKey
     BearerAuth:
       bearerFormat: JWT
-      description: Access token issued by core.auth (AuthManager.create_token).
+      description: Access token issued by baselith.core.auth (AuthManager.create_token).
       scheme: bearer
       type: http
     HTTPBasic:

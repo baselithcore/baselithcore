@@ -11,9 +11,9 @@ from uuid import uuid4
 
 import pytest
 
-from core.config import StorageConfig
-from core.storage.models import Feedback, Interaction
-from core.storage.postgres import PostgresStorage
+from baselith.core.config import StorageConfig
+from baselith.core.storage.models import Feedback, Interaction
+from baselith.core.storage.postgres import PostgresStorage
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ async def test_initialize_schema(storage, mock_async_cursor):
     cursor, cm = mock_async_cursor
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch("core.storage.postgres.get_async_cursor", side_effect=cm):
+        with patch("baselith.core.storage.postgres.get_async_cursor", side_effect=cm):
             await storage.initialize()
 
             cursor.execute.assert_awaited()
@@ -81,7 +81,9 @@ async def test_initialize_disabled(config):
     storage = PostgresStorage(config)
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch("core.storage.postgres.get_async_cursor") as mock_get_async_cursor:
+        with patch(
+            "baselith.core.storage.postgres.get_async_cursor"
+        ) as mock_get_async_cursor:
             await storage.initialize()
             mock_get_async_cursor.assert_not_called()
 
@@ -92,7 +94,7 @@ async def test_health_check(storage, mock_async_cursor):
     cursor, cm = mock_async_cursor
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch("core.storage.postgres.get_async_cursor", side_effect=cm):
+        with patch("baselith.core.storage.postgres.get_async_cursor", side_effect=cm):
             result = await storage.health_check()
             assert result is True
             cursor.execute.assert_awaited()
@@ -111,7 +113,7 @@ async def test_store_interaction(storage, mock_async_cursor):
         metadata={"foo": "bar"},
     )
 
-    with patch("core.storage.postgres.get_async_cursor", side_effect=cm):
+    with patch("baselith.core.storage.postgres.get_async_cursor", side_effect=cm):
         await storage.store_interaction(interaction)
 
         cursor.execute.assert_awaited()
@@ -140,7 +142,7 @@ async def test_get_interaction(storage, mock_async_cursor):
     }
     cursor.fetchone.return_value = mock_data
 
-    with patch("core.storage.postgres.get_async_cursor", side_effect=cm):
+    with patch("baselith.core.storage.postgres.get_async_cursor", side_effect=cm):
         result = await storage.get_interaction(inter_id)
 
         assert result is not None
@@ -155,7 +157,7 @@ async def test_store_feedback(storage, mock_async_cursor):
 
     feedback = Feedback(interaction_id=uuid4(), score=0.9, label="positive")
 
-    with patch("core.storage.postgres.get_async_cursor", side_effect=cm):
+    with patch("baselith.core.storage.postgres.get_async_cursor", side_effect=cm):
         await storage.store_feedback(feedback)
 
         cursor.execute.assert_awaited()

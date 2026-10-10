@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from plugins.coding_agent.harness import parse_report, screen_texts
-from plugins.coding_agent.workspace_harness import (
+from baselith.plugins.coding_agent.harness import parse_report, screen_texts
+from baselith.plugins.coding_agent.workspace_harness import (
     WORKSPACE_MAX_BYTES,
     build_workspace_script,
     stage,
@@ -126,7 +126,7 @@ def test_other_users_cannot_list_where_workspaces_live():
 
 
 def test_a_parent_owned_by_someone_else_is_refused(monkeypatch, tmp_path):
-    from plugins.coding_agent import workspace_harness
+    from baselith.plugins.coding_agent import workspace_harness
 
     trap = tmp_path / "planted"
     trap.symlink_to(tmp_path)
@@ -154,7 +154,7 @@ async def test_a_test_file_cannot_load_a_workspace_module_as_a_pytest_plugin():
         "    outcome = yield\n    outcome.get_result().outcome = 'passed'\n"
     )
     tests = 'pytest_plugins = ["pkg.forger"]\n\n\ndef test_x():\n    assert False\n'
-    from plugins.coding_agent import CodingAgent, Workspace
+    from baselith.plugins.coding_agent import CodingAgent, Workspace
 
     agent = CodingAgent()
     agent._sandbox = LocalSandbox()

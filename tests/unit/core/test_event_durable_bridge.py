@@ -9,10 +9,10 @@ import asyncio
 
 import pytest
 
-from core.events.bus import EventBus
-from core.events.durable import POISON_DELIVERY_THRESHOLD, DurableEventBridge
-from core.events.stream import InMemoryEventStream, StreamRecord
-from core.events.types import Event
+from baselith.core.events.bus import EventBus
+from baselith.core.events.durable import POISON_DELIVERY_THRESHOLD, DurableEventBridge
+from baselith.core.events.stream import InMemoryEventStream, StreamRecord
+from baselith.core.events.types import Event
 
 
 def _bridge(stream=None, bus=None, **kwargs) -> DurableEventBridge:
@@ -42,7 +42,7 @@ class TestPublish:
         assert record.event.data == {"order_id": 7}
 
     async def test_the_tenant_is_captured_at_publish(self):
-        from core.context import reset_tenant_context, set_tenant_context
+        from baselith.core.context import reset_tenant_context, set_tenant_context
 
         stream = InMemoryEventStream()
         await stream.ensure_group("test")
@@ -114,7 +114,7 @@ class TestDispatch:
 
     async def test_the_emitting_tenant_is_restored_for_handlers(self):
         """A replica has no request context; the record carries the tenant."""
-        from core.context import get_tenant_or_default
+        from baselith.core.context import get_tenant_or_default
 
         seen = []
         bus = EventBus()
@@ -129,7 +129,7 @@ class TestDispatch:
         assert seen == ["acme"]
 
     async def test_the_tenant_context_does_not_leak_past_the_dispatch(self):
-        from core.context import get_tenant_or_default
+        from baselith.core.context import get_tenant_or_default
 
         bridge = _bridge()
         await bridge._dispatch(

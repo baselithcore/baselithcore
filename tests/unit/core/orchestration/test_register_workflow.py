@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.orchestrator import Orchestrator
-from core.workflows.builder import WorkflowBuilder
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.orchestration.orchestrator import Orchestrator
+from baselith.core.workflows.builder import WorkflowBuilder
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
 
 def _workflow():
@@ -63,7 +63,9 @@ async def test_loop_node_fails_closed_not_pass_through():
         WorkflowBuilder("looped")
         .start()
         ._add_node(  # no builder sugar for LOOP on purpose — unsupported
-            __import__("core.workflows.builder", fromlist=["NodeType"]).NodeType.LOOP,
+            __import__(
+                "baselith.core.workflows.builder", fromlist=["NodeType"]
+            ).NodeType.LOOP,
             "loop",
         )
         .end()

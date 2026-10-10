@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.auth.api_keys import APIKeyValidator
-from core.auth.types import AuthRole
-from core.config.security import SecurityConfig
+from baselith.core.auth.api_keys import APIKeyValidator
+from baselith.core.auth.types import AuthRole
+from baselith.core.config.security import SecurityConfig
 
 
 def _validator(redis, **config_overrides) -> APIKeyValidator:
@@ -63,7 +63,7 @@ async def test_closed_mode_logs_the_denial(monkeypatch):
 
     validator = _validator(_down_redis())
     monkeypatch.setattr(
-        "core.auth.api_keys.logger",
+        "baselith.core.auth.api_keys.logger",
         type(
             "_Logger",
             (),
@@ -111,12 +111,12 @@ async def test_no_declared_redis_uses_process_local_revocation(monkeypatch):
     ``create_redis_client`` is lazy, so building a client never failed and the
     first denylist read against an unreachable server rejected *every* key.
     """
-    import core.config as config_mod
+    import baselith.core.config as config_mod
 
     monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("local"))
     created = []
     monkeypatch.setattr(
-        "core.cache.redis_cache.create_redis_client",
+        "baselith.core.cache.redis_cache.create_redis_client",
         lambda url: created.append(url) or _down_redis(),
     )
     validator = APIKeyValidator(config=SecurityConfig())
@@ -131,11 +131,11 @@ async def test_no_declared_redis_uses_process_local_revocation(monkeypatch):
 
 
 async def test_declared_redis_down_still_fails_closed(monkeypatch):
-    import core.config as config_mod
+    import baselith.core.config as config_mod
 
     monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("redis"))
     monkeypatch.setattr(
-        "core.cache.redis_cache.create_redis_client", lambda url: _down_redis()
+        "baselith.core.cache.redis_cache.create_redis_client", lambda url: _down_redis()
     )
     validator = APIKeyValidator(config=SecurityConfig())
     validator.register_key("k-123", "svc", {AuthRole.SERVICE})
@@ -145,13 +145,13 @@ async def test_declared_redis_down_still_fails_closed(monkeypatch):
 
 
 async def test_declared_redis_client_build_failure_fails_closed(monkeypatch):
-    import core.config as config_mod
+    import baselith.core.config as config_mod
 
     def _boom(url):
         raise ValueError("bad redis url")
 
     monkeypatch.setattr(config_mod, "get_storage_config", lambda: _storage("redis"))
-    monkeypatch.setattr("core.cache.redis_cache.create_redis_client", _boom)
+    monkeypatch.setattr("baselith.core.cache.redis_cache.create_redis_client", _boom)
     validator = APIKeyValidator(config=SecurityConfig())
     validator.register_key("k-123", "svc", {AuthRole.SERVICE})
 

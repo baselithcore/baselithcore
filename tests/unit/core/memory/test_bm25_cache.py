@@ -5,8 +5,8 @@ The cache must be a pure speedup: scoring identical to a fresh build,
 whole-index reuse on an unchanged corpus, correct invalidation on change.
 """
 
-from core.memory.hierarchy_search import HierarchySearchMixin
-from core.memory.hybrid_search import BM25Index, bm25_doc_stats
+from baselith.core.memory.hierarchy_search import HierarchySearchMixin
+from baselith.core.memory.hybrid_search import BM25Index, bm25_doc_stats
 
 DOCS = {
     "a": "the quick brown fox jumps over errors",
@@ -69,8 +69,8 @@ async def test_recall_reuses_base_index_when_ltm_candidates_vary():
     """LTM/provider candidates change every query; they must ride on top of the
     cached STM/MTM index (search_with_extra), not force a whole-index rebuild
     per recall."""
-    from core.memory.hierarchy import HierarchicalMemory, MemoryTier
-    from core.memory.types import MemoryItem, MemoryType
+    from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
+    from baselith.core.memory.types import MemoryItem, MemoryType
 
     mem = HierarchicalMemory()  # no embedder → keyword path feeds dense_results
     await mem.add("error code E123 occurred in the parser", tier=MemoryTier.STM)

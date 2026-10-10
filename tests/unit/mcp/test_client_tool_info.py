@@ -8,8 +8,8 @@ from typing import Any
 
 import httpx
 
-from core.mcp.client import MCPClient
-from core.mcp.client_types import MCPToolAnnotations, MCPToolInfo
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.client_types import MCPToolAnnotations, MCPToolInfo
 
 from .fakes.http_server import default_methods, json_response, make_transport, rpc
 

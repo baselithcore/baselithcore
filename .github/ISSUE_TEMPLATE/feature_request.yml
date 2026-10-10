@@ -35,9 +35,9 @@ body:
     attributes:
       label: Core or plugin?
       description: >
-        The Sacred Core rule: `core/` holds only domain-agnostic logic
+        The Sacred Core rule: `baselith/core/` holds only domain-agnostic logic
         (orchestration, infrastructure, utilities). Domain-specific logic,
-        external integrations and business features belong in `plugins/`.
+        external integrations and business features belong in `baselith/plugins/`.
         Most requests are plugins, and that is not a demotion.
       options:
         - A plugin (domain-specific, an integration, a business capability)

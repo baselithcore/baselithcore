@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.apply.swap import current_target, point_to, prune_store
+from baselith.core.plugin_updates.apply.swap import (
+    current_target,
+    point_to,
+    prune_store,
+)
 
 
 def _store(root: Path, *names: str) -> None:

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugin_updates.models import Refusal
-from core.plugin_updates.provenance import RELEASE_WORKFLOW_AUTHOR
+from baselith.core.plugin_updates.models import Refusal
+from baselith.core.plugin_updates.provenance import RELEASE_WORKFLOW_AUTHOR
 
 from .provenance_fake import OTHER, SHA, FakeGitHub, _check, _manifest, _release
 

@@ -3,7 +3,7 @@ title: Personas
 description: Configurable personalities and traits for agents
 ---
 
-**Module**: `core/personas/`
+**Module**: `baselith/core/personas/`
 
 The Personas module allows you to decouple identity definition from execution logic. By applying a dynamically configurable `Persona` to an agent, you can drastically alter its tone, expertise, and operational boundaries without rewriting its base prompt.
 
@@ -11,7 +11,7 @@ The Personas module allows you to decouple identity definition from execution lo
     The default app never applies a persona: no route, handler or startup hook
     builds a `PersonaManager` or injects a `Persona` into a prompt. Use them
     from host or plugin code — pass `Persona` objects to
-    `core.meta.MultiPersonaAgent` / `PersonaEnsemble`, or prepend
+    `baselith.core.meta.MultiPersonaAgent` / `PersonaEnsemble`, or prepend
     `Persona.get_prompt_prefix()` (and examples from a `FewShotLibrary`) to
     your own agent's system prompt.
 
@@ -20,7 +20,7 @@ The Personas module allows you to decouple identity definition from execution lo
 ## Module Structure
 
 ```text
-core/personas/
+baselith/core/personas/
 ├── __init__.py           # Public exports
 ├── manager.py            # Persona dataclass + PersonaManager
 ├── defaults.py           # Built-in Persona instances
@@ -31,10 +31,10 @@ Both `Persona` and `PersonaManager` live in `manager.py`; there is no
 `models.py` and no separate `Trait` model — traits are a plain `Dict[str, str]`
 field on `Persona`.
 
-Public exports from `core.personas`:
+Public exports from `baselith.core.personas`:
 
 ```python
-from core.personas import (
+from baselith.core.personas import (
     Persona, PersonaManager,
     HELPFUL_ASSISTANT, TECHNICAL_EXPERT, CREATIVE_WRITER,
 )
@@ -45,7 +45,7 @@ from core.personas import (
 ## Defining a Persona
 
 ```python
-from core.personas import Persona
+from baselith.core.personas import Persona
 
 # Define the persona traits and system prompt
 expert = Persona(
@@ -84,8 +84,8 @@ no `apply_persona` helper in this module — register the persona, then switch t
 it (or compose its system prompt via `Persona.get_prompt_prefix()` directly).
 
 ```python
-from core.personas import PersonaManager
-from core.personas.defaults import THOROUGH_RESEARCHER, STRUCTURED_REPORTER
+from baselith.core.personas import PersonaManager
+from baselith.core.personas.defaults import THOROUGH_RESEARCHER, STRUCTURED_REPORTER
 
 manager = PersonaManager(default_persona=THOROUGH_RESEARCHER)
 await manager.register(STRUCTURED_REPORTER)
@@ -104,7 +104,7 @@ system_prompt = active.get_prompt_prefix()   # splice into your agent prompt
 
 ## Few-Shot Example Library
 
-`core/personas/few_shot.py` provides a task-indexed library of in-context
+`baselith/core/personas/few_shot.py` provides a task-indexed library of in-context
 examples. In-context examples reduce token spend and improve format
 adherence; keeping them under version control means non-engineers can
 review and edit them.
@@ -135,16 +135,16 @@ summarize:
 ```
 
 ```python
-from core.personas.few_shot import load_library
+from baselith.core.personas.few_shot import load_library
 
 lib = load_library("personas/data/examples.yaml")
 chosen = lib.select("summarize", limit=2, tags=["news"])
 prompt_block = lib.render("summarize")   # Markdown ready to splice in
 ```
 
-The library symbols are exported from `core.personas` directly, and a
-packaged seed library ships at `core.personas.DEFAULT_EXAMPLES_PATH`
-(`core/personas/examples/default_examples.yaml`). To splice examples into a
+The library symbols are exported from `baselith.core.personas` directly, and a
+packaged seed library ships at `baselith.core.personas.DEFAULT_EXAMPLES_PATH`
+(`baselith/core/personas/examples/default_examples.yaml`). To splice examples into a
 structured system prompt, use
 [`PromptEngine.with_library`](chat.md#few-shot-library-bridge).
 

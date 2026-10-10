@@ -4,12 +4,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.middleware.security import require_admin, require_user
-from core.routers.admin import router as admin_router
-from core.routers.admin import verify_credentials
-from core.routers.feedback import router as feedback_router
-from core.routers.tenant import router as tenant_router
-from core.services.tenant import Tenant
+from baselith.core.middleware.security import require_admin, require_user
+from baselith.core.routers.admin import router as admin_router
+from baselith.core.routers.admin import verify_credentials
+from baselith.core.routers.feedback import router as feedback_router
+from baselith.core.routers.tenant import router as tenant_router
+from baselith.core.services.tenant import Tenant
 
 # Create app for testing routers
 app = FastAPI()
@@ -48,8 +48,8 @@ def mock_require_admin():
 @pytest.fixture
 def mock_feedback_service():
     with (
-        patch("core.routers.admin.get_feedback_service") as mock_admin,
-        patch("core.routers.feedback.get_feedback_service") as mock_feedback,
+        patch("baselith.core.routers.admin.get_feedback_service") as mock_admin,
+        patch("baselith.core.routers.feedback.get_feedback_service") as mock_feedback,
     ):
         service_mock = AsyncMock()
         mock_admin.return_value = service_mock
@@ -59,7 +59,7 @@ def mock_feedback_service():
 
 @pytest.fixture
 def mock_tenant_service():
-    with patch("core.routers.tenant.get_tenant_service") as mock:
+    with patch("baselith.core.routers.tenant.get_tenant_service") as mock:
         service_mock = AsyncMock()
         mock.return_value = service_mock
         yield service_mock

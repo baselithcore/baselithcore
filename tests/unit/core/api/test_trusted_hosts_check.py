@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.api.startup_checks import (
+from baselith.core.api.startup_checks import (
     UnvalidatedHostConfigError,
     _warn_missing_trusted_hosts,
 )
@@ -21,13 +21,15 @@ from core.api.startup_checks import (
 
 def _run(monkeypatch, *, production: bool, trusted: list[str]) -> MagicMock:
     """Invoke the check under a controlled environment; return the logger."""
-    monkeypatch.setattr("core.api.startup_checks.is_production_env", lambda: production)
     monkeypatch.setattr(
-        "core.config.get_security_config",
+        "baselith.core.api.startup_checks.is_production_env", lambda: production
+    )
+    monkeypatch.setattr(
+        "baselith.core.config.get_security_config",
         lambda: SimpleNamespace(trusted_hosts=trusted),
     )
     mock_logger = MagicMock()
-    monkeypatch.setattr("core.api.startup_checks.logger", mock_logger)
+    monkeypatch.setattr("baselith.core.api.startup_checks.logger", mock_logger)
     _warn_missing_trusted_hosts()
     return mock_logger
 
@@ -76,7 +78,7 @@ def _template_trusted_hosts() -> list[str]:
     """The ``TRUSTED_HOSTS`` value ``.env.example`` ships, parsed as the app does."""
     from pathlib import Path
 
-    from core.config._collections import csv_list
+    from baselith.core.config._collections import csv_list
 
     template = Path(__file__).resolve().parents[4] / ".env.example"
     for line in template.read_text(encoding="utf-8").splitlines():

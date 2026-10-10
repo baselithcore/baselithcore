@@ -18,16 +18,19 @@ from unittest.mock import Mock, patch
 import pytest
 from prometheus_client import REGISTRY
 
-from core.observability import genai_semconv as sc
-from core.services.llm._accounting import account_turn, set_usage_span_attributes
-from core.services.llm._telemetry import (
+from baselith.core.observability import genai_semconv as sc
+from baselith.core.services.llm._accounting import (
+    account_turn,
+    set_usage_span_attributes,
+)
+from baselith.core.services.llm._telemetry import (
     gen_ai_provider_for,
     gen_ai_provider_name,
     gen_ai_system,
     record_genai_metrics,
 )
-from core.services.llm.tool_calling import LLMResult
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.usage import Usage
 
 pytestmark = [pytest.mark.unit]
 
@@ -138,7 +141,9 @@ class TestFinishReasons:
             tokens_used=15,
             usage=Usage(input_tokens=10, output_tokens=5),
         )
-        with patch("core.services.llm._accounting.report_tokens_to_middleware"):
+        with patch(
+            "baselith.core.services.llm._accounting.report_tokens_to_middleware"
+        ):
             account_turn(
                 self._service(),
                 span,

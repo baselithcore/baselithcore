@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.chat.agent_state import AgentState
-from core.chat.guardrails import GuardrailDecision
-from core.chat.rag_workflow import RagWorkflow, RagWorkflowHandler
-from core.models.chat import ChatRequest
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.chat.guardrails import GuardrailDecision
+from baselith.core.chat.rag_workflow import RagWorkflow, RagWorkflowHandler
+from baselith.core.models.chat import ChatRequest
 
 
 class TestRagWorkflow:
@@ -15,7 +15,7 @@ class TestRagWorkflow:
 
     @pytest.fixture
     def workflow(self, mock_service):
-        with patch("core.chat.rag_workflow.get_llm_service") as mock_llm:
+        with patch("baselith.core.chat.rag_workflow.get_llm_service") as mock_llm:
             mock_llm.return_value.generate_response = AsyncMock()
             return RagWorkflow(mock_service)
 
@@ -29,7 +29,9 @@ class TestRagWorkflow:
         state = AgentState(request=ChatRequest(query="safe query"))
         decision = GuardrailDecision(action="allow")
 
-        with patch("core.chat.rag_workflow.evaluate_guardrails", return_value=decision):
+        with patch(
+            "baselith.core.chat.rag_workflow.evaluate_guardrails", return_value=decision
+        ):
             workflow.classify_intent(state)
 
         assert state.guardrail_decision == decision
@@ -42,7 +44,9 @@ class TestRagWorkflow:
             action="block", matched="test_rule", response="Blocked."
         )
 
-        with patch("core.chat.rag_workflow.evaluate_guardrails", return_value=decision):
+        with patch(
+            "baselith.core.chat.rag_workflow.evaluate_guardrails", return_value=decision
+        ):
             workflow.classify_intent(state)
 
         assert state.done

@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.resilience.circuit_breaker import (
+from baselith.core.resilience.circuit_breaker import (
     CircuitState,
     CircuitStats,
     get_circuit_breaker,
 )
-from core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.exceptions import LLMProviderError
 
-_SDK = "core.services.llm.providers.openai_provider.openai"
+_SDK = "baselith.core.services.llm.providers.openai_provider.openai"
 
 
 def _completion(text: str = "ok", total: int = 7) -> MagicMock:
@@ -69,7 +69,9 @@ class TestBaseUrl:
         ],
     )
     def test_normalises_to_the_openai_root(self, given, expected):
-        from core.services.llm.providers.vllm_provider import normalize_vllm_base_url
+        from baselith.core.services.llm.providers.vllm_provider import (
+            normalize_vllm_base_url,
+        )
 
         assert normalize_vllm_base_url(given) == expected
 
@@ -79,7 +81,7 @@ class TestInit:
     def test_needs_no_api_key(self, mock_openai):
         """A keyless server is the common case; the SDK still wants a string."""
         mock_openai.AsyncOpenAI.return_value = MagicMock()
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         VLLMProvider(api_base="http://gpu:8000")._ensure_client()
 
@@ -91,7 +93,7 @@ class TestInit:
     @patch(_SDK)
     def test_forwards_a_configured_key(self, mock_openai):
         mock_openai.AsyncOpenAI.return_value = MagicMock()
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         provider = VLLMProvider(
             api_base="http://gpu:8000/v1", api_key=SecretStr("token-abc")
@@ -104,14 +106,14 @@ class TestInit:
     @pytest.mark.parametrize("base", [None, "", "   "])
     def test_refuses_to_guess_an_endpoint(self, base):
         """No default: vLLM's :8000 is also where this backend listens."""
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         with pytest.raises(LLMProviderError, match="LLM_VLLM_API_BASE"):
             VLLMProvider(api_base=base)
 
     def test_native_tools_follow_the_server_flag(self):
         """Tool calling needs ``--enable-auto-tool-choice`` on the server."""
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         assert VLLMProvider(api_base="http://gpu:8000").supports_native_tools
         assert not VLLMProvider(
@@ -127,7 +129,7 @@ class TestCalls:
         client.chat.completions.create.return_value = _completion("hi", 12)
         with patch(_SDK) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.vllm_provider import VLLMProvider
+            from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
             provider = VLLMProvider(api_base="http://gpu:8000")
             text, tokens = await provider.generate(
@@ -146,7 +148,7 @@ class TestCalls:
         extra = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
         with patch(_SDK) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.vllm_provider import VLLMProvider
+            from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
             await VLLMProvider(api_base="http://gpu:8000").generate(
                 "ping", model="m", extra_body=extra
@@ -159,7 +161,7 @@ class TestCalls:
         client.chat.completions.create.side_effect = Exception("boom")
         with patch(_SDK) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.vllm_provider import VLLMProvider
+            from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
             with pytest.raises(LLMProviderError) as exc_info:
                 await VLLMProvider(api_base="http://gpu:8000").generate("p", model="m")
@@ -173,7 +175,7 @@ class TestCalls:
         client.chat.completions.create.side_effect = Exception("down")
         with patch(_SDK) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.vllm_provider import VLLMProvider
+            from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
             provider = VLLMProvider(api_base="http://gpu:8000")
             breaker = get_circuit_breaker("vllm_provider")
@@ -196,7 +198,7 @@ class TestCalls:
         client.chat.completions.create.return_value = _chunks()
         with patch(_SDK) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = client
-            from core.services.llm.providers.vllm_provider import VLLMProvider
+            from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
             provider = VLLMProvider(api_base="http://gpu:8000")
             seen: list[str] = []
@@ -211,7 +213,7 @@ class TestCalls:
         assert get_circuit_breaker("openai_provider")._stats.failures == 0
 
     async def test_image_generation_is_refused_up_front(self):
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         with pytest.raises(LLMProviderError, match="image"):
             await VLLMProvider(api_base="http://gpu:8000").generate_image("a cat")
@@ -234,8 +236,8 @@ class TestFactory:
         return SimpleNamespace(**base)
 
     def test_builds_a_vllm_provider(self):
-        from core.services.llm.provider_factory import create_provider
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         provider = create_provider(self._config())
 
@@ -245,7 +247,7 @@ class TestFactory:
 
     def test_policy_clone_endpoint_wins(self):
         """A policy clone carries the resolved endpoint in ``api_base``."""
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(
             self._config(api_base="http://other:9000/v1", vllm_api_base=None)
@@ -254,7 +256,7 @@ class TestFactory:
 
     def test_dedicated_key_outranks_the_primary_one(self):
         """``LLM_API_KEY`` may be an OpenAI key (``LLM_OPENAI_API_KEY`` alias)."""
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(
             self._config(
@@ -267,15 +269,15 @@ class TestFactory:
         """The leak the review caught: ``LLM_API_KEY`` also answers to
         ``LLM_OPENAI_API_KEY``, so switching the default provider to vLLM used
         to send whatever OpenAI key sat in the environment to the GPU box."""
-        from core.services.llm.provider_factory import create_provider
-        from core.services.llm.providers.vllm_provider import VLLM_NO_KEY
+        from baselith.core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.providers.vllm_provider import VLLM_NO_KEY
 
         provider = create_provider(self._config(api_key=SecretStr("sk-openai")))
         assert provider._api_key.get_secret_value() == VLLM_NO_KEY
 
     def test_dedicated_endpoint_outranks_the_primary_base(self):
         """Same precedence as ``api_base_for``: the dedicated field first."""
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(
             self._config(
@@ -285,13 +287,13 @@ class TestFactory:
         assert provider._base_url == "http://gpu:8000/v1"
 
     def test_native_tools_flag_is_forwarded(self):
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         provider = create_provider(self._config(vllm_native_tools=False))
         assert provider.supports_native_tools is False
 
     def test_missing_endpoint_fails_loudly(self):
-        from core.services.llm.provider_factory import create_provider
+        from baselith.core.services.llm.provider_factory import create_provider
 
         with pytest.raises(LLMProviderError, match="LLM_VLLM_API_BASE"):
             create_provider(self._config(vllm_api_base=None))

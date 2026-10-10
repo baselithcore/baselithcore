@@ -10,7 +10,7 @@
 .claude/
 # Repo-root scratch dir for agent artifacts only. Anchored with a leading
 # slash: an unanchored `docs/` also matches mkdocs-site/docs/,
-# plugins/*/docs/ and backstage-portal example docs — all tracked trees the
+# baselith/plugins/*/docs/ and backstage-portal example docs — all tracked trees the
 # OpenAPI drift gate and the docs build depend on.
 /docs/
 CLAUDE.md
@@ -32,10 +32,10 @@ build/
 *.egg-info/
 
 # --- Local caches (marketplace registry, etc.) ---
-# NB: 'cache/' is unanchored => it also matched the SOURCE packages core/cache/
+# NB: 'cache/' is unanchored => it also matched the SOURCE packages baselith/core/cache/
 # and tests/unit/core/cache/. Re-include them explicitly (negation after the rule).
 cache/
-!core/cache/
+!baselith/core/cache/
 !tests/unit/core/cache/
 
 # --- Testing and Coverage ---
@@ -62,7 +62,7 @@ EXTERNAL/
 .env
 .env.*
 /plugins/.pnpm-store/
-plugins/*/.state/
+baselith/plugins/*/.state/
 !.env.example
 !.env.*.example
 configs/.env

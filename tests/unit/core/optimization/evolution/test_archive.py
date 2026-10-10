@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.optimization.evolution import Candidate, CandidateArchive
-from core.skill_evolution.types import FitnessVector
+from baselith.core.optimization.evolution import Candidate, CandidateArchive
+from baselith.core.skill_evolution.types import FitnessVector
 
 pytestmark = [pytest.mark.unit]
 

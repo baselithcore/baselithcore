@@ -17,17 +17,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.services.llm.exceptions import LLMProviderError, StreamInterruptedError
-from core.services.llm.messages import Message
-from core.services.llm.stream_events import StreamEnd, TextDelta
-from core.services.llm.tool_calling import (
+from baselith.core.services.llm.exceptions import (
+    LLMProviderError,
+    StreamInterruptedError,
+)
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.stream_events import StreamEnd, TextDelta
+from baselith.core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
     ResponseFormat,
     ToolCall,
 )
-from core.services.llm.usage import Usage
-from core.services.llm.usage_sinks import (
+from baselith.core.services.llm.usage import Usage
+from baselith.core.services.llm.usage_sinks import (
     UsageReport,
     register_usage_sink,
     unregister_usage_sink,
@@ -78,8 +81,8 @@ class FakeStreamingProvider:
 
 
 def _service(provider, *, chain: str = "", stream: bool = True):
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider="ollama",
@@ -96,7 +99,9 @@ def _no_tenant_ledger(monkeypatch):
     async def _record(usd, **_kwargs):
         return None
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
 
 
 @pytest.fixture
@@ -122,7 +127,7 @@ async def test_text_arrives_chunk_by_chunk_and_the_result_is_whole():
 
 
 async def test_usage_is_booked_exactly_once_with_the_providers_counts(reports):
-    from core.services.llm.usage_sinks import drain_usage_sinks
+    from baselith.core.services.llm.usage_sinks import drain_usage_sinks
 
     provider = FakeStreamingProvider(["a", "b", "c"])
     await _service(provider).generate_messages(HISTORY, on_text=lambda _t: None)
@@ -167,7 +172,7 @@ async def test_a_failure_before_the_first_chunk_fails_over_invisibly():
     chunks: list[str] = []
 
     with patch(
-        "core.services.llm.fallback_runtime._clone_service",
+        "baselith.core.services.llm.fallback_runtime._clone_service",
         return_value=secondary_service,
     ):
         result = await _service(primary, chain="openai:gpt-4o-mini").generate_messages(
@@ -180,14 +185,14 @@ async def test_a_failure_before_the_first_chunk_fails_over_invisibly():
 
 
 async def test_a_failure_after_a_chunk_never_restarts_and_keeps_the_partial(reports):
-    from core.services.llm.usage_sinks import drain_usage_sinks
+    from baselith.core.services.llm.usage_sinks import drain_usage_sinks
 
     primary = FakeStreamingProvider(["Hel", LLMProviderError("connection reset")])
     secondary = FakeStreamingProvider(["again"])
     chunks: list[str] = []
 
     with patch(
-        "core.services.llm.fallback_runtime._clone_service",
+        "baselith.core.services.llm.fallback_runtime._clone_service",
         return_value=_service(secondary),
     ):
         with pytest.raises(StreamInterruptedError) as caught:
@@ -282,7 +287,9 @@ async def test_a_streamed_call_takes_the_same_rate_limit_slot_as_a_buffered_one(
     async def deny(_provider):
         raise LLMProviderError("rate limit exceeded")
 
-    with patch("core.services.llm.message_runtime.acquire_llm_call_slot", deny):
+    with patch(
+        "baselith.core.services.llm.message_runtime.acquire_llm_call_slot", deny
+    ):
         with pytest.raises(LLMProviderError):
             await _service(provider).generate_messages(HISTORY, on_text=chunks.append)
 
@@ -290,14 +297,16 @@ async def test_a_streamed_call_takes_the_same_rate_limit_slot_as_a_buffered_one(
 
 
 async def test_a_tenant_over_budget_cannot_open_a_stream():
-    from core.quotas.manager import CostBudgetExceededError
+    from baselith.core.quotas.manager import CostBudgetExceededError
 
     provider = FakeStreamingProvider(["never"])
 
     async def over(**_kwargs):
         raise CostBudgetExceededError("t1", SimpleNamespace(value="daily"), 1.0, 2.0)
 
-    with patch("core.quotas.cost_enforcement.enforce_tenant_cost_budget", over):
+    with patch(
+        "baselith.core.quotas.cost_enforcement.enforce_tenant_cost_budget", over
+    ):
         with pytest.raises(CostBudgetExceededError):
             await _service(provider).generate_messages(HISTORY, on_text=lambda _t: None)
 
@@ -305,7 +314,7 @@ async def test_a_tenant_over_budget_cannot_open_a_stream():
 
 
 async def test_a_cancelled_stream_still_books_its_usage_exactly_once(reports):
-    from core.services.llm.usage_sinks import drain_usage_sinks
+    from baselith.core.services.llm.usage_sinks import drain_usage_sinks
 
     provider = FakeStreamingProvider(["some words", "<hang>"])
     chunks: list[str] = []

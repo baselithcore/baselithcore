@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.skill_evolution.impact import MAX_OPEN_RUNS, SkillImpactTracker
+from baselith.core.skill_evolution.impact import MAX_OPEN_RUNS, SkillImpactTracker
 
 
 def test_run_scoped_attribution() -> None:

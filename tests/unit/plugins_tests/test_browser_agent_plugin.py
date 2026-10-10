@@ -1,11 +1,13 @@
-from core.agents.browser_agent import BrowserAgent as CoreBrowserAgent
-from core.agents.browser_tools import (
+from baselith.core.agents.browser_agent import BrowserAgent as CoreBrowserAgent
+from baselith.core.agents.browser_tools import (
     register_browser_tools as core_register_browser_tools,
 )
-from core.agents.browser_types import BrowserAgentResult as CoreBrowserAgentResult
-from plugins.browser_agent import BrowserAgent, register_browser_tools
-from plugins.browser_agent.plugin import BrowserAgentPlugin
-from plugins.browser_agent.types import BrowserAgentResult
+from baselith.core.agents.browser_types import (
+    BrowserAgentResult as CoreBrowserAgentResult,
+)
+from baselith.plugins.browser_agent import BrowserAgent, register_browser_tools
+from baselith.plugins.browser_agent.plugin import BrowserAgentPlugin
+from baselith.plugins.browser_agent.types import BrowserAgentResult
 
 
 def test_legacy_core_imports_resolve_to_plugin_exports() -> None:
@@ -39,7 +41,7 @@ class TestWaitActionIsBounded:
     def test_clamp_wait_seconds_bounds(self) -> None:
         import math
 
-        from plugins.browser_agent.actions import (
+        from baselith.plugins.browser_agent.actions import (
             MAX_WAIT_SECONDS,
             clamp_wait_seconds,
         )
@@ -55,9 +57,12 @@ class TestWaitActionIsBounded:
     async def test_execute_action_sleeps_at_most_the_cap(self, monkeypatch) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
-        import plugins.browser_agent.agent as agent_module
-        from plugins.browser_agent.actions import MAX_WAIT_SECONDS
-        from plugins.browser_agent.types import BrowserAction, BrowserActionType
+        import baselith.plugins.browser_agent.agent as agent_module
+        from baselith.plugins.browser_agent.actions import MAX_WAIT_SECONDS
+        from baselith.plugins.browser_agent.types import (
+            BrowserAction,
+            BrowserActionType,
+        )
 
         sleep = AsyncMock()
         monkeypatch.setattr(agent_module.asyncio, "sleep", sleep)

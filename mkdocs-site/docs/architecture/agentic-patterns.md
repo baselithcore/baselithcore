@@ -3,14 +3,14 @@ title: Agentic Patterns
 description: Agentic patterns implemented in BaselithCore
 ---
 
-BaselithCore implements **20+ agentic design patterns** organized into 7 categories. Each pattern has a dedicated module in `core/`.
+BaselithCore implements **20+ agentic design patterns** organized into 7 categories. Each pattern has a dedicated module in `baselith/core/`.
 
 ---
 
 ## Pattern Overview
 
 !!! info "Importing a primitive is cheap"
-    `core.orchestration` resolves its exports on first access, so reaching one
+    `baselith.core.orchestration` resolves its exports on first access, so reaching one
     primitive — `AutonomyPolicy`, `LoopBudget`, a checkpoint store — no longer
     imports the whole handler graph and the LLM service behind it. The map
     below still describes what each module does; it no longer describes what
@@ -21,38 +21,38 @@ The **agentic patterns** are organized into 7 functional categories:
 
 | #   | Pattern                | Category       | Module              | Brief Description                         |
 | --- | ---------------------- | -------------- | ------------------- | ----------------------------------------- |
-| 1   | **Reflection**         | Control        | `core/reflection/`  | Self-evaluation and response refinement   |
-| 2   | **Guardrails**         | Control        | `core/guardrails/`  | Input/output protection (security)        |
-| 3   | **Goals**              | Control        | `plugins/goals/`    | Goal tracking with success criteria       |
-| 4   | **Planning**           | Logic          | `core/planning/`    | Task decomposition into steps             |
-| 5   | **Reasoning (ToT)**    | Logic          | `core/reasoning/`   | Chain/Tree-of-Thought reasoning           |
-| 6   | **Self-Correction**    | Logic          | `core/reasoning/`   | Auto-correction of errors                 |
-| 7   | **Swarm Intelligence** | Social         | `core/swarm/`       | Multi-agent coordination                  |
-| 8   | **A2A Protocol**       | Social         | `core/a2a/`         | Agent-to-agent communication              |
-| 9   | **Human-in-the-Loop**  | Social         | `core/human/`       | Human intervention for critical decisions |
-| 10  | **MCP Integration**    | Social         | `core/mcp/`         | Tool calling via Model Context Protocol   |
-| 11  | **World Model**        | World          | `core/world_model/` | World state representation                |
-| 12  | **Exploration**        | World          | `core/exploration/` | Autonomous information exploration        |
-| 13  | **Adversarial**        | World          | `core/adversarial/` | Adversarial scenario simulation           |
-| 14  | **Personas**           | Identity       | `core/personas/`    | Configurable personalities                |
-| 15  | **Meta-Agent**         | Identity       | `core/meta/`        | Agent coordinating other agents           |
-| 16  | **Learning Loop**      | Learning       | `core/learning/`    | Continuous learning from interactions     |
-| 17  | **Evolution**          | Learning       | `core/learning/`    | Evolutionary prompt improvement           |
-| 18  | **Auto Fine-Tuning**   | Learning       | `core/finetuning/`  | Automatic fine-tuning from feedback       |
-| 19  | **Memory Tiering**     | Infrastructure | `core/memory/`      | Multi-level memory system                 |
-| 20  | **Multi-Tenancy**      | Infrastructure | `core/context.py`   | Data isolation between tenants            |
-| 21  | **Task Queue**         | Infrastructure | `core/task_queue/`  | Distributed queues for async jobs         |
-| 22  | **Evaluation**         | Infrastructure | `core/evaluation/`          | LLM response quality evaluation       |
+| 1   | **Reflection**         | Control        | `baselith/core/reflection/`  | Self-evaluation and response refinement   |
+| 2   | **Guardrails**         | Control        | `baselith/core/guardrails/`  | Input/output protection (security)        |
+| 3   | **Goals**              | Control        | `baselith/plugins/goals/`    | Goal tracking with success criteria       |
+| 4   | **Planning**           | Logic          | `baselith/core/planning/`    | Task decomposition into steps             |
+| 5   | **Reasoning (ToT)**    | Logic          | `baselith/core/reasoning/`   | Chain/Tree-of-Thought reasoning           |
+| 6   | **Self-Correction**    | Logic          | `baselith/core/reasoning/`   | Auto-correction of errors                 |
+| 7   | **Swarm Intelligence** | Social         | `baselith/core/swarm/`       | Multi-agent coordination                  |
+| 8   | **A2A Protocol**       | Social         | `baselith/core/a2a/`         | Agent-to-agent communication              |
+| 9   | **Human-in-the-Loop**  | Social         | `baselith/core/human/`       | Human intervention for critical decisions |
+| 10  | **MCP Integration**    | Social         | `baselith/core/mcp/`         | Tool calling via Model Context Protocol   |
+| 11  | **World Model**        | World          | `baselith/core/world_model/` | World state representation                |
+| 12  | **Exploration**        | World          | `baselith/core/exploration/` | Autonomous information exploration        |
+| 13  | **Adversarial**        | World          | `baselith/core/adversarial/` | Adversarial scenario simulation           |
+| 14  | **Personas**           | Identity       | `baselith/core/personas/`    | Configurable personalities                |
+| 15  | **Meta-Agent**         | Identity       | `baselith/core/meta/`        | Agent coordinating other agents           |
+| 16  | **Learning Loop**      | Learning       | `baselith/core/learning/`    | Continuous learning from interactions     |
+| 17  | **Evolution**          | Learning       | `baselith/core/learning/`    | Evolutionary prompt improvement           |
+| 18  | **Auto Fine-Tuning**   | Learning       | `baselith/core/finetuning/`  | Automatic fine-tuning from feedback       |
+| 19  | **Memory Tiering**     | Infrastructure | `baselith/core/memory/`      | Multi-level memory system                 |
+| 20  | **Multi-Tenancy**      | Infrastructure | `baselith/core/context.py`   | Data isolation between tenants            |
+| 21  | **Task Queue**         | Infrastructure | `baselith/core/task_queue/`  | Distributed queues for async jobs         |
+| 22  | **Evaluation**         | Infrastructure | `baselith/core/evaluation/`          | LLM response quality evaluation       |
 
 !!! note "In the running app versus in the library"
     A pattern having a module does not mean the default app runs it. These are
     **library APIs** — no route, handler registration, startup hook or
     scheduler reaches them until host or plugin code calls them:
-    `core/reflection/`, `core/planning/`, `core/world_model/` (except the
+    `baselith/core/reflection/`, `baselith/core/planning/`, `baselith/core/world_model/` (except the
     signed-mandate and payment chain the `payments` plugin builds on),
-    `core/exploration/`, `core/adversarial/`, `core/meta/`, `core/human/`
+    `baselith/core/exploration/`, `baselith/core/adversarial/`, `baselith/core/meta/`, `baselith/core/human/`
     (the orchestrator the chat service builds has no `HumanIntervention`;
-    approvals go through the durable `/approvals` path), and `core/learning/`
+    approvals go through the durable `/approvals` path), and `baselith/core/learning/`
     (`EvolutionService` starts at boot only when a plugin lists `evolution` in
     `required_resources`). In memory, the chat loop uses `AgentMemory` — not
     `HierarchicalMemory`, the scratchpad or a graph provider. Each module page
@@ -76,12 +76,12 @@ The **agentic patterns** are organized into 7 functional categories:
 
 ### Reflection
 
-**Module**: `core/reflection/`
+**Module**: `baselith/core/reflection/`
 
 The agent evaluates and improves its own responses through a self-evaluation loop.
 
 ```python
-from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
+from baselith.core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
 # ReflectionAgent requires an evaluator and a refiner
 agent = ReflectionAgent(evaluator=DefaultEvaluator(), refiner=DefaultRefiner())
@@ -116,12 +116,12 @@ if evaluation.score < 0.8:
 
 ### Guardrails
 
-**Module**: `core/guardrails/`
+**Module**: `baselith/core/guardrails/`
 
 Input/output protection for security and quality.
 
 ```python
-from core.guardrails import InputGuard, OutputGuard
+from baselith.core.guardrails import InputGuard, OutputGuard
 
 input_guard = InputGuard()
 output_guard = OutputGuard()
@@ -156,14 +156,14 @@ safe_output = output.filtered_output
 
 !!! note "Applied in the loop — streaming included"
     `Orchestrator.process` runs both guards automatically
-    (`core/orchestration/guard_pipeline.py`), and `process_stream` — which
+    (`baselith/core/orchestration/guard_pipeline.py`), and `process_stream` — which
     binds the same per-request `LoopBudget`, tenant guard and memory recall
-    around a stream handler (`core/orchestration/mixins/_streaming.py`) —
+    around a stream handler (`baselith/core/orchestration/mixins/_streaming.py`) —
     filters streamed chunks through `guard_stream`
-    (`core/orchestration/stream_guard.py`) with a holdback window, so
+    (`baselith/core/orchestration/stream_guard.py`) with a holdback window, so
     redaction patterns split across chunk boundaries are still caught. The
     inbound gate (`guard_input_async`) also layers **content moderation**
-    (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
+    (`baselith/core/guardrails/moderation.py`, fail-open) on top of the regex guard
     when `BASELITH_MODERATION_PROVIDER` names a provider; a surface that
     validates before handing off (the chat service) reuses the same compiled
     `InputGuard` through `get_input_guard()` rather than building one per
@@ -193,12 +193,12 @@ safe_output = output.filtered_output
 
 ### Goals
 
-**Module**: `plugins/goals/` (re-exported from `core/goals/` for backward compatibility)
+**Module**: `baselith/plugins/goals/` (re-exported from `baselith/core/goals/` for backward compatibility)
 
 Goal tracking with progress and explicit success criteria. Moved to `plugins/` per the Core Sacro Rule (domain logic lives in plugins).
 
 ```python
-from plugins.goals import GoalTracker, Goal, GoalStatus
+from baselith.plugins.goals import GoalTracker, Goal, GoalStatus
 
 tracker = GoalTracker()
 
@@ -229,7 +229,7 @@ tracker.get_summary()  # {"total": ..., "completed": ..., "in_progress": ..., "f
 `None`.
 
 !!! note "Backward Compatibility"
-    `core/goals/` still works as a re-export shim — existing imports are not broken.
+    `baselith/core/goals/` still works as a re-export shim — existing imports are not broken.
 
 ---
 
@@ -237,13 +237,13 @@ tracker.get_summary()  # {"total": ..., "completed": ..., "in_progress": ..., "f
 
 ### Planning
 
-**Module**: `core/planning/`
+**Module**: `baselith/core/planning/`
 
 Decomposition of complex tasks into executable steps. Plans can be converted to executable workflows via `plan_to_workflow()`.
 
 ```python
-from core.planning import TaskPlanner, plan_to_workflow
-from core.workflows import WorkflowExecutor
+from baselith.core.planning import TaskPlanner, plan_to_workflow
+from baselith.core.workflows import WorkflowExecutor
 
 planner = TaskPlanner()
 
@@ -266,12 +266,12 @@ result = await executor.execute(workflow, initial_input={"project": "todos"})
 
 ### Reasoning (Tree of Thoughts)
 
-**Module**: `core/reasoning/`
+**Module**: `baselith/core/reasoning/`
 
 Advanced reasoning with Chain-of-Thought and Tree-of-Thoughts.
 
 ```python
-from core.reasoning import TreeOfThoughts, ChainOfThought
+from baselith.core.reasoning import TreeOfThoughts, ChainOfThought
 
 # Chain of Thought (linear). reason() returns (final_answer, steps).
 cot = ChainOfThought()
@@ -314,12 +314,12 @@ print(result["solution"])
 
 ### Self-Correction
 
-**Module**: `core/reasoning/self_correction.py`
+**Module**: `baselith/core/reasoning/self_correction.py`
 
 The agent autonomously corrects its own errors.
 
 ```python
-from core.reasoning import SelfCorrector
+from baselith.core.reasoning import SelfCorrector
 
 corrector = SelfCorrector()
 
@@ -340,12 +340,12 @@ if result.corrections_made > 0:
 
 ### Swarm Intelligence
 
-**Module**: `core/swarm/`
+**Module**: `baselith/core/swarm/`
 
 Multi-agent coordination inspired by collective behaviors.  Supports both single-task auction allocation and **batch parallel execution**.
 
 ```python
-from core.swarm import Colony, AgentProfile, Capability, Task
+from baselith.core.swarm import Colony, AgentProfile, Capability, Task
 
 colony = Colony()
 
@@ -390,12 +390,12 @@ so every task in `execute_batch` draws from one shared cap. Pass
 
 ### A2A Protocol
 
-**Module**: `core/a2a/`
+**Module**: `baselith/core/a2a/`
 
 Agent-to-Agent protocol for inter-agent communication.
 
 ```python
-from core.a2a import A2AClient, AgentCard, AgentCapability, AgentDiscovery
+from baselith.core.a2a import A2AClient, AgentCard, AgentCapability, AgentDiscovery
 
 # Describe an agent and register it for discovery
 card = AgentCard(
@@ -427,12 +427,12 @@ print(response.success, response.result)
 
 ### Human-in-the-Loop
 
-**Module**: `core/human/`
+**Module**: `baselith/core/human/`
 
 Human intervention for critical decisions.
 
 ```python
-from core.human import HumanIntervention
+from baselith.core.human import HumanIntervention
 
 intervention = HumanIntervention()
 
@@ -468,14 +468,14 @@ Other interaction primitives on `HumanIntervention`: `ask_input()`,
 
 ### MCP Integration
 
-**Module**: `core/mcp/`
+**Module**: `baselith/core/mcp/`
 
 Model Context Protocol for standardized tool calling.
 
 Connect to an external MCP server as a client and invoke its tools:
 
 ```python
-from core.mcp import MCPClient
+from baselith.core.mcp import MCPClient
 
 # Connect to an MCP server (a launchable script or custom command).
 # Entering the context manager calls connect(); leaving it disconnects.
@@ -494,7 +494,7 @@ To **expose** your own functions as MCP tools, register them on an `MCPServer`
 through the `MCPToolAdapter`:
 
 ```python
-from core.mcp import MCPServer, MCPToolAdapter
+from baselith.core.mcp import MCPServer, MCPToolAdapter
 
 server = MCPServer()
 adapter = MCPToolAdapter(server)
@@ -512,7 +512,7 @@ adapter.register_function(web_search)  # name/description inferred from the func
 
 ### World Model
 
-**Module**: `core/world_model/`
+**Module**: `baselith/core/world_model/`
 
 Internal representation of world state.
 
@@ -523,7 +523,7 @@ credentials to exist: with a `custom_predictor=` it skips the LLM, and with no
 usable provider it falls back to applying action effects.
 
 ```python
-from core.world_model import State, Action, StatePredictor, RiskAssessor
+from baselith.core.world_model import State, Action, StatePredictor, RiskAssessor
 
 # Describe the current world state
 state = State(name="cluster", variables={"status": "running", "load": 0.7})
@@ -548,7 +548,7 @@ assessment = risk.assess_action(deploy, state=state)
 
 ### Exploration
 
-**Module**: `core/exploration/`
+**Module**: `baselith/core/exploration/`
 
 Autonomous exploration to discover new information.
 
@@ -556,7 +556,7 @@ Autonomous exploration to discover new information.
 implementations, expanding the query for broader coverage.
 
 ```python
-from core.exploration import ProactiveExplorer
+from baselith.core.exploration import ProactiveExplorer
 
 # sources implement the KnowledgeSource protocol (search/get_related)
 explorer = ProactiveExplorer(sources=my_sources)
@@ -574,7 +574,7 @@ print(result.findings)
 
 ### Adversarial
 
-**Module**: `core/adversarial/`
+**Module**: `baselith/core/adversarial/`
 
 Adversarial scenario simulation for robustness testing. The `RedTeamAgent` supports two detection strategies:
 
@@ -582,7 +582,7 @@ Adversarial scenario simulation for robustness testing. The `RedTeamAgent` suppo
 - **Keyword heuristic fallback**: Pattern-matching on known attack-success indicators when LLM is unavailable.
 
 ```python
-from core.adversarial import RedTeamAgent, AttackCategory
+from baselith.core.adversarial import RedTeamAgent, AttackCategory
 
 # LLM-based detection (default)
 red_team = RedTeamAgent(llm_detection=True)
@@ -613,13 +613,13 @@ summary = await red_team.quick_scan(target_fn=my_agent_fn)
 
 ### Personas
 
-**Module**: `core/personas/`
+**Module**: `baselith/core/personas/`
 
 Configurable personalities for agents.
 
 ```python
-from core.personas import Persona, PersonaManager
-from core.services.llm import get_llm_service
+from baselith.core.personas import Persona, PersonaManager
+from baselith.core.services.llm import get_llm_service
 
 manager = PersonaManager()
 
@@ -635,7 +635,7 @@ await manager.switch("TechExpert")
 
 # Apply it: prepend the active persona's prefix to the prompt and pass its
 # sampling settings to the LLM call. This is exactly how PersonaEnsemble in
-# core/meta/ consumes personas; there is no agent.set_persona().
+# baselith/core/meta/ consumes personas; there is no agent.set_persona().
 active = await manager.get_active()
 llm = get_llm_service()
 answer = await llm.generate_response(
@@ -647,7 +647,7 @@ answer = await llm.generate_response(
 
 `get_prompt_prefix()` returns `system_prompt` when it is set, otherwise a
 sentence built from `name`, `description` and `traits`. Ready-made personas
-ship in `core.personas` (`HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`,
+ship in `baselith.core.personas` (`HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`,
 `CREATIVE_WRITER`) and can seed the manager via
 `PersonaManager(default_persona=TECHNICAL_EXPERT)`.
 
@@ -655,12 +655,12 @@ ship in `core.personas` (`HELPFUL_ASSISTANT`, `TECHNICAL_EXPERT`,
 
 ### Meta-Agent
 
-**Module**: `core/meta/`
+**Module**: `baselith/core/meta/`
 
 Agent that coordinates and optimizes other agents. Includes a **multi-perspective debate** system with LLM-powered agreement analysis.
 
 ```python
-from core.meta import MultiPersonaAgent, InternalDebate, PersonaEnsemble
+from baselith.core.meta import MultiPersonaAgent, InternalDebate, PersonaEnsemble
 
 # End-to-end: ensemble generates perspectives, then they debate, then synthesize
 meta = MultiPersonaAgent()
@@ -685,12 +685,12 @@ print(result.winning_perspective, result.key_points, result.unresolved_tensions)
 
 ### Learning Loop
 
-**Module**: `core/learning/`
+**Module**: `baselith/core/learning/`
 
 Continuous learning from interactions.
 
 ```python
-from core.learning import ContinuousLearner
+from baselith.core.learning import ContinuousLearner
 
 learner = ContinuousLearner()
 
@@ -711,14 +711,14 @@ stats = learner.train(iterations=10)
 
 ### Evolution
 
-**Module**: `core/learning/evolution.py`
+**Module**: `baselith/core/learning/evolution.py`
 
 `EvolutionService` is an event-driven service: it subscribes to evaluation-
 completed events and, when configured, drives automatic fine-tuning through
 `AutoFineTuningService`.
 
 ```python
-from core.learning import EvolutionService
+from baselith.core.learning import EvolutionService
 
 evolution = EvolutionService(enable_auto_finetuning=True)
 
@@ -738,7 +738,7 @@ evolution.stop()
 
 ### Auto Fine-Tuning
 
-**Module**: `core/finetuning/`
+**Module**: `baselith/core/finetuning/`
 
 Automatic fine-tuning based on feedback.
 
@@ -747,7 +747,7 @@ the configured provider (OpenAI or Together). Build a dataset with
 `DatasetBuilder` and start training:
 
 ```python
-from core.finetuning import (
+from baselith.core.finetuning import (
     FineTuningPipeline,
     DatasetBuilder,
     FineTuneConfig,
@@ -771,7 +771,7 @@ if result.success and result.job:
 
 !!! note "Triggering"
     Automatic, feedback-driven triggering of fine-tuning jobs is handled by
-    `AutoFineTuningService` in `core/learning/` (wired to evaluation events
+    `AutoFineTuningService` in `baselith/core/learning/` (wired to evaluation events
     once an `EvolutionService` is started — not by default, see the note under
     [Pattern Overview](#pattern-overview)), which delegates the actual run to
     `FineTuningPipeline`.
@@ -782,11 +782,11 @@ if result.success and result.job:
 
 ### Memory Tiering
 
-**Module**: `core/memory/`
+**Module**: `baselith/core/memory/`
 
 Three-tier hierarchy (`MemoryTier`, defined in
-`core/memory/hierarchy_config.py` and re-exported from
-`core.memory.hierarchy`). Each tier carries a `TierConfig`
+`baselith/core/memory/hierarchy_config.py` and re-exported from
+`baselith.core.memory.hierarchy`). Each tier carries a `TierConfig`
 (`max_items`, `auto_promote_threshold`, `ttl_seconds`).
 
 | Tier    | `MemoryTier` value | Role                        | Default `TierConfig`  |
@@ -796,7 +796,7 @@ Three-tier hierarchy (`MemoryTier`, defined in
 | **LTM** | `long_term`        | Compressed, provider-backed | 500 items, TTL 7 days |
 
 ```python
-from core.memory import AgentMemory
+from baselith.core.memory import AgentMemory
 
 memory = AgentMemory()
 
@@ -807,7 +807,7 @@ related = await memory.recall(query, limit=5)
 
 !!! note "Post-response memory writes are bounded"
     The orchestrator writes each turn to memory as a tracked background task
-    (`core/orchestration/mixins/_memory_write.py`): at most 32 run at once and
+    (`baselith/core/orchestration/mixins/_memory_write.py`): at most 32 run at once and
     the backlog (running plus queued) is capped at 1024. Past the cap a new
     write is dropped and counted on `_memory_writes_dropped` and in
     `mas_memory_writes_dropped_total`, with a rate-limited WARNING (one line a
@@ -817,7 +817,7 @@ related = await memory.recall(query, limit=5)
 
 ### Multi-Tenancy
 
-**Module**: `core/context.py`
+**Module**: `baselith/core/context.py`
 
 Data isolation between tenants.
 
@@ -826,7 +826,7 @@ request/task and reset it with the returned token (there is no context-manager
 helper). `get_current_tenant_id()` reads the current value.
 
 ```python
-from core.context import (
+from baselith.core.context import (
     set_tenant_context,
     reset_tenant_context,
     get_current_tenant_id,
@@ -846,13 +846,13 @@ finally:
 
 ### Task Queue
 
-**Module**: `core/task_queue/`
+**Module**: `baselith/core/task_queue/`
 
 Distributed queues for asynchronous jobs.
 
 ```python
-from core.task_queue import enqueue_task
-from core.task_queue.status import get_task_tracker
+from baselith.core.task_queue import enqueue_task
+from baselith.core.task_queue.status import get_task_tracker
 
 
 def ingest_document(document_id: str) -> None:
@@ -876,7 +876,7 @@ thread or an executor if you are inside a hot async path.
 
 ### Evaluation
 
-**Module**: `core/evaluation/`
+**Module**: `baselith/core/evaluation/`
 
 LLM-as-a-Judge quality evaluation: the event-driven `EvaluationService` judges
 completed flows, and the RAG metric evaluators score a single answer:
@@ -889,14 +889,14 @@ completed flows, and the RAG metric evaluators score a single answer:
 ```python
 import asyncio
 
-from core.evaluation.metrics import FaithfulnessEvaluator
+from baselith.core.evaluation.metrics import FaithfulnessEvaluator
 
 score = await asyncio.to_thread(
     FaithfulnessEvaluator().measure, user_query, agent_response, contexts
 )
 ```
 
-`core.services.evaluation` is a deprecated shim over this package — see
+`baselith.core.services.evaluation` is a deprecated shim over this package — see
 [Evaluation](../core-modules/evaluation.md).
 
 ---
@@ -906,8 +906,8 @@ score = await asyncio.to_thread(
 Here's how multiple patterns work together:
 
 ```python
-from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
-from core.guardrails import InputGuard, OutputGuard
+from baselith.core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
+from baselith.core.guardrails import InputGuard, OutputGuard
 
 # Setup
 reflection_agent = ReflectionAgent(
@@ -946,28 +946,28 @@ async def handle_complex_request(query: str, agent) -> str:
 
 | Category       | Pattern         | Module              |
 | -------------- | --------------- | ------------------- |
-| Control        | Reflection      | `core/reflection/`  |
-|                | Guardrails      | `core/guardrails/`  |
-|                | Goals           | `plugins/goals/`    |
-| Logic          | Planning        | `core/planning/`    |
-|                | Reasoning       | `core/reasoning/`   |
-|                | Self-Correction | `core/reasoning/`   |
-| Social         | Swarm           | `core/swarm/`       |
-|                | A2A Protocol    | `core/a2a/`         |
-|                | Human-in-Loop   | `core/human/`       |
-|                | MCP Integration | `core/mcp/`         |
-| World          | World Model     | `core/world_model/` |
-|                | Exploration     | `core/exploration/` |
-|                | Adversarial     | `core/adversarial/` |
-| Identity       | Personas        | `core/personas/`    |
-|                | Meta-Agent      | `core/meta/`        |
-| Learning       | Learning Loop   | `core/learning/`    |
-|                | Evolution       | `core/learning/`    |
-|                | Fine-Tuning     | `core/finetuning/`  |
-| Infrastructure | Memory Tiering  | `core/memory/`      |
-|                | Multi-Tenancy   | `core/context.py`   |
-|                | Task Queue      | `core/task_queue/`          |
-|                | Evaluation      | `core/evaluation/`          |
+| Control        | Reflection      | `baselith/core/reflection/`  |
+|                | Guardrails      | `baselith/core/guardrails/`  |
+|                | Goals           | `baselith/plugins/goals/`    |
+| Logic          | Planning        | `baselith/core/planning/`    |
+|                | Reasoning       | `baselith/core/reasoning/`   |
+|                | Self-Correction | `baselith/core/reasoning/`   |
+| Social         | Swarm           | `baselith/core/swarm/`       |
+|                | A2A Protocol    | `baselith/core/a2a/`         |
+|                | Human-in-Loop   | `baselith/core/human/`       |
+|                | MCP Integration | `baselith/core/mcp/`         |
+| World          | World Model     | `baselith/core/world_model/` |
+|                | Exploration     | `baselith/core/exploration/` |
+|                | Adversarial     | `baselith/core/adversarial/` |
+| Identity       | Personas        | `baselith/core/personas/`    |
+|                | Meta-Agent      | `baselith/core/meta/`        |
+| Learning       | Learning Loop   | `baselith/core/learning/`    |
+|                | Evolution       | `baselith/core/learning/`    |
+|                | Fine-Tuning     | `baselith/core/finetuning/`  |
+| Infrastructure | Memory Tiering  | `baselith/core/memory/`      |
+|                | Multi-Tenancy   | `baselith/core/context.py`   |
+|                | Task Queue      | `baselith/core/task_queue/`          |
+|                | Evaluation      | `baselith/core/evaluation/`          |
 
 ---
 
@@ -975,71 +975,71 @@ async def handle_complex_request(query: str, agent) -> str:
 
 The patterns above are backed by a set of small, dependency-light
 primitives the orchestrator and handlers can pull in directly. They all
-live under `core/` and stay out of the way of plugin code.
+live under `baselith/core/` and stay out of the way of plugin code.
 
 | Concern | Module | Key symbols | Mkdocs page |
 |---------|--------|-------------|--------------|
-| Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
-| Tenant + identity USD cost budgets (post-paid metering, fail-open) | `core/quotas/cost_budgets.py`, `core/quotas/cost_enforcement.py` | `CostBudgetMixin`, `record_tenant_cost`, `check_identity_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
-| Content moderation gates — input, plus opt-in output/stream (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py`, `core/orchestration/stream_guard.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async`, `guard_output_async`, `moderate_stream` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
-| Packaged prompt catalog (registry-served hot-path prompts, env-switched A/B) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR`, `BASELITH_PROMPT_VARIANTS_<NAME>` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
-| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews/colonies as nodes, first-class intent registration) | `core/workflows/flow_handler.py`, `core/workflows/executor.py`, `core/workflows/adapters.py` | `Orchestrator.register_workflow`, `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter`, `ColonyNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
-| Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
-| Autonomy spectrum (incl. `self_modify` category) | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError`, `SELF_MODIFY` | [Orchestration](../core-modules/orchestration.md) |
-| Tool-invocation chokepoint (contract → autonomy → budget → rate limit → pre-hooks; audited) | `core/orchestration/enforcement.py`, `hooks.py`, `rate_limit.py` | `enforce_tool_invocation`, `ToolHookRegistry`, `get_tool_hook_registry`, `ToolRateLimiter` | [Orchestration](../core-modules/orchestration.md#tool-hooks-hookspy) |
-| Indirect-injection scan of tool observations (on by default; kill switch `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`) | `core/orchestration/tool_output.py`, `core/guardrails/indirect.py` | `sanitize_tool_output`, `scan_external_content` | [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning) |
-| Untrusted-output envelope (provenance boundary the model is told to distrust; **not idempotent** — one seam only) | `core/orchestration/tool_output.py` | `wrap_untrusted`, `unwrap_untrusted`, `escape_untrusted_markers`, `UNTRUSTED_OUTPUT_SYSTEM_RULE` | [Orchestration](../core-modules/orchestration.md#untrusted-output-envelope) |
-| Neutral message history (tool-call correlation, `is_error`, verbatim thinking, stable cache prefix) | `core/services/llm/messages.py`, `message_runtime.py` | `Message`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock`, `to_anthropic`, `to_openai`, `message_from_result`, `render_as_prompt`, `MessageCapableProvider` | [Neutral Message API](../core-modules/messages.md) |
-| One message round trip shared by both agent loops (typed `Agent` **and** the orchestrated ReAct loop; degrades to a rendered transcript + `CONVERGENCE_NUDGE`) | `core/services/llm/message_transport.py` | `generate_over_messages`, `service_supports_messages` | [Services](../core-modules/services.md#one-round-trip-for-a-message-history) |
-| ReAct native loop over an append-only message history (compaction that shortens block contents instead of dropping a turn; opt-in LLM summary of older complete turns via `ORCHESTRATOR_COMPACTION_SUMMARIZE`) | `core/reasoning/react_native.py`, `core/reasoning/history.py`, `core/reasoning/history_summary.py`, `core/reasoning/react_tools.py` | `run_native_loop`, `compact_message_history`, `compact_history_for_loop`, `observation_is_error` | [Reasoning](../core-modules/reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) |
-| Agentic-vs-deterministic router (library API — not wired by default) | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
-| Durable checkpoint + idempotent replay (on by default; content-addressed step keys; used by both ReAct loops and by `Agent.run(checkpoint=...)`; the Postgres run listing strips heavy keys server-side and adds only the filters given, so it stays index-served) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `CheckpointManager.next_occurrence`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
-| Cross-process tool idempotency (process-wide ledger chosen by `ORCHESTRATOR_TOOL_LEDGER`: `auto`/`postgres`/`memory`/`off`; a ledger error fails open, the call runs unrecorded; keys are content-addressed — tool + args + occurrence, never position — so a resumed run on a different path replays; legacy positional rows still honoured; the completed-row purge is bounded on the indexed `created_at` as well) | `core/orchestration/idempotency.py`, `call_keys.py`, `idempotency_postgres.py`, `ledger_factory.py`, `core/reasoning/react_tool_gate.py`, `core/reasoning/react_ledger.py` | `derive_call_key`, `CallOccurrences`, `claim_call`, `derive_idempotency_key` (legacy), `ToolLedger`, `InMemoryToolLedger`, `PostgresToolLedger`, `get_tool_ledger`, `reset_tool_ledger`, `DurableLedgerUnavailable`, `claim_ledger_entry` | [Orchestration](../core-modules/orchestration.md#choosing-the-ledger-orchestrator_tool_ledger) |
-| Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
-| Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
-| Crash-recovery sweep (one per fleet, cross-replica locked) + stale-run sweep (heartbeat-aware, `awaiting_approval` never swept); with PostgreSQL down at boot the store init is deferred to a background retry instead of blocking startup | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `sweep_stale_runs`, `StaleSweepReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md#stale-run-sweep-sweep_stale_runs) |
-| Plan-approve gate (rendered plan → human sign-off before execution; fail closed) (library API — not wired by default) | `core/planning/approval.py` | `approve_plan`, `render_plan_for_review`, `PlanRejectedError` | [Planning](../core-modules/planning.md#plan-approve-gate) |
-| Async agent runs on the task queue (202 + status poll, terminal `agent.completed`/`agent.failed` webhooks) | `core/task_queue/jobs/agent_run.py`, `plugins/api_routers/async_runs.py` | `run_agent_task`, `POST /agent/async`, `GET /agent/status/{task_id}` | [Task Queue](../core-modules/task-queue.md#async-agent-runs-agentasync) |
-| Cron + scheduled workflows (stdlib Vixie-semantics parser; deterministic in-process scheduler, `on_failure` webhook) (the scheduler is a library API — not started by default) | `core/task_queue/cron.py`, `core/workflows/schedule.py` | `CronExpression`, `WorkflowScheduler`, `WorkflowDefinition.schedule` / `.on_failure` | [Workflow Engine](../core-modules/workflows.md#scheduled-workflows-workflowscheduler) |
-| Hierarchical crew + coordination tax (manager brief → review → one bounded revision; per-task latency/cost) | `core/agent/crew.py`, `core/agent/crew_hierarchical.py` | `Crew(process="hierarchical", manager=...)`, `TaskResult.latency_ms` / `.cost_usd` / `.review`, `CrewResult.breakdown` | [Agent API](../core-modules/agent.md#hierarchical-process-manager-led) |
-| Group chat (shared transcript, pluggable speaker selection, bounded by rounds/predicate/`LoopBudget`) | `core/agent/group_chat.py` | `GroupChat`, `RoundRobinSelector`, `LLMManagerSelector`, `CapabilitySelector`, `GroupChatResult.terminated_by` | [Agent API](../core-modules/agent.md#group-chat-groupchat-speaker-selection) |
-| Document-aware splitting + hierarchical (small-to-big) chunking | `core/services/vectorstore/splitters.py`, `core/services/vectorstore/chunking_hierarchical.py` | `select_splitter`, `MarkdownHeaderSplitter`, `PythonCodeSplitter`, `HierarchicalChunker`, `expand_to_parents` | [Services](../core-modules/services.md#hierarchical-chunking-small-to-big-retrieval) |
-| Guard depth: LLM input taxonomy + output groundedness + modality stamp (all fail-open) | `core/guardrails/input_guard.py`, `core/orchestration/guard_groundedness.py`, `core/orchestration/modality_router.py` | `InputGuard.classify`, `InputClassification`, `apply_groundedness`, `detect_modality`, `annotate_context` | [Guardrails](../core-modules/guardrails.md#intent-taxonomy-classify) |
-| Native document/audio content (fail-closed magic-byte sniffing, provider support matrix, no in-core extraction fallback) | `core/services/vision/media_models.py`, `media_service.py`, `media_backends.py`, `core/utils/media.py` | `DocumentContent`, `AudioContent`, `UnsupportedContentError`, `analyze_document`, `analyze_audio`, `sniff_document_type`, `sniff_audio_type` | [Services](../core-modules/services.md#native-documents-audio) |
-| Duplex voice contract + realtime loop (adapters in plugins) | `core/realtime/duplex.py` | `DuplexVoiceSession`, `AudioDelta`, `SpeechStarted` | [Real-time PubSub](../core-modules/realtime.md#duplex-voice-sessions-duplexvoicesession) |
-| Sandbox compute metering + streaming execution (budget-charged; timeout kills the container) | `core/services/sandbox/service.py`, `core/services/sandbox/streaming.py` | `ExecutionResult.compute_seconds` / `.cost_usd`, `execute_code_async(budget=)`, `execute_code_stream`, `SANDBOX_COST_PER_COMPUTE_SECOND` | [Services](../core-modules/services.md#compute-metering-budget-charging) |
-| Skill ergonomics: catalog BM25 pre-filter + sandboxed bundled scripts | `core/plugins/skills_service.py`, `core/plugins/skill_scripts.py` | `render_catalog(query=)`, `run_skill_script`, `make_run_skill_script_tool`, `SkillScriptResult` | [Declarative Skills](../core-modules/skills.md#bundled-files-scripts-references-assets) |
-| Declarative external MCP server registry (allowlist fail-closed, per-server autonomy category) | `core/config/mcp.py`, `core/mcp/declarative.py` | `MCPServerSpec`, `MCPConfig.mcp_servers`, `mount_configured_servers`, `make_mcp_tool_fns` | [MCP Integration](../core-modules/mcp.md#declarative-external-server-registry-mcp_servers) |
-| Plugin tools on the HTTP-mounted MCP server (registered per activation, withdrawn on disable, calls refused once the plugin is down; undeclared category = `destructive`) | `core/mcp/plugin_tools.py`, `core/api/_plugin_runtime.py` | `register_plugin_mcp_tools`, `unregister_plugin_mcp_tools`, `PluginToolUnavailableError`, `MCPServer.unregister_tool` | [MCP Integration](../core-modules/mcp.md#plugin-tools) |
-| Conversation history on `/chat` and `/chat/stream` (loaded before orchestration as `history_text`, recorded after a real answer, keyed per user; the default `qa_docs` prompt opens with `Conversation so far:`) | `core/services/chat/utils/conversation.py`, `core/orchestration/handlers/rag.py` | `load_history`, `record_turn`, `recording_stream`, `conversation_key`, `build_rag_user_prompt(..., history=)` | [Chat & RAG](../core-modules/chat.md#conversation-history) |
-| Run promotion into the eval corpus (scrubbed, fail-closed) + fine-tuning scrub gate | `core/evaluation/promotion.py`, `scripts/promote_run.py`, `core/learning/auto_finetuning.py` | `promote_run`, `scrub_text`, `PromotionError`, `samples_dropped_poisoned` | [Evaluation](../core-modules/evaluation.md#promoting-production-runs-promotionpy) |
-| Distillation → retrieval (strategy patterns as few-shot examples; loop priming) (library API — not wired by default) | `core/skill_evolution/distillation.py`, `core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
-| Safe defaults for a standalone `Agent`/`Crew`/`GroupChat`/`Colony` (tools *declared* `category="destructive"` refused unless an `AutonomyPolicy` is given; an undeclared category behaves as before; a default `LoopBudget` bound when none is ambient, never doubled) | `core/agent/_safety.py`, `core/orchestration/budget_context.py`, `core/reasoning/react_types.py` | `destructive_denial`, `standalone_budget`, `ToolDefinition.category_declared`, `Agent(autonomy_policy=, loop_limits=)` | [Agent API](../core-modules/agent.md#safe-defaults-for-a-standalone-run) |
-| Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
-| Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
-| Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
-| Section-bounded scratchpad (library API — not wired by default) | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
-| Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
-| Trajectory eval + CI runner (incl. `reference_fact` groundedness, multi-model bake-off) | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py`, `core/evaluation/bake_off.py` | `TrajectoryEvaluator`, `RegressionReport`, `run_bake_off`, `BakeOffResult` | [Evaluation](../core-modules/evaluation.md) |
-| Engineered loop (verifier-owned iteration) | `core/loops/engineered.py`, `stall.py`, `lessons.py`, `fingerprint.py` | `EngineeredLoop`, `StallGuard`, `LessonLog`, `failure_fingerprint` | [Loop Engineering](../core-modules/loops.md) |
-| Loop-as-handler bridge (budget-bound, checkpointed outcome, default escalation, wiki-primed first attempt) (library API — not wired by default) | `core/loops/flow_handler.py`, `escalation.py`, `rubric.py`, `goal.py`, `priming.py` | `LoopFlowHandler(pattern_store=...)`, `build_default_escalation`, `rubric_verifier`, `harden_goal`, `prime_lessons` | [Loop Engineering](../core-modules/loops.md#production-wiring-flow_handlerpy) |
-| Handoff cycle guard (no revisit, hop-capped) | `core/swarm/types.py`, `core/config/swarm.py` | `HandoffCycleGuard`, `Handoff.hop_count` / `.visited`, `SwarmConfig.max_handoff_hops` | [Swarm Intelligence](../core-modules/swarm.md) |
-| Governed self-modification (eval gates + `self_modify` approval + audit) (library API — not wired by default) | `core/skill_evolution/gating.py`, `core/skill_evolution/types.py`, `core/optimization/tune_gate.py` | `SkillGate`, `FitnessVector`, `review_candidate`, `TuneEvaluator` | [Skill Evolution](../core-modules/skill-evolution.md#governed-self-modification) |
-| Evolutionary search (per-instance Pareto archive, diff-bounded reflective mutation, holdout anti-gaming audit) (library API — not wired by default) | `core/optimization/evolution/` | `EvolutionEngine`, `CandidateArchive`, `ReflectiveMutator`, `EvolutionBudget`, `EvolutionReport.holdout_regressed` | [Optimization](../core-modules/optimization.md#evolutionary-search-coreoptimizationevolution) |
-| DSPy-lite prompt compilation (bootstrap few-shot demos, eval-gated candidate landing) (library API — not wired by default) | `core/optimization/compile.py` | `compile_prompt`, `CompiledPrompt`, `DEMOS_HEADER` | [Optimization](../core-modules/optimization.md#dspy-lite-prompt-compilation-compile_prompt) |
-| Multi-judge consensus | `core/evaluation/consensus.py` | `ConsensusEvaluator` | [Evaluation](../core-modules/evaluation.md) |
-| Red-team regression gate | `core/evaluation/red_team.py`, `evals/red_team/` | `load_red_team_cases`, `run_red_team_suite` | [Evaluation](../core-modules/evaluation.md) |
-| Outcome-fed model routing | `core/models/routing_stats.py` | `RoutingScoreboard`, `LearnedModelRouter` | [Domain Models](../core-modules/models.md) |
-| Generator-Challenger debate (library API — not wired by default) | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
-| Few-shot example library | `core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
-| LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost`, `qualified_model_id` | [Chat & RAG](../core-modules/chat.md) |
-| LLM failover posture (what a chain does and does not absorb; startup validation) | `core/services/llm/_fallback_support.py`, `preflight.py` | `fatal_exception_types`, `record_fallback_served`, `run_llm_preflight` | [Services](../core-modules/services.md) |
-| Central per-plugin LLM policy | `core/services/llm/policy.py`, `runtime.py`, `core/middleware/plugin_context.py` | `PluginLLMPolicy`, `set_plugin_llm_policy_resolver`, `get_llm_service` | [Services](../core-modules/services.md) |
-| A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
-| Signed mandate chain (money math in integer cents; signed conditions enforced, unknown keys fail closed) | `core/world_model/mandates.py`, `core/world_model/mandate_conditions.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate.total_cents`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `evaluate_intent_conditions`, `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md#signed-intent-conditions) |
-| AP2 payment execution + delegated commerce (verify → PSP → receipt → audit chokepoint; human-not-present buyer, conditions unconditional) | `core/world_model/payments.py`, `core/world_model/delegated.py`, `plugins/payments/` | `execute_payment`, `PaymentExecutor`, `PaymentReceipt`, `ReceiptStore`, `DelegatedPurchaseAgent`, `MockPSPAdapter` | [World Model](../core-modules/world-model.md#ap2-payment-execution-execute_payment) |
-| Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
-| OpenInference enrichment of LLM spans (opt-in, content capture separate) | `core/observability/openinference.py` | `openinference_llm_attributes`, `openinference_enabled`, `MAX_CONTENT_CHARS` | [Observability](../core-modules/observability-module.md#openinference-enrichment-openinferencepy) |
+| Iteration + cost cap | `baselith/core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
+| Tenant + identity USD cost budgets (post-paid metering, fail-open) | `baselith/core/quotas/cost_budgets.py`, `baselith/core/quotas/cost_enforcement.py` | `CostBudgetMixin`, `record_tenant_cost`, `check_identity_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
+| Content moderation gates — input, plus opt-in output/stream (fail-open) | `baselith/core/guardrails/moderation.py`, `baselith/core/orchestration/guard_pipeline.py`, `baselith/core/orchestration/stream_guard.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async`, `guard_output_async`, `moderate_stream` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
+| Packaged prompt catalog (registry-served hot-path prompts, env-switched A/B) | `baselith/core/prompts/catalog.py`, `baselith/core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR`, `BASELITH_PROMPT_VARIANTS_<NAME>` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
+| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews/colonies as nodes, first-class intent registration) | `baselith/core/workflows/flow_handler.py`, `baselith/core/workflows/executor.py`, `baselith/core/workflows/adapters.py` | `Orchestrator.register_workflow`, `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter`, `ColonyNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
+| Declarative agent spec | `baselith/core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
+| Autonomy spectrum (incl. `self_modify` category) | `baselith/core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError`, `SELF_MODIFY` | [Orchestration](../core-modules/orchestration.md) |
+| Tool-invocation chokepoint (contract → autonomy → budget → rate limit → pre-hooks; audited) | `baselith/core/orchestration/enforcement.py`, `hooks.py`, `rate_limit.py` | `enforce_tool_invocation`, `ToolHookRegistry`, `get_tool_hook_registry`, `ToolRateLimiter` | [Orchestration](../core-modules/orchestration.md#tool-hooks-hookspy) |
+| Indirect-injection scan of tool observations (on by default; kill switch `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`) | `baselith/core/orchestration/tool_output.py`, `baselith/core/guardrails/indirect.py` | `sanitize_tool_output`, `scan_external_content` | [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning) |
+| Untrusted-output envelope (provenance boundary the model is told to distrust; **not idempotent** — one seam only) | `baselith/core/orchestration/tool_output.py` | `wrap_untrusted`, `unwrap_untrusted`, `escape_untrusted_markers`, `UNTRUSTED_OUTPUT_SYSTEM_RULE` | [Orchestration](../core-modules/orchestration.md#untrusted-output-envelope) |
+| Neutral message history (tool-call correlation, `is_error`, verbatim thinking, stable cache prefix) | `baselith/core/services/llm/messages.py`, `message_runtime.py` | `Message`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock`, `to_anthropic`, `to_openai`, `message_from_result`, `render_as_prompt`, `MessageCapableProvider` | [Neutral Message API](../core-modules/messages.md) |
+| One message round trip shared by both agent loops (typed `Agent` **and** the orchestrated ReAct loop; degrades to a rendered transcript + `CONVERGENCE_NUDGE`) | `baselith/core/services/llm/message_transport.py` | `generate_over_messages`, `service_supports_messages` | [Services](../core-modules/services.md#one-round-trip-for-a-message-history) |
+| ReAct native loop over an append-only message history (compaction that shortens block contents instead of dropping a turn; opt-in LLM summary of older complete turns via `ORCHESTRATOR_COMPACTION_SUMMARIZE`) | `baselith/core/reasoning/react_native.py`, `baselith/core/reasoning/history.py`, `baselith/core/reasoning/history_summary.py`, `baselith/core/reasoning/react_tools.py` | `run_native_loop`, `compact_message_history`, `compact_history_for_loop`, `observation_is_error` | [Reasoning](../core-modules/reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) |
+| Agentic-vs-deterministic router (library API — not wired by default) | `baselith/core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
+| Durable checkpoint + idempotent replay (on by default; content-addressed step keys; used by both ReAct loops and by `Agent.run(checkpoint=...)`; the Postgres run listing strips heavy keys server-side and adds only the filters given, so it stays index-served) | `baselith/core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `CheckpointManager.next_occurrence`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Cross-process tool idempotency (process-wide ledger chosen by `ORCHESTRATOR_TOOL_LEDGER`: `auto`/`postgres`/`memory`/`off`; a ledger error fails open, the call runs unrecorded; keys are content-addressed — tool + args + occurrence, never position — so a resumed run on a different path replays; legacy positional rows still honoured; the completed-row purge is bounded on the indexed `created_at` as well) | `baselith/core/orchestration/idempotency.py`, `call_keys.py`, `idempotency_postgres.py`, `ledger_factory.py`, `baselith/core/reasoning/react_tool_gate.py`, `baselith/core/reasoning/react_ledger.py` | `derive_call_key`, `CallOccurrences`, `claim_call`, `derive_idempotency_key` (legacy), `ToolLedger`, `InMemoryToolLedger`, `PostgresToolLedger`, `get_tool_ledger`, `reset_tool_ledger`, `DurableLedgerUnavailable`, `claim_ledger_entry` | [Orchestration](../core-modules/orchestration.md#choosing-the-ledger-orchestrator_tool_ledger) |
+| Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `baselith/core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
+| Streamed-output guarding (holdback window + opt-in moderation) | `baselith/core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
+| Crash-recovery sweep (one per fleet, cross-replica locked) + stale-run sweep (heartbeat-aware, `awaiting_approval` never swept); with PostgreSQL down at boot the store init is deferred to a background retry instead of blocking startup | `baselith/core/orchestration/recovery.py`, `baselith/core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `sweep_stale_runs`, `StaleSweepReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md#stale-run-sweep-sweep_stale_runs) |
+| Plan-approve gate (rendered plan → human sign-off before execution; fail closed) (library API — not wired by default) | `baselith/core/planning/approval.py` | `approve_plan`, `render_plan_for_review`, `PlanRejectedError` | [Planning](../core-modules/planning.md#plan-approve-gate) |
+| Async agent runs on the task queue (202 + status poll, terminal `agent.completed`/`agent.failed` webhooks) | `baselith/core/task_queue/jobs/agent_run.py`, `baselith/plugins/api_routers/async_runs.py` | `run_agent_task`, `POST /agent/async`, `GET /agent/status/{task_id}` | [Task Queue](../core-modules/task-queue.md#async-agent-runs-agentasync) |
+| Cron + scheduled workflows (stdlib Vixie-semantics parser; deterministic in-process scheduler, `on_failure` webhook) (the scheduler is a library API — not started by default) | `baselith/core/task_queue/cron.py`, `baselith/core/workflows/schedule.py` | `CronExpression`, `WorkflowScheduler`, `WorkflowDefinition.schedule` / `.on_failure` | [Workflow Engine](../core-modules/workflows.md#scheduled-workflows-workflowscheduler) |
+| Hierarchical crew + coordination tax (manager brief → review → one bounded revision; per-task latency/cost) | `baselith/core/agent/crew.py`, `baselith/core/agent/crew_hierarchical.py` | `Crew(process="hierarchical", manager=...)`, `TaskResult.latency_ms` / `.cost_usd` / `.review`, `CrewResult.breakdown` | [Agent API](../core-modules/agent.md#hierarchical-process-manager-led) |
+| Group chat (shared transcript, pluggable speaker selection, bounded by rounds/predicate/`LoopBudget`) | `baselith/core/agent/group_chat.py` | `GroupChat`, `RoundRobinSelector`, `LLMManagerSelector`, `CapabilitySelector`, `GroupChatResult.terminated_by` | [Agent API](../core-modules/agent.md#group-chat-groupchat-speaker-selection) |
+| Document-aware splitting + hierarchical (small-to-big) chunking | `baselith/core/services/vectorstore/splitters.py`, `baselith/core/services/vectorstore/chunking_hierarchical.py` | `select_splitter`, `MarkdownHeaderSplitter`, `PythonCodeSplitter`, `HierarchicalChunker`, `expand_to_parents` | [Services](../core-modules/services.md#hierarchical-chunking-small-to-big-retrieval) |
+| Guard depth: LLM input taxonomy + output groundedness + modality stamp (all fail-open) | `baselith/core/guardrails/input_guard.py`, `baselith/core/orchestration/guard_groundedness.py`, `baselith/core/orchestration/modality_router.py` | `InputGuard.classify`, `InputClassification`, `apply_groundedness`, `detect_modality`, `annotate_context` | [Guardrails](../core-modules/guardrails.md#intent-taxonomy-classify) |
+| Native document/audio content (fail-closed magic-byte sniffing, provider support matrix, no in-core extraction fallback) | `baselith/core/services/vision/media_models.py`, `media_service.py`, `media_backends.py`, `baselith/core/utils/media.py` | `DocumentContent`, `AudioContent`, `UnsupportedContentError`, `analyze_document`, `analyze_audio`, `sniff_document_type`, `sniff_audio_type` | [Services](../core-modules/services.md#native-documents-audio) |
+| Duplex voice contract + realtime loop (adapters in plugins) | `baselith/core/realtime/duplex.py` | `DuplexVoiceSession`, `AudioDelta`, `SpeechStarted` | [Real-time PubSub](../core-modules/realtime.md#duplex-voice-sessions-duplexvoicesession) |
+| Sandbox compute metering + streaming execution (budget-charged; timeout kills the container) | `baselith/core/services/sandbox/service.py`, `baselith/core/services/sandbox/streaming.py` | `ExecutionResult.compute_seconds` / `.cost_usd`, `execute_code_async(budget=)`, `execute_code_stream`, `SANDBOX_COST_PER_COMPUTE_SECOND` | [Services](../core-modules/services.md#compute-metering-budget-charging) |
+| Skill ergonomics: catalog BM25 pre-filter + sandboxed bundled scripts | `baselith/core/plugins/skills_service.py`, `baselith/core/plugins/skill_scripts.py` | `render_catalog(query=)`, `run_skill_script`, `make_run_skill_script_tool`, `SkillScriptResult` | [Declarative Skills](../core-modules/skills.md#bundled-files-scripts-references-assets) |
+| Declarative external MCP server registry (allowlist fail-closed, per-server autonomy category) | `baselith/core/config/mcp.py`, `baselith/core/mcp/declarative.py` | `MCPServerSpec`, `MCPConfig.mcp_servers`, `mount_configured_servers`, `make_mcp_tool_fns` | [MCP Integration](../core-modules/mcp.md#declarative-external-server-registry-mcp_servers) |
+| Plugin tools on the HTTP-mounted MCP server (registered per activation, withdrawn on disable, calls refused once the plugin is down; undeclared category = `destructive`) | `baselith/core/mcp/plugin_tools.py`, `baselith/core/api/_plugin_runtime.py` | `register_plugin_mcp_tools`, `unregister_plugin_mcp_tools`, `PluginToolUnavailableError`, `MCPServer.unregister_tool` | [MCP Integration](../core-modules/mcp.md#plugin-tools) |
+| Conversation history on `/chat` and `/chat/stream` (loaded before orchestration as `history_text`, recorded after a real answer, keyed per user; the default `qa_docs` prompt opens with `Conversation so far:`) | `baselith/core/services/chat/utils/conversation.py`, `baselith/core/orchestration/handlers/rag.py` | `load_history`, `record_turn`, `recording_stream`, `conversation_key`, `build_rag_user_prompt(..., history=)` | [Chat & RAG](../core-modules/chat.md#conversation-history) |
+| Run promotion into the eval corpus (scrubbed, fail-closed) + fine-tuning scrub gate | `baselith/core/evaluation/promotion.py`, `scripts/promote_run.py`, `baselith/core/learning/auto_finetuning.py` | `promote_run`, `scrub_text`, `PromotionError`, `samples_dropped_poisoned` | [Evaluation](../core-modules/evaluation.md#promoting-production-runs-promotionpy) |
+| Distillation → retrieval (strategy patterns as few-shot examples; loop priming) (library API — not wired by default) | `baselith/core/skill_evolution/distillation.py`, `baselith/core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
+| Safe defaults for a standalone `Agent`/`Crew`/`GroupChat`/`Colony` (tools *declared* `category="destructive"` refused unless an `AutonomyPolicy` is given; an undeclared category behaves as before; a default `LoopBudget` bound when none is ambient, never doubled) | `baselith/core/agent/_safety.py`, `baselith/core/orchestration/budget_context.py`, `baselith/core/reasoning/react_types.py` | `destructive_denial`, `standalone_budget`, `ToolDefinition.category_declared`, `Agent(autonomy_policy=, loop_limits=)` | [Agent API](../core-modules/agent.md#safe-defaults-for-a-standalone-run) |
+| Tool/skill envelope | `baselith/core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
+| Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `baselith/core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
+| Declarative SKILL.md skills (progressive disclosure) | `baselith/core/plugins/declarative.py`, `baselith/core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
+| Section-bounded scratchpad (library API — not wired by default) | `baselith/core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
+| Hybrid keyword/dense retrieval | `baselith/core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
+| Trajectory eval + CI runner (incl. `reference_fact` groundedness, multi-model bake-off) | `baselith/core/evaluation/trajectory.py`, `baselith/core/evaluation/regression_runner.py`, `baselith/core/evaluation/bake_off.py` | `TrajectoryEvaluator`, `RegressionReport`, `run_bake_off`, `BakeOffResult` | [Evaluation](../core-modules/evaluation.md) |
+| Engineered loop (verifier-owned iteration) | `baselith/core/loops/engineered.py`, `stall.py`, `lessons.py`, `fingerprint.py` | `EngineeredLoop`, `StallGuard`, `LessonLog`, `failure_fingerprint` | [Loop Engineering](../core-modules/loops.md) |
+| Loop-as-handler bridge (budget-bound, checkpointed outcome, default escalation, wiki-primed first attempt) (library API — not wired by default) | `baselith/core/loops/flow_handler.py`, `escalation.py`, `rubric.py`, `goal.py`, `priming.py` | `LoopFlowHandler(pattern_store=...)`, `build_default_escalation`, `rubric_verifier`, `harden_goal`, `prime_lessons` | [Loop Engineering](../core-modules/loops.md#production-wiring-flow_handlerpy) |
+| Handoff cycle guard (no revisit, hop-capped) | `baselith/core/swarm/types.py`, `baselith/core/config/swarm.py` | `HandoffCycleGuard`, `Handoff.hop_count` / `.visited`, `SwarmConfig.max_handoff_hops` | [Swarm Intelligence](../core-modules/swarm.md) |
+| Governed self-modification (eval gates + `self_modify` approval + audit) (library API — not wired by default) | `baselith/core/skill_evolution/gating.py`, `baselith/core/skill_evolution/types.py`, `baselith/core/optimization/tune_gate.py` | `SkillGate`, `FitnessVector`, `review_candidate`, `TuneEvaluator` | [Skill Evolution](../core-modules/skill-evolution.md#governed-self-modification) |
+| Evolutionary search (per-instance Pareto archive, diff-bounded reflective mutation, holdout anti-gaming audit) (library API — not wired by default) | `baselith/core/optimization/evolution/` | `EvolutionEngine`, `CandidateArchive`, `ReflectiveMutator`, `EvolutionBudget`, `EvolutionReport.holdout_regressed` | [Optimization](../core-modules/optimization.md#evolutionary-search-coreoptimizationevolution) |
+| DSPy-lite prompt compilation (bootstrap few-shot demos, eval-gated candidate landing) (library API — not wired by default) | `baselith/core/optimization/compile.py` | `compile_prompt`, `CompiledPrompt`, `DEMOS_HEADER` | [Optimization](../core-modules/optimization.md#dspy-lite-prompt-compilation-compile_prompt) |
+| Multi-judge consensus | `baselith/core/evaluation/consensus.py` | `ConsensusEvaluator` | [Evaluation](../core-modules/evaluation.md) |
+| Red-team regression gate | `baselith/core/evaluation/red_team.py`, `evals/red_team/` | `load_red_team_cases`, `run_red_team_suite` | [Evaluation](../core-modules/evaluation.md) |
+| Outcome-fed model routing | `baselith/core/models/routing_stats.py` | `RoutingScoreboard`, `LearnedModelRouter` | [Domain Models](../core-modules/models.md) |
+| Generator-Challenger debate (library API — not wired by default) | `baselith/core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
+| Few-shot example library | `baselith/core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
+| LLM portability layer | `baselith/core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost`, `qualified_model_id` | [Chat & RAG](../core-modules/chat.md) |
+| LLM failover posture (what a chain does and does not absorb; startup validation) | `baselith/core/services/llm/_fallback_support.py`, `preflight.py` | `fatal_exception_types`, `record_fallback_served`, `run_llm_preflight` | [Services](../core-modules/services.md) |
+| Central per-plugin LLM policy | `baselith/core/services/llm/policy.py`, `runtime.py`, `baselith/core/middleware/plugin_context.py` | `PluginLLMPolicy`, `set_plugin_llm_policy_resolver`, `get_llm_service` | [Services](../core-modules/services.md) |
+| A2UI blueprint schema | `baselith/core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
+| Signed mandate chain (money math in integer cents; signed conditions enforced, unknown keys fail closed) | `baselith/core/world_model/mandates.py`, `baselith/core/world_model/mandate_conditions.py`, `baselith/core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate.total_cents`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `evaluate_intent_conditions`, `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md#signed-intent-conditions) |
+| AP2 payment execution + delegated commerce (verify → PSP → receipt → audit chokepoint; human-not-present buyer, conditions unconditional) | `baselith/core/world_model/payments.py`, `baselith/core/world_model/delegated.py`, `baselith/plugins/payments/` | `execute_payment`, `PaymentExecutor`, `PaymentReceipt`, `ReceiptStore`, `DelegatedPurchaseAgent`, `MockPSPAdapter` | [World Model](../core-modules/world-model.md#ap2-payment-execution-execute_payment) |
+| Loop instrumentation on `AgentState` | `baselith/core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
+| OpenInference enrichment of LLM spans (opt-in, content capture separate) | `baselith/core/observability/openinference.py` | `openinference_llm_attributes`, `openinference_enabled`, `MAX_CONTENT_CHARS` | [Observability](../core-modules/observability-module.md#openinference-enrichment-openinferencepy) |
 
 !!! note "Eval gating in CI"
     The three deterministic quality gates backed by the eval primitives above

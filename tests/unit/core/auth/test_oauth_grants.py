@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.auth.oauth import (
+from baselith.core.auth.oauth import (
     ClientType,
     GrantType,
     InvalidRequestError,

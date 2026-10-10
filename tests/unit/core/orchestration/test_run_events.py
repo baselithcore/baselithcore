@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.api.events import AgentEvent, EventType
-from core.orchestration.checkpoint import (
+from baselith.core.api.events import AgentEvent, EventType
+from baselith.core.orchestration.checkpoint import (
     Checkpoint,
     CheckpointManager,
     InMemoryCheckpointStore,
 )
-from core.orchestration.run_events import (
+from baselith.core.orchestration.run_events import (
     TERMINAL_EVENT_TYPES,
     RunEventStream,
     get_run_event_stream,
@@ -158,7 +158,7 @@ class _BoomHandler:
 
 
 def _orchestrator(store=None, handler=None):
-    from core.orchestration.orchestrator import Orchestrator
+    from baselith.core.orchestration.orchestrator import Orchestrator
 
     orch = Orchestrator(checkpoint_store=store, default_intent="test_intent")
     orch.classify_intent_async = AsyncMock(return_value="test_intent")  # type: ignore

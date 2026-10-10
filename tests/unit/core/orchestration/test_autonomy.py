@@ -1,10 +1,10 @@
-"""Unit tests for ``core.orchestration.autonomy``."""
+"""Unit tests for ``baselith.core.orchestration.autonomy``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     DESTRUCTIVE,
     EXTERNAL_SIDE_EFFECT,
     MUTATING,

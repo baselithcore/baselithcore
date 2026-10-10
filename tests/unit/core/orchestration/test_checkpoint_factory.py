@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-import core.orchestration.checkpoint_factory as factory
-from core.orchestration.checkpoint import InMemoryCheckpointStore
+import baselith.core.orchestration.checkpoint_factory as factory
+from baselith.core.orchestration.checkpoint import InMemoryCheckpointStore
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     factory.reset_default_checkpoint_store()
     # Isolate from process env / cached config.
-    import core.config.orchestration as orch_config
+    import baselith.core.config.orchestration as orch_config
 
     monkeypatch.setattr(orch_config, "_orchestration_config", None)
     yield
@@ -71,8 +71,8 @@ class _FakePostgresStore:
 
 @pytest.fixture
 def _postgres_store(monkeypatch):
-    from core.db import reachability
-    from core.orchestration import checkpoint_postgres
+    from baselith.core.db import reachability
+    from baselith.core.orchestration import checkpoint_postgres
 
     monkeypatch.setattr(
         checkpoint_postgres, "PostgresCheckpointStore", _FakePostgresStore
@@ -87,7 +87,7 @@ def _postgres_store(monkeypatch):
 async def test_postgres_store_init_fails_fast_when_the_probe_saw_the_db_down(
     _postgres_store,
 ):
-    from core.db import reachability
+    from baselith.core.db import reachability
 
     reachability._last_outcome = False
     with pytest.raises(factory.CheckpointStoreUnavailableError):
@@ -109,7 +109,7 @@ async def test_postgres_store_init_unchanged_when_never_probed(_postgres_store):
 
 
 async def test_memory_store_ignores_the_probe(monkeypatch):
-    from core.db import reachability
+    from baselith.core.db import reachability
 
     monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
     monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "memory")

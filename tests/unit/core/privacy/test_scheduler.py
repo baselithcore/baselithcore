@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from core.privacy.scheduler import RetentionScheduler
+from baselith.core.privacy.scheduler import RetentionScheduler
 
 
 class _FakeReport:
@@ -26,7 +26,7 @@ class TestRetentionScheduler:
                 return _FakeReport()
 
         monkeypatch.setattr(
-            "core.privacy.scheduler.get_data_subject_service",
+            "baselith.core.privacy.scheduler.get_data_subject_service",
             lambda: _FakeService(),
         )
 
@@ -40,7 +40,7 @@ class TestRetentionScheduler:
     @pytest.mark.asyncio
     async def test_start_is_idempotent(self, monkeypatch):
         monkeypatch.setattr(
-            "core.privacy.scheduler.get_data_subject_service",
+            "baselith.core.privacy.scheduler.get_data_subject_service",
             lambda: pytest.fail("should not be called before a tick"),
         )
         sched = RetentionScheduler(retention_seconds=100, interval_seconds=3600)
@@ -67,7 +67,7 @@ class TestRetentionScheduler:
                 raise RuntimeError("db down")
 
         monkeypatch.setattr(
-            "core.privacy.scheduler.get_data_subject_service",
+            "baselith.core.privacy.scheduler.get_data_subject_service",
             lambda: _FlakyService(),
         )
         # Tiny interval so the loop retries quickly despite the raised error.

@@ -6,9 +6,9 @@ from typing import Any, Callable
 import httpx
 from pydantic import SecretStr
 
-from core.plugin_updates.models import Advisory, CheckReport, SystemUpdate
-from core.plugin_updates.sources import GitHubReleaseSource
-from core.plugin_updates.system import affects, check_system
+from baselith.core.plugin_updates.models import Advisory, CheckReport, SystemUpdate
+from baselith.core.plugin_updates.sources import GitHubReleaseSource
+from baselith.core.plugin_updates.system import affects, check_system
 
 
 def _rel(tag: str, *, pre: bool = False) -> dict[str, Any]:
@@ -236,7 +236,7 @@ async def test_no_carry_over_after_upgrade() -> None:
 
 
 def test_advisory_without_a_range_is_kept_not_dropped() -> None:
-    from core.plugin_updates._advisories import parse_advisory
+    from baselith.core.plugin_updates._advisories import parse_advisory
 
     entry = _adv("GHSA-9", "high", "")
     entry["vulnerabilities"][0]["vulnerable_version_range"] = None

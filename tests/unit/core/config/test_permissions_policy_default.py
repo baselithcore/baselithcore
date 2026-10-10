@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.config.security import SecurityConfig
+from baselith.core.config.security import SecurityConfig
 
 _NGINX = Path(__file__).resolve().parents[4] / "deploy" / "nginx" / "nginx.conf"
 _DENIED = (

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.cli.commands.doctor_plugin_checks import (
+from baselith.core.cli.commands.doctor_plugin_checks import (
     check_plugin_frontends,
     frontend_build_output,
 )

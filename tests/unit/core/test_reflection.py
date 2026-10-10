@@ -11,13 +11,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.reflection import (
+from baselith.core.reflection import (
     DefaultEvaluator,
     DefaultRefiner,
     EvaluationResult,
     ReflectionAgent,
 )
-from core.reflection.protocols import QualityLevel
+from baselith.core.reflection.protocols import QualityLevel
 
 # ============================================================================
 # EvaluationResult Tests

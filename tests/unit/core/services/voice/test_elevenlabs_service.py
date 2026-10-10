@@ -9,14 +9,14 @@ import httpx
 import pytest
 from elevenlabs_rig import KEY, VOICE, Handler, error, make_service
 
-from core.services.voice import (
+from baselith.core.services.voice import (
     VoiceCapabilities,
     VoiceKeyInvalidError,
     VoiceLimitError,
     VoiceNotConfiguredError,
     VoiceOverrides,
 )
-from core.services.voice.models import VoiceProvider
+from baselith.core.services.voice.models import VoiceProvider
 
 
 class TestService:
@@ -35,7 +35,7 @@ class TestService:
     async def test_tts_and_usage_in_characters(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.services.llm.usage_sinks import (
+        from baselith.core.services.llm.usage_sinks import (
             register_usage_sink,
             unregister_usage_sink,
         )
@@ -59,7 +59,7 @@ class TestService:
     async def test_stt_and_usage_in_seconds(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.services.llm.usage_sinks import (
+        from baselith.core.services.llm.usage_sinks import (
             register_usage_sink,
             unregister_usage_sink,
         )
@@ -92,7 +92,7 @@ class TestService:
     async def test_no_usage_is_reported_for_a_failed_call(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.services.llm.usage_sinks import (
+        from baselith.core.services.llm.usage_sinks import (
             register_usage_sink,
             unregister_usage_sink,
         )

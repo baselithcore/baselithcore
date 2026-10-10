@@ -3,7 +3,7 @@
 ``LLM_VLLM_NATIVE_TOOLS=false`` says the server was started without
 ``--enable-auto-tool-choice`` / ``--tool-call-parser``. Such a server answers a
 request carrying ``tool_choice="auto"`` with HTTP 400, so the message path —
-the one every ``core.agent.Agent`` turn takes — has to fall back to the prompt
+the one every ``baselith.core.agent.Agent`` turn takes — has to fall back to the prompt
 coercion path (tools described in the system prompt, a JSON object parsed back
 into a tool call) exactly as the structured path already did.
 """
@@ -15,17 +15,17 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from core.agent import Agent
-from core.resilience.circuit_breaker import (
+from baselith.core.agent import Agent
+from baselith.core.resilience.circuit_breaker import (
     CircuitState,
     CircuitStats,
     get_circuit_breaker,
 )
-from core.services.llm.messages import Message
-from core.services.llm.service import LLMService
-from core.services.llm.tool_calling import LLMToolSpec
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.tool_calling import LLMToolSpec
 
-_SDK = "core.services.llm.providers.openai_provider.openai"
+_SDK = "baselith.core.services.llm.providers.openai_provider.openai"
 
 _POP_SPEC = LLMToolSpec(
     name="pop",
@@ -74,7 +74,7 @@ def _completion(text: str) -> MagicMock:
 
 def _vllm_service(client: AsyncMock, *, native_tools: bool) -> LLMService:
     """A real ``LLMService`` driving a real ``VLLMProvider`` over a fake SDK."""
-    with patch("core.services.llm.service.get_llm_config") as mock_config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
         mock_config.return_value = Mock(
             provider="ollama",
             model="qwen",
@@ -85,7 +85,7 @@ def _vllm_service(client: AsyncMock, *, native_tools: bool) -> LLMService:
         )
         service = LLMService()
     service.config.provider = "vllm"
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     service.provider = VLLMProvider(
         api_base="http://gpu:8000", native_tools=native_tools
@@ -178,12 +178,12 @@ class TestAgentOnAParserlessServer:
 class TestFallbackChain:
     async def test_a_parserless_stage_is_skipped_on_a_tool_turn(self, monkeypatch):
         """A chain stage must not 400 where the primary would have degraded."""
-        from core.services.llm import fallback_runtime
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm import fallback_runtime
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         fallback_runtime.reset_fallback_services()
-        with patch("core.services.llm.service.get_llm_config") as mock_config:
+        with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
             mock_config.return_value = Mock(
                 provider="ollama",
                 model="claude-opus-5",

@@ -1,6 +1,6 @@
 """``describe_exception`` masks credentials an upstream error echoes back."""
 
-from core.services.llm.exceptions import describe_exception
+from baselith.core.services.llm.exceptions import describe_exception
 
 
 def test_bearer_and_key_pairs_are_masked():
@@ -21,7 +21,10 @@ def test_plain_messages_and_empty_exceptions_are_unchanged():
 
 
 def test_a_huge_error_body_is_bounded_before_redaction():
-    from core.services.llm.exceptions import _MAX_DESCRIBED_CHARS, describe_exception
+    from baselith.core.services.llm.exceptions import (
+        _MAX_DESCRIBED_CHARS,
+        describe_exception,
+    )
 
     text = describe_exception(RuntimeError("x" * (_MAX_DESCRIBED_CHARS * 50)))
     assert len(text) <= _MAX_DESCRIBED_CHARS

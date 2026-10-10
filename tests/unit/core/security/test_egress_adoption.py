@@ -10,7 +10,7 @@ import socket
 
 import pytest
 
-from core.security.ssrf import SsrfError
+from baselith.core.security.ssrf import SsrfError
 
 
 def _dns(monkeypatch, mapping):
@@ -30,7 +30,7 @@ def _dns(monkeypatch, mapping):
 
 
 def test_oidc_discovery_refuses_internal_issuer(monkeypatch):
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.internal": ["192.168.0.10"]})
     with pytest.raises(SsrfError):
@@ -38,7 +38,7 @@ def test_oidc_discovery_refuses_internal_issuer(monkeypatch):
 
 
 def test_oidc_discovery_allows_public_issuer(monkeypatch):
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.example.com": ["93.184.216.34"]})
     oidc._assert_issuer_safe("https://idp.example.com")  # does not raise
@@ -97,7 +97,7 @@ def _rsa_jwk(kid: str):
 
 
 def _oidc_config(**overrides):
-    from core.config.security import SecurityConfig
+    from baselith.core.config.security import SecurityConfig
 
     base = dict(
         SECRET_KEY="x" * 40,
@@ -112,7 +112,7 @@ def _oidc_config(**overrides):
 def test_oidc_discovery_fetch_uses_pinned_path(monkeypatch):
     """Finding 3: the discovery GET must not re-resolve DNS unpinned after
     ``_assert_issuer_safe`` validates the issuer once."""
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.example.com": ["93.184.216.34"]})
     calls = _recording_httpx_client(
@@ -135,7 +135,7 @@ def test_oidc_discovery_fetch_uses_pinned_path(monkeypatch):
 def test_oidc_jwks_fetch_uses_pinned_path(monkeypatch):
     """Finding 1: the JWKS document fetch must go through the same pinned
     path as discovery - never PyJWKClient's unguarded ``urlopen``."""
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.example.com": ["93.184.216.34"]})
     _key, jwk = _rsa_jwk("kid-1")
@@ -155,7 +155,7 @@ def test_oidc_jwks_fetch_uses_pinned_path(monkeypatch):
 def test_oidc_jwks_fetch_rejects_dns_rebind_to_internal(monkeypatch):
     """Finding 1: a JWKS host whose DNS resolves internal (compromised IdP
     DNS, or a rebind) is rejected before any HTTP call is made."""
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.example.com": ["10.0.0.9"]})
     verifier = oidc.OIDCVerifier(
@@ -171,7 +171,7 @@ def test_oidc_jwks_refetch_on_unknown_kid_uses_pinned_path(monkeypatch):
     re-fetch, and that re-fetch also goes through the pinned path."""
     import jwt as pyjwt
 
-    from core.auth import oidc
+    from baselith.core.auth import oidc
 
     _dns(monkeypatch, {"idp.example.com": ["93.184.216.34"]})
     old_key, old_jwk = _rsa_jwk("old-kid")
@@ -209,8 +209,8 @@ def test_oidc_jwks_refetch_on_unknown_kid_uses_pinned_path(monkeypatch):
 
 
 def _agent_client(**config_overrides):
-    from core.a2a.agent_card import AgentCard
-    from core.a2a.client import A2AClient, A2AClientConfig
+    from baselith.core.a2a.agent_card import AgentCard
+    from baselith.core.a2a.client import A2AClient, A2AClientConfig
 
     card = AgentCard(
         name="peer", description="d", endpoint="http://internal.example/agent"
@@ -227,7 +227,7 @@ async def test_a2a_client_refuses_internal_endpoint_when_strict(monkeypatch):
 
 async def test_a2a_client_allows_internal_endpoint_by_default(monkeypatch):
     # A2A meshes commonly run peer agents on internal networks (see
-    # core/a2a/client.py:A2AClient.endpoint) - default posture must not
+    # baselith/core/a2a/client.py:A2AClient.endpoint) - default posture must not
     # regress this, only the opt-out (allow_internal_endpoints=False) does.
     _dns(monkeypatch, {"internal.example": ["10.0.0.5"]})
     client = _agent_client()
@@ -264,7 +264,7 @@ async def test_a2a_client_assert_endpoint_safe_offloads_dns(monkeypatch):
 
 
 def test_a2a_default_allow_internal_endpoints_reads_env(monkeypatch):
-    from core.a2a.client import A2AClientConfig
+    from baselith.core.a2a.client import A2AClientConfig
 
     monkeypatch.delenv("A2A_ALLOW_INTERNAL_ENDPOINTS", raising=False)
     assert A2AClientConfig().allow_internal_endpoints is True
@@ -282,7 +282,7 @@ def test_a2a_default_allow_internal_endpoints_reads_env(monkeypatch):
 
 
 async def test_mcp_http_transport_refuses_internal_endpoint(monkeypatch):
-    from core.mcp.http_client_transport import HTTPClientTransport
+    from baselith.core.mcp.http_client_transport import HTTPClientTransport
 
     _dns(monkeypatch, {"mcp-internal.example": ["172.16.0.9"]})
     transport = HTTPClientTransport("http://mcp-internal.example/mcp")
@@ -293,12 +293,12 @@ async def test_mcp_http_transport_refuses_internal_endpoint(monkeypatch):
 async def test_mcp_http_transport_allows_internal_when_configured(monkeypatch):
     import httpx
 
-    from core.config import get_mcp_config
-    from core.mcp.http_client_transport import HTTPClientTransport
+    from baselith.core.config import get_mcp_config
+    from baselith.core.mcp.http_client_transport import HTTPClientTransport
 
     get_mcp_config.cache_clear() if hasattr(get_mcp_config, "cache_clear") else None
     monkeypatch.setenv("MCP_ALLOW_INTERNAL_ENDPOINTS", "true")
-    import core.config.mcp as mcp_config_module
+    import baselith.core.config.mcp as mcp_config_module
 
     monkeypatch.setattr(mcp_config_module, "_mcp_config", None)
 
@@ -324,7 +324,7 @@ async def test_mcp_http_transport_allows_internal_when_configured(monkeypatch):
 
 
 async def test_together_provider_uses_hardened_client(monkeypatch):
-    from core.finetuning.providers import TogetherProvider
+    from baselith.core.finetuning.providers import TogetherProvider
 
     provider = TogetherProvider(api_key="test-key")
 
@@ -337,8 +337,8 @@ async def test_together_provider_uses_hardened_client(monkeypatch):
 
     mock_transport = httpx.MockTransport(handler)
 
-    import core.finetuning.providers as providers_module
-    from core.security.http import create_hardened_async_client
+    import baselith.core.finetuning.providers as providers_module
+    from baselith.core.security.http import create_hardened_async_client
 
     def _patched(*args, **kwargs):
         kwargs["transport"] = mock_transport
@@ -358,8 +358,8 @@ async def test_together_provider_uses_hardened_client(monkeypatch):
 async def test_exporters_github_exchange_refuses_internal_marketplace_url(monkeypatch):
     from fastapi import HTTPException
 
-    import core.config as core_config
-    from core.plugins.exporters import router as exporters_router
+    import baselith.core.config as core_config
+    from baselith.core.plugins.exporters import router as exporters_router
 
     _dns(monkeypatch, {"internal-marketplace.example": ["10.1.2.3"]})
 

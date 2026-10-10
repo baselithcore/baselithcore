@@ -1,5 +1,5 @@
 """
-Unit tests for core.plugins.registry module.
+Unit tests for baselith.core.plugins.registry module.
 """
 
 from pathlib import Path
@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.plugins.interface import Plugin, PluginMetadata
-from core.plugins.registry import PluginRegistry
-from core.plugins.resource_analyzer import PluginDiscovery
+from baselith.core.plugins.interface import Plugin, PluginMetadata
+from baselith.core.plugins.registry import PluginRegistry
+from baselith.core.plugins.resource_analyzer import PluginDiscovery
 
 
 class TestPluginRegistry:
@@ -369,8 +369,8 @@ async def test_unregister_emits_plugin_unload_audit_event(monkeypatch):
     """Removing a plugin records a `plugin.unload` audit event."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from core.observability import audit as audit_module
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.observability import audit as audit_module
+    from baselith.core.plugins.registry import PluginRegistry
 
     events: list[tuple] = []
     monkeypatch.setattr(
@@ -416,7 +416,7 @@ class TestGenericRoutePrefixWarning:
     def test_generic_prefix_warning_is_emitted_once_per_plugin(self, monkeypatch):
         # The route snapshot lives in RouteMatchMixin (split out of registry.py
         # for the 500-line cap), so that is where the warning is emitted.
-        from core.plugins import route_matching as route_module
+        from baselith.core.plugins import route_matching as route_module
 
         fake_logger = MagicMock()
         monkeypatch.setattr(route_module, "logger", fake_logger)

@@ -1,9 +1,9 @@
 # Agentic Modules
 
-The historical `core/agents/` entrypoints are now **compatibility shims**. The canonical implementations of **BrowserAgent** and **CodingAgent** live in the official plugins `plugins/browser_agent/` and `plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
+The historical `baselith/core/agents/` entrypoints are now **compatibility shims**. The canonical implementations of **BrowserAgent** and **CodingAgent** live in the official plugins `baselith/plugins/browser_agent/` and `baselith/plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
 
 !!! info "Current State"
-    Existing imports from `core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly. Importing `core.agents` (like `core.goals`, the shim over `plugins.goals`) emits a `DeprecationWarning`: deprecated since 0.39, removed in 1.0.
+    Existing imports from `baselith.core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly. Importing `baselith.core.agents` (like `baselith.core.goals`, the shim over `baselith.plugins.goals`) emits a `DeprecationWarning`: deprecated since 0.39, removed in 1.0.
 
 ## Module Structure
 
@@ -17,7 +17,7 @@ plugins/
 ├── coding_agent/
 │   ├── agent.py           # CodingAgent: public tasks, review, provenance
 │   ├── flows.py           # fix / write / refactor / tests flows
-│   ├── loop.py            # Verified loop on core.loops.EngineeredLoop
+│   ├── loop.py            # Verified loop on baselith.core.loops.EngineeredLoop
 │   ├── harness.py         # pytest run in the sandbox, keyed report
 │   ├── screening.py       # What code and tests may not reach before they run
 │   ├── llm.py             # Typed answers via response_format
@@ -27,19 +27,19 @@ plugins/
 │   ├── tools.py           # MCP tool definitions and adapters
 │   ├── workspace*.py      # fix_in_workspace: one file of a repository, verified
 │   ├── types.py           # CodeLanguage, CodingResult, CodeExecutionResult
-│   ├── evals/             # Fix-rate benchmark (python -m plugins.coding_agent.evals)
+│   ├── evals/             # Fix-rate benchmark (python -m baselith.plugins.coding_agent.evals)
 │   └── plugin.py          # CodingAgentPlugin
 └── ...
 
-core/agents/
+baselith/core/agents/
 ├── browser_agent.py       # Backward-compatible shim
 ├── browser_tools.py       # Backward-compatible shim
 ├── browser_types.py       # Backward-compatible shim
 ├── coding/                # Backward-compatible shim package
 │   ├── __init__.py
-│   ├── agent.py           # -> plugins.coding_agent.agent
-│   ├── prompts.py         # -> plugins.coding_agent.prompts
-│   └── types.py           # -> plugins.coding_agent.types
+│   ├── agent.py           # -> baselith.plugins.coding_agent.agent
+│   ├── prompts.py         # -> baselith.plugins.coding_agent.prompts
+│   └── types.py           # -> baselith.plugins.coding_agent.types
 └── coding_tools.py        # Backward-compatible shim
 ```
 
@@ -65,7 +65,7 @@ graph LR
 ### Usage
 
 ```python
-from plugins.browser_agent import BrowserAgent
+from baselith.plugins.browser_agent import BrowserAgent
 
 # Context manager handles Playwright lifecycle
 async with BrowserAgent(headless=True) as agent:
@@ -102,7 +102,7 @@ async with BrowserAgent(headless=True) as agent:
 ### MCP Tools Integration
 
 ```python
-from plugins.browser_agent import register_browser_tools
+from baselith.plugins.browser_agent import register_browser_tools
 
 # Register the browser tools onto an MCP server (returns None)
 register_browser_tools(server)
@@ -140,17 +140,17 @@ graph LR
   pins today's behaviour with characterization tests that must pass on the
   original before the refactor is attempted; `generate_tests` runs the tests
   once against the code.
-- **Verified loop** on `core.loops.EngineeredLoop`: lessons from failed
+- **Verified loop** on `baselith.core.loops.EngineeredLoop`: lessons from failed
   attempts feed the next one, the stall guard ends a run stuck on the same
   failure, and the best candidate is returned on a loss.
 - **Observability and compliance**: one `agent_span` per call with the outcome
   as attributes, registration in the AI-system inventory at initialize, and an
-  AI Act Art. 50 provenance tag (`core.transparency`) on new code only.
+  AI Act Art. 50 provenance tag (`baselith.core.transparency`) on new code only.
 
 **Usage**
 
 ```python
-from plugins.coding_agent import CodingAgent
+from baselith.plugins.coding_agent import CodingAgent
 
 agent = CodingAgent(max_fix_attempts=5, execution_timeout=30)
 
@@ -171,7 +171,7 @@ explanation = await agent.explain_code(code, language="javascript")  # nothing r
 
 Only Python executes; other languages get `explain_code`. The sandbox image
 must contain pytest: `agent-sandbox:latest` built from
-`core/services/sandbox/Dockerfile.sandbox` does.
+`baselith/core/services/sandbox/Dockerfile.sandbox` does.
 
 ### Repository fixes
 
@@ -241,7 +241,7 @@ sandbox isolation and the security review below apply to every result.
 
 Code, error messages, instructions, the test reports and the lessons from
 earlier attempts fed back to the model pass
-`core.guardrails.scan_external_content` and are fenced in the prompt between
+`baselith.core.guardrails.scan_external_content` and are fenced in the prompt between
 `<<<DATA` and `DATA>>>`. Data that spells a fence marker is defused before it
 is quoted: any case or spacing, lookalike brackets or letters (fullwidth,
 Cyrillic, Greek), HTML entities, hidden characters, a marker split across
@@ -253,7 +253,7 @@ the review decide what is returned.
 
 ### Fix-rate benchmark
 
-`python -m plugins.coding_agent.evals` runs six real bugs through `fix_code`
+`python -m baselith.plugins.coding_agent.evals` runs six real bugs through `fix_code`
 with the configured model and judges each by hidden tests the agent never
 sees; passing its own tests is not enough. It exits `0` only at a 100% fix
 rate. `--workspace` runs the repository cases through `fix_in_workspace`
@@ -264,7 +264,7 @@ instead; positional names select cases.
 Every code-returning path (`fix_code`, `generate_code`, `generate_tests`,
 `refactor_code`) funnels through the LLM-free
 [code security review](guardrails.md#code-security-review)
-(`core.guardrails.review_code`) before a `CodingResult` leaves the agent. It
+(`baselith.core.guardrails.review_code`) before a `CodingResult` leaves the agent. It
 covers the returned tests too: a high-severity finding in `test_code` replaces
 them with a note and sets `success` to `False`. For the code itself:
 
@@ -286,7 +286,7 @@ if result.review and result.review.verdict == "flagged":
 ### Supported Languages
 
 ```python
-from plugins.coding_agent import CodeLanguage
+from baselith.plugins.coding_agent import CodeLanguage
 
 CodeLanguage.PYTHON     # "python"
 CodeLanguage.JAVASCRIPT # "javascript"
@@ -296,7 +296,7 @@ CodeLanguage.TYPESCRIPT # "typescript"
 **MCP Tools Integration**
 
 ```python
-from plugins.coding_agent import register_coding_tools
+from baselith.plugins.coding_agent import register_coding_tools
 
 register_coding_tools(server)  # Registers coding tools onto an MCP server (returns None)
 ```

@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 MODULE_PATH = (
-    Path(__file__).resolve().parents[5] / "core/services/vectorstore/embedding_cache.py"
+    Path(__file__).resolve().parents[5]
+    / "baselith/core/services/vectorstore/embedding_cache.py"
 )
 MODULE_SPEC = importlib.util.spec_from_file_location(
     "test_embedding_cache_module", MODULE_PATH

@@ -8,7 +8,7 @@ fast path; ``auto`` resolves to the memory store whenever Postgres is off.
 
 from __future__ import annotations
 
-from core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
+from baselith.core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
 
 
 def _checkpoint(run_id: str = "r1") -> Checkpoint:

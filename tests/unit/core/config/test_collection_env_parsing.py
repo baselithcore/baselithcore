@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.config._collections import csv_list
+from baselith.core.config._collections import csv_list
 
 pytestmark = [pytest.mark.unit]
 
@@ -27,7 +27,10 @@ def _env(monkeypatch, name: str, value: str) -> None:
 
 class TestCsvList:
     def test_parses_a_comma_separated_string(self):
-        assert csv_list("core.,plugins.") == ["core.", "plugins."]
+        assert csv_list("baselith.core.,baselith.plugins.") == [
+            "baselith.core.",
+            "baselith.plugins.",
+        ]
 
     def test_trims_and_drops_empties(self):
         assert csv_list(" a , , b ") == ["a", "b"]
@@ -53,31 +56,38 @@ class TestCsvList:
 class TestTaskQueueConfig:
     def test_replay_allowlist_accepts_the_documented_csv(self, monkeypatch):
         """The exact value `.env.example` documents."""
-        from core.config.task_queue import TaskQueueConfig
+        from baselith.core.config.task_queue import TaskQueueConfig
 
-        _env(monkeypatch, "TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES", "core.,plugins.")
-        assert TaskQueueConfig().dlq_replay_allowed_modules == ["core.", "plugins."]
+        _env(
+            monkeypatch,
+            "TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES",
+            "baselith.core.,baselith.plugins.",
+        )
+        assert TaskQueueConfig().dlq_replay_allowed_modules == [
+            "baselith.core.",
+            "baselith.plugins.",
+        ]
 
     def test_replay_allowlist_accepts_blank(self, monkeypatch):
-        from core.config.task_queue import TaskQueueConfig
+        from baselith.core.config.task_queue import TaskQueueConfig
 
         _env(monkeypatch, "TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES", "")
         assert TaskQueueConfig().dlq_replay_allowed_modules == []
 
     def test_queues_accepts_csv(self, monkeypatch):
-        from core.config.task_queue import TaskQueueConfig
+        from baselith.core.config.task_queue import TaskQueueConfig
 
         _env(monkeypatch, "TASK_QUEUE_QUEUES", "default,documents")
         assert TaskQueueConfig().queues == ["default", "documents"]
 
     def test_queues_accepts_blank(self, monkeypatch):
-        from core.config.task_queue import TaskQueueConfig
+        from baselith.core.config.task_queue import TaskQueueConfig
 
         _env(monkeypatch, "TASK_QUEUE_QUEUES", "")
         assert TaskQueueConfig().queues == []
 
     def test_queues_still_accepts_json(self, monkeypatch):
-        from core.config.task_queue import TaskQueueConfig
+        from baselith.core.config.task_queue import TaskQueueConfig
 
         _env(monkeypatch, "TASK_QUEUE_QUEUES", '["a", "b"]')
         assert TaskQueueConfig().queues == ["a", "b"]
@@ -85,7 +95,7 @@ class TestTaskQueueConfig:
 
 class TestObservabilityConfig:
     def test_tenant_allowlist_accepts_csv(self, monkeypatch):
-        from core.config.observability import ObservabilityConfig
+        from baselith.core.config.observability import ObservabilityConfig
 
         _env(monkeypatch, "METRICS_TENANT_LABEL_ALLOWLIST", "acme,globex")
         assert ObservabilityConfig().metrics_tenant_label_allowlist == {
@@ -94,7 +104,7 @@ class TestObservabilityConfig:
         }
 
     def test_tenant_allowlist_accepts_blank(self, monkeypatch):
-        from core.config.observability import ObservabilityConfig
+        from baselith.core.config.observability import ObservabilityConfig
 
         _env(monkeypatch, "METRICS_TENANT_LABEL_ALLOWLIST", "")
         assert ObservabilityConfig().metrics_tenant_label_allowlist == set()
@@ -103,8 +113,8 @@ class TestObservabilityConfig:
         """The user-visible consequence: a SettingsError here was swallowed by
         ``resolve_tenant_label``, collapsing every tenant to 'other' — the exact
         opposite of what the operator configured."""
-        from core.config.observability import reset_observability_config
-        from core.observability.metric_context import resolve_tenant_label
+        from baselith.core.config.observability import reset_observability_config
+        from baselith.core.observability.metric_context import resolve_tenant_label
 
         _env(monkeypatch, "METRICS_TENANT_LABEL_ALLOWLIST", "acme,globex")
         reset_observability_config()
@@ -122,7 +132,7 @@ class TestProcessingConfig:
         Parsed *and* dot-normalised — see
         ``test_dotless_extensions_are_normalised`` for why the dot matters.
         """
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "DOCUMENTS_EXTENSIONS", "pdf,docx,txt,md")
         assert ProcessingConfig().documents_extensions == (
@@ -136,7 +146,7 @@ class TestProcessingConfig:
         """`.env.example:342` ships them dotless, but the filesystem source
         matches ``Path.suffix``, which always has a dot — so a dotless entry
         matched nothing and indexing silently found zero documents."""
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "DOCUMENTS_EXTENSIONS", "pdf,docx,txt,md")
         assert ProcessingConfig().documents_extensions == (
@@ -147,25 +157,25 @@ class TestProcessingConfig:
         )
 
     def test_dotted_extensions_are_left_alone(self, monkeypatch):
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "DOCUMENTS_EXTENSIONS", ".pdf,.DOCX")
         assert ProcessingConfig().documents_extensions == (".pdf", ".docx")
 
     def test_the_default_extensions_are_still_dotted(self):
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         assert all(e.startswith(".") for e in ProcessingConfig().documents_extensions)
 
     def test_web_documents_urls_accepts_blank(self, monkeypatch):
         """`.env.example` ships this key blank — the shipped regression."""
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "WEB_DOCUMENTS_URLS", "")
         assert ProcessingConfig().web_documents_urls == []
 
     def test_web_documents_urls_accepts_csv(self, monkeypatch):
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(
             monkeypatch,
@@ -178,7 +188,7 @@ class TestProcessingConfig:
         ]
 
     def test_web_documents_allowlist_accepts_csv_and_blank(self, monkeypatch):
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "WEB_DOCUMENTS_ALLOWLIST", "a.example,b.example")
         assert ProcessingConfig().web_documents_allowlist == ["a.example", "b.example"]
@@ -187,13 +197,13 @@ class TestProcessingConfig:
 
     def test_blank_mineru_model_source_means_auto(self, monkeypatch):
         """`.env.example` ships ``MINERU_MODEL_SOURCE=`` commented "empty = auto"."""
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "MINERU_MODEL_SOURCE", "")
         assert ProcessingConfig().mineru_model_source is None
 
     def test_a_real_mineru_model_source_still_validates(self, monkeypatch):
-        from core.config.processing import ProcessingConfig
+        from baselith.core.config.processing import ProcessingConfig
 
         _env(monkeypatch, "MINERU_MODEL_SOURCE", "huggingface")
         assert ProcessingConfig().mineru_model_source == "huggingface"
@@ -201,19 +211,19 @@ class TestProcessingConfig:
 
 class TestAppConfig:
     def test_guardrail_keywords_accept_csv(self, monkeypatch):
-        from core.config.app import AppConfig
+        from baselith.core.config.app import AppConfig
 
         _env(monkeypatch, "CHAT_GUARDRAILS_BLOCK_KEYWORDS", "alpha,beta")
         assert AppConfig().chat_guardrails_block_keywords == ["alpha", "beta"]
 
     def test_guardrail_keywords_accept_blank(self, monkeypatch):
-        from core.config.app import AppConfig
+        from baselith.core.config.app import AppConfig
 
         _env(monkeypatch, "CHAT_GUARDRAILS_BLOCK_KEYWORDS", "")
         assert AppConfig().chat_guardrails_block_keywords == []
 
     def test_out_of_scope_patterns_accept_csv_and_blank(self, monkeypatch):
-        from core.config.app import AppConfig
+        from baselith.core.config.app import AppConfig
 
         _env(monkeypatch, "CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS", "^foo,^bar")
         assert AppConfig().chat_guardrails_out_of_scope_patterns == ["^foo", "^bar"]
@@ -234,13 +244,13 @@ class TestSecurityConfig:
 
     def test_allow_origins_accepts_the_shipped_template_value(self, monkeypatch):
         """`.env.example:443` — ``ALLOW_ORIGINS=https://app.example.com``."""
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "ALLOW_ORIGINS", "https://app.example.com")
         assert SecurityConfig().allow_origins == ["https://app.example.com"]
 
     def test_allow_origins_accepts_multiple_csv_origins(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "ALLOW_ORIGINS", "https://a.example,https://b.example")
         assert SecurityConfig().allow_origins == [
@@ -249,20 +259,20 @@ class TestSecurityConfig:
         ]
 
     def test_allow_origins_accepts_blank(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "ALLOW_ORIGINS", "")
         assert SecurityConfig().allow_origins == []
 
     def test_trusted_hosts_still_accepts_the_shipped_json(self, monkeypatch):
         """`.env.example:448` ships a JSON array — NoDecode must not break it."""
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "TRUSTED_HOSTS", '["app.example.com"]')
         assert SecurityConfig().trusted_hosts == ["app.example.com"]
 
     def test_trusted_hosts_accepts_csv_and_blank(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "TRUSTED_HOSTS", "a.example,b.example")
         assert SecurityConfig().trusted_hosts == ["a.example", "b.example"]
@@ -270,21 +280,21 @@ class TestSecurityConfig:
         assert SecurityConfig().trusted_hosts == []
 
     def test_oidc_algorithms_accept_csv(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "OIDC_ALGORITHMS", "RS256,ES256")
         assert SecurityConfig().oidc_algorithms == ["RS256", "ES256"]
 
     def test_api_keys_accept_the_shipped_template_value(self, monkeypatch):
         """`.env.example:449` — ``API_KEYS_USER=__CHANGE_ME__``."""
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "API_KEYS_USER", "__CHANGE_ME__")
         keys = SecurityConfig().api_keys_user
         assert {k.get_secret_value() for k in keys} == {"__CHANGE_ME__"}
 
     def test_api_keys_accept_csv_and_stay_secret(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "API_KEYS_USER", f"{'a' * 40},{'b' * 40}")
         config = SecurityConfig()
@@ -296,20 +306,20 @@ class TestSecurityConfig:
         deployments. NoDecode made pydantic stop decoding it, so the coercer
         had to start — until it did, every configured key silently stopped
         matching."""
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "API_KEYS_USER", f'["{"a" * 40}", "{"b" * 40}"]')
         keys = {k.get_secret_value() for k in SecurityConfig().api_keys_user}
         assert keys == {"a" * 40, "b" * 40}
 
     def test_oidc_algorithms_accept_the_json_array_form(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         _env(monkeypatch, "OIDC_ALGORITHMS", '["RS256", "ES256"]')
         assert SecurityConfig().oidc_algorithms == ["RS256", "ES256"]
 
     def test_api_keys_accept_blank(self, monkeypatch):
-        from core.config.security import SecurityConfig
+        from baselith.core.config.security import SecurityConfig
 
         for name in ("API_KEYS_USER", "API_KEYS_ADMIN", "API_KEYS_JOB"):
             _env(monkeypatch, name, "")
@@ -321,13 +331,13 @@ class TestSecurityConfig:
 
 class TestScraperConfig:
     def test_blocked_extensions_accept_csv(self, monkeypatch):
-        from core.config.scraper import ScraperConfig
+        from baselith.core.config.scraper import ScraperConfig
 
         _env(monkeypatch, "SCRAPER_BLOCKED_EXTENSIONS", ".exe,.zip")
         assert ScraperConfig().blocked_extensions == [".exe", ".zip"]
 
     def test_blocked_extensions_accept_blank(self, monkeypatch):
-        from core.config.scraper import ScraperConfig
+        from baselith.core.config.scraper import ScraperConfig
 
         _env(monkeypatch, "SCRAPER_BLOCKED_EXTENSIONS", "")
         assert ScraperConfig().blocked_extensions == []

@@ -1,6 +1,6 @@
 """Strict-typing ratchet for the core kernel.
 
-The repo-wide mypy run (``mypy core/``) is deliberately lenient:
+The repo-wide mypy run (``mypy baselith/core/``) is deliberately lenient:
 ``disallow_untyped_defs`` is off and ``warn_return_any`` is off, because a
 big-bang switch to strict mode across 140k lines would never land. This gate
 is the ratchet that gets there package by package:
@@ -14,7 +14,7 @@ is the ratchet that gets there package by package:
   so growing the list is a one-line change, not an investigation.
 
 It supersedes the file-level ``check_core_resilience_typing.py`` gate: the
-four resilience modules it covered sit inside ``core.resilience``, which is
+four resilience modules it covered sit inside ``baselith.core.resilience``, which is
 allowlisted here as a whole package.
 
 Usage:
@@ -62,98 +62,101 @@ STRICT_FLAGS: tuple[str, ...] = (
 #: Packages (or top-level ``core.<module>`` files) that pass
 #: :data:`STRICT_FLAGS`. Sorted, dotted names. Grow only.
 STRICT_CORE_PACKAGES: tuple[str, ...] = (
-    # The public facade. Not under ``core/`` — and so never a ``--candidates``
+    # The public facade. Not under ``baselith/core/`` — and so never a ``--candidates``
     # suggestion — but it is the one package every downstream program imports,
     # so it is strict from its first commit.
     "baselith",
-    "core._core_version",
-    "core._version",
-    "core.a2a",
-    "core.adversarial",
-    "core.agent",
-    "core.agents",
-    "core.api",
-    "core.auth",
-    "core.bootstrap",
-    "core.cache",
-    "core.chat",
-    "core.cli",
-    "core.compliance",
-    "core.config",
-    "core.connectors",
-    "core.context",
-    "core.db",
-    "core.di",
-    "core.doc_sources",
-    "core.evaluation",
-    "core.events",
-    "core.exceptions",
-    "core.exploration",
-    "core.feature_flags",
-    "core.finetuning",
-    "core.goals",
-    "core.graph",
-    "core.guardrails",
-    "core.human",
-    "core.incidents",
-    "core.interfaces",
-    "core.learning",
-    "core.lifecycle",
-    "core.loops",
-    "core.marketplace",
-    "core.mcp",
-    "core.memory",
-    "core.meta",
-    "core.middleware",
-    "core.models",
-    "core.nlp",
-    "core.observability",
-    "core.optimization",
-    "core.orchestration",
-    "core.personas",
-    "core.planning",
-    "core.plugins",
-    "core.prioritization",
-    "core.privacy",
-    "core.prompts",
-    "core.quotas",
-    "core.realtime",
-    "core.reasoning",
-    "core.reflection",
-    "core.registries",
-    "core.resilience",
-    "core.routers",
-    "core.scraper",
-    "core.security",
-    "core.services.chat",
-    "core.services.evaluation",
-    "core.services.graph",
-    "core.services.indexing",
-    "core.services.llm",
-    "core.services.retrieval",
-    "core.services.sandbox",
-    "core.services.tenant",
-    "core.services.vectorstore",
-    "core.services.vision",
-    "core.services.voice",
-    "core.skill_evolution",
-    "core.storage",
-    "core.swarm",
-    "core.task_queue",
-    "core.tenancy",
-    "core.thirdparty",
-    "core.transparency",
-    "core.utils",
-    "core.webhooks",
-    "core.workflows",
-    "core.world_model",
+    "baselith.core._core_version",
+    "baselith.core._version",
+    "baselith.core.a2a",
+    "baselith.core.adversarial",
+    "baselith.core.agent",
+    "baselith.core.agents",
+    "baselith.core.api",
+    "baselith.core.auth",
+    "baselith.core.bootstrap",
+    "baselith.core.cache",
+    "baselith.core.chat",
+    "baselith.core.cli",
+    "baselith.core.compliance",
+    "baselith.core.config",
+    "baselith.core.connectors",
+    "baselith.core.context",
+    "baselith.core.db",
+    "baselith.core.di",
+    "baselith.core.doc_sources",
+    "baselith.core.evaluation",
+    "baselith.core.events",
+    "baselith.core.exceptions",
+    "baselith.core.exploration",
+    "baselith.core.feature_flags",
+    "baselith.core.finetuning",
+    "baselith.core.goals",
+    "baselith.core.graph",
+    "baselith.core.guardrails",
+    "baselith.core.human",
+    "baselith.core.incidents",
+    "baselith.core.interfaces",
+    "baselith.core.learning",
+    "baselith.core.lifecycle",
+    "baselith.core.loops",
+    "baselith.core.marketplace",
+    "baselith.core.mcp",
+    "baselith.core.memory",
+    "baselith.core.meta",
+    "baselith.core.middleware",
+    "baselith.core.models",
+    "baselith.core.nlp",
+    "baselith.core.observability",
+    "baselith.core.optimization",
+    "baselith.core.orchestration",
+    "baselith.core.personas",
+    "baselith.core.planning",
+    "baselith.core.plugins",
+    "baselith.core.prioritization",
+    "baselith.core.privacy",
+    "baselith.core.prompts",
+    "baselith.core.quotas",
+    "baselith.core.realtime",
+    "baselith.core.reasoning",
+    "baselith.core.reflection",
+    "baselith.core.registries",
+    "baselith.core.resilience",
+    "baselith.core.routers",
+    "baselith.core.scraper",
+    "baselith.core.security",
+    "baselith.core.services.chat",
+    "baselith.core.services.evaluation",
+    "baselith.core.services.graph",
+    "baselith.core.services.indexing",
+    "baselith.core.services.llm",
+    "baselith.core.services.retrieval",
+    "baselith.core.services.sandbox",
+    "baselith.core.services.tenant",
+    "baselith.core.services.vectorstore",
+    "baselith.core.services.vision",
+    "baselith.core.services.voice",
+    "baselith.core.skill_evolution",
+    "baselith.core.storage",
+    "baselith.core.swarm",
+    "baselith.core.task_queue",
+    "baselith.core.tenancy",
+    "baselith.core.thirdparty",
+    "baselith.core.transparency",
+    "baselith.core.utils",
+    "baselith.core.webhooks",
+    "baselith.core.workflows",
+    "baselith.core.world_model",
 )
 
 
 def package_path(root: Path, name: str) -> Path:
     """Filesystem target of a dotted name under ``root``: a package directory
-    or, for a top-level module such as ``core.context``, its ``.py`` file."""
+    or, for a top-level module such as ``baselith.core.context``, its ``.py`` file."""
     directory = root.joinpath(*name.split("."))
+    if name == "baselith":
+        # The facade only: the package also holds ``core`` and ``plugins``.
+        return directory / "__init__.py"
     if directory.is_dir():
         return directory
     return directory.with_suffix(".py")
@@ -173,20 +176,20 @@ def all_core_packages(
     """Every ``core.*`` package or module the gate could check, sorted.
 
     Top-level by default. A package that is only *partially* covered — one of
-    its subpackages is allowlisted, as ``core.services.llm`` is — is replaced
+    its subpackages is allowlisted, as ``baselith.core.services.llm`` is — is replaced
     by its own subpackages, so ``--candidates`` names the unit that can
     actually be added instead of a parent that will never go green as a whole.
     """
-    core = root / "core"
+    core = root / "baselith" / "core"
     listed = set(allowlist)
     names: list[str] = []
     for child in core.iterdir():
         if child.is_dir() and (child / "__init__.py").is_file():
-            dotted = f"core.{child.name}"
+            dotted = f"baselith.core.{child.name}"
             partially_covered = any(e.startswith(f"{dotted}.") for e in listed)
             names.extend(_subpackages(child, dotted) if partially_covered else [dotted])
         elif child.suffix == ".py" and child.name != "__init__.py":
-            names.append(f"core.{child.stem}")
+            names.append(f"baselith.core.{child.stem}")
     return sorted(names)
 
 

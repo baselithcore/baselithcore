@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.plugins.skills_service import (
+from baselith.core.plugins.skills_service import (
     PREFILTER_THRESHOLD_ENV,
     PREFILTER_TOP_K_ENV,
     SKILL_CATALOG_PREFILTER_THRESHOLD,

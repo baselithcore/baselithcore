@@ -1,0 +1,173 @@
+"""
+Default checkpoint-store factory.
+
+Resolves the process-wide checkpoint store from
+:class:`~baselith.core.config.orchestration.OrchestrationConfig`
+(``ORCHESTRATOR_CHECKPOINT_ENABLED`` / ``ORCHESTRATOR_CHECKPOINT_BACKEND``) so
+the chat service, the approvals API and any other transport share one store —
+a decision recorded through the API is visible to the orchestrator that
+resumes the run.
+
+Enabled by default: the 'auto' backend resolves to Postgres when Postgres
+storage is enabled, else a bounded in-memory store. Setting
+``ORCHESTRATOR_CHECKPOINT_ENABLED=false`` resolves to ``None`` and the
+orchestrator runs without checkpointing.
+"""
+
+from __future__ import annotations
+
+import sys
+import threading
+
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.checkpoint import (
+    CheckpointStore,
+    InMemoryCheckpointStore,
+)
+
+logger = get_logger(__name__)
+
+_store: CheckpointStore | None = None
+_resolved = False
+_initialized = False
+_lock = threading.Lock()
+
+
+def _resolve_backend() -> str:
+    from baselith.core.config.orchestration import get_orchestration_config
+
+    backend = get_orchestration_config().checkpoint_backend.strip().lower()
+    if backend == "auto":
+        try:
+            from baselith.core.config.storage import get_storage_config
+
+            return "postgres" if get_storage_config().postgres_enabled else "memory"
+        except Exception:  # pragma: no cover - storage config unavailable
+            logger.warning(
+                "checkpoint_backend_auto_resolution_failed; using memory",
+                exc_info=True,
+            )
+            return "memory"
+    return backend
+
+
+def get_default_checkpoint_store() -> CheckpointStore | None:
+    """Return the shared checkpoint store, or None when checkpointing is off.
+
+    The store is resolved once per process. The Postgres backend needs its
+    schema created before first use — call
+    :func:`initialize_default_checkpoint_store` from an async startup hook
+    (the app lifespan does this).
+    """
+    global _store, _resolved
+    with _lock:
+        if _resolved:
+            return _store
+        from baselith.core.config.orchestration import get_orchestration_config
+
+        config = get_orchestration_config()
+        if not config.checkpoint_enabled:
+            _resolved = True
+            return None
+        history_enabled = config.checkpoint_history_enabled
+        history_limit = config.checkpoint_history_limit
+        backend = _resolve_backend()
+        if backend == "postgres":
+            from baselith.core.orchestration.checkpoint_postgres import (
+                PostgresCheckpointStore,
+            )
+
+            _store = PostgresCheckpointStore(
+                history_enabled=history_enabled, history_limit=history_limit
+            )
+        elif backend == "sqlite":
+            from baselith.core.orchestration.checkpoint_sqlite import (
+                SQLiteCheckpointStore,
+            )
+
+            _store = SQLiteCheckpointStore(
+                config.checkpoint_sqlite_path,
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+            )
+        elif backend == "memory":
+            _store = InMemoryCheckpointStore(
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+                max_entries=config.checkpoint_memory_max_entries,
+            )
+        else:
+            logger.warning(
+                "unknown_checkpoint_backend '%s', falling back to memory", backend
+            )
+            _store = InMemoryCheckpointStore(
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+                max_entries=config.checkpoint_memory_max_entries,
+            )
+        logger.info("checkpoint_store_resolved backend=%s", backend)
+        _resolved = True
+        return _store
+
+
+class CheckpointStoreUnavailableError(RuntimeError):
+    """The store's database was down at the last reachability probe."""
+
+
+def _needs_postgres(store: CheckpointStore) -> bool:
+    # Read from sys.modules: a memory/SQLite deployment never imports the
+    # Postgres store (or psycopg) just to answer "no".
+    module = sys.modules.get("baselith.core.orchestration.checkpoint_postgres")
+    return module is not None and isinstance(store, module.PostgresCheckpointStore)
+
+
+def is_default_checkpoint_store_initialized() -> bool:
+    """Whether the shared store's async initialization has completed."""
+    return _initialized
+
+
+async def initialize_default_checkpoint_store() -> CheckpointStore | None:
+    """Resolve the store and run its async initialization (idempotent DDL).
+
+    Raises:
+        CheckpointStoreUnavailableError: The store lives in PostgreSQL and the
+            most recent :func:`baselith.core.db.reachability.probe_postgres` saw it
+            down. Raised immediately, instead of waiting a full
+            ``DB_POOL_TIMEOUT`` on the pool; the store stays uninitialized so
+            a later call (after a successful probe) completes it.
+    """
+    global _initialized
+    store = get_default_checkpoint_store()
+    if store is None or _initialized:
+        return store
+    if _needs_postgres(store):
+        from baselith.core.db.reachability import postgres_known_unreachable
+
+        if postgres_known_unreachable():
+            raise CheckpointStoreUnavailableError(
+                "PostgreSQL was unreachable at the last probe; "
+                "checkpoint schema not initialized yet"
+            )
+    initialize = getattr(store, "initialize", None)
+    if callable(initialize):
+        await initialize()
+    _initialized = True
+    return store
+
+
+def reset_default_checkpoint_store() -> None:
+    """Reset the cached resolution (tests / config reloads)."""
+    global _store, _resolved, _initialized
+    with _lock:
+        _store = None
+        _resolved = False
+        _initialized = False
+
+
+__all__ = [
+    "CheckpointStoreUnavailableError",
+    "get_default_checkpoint_store",
+    "initialize_default_checkpoint_store",
+    "is_default_checkpoint_store_initialized",
+    "reset_default_checkpoint_store",
+]

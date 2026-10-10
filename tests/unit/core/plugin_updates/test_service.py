@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from core._core_version import CORE_VERSION
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.models import (
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.models import (
     CheckReport,
     ReleaseInfo,
     SystemUpdate,
@@ -134,7 +134,7 @@ async def test_error_is_sanitized_to_type_name(
 async def test_source_error_message_is_kept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugin_updates.sources import SourceError
+    from baselith.core.plugin_updates.sources import SourceError
 
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path), bundled_root=tmp_path)
 
@@ -263,7 +263,7 @@ async def test_unexpected_system_exception_keeps_previous_security(
 
 
 def _gauge_components() -> set[str]:
-    from core.observability.metrics import UPDATE_AVAILABLE
+    from baselith.core.observability.metrics import UPDATE_AVAILABLE
 
     return {
         s.labels["component"]
@@ -276,7 +276,7 @@ def _gauge_components() -> set[str]:
 async def test_start_publishes_the_cached_report_and_check_updates_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugin_updates.metrics import publish_update_metrics
+    from baselith.core.plugin_updates.metrics import publish_update_metrics
 
     publish_update_metrics(None)
     svc = svc_mod.PluginUpdateService(_cfg(tmp_path), bundled_root=tmp_path)

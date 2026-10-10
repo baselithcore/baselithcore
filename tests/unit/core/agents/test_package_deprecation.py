@@ -1,6 +1,6 @@
-"""Importing the deprecated ``core.agents`` / ``core.goals`` shims must warn.
+"""Importing the deprecated ``baselith.core.agents`` / ``baselith.core.goals`` shims must warn.
 
-Both packages are ``deprecated`` in ``core.stability`` but used to import
+Both packages are ``deprecated`` in ``baselith.core.stability`` but used to import
 silently, so nobody still on them was ever told.
 """
 
@@ -15,8 +15,8 @@ import pytest
 @pytest.mark.parametrize(
     ("module", "alternative"),
     [
-        ("core.agents", "plugins.browser_agent"),
-        ("core.goals", "plugins.goals"),
+        ("baselith.core.agents", "baselith.plugins.browser_agent"),
+        ("baselith.core.goals", "baselith.plugins.goals"),
     ],
 )
 def test_import_emits_deprecation_warning(module, alternative):
@@ -38,9 +38,9 @@ def test_import_emits_deprecation_warning(module, alternative):
 def test_reexports_still_resolve():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from core.agents import BrowserAgent, CodingAgent
-        from core.goals import Goal, GoalStatus, GoalTracker
-        from plugins.goals import GoalTracker as PluginGoalTracker
+        from baselith.core.agents import BrowserAgent, CodingAgent
+        from baselith.core.goals import Goal, GoalStatus, GoalTracker
+        from baselith.plugins.goals import GoalTracker as PluginGoalTracker
 
     assert BrowserAgent and CodingAgent and Goal and GoalStatus
     assert GoalTracker is PluginGoalTracker

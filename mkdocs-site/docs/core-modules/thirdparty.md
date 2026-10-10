@@ -3,7 +3,7 @@ title: ICT Third-Party Register (DORA)
 description: DORA Art. 28 Register of Information — ICT third-party providers, functions, and contractual arrangements
 ---
 
-`core/thirdparty/` maintains the **Register of Information** that **DORA
+`baselith/core/thirdparty/` maintains the **Register of Information** that **DORA
 (EU 2022/2554) Art. 28(3)** requires financial entities to keep on every
 contractual arrangement for the use of ICT services. Its structure follows the
 ESA ITS templates of **Commission Implementing Regulation (EU) 2024/2956**.
@@ -34,7 +34,7 @@ remains responsible for completeness and for the regulatory submission.
 
 ## Design
 
-- **Sacred Core.** Domain-agnostic infrastructure, so it lives in `core/`.
+- **Sacred Core.** Domain-agnostic infrastructure, so it lives in `baselith/core/`.
 - **Storage-agnostic.** `RegisterStore` is a Protocol with an in-memory
   reference implementation; register a durable store (e.g. Postgres) for
   production, exactly like other subsystems.
@@ -47,7 +47,7 @@ remains responsible for completeness and for the regulatory submission.
 ## Usage
 
 ```python
-from core.thirdparty import (
+from baselith.core.thirdparty import (
     ContractualArrangement,
     FunctionCriticality,
     ICTFunction,
@@ -104,14 +104,14 @@ register = await reg.export_register()   # keyed by B_05.01, B_06.01, B_02.02, �
 | `build_register()` / `REGISTER_STANDARD` | Render the ESA ITS template layout.                  |
 | `get_register()`                         | Shared register — durable SQLite when `THIRDPARTY_REGISTER_DB_PATH` is set, else in-memory. |
 
-All symbols are re-exported from `core.thirdparty`.
+All symbols are re-exported from `baselith.core.thirdparty`.
 
 ## Operational notes
 
 - **Register a durable store** before relying on this in production; the default
   in-memory store does not survive a restart. Setting
   `THIRDPARTY_REGISTER_DB_PATH` swaps `get_register()` onto the bundled
-  `SQLiteRegisterStore` (`core/thirdparty/persistence.py`), which holds the three
+  `SQLiteRegisterStore` (`baselith/core/thirdparty/persistence.py`), which holds the three
   register collections in one file and runs every statement on a worker thread —
   one `asyncio.to_thread` hop per public operation, covering lock, statement,
   fetch, JSON decode and record rehydration — so register writes never block the

@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.context import (
+from baselith.core.context import (
     TenantContextError,
     get_current_tenant_id,
     reset_tenant_context,
@@ -19,15 +19,15 @@ class TestStrictMultiTenancy:
 
     def test_default_behavior_relaxed(self):
         """Test that by default (strict=False), missing context returns 'default'."""
-        with patch("core.context.get_app_config") as mock_config:
+        with patch("baselith.core.context.get_app_config") as mock_config:
             mock_config.return_value.strict_tenant_isolation = False
             assert get_current_tenant_id() == "default"
 
     def test_strict_mode_raises_error(self):
         """Test that with strict=True, missing context raises TenantContextError."""
-        from core.context import _tenant_context
+        from baselith.core.context import _tenant_context
 
-        with patch("core.context.get_app_config") as mock_config:
+        with patch("baselith.core.context.get_app_config") as mock_config:
             mock_config.return_value.strict_tenant_isolation = True
 
             # Ensure context is None
@@ -40,7 +40,7 @@ class TestStrictMultiTenancy:
 
     def test_strict_mode_with_context(self):
         """Test that with strict=True, correctly set context works."""
-        with patch("core.context.get_app_config") as mock_config:
+        with patch("baselith.core.context.get_app_config") as mock_config:
             mock_config.return_value.strict_tenant_isolation = True
 
             token = set_tenant_context("tenant-123")

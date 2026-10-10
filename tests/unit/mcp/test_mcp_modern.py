@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 
-from core.mcp.modern import (
+from baselith.core.mcp.modern import (
     LOG_LEVEL_KEY,
     MODERN_PROTOCOL_VERSION,
     PROTOCOL_VERSION_KEY,
     SERVER_INFO_KEY,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
 CLIENT_INFO_KEY = "io.modelcontextprotocol/clientInfo"

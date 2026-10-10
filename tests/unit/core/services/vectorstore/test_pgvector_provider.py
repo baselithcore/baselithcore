@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.vectorstore.exceptions import VectorStoreError
-from core.services.vectorstore.providers.pgvector_provider import (
+from baselith.core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.services.vectorstore.providers.pgvector_provider import (
     PgVectorPoint,
     PgVectorProvider,
 )
@@ -29,7 +29,7 @@ def _patched(cursor):
         yield cursor
 
     return patch(
-        "core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
+        "baselith.core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
         _ctx,
     )
 
@@ -203,10 +203,10 @@ class TestServiceWiring:
     def test_service_instantiates_pgvector_provider(self):
         from unittest.mock import MagicMock
 
-        from core.services.vectorstore.providers.pgvector_provider import (
+        from baselith.core.services.vectorstore.providers.pgvector_provider import (
             PgVectorProvider,
         )
-        from core.services.vectorstore.service import VectorStoreService
+        from baselith.core.services.vectorstore.service import VectorStoreService
 
         config = MagicMock()
         config.provider = "pgvector"
@@ -215,7 +215,7 @@ class TestServiceWiring:
         assert isinstance(service.provider, PgVectorProvider)
 
     def test_config_accepts_pgvector(self):
-        from core.config.services import VectorStoreConfig
+        from baselith.core.config.services import VectorStoreConfig
 
         cfg = VectorStoreConfig(provider="pgvector")
         assert cfg.provider == "pgvector"
@@ -339,11 +339,13 @@ class TestOptionalQdrantDependency:
         import sys
         from unittest.mock import MagicMock
 
-        from core.services.vectorstore.service import VectorStoreService
+        from baselith.core.services.vectorstore.service import VectorStoreService
 
         # Poison the lazy import target: `from ... import QdrantProvider` fails.
         monkeypatch.setitem(
-            sys.modules, "core.services.vectorstore.providers.qdrant_provider", None
+            sys.modules,
+            "baselith.core.services.vectorstore.providers.qdrant_provider",
+            None,
         )
         config = MagicMock()
         config.provider = "qdrant"
@@ -355,10 +357,12 @@ class TestOptionalQdrantDependency:
         import sys
         from unittest.mock import MagicMock
 
-        from core.services.vectorstore.service import VectorStoreService
+        from baselith.core.services.vectorstore.service import VectorStoreService
 
         monkeypatch.setitem(
-            sys.modules, "core.services.vectorstore.providers.qdrant_provider", None
+            sys.modules,
+            "baselith.core.services.vectorstore.providers.qdrant_provider",
+            None,
         )
         config = MagicMock()
         config.provider = "pgvector"

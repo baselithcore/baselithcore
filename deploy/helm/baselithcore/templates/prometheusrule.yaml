@@ -338,7 +338,7 @@ spec:
     # A group of its own: these are notices about the release, not about the
     # cell's health, so they never share an evaluation instant with the
     # "is it up" alerts above and can be dropped as a unit. The series is
-    # `baselith_update_available{component,security}` (core/plugin_updates).
+    # `baselith_update_available{component,security}` (baselith/core/plugin_updates).
     - name: {{ include "baselithcore.fullname" . }}-updates
       {{- with .Values.prometheusRule.interval }}
       interval: {{ . }}

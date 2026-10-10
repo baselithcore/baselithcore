@@ -29,7 +29,7 @@ defaults `0.0.0.0` / `8000`)
 
 !!! info "No global `/api` prefix"
     The framework's application routers ship in the `api_routers` plugin
-    (`plugins/api_routers/*`; the modules under `core/routers/*` are thin
+    (`baselith/plugins/api_routers/*`; the modules under `baselith/core/routers/*` are thin
     re-export shims). They are mounted **without** a global `/api` prefix, so
     the chat endpoint is `POST /chat`, not `POST /api/chat`. The plugin
     management, Backstage, and frontend-manifest surfaces are the routers that
@@ -147,7 +147,7 @@ change that reaches clients slowly.
 ## Error Envelope
 
 Every error — framework exceptions, `HTTPException`, request-validation
-failures and uncaught exceptions alike — is rendered by `core/api/errors.py`
+failures and uncaught exceptions alike — is rendered by `baselith/core/api/errors.py`
 as an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem document
 (`Content-Type: application/problem+json`), so the API never emits two error
 shapes. The `request_id` matches the `X-Request-ID` response header:
@@ -265,7 +265,7 @@ browser origin — `Access-Control-Allow-Origin`, like every other error. See
 ## Pagination
 
 The list endpoints of the API routers share one **cursor** contract
-(`core.api.pagination.page_params` + `paginated`):
+(`baselith.core.api.pagination.page_params` + `paginated`):
 
 - Query: `limit` — `1..200`, default `50` (the bounds are in the OpenAPI
   schema; out of range is a `422`) — and `cursor`, the opaque `next_cursor` of
@@ -385,7 +385,7 @@ curl -u admin:password http://localhost:8000/admin/data
 
 !!! note "No JWT login endpoint"
     There is **no** `POST /api/auth/login` route that returns an
-    `access_token`. `core/auth/jwt.py` exists as a token-handling library used
+    `access_token`. `baselith/core/auth/jwt.py` exists as a token-handling library used
     by the API-key/Bearer pipeline, but the framework does not expose a
     username/password login route. Admin access is HTTP Basic Auth.
 
@@ -393,7 +393,7 @@ curl -u admin:password http://localhost:8000/admin/data
 
 ## Chat
 
-Mounted by the `api_routers` plugin (`plugins/api_routers/chat.py`). The whole
+Mounted by the `api_routers` plugin (`baselith/plugins/api_routers/chat.py`). The whole
 router requires authentication (`Depends(require_user)`), so both endpoints
 accept the `user`, `admin`, or `job` roles.
 
@@ -518,7 +518,7 @@ change sent the bare text `stream failed`; both SDKs accept either form.
 
 ### WebSocket Chat (`WS /v1/chat/ws`)
 
-Persistent conversational channel (`plugins/api_routers/chat_ws.py`): one
+Persistent conversational channel (`baselith/plugins/api_routers/chat_ws.py`): one
 authenticated connection, many turns. SSE (`POST /chat/stream`) remains the
 one-shot streaming surface. Connect to `/v1/chat/ws`; the unprefixed
 `/chat/ws` still works but is deprecated (see
@@ -548,7 +548,7 @@ closes the socket with 4401/4403 at the next turn. This is what keeps a
 long-lived connection from becoming an unmetered channel — the HTTP body-size
 and quota middlewares do not see WebSocket scopes. Cross-site WebSocket
 hijacking is rejected upstream by the CSWSH origin guard
-(`core/middleware/csrf.py`).
+(`baselith/core/middleware/csrf.py`).
 
 **Frames** — the client sends one JSON frame per turn:
 
@@ -597,7 +597,7 @@ asyncio.run(chat())
 
 ### `POST /agent/async` - Async Agent Run
 
-Enqueues one agent request on the task queue (`plugins/api_routers/async_runs.py`)
+Enqueues one agent request on the task queue (`baselith/plugins/api_routers/async_runs.py`)
 and returns immediately — for runs too long for a synchronous HTTP response.
 Authenticated like the chat surface.
 
@@ -676,12 +676,12 @@ is fine. The plugin-less fallback route behaves the same way.
     production** instead of answering 503 — an empty `TRUSTED_HOSTS`, an
     unbound JWT trust perimeter, and a database role that silently bypasses
     row-level security while `DB_RLS_ENABLED=true`
-    (`core.api.startup_checks` → [`core.db.rls_posture`](../core-modules/db.md#is-row-level-security-actually-enforced)).
+    (`baselith.core.api.startup_checks` → [`baselith.core.db.rls_posture`](../core-modules/db.md#is-row-level-security-actually-enforced)).
     Each names its own auditable opt-out in the failure message. A pod
     crash-looping with one of those errors is not an outage to route around;
     it is the framework refusing to serve behind a perimeter that is not
     there. A fourth check refuses the boot for a different reason:
-    `LLM_PREFLIGHT` (`core.services.llm.preflight`, `auto` = strict in
+    `LLM_PREFLIGHT` (`baselith.core.services.llm.preflight`, `auto` = strict in
     production) validates that the deployment will serve from the provider it
     thinks it will — a configuration that never set `LLM_PROVIDER` inherits
     the package default and answers every request from a local model on that
@@ -689,7 +689,7 @@ is fine. The plugin-less fallback route behaves the same way.
 
 !!! note "Shutdown drains long-lived streams"
     At startup the application lifespan installs a drain hook in front of the
-    server's SIGTERM/SIGINT handlers (`core.lifecycle.drain`). The first stop
+    server's SIGTERM/SIGINT handlers (`baselith.core.lifecycle.drain`). The first stop
     signal marks the process as draining before the server waits for open
     connections, so a stream that awaits `wait_for_drain()` — an SSE feed or
     WebSocket subscription that would otherwise stay open until the client
@@ -746,14 +746,14 @@ curl -u metrics:"$METRICS_PASSWORD" http://localhost:8000/metrics
 ## Admin & Analytics
 
 The admin surface is HTML + analytics JSON + the dead-letter queue, protected
-by **HTTP Basic Auth** (`plugins/api_routers/admin.py`). It is only mounted
+by **HTTP Basic Auth** (`baselith/plugins/api_routers/admin.py`). It is only mounted
 when feedback is enabled (`ENABLE_FEEDBACK=true`, the default). The DLQ
 endpoints under `/admin/dlq` are listed with the other
 [feature-gated routers](#feature-gated-routers).
 
 ### `GET /admin` - Admin Dashboard
 
-Serves the admin HTML page (`core/static/admin.html`). The page and every
+Serves the admin HTML page (`baselith/core/static/admin.html`). The page and every
 call it makes use the same Basic credentials: it reads `/admin/data` and
 `/admin/status` and triggers `/admin/reindex` — never the API-key routes
 (`/status`, `/reindex`), which reject Basic credentials. The page's `POST` is
@@ -804,7 +804,7 @@ curl -u admin:password "http://localhost:8000/admin/data?days=30&recent_limit=20
 
 ## Indexing
 
-Document indexing lifecycle (`plugins/api_routers/index.py`). The whole router
+Document indexing lifecycle (`baselith/plugins/api_routers/index.py`). The whole router
 requires admin or job credentials (`require_admin_or_job`).
 
 ### `GET /index/status`
@@ -851,7 +851,7 @@ the count the old synchronous response returned as `new_files_indexed`.
 
 ## Feedback
 
-Recorded when `ENABLE_FEEDBACK` is set (`plugins/api_routers/feedback.py`).
+Recorded when `ENABLE_FEEDBACK` is set (`baselith/plugins/api_routers/feedback.py`).
 
 ### `POST /feedback`
 
@@ -871,7 +871,7 @@ always bounded, an omitted `limit` returns the default page.
 
 ## Plugin Management API
 
-Hot-reload and lifecycle management for plugins (`core/plugins/api.py`),
+Hot-reload and lifecycle management for plugins (`baselith/core/plugins/api.py`),
 mounted under the `/api/plugins` prefix. The whole router requires admin
 (`require_admin`).
 
@@ -909,7 +909,7 @@ mounted under the `/api/plugins` prefix. The whole router requires admin
 
 ### Plugin update checks (`/api/plugins/updates`)
 
-Served by `core/plugin_updates/api.py`, admin-only, and registered before the
+Served by `baselith/core/plugin_updates/api.py`, admin-only, and registered before the
 plugin-management router so `/{name}` does not capture `/updates`.
 
 | Method & path                         | Description                                                          |
@@ -923,7 +923,7 @@ The report shape, refusal reasons and trust model are described in
 ### `GET /api/plugins/frontend-manifest`
 
 Returns the manifest of all plugin frontend assets for UI injection. Defined
-directly on the app (`core/api/factory.py`), not on the plugin-management
+directly on the app (`baselith/core/api/factory.py`), not on the plugin-management
 router, and gated by `require_user` (any authenticated role) rather than
 admin-only.
 
@@ -931,7 +931,7 @@ admin-only.
 
 ## Backstage Integration
 
-Software-catalog export endpoints (`core/plugins/exporters/router.py`), mounted
+Software-catalog export endpoints (`baselith/core/plugins/exporters/router.py`), mounted
 under `/api/backstage`. All endpoints require admin or job credentials.
 
 | Method & path                                       | Description                                   |
@@ -948,7 +948,7 @@ under `/api/backstage`. All endpoints require admin or job credentials.
 
 ## A2A Discovery
 
-Agent-to-agent discovery card (`core/a2a/router.py`), advertising this
+Agent-to-agent discovery card (`baselith/core/a2a/router.py`), advertising this
 instance's capabilities. No authentication required. The default app mounts
 the card only, not the A2A JSON-RPC endpoint, so the card advertises
 `streaming: false`.
@@ -963,7 +963,7 @@ the card only, not the A2A JSON-RPC endpoint, so the card advertises
 
 ## Tenant Administration
 
-Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
+Multi-tenant management (`baselith/plugins/api_routers/tenant.py`), mounted under the
 `/admin/tenants` prefix and protected by **HTTP Basic Auth**
 (`verify_credentials`).
 
@@ -977,7 +977,7 @@ Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
 ## Prompt Catalog Administration
 
 Durable prompt-version and label management
-(`plugins/api_routers/prompts.py`), mounted under the `/prompts` prefix and
+(`baselith/plugins/api_routers/prompts.py`), mounted under the `/prompts` prefix and
 protected by **HTTP Basic Auth** (`verify_credentials`). Reads always serve
 the local registry; the write endpoints require the durable prompt-sync
 backend (`BASELITH_PROMPT_SYNC=postgres`) and answer **503** without it, so a
@@ -997,8 +997,8 @@ for the write-through semantics and the cross-replica refresh model.
 
 ## Console
 
-The admin console (`plugins/api_routers/console.py`) is served at `GET /console`
-and `GET /console/{path}`, returning `core/static/frontend/index.html`. The
+The admin console (`baselith/plugins/api_routers/console.py`) is served at `GET /console`
+and `GET /console/{path}`, returning `baselith/core/static/frontend/index.html`. The
 shipped console is a self-contained, dependency-free page (`index.html` +
 `console.css` + `console.js`) served same-origin under `/static/frontend/`, so
 it satisfies the strict runtime CSP without any external CDN or build step. It
@@ -1100,7 +1100,7 @@ code is the stable contract.
 ## Rate Limiting
 
 Rate limits are enforced per authenticated identity by the `require_*`
-dependencies (`core/middleware/rate_limiter.py`): a Redis-backed sliding window
+dependencies (`baselith/core/middleware/rate_limiter.py`): a Redis-backed sliding window
 of `RATE_LIMIT_WINDOW_SECONDS` (default `60`), with an in-memory fallback
 (capped at 10 000 keys) when Redis is unavailable. With `AUTH_REQUIRED=false`
 and no API keys configured, anonymous traffic on user routes is metered per
@@ -1131,7 +1131,7 @@ RateLimit-Remaining: 0
 RateLimit-Reset: 42
 ```
 
-All limits live in `SecurityConfig` (`core/config/security.py`).
+All limits live in `SecurityConfig` (`baselith/core/config/security.py`).
 
 ---
 
@@ -1210,7 +1210,7 @@ chat (`POST /chat` → `ChatResponse`), feedback, async runs (submit and
 status), indexing (status and the two `202` triggers), the prompt catalog,
 privacy (providers, export, erasure, retention sweep), tenants, approvals
 (list, decision, resume), runs (history, state, fork) and webhooks (CRUD,
-deliveries, replay). The models live in `plugins/api_routers/schemas.py` and
+deliveries, replay). The models live in `baselith/plugins/api_routers/schemas.py` and
 describe the existing payloads without changing them: open-ended payloads
 (task-tracker records, index status, run state) allow extra keys, and keys
 that are only sometimes present (a feedback `comment`, a task `result`) stay
@@ -1254,5 +1254,5 @@ scheme would collide.
 
 !!! note "Shutdown of the inference bridge"
     The application lifespan closes the synchronous inference bridge
-    (`core.services.inference`) at shutdown, after plugins and lazy services
+    (`baselith.core.services.inference`) at shutdown, after plugins and lazy services
     have stopped. See [Inference Services](../advanced/inference-services.md).

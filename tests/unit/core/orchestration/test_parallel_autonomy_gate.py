@@ -7,8 +7,12 @@ approval are gated through ``enforce_approval`` before execution.
 
 from __future__ import annotations
 
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-from core.orchestration.parallel import ParallelToolExecutor, ToolCall, ToolStatus
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.orchestration.parallel import (
+    ParallelToolExecutor,
+    ToolCall,
+    ToolStatus,
+)
 
 
 class _Human:
@@ -164,7 +168,7 @@ async def test_pending_approval_does_not_hold_concurrency_slot() -> None:
 
 
 async def test_loop_budget_caps_tool_calls() -> None:
-    from core.orchestration.limits import LoopBudget, LoopLimits
+    from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
     budget = LoopBudget(limits=LoopLimits(max_tool_calls=1))
     executor = ParallelToolExecutor(loop_budget=budget)
@@ -185,7 +189,7 @@ async def test_loop_budget_caps_tool_calls() -> None:
 
 
 async def test_contract_validator_blocks_forbidden_tool() -> None:
-    from core.orchestration.contract import (
+    from baselith.core.orchestration.contract import (
         AgentContract,
         Capabilities,
         ContractValidator,

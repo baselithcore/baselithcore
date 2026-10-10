@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.config import SecurityConfig
+from baselith.core.config import SecurityConfig
 
 
 @pytest.fixture
@@ -41,9 +41,9 @@ def idem_verified_credentials(monkeypatch):
 
     Idempotency only replays/stores for a credential that verifies; its unit
     tests exercise the replay machinery, not token verification."""
-    from core.auth import AuthRole, AuthUser
-    from core.middleware import _idempotency_replay
-    from core.middleware._auth_memo import effective_auth_header
+    from baselith.core.auth import AuthRole, AuthUser
+    from baselith.core.middleware import _idempotency_replay
+    from baselith.core.middleware._auth_memo import effective_auth_header
 
     async def _resolve(scope):
         header = effective_auth_header(scope)

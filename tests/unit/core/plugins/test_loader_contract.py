@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import PluginLoader, PluginRegistry
-from core.plugins.discovery import ENTRY_POINT_GROUP, merge_plugin_dirs
+from baselith.core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins.discovery import ENTRY_POINT_GROUP, merge_plugin_dirs
 
 TWO_CLASSES = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class AlphaPlugin(Plugin):
@@ -35,7 +35,7 @@ class ZuluPlugin(Plugin):
 """
 
 ONE_CLASS = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class SoloPlugin(Plugin):
@@ -71,7 +71,7 @@ def _clean_sys_modules():
     before = set(sys.modules)
     yield
     for key in set(sys.modules) - before:
-        if key.startswith("plugins."):
+        if key.startswith("baselith.plugins."):
             del sys.modules[key]
 
 
@@ -268,7 +268,7 @@ class TestModuleTeardown:
         plugin_dir = _write_plugin(
             tmp_path,
             "withsub",
-            body="from plugins.withsub.helper import VALUE\n" + ONE_CLASS,
+            body="from baselith.plugins.withsub.helper import VALUE\n" + ONE_CLASS,
         )
         (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
         (plugin_dir / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -276,14 +276,15 @@ class TestModuleTeardown:
         loader = PluginLoader(tmp_path, registry)
         plugin = await loader.load_plugin(plugin_dir, initialize=False)
         assert plugin is not None
-        assert "plugins.withsub.helper" in sys.modules
+        assert "baselith.plugins.withsub.helper" in sys.modules
 
         loader._unload_module("withsub")
 
         leftovers = [
             key
             for key in sys.modules
-            if key == "plugins.withsub" or key.startswith("plugins.withsub.")
+            if key == "baselith.plugins.withsub"
+            or key.startswith("baselith.plugins.withsub.")
         ]
         assert leftovers == []
 
@@ -303,8 +304,8 @@ class TestModuleTeardown:
             tmp_path,
             "reloadable",
             body=(
-                "from plugins.reloadable.helper import VALUE\n"
-                "from core.plugins import Plugin\n"
+                "from baselith.plugins.reloadable.helper import VALUE\n"
+                "from baselith.core.plugins import Plugin\n"
                 "\n"
                 "\n"
                 "class ReloadablePlugin(Plugin):\n"
@@ -355,7 +356,7 @@ class TestDiscoveryMerge:
     def test_directory_wins_on_name_clash(self, tmp_path, monkeypatch):
         from unittest.mock import MagicMock
 
-        from core.plugins import discovery as discovery_module
+        from baselith.core.plugins import discovery as discovery_module
 
         fake_logger = MagicMock()
         monkeypatch.setattr(discovery_module, "logger", fake_logger)
@@ -390,7 +391,7 @@ class TestDiscoveryMerge:
 
         monkeypatch.syspath_prepend(str(external_root))
         monkeypatch.setattr(
-            "core.plugins.discovery.entry_points",
+            "baselith.core.plugins.discovery.entry_points",
             lambda group: [_FakeEntryPoint("from_wheel", "from_wheel")],
         )
 
@@ -411,7 +412,7 @@ class TestDiscoveryMerge:
 
         monkeypatch.syspath_prepend(str(external_root))
         monkeypatch.setattr(
-            "core.plugins.discovery.entry_points",
+            "baselith.core.plugins.discovery.entry_points",
             lambda group: [_FakeEntryPoint("no_manifest", "no_manifest")],
         )
 
@@ -428,7 +429,7 @@ class TestDiscoveryMerge:
         def _boom(group):
             raise RuntimeError("metadata backend exploded")
 
-        monkeypatch.setattr("core.plugins.discovery.entry_points", _boom)
+        monkeypatch.setattr("baselith.core.plugins.discovery.entry_points", _boom)
 
         loader = PluginLoader(scanned, registry)
         assert [p.name for p in loader.discover_plugins()] == ["from_dir"]

@@ -1,0 +1,90 @@
+"""
+Tenant Management Router.
+
+Provides API endpoints for managing multi-tenant isolating context,
+such as creating and listing tenants. Protected by admin credentials.
+"""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+
+from baselith.core.models.chat import MAX_ID_LENGTH
+from baselith.core.services.tenant import (
+    DEFAULT_TENANT_PAGE_SIZE,
+    MAX_TENANT_PAGE_SIZE,
+    ReservedTenantIdError,
+    Tenant,
+    get_tenant_service,
+)
+from baselith.core.utils.logsafe import sanitize_log_value
+from baselith.plugins.api_routers.schemas import problem_responses
+
+from .admin import verify_credentials
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/admin/tenants", tags=["admin", "tenants"])
+
+
+class CreateTenantRequest(BaseModel):
+    """Payload for creating a new tenant."""
+
+    id: str = Field(..., min_length=1, max_length=MAX_ID_LENGTH)
+    name: str = Field(..., min_length=1, max_length=256)
+
+
+@router.get("", response_model=list[Tenant], responses=problem_responses(401, 422))
+async def list_tenants(
+    limit: int = Query(
+        DEFAULT_TENANT_PAGE_SIZE, ge=1, le=MAX_TENANT_PAGE_SIZE, description="Page size"
+    ),
+    offset: int = Query(0, ge=0, description="Rows to skip"),
+    _user: str = Depends(verify_credentials),
+):
+    """List tenants, newest first (paginated — the listing is never unbounded)."""
+    service = get_tenant_service()
+    return await service.list_tenants(limit=limit, offset=offset)
+
+
+@router.post(
+    "",
+    response_model=Tenant,
+    status_code=status.HTTP_201_CREATED,
+    responses=problem_responses(400, 401, 409, 422, 500),
+)
+async def create_tenant(
+    request: CreateTenantRequest, user: str = Depends(verify_credentials)
+):
+    """Create a new tenant."""
+    service = get_tenant_service()
+    try:
+        if await service.get_tenant(request.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Tenant with ID {request.id} already exists",
+            )
+        return await service.create_tenant(request.id, request.name)
+    except ReservedTenantIdError as e:
+        # A client error, not a server one: the id is well-formed, it is simply
+        # not the caller's to take. Without this it fell into the generic
+        # handler below and came back as a 500 "internal error", which tells an
+        # operator nothing about what to change.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        # Escape the caller-supplied tenant id: unescaped it could forge a
+        # second log entry (CWE-117).
+        logger.error(
+            "Unexpected error creating tenant %r: %s",
+            sanitize_log_value(request.id),
+            e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred.",
+        ) from e

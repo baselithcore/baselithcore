@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.routers.tenant import CreateTenantRequest, create_tenant
-from core.services.tenant import (
+from baselith.core.routers.tenant import CreateTenantRequest, create_tenant
+from baselith.core.services.tenant import (
     DEFAULT_TENANT_PAGE_SIZE,
     MAX_TENANT_PAGE_SIZE,
     TenantService,
@@ -31,7 +31,7 @@ def _mock_cursor(mock_get_conn):
 
 class TestTenantService:
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_create_tenant(self, mock_get_conn):
         # Setup mocks
         mock_conn = AsyncMock()
@@ -70,7 +70,7 @@ class TestTenantService:
         assert "INSERT INTO tenants" in mock_cursor.execute.call_args[0][0]
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_list_tenants(self, mock_get_conn):
         mock_conn = AsyncMock()
         mock_cursor = AsyncMock()
@@ -99,7 +99,7 @@ class TestTenantService:
         assert tenants[1].id == "t2"
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_list_tenants_is_always_bounded(self, mock_get_conn):
         """The listing must never issue an unbounded SELECT over `tenants`."""
         mock_cursor = _mock_cursor(mock_get_conn)
@@ -111,7 +111,7 @@ class TestTenantService:
         assert params == (DEFAULT_TENANT_PAGE_SIZE, 0)
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_list_tenants_honours_pagination(self, mock_get_conn):
         mock_cursor = _mock_cursor(mock_get_conn)
 
@@ -120,7 +120,7 @@ class TestTenantService:
         assert mock_cursor.execute.call_args[0][1] == (10, 20)
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_list_tenants_clamps_out_of_range_page(self, mock_get_conn):
         """A caller cannot reinstate the unbounded scan (or ask for 0 rows)."""
         mock_cursor = _mock_cursor(mock_get_conn)
@@ -135,7 +135,7 @@ class TestTenantService:
 
 class TestTenantRouter:
     @pytest.mark.asyncio
-    @patch("core.routers.tenant.get_tenant_service")
+    @patch("baselith.core.routers.tenant.get_tenant_service")
     async def test_router_create_tenant(self, mock_get_service):
         mock_service = AsyncMock()
         mock_get_service.return_value = mock_service
@@ -164,11 +164,11 @@ class TestReservedTenantIdIsRefused:
     """
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_the_service_refuses_before_touching_the_database(
         self, mock_get_conn
     ):
-        from core.services.tenant import ReservedTenantIdError
+        from baselith.core.services.tenant import ReservedTenantIdError
 
         mock_cursor = _mock_cursor(mock_get_conn)
 
@@ -178,11 +178,11 @@ class TestReservedTenantIdIsRefused:
         mock_cursor.execute.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_it_is_a_value_error_for_existing_handlers(self, mock_get_conn):
         """Subclassing ``ValueError`` keeps callers that already catch it — the
         documented failure mode of ``create_tenant`` — working unchanged."""
-        from core.services.tenant import ReservedTenantIdError
+        from baselith.core.services.tenant import ReservedTenantIdError
 
         _mock_cursor(mock_get_conn)
 
@@ -191,7 +191,7 @@ class TestReservedTenantIdIsRefused:
         assert issubclass(ReservedTenantIdError, ValueError)
 
     @pytest.mark.asyncio
-    @patch("core.services.tenant.service.get_async_connection")
+    @patch("baselith.core.services.tenant.service.get_async_connection")
     async def test_an_ordinary_id_is_unaffected(self, mock_get_conn):
         mock_cursor = _mock_cursor(mock_get_conn)
         mock_cursor.fetchone.return_value = ("acme", "Acme", "active", "2026-01-01")
@@ -202,13 +202,13 @@ class TestReservedTenantIdIsRefused:
         mock_cursor.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("core.routers.tenant.get_tenant_service")
+    @patch("baselith.core.routers.tenant.get_tenant_service")
     async def test_the_admin_route_answers_400_not_500(self, mock_get_service):
         """Without the mapping it fell into the generic handler and came back as
         'An internal error occurred', which tells an operator nothing."""
         from fastapi import HTTPException
 
-        from core.services.tenant import ReservedTenantIdError
+        from baselith.core.services.tenant import ReservedTenantIdError
 
         mock_service = AsyncMock()
         mock_get_service.return_value = mock_service

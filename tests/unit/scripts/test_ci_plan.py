@@ -65,7 +65,7 @@ def test_a_pipeline_change_runs_its_own_new_plan_in_full(path: str) -> None:
 
 
 def test_develop_prs_run_the_floor_python_only() -> None:
-    plan = _develop_pr("core/api/factory.py")
+    plan = _develop_pr("baselith/core/api/factory.py")
     assert plan.mode == "scoped"
     assert plan.pythons == SCOPED_PYTHONS
     assert plan.flags["python"]
@@ -78,8 +78,8 @@ def test_develop_prs_run_the_floor_python_only() -> None:
     [
         "mkdocs-site/docs/core-modules/db.md",
         "README.md",
-        "plugins/web_scraper/docs/security.md",
-        "plugins/web_scraper/README.md",
+        "baselith/plugins/web_scraper/docs/security.md",
+        "baselith/plugins/web_scraper/README.md",
     ],
 )
 def test_prose_only_skips_the_suite(path: str) -> None:
@@ -91,8 +91,8 @@ def test_prose_only_skips_the_suite(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "core/chat/prompts/conversation_system.md",  # a prompt template is code
-        "plugins/web_scraper/SKILL.md",
+        "baselith/core/chat/prompts/conversation_system.md",  # a prompt template is code
+        "baselith/plugins/web_scraper/SKILL.md",
         "evals/cases/qa.yaml",
         "configs/.env.base",
         "deploy/helm/baselithcore/values.yaml",  # tests render the chart
@@ -106,7 +106,7 @@ def test_executed_markdown_and_data_still_run_the_suite(path: str) -> None:
     ("path", "flag"),
     [
         ("deploy/helm/baselithcore/templates/deployment.yaml", "helm"),
-        ("core/static/frontend/js/api.js", "frontend"),
+        ("baselith/core/static/frontend/js/api.js", "frontend"),
         ("sdk/typescript/src/client.ts", "sdk"),
         (".github/workflows/codeql.yml", "workflows"),
         ("uv.lock", "supply"),
@@ -117,13 +117,13 @@ def test_executed_markdown_and_data_still_run_the_suite(path: str) -> None:
 )
 def test_single_tree_jobs_run_when_their_tree_changes(path: str, flag: str) -> None:
     assert _develop_pr(path).flags[flag]
-    assert not _develop_pr("core/api/factory.py").flags[flag]
+    assert not _develop_pr("baselith/core/api/factory.py").flags[flag]
 
 
 def test_outputs_cover_every_flag_the_workflow_reads() -> None:
     """A flag the workflow compares against but the plan never sets reads as
     the empty string, which is never 'true' — a silent skip."""
-    outputs = _develop_pr("core/api/factory.py").outputs()
+    outputs = _develop_pr("baselith/core/api/factory.py").outputs()
     text = CI_WORKFLOW.read_text(encoding="utf-8")
     read = set(re.findall(r"needs\.changes\.outputs\.(\w+)", text))
     declared = set(yaml.safe_load(text)["jobs"]["changes"]["outputs"])

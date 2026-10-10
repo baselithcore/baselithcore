@@ -24,7 +24,7 @@ paths-ignore:
   # Alembic migration modules declare `revision`, `down_revision`,
   # `branch_labels` and `depends_on` as module globals that the framework
   # reads reflectively — every one of them reads as an unused global.
-  - core/db/migrations/versions
+  - baselith/core/db/migrations/versions
 
 # NOTE: no `queries:` key here on purpose. It would apply to every language in
 # the workflow matrix (python, javascript-typescript, actions), and the suite
@@ -38,15 +38,15 @@ paths-ignore:
 # The same exclusions are restated as filters so they still apply if a caller
 # adds queries on top (a workflow `queries:` input merges with this file).
 query-filters:
-  # Accepted: core/security/digest.py hashes high-entropy random tokens (API
+  # Accepted: baselith/core/security/digest.py hashes high-entropy random tokens (API
   # keys, JWTs) to build lookup and cache keys — not passwords. A KDF on every
   # authenticated request would cost latency and buy nothing. Operator
-  # passwords go through argon2/PBKDF2 in core/auth, and SecurityConfig warns
+  # passwords go through argon2/PBKDF2 in baselith/core/auth, and SecurityConfig warns
   # when a configured API key is short enough to be guessable.
   - exclude:
       id: py/weak-sensitive-data-hashing
 
-  # Accepted: the operator console (core/static/frontend/js) holds the API key
+  # Accepted: the operator console (baselith/core/static/frontend/js) holds the API key
   # the operator pastes for their own session in sessionStorage. A client-held
   # bearer credential has no more-secure browser store — httpOnly cookies would
   # require a server-side session the console does not have, and any encryption
@@ -56,7 +56,7 @@ query-filters:
   - exclude:
       id: js/clear-text-storage-of-sensitive-data
 
-  # Accepted: core/mcp/http_transport.py returns MCPProtocolError.message, a
+  # Accepted: baselith/core/mcp/http_transport.py returns MCPProtocolError.message, a
   # string this codebase writes, because the JSON-RPC layer of the MCP spec
   # requires a human-readable `message` on every error object. No traceback,
   # no exception text from third-party code — the A2A and quota paths that did

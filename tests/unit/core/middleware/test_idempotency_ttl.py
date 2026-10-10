@@ -17,7 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.middleware.idempotency import IdempotencyMiddleware, _jwt_exp
+from baselith.core.middleware.idempotency import IdempotencyMiddleware, _jwt_exp
 
 # Replay/storage require a credential that verifies; see the conftest fixture.
 pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
@@ -60,7 +60,9 @@ def _client(fake: _RecordingRedis, *, ttl_seconds: int = 86_400) -> TestClient:
     def _do():
         return {"ok": True}
 
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app, ttl_seconds=ttl_seconds)
     return TestClient(mw, raise_server_exceptions=False)
 
@@ -94,7 +96,7 @@ def test_opaque_bearer_replay_capped_at_access_token_lifetime():
     fake = _RecordingRedis()
     client = _client(fake)
     with patch(
-        "core.config.get_security_config",
+        "baselith.core.config.get_security_config",
         return_value=SimpleNamespace(access_token_lifetime=900),
     ):
         r = client.post(
@@ -117,7 +119,7 @@ def test_short_ttl_wins_over_a_long_lived_token():
     client = _client(fake, ttl_seconds=60)
     token = _jwt({"exp": int(time.time()) + 10_000})
     with patch(
-        "core.config.get_security_config",
+        "baselith.core.config.get_security_config",
         return_value=SimpleNamespace(access_token_lifetime=3600),
     ):
         client.post(

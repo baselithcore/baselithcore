@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from core.a2a.client import _is_retryable_error
+from baselith.core.a2a.client import _is_retryable_error
 
 
 def _status_error(status: int) -> httpx.HTTPStatusError:

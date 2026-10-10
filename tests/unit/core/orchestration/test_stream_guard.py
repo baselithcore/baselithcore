@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from core.orchestration.stream_guard import guard_stream
+from baselith.core.orchestration.stream_guard import guard_stream
 
 
 async def _agen(chunks: list[str]) -> AsyncIterator[str]:

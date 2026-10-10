@@ -8,14 +8,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.approvals as approvals_module
-from core.orchestration.checkpoint import (
+import baselith.plugins.api_routers.approvals as approvals_module
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from plugins.api_routers.admin import verify_credentials
-from plugins.api_routers.approvals import router
+from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.approvals import router
 
 
 @pytest.fixture
@@ -219,7 +219,7 @@ class TestResume:
         class _FakeChatService:
             agent = fake_agent
 
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")
@@ -235,7 +235,7 @@ class TestResume:
         """The admin's ambient tenant must not leak into another tenant's run."""
         import anyio
 
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         anyio.run(lambda: _paused_run(store, tenant="tenant-a"))
         seen: dict[str, object] = {}
@@ -249,7 +249,7 @@ class TestResume:
             agent = AsyncMock()
 
         _FakeChatService.agent.process = _process
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")
@@ -267,7 +267,7 @@ class TestResume:
         class _FakeChatService:
             agent = fake_agent
 
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")

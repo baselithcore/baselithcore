@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.observability import logging as logmod
-from core.observability import redaction as redmod
-from core.observability.logging import redact_sensitive, redact_url_credentials
+from baselith.core.observability import logging as logmod
+from baselith.core.observability import redaction as redmod
+from baselith.core.observability.logging import redact_sensitive, redact_url_credentials
 
 
 @pytest.fixture
@@ -109,8 +109,8 @@ def test_redact_url_credentials_malformed_keeps_host():
 
 
 def test_storage_url_redaction_withholds_value_when_redaction_fails(monkeypatch):
-    from core.config import storage
-    from core.observability import redaction
+    from baselith.core.config import storage
+    from baselith.core.observability import redaction
 
     def boom(_url: str) -> str:
         raise RuntimeError("redaction broke")

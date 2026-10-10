@@ -26,7 +26,7 @@ if ! command -v baselith >/dev/null 2>&1; then
 fi
 
 cleanup() {
-    rm -rf "plugins/${PLUGIN}"
+    rm -rf "baselith/plugins/${PLUGIN}"
 }
 
 # Start from a clean slate so the recording is repeatable.
@@ -52,7 +52,7 @@ run() {
 
 sleep 1
 run "baselith plugin create ${PLUGIN} --type agent --no-register" 1.8
-run "ls plugins/${PLUGIN}" 1.8
+run "ls baselith/plugins/${PLUGIN}" 1.8
 run "baselith plugin validate ${PLUGIN}" 3
 
 cleanup

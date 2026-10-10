@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
-from core.cache.redis_cache import RedisTTLCache
-from core.cache.semantic_cache import SemanticLLMCache
+from baselith.core.cache.redis_cache import RedisTTLCache
+from baselith.core.cache.semantic_cache import SemanticLLMCache
 
 
 class TestRedisKeySerialization:
     @pytest.fixture
     def cache(self, monkeypatch: pytest.MonkeyPatch) -> RedisTTLCache:
-        import core.config.cache as cache_config_module
+        import baselith.core.config.cache as cache_config_module
 
         monkeypatch.setattr(cache_config_module, "_redis_cache_config", None)
         return RedisTTLCache(client=AsyncMock(), prefix="t", default_ttl=60)
@@ -134,7 +134,7 @@ class TestTTLCacheFullInsert:
 
     @pytest.mark.asyncio
     async def test_full_cache_set_does_not_scan_for_expired(self) -> None:
-        from core.cache.local_cache import TTLCache
+        from baselith.core.cache.local_cache import TTLCache
 
         cache: TTLCache[int, int] = TTLCache(maxsize=3, ttl=60)
         cache._last_purge_time = float("inf")  # hold off the interval sweep

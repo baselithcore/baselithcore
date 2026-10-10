@@ -56,7 +56,7 @@ silently ignored; `baselith config env` reports those.
 
 ## General Application Configuration
 
-Declared in `core.config.app`.
+Declared in `baselith.core.config.app`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -69,9 +69,9 @@ Declared in `core.config.app`.
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` | Deprecated, no effect: nothing reads it |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
 | `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
-| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
+| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`baselith.core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
-| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in core/chat RAG pipeline only |
+| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in baselith/core/chat RAG pipeline only |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
@@ -128,7 +128,7 @@ Declared in `core.config.app`.
 
 ## Audit-trail configuration
 
-Declared in `core.config.audit`.
+Declared in `baselith.core.config.audit`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Declared in `core.config.audit`.
 
 ## Core configuration settings
 
-Declared in `core.config.base`.
+Declared in `baselith.core.config.base`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -162,7 +162,7 @@ Declared in `core.config.base`.
 
 ## Cache configuration settings
 
-Declared in `core.config.cache`.
+Declared in `baselith.core.config.cache`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -185,7 +185,7 @@ Declared in `core.config.cache`.
 
 ## Chat configuration (`CHAT_`)
 
-Declared in `core.config.chat`.
+Declared in `baselith.core.config.chat`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -203,7 +203,7 @@ Declared in `core.config.chat`.
 
 ## AI-governance configuration (EU AI Act, GDPR accountability artefacts)
 
-Declared in `core.config.compliance`.
+Declared in `baselith.core.config.compliance`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -224,7 +224,7 @@ Declared in `core.config.compliance`.
 
 ## Evaluation configuration (`EVAL_`)
 
-Declared in `core.config.evaluation`.
+Declared in `baselith.core.config.evaluation`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -236,7 +236,7 @@ Declared in `core.config.evaluation`.
 
 ## Events configuration
 
-Declared in `core.config.events`.
+Declared in `baselith.core.config.events`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -249,7 +249,7 @@ Declared in `core.config.events`.
 
 ## Guardrails configuration (`GUARDRAILS_`)
 
-Declared in `core.config.guardrails`.
+Declared in `baselith.core.config.guardrails`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -268,13 +268,13 @@ Declared in `core.config.guardrails`.
 
 ## Security-incident reporting configuration
 
-Declared in `core.config.incidents`.
+Declared in `baselith.core.config.incidents`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `AI_ACT_COMPLETE_REPORT_DAYS` | `int` | `30` |  |
 | `AI_ACT_INCIDENT_DB_PATH` | `str \| None` | *empty* |  |
-| `AI_ACT_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting. The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so they are derived in core.incidents.ai_act and deliberately NOT settings — there is no legitimate deployment-level override. Only the complete-report follow-up is configurable: Art. 73(5) allows an initial incomplete report followed by a complete one but fixes no outer limit for the latter, so this is an internal SLA, not a regulatory deadline. |
+| `AI_ACT_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting. The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so they are derived in baselith.core.incidents.ai_act and deliberately NOT settings — there is no legitimate deployment-level override. Only the complete-report follow-up is configurable: Art. 73(5) allows an initial incomplete report followed by a complete one but fixes no outer limit for the latter, so this is an internal SLA, not a regulatory deadline. |
 | `DORA_AWARENESS_CAP_HOURS` | `int` | `24` |  |
 | `DORA_DB_PATH` | `str \| None` | *empty* |  |
 | `DORA_FINAL_REPORT_DAYS` | `int` | `30` |  |
@@ -293,7 +293,7 @@ Declared in `core.config.incidents`.
 
 ## The shared inference services (embedding, rerank, Qdrant)
 
-Declared in `core.config.inference`.
+Declared in `baselith.core.config.inference`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -344,7 +344,7 @@ Declared in `core.config.inference`.
 
 ## MCP Configuration
 
-Declared in `core.config.mcp`.
+Declared in `baselith.core.config.mcp`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -373,9 +373,9 @@ Declared in `core.config.mcp`.
 | `MCP_LIST_PAGE_SIZE` | `int` | `100` | Maximum entries returned by one tools/list, resources/list or resources/templates/list page; the client pages on with `nextCursor`. |
 | `MCP_MAX_TOOL_RESULT_BYTES` | `int` | `1048576` | Upper bound on the serialized size of one `tools/call` result. A larger result is truncated with an explicit notice rather than refused: the call succeeded, and the model is told what it is missing. 0 disables the cap; any other value must clear MIN_TOOL_RESULT_BYTES, the cost of the truncation envelope itself. |
 | `MCP_OAUTH_MAX_RESPONSE_BYTES` | `int` | `262144` |  |
-| `MCP_OAUTH_TIMEOUT_SECONDS` | `float` | `15.0` | OAuth client (core.mcp.oauth_client): per-call deadline and response cap for discovery, registration and token requests. |
+| `MCP_OAUTH_TIMEOUT_SECONDS` | `float` | `15.0` | OAuth client (baselith.core.mcp.oauth_client): per-call deadline and response cap for discovery, registration and token requests. |
 | `MCP_POOL_IDLE_SECONDS` | `float` | `300.0` |  |
-| `MCP_POOL_MAX_CLIENTS` | `int` | `64` | Per-key client pool (core.mcp.keyed_pool): live clients kept at once, and how long an unused one survives before it is closed. |
+| `MCP_POOL_MAX_CLIENTS` | `int` | `64` | Per-key client pool (baselith.core.mcp.keyed_pool): live clients kept at once, and how long an unused one survives before it is closed. |
 | `MCP_RAG_DEFAULT_TOP_K` | `int` | `5` |  |
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
@@ -398,7 +398,7 @@ Declared in `core.config.mcp`.
 
 ## Memory configuration
 
-Declared in `core.config.memory`.
+Declared in `baselith.core.config.memory`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -416,7 +416,7 @@ Declared in `core.config.memory`.
 
 ## Schemas for the multimodal and adaptation services
 
-Declared in `core.config.multimodal`.
+Declared in `baselith.core.config.multimodal`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -461,7 +461,7 @@ Declared in `core.config.multimodal`.
 
 ## Observability configuration (metric cardinality and trace exemplars)
 
-Declared in `core.config.observability`.
+Declared in `baselith.core.config.observability`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -470,7 +470,7 @@ Declared in `core.config.observability`.
 
 ## Orchestration and routing configuration (`ORCHESTRATOR_`, `ROUTER_`)
 
-Declared in `core.config.orchestration`.
+Declared in `baselith.core.config.orchestration`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -507,7 +507,7 @@ Declared in `core.config.orchestration`.
 
 ## One-click plugin update (host installs): the updater's and the console's settings
 
-Declared in `core.config.plugin_update_apply`.
+Declared in `baselith.core.config.plugin_update_apply`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -527,11 +527,11 @@ Declared in `core.config.plugin_update_apply`.
 
 ## Plugin updates (release polling, trust mode and overlay)
 
-Declared in `core.config.plugin_updates`.
+Declared in `baselith.core.config.plugin_updates`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
+| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (baselith/core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
 | `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
@@ -546,7 +546,7 @@ Declared in `core.config.plugin_updates`.
 
 ## Plugin-specific configuration settings
 
-Declared in `core.config.plugins`.
+Declared in `baselith.core.config.plugins`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -563,7 +563,7 @@ Declared in `core.config.plugins`.
 
 ## Prioritization Configuration
 
-Declared in `core.config.prioritization`.
+Declared in `baselith.core.config.prioritization`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -575,7 +575,7 @@ Declared in `core.config.prioritization`.
 
 ## Privacy / data-subject-request configuration
 
-Declared in `core.config.privacy`.
+Declared in `baselith.core.config.privacy`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -586,7 +586,7 @@ Declared in `core.config.privacy`.
 
 ## Processing configuration
 
-Declared in `core.config.processing`.
+Declared in `baselith.core.config.processing`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -620,7 +620,7 @@ Declared in `core.config.processing`.
 
 ## Per-key usage quota configuration
 
-Declared in `core.config.quotas`.
+Declared in `baselith.core.config.quotas`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -637,7 +637,7 @@ Declared in `core.config.quotas`.
 
 ## Reasoning configuration (`TOT_`)
 
-Declared in `core.config.reasoning`.
+Declared in `baselith.core.config.reasoning`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -651,7 +651,7 @@ Declared in `core.config.reasoning`.
 
 ## Reflection Pattern Configuration
 
-Declared in `core.config.reflection`.
+Declared in `baselith.core.config.reflection`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -660,7 +660,7 @@ Declared in `core.config.reflection`.
 
 ## Resilience configuration
 
-Declared in `core.config.resilience`.
+Declared in `baselith.core.config.resilience`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -683,11 +683,11 @@ Declared in `core.config.resilience`.
 
 ## Sandbox configuration (`SANDBOX_`)
 
-Declared in `core.config.sandbox`.
+Declared in `baselith.core.config.sandbox`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
+| `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled baselith/core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
 | `SANDBOX_COST_PER_COMPUTE_SECOND` | `float` | `0.0` | USD charged per wall-clock compute second of sandbox execution. 0 (default) keeps cost_usd at 0 while compute_seconds is still recorded. |
 | `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker daemon socket for the sandbox client. Used only when set explicitly and DOCKER_HOST is unset; otherwise Docker's own client environment decides. |
 | `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Give Docker sandbox containers the default bridge network (egress for untrusted code). Off: network_mode none. |
@@ -703,7 +703,7 @@ Declared in `core.config.sandbox`.
 
 ## Scraper configuration
 
-Declared in `core.config.scraper`.
+Declared in `baselith.core.config.scraper`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -734,7 +734,7 @@ Declared in `core.config.scraper`.
 
 ## Security configuration
 
-Declared in `core.config.security`.
+Declared in `baselith.core.config.security`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -744,7 +744,7 @@ Declared in `core.config.security`.
 | `ALLOW_ORIGINS` | `Annotated[list[str], NoDecode]` | *computed* | Comma-separated list of browser origins allowed to make cross-origin requests, each written scheme-and-host (no trailing path). Empty — the default — blocks every cross-origin request, which is the safe posture for an API with no browser front end. |
 | `API_KEYS_ADMIN` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
 | `API_KEYS_JOB` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
-| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
+| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see baselith.core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
 | `API_KEYS_USER` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
 | `API_KEY_ENABLED`<br>also accepts `SECURITY_API_KEY_ENABLED` | `bool` | `True` | Master switch for API-key authentication. When false, API keys are rejected entirely. |
 | `API_KEY_REVOCATION_FAIL_MODE` | `Literal['closed', 'open']` | `closed` | What to do when the shared API-key revocation denylist is unreadable: 'closed' (default) rejects the key, 'open' accepts it on process-local state. |
@@ -797,7 +797,7 @@ Declared in `core.config.security`.
 
 ## Service-level configuration internal engines
 
-Declared in `core.config.services`.
+Declared in `baselith.core.config.services`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -844,7 +844,7 @@ Declared in `core.config.services`.
 
 ## Storage configuration
 
-Declared in `core.config.storage`.
+Declared in `baselith.core.config.storage`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -867,7 +867,7 @@ Declared in `core.config.storage`.
 | `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
 | `DB_RLS_TENANT_SCOPE` | `Literal['session', 'transaction']` | `session` | How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config per session, memoized per pooled connection) or 'transaction' (each checkout is one transaction, set_config is transaction-local). Use 'transaction' behind a transaction-mode pooler such as PgBouncer pool_mode=transaction. |
-| `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
+| `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `baselith.core.db.ddl.runtime_ddl_allowed`. |
 | `DB_SCHEMA_CHECK` | `Literal['strict', 'warn', 'off'] \| None` | *empty* | Startup schema-revision check: 'strict' refuses to start when the database is behind the packaged migration head, 'warn' logs it, 'off' skips it. Unset means strict in production, off elsewhere. |
 | `DB_SSL_MODE` | `str \| None` | *empty* |  |
 | `DB_STATEMENT_TIMEOUT_MS` | `int` | `30000` | Server-side budgets baked into every pooled connection's startup options, in milliseconds (0 disables the Postgres guard). A statement that outlives `statement_timeout` is cancelled by the server, so a runaway query cannot hold a pooled connection indefinitely. The idle-in-transaction cap kills a session that opened a transaction and went quiet (leaked connection, crashed handler mid-transaction) before the locks it holds block everyone else. |
@@ -892,7 +892,7 @@ Declared in `core.config.storage`.
 
 ## Swarm configuration (`SWARM_`)
 
-Declared in `core.config.swarm`.
+Declared in `baselith.core.config.swarm`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -906,7 +906,7 @@ Declared in `core.config.swarm`.
 
 ## Task-queue configuration (`TASK_QUEUE_`)
 
-Declared in `core.config.task_queue`.
+Declared in `baselith.core.config.task_queue`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -914,7 +914,7 @@ Declared in `core.config.task_queue`.
 | `TASK_QUEUE_DEFAULT_QUEUE` | `str` | `default` |  |
 | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `int` | `3` | Retry settings |
 | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `int` | `60` |  |
-| `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `Annotated[list[str], NoDecode]` | `['core.', 'plugins.']` | Comma-separated module prefixes a dead-lettered job may be replayed from. A stored function reference outside them is refused before any import happens. |
+| `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `Annotated[list[str], NoDecode]` | `['baselith.core.', 'baselith.plugins.']` | Comma-separated module prefixes a dead-lettered job may be replayed from. A stored function reference outside them is refused before any import happens. |
 | `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `int` | `604800` | Dead-letter retention. The DLQ is a diagnosis and replay aid, not an archive: without a horizon every terminally-failed job stays in Redis forever, so one bad deploy's failures sit in memory indefinitely. Matches `failure_ttl` so the two views of a failed job expire together. 0 disables expiry (keep forever) — only for a deployment that prunes the DLQ by hand. |
 | `TASK_QUEUE_FAILURE_TTL` | `int` | `604800` |  |
 | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `float` | `30.0` |  |
@@ -928,7 +928,7 @@ Declared in `core.config.task_queue`.
 
 ## DORA Register of Information persistence configuration
 
-Declared in `core.config.thirdparty`.
+Declared in `baselith.core.config.thirdparty`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -936,7 +936,7 @@ Declared in `core.config.thirdparty`.
 
 ## AI-transparency configuration (EU AI Act Article 50)
 
-Declared in `core.config.transparency`.
+Declared in `baselith.core.config.transparency`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -948,7 +948,7 @@ Declared in `core.config.transparency`.
 
 ## Vector store configuration (Qdrant / pgvector)
 
-Declared in `core.config.vectorstore`.
+Declared in `baselith.core.config.vectorstore`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -980,7 +980,7 @@ Declared in `core.config.vectorstore`.
 
 ## Webhook subsystem configuration
 
-Declared in `core.config.webhooks`.
+Declared in `baselith.core.config.webhooks`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -996,7 +996,7 @@ Declared in `core.config.webhooks`.
 
 ## World-model configuration (`WORLD_MODEL_`)
 
-Declared in `core.config.world_model`.
+Declared in `baselith.core.config.world_model`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1011,7 +1011,7 @@ Declared in `core.config.world_model`.
 
 ## Ambient tenant cost-budget seam for the LLM generation path
 
-Declared in `core.quotas.cost_enforcement`.
+Declared in `baselith.core.quotas.cost_enforcement`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1019,7 +1019,7 @@ Declared in `core.quotas.cost_enforcement`.
 
 ## Token Estimation Utilities
 
-Declared in `core.utils.tokens`.
+Declared in `baselith.core.utils.tokens`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |

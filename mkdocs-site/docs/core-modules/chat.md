@@ -1,10 +1,10 @@
 # Chat & RAG Workflow
 
-The `core/chat/` module implements the production-ready conversational pipeline, including retrieval-augmented generation (RAG), streaming, conversation history, and plugin-extensible flow handlers.
+The `baselith/core/chat/` module implements the production-ready conversational pipeline, including retrieval-augmented generation (RAG), streaming, conversation history, and plugin-extensible flow handlers.
 
 !!! note "Two RAG paths — only one runs by default"
     The `qa_docs` intent the running app answers is served by
-    `StandardRagHandler` (`core/orchestration/handlers/rag.py`) and its
+    `StandardRagHandler` (`baselith/core/orchestration/handlers/rag.py`) and its
     streaming twin — see
     [Orchestration › Streaming pipeline](orchestration.md#streaming-pipeline).
     The step pipeline described under [RAG Workflow](#rag-workflow)
@@ -16,7 +16,7 @@ The `core/chat/` module implements the production-ready conversational pipeline,
 ## Module Structure
 
 ```yaml
-core/chat/
+baselith/core/chat/
 ├── service.py              # ChatService — main entry point (DI-aware)
 ├── rag_workflow.py         # Native RAG pipeline (FlowHandler + step collection)
 ├── workflow_planner.py     # Dynamic workflow planning
@@ -48,7 +48,7 @@ core/chat/
 
 !!! note "Query-side embeddings"
     Retrieval embeds the user question through
-    `core.nlp.roles.aencode_query`, which uses the embedder's query prompt
+    `baselith.core.nlp.roles.aencode_query`, which uses the embedder's query prompt
     (`BASELITH_EMBEDDING_QUERY_PREFIX`) when it has one. Indexed documents
     use the document prefix, and both roles get separate cache keys, so
     instruction-tuned embedding models (e5, Qwen3) are queried the way they
@@ -58,13 +58,13 @@ core/chat/
 
 ## ChatService
 
-The main conversational interface. Extends `core.services.chat.ChatService` with full dependency injection.
+The main conversational interface. Extends `baselith.core.services.chat.ChatService` with full dependency injection.
 
 ### Basic Usage
 
 ```python
-from core.chat.service import ChatService
-from core.chat.dependencies import ChatDependencyConfig
+from baselith.core.chat.service import ChatService
+from baselith.core.chat.dependencies import ChatDependencyConfig
 
 # Configure and instantiate
 config = ChatDependencyConfig(
@@ -75,7 +75,7 @@ config = ChatDependencyConfig(
 chat = ChatService(dependency_config=config)
 
 # Ask a question — the request is a ChatRequest, the result a ChatResponse
-from core.models.chat import ChatRequest
+from baselith.core.models.chat import ChatRequest
 
 req = ChatRequest(
     query="What is the Plugin-First architecture?",
@@ -89,8 +89,8 @@ print(response.sources)  # Optional[list[dict]] of source documents
 
 ### Entry points
 
-`ChatService` (in `core/services/chat/service.py`, subclassed by
-`core/chat/service.py`) exposes four request-shaped entry points — all
+`ChatService` (in `baselith/core/services/chat/service.py`, subclassed by
+`baselith/core/chat/service.py`) exposes four request-shaped entry points — all
 take a single `ChatRequest`:
 
 | Method | Returns | Use |
@@ -111,20 +111,20 @@ take a single `ChatRequest`:
 The non-streaming methods run the regex input guard before orchestration and
 raise `ChatServiceError("Blocked by InputGuard: …")` on a block. They use the
 same compiled `InputGuard` instance the orchestrator's guard pipeline caches
-(`core.orchestration.guard_pipeline.get_input_guard`) instead of building one
+(`baselith.core.orchestration.guard_pipeline.get_input_guard`) instead of building one
 per request; the orchestrator still runs its own `guard_input_async` (regex,
 then the opt-in moderation and taxonomy layers), which is the only input
 guard on the streaming path.
 
 `handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
-through `core.utils.concurrency.drain_async_iterator`, so the guardrails, the
+through `baselith.core.utils.concurrency.drain_async_iterator`, so the guardrails, the
 metrics, the streaming-disabled fallback and the error stream have one
 implementation rather than two that can drift.
 
 ### With Plugin Registry
 
 ```python
-from core.plugins import PluginRegistry
+from baselith.core.plugins import PluginRegistry
 
 registry = PluginRegistry()
 chat = ChatService(plugin_registry=registry)
@@ -134,7 +134,7 @@ chat = ChatService(plugin_registry=registry)
 
 The `Orchestrator` that `ChatService` builds takes an optional
 `memory_manager`. It is `None` unless `CHAT_LONG_TERM_MEMORY_ENABLED=true`, in
-which case the service constructs an `AgentMemory` (`core/memory/manager.py`)
+which case the service constructs an `AgentMemory` (`baselith/core/memory/manager.py`)
 with the persistent provider and the LLM summarizer the lazy `memory` resource
 uses, and the loop recalls past interactions before answering and writes the
 exchange back afterwards. That costs an embedding and a store round-trip per
@@ -163,10 +163,10 @@ CHAT_LONG_TERM_MEMORY_ENABLED=true
     code by registering it for an intent, as its docstring shows:
     `orchestrator.register_handler("rag_full", RagWorkflowHandler(service))`.
     Until then the steps below, the answer caches and the `CHAT_GUARDRAILS_*`
-    keyword guard (`core/chat/guardrails.py`) do not run.
+    keyword guard (`baselith/core/chat/guardrails.py`) do not run.
 
 The RAG pipeline is implemented natively as an **Orchestrator-compatible
-`FlowHandler`** (`RagWorkflowHandler` in `core/chat/rag_workflow.py`) driving a
+`FlowHandler`** (`RagWorkflowHandler` in `baselith/core/chat/rag_workflow.py`) driving a
 typed `AgentState` through explicit steps — conditional early exits
 (guardrail rejection, pre-retrieval cache hit, clarification request,
 answer-cache hit) and extensibility without any external graph framework.
@@ -193,12 +193,12 @@ graph TD
 
 ### Backlog Planner
 
-`core/chat/workflow_planner.py` exposes `BacklogPlanner`, which mutates an
+`baselith/core/chat/workflow_planner.py` exposes `BacklogPlanner`, which mutates an
 `AgentState` in place to attach a generated backlog. It is constructed with
 the owning `ChatService` and operates on the shared loop state:
 
 ```python
-from core.chat.workflow_planner import BacklogPlanner
+from baselith.core.chat.workflow_planner import BacklogPlanner
 
 planner = BacklogPlanner(service=chat)
 planner.plan_backlog(state)  # mutates state in place; returns None
@@ -280,7 +280,7 @@ Three mitigations, strongest first:
    response cache.
 
 Beyond `index_version` there is **no push-based invalidation hook** in the
-codebase: nothing in `core/services/indexing/` notifies the chat caches when
+codebase: nothing in `baselith/core/services/indexing/` notifies the chat caches when
 documents change. For cross-process corpus mutations the short TTL is the
 entire defense. Documented deliberately — do not assume a listener exists.
 
@@ -299,7 +299,7 @@ collide, and lets the scheme be revised without honouring entries written
 under the old one.
 
 !!! danger "`tenant=` comes from the authenticated context, not the request body"
-    `build_precheck_key` reads `core.context.get_current_tenant_id()` — the
+    `build_precheck_key` reads `baselith.core.context.get_current_tenant_id()` — the
     tenant bound to the request by the auth/tenancy middleware. It previously
     read `ChatRequest.tenant_id`, a **client-supplied** field that normal
     callers leave unset: with the pre-check enabled, every tenant therefore
@@ -317,7 +317,7 @@ under the old one.
     `check_precheck_cache` catches that, so enabling the pre-check on a code
     path that runs *outside* a request context — a background job, a script —
     requires setting the tenant context first
-    (`core.context.set_tenant_context`), exactly as the storage layer does.
+    (`baselith.core.context.set_tenant_context`), exactly as the storage layer does.
 
 #### When entries are written
 
@@ -365,7 +365,7 @@ one). The default `qa_docs` handler places them in the prompt as
 Retrieval itself still runs on the raw query; there is no query rewriting.
 
 Replayed turns and retrieved documents are **data, not instructions**: both the
-`qa_docs` handler and the chat workflow's `build_prompt` (`core/chat/prompt.py`)
+`qa_docs` handler and the chat workflow's `build_prompt` (`baselith/core/chat/prompt.py`)
 scan them for indirect prompt injection and seal each in an untrusted envelope
 (`conversation_history`, `document_retrieval`), and the prompt carries the
 `RAG_CONTEXT_IS_DATA_RULE`, so a poisoned earlier turn or document cannot pass
@@ -382,10 +382,10 @@ The storage key is `<user_id>:<conversation_id>` (`anonymous` when there is no
 authenticated user), on top of the history cache's tenant namespace. Inside one
 tenant, a client that reuses or guesses another user's `conversation_id` gets a
 separate, empty conversation. A request without `conversation_id` is stateless.
-The helpers live in `core/services/chat/utils/conversation.py`.
+The helpers live in `baselith/core/services/chat/utils/conversation.py`.
 
 History is on when `ChatDependencyConfig.history_enabled` is true; it defaults to
-`CHAT_MEMORY_ENABLED` (`core/config/app.py`, default `true`), and the manager
+`CHAT_MEMORY_ENABLED` (`baselith/core/config/app.py`, default `true`), and the manager
 follows the other `CHAT_MEMORY_*` settings:
 
 | Variable | Default | Effect |
@@ -398,12 +398,12 @@ follows the other `CHAT_MEMORY_*` settings:
 | `CHAT_MEMORY_SUMMARY_MAX_TURNS` | `8` | Turns kept in the summary |
 | `CHAT_MEMORY_SUMMARY_MAX_CHARS` | `800` | Summary length cap |
 
-`ChatHistoryManager` (`core/services/chat/utils/history.py`) is the storage layer
+`ChatHistoryManager` (`baselith/core/services/chat/utils/history.py`) is the storage layer
 underneath: async, cache-backed, and keyed by the string it is given. It exposes `load` (returns the
 trimmed turns plus a formatted history/summary string) and `append_turn`:
 
 ```python
-from core.services.chat.utils.history import ChatHistoryManager
+from baselith.core.services.chat.utils.history import ChatHistoryManager
 
 history = ChatHistoryManager(
     cache,                  # CacheProtocol | None; built by the dependency factory
@@ -438,7 +438,7 @@ parallel.
 
 ```python
 # Stream tokens for real-time output — pass a ChatRequest
-from core.models.chat import ChatRequest
+from baselith.core.models.chat import ChatRequest
 
 req = ChatRequest(query="...", conversation_id="conv-123")
 # handle_chat_stream_async is a coroutine that *returns* the async stream:
@@ -472,7 +472,7 @@ BaselithCore implements a **4-Layer Prompt Architecture** to ensure prompts are 
 The `PromptEngine` handle assembly and rendering. It uses simple `{key}` substitution instead of Python's `.format()` to avoid conflicts with JSON braces.
 
 ```python
-from core.chat.prompt_engine import PromptEngine, FewShotExample
+from baselith.core.chat.prompt_engine import PromptEngine, FewShotExample
 
 # 1. Define the engine
 engine = PromptEngine(
@@ -501,14 +501,14 @@ system_prompt = engine.render(
 
 `engine.with_library(library, task_type, limit=..., tags=...)` splices
 examples from the task-indexed
-[`FewShotLibrary`](../core-modules/personas.md) (`core.personas`) into the
+[`FewShotLibrary`](../core-modules/personas.md) (`baselith.core.personas`) into the
 few-shot layer. The library is YAML/JSON-backed — curated, version-controlled
 example files editable by non-engineers — and a packaged seed ships at
-`core/personas/examples/default_examples.yaml`
-(`core.personas.DEFAULT_EXAMPLES_PATH`):
+`baselith/core/personas/examples/default_examples.yaml`
+(`baselith.core.personas.DEFAULT_EXAMPLES_PATH`):
 
 ```python
-from core.personas import DEFAULT_EXAMPLES_PATH, load_library
+from baselith.core.personas import DEFAULT_EXAMPLES_PATH, load_library
 
 library = load_library(DEFAULT_EXAMPLES_PATH)
 system_prompt = engine.with_library(library, "refusal").render()
@@ -517,7 +517,7 @@ system_prompt = engine.with_library(library, "refusal").render()
 ### Registry-backed conversation prompt
 
 The production conversation system prompt is **prompt-as-code**: the
-canonical template lives in `core/chat/prompts/conversation_system.md`
+canonical template lives in `baselith/core/chat/prompts/conversation_system.md`
 (YAML front matter + body) and is served through the global
 `PromptRegistry` under the name `conversation_system`. `build_prompt`
 renders the `production`-labelled version on every request, emitting a
@@ -550,7 +550,7 @@ print(engine.version_info())
 
 ## Configuration
 
-Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
+Key `ChatDependencyConfig` fields (`baselith/core/chat/dependencies.py`):
 
 | Field                    | Description                                   |
 | ------------------------ | --------------------------------------------- |
@@ -565,14 +565,14 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 
 !!! note "Embedder and reranker are built on first use"
     `create_default_dependencies()` does not load either model. It stores a
-    `LazyEmbedder` / `LazyReranker` (`core.nlp.lazy`) holding the factory and
+    `LazyEmbedder` / `LazyReranker` (`baselith.core.nlp.lazy`) holding the factory and
     the model name; the model is built the first time the RAG path embeds a
     query or reranks candidates, in a worker thread rather than on the event
     loop. A plain install without the `[rag]` extra therefore boots and serves
     non-RAG chat; only the first RAG request fails, with the "install
     `baselith-core[rag]`" error.
 
-`rerank_hits` scores candidates through `core.nlp.rerank.score_pairs` rather
+`rerank_hits` scores candidates through `baselith.core.nlp.rerank.score_pairs` rather
 than `predict` directly, so the cross-encoder runs with a batch size suited to
 its device (8 off CUDA, 32 on CUDA) — see
 [NLP › Loading models off the event loop](nlp.md#loading-models-off-the-event-loop).
@@ -588,7 +588,7 @@ its device (8 off CUDA, 32 on CUDA) — see
 
 ## AgentState — loop instrumentation
 
-`core/chat/agent_state.py` exposes `AgentState`, the shared dataclass
+`baselith/core/chat/agent_state.py` exposes `AgentState`, the shared dataclass
 passed between chat steps. In addition to the request, history, hits,
 and answer fields, the state carries explicit loop instrumentation so
 handlers can record what the agent did without changing call sites.
@@ -626,7 +626,7 @@ observable to evaluators and dashboards.
 ### Example
 
 ```python
-from core.chat.agent_state import AgentState
+from baselith.core.chat.agent_state import AgentState
 
 state = AgentState(request=req)
 state.iteration_count += 1
@@ -637,17 +637,17 @@ state.record_tool_call({"name": "search", "args": {"q": q}, "ok": True})
 ### Models layer — portability primitives
 
 The same dataclass cooperates with three companion primitives in
-`core/models/`:
+`baselith/core/models/`:
 
 | Module | Purpose |
 |--------|---------|
-| [`pricing.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/pricing.py) | Provider pricing table + `estimate_cost(model_id, in, out)` |
-| [`routing.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/routing.py) | `ModelRouter` selects the right model by `TaskCategory` + `Complexity` |
-| [`fallback.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/fallback.py) | `FallbackChain` retries against secondary providers with circuit-breaker skip |
+| [`pricing.py`](https://github.com/baselithcore/baselithcore/blob/main/baselith/core/models/pricing.py) | Provider pricing table + `estimate_cost(model_id, in, out)` |
+| [`routing.py`](https://github.com/baselithcore/baselithcore/blob/main/baselith/core/models/routing.py) | `ModelRouter` selects the right model by `TaskCategory` + `Complexity` |
+| [`fallback.py`](https://github.com/baselithcore/baselithcore/blob/main/baselith/core/models/fallback.py) | `FallbackChain` retries against secondary providers with circuit-breaker skip |
 
 ```python
-from core.models.routing import ModelRouter, TaskCategory, Complexity
-from core.models.pricing import estimate_cost
+from baselith.core.models.routing import ModelRouter, TaskCategory, Complexity
+from baselith.core.models.pricing import estimate_cost
 
 decision = ModelRouter().select(
     TaskCategory.EXECUTION, complexity=Complexity.COMPLEX

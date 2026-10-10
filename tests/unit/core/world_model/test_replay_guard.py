@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from core.world_model.replay_guard import (
+from baselith.core.world_model.replay_guard import (
     RedisReplayGuard,
     ReplayLedgerUnavailableError,
     build_default_replay_guard,
@@ -76,11 +76,13 @@ def _patch_storage(monkeypatch, *, backend: str, url: str) -> None:
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "core.config.get_storage_config",
+        "baselith.core.config.get_storage_config",
         lambda: SimpleNamespace(cache_backend=backend, cache_redis_url=url),
     )
     monkeypatch.setattr("redis.Redis.from_url", lambda url: _FakeRedis())
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: False)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: False
+    )
 
 
 def test_default_guard_is_redis_backed_when_running_on_redis(monkeypatch) -> None:
@@ -89,7 +91,7 @@ def test_default_guard_is_redis_backed_when_running_on_redis(monkeypatch) -> Non
 
 
 def test_default_guard_falls_back_to_memory_without_cache_url(monkeypatch) -> None:
-    from core.world_model.mandates import InMemoryReplayGuard
+    from baselith.core.world_model.mandates import InMemoryReplayGuard
 
     _patch_storage(monkeypatch, backend="redis", url="")
     assert isinstance(build_default_replay_guard(), InMemoryReplayGuard)
@@ -101,7 +103,7 @@ def test_local_cache_backend_does_not_select_redis(monkeypatch) -> None:
     a fail-closed Redis guard with no Redis behind it — turning every mandate
     verification into an error instead of falling back to the in-memory guard.
     """
-    from core.world_model.mandates import InMemoryReplayGuard
+    from baselith.core.world_model.mandates import InMemoryReplayGuard
 
     _patch_storage(monkeypatch, backend="local", url="redis://localhost:6379/1")
     assert isinstance(build_default_replay_guard(), InMemoryReplayGuard)

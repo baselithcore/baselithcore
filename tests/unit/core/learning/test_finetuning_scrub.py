@@ -9,7 +9,10 @@ round-trip — handlers are invoked directly.
 
 from __future__ import annotations
 
-from core.learning.auto_finetuning import AutoFineTuneConfig, AutoFineTuningService
+from baselith.core.learning.auto_finetuning import (
+    AutoFineTuneConfig,
+    AutoFineTuningService,
+)
 
 ZWSP = "\u200b"
 

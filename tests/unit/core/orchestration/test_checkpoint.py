@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_RUNNING,
@@ -209,7 +209,7 @@ class _StepHandler:
 
 
 def _orchestrator(store):
-    from core.orchestration.orchestrator import Orchestrator
+    from baselith.core.orchestration.orchestrator import Orchestrator
 
     orch = Orchestrator(checkpoint_store=store, default_intent="test_intent")
     orch.classify_intent_async = AsyncMock(return_value="test_intent")  # type: ignore
@@ -281,7 +281,7 @@ class TestOrchestratorIntegration:
         assert captured["budget"]["cost_usd"] == 0.2
 
     async def test_no_store_means_no_checkpoint_context(self):
-        from core.orchestration.orchestrator import Orchestrator
+        from baselith.core.orchestration.orchestrator import Orchestrator
 
         orch = Orchestrator(default_intent="test_intent")  # no store
         orch.classify_intent_async = AsyncMock(return_value="test_intent")  # type: ignore
@@ -313,12 +313,14 @@ class TestPostgresStore:
         return _ctx
 
     async def test_save_issues_upsert(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()
@@ -331,7 +333,9 @@ class TestPostgresStore:
         assert params[0] == "r1" and params[1] == "t1"
 
     async def test_load_parses_jsonb(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
@@ -339,7 +343,7 @@ class TestPostgresStore:
             return_value={"data": {"run_id": "r1", "query": "hi"}}
         )
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()
@@ -347,13 +351,15 @@ class TestPostgresStore:
         assert cp is not None and cp.query == "hi"
 
     async def test_load_missing_returns_none(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         cursor.fetchone = AsyncMock(return_value=None)
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()
@@ -416,13 +422,15 @@ class TestSaveStepFastPath:
         assert len(store.saved) == 1
 
     async def test_postgres_save_step_patches_row_in_place(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         cursor.rowcount = 1
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()
@@ -441,13 +449,15 @@ class TestSaveStepFastPath:
         assert cp.version == 4
 
     async def test_postgres_save_step_falls_back_to_upsert_when_row_missing(self):
-        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+        from baselith.core.orchestration.checkpoint_postgres import (
+            PostgresCheckpointStore,
+        )
 
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         cursor.rowcount = 0  # no existing row: first persist of the run
         with patch(
-            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),
         ):
             store = PostgresCheckpointStore()

@@ -47,7 +47,7 @@ jobs:
           pip install uv
           uv pip install --system --group dev -e . mypy --upgrade
           mypy --version
-          mypy core/ || true  # advisory: pre-existing debt tracked separately
+          mypy baselith/core/ || true  # advisory: pre-existing debt tracked separately
 
   forward_compat:
     # Python 3.13 and 3.14 against the LOCKED dependency set. Two canaries, one
@@ -59,7 +59,7 @@ jobs:
     # 3.13 is in ci.yml's matrix too, but only on a `full` plan
     # (scripts/ci_plan.py: a pull request into main, the merge queue, an
     # unverified push); a pull request into develop runs 3.12 alone. Between
-    # promotions nothing ran 3.13, so a lock bump or a core/ change that breaks
+    # promotions nothing ran 3.13, so a lock bump or a baselith/core/ change that breaks
     # it surfaced at release time. Here it gets the same daily answer 3.14
     # does. `fail-fast: false` so one interpreter's breakage never cancels the
     # other's answer.
@@ -71,7 +71,7 @@ jobs:
     # "upstream has not published wheels for this interpreter yet".
     #
     # A failure here is information, not an incident: it means the ecosystem is
-    # not ready, or that something in core/ genuinely breaks on that
+    # not ready, or that something in baselith/core/ genuinely breaks on that
     # interpreter. Read it, do not silence it.
     name: Forward-compat (Python ${{ matrix.python-version }}, locked deps)
     runs-on: ubuntu-latest
@@ -222,7 +222,7 @@ jobs:
           DB_NAME: drill_src
           DB_USER: baselith
           DB_PASSWORD: password
-        run: python -m core.db.migrate
+        run: python -m baselith.core.db.migrate
       - name: Seed known rows
         run: python scripts/backup_restore_drill.py seed --db drill_src
       - name: Back up the way the Helm CronJob does
@@ -249,9 +249,9 @@ jobs:
 
   mutation_testing:
     # Mutation testing of the security-critical code: secret redaction
-    # (core/observability/redaction.py), the secrets provider
-    # (core/security/secrets.py) and the prompt-injection input guard
-    # (core/guardrails/input_guard.py). Coverage says a test ran the redaction
+    # (baselith/core/observability/redaction.py), the secrets provider
+    # (baselith/core/security/secrets.py) and the prompt-injection input guard
+    # (baselith/core/guardrails/input_guard.py). Coverage says a test ran the redaction
     # regex; a surviving mutant says no test would notice if it stopped
     # matching. Scope and test selection live in [tool.mutmut] in
     # pyproject.toml, so a local `mutmut run` is the same run.

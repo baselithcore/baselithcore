@@ -1,4 +1,4 @@
-"""core.nlp routes its embedder/reranker to the inference services when configured."""
+"""baselith.core.nlp routes its embedder/reranker to the inference services when configured."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from core.config import inference
-from core.config.inference import EmbeddingConfig, RerankConfig
-from core.nlp import _remote
+from baselith.core.config import inference
+from baselith.core.config.inference import EmbeddingConfig, RerankConfig
+from baselith.core.nlp import _remote
 
 
 class _Bridge:
@@ -30,7 +30,9 @@ class _Bridge:
 @pytest.fixture
 def bridge(monkeypatch: pytest.MonkeyPatch) -> _Bridge:
     fake = _Bridge()
-    monkeypatch.setattr("core.services.inference.get_sync_inference", lambda: fake)
+    monkeypatch.setattr(
+        "baselith.core.services.inference.get_sync_inference", lambda: fake
+    )
     return fake
 
 
@@ -98,7 +100,7 @@ def test_cross_encoder_scores_in_input_order_grouped_by_query(
 def test_get_embedder_and_get_reranker_go_remote(
     monkeypatch: pytest.MonkeyPatch, bridge: _Bridge, configured: None
 ) -> None:
-    from core.nlp import models
+    from baselith.core.nlp import models
 
     models.get_embedder.cache_clear()
     models.get_reranker.cache_clear()
@@ -120,7 +122,7 @@ def test_get_embedder_and_get_reranker_go_remote(
 async def test_cached_embedder_round_trip_through_the_remote_model(
     bridge: _Bridge, configured: None
 ) -> None:
-    from core.nlp.models import CachedEmbedder
+    from baselith.core.nlp.models import CachedEmbedder
 
     emb = CachedEmbedder(_remote.RemoteEmbeddingModel(), cache_backend="memory")
     vec = await emb.encode("hello")
@@ -132,8 +134,8 @@ async def test_cached_embedder_round_trip_through_the_remote_model(
 async def test_retrieval_reranker_uses_the_service_without_sentence_transformers(
     monkeypatch: pytest.MonkeyPatch, bridge: _Bridge, configured: None
 ) -> None:
-    from core.models.domain import Document, SearchResult
-    from core.services.retrieval import reranker as rr_mod
+    from baselith.core.models.domain import Document, SearchResult
+    from baselith.core.services.retrieval import reranker as rr_mod
 
     monkeypatch.setattr(rr_mod, "CrossEncoder", None)
     monkeypatch.setattr(rr_mod, "use_remote_reranker", lambda _name: True)

@@ -1,4 +1,4 @@
-"""Tests for agent-attributed spans (``core.observability.agent_spans``)."""
+"""Tests for agent-attributed spans (``baselith.core.observability.agent_spans``)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from core.observability.agent_spans import (
+from baselith.core.observability.agent_spans import (
     AGENT_ID_KEY,
     AGENT_KIND_KEY,
     AGENT_NAME_KEY,
@@ -21,7 +21,7 @@ from core.observability.agent_spans import (
     current_agent_name,
     tool_span,
 )
-from core.observability.span_sink import (
+from baselith.core.observability.span_sink import (
     SpanRecord,
     register_span_sink,
     unregister_span_sink,
@@ -137,7 +137,9 @@ class TestAgentSpan:
         def explode(_name: str) -> Any:
             raise RuntimeError("tracer down")
 
-        monkeypatch.setattr("core.observability.agent_spans.get_tracer", explode)
+        monkeypatch.setattr(
+            "baselith.core.observability.agent_spans.get_tracer", explode
+        )
 
         with agent_span("resilient") as span:
             assert span is None

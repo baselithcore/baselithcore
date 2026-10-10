@@ -9,9 +9,9 @@ from typing import Any
 import httpx
 import pytest
 
-from core.mcp.bounded_http import read_capped
-from core.mcp.client_errors import MCPTransportError
-from core.mcp.http_client_transport import HTTPClientTransport
+from baselith.core.mcp.bounded_http import read_capped
+from baselith.core.mcp.client_errors import MCPTransportError
+from baselith.core.mcp.http_client_transport import HTTPClientTransport
 
 from .fakes.http_server import (
     EndlessSSE,

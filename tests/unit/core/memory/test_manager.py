@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.memory.manager import AgentMemory
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 
 @pytest.fixture
@@ -150,8 +150,8 @@ async def test_recall_gates_provider_hits_by_similarity_threshold():
     hit below it is dropped instead of being injected as prompt noise."""
     from unittest.mock import AsyncMock
 
-    from core.memory.manager import AgentMemory
-    from core.memory.types import MemoryItem, MemoryType
+    from baselith.core.memory.manager import AgentMemory
+    from baselith.core.memory.types import MemoryItem, MemoryType
 
     provider = AsyncMock()
     provider.search = AsyncMock(
@@ -170,8 +170,8 @@ async def test_recall_gates_provider_hits_by_similarity_threshold():
 async def test_recall_min_score_zero_restores_ungated_provider_hits():
     from unittest.mock import AsyncMock
 
-    from core.memory.manager import AgentMemory
-    from core.memory.types import MemoryItem, MemoryType
+    from baselith.core.memory.manager import AgentMemory
+    from baselith.core.memory.types import MemoryItem, MemoryType
 
     provider = AsyncMock()
     provider.search = AsyncMock(

@@ -17,7 +17,7 @@ release job back for that push and leaves every other check running. Do not
 use `[skip ci]` for it: that also skips CodeQL and Semgrep, which OpenSSF
 Scorecard's SAST check reads per pull request.
 
-The version lives in `core/_version.py` (single source of truth). The release
+The version lives in `baselith/core/_version.py` (single source of truth). The release
 pipeline writes it into the artifacts it publishes, but it cannot commit it:
 `main` is pull-request-only. The bump and the matching
 [CHANGELOG](https://keepachangelog.com) entry therefore travel in the
@@ -69,7 +69,7 @@ then on every row of the table above applies without exception.
 ### Enforcement: the public API surface gate
 
 The first bullet above is enforced, not just declared. `scripts/check_public_api.py`
-snapshots every literal `__all__` under `baselith/` and `core/` into
+snapshots every literal `__all__` under `baselith/` and `baselith/core/` into
 `scripts/public_api_baseline.json` and fails on any drift — the Python-surface
 twin of the OpenAPI drift gate:
 
@@ -116,7 +116,7 @@ wording, marks the symbol's tier, and appends a `.. deprecated::` note to the
 docstring:
 
 ```python
-from core.stability import deprecated
+from baselith.core.stability import deprecated
 
 @deprecated(since="0.37", removed_in="1.0", alternative="new_api")
 def old_api(*args, **kwargs):
@@ -135,7 +135,7 @@ above — clients pinned to `/v1` keep working through the overlap window.
 When renaming a setting, accept both names for the overlap window with
 `AliasChoices` — `SecurityConfig.access_token_lifetime` reads
 `AUTH_ACCESS_TOKEN_LIFETIME` and the legacy `AUTH_SESSION_LIFETIME` this way
-(`core/config/security.py`). Pydantic resolves the alias silently, so no
+(`baselith/core/config/security.py`). Pydantic resolves the alias silently, so no
 runtime warning is emitted for the old name; make the rename visible in the
 commit subject so it lands in the generated release notes.
 

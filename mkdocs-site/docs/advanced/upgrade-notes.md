@@ -230,10 +230,10 @@ See [Security › Plugin trust store](security.md#plugin-trust-store).
 ### Plugin core bounds name the public core release
 
 `min_core_version` / `max_core_version` are compared with `CORE_VERSION`
-(`core/_core_version.py`) by the plugin loader, `baselith plugin add`, the plugin
-update checker and the upgrade checklist — no longer with `core._version`. In the
+(`baselith/core/_core_version.py`) by the plugin loader, `baselith plugin add`, the plugin
+update checker and the upgrade checklist — no longer with `baselith.core._version`. In the
 core project the two numbers are equal, so nothing changes there. A downstream
-distribution that versions its own `core/_version.py` independently must restate
+distribution that versions its own `baselith/core/_version.py` independently must restate
 its plugins' bounds as public core releases: a floor written in the
 distribution's own numbering (`1.0.0` against a public `0.42.1`) now refuses the
 plugin. The upgrade checklist's plugin check, previously reported as not
@@ -353,7 +353,7 @@ See [A2A Protocol](../core-modules/a2a.md).
 
 `create`, `touch` and `terminate` are coroutines on both `SessionStore` and the
 new `RedisSessionStore`; they must be awaited. The class keeps its name and its
-`core.mcp.http_transport` import path. Sessions are now Redis-backed
+`baselith.core.mcp.http_transport` import path. Sessions are now Redis-backed
 automatically when the deployment declares `CACHE_BACKEND=redis`, which makes
 them shared across replicas.
 
@@ -365,7 +365,7 @@ See [MCP › Session storage](../core-modules/mcp.md#session-storage).
 
 ### `estimate_cost` renamed its first two parameters
 
-`core.models.pricing.estimate_cost(model_id, input_tokens, output_tokens, ...)` —
+`baselith.core.models.pricing.estimate_cost(model_id, input_tokens, output_tokens, ...)` —
 they were `prompt_tokens` / `completion_tokens`. **Positional callers are
 unaffected; keyword callers are not.** `ModelPrice.estimate` keeps the older
 names.
@@ -452,7 +452,7 @@ than a `SettingsError` out of the whole settings class. Previously both raised,
 which meant copying `.env.example` verbatim could break a subsystem by leaving a
 key empty.
 
-The parser (`core.config._collections.csv_list`) splits on a **literal comma**. A
+The parser (`baselith.core.config._collections.csv_list`) splits on a **literal comma**. A
 value that legitimately contains one — a credential, an algorithm token, a
 description — cannot be expressed in the CSV form. Both forms are accepted, so
 use the JSON one there:
@@ -472,9 +472,9 @@ SOME_KEYS=["abc", "def-with,comma"]
 
     | Setting | Shape |
     |---|---|
-    | `MCP_SERVERS` | `dict[str, MCPServerSpec]` (`core/config/mcp.py`) |
-    | `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` (`core/config/plugins.py`) |
-    | `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` (`core/config/world_model.py`) |
+    | `MCP_SERVERS` | `dict[str, MCPServerSpec]` (`baselith/core/config/mcp.py`) |
+    | `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` (`baselith/core/config/plugins.py`) |
+    | `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` (`baselith/core/config/world_model.py`) |
 
     `MCP_SERVERS=weather` fails; `MCP_SERVERS='{"weather": {...}}'` is the only
     accepted form. There is no CSV spelling for a nested object, so this is a

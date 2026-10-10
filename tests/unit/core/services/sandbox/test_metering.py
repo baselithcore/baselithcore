@@ -8,14 +8,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.sandbox import SandboxConfig
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
+from baselith.core.config.sandbox import SandboxConfig
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
 
 
 @pytest.fixture
 def mock_docker_pkg():
     """Patch the docker package where docker_factory imports it."""
-    with patch("core.services.sandbox.docker_factory.docker") as mock_docker:
+    with patch("baselith.core.services.sandbox.docker_factory.docker") as mock_docker:
 
         class MockDockerException(Exception):
             pass
@@ -49,13 +53,13 @@ def mock_container(mock_docker_client):
 def patched_config(**overrides):
     """Patch the config seam the service reads, with field overrides."""
     return patch(
-        "core.services.sandbox.service.get_sandbox_config",
+        "baselith.core.services.sandbox.service.get_sandbox_config",
         return_value=SandboxConfig(**overrides),
     )
 
 
 def test_execution_result_metering_defaults():
-    from core.services.sandbox.service import ExecutionResult
+    from baselith.core.services.sandbox.service import ExecutionResult
 
     result = ExecutionResult(stdout="", stderr="", exit_code=0, execution_time=1.0)
     assert result.compute_seconds == 0.0
@@ -67,7 +71,7 @@ def test_config_cost_rate_defaults_to_zero():
 
 
 async def test_compute_seconds_and_cost_populated(mock_docker_client, mock_container):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     with patched_config(cost_per_compute_second=0.5):
         service = SandboxService()
@@ -80,7 +84,7 @@ async def test_compute_seconds_and_cost_populated(mock_docker_client, mock_conta
 
 
 async def test_zero_rate_keeps_cost_zero(mock_docker_client, mock_container):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     with patched_config():
         service = SandboxService()
@@ -91,7 +95,7 @@ async def test_zero_rate_keeps_cost_zero(mock_docker_client, mock_container):
 
 
 async def test_budget_charged_after_execution(mock_docker_client, mock_container):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     budget = LoopBudget(limits=LoopLimits(budget_usd=10.0))
     with patched_config(cost_per_compute_second=1.0):
@@ -103,7 +107,7 @@ async def test_budget_charged_after_execution(mock_docker_client, mock_container
 
 
 async def test_budget_exceeded_propagates(mock_docker_client, mock_container):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     budget = LoopBudget(limits=LoopLimits(budget_usd=1e-9))
     with patched_config(cost_per_compute_second=1.0):
@@ -113,7 +117,7 @@ async def test_budget_exceeded_propagates(mock_docker_client, mock_container):
 
 
 async def test_timeout_records_compute_and_cost(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     container = MagicMock()
     container.wait.side_effect = RuntimeError("simulated wait timeout")
@@ -134,7 +138,7 @@ async def test_timeout_records_compute_and_cost(mock_docker_client):
 
 
 async def test_static_analysis_block_no_container_no_charge(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     budget = LoopBudget()
     with patched_config(static_analysis_mode="block", cost_per_compute_second=1.0):
@@ -150,7 +154,7 @@ async def test_static_analysis_block_no_container_no_charge(mock_docker_client):
 
 
 async def test_sbx_metering(mock_docker_pkg):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     sbx_factory = MagicMock()
     sbx_factory.ensure_available = AsyncMock()

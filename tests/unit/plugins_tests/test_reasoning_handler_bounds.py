@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # Resolve through sys.modules: a shim can clobber the package attribute.
-import plugins.reasoning_agent.plugin  # noqa: F401
+import baselith.plugins.reasoning_agent.plugin  # noqa: F401
 
-_plugin = sys.modules["plugins.reasoning_agent.plugin"]
+_plugin = sys.modules["baselith.plugins.reasoning_agent.plugin"]
 
 
 def _handler(config: dict[str, Any] | None = None) -> tuple[Any, AsyncMock]:

@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.orchestration.handlers.reasoning import ReasoningHandler
-from core.orchestration.parallel import ToolCall
-from core.reasoning.react import ToolDefinition
+from baselith.core.orchestration.handlers.reasoning import ReasoningHandler
+from baselith.core.orchestration.parallel import ToolCall
+from baselith.core.reasoning.react import ToolDefinition
 
 pytestmark = [pytest.mark.contract]
 
@@ -143,7 +143,7 @@ class TestParallelToolsStrategy:
         assert "ERROR" in result["response"]["c1"]
 
     async def test_tool_categories_gate_parallel_tools(self):
-        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+        from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
         handler = ReasoningHandler()
 
@@ -165,7 +165,7 @@ class TestParallelToolsStrategy:
         assert "requires human" in result["response"]["c1"]
 
     async def test_undeclared_category_gated_fail_safe(self):
-        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+        from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
         handler = ReasoningHandler()
 
@@ -198,7 +198,7 @@ class TestParallelToolsStrategy:
 
 def _skill_service(tmp_path):
     """A SkillService over one plugin shipping a single 'review' skill."""
-    from core.plugins.skills_service import SkillService
+    from baselith.core.plugins.skills_service import SkillService
 
     root = tmp_path / "alpha" / "skills" / "review"
     root.mkdir(parents=True)

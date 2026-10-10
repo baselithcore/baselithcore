@@ -10,17 +10,17 @@ from unittest.mock import Mock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.services.llm import LLMService
-from core.services.llm.cost_control import CostTracker
-from core.services.llm.exceptions import BudgetExceededError
+from baselith.core.services.llm import LLMService
+from baselith.core.services.llm.cost_control import CostTracker
+from baselith.core.services.llm.exceptions import BudgetExceededError
 
 
 class TestLLMService:
     """Tests for LLMService."""
 
-    @patch("core.services.llm.service.TTLCache")
-    @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.providers.ollama_provider.OllamaProvider")
+    @patch("baselith.core.services.llm.service.TTLCache")
+    @patch("baselith.core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.providers.ollama_provider.OllamaProvider")
     def test_initialization_ollama(self, mock_ollama, mock_config, mock_ttl_cache):
         """Test service initialization with Ollama."""
         mock_config.return_value = Mock(
@@ -39,9 +39,9 @@ class TestLLMService:
         mock_ollama.assert_called_once()
         mock_ttl_cache.assert_called_once()
 
-    @patch("core.services.llm.service.TTLCache")
-    @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.providers.openai_provider.OpenAIProvider")
+    @patch("baselith.core.services.llm.service.TTLCache")
+    @patch("baselith.core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.providers.openai_provider.OpenAIProvider")
     def test_initialization_openai(self, mock_openai, mock_config, mock_ttl_cache):
         """Test service initialization with OpenAI."""
         mock_config.return_value = Mock(
@@ -60,10 +60,10 @@ class TestLLMService:
         assert mock_openai.call_args.kwargs["api_key"] == "test-key"
         mock_ttl_cache.assert_called_once()
 
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     def test_initialization_openai_no_key(self, mock_config):
         """Test error when OpenAI key is missing."""
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         mock_config.return_value = Mock(
             provider="openai",
@@ -75,8 +75,8 @@ class TestLLMService:
         with pytest.raises(LLMProviderError, match="OpenAI API key is required"):
             LLMService()
 
-    @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.providers.anthropic_provider.AnthropicProvider")
+    @patch("baselith.core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.providers.anthropic_provider.AnthropicProvider")
     def test_initialization_anthropic(self, mock_anthropic, mock_config):
         """Test service initialization with Anthropic."""
         mock_config.return_value = Mock(
@@ -91,10 +91,10 @@ class TestLLMService:
         mock_anthropic.assert_called_once()
         assert mock_anthropic.call_args.kwargs["api_key"] == "ant-key"
 
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     def test_initialization_unsupported(self, mock_config):
         """Test error for unsupported provider."""
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         mock_config.return_value = Mock(
             provider="unsupported", enable_cache=False, cache_max_size=10, cache_ttl=10
@@ -102,8 +102,8 @@ class TestLLMService:
         with pytest.raises(LLMProviderError, match="Unsupported provider"):
             LLMService()
 
-    @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.service.SemanticLLMCache")
+    @patch("baselith.core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.SemanticLLMCache")
     def test_initialization_semantic_cache(self, mock_semantic, mock_config):
         """Test semantic cache initialization."""
         mock_config.return_value = Mock(
@@ -119,11 +119,11 @@ class TestLLMService:
         # Size/TTL come from SEMANTIC_CACHE_*, not the exact-match LLM cache.
         mock_semantic.assert_called_once_with(threshold=None)
 
-    @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.service.SemanticLLMCache")
+    @patch("baselith.core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.SemanticLLMCache")
     def test_semantic_cache_enabled_from_config(self, mock_semantic, mock_config):
         """SEMANTIC_CACHE_ENABLED turns the cache on without a constructor flag."""
-        from core.config.cache import SemanticCacheConfig
+        from baselith.core.config.cache import SemanticCacheConfig
 
         mock_config.return_value = Mock(
             provider="ollama",
@@ -132,16 +132,18 @@ class TestLLMService:
             api_base="http://localhost:11434",
         )
         on = SemanticCacheConfig(enabled=True, _env_file=None)
-        with patch("core.config.cache.get_semantic_cache_config", return_value=on):
+        with patch(
+            "baselith.core.config.cache.get_semantic_cache_config", return_value=on
+        ):
             service = LLMService()
             assert service.enable_semantic_cache is True
             mock_semantic.assert_called_once_with(threshold=None)
             # An explicit False still opts out.
             assert LLMService(enable_semantic_cache=False).semantic_cache is None
 
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     def test_semantic_cache_off_by_default(self, mock_config):
-        from core.config.cache import SemanticCacheConfig
+        from baselith.core.config.cache import SemanticCacheConfig
 
         mock_config.return_value = Mock(
             provider="ollama",
@@ -150,21 +152,25 @@ class TestLLMService:
             api_base="http://localhost:11434",
         )
         off = SemanticCacheConfig(_env_file=None)
-        with patch("core.config.cache.get_semantic_cache_config", return_value=off):
+        with patch(
+            "baselith.core.config.cache.get_semantic_cache_config", return_value=off
+        ):
             assert LLMService().semantic_cache is None
 
     def test_semantic_cache_reads_config_values(self, monkeypatch):
         """maxsize/ttl/threshold default to the SEMANTIC_CACHE_* settings."""
-        from core.cache.semantic_cache import SemanticLLMCache
-        from core.config.cache import SemanticCacheConfig
+        from baselith.core.cache.semantic_cache import SemanticLLMCache
+        from baselith.core.config.cache import SemanticCacheConfig
 
         cfg = SemanticCacheConfig(maxsize=7, ttl=11.0, threshold=0.6, _env_file=None)
-        monkeypatch.setattr("core.config.cache.get_semantic_cache_config", lambda: cfg)
+        monkeypatch.setattr(
+            "baselith.core.config.cache.get_semantic_cache_config", lambda: cfg
+        )
         cache = SemanticLLMCache(embedder=Mock())
         assert (cache._maxsize, cache._ttl, cache._threshold) == (7, 11.0, 0.6)
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_response(self, mock_config):
         """Test generating a response (async)."""
         mock_config.return_value = Mock(
@@ -192,8 +198,8 @@ class TestLLMService:
         service.provider.generate.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.TTLCache")
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.TTLCache")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_response_with_cache(self, mock_config, mock_ttl_cache):
         """Test response caching (async)."""
         mock_config.return_value = Mock(
@@ -252,7 +258,7 @@ class TestLLMService:
         assert service.provider.generate.call_count == 1  # Not called again
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_exact_cache_hit_skips_semantic_cache(self, mock_config):
         """An exact-cache hit (O(1) Redis GET) must not pay for the semantic
         cache's embedding inference — the exact check runs first."""
@@ -280,7 +286,7 @@ class TestLLMService:
         service.semantic_cache.get_similar.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_response_with_budget(self, mock_config):
         """Test generation with token budget (async)."""
         mock_config.return_value = Mock(
@@ -306,7 +312,7 @@ class TestLLMService:
             await service.generate_response("Test prompt")
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_response_stream(self, mock_config):
         """Test streaming generation (async)."""
         mock_config.return_value = Mock(
@@ -338,7 +344,7 @@ class TestLLMService:
         assert chunks == ["Hello", " world", "!"]
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_rate_limit_retry(self, mock_config):
         """Test retry logic on rate limit errors."""
         mock_config.return_value = Mock(
@@ -360,7 +366,7 @@ class TestLLMService:
         assert mock_provider.generate.call_count == 2
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_non_transient_error_fails_fast_single_attempt(self, mock_config):
         """The service is the single retry layer and only retries rate limits.
 
@@ -369,7 +375,7 @@ class TestLLMService:
         """
         from unittest.mock import AsyncMock
 
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         mock_config.return_value = Mock(
             provider="ollama", model="m", enable_cache=False
@@ -395,8 +401,10 @@ class TestLLMService:
         """
         import inspect
 
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         for cls in (AnthropicProvider, OpenAIProvider):
             for method_name in ("generate", "generate_stream"):
@@ -404,10 +412,10 @@ class TestLLMService:
                 assert "@retry" not in src, f"{cls.__name__}.{method_name}"
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_general_error(self, mock_config):
         """Test general error wrapping in generate_response."""
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         mock_config.return_value = Mock(
             provider="ollama", model="m", enable_cache=False
@@ -424,10 +432,10 @@ class TestLLMService:
             await service.generate_response("q")
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
+    @patch("baselith.core.services.llm.service.get_llm_config")
     async def test_generate_response_stream_error(self, mock_config):
         """Test error handling in streaming generation."""
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         mock_config.return_value = Mock(
             provider="ollama", model="m", enable_cache=False

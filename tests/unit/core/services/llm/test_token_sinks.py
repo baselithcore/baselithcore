@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.services.llm._telemetry import (
+from baselith.core.services.llm._telemetry import (
     register_token_sink,
     unregister_token_sink,
 )
@@ -21,7 +21,9 @@ def test_sink_fires_from_directly_imported_reference() -> None:
     # Import the way a generation module does: a direct reference bound at
     # import time. The observer must still fire — this is the regression that
     # silently detached the cost ledger when the seam was a monkeypatch.
-    from core.services.llm._generation import report_tokens_to_middleware as sink_ref
+    from baselith.core.services.llm._generation import (
+        report_tokens_to_middleware as sink_ref,
+    )
 
     seen: list[tuple[int, str]] = []
 
@@ -39,7 +41,7 @@ def test_sink_fires_from_directly_imported_reference() -> None:
 
 
 def test_zero_and_negative_counts_are_not_reported() -> None:
-    from core.services.llm._telemetry import report_tokens_to_middleware
+    from baselith.core.services.llm._telemetry import report_tokens_to_middleware
 
     seen: list[tuple[int, str]] = []
 
@@ -56,7 +58,7 @@ def test_zero_and_negative_counts_are_not_reported() -> None:
 
 
 def test_register_is_idempotent_and_unregister_removes() -> None:
-    from core.services.llm._telemetry import report_tokens_to_middleware
+    from baselith.core.services.llm._telemetry import report_tokens_to_middleware
 
     seen: list[int] = []
 
@@ -77,7 +79,7 @@ def test_register_is_idempotent_and_unregister_removes() -> None:
 
 
 def test_sink_exception_never_breaks_the_report() -> None:
-    from core.services.llm._telemetry import report_tokens_to_middleware
+    from baselith.core.services.llm._telemetry import report_tokens_to_middleware
 
     def broken(count: int, model: str) -> None:
         raise RuntimeError("observer bug")
@@ -94,7 +96,7 @@ def test_sink_fires_even_when_budget_check_raises(
 ) -> None:
     # Consumed tokens must be accounted even when the middleware budget gate
     # rejects the request.
-    import core.services.llm._telemetry as telemetry
+    import baselith.core.services.llm._telemetry as telemetry
 
     class _Boom:
         def track_tokens(self, count: int, model: str = "unknown") -> None:
@@ -126,7 +128,7 @@ class TestReportExternalUsage:
     """
 
     def test_emits_the_paired_input_then_model_reports(self) -> None:
-        from core.services.llm import report_external_usage
+        from baselith.core.services.llm import report_external_usage
 
         seen: list[tuple[int, str]] = []
 
@@ -144,7 +146,7 @@ class TestReportExternalUsage:
         assert seen == [(900, "input"), (120, "qwen3:8b")]
 
     def test_streaming_uses_the_input_stream_sentinel(self) -> None:
-        from core.services.llm import report_external_usage
+        from baselith.core.services.llm import report_external_usage
 
         seen: list[tuple[int, str]] = []
 
@@ -162,7 +164,7 @@ class TestReportExternalUsage:
         assert seen == [(10, "input_stream"), (2, "gpt-4o-mini")]
 
     def test_skips_missing_counts(self) -> None:
-        from core.services.llm import report_external_usage
+        from baselith.core.services.llm import report_external_usage
 
         seen: list[tuple[int, str]] = []
 
@@ -184,7 +186,7 @@ class TestReportExternalUsage:
         # The tokens were already spent by an engine this process does not
         # gate, so a budget raise must not corrupt a paid-for response — and
         # must not swallow the second half of the pair either.
-        import core.services.llm._telemetry as telemetry
+        import baselith.core.services.llm._telemetry as telemetry
 
         class _Boom:
             def track_tokens(self, count: int, model: str = "unknown") -> None:

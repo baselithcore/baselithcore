@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from core._core_version import CORE_VERSION
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.upgrade import (
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.upgrade import (
     Deployment,
     detect_install_method,
     render_instructions,
 )
-from core.plugin_updates.upgrade.method import is_source_checkout
+from baselith.core.plugin_updates.upgrade.method import is_source_checkout
 
 from .test_upgrade_instructions import _build, _commands
 from .test_upgrade_service import _cfg as _svc_cfg
@@ -195,7 +195,7 @@ def test_a_directory_is_refused(tmp_path: Path) -> None:
 def test_the_file_is_read_again_only_when_it_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugin_updates.upgrade import custom
+    from baselith.core.plugin_updates.upgrade import custom
 
     doc = tmp_path / "u.md"
     doc.write_text("v1 {version}")

@@ -59,13 +59,13 @@ PIPELINE = re.compile(r"^(\.github/workflows/ci\.yml|scripts/ci_plan\.py)$")
 
 #: Prose nothing executes. A pull request that touches only these skips the
 #: suite, the evals and the packaging checks; the docs gates still run. Prompt
-#: templates are Markdown too, but live under core/ and are code.
+#: templates are Markdown too, but live under baselith/core/ and are code.
 DOCS_ONLY = re.compile(
     r"^("
     r"mkdocs-site/"
     r"|[^/]+\.md$"
-    r"|plugins/[^/]+/docs/"
-    r"|plugins/[^/]+/(README|CHANGELOG)\.md$"
+    r"|baselith/plugins/[^/]+/docs/"
+    r"|baselith/plugins/[^/]+/(README|CHANGELOG)\.md$"
     r"|sdk/[^/]+/README\.md$"
     r"|\.github/(ISSUE_TEMPLATE/|PULL_REQUEST_TEMPLATE)"
     r"|media/"
@@ -76,7 +76,7 @@ DOCS_ONLY = re.compile(
 SCOPES: dict[str, re.Pattern[str]] = {
     "workflows": re.compile(r"^\.github/"),
     "helm": re.compile(r"^deploy/helm/"),
-    "frontend": re.compile(r"^core/static/frontend/"),
+    "frontend": re.compile(r"^baselith/core/static/frontend/"),
     "sdk": re.compile(r"^sdk/"),
     # What the dependency scanners read: manifests, locks, the image recipe
     # and the accepted-risk register they all honour.

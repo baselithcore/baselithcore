@@ -6,7 +6,7 @@ different models of the same width — the common case, 384 — therefore shared
 every entry, so a query embedded by one model could be answered with the
 other's vector, silently wrecking the geometry of every similarity score.
 
-The sibling implementation in ``core/services/vectorstore/embedding_cache.py``
+The sibling implementation in ``baselith/core/services/vectorstore/embedding_cache.py``
 already keys on ``f"{model_id}:{text}"``; these tests pin the same guarantee
 here so the two cannot drift apart again.
 """
@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import pytest
 
-from core.nlp.models import CachedEmbedder
+from baselith.core.nlp.models import CachedEmbedder
 
 pytestmark = pytest.mark.unit
 

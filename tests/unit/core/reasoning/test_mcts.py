@@ -2,10 +2,15 @@
 Test suite for MCTS strategy in Tree of Thoughts.
 
 Tests the modularized MCTS functions (uct_select, backpropagate, mcts_search)
-from core.reasoning.tot.mcts module.
+from baselith.core.reasoning.tot.mcts module.
 """
 
-from core.reasoning.tot import ThoughtNode, backpropagate, mcts_search, uct_select
+from baselith.core.reasoning.tot import (
+    ThoughtNode,
+    backpropagate,
+    mcts_search,
+    uct_select,
+)
 
 
 class TestMCTS:

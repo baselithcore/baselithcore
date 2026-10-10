@@ -1,10 +1,10 @@
-"""Unit tests for ``core.models.fallback``."""
+"""Unit tests for ``baselith.core.models.fallback``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.models.fallback import (
+from baselith.core.models.fallback import (
     AllProvidersFailedError,
     FallbackChain,
     Provider,

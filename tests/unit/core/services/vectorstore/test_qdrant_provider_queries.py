@@ -1,5 +1,5 @@
 """
-Tests for core/services/vectorstore/providers/qdrant_provider.py
+Tests for baselith/core/services/vectorstore/providers/qdrant_provider.py
 
 Tests QdrantProvider with mocked AsyncQdrant client.
 """
@@ -13,7 +13,9 @@ import pytest
 class TestQdrantProviderSearch:
     """Tests for QdrantProvider.search method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_search_returns_results(self, mock_qdrant_client):
         """Verify search returns query results."""
         mock_client = AsyncMock()
@@ -22,7 +24,9 @@ class TestQdrantProviderSearch:
         mock_client.query_points.return_value = mock_response
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         results = await provider.search("test_collection", [0.1, 0.2, 0.3], limit=5)
@@ -30,15 +34,19 @@ class TestQdrantProviderSearch:
         assert len(results) == 2
         mock_client.query_points.assert_called_once()
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_search_raises_on_error(self, mock_qdrant_client):
         """Verify search raises VectorStoreError on failure."""
         mock_client = AsyncMock()
         mock_client.query_points.side_effect = Exception("Search failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -52,7 +60,9 @@ class TestQdrantProviderSearch:
 class TestQdrantProviderRetrieve:
     """Tests for QdrantProvider.retrieve method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_retrieve_points(self, mock_qdrant_client):
         """Verify retrieve returns specific points by ID."""
         mock_client = AsyncMock()
@@ -60,7 +70,9 @@ class TestQdrantProviderRetrieve:
         mock_client.retrieve.return_value = mock_points
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         results = await provider.retrieve("test_collection", [1, 2])
@@ -71,15 +83,19 @@ class TestQdrantProviderRetrieve:
             ids=[1, 2],
         )
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_retrieve_raises_on_error(self, mock_qdrant_client):
         """Verify retrieve raises VectorStoreError on failure."""
         mock_client = AsyncMock()
         mock_client.retrieve.side_effect = Exception("Retrieve failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -93,13 +109,17 @@ class TestQdrantProviderRetrieve:
 class TestQdrantProviderDelete:
     """Tests for QdrantProvider.delete method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_delete_points(self, mock_qdrant_client):
         """Verify delete removes points correctly."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         await provider.delete("test_collection", [1, 2, 3])
@@ -109,15 +129,19 @@ class TestQdrantProviderDelete:
         assert call_kwargs["collection_name"] == "test_collection"
         assert call_kwargs["points_selector"] == [1, 2, 3]
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_delete_raises_on_error(self, mock_qdrant_client):
         """Verify delete raises VectorStoreError on failure."""
         mock_client = AsyncMock()
         mock_client.delete.side_effect = Exception("Delete failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -131,7 +155,9 @@ class TestQdrantProviderDelete:
 class TestQdrantProviderCollectionExists:
     """Tests for QdrantProvider.collection_exists method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_collection_exists_returns_true(self, mock_qdrant_client):
         """Verify collection_exists returns True when collection exists."""
         mock_client = AsyncMock()
@@ -142,14 +168,18 @@ class TestQdrantProviderCollectionExists:
         mock_client.get_collections.return_value = mock_collections
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         result = await provider.collection_exists("test_collection")
 
         assert result is True
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_collection_exists_returns_false(self, mock_qdrant_client):
         """Verify collection_exists returns False when collection doesn't exist."""
         mock_client = AsyncMock()
@@ -158,22 +188,28 @@ class TestQdrantProviderCollectionExists:
         mock_client.get_collections.return_value = mock_collections
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         result = await provider.collection_exists("nonexistent")
 
         assert result is False
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_collection_exists_raises_when_unreachable(self, mock_qdrant_client):
         """An unreachable store must not be reported as a missing collection."""
         mock_client = AsyncMock()
         mock_client.get_collections.side_effect = Exception("connection refused")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         with pytest.raises(VectorStoreError, match="connection refused"):
@@ -184,7 +220,9 @@ class TestQdrantProviderCollectionExists:
 class TestQdrantProviderScroll:
     """Tests for QdrantProvider.scroll method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_scroll_returns_results(self, mock_qdrant_client):
         """Verify scroll returns scroll response."""
         mock_client = AsyncMock()
@@ -192,7 +230,9 @@ class TestQdrantProviderScroll:
         mock_client.scroll.return_value = mock_response
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         result = await provider.scroll("test_collection", limit=50, offset=None)
@@ -200,15 +240,19 @@ class TestQdrantProviderScroll:
         assert result is mock_response
         mock_client.scroll.assert_called_once()
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_scroll_raises_on_error(self, mock_qdrant_client):
         """Verify scroll raises VectorStoreError on failure."""
         mock_client = AsyncMock()
         mock_client.scroll.side_effect = Exception("Scroll failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 

@@ -2,7 +2,7 @@
 
 Every settings class declares ``extra="ignore"``, so ``CORE_LOG_LEVL=DEBUG`` is
 accepted and dropped: the operator sees the default and no error explaining why.
-``core.config.drift`` reports names that closely resemble a declared setting
+``baselith.core.config.drift`` reports names that closely resemble a declared setting
 without matching one, and — deliberately — nothing else, so the warning stays
 worth reading.
 """
@@ -12,9 +12,9 @@ import os
 
 import pytest
 
-import core.config  # noqa: F401  — binds every settings class for the name table
-from core.config import drift
-from core.config.drift import (
+import baselith.core.config  # noqa: F401  — binds every settings class for the name table
+from baselith.core.config import drift
+from baselith.core.config.drift import (
     EnvSuspect,
     known_setting_names,
     register_owned_env,
@@ -119,7 +119,7 @@ class TestStartupWarning:
         monkeypatch.setattr(os, "environ", {"PATH": "/usr/bin"})
         monkeypatch.setenv("CORE_LOG_LEVL", "DEBUG")
 
-        with caplog.at_level(logging.WARNING, logger="core.config.drift"):
+        with caplog.at_level(logging.WARNING, logger="baselith.core.config.drift"):
             suspects = warn_on_suspected_typos()
 
         assert [suspect.name for suspect in suspects] == ["CORE_LOG_LEVL"]
@@ -129,7 +129,7 @@ class TestStartupWarning:
         """Cleared rather than trusted: the ambient environment is not hermetic."""
         monkeypatch.setattr(os, "environ", {"PATH": "/usr/bin"})
 
-        with caplog.at_level(logging.WARNING, logger="core.config.drift"):
+        with caplog.at_level(logging.WARNING, logger="baselith.core.config.drift"):
             assert warn_on_suspected_typos() == []
 
         assert not [r for r in caplog.records if "matches no setting" in r.message]

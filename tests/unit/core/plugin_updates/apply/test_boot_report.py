@@ -9,14 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.api import _runtime_services
-from core.plugin_updates.apply.boot_report import (
+from baselith.core.api import _runtime_services
+from baselith.core.plugin_updates.apply.boot_report import (
     latest_active_plugins,
     read_boot_reports,
     write_boot_report,
 )
-from core.plugin_updates.apply.models import Expectation
-from core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.apply.models import Expectation
+from baselith.core.plugin_updates.apply.store import RunStore
 
 T0 = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 RUN = "pinstall-20260930T120000Z-0000abcd"
@@ -161,7 +161,7 @@ async def test_old_reports_are_pruned_and_content_has_no_secrets(
 
 
 async def test_real_registry_health_shape(tmp_path: Path) -> None:
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.plugins.registry import PluginRegistry
 
     class _P:
         metadata = SimpleNamespace(name="demo", version="1.2.0")
@@ -173,7 +173,9 @@ async def test_real_registry_health_shape(tmp_path: Path) -> None:
     reg._plugins["demo"] = _P()  # type: ignore[assignment]
     store = RunStore(tmp_path)
     _expect(store, [])
-    with patch("core.plugins.interface.Plugin.has_health_override", return_value=False):
+    with patch(
+        "baselith.core.plugins.interface.Plugin.has_health_override", return_value=False
+    ):
         await write_boot_report(reg, store, core_version="1", now=T0, pid=5)
     (report,) = read_boot_reports(store, since=T0 - timedelta(seconds=1))
     assert report.plugins["demo"].active and report.plugins["demo"].healthy is True
@@ -183,7 +185,8 @@ async def test_real_registry_health_shape(tmp_path: Path) -> None:
 async def test_hook_is_a_noop_when_apply_is_disabled(tmp_path: Path) -> None:
     cfg = SimpleNamespace(enabled=False, state_dir=tmp_path / "st")
     with patch(
-        "core.config.plugin_update_apply.get_update_apply_config", return_value=cfg
+        "baselith.core.config.plugin_update_apply.get_update_apply_config",
+        return_value=cfg,
     ):
         await _runtime_services._write_update_boot_report()
     assert not (tmp_path / "st").exists()
@@ -192,7 +195,7 @@ async def test_hook_is_a_noop_when_apply_is_disabled(tmp_path: Path) -> None:
 async def test_hook_never_raises(tmp_path: Path) -> None:
     with (
         patch(
-            "core.config.plugin_update_apply.get_update_apply_config",
+            "baselith.core.config.plugin_update_apply.get_update_apply_config",
             side_effect=RuntimeError("x"),
         ),
         patch.object(_runtime_services, "logger") as log,
@@ -253,7 +256,7 @@ async def test_hanging_health_is_unhealthy_within_the_bound(tmp_path: Path) -> N
 
 
 def test_health_payload_interpretation() -> None:
-    from core.plugin_updates.apply.boot_report import _healthy
+    from baselith.core.plugin_updates.apply.boot_report import _healthy
 
     assert _healthy({"plugins": {"a": {"status": "unhealthy"}}}, "a") is False
     assert _healthy({"plugins": {"a": {"status": "not_found"}}}, "a") is False
@@ -301,7 +304,7 @@ async def test_overlay_link_is_reported_as_its_store_entry(tmp_path: Path) -> No
     made every real update fail "not loaded from the expected release
     directory" and roll back (found on a real boot, Task 15).
     """
-    from core.plugin_updates.apply.health import evaluate_boot_reports
+    from baselith.core.plugin_updates.apply.health import evaluate_boot_reports
 
     overlay = tmp_path / "ov"
     (overlay / ".store" / "demo-1.2.0").mkdir(parents=True)

@@ -16,17 +16,17 @@ import time
 
 import pytest
 
-from core.connectors.errors import redact as connector_redact
-from core.observability import redaction as redmod
-from core.observability import setup as setupmod
-from core.observability.redaction import (
+from baselith.core.connectors.errors import redact as connector_redact
+from baselith.core.observability import redaction as redmod
+from baselith.core.observability import setup as setupmod
+from baselith.core.observability.redaction import (
     _key_is_sensitive,
     _mask_text,
     redact_secrets,
     redact_sensitive,
     redact_url_credentials,
 )
-from core.observability.sentry import _before_send
+from baselith.core.observability.sentry import _before_send
 
 NEW_KEYS = [
     "pwd",

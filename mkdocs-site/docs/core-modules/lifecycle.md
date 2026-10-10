@@ -1,11 +1,11 @@
 # Lifecycle Management
 
-The `core/lifecycle/` module provides deterministic startup/shutdown hooks and a mixin pattern for components that need managed lifecycle phases.
+The `baselith/core/lifecycle/` module provides deterministic startup/shutdown hooks and a mixin pattern for components that need managed lifecycle phases.
 
 ## Module Structure
 
 ```yaml
-core/lifecycle/
+baselith/core/lifecycle/
 ├── protocols.py      # AgentLifecycle, AgentHooks, AgentState, HealthStatus
 ├── mixins.py         # LifecycleMixin — startup()/shutdown() template methods
 ├── deterministic.py  # apply_deterministic_mode() + get_llm_override_kwargs()
@@ -20,7 +20,7 @@ core/lifecycle/
 Base class for any component that requires explicit initialization and
 teardown. It implements the public `startup()` / `shutdown()` template
 methods, which manage an `AgentState` machine and call the override hooks
-`_do_startup()` / `_do_shutdown()`. `AgentState` (`core/lifecycle/protocols.py`)
+`_do_startup()` / `_do_shutdown()`. `AgentState` (`baselith/core/lifecycle/protocols.py`)
 has nine values — `UNINITIALIZED`, `STARTING`, `READY`, `RUNNING`, `PAUSED`,
 `STOPPING`, `STOPPED`, `ERROR`, `RECOVERING` — and the mixin drives them as
 follows:
@@ -39,7 +39,7 @@ follows:
   mixin.
 
 ```python
-from core.lifecycle.mixins import LifecycleMixin
+from baselith.core.lifecycle.mixins import LifecycleMixin
 
 class MyService(LifecycleMixin):
 
@@ -72,12 +72,12 @@ context-manager support — call `startup()`/`shutdown()` explicitly.
 
 ## Deterministic Mode
 
-`core/lifecycle/deterministic.py` provides reproducibility helpers, gated on
+`baselith/core/lifecycle/deterministic.py` provides reproducibility helpers, gated on
 `deterministic_mode` (`CORE_DETERMINISTIC_MODE`) in the core config. They are
 plain module functions — there is no startup-ordering manager here.
 
 ```python
-from core.lifecycle.deterministic import (
+from baselith.core.lifecycle.deterministic import (
     apply_deterministic_mode,
     get_llm_override_kwargs,
 )
@@ -116,7 +116,7 @@ without changing anything and `get_llm_override_kwargs()` returns `{}`.
 
 ## Lifecycle Errors
 
-`core/lifecycle/errors.py` defines the framework error hierarchy. All errors
+`baselith/core/lifecycle/errors.py` defines the framework error hierarchy. All errors
 derive from `BaseFrameworkError`, which carries a `code`
 (`FrameworkErrorCode`), an optional `context` dict, a `recoverable` flag, and
 a `to_dict()` serializer for logging/API responses.
@@ -133,7 +133,7 @@ a `to_dict()` serializer for logging/API responses.
 code `FrameworkErrorCode.LIFECYCLE_START_FAILED` and re-raises it.
 
 ```python
-from core.lifecycle.errors import LifecycleError, FrameworkErrorCode
+from baselith.core.lifecycle.errors import LifecycleError, FrameworkErrorCode
 
 try:
     await svc.startup()
@@ -148,8 +148,8 @@ except LifecycleError as exc:
 
 To optimize startup time and memory footprint, the framework supports **Lazy Resource Initialization**. Instead of starting all core services (PostgreSQL, Redis, Vector Database, LLM providers) at once, the system analyzes the requirements of enabled plugins:
 
-1. **Requirement Analysis**: `ResourceAnalyzer` (`core/plugins/resource_analyzer.py`) performs static analysis of plugin code to identify dependencies on core resources — the `ResourceType` values `llm`, `vectorstore`, `graph`, `postgres`, `redis`, `memory`, `evaluation`, `evolution`.
-2. **On-Demand Factory Registration**: the API lifespan registers one async initializer per required resource from `core/bootstrap/lazy_init.py` (`RESOURCE_FACTORIES`: `initialize_postgres`, `initialize_vectorstore`, `initialize_llm`, `initialize_graph`, `initialize_redis`, `initialize_memory`, `initialize_hierarchical_memory`, `initialize_evaluation`, `initialize_evolution`) into the `LazyServiceRegistry` (`core/di/lazy_registry.py`, `get_lazy_registry()`) via `register_factory(resource, factory)`. This is a separate registry from the plain DI container in `core/di/container.py` — `ServiceRegistry.register(interface, implementation)` and `DependencyContainer.register(interface, factory, lifetime)` carry no lazy semantics.
+1. **Requirement Analysis**: `ResourceAnalyzer` (`baselith/core/plugins/resource_analyzer.py`) performs static analysis of plugin code to identify dependencies on core resources — the `ResourceType` values `llm`, `vectorstore`, `graph`, `postgres`, `redis`, `memory`, `evaluation`, `evolution`.
+2. **On-Demand Factory Registration**: the API lifespan registers one async initializer per required resource from `baselith/core/bootstrap/lazy_init.py` (`RESOURCE_FACTORIES`: `initialize_postgres`, `initialize_vectorstore`, `initialize_llm`, `initialize_graph`, `initialize_redis`, `initialize_memory`, `initialize_hierarchical_memory`, `initialize_evaluation`, `initialize_evolution`) into the `LazyServiceRegistry` (`baselith/core/di/lazy_registry.py`, `get_lazy_registry()`) via `register_factory(resource, factory)`. This is a separate registry from the plain DI container in `baselith/core/di/container.py` — `ServiceRegistry.register(interface, implementation)` and `DependencyContainer.register(interface, factory, lifetime)` carry no lazy semantics.
 3. **Just-In-Time Startup**: `await get_lazy_registry().get_or_create("postgres")` runs the factory at most once (async- and thread-safe), caches the instance, and hands it back on every later call; `shutdown_all()` tears the initialized ones down during lifespan shutdown.
 
 This mechanism ensures that a "headless" core or a core with minimal plugins remains extremely lightweight.
@@ -158,8 +158,8 @@ This mechanism ensures that a "headless" core or a core with minimal plugins rem
 
 ## FastAPI Integration
 
-Nothing in `core/` calls `LifecycleMixin.startup()` for you. The API lifespan
-(`core/api/lifespan.py`) drives the **plugin interface** — the loader calls
+Nothing in `baselith/core/` calls `LifecycleMixin.startup()` for you. The API lifespan
+(`baselith/core/api/lifespan.py`) drives the **plugin interface** — the loader calls
 `plugin.initialize(config)` when a plugin is loaded and the lifespan calls
 `plugin.shutdown()` on teardown — plus the lazy registry's `shutdown_all()`.
 A `LifecycleMixin` component is started and stopped by whoever owns it. In
@@ -194,7 +194,7 @@ waits out `--timeout-graceful-shutdown` and then cancels it, logging
 restart. The lifespan teardown cannot help: it runs after the connections
 are gone.
 
-`core.lifecycle.drain` is the moment in between. The application lifespan
+`baselith.core.lifecycle.drain` is the moment in between. The application lifespan
 calls `install_drain_signal_hook()` at startup, which chains a handler in
 front of the ASGI server's SIGTERM/SIGINT handlers, so the first stop signal
 marks the process as draining **before** the server starts waiting. A stream
@@ -202,7 +202,7 @@ awaits `wait_for_drain()` alongside its own work and returns:
 
 ```python
 import asyncio
-from core.lifecycle import wait_for_drain
+from baselith.core.lifecycle import wait_for_drain
 
 async def feed(queue: asyncio.Queue[str]):
     drained = asyncio.ensure_future(wait_for_drain())
@@ -227,7 +227,7 @@ Measured with uvicorn (`--timeout-graceful-shutdown 8`, one open SSE
 client, SIGTERM): without the hook the shutdown took 8.1 s and logged the
 cancellation; with it, 0.1 s and no error — also under `--workers`. An
 `EventSource` reconnects by itself to whichever worker comes up next.
-The MCP Streamable HTTP stream (`core.mcp.sse.SSEStream`) is the core's own
+The MCP Streamable HTTP stream (`baselith.core.mcp.sse.SSEStream`) is the core's own
 consumer: it flushes what is already queued and ends on the drain signal.
 `is_draining()` is the synchronous half: `GET /health/ready` answers 503
 `draining` as soon as it is true, so the load balancer stops sending new

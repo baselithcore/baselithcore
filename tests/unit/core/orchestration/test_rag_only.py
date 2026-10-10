@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.orchestration.mixins._context_assembly import rag_only_intent
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.orchestration.mixins._context_assembly import rag_only_intent
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class _FlowHandler:

@@ -10,8 +10,8 @@ env-driven deployment therefore could neither turn the cache off nor change its
 import pytest
 from pydantic import ValidationError
 
-from core.config.vectorstore import VectorStoreConfig
-from core.services.vectorstore.orchestrator import SearchOrchestrator
+from baselith.core.config.vectorstore import VectorStoreConfig
+from baselith.core.services.vectorstore.orchestrator import SearchOrchestrator
 
 pytestmark = pytest.mark.unit
 

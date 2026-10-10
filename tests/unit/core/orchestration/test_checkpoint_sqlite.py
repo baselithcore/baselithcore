@@ -2,13 +2,13 @@
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     STATUS_COMPLETED,
     STATUS_RUNNING,
     Checkpoint,
 )
-from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+from baselith.core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
 
 pytestmark = [pytest.mark.unit]
 
@@ -141,8 +141,8 @@ class TestHistory:
 
 class TestFactoryResolution:
     async def test_factory_resolves_sqlite_backend(self, tmp_path, monkeypatch):
-        from core.config import orchestration as orch_config
-        from core.orchestration import checkpoint_factory
+        from baselith.core.config import orchestration as orch_config
+        from baselith.core.orchestration import checkpoint_factory
 
         monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "sqlite")
         monkeypatch.setenv(

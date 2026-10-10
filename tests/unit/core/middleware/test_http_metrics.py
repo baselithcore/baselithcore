@@ -1,5 +1,5 @@
 """
-Tests for core/middleware/http_metrics.py.
+Tests for baselith/core/middleware/http_metrics.py.
 
 Focus: the ``route`` label must always be the matched path *template*
 (bounded cardinality), never the raw URL — including when a path-param
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from prometheus_client import REGISTRY
 
-from core.middleware.http_metrics import HTTPMetricsMiddleware, _route_template
+from baselith.core.middleware.http_metrics import HTTPMetricsMiddleware, _route_template
 
 
 def _scope(path: str, **extra) -> dict:

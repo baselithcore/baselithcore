@@ -21,7 +21,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.services.vision import ImageContent, VisionRequest, VisionService
+from baselith.core.services.vision import ImageContent, VisionRequest, VisionService
 
 
 async def demo_analyze_image(service: VisionService, image_path: str) -> None:

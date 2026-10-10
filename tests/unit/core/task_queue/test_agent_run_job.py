@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.task_queue.jobs import agent_run as job_module
+from baselith.core.task_queue.jobs import agent_run as job_module
 
 pytestmark = [pytest.mark.unit]
 
@@ -162,7 +162,7 @@ class TestRetryAwareFailure:
 
 
 def test_tracker_mark_retrying_is_non_terminal_status():
-    from core.task_queue.status import TaskStatus, TaskTracker
+    from baselith.core.task_queue.status import TaskStatus, TaskTracker
 
     recorded = {}
 

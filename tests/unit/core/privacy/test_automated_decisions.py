@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from core.privacy.automated_decisions import (
+from baselith.core.privacy.automated_decisions import (
     Art22Ground,
     AutomatedDecisionActivity,
     AutomatedDecisionRegistry,
@@ -113,7 +113,7 @@ class TestRegistry:
         # structlog sink is process-wide mutable state, so a stdout assert
         # is order-dependent under random test ordering. The warning fires
         # at registration time (register audits the Art. 22 posture).
-        with patch("core.privacy.automated_decisions.logger") as log:
+        with patch("baselith.core.privacy.automated_decisions.logger") as log:
             registry.register(AutomatedDecisionActivity(name="unguarded"))
         assert len(registry.all()) == 2
         assert len(registry.in_scope()) == 2
@@ -140,7 +140,9 @@ class TestRegistry:
 
 class TestDurableStore:
     def test_the_register_survives_a_reopen(self, tmp_path):
-        from core.privacy.automated_decisions import SQLiteAutomatedDecisionStore
+        from baselith.core.privacy.automated_decisions import (
+            SQLiteAutomatedDecisionStore,
+        )
 
         store = SQLiteAutomatedDecisionStore(tmp_path / "adm.db")
         registry = AutomatedDecisionRegistry(store=store)
@@ -158,7 +160,9 @@ class TestDurableStore:
             reopened.close()
 
     def test_updates_replace_rather_than_duplicate(self, tmp_path):
-        from core.privacy.automated_decisions import SQLiteAutomatedDecisionStore
+        from baselith.core.privacy.automated_decisions import (
+            SQLiteAutomatedDecisionStore,
+        )
 
         store = SQLiteAutomatedDecisionStore(tmp_path / "adm.db")
         try:
@@ -174,8 +178,8 @@ class TestDurableStore:
     def test_service_uses_the_durable_store_when_configured(
         self, tmp_path, monkeypatch
     ):
-        from core.config import privacy as privacy_config
-        from core.privacy.automated_decisions import (
+        from baselith.core.config import privacy as privacy_config
+        from baselith.core.privacy.automated_decisions import (
             SQLiteAutomatedDecisionStore,
             get_automated_decision_registry,
             reset_automated_decision_registry,

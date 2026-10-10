@@ -29,12 +29,12 @@ plugin-template/
 Every plugin must implement at least `BasePlugin` (or `AgentPlugin`, `RouterPlugin` depending on functionality):
 
 ```python
-from core.plugins import BasePlugin
+from baselith.core.plugins import BasePlugin
 
 class MyPlugin(BasePlugin):
     name = "my-plugin"
     version = "1.0.0"
-    
+
     def initialize(self, config: dict) -> None:
         """Called during system startup."""
         pass
@@ -47,7 +47,7 @@ class MyPlugin(BasePlugin):
 For plugins providing agents:
 
 ```python
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 
 class MyAgentPlugin(AgentPlugin):
     def create_agent(self, service, **kwargs):
@@ -59,7 +59,7 @@ class MyAgentPlugin(AgentPlugin):
 For plugins extending the knowledge graph:
 
 ```python
-from core.plugins import GraphPlugin
+from baselith.core.plugins import GraphPlugin
 
 class MyGraphPlugin(GraphPlugin):
     def register_entity_types(self) -> list[dict]:
@@ -71,7 +71,7 @@ class MyGraphPlugin(GraphPlugin):
 For plugins adding API endpoints (FastAPI):
 
 ```python
-from core.plugins import RouterPlugin
+from baselith.core.plugins import RouterPlugin
 
 class MyRouterPlugin(RouterPlugin):
     def get_router(self):

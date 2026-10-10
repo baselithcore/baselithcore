@@ -1,6 +1,6 @@
 # Storage Layer
 
-The `core/storage/` module is the **interaction and feedback repository
+The `baselith/core/storage/` module is the **interaction and feedback repository
 layer**. It defines abstract repository interfaces, Pydantic models for
 interactions and feedback, and a PostgreSQL-backed implementation. It is a
 typed, domain-shaped persistence API — not a generic key-value store.
@@ -8,7 +8,7 @@ typed, domain-shaped persistence API — not a generic key-value store.
 ## Module Structure
 
 ```yaml
-core/storage/
+baselith/core/storage/
 ├── interfaces.py  # InteractionRepository + FeedbackRepository (ABCs)
 ├── models.py      # Interaction, Feedback (Pydantic models)
 └── postgres.py    # PostgresStorage — implements both repositories
@@ -22,7 +22,7 @@ Two abstract base classes (`abc.ABC`) define the contract. All methods are
 async.
 
 ```python
-from core.storage.interfaces import InteractionRepository, FeedbackRepository
+from baselith.core.storage.interfaces import InteractionRepository, FeedbackRepository
 ```
 
 ### `InteractionRepository`
@@ -46,7 +46,7 @@ from core.storage.interfaces import InteractionRepository, FeedbackRepository
 ## Models
 
 ```python
-from core.storage.models import Interaction, Feedback
+from baselith.core.storage.models import Interaction, Feedback
 ```
 
 ### `Interaction`
@@ -89,9 +89,9 @@ string argument) and must be `initialize()`-d before use.
     to `"default"`. See [Multi-Tenancy](../advanced/multi-tenancy.md).
 
 ```python
-from core.config import get_storage_config
-from core.storage.postgres import PostgresStorage
-from core.storage.models import Interaction, Feedback
+from baselith.core.config import get_storage_config
+from baselith.core.storage.postgres import PostgresStorage
+from baselith.core.storage.models import Interaction, Feedback
 
 storage = PostgresStorage(config=get_storage_config())
 await storage.initialize()        # opens the pool, ensures schema
@@ -142,7 +142,7 @@ for the `tenant_id` backfill). The indexes it ensures on `interactions`:
     columns and the tenant indexes are owned by migrations 002b and 007;
     see [Who creates the schema](db.md#who-creates-the-schema).
     The migration scripts ship inside the package, under
-    `core/db/migrations/versions/`, so a wheel install can apply them too.
+    `baselith/core/db/migrations/versions/`, so a wheel install can apply them too.
 
 | Index | Columns | Serves |
 |-------|---------|--------|
@@ -173,7 +173,7 @@ them — so every sweep sequentially scanned the whole table.
 
 ## Configuration
 
-`StorageConfig` (`core/config/storage.py`) reads the standard `DB_*`
+`StorageConfig` (`baselith/core/config/storage.py`) reads the standard `DB_*`
 environment variables (there is no `POSTGRES_DSN`):
 
 ```bash
@@ -187,9 +187,9 @@ DB_SSL_MODE=                       # optional libpq sslmode
 DATABASE_URL=postgresql://user:password@host:5432/baselith
 ```
 
-!!! note "vs core/db"
-    `core/storage/` is the **typed interaction/feedback repository layer**
-    (Pydantic models + ABCs). `core/db/` is the **lower-level, function-based
+!!! note "vs baselith/core/db"
+    `baselith/core/storage/` is the **typed interaction/feedback repository layer**
+    (Pydantic models + ABCs). `baselith/core/db/` is the **lower-level, function-based
     document/feedback store** (chunks, schema, analytics). Both target the
     same PostgreSQL instance via the shared connection pool in
-    `core/db/connection.py`.
+    `baselith/core/db/connection.py`.

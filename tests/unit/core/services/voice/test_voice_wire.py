@@ -15,9 +15,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.config.multimodal import VoiceConfig
-from core.services.llm.governed import GovernedClientConfig
-from core.services.voice import (
+from baselith.core.config.multimodal import VoiceConfig
+from baselith.core.services.llm.governed import GovernedClientConfig
+from baselith.core.services.voice import (
     VoiceCapabilities,
     VoiceEgressError,
     VoiceError,
@@ -28,7 +28,7 @@ from core.services.voice import (
     VoiceTimeoutError,
     VoiceUpstreamError,
 )
-from core.services.voice._openai_wire import OpenAIWireClient, WireTarget
+from baselith.core.services.voice._openai_wire import OpenAIWireClient, WireTarget
 
 BASE = "http://voice.test/v1"
 LEAK = "sk-leaky-body-secret-123456"
@@ -103,7 +103,9 @@ def cfg(monkeypatch: pytest.MonkeyPatch) -> VoiceConfig:
     monkeypatch.setenv("VOICE_TTS_BASE_URL", BASE)
     monkeypatch.setenv("VOICE_ALLOW_INTERNAL_ENDPOINTS", "true")
     config = VoiceConfig()
-    monkeypatch.setattr("core.services.voice.service.get_voice_config", lambda: config)
+    monkeypatch.setattr(
+        "baselith.core.services.voice.service.get_voice_config", lambda: config
+    )
     return config
 
 
@@ -270,7 +272,7 @@ class TestService:
             monkeypatch.delenv(var, raising=False)
         config = VoiceConfig(_env_file=None)
         monkeypatch.setattr(
-            "core.services.voice.service.get_voice_config", lambda: config
+            "baselith.core.services.voice.service.get_voice_config", lambda: config
         )
         assert VoiceService().capabilities() == VoiceCapabilities(
             False, False, None, None
@@ -283,7 +285,7 @@ class TestService:
             _env_file=None, openai_api_key=SecretStr("sk-test-key-0000")
         )
         monkeypatch.setattr(
-            "core.services.voice.service.get_voice_config", lambda: config
+            "baselith.core.services.voice.service.get_voice_config", lambda: config
         )
         caps = VoiceService().capabilities()
         assert (caps.stt_provider, caps.tts_provider) == ("openai", "openai")
@@ -314,7 +316,7 @@ class TestGovernance:
             return config
 
         monkeypatch.setattr(
-            "core.services.llm.governed.resolve_governed_client_config", fake
+            "baselith.core.services.llm.governed.resolve_governed_client_config", fake
         )
         return seen
 
@@ -394,7 +396,7 @@ class TestGovernance:
 class TestUsage:
     @pytest.fixture
     def reports(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int, int]]:
-        from core.services.llm.usage_sinks import (
+        from baselith.core.services.llm.usage_sinks import (
             register_usage_sink,
             unregister_usage_sink,
         )
@@ -425,5 +427,7 @@ class TestUsage:
         def boom(*a: Any, **k: Any) -> None:
             raise RuntimeError("accounting down")
 
-        monkeypatch.setattr("core.services.llm._telemetry.report_external_usage", boom)
+        monkeypatch.setattr(
+            "baselith.core.services.llm._telemetry.report_external_usage", boom
+        )
         assert (await service(server).text_to_speech("hi")).audio_bytes

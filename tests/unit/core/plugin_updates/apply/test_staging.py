@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.apply.staging import StagingError, private_copy
-from core.plugins.signing import generate_keypair_hex
+from baselith.core.plugin_updates.apply.staging import StagingError, private_copy
+from baselith.core.plugins.signing import generate_keypair_hex
 
 from ..test_checker import _signed_tarball
 from ._staging_fixtures import KNOWN, make_current, stage, store_is_clean

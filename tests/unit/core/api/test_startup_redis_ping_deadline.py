@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from core.api import startup_checks
+from baselith.core.api import startup_checks
 
 
 async def test_ping_passes_socket_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:

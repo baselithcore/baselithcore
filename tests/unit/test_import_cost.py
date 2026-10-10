@@ -1,11 +1,11 @@
 """Import budgets: what touching one name is allowed to cost.
 
 A package whose ``__init__`` imports every submodule makes the cost of any of
-its names the cost of all of them. That is how ``from core.plugins.result
+its names the cost of all of them. That is how ``from baselith.core.plugins.result
 import SkillResult`` — four Pydantic fields — came to load 955 modules, and
-how ``from core.agent import Agent`` came to load 3 209, including the
+how ``from baselith.core.agent import Agent`` came to load 3 209, including the
 anthropic and openai SDKs whether or not either provider was configured.
-:pep:`562` lazy resolution in :mod:`core._lazy` fixed both.
+:pep:`562` lazy resolution in :mod:`baselith.core._lazy` fixed both.
 
 Nothing stops the next eager import from putting it back, and nobody notices
 an import that got slower. These budgets are that alarm.
@@ -35,9 +35,9 @@ FORBIDDEN = ("anthropic", "openai", "torch", "transformers", "playwright")
 #: ``statement -> (module budget, measured at the time of writing)``.
 BUDGETS: dict[str, tuple[int, int]] = {
     "import baselith": (150, 79),
-    "from core.plugins import SkillResult": (350, 226),
-    "from core.orchestration import AutonomyPolicy": (200, 95),
-    "from core.agent import Agent": (1500, 1107),
+    "from baselith.core.plugins import SkillResult": (350, 226),
+    "from baselith.core.orchestration import AutonomyPolicy": (200, 95),
+    "from baselith.core.agent import Agent": (1500, 1107),
 }
 
 
@@ -82,7 +82,7 @@ def test_no_provider_sdk_is_imported(statement: str) -> None:
 
     assert not forbidden, (
         f"`{statement}` imported {', '.join(forbidden)}. A provider SDK is "
-        "imported inside the branch of core.services.llm.provider_factory "
+        "imported inside the branch of baselith.core.services.llm.provider_factory "
         "that builds it, never at module scope."
     )
 
@@ -92,7 +92,7 @@ def test_importing_the_facade_touches_no_engine() -> None:
     probe = (
         "import sys, baselith\n"
         "print(sorted(m for m in sys.modules "
-        "if m.startswith('core.') and m != 'core._version'))\n"
+        "if m.startswith('core.') and m != 'baselith.core._version'))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe],

@@ -3,7 +3,7 @@ title: Task Queue
 description: Distributed queues for asynchronous jobs with Redis
 ---
 
-The `core/task_queue` module manages **asynchronous jobs** via Redis Queue (RQ), allowing heavy processing without blocking HTTP responses.
+The `baselith/core/task_queue` module manages **asynchronous jobs** via Redis Queue (RQ), allowing heavy processing without blocking HTTP responses.
 
 ## Distributed Architecture Explained
 
@@ -26,7 +26,7 @@ The task queue separates processing into two components:
 **Practical Example**:
 
 ```python
-from core.task_queue import enqueue_task
+from baselith.core.task_queue import enqueue_task
 
 # ❌ WRONG: Sync processing blocks HTTP
 @app.post("/documents")
@@ -48,7 +48,7 @@ async def upload_document(file: UploadFile):
 ## Structure
 
 ```text
-core/task_queue/
+baselith/core/task_queue/
 ├── __init__.py     # public API: get_queue_redis_connection, get_queue,
 │                   #             enqueue_task, schedule_task, CronExpression,
 │                   #             get_dead_letter_queue
@@ -66,7 +66,7 @@ core/task_queue/
     Nothing in the default app enqueues the document and indexing jobs:
     `ingest_document_task`, `batch_ingest_task` and `reindex_collection_task`
     (`jobs/documents.py`) and `run_indexing_job` (`jobs/indexing.py`) have no
-    producer in `core/` or the official plugins. Enqueue them from host or
+    producer in `baselith/core/` or the official plugins. Enqueue them from host or
     plugin code — for example
     `enqueue_task(run_indexing_job, incremental=True, queue="documents")` —
     and run a worker on that queue. The indexing job's `JOB_*`
@@ -77,7 +77,7 @@ core/task_queue/
 The package `__all__` is intentionally small:
 
 ```python
-from core.task_queue import (
+from baselith.core.task_queue import (
     get_queue_redis_connection,  # -> redis.Redis
     get_queue,                   # -> rq.Queue (name="default" unless given)
     enqueue_task,                # immediate enqueue (tenant-aware)
@@ -90,8 +90,8 @@ from core.task_queue import (
 !!! warning "API surface"
     There is **no** `enqueue`, `TaskPriority`, `Job`, `TaskTracker`,
     `TaskScheduler`, or `WorkerMonitor` exported at the package level. The
-    classes live in their submodules (`core.task_queue.scheduler`,
-    `core.task_queue.status`, `core.task_queue.monitor`). Jobs are plain
+    classes live in their submodules (`baselith.core.task_queue.scheduler`,
+    `baselith.core.task_queue.status`, `baselith.core.task_queue.monitor`). Jobs are plain
     callables enqueued by reference — there is no `Job` base class. All of
     the scheduler/tracker/monitor methods are **synchronous** (RQ is sync).
 
@@ -103,7 +103,7 @@ The package-level helpers enqueue plain callables. `enqueue_task` also injects
 the current tenant id into the job metadata.
 
 !!! note "Tenant & user context restoration"
-    Jobs run under `TenantAwareWorker` (`core/task_queue/worker.py`), which
+    Jobs run under `TenantAwareWorker` (`baselith/core/task_queue/worker.py`), which
     rebinds `tenant_id` from the job metadata around each `perform_job`. If the
     job metadata carries a `user_id` (pass it via `meta={"user_id": …}`), the
     worker rebinds the user context too — so plugins declaring `tenancy: personal`
@@ -116,7 +116,7 @@ the current tenant id into the job metadata.
     around the job — no tenant id is set at all.
 
 ```python
-from core.task_queue import enqueue_task, schedule_task
+from baselith.core.task_queue import enqueue_task, schedule_task
 
 # Immediate execution on the configured default queue
 # (TASK_QUEUE_DEFAULT_QUEUE, "default" out of the box)
@@ -142,7 +142,7 @@ in-process recurring workflows.
 
 ```python
 from datetime import datetime, timezone
-from core.task_queue.scheduler import get_task_scheduler
+from baselith.core.task_queue.scheduler import get_task_scheduler
 
 scheduler = get_task_scheduler()
 
@@ -189,7 +189,7 @@ job_id = scheduler.enqueue(
 ```
 
 `retry_delay` (default `TASK_QUEUE_DEFAULT_RETRY_DELAY`, `60`) is the base of
-`core.task_queue.scheduler.retry_intervals(count, base_delay)`, which returns
+`baselith.core.task_queue.scheduler.retry_intervals(count, base_delay)`, which returns
 one interval per retry — `[base, 2*base, 4*base, ...]` — capped at
 `MAX_RETRY_INTERVAL_SECONDS` (3600s). `Retry(max=n)` alone retries with no
 delay at all, so a job whose dependency is briefly down would previously
@@ -207,7 +207,7 @@ webhook handler that may be invoked more than once for the same event).
 
 ## Cron Expressions (`CronExpression`)
 
-`core.task_queue.cron.CronExpression` (re-exported at the package level) is a
+`baselith.core.task_queue.cron.CronExpression` (re-exported at the package level) is a
 **pure-stdlib** parser for classic 5-field cron expressions
 (`minute hour day-of-month month day-of-week`). Supported syntax per field:
 `*`, single numbers, ranges (`1-5`), steps (`*/15`, `1-30/5`), and lists
@@ -216,7 +216,7 @@ for Sunday.
 
 ```python
 from datetime import UTC, datetime
-from core.task_queue import CronExpression
+from baselith.core.task_queue import CronExpression
 
 expr = CronExpression.parse("*/15 9-17 * * 1-5")   # ValueError when malformed
 expr.next_after(datetime(2026, 1, 5, 10, 7, tzinfo=UTC))
@@ -243,12 +243,12 @@ workflow definitions.
 
 ## Task Status Tracking
 
-`TaskTracker` (in `core.task_queue.status`) persists status/progress in Redis.
+`TaskTracker` (in `baselith.core.task_queue.status`) persists status/progress in Redis.
 Construct it directly with a connection, or use the lazy singleton
 `get_task_tracker()`. All methods are synchronous.
 
 ```python
-from core.task_queue.status import get_task_tracker, TaskStatus
+from baselith.core.task_queue.status import get_task_tracker, TaskStatus
 
 tracker = get_task_tracker()  # uses the shared queue Redis connection
 
@@ -283,7 +283,7 @@ at all (fail closed). `get_status()` stays unscoped for trusted internal use.
 ### Reporting progress from inside a job
 
 ```python
-from core.task_queue.status import update_job_progress, get_job_status
+from baselith.core.task_queue.status import update_job_progress, get_job_status
 
 def process_document(document_id: str) -> dict:
     update_job_progress(25, "Loading")
@@ -301,7 +301,7 @@ full = get_job_status(job_id)
 
 The queue machinery (RQ workers, TaskTracker, dead-letter, webhooks) long
 existed, but only documents/indexing were enqueueable — an *agent request*
-could not run async. `core/task_queue/jobs/agent_run.py` closes that gap:
+could not run async. `baselith/core/task_queue/jobs/agent_run.py` closes that gap:
 `run_agent_task(query, conversation_id=None)` executes one chat/agent request
 on a worker, tracks its lifecycle in the TaskTracker, and emits a terminal
 webhook so callers can subscribe instead of polling.
@@ -371,11 +371,11 @@ calling process becomes a `WorkerSupervisor` over `N` child workers:
 
 ## Worker Monitoring
 
-`WorkerMonitor` (in `core.task_queue.monitor`) inspects RQ workers and queues.
+`WorkerMonitor` (in `baselith.core.task_queue.monitor`) inspects RQ workers and queues.
 It is synchronous; use it directly or via `get_worker_monitor()`.
 
 ```python
-from core.task_queue.monitor import get_worker_monitor
+from baselith.core.task_queue.monitor import get_worker_monitor
 
 monitor = get_worker_monitor()
 
@@ -415,7 +415,7 @@ monitor.retry_failed_job(job_id)           # bool
 
 ```python
 import prometheus_client as prom
-from core.task_queue.monitor import get_worker_monitor
+from baselith.core.task_queue.monitor import get_worker_monitor
 
 monitor = get_worker_monitor()
 queue_depth = prom.Gauge("queue_depth", "Jobs in queue", ["queue"])
@@ -440,7 +440,7 @@ The worker wires it automatically: `start_worker()` registers
 retries left is recorded — RQ's normal handling still runs.
 
 ```python
-from core.task_queue import get_dead_letter_queue
+from baselith.core.task_queue import get_dead_letter_queue
 
 dlq = get_dead_letter_queue()
 
@@ -468,7 +468,7 @@ can still be replayed after the RQ `failure_ttl` window.
       `payload_b64` is **no longer written** (kept only so pre-upgrade
       records still load) and replay never unpickles anything.
     - **Redacted before storage.** Call arguments cross
-      `core.observability.redaction.redact_sensitive` before they are stored,
+      `baselith.core.observability.redaction.redact_sensitive` before they are stored,
       so a job that took an API key does not sit in Redis under a key with no
       TTL. Replay re-runs with the *redacted* values — a job whose argument
       really was a secret must be re-enqueued by its owner, not replayed.
@@ -508,7 +508,7 @@ Admin HTTP endpoints (Basic Auth) expose the same operations:
 ## Trace propagation across the queue boundary
 
 A queued job runs minutes later in another process, and until
-`core/task_queue/trace_context.py` existed it started a trace of its own — the
+`baselith/core/task_queue/trace_context.py` existed it started a trace of its own — the
 request that enqueued it and the work it caused were two unrelated traces, so
 a failure in the background job was invisible from the span that asked for it.
 
@@ -517,7 +517,7 @@ calls `inject_trace_context(meta)`, which writes the active span's W3C
 `traceparent` (plus `tracestate`/`baggage` when present) into the job's
 metadata — the same carrier HTTP uses. On the worker side, `TenantAwareWorker`
 wraps every `perform_job` in `consumer_span(job, queue_name)`
-(`core.task_queue.trace_context`): a `CONSUMER`-kind OTel span parented on
+(`baselith.core.task_queue.trace_context`): a `CONSUMER`-kind OTel span parented on
 that carrier, tagged with the standard `messaging.*` semantic-convention
 attributes (`messaging.system="rq"`, `messaging.destination.name`,
 `messaging.message.id`, `code.function.name`) — never the job's arguments,
@@ -533,7 +533,7 @@ of the same trace.
 
 ## Configuration
 
-Queue settings come from `core.config.task_queue.TaskQueueConfig`. The Redis URL
+Queue settings come from `baselith.core.config.task_queue.TaskQueueConfig`. The Redis URL
 defaults to DB 2; configured queue names default to `default`, `documents`,
 `analysis`.
 

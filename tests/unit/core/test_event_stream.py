@@ -10,13 +10,13 @@ import asyncio
 
 import pytest
 
-from core.events.stream import (
+from baselith.core.events.stream import (
     InMemoryEventStream,
     StreamRecord,
     decode_event_fields,
     encode_event_fields,
 )
-from core.events.types import Event
+from baselith.core.events.types import Event
 
 
 def _event(name: str = "order.paid", **data) -> Event:

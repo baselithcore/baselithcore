@@ -2,11 +2,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.human.interaction import HumanIntervention
-from core.learning.feedback import FeedbackCollector
-from core.memory.manager import AgentMemory
-from core.memory.types import MemoryType
-from core.optimization.optimizer import PromptOptimizer
+from baselith.core.human.interaction import HumanIntervention
+from baselith.core.learning.feedback import FeedbackCollector
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.types import MemoryType
+from baselith.core.optimization.optimizer import PromptOptimizer
 
 # --- MEMORY TESTS ---
 

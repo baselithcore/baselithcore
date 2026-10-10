@@ -18,7 +18,7 @@ import pytest
 def _hermetic_integrity_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Integrity tests must not depend on ambient env / local .env flags.
 
-    ``core.config`` loads the repository .env into os.environ once at import;
+    ``baselith.core.config`` loads the repository .env into os.environ once at import;
     a developer's ``BASELITH_SKIP_INTEGRITY_CHECK=true`` (dev escape hatch)
     would silently turn hash-mismatch tests into no-ops.
     """

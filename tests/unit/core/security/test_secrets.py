@@ -5,7 +5,7 @@ import importlib.metadata
 import pytest
 from pydantic import SecretStr
 
-from core.security.secrets import (
+from baselith.core.security.secrets import (
     ENTRY_POINT_GROUP,
     EnvSecretsProvider,
     FileSecretsProvider,
@@ -22,7 +22,7 @@ from core.security.secrets import (
 def _reset_provider(monkeypatch):
     # The backend comes from the cached SecurityConfig: drop the cache so each
     # test's environment is read afresh.
-    monkeypatch.setattr("core.config.security._security_config", None)
+    monkeypatch.setattr("baselith.core.config.security._security_config", None)
     reset_secrets_provider()
     yield
     reset_secrets_provider()
@@ -96,7 +96,7 @@ class TestFactoryAndRegistry:
 
         monkeypatch.delenv("SECRETS_BACKEND", raising=False)
         monkeypatch.setattr(
-            "core.config.security._security_config",
+            "baselith.core.config.security._security_config",
             SimpleNamespace(secrets_backend="file", secrets_dir=str(tmp_path)),
         )
         provider = get_secrets_provider()
@@ -156,7 +156,7 @@ class TestEntryPointDiscovery:
     def _isolate_registry(self, monkeypatch):
         # Earlier tests register backends into the module-level dict; keep this
         # class independent of test order (pytest-randomly).
-        monkeypatch.setattr("core.security.secrets._PROVIDER_FACTORIES", {})
+        monkeypatch.setattr("baselith.core.security.secrets._PROVIDER_FACTORIES", {})
 
     @pytest.fixture
     def entry_points(self, monkeypatch):
@@ -349,10 +349,12 @@ class TestFileProviderContract:
 
         monkeypatch.setattr("pathlib.Path.read_text", deny)
         provider = FileSecretsProvider(tmp_path, fallback_env=False)
-        with caplog.at_level("WARNING", logger="core.security.secrets"):
+        with caplog.at_level("WARNING", logger="baselith.core.security.secrets"):
             assert provider.get_secret("DB_PASSWORD") is None
         messages = [
-            r.getMessage() for r in caplog.records if r.name == "core.security.secrets"
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "baselith.core.security.secrets"
         ]
         assert messages
         assert all(reason in m for m in messages)
@@ -370,10 +372,12 @@ class TestProviderSelection:
 
     def test_logs_the_provider_class_only(self, monkeypatch, caplog):
         monkeypatch.delenv("SECRETS_BACKEND", raising=False)
-        with caplog.at_level("INFO", logger="core.security.secrets"):
+        with caplog.at_level("INFO", logger="baselith.core.security.secrets"):
             get_secrets_provider()
         assert [
-            r.getMessage() for r in caplog.records if r.name == "core.security.secrets"
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "baselith.core.security.secrets"
         ] == ["Initialized provider: EnvSecretsProvider"]
 
 

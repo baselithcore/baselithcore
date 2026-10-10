@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.memory.providers import InMemoryProvider, VectorMemoryProvider
-from core.memory.types import MemoryItem, MemoryType
-from core.models.domain import Document
+from baselith.core.memory.providers import InMemoryProvider, VectorMemoryProvider
+from baselith.core.memory.types import MemoryItem, MemoryType
+from baselith.core.models.domain import Document
 
 
 class TestInMemoryProvider:
@@ -50,7 +50,7 @@ class TestInMemoryProvider:
 class TestVectorMemoryProvider:
     @pytest.fixture
     def mock_vector_service(self):
-        with patch("core.memory.providers.get_vectorstore_service") as mock:
+        with patch("baselith.core.memory.providers.get_vectorstore_service") as mock:
             service = AsyncMock()
             mock.return_value = service
             yield service
@@ -121,7 +121,9 @@ class TestVectorMemoryProvider:
         backend = MagicMock()
         backend.delete_by_filter = AsyncMock()
         mock_vector_service.provider = backend
-        with patch("core.memory.providers.get_current_tenant_id", return_value="acme"):
+        with patch(
+            "baselith.core.memory.providers.get_current_tenant_id", return_value="acme"
+        ):
             await provider.clear()
         backend.delete_by_filter.assert_awaited_once_with(
             collection_name="test_collection",
@@ -136,7 +138,9 @@ class TestVectorMemoryProvider:
         backend = MagicMock()
         backend.delete_by_filter = AsyncMock()
         mock_vector_service.provider = backend
-        with patch("core.memory.providers.get_current_tenant_id", return_value="acme"):
+        with patch(
+            "baselith.core.memory.providers.get_current_tenant_id", return_value="acme"
+        ):
             await provider.clear(MemoryType.EPISODIC)
         backend.delete_by_filter.assert_awaited_once_with(
             collection_name="test_collection",
@@ -174,10 +178,10 @@ class TestBatchedProviderWrites:
     async def test_vector_provider_indexes_a_batch_in_one_call(self):
         from unittest.mock import AsyncMock, patch
 
-        from core.memory.providers import VectorMemoryProvider
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.providers import VectorMemoryProvider
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
-        with patch("core.memory.providers.get_vectorstore_service") as factory:
+        with patch("baselith.core.memory.providers.get_vectorstore_service") as factory:
             service = AsyncMock()
             factory.return_value = service
             provider = VectorMemoryProvider(collection_name="c")
@@ -195,9 +199,9 @@ class TestBatchedProviderWrites:
     async def test_add_many_on_empty_batch_is_a_noop(self):
         from unittest.mock import AsyncMock, patch
 
-        from core.memory.providers import VectorMemoryProvider
+        from baselith.core.memory.providers import VectorMemoryProvider
 
-        with patch("core.memory.providers.get_vectorstore_service") as factory:
+        with patch("baselith.core.memory.providers.get_vectorstore_service") as factory:
             service = AsyncMock()
             factory.return_value = service
             provider = VectorMemoryProvider(collection_name="c")
@@ -206,8 +210,8 @@ class TestBatchedProviderWrites:
         service.index.assert_not_awaited()
 
     async def test_helper_falls_back_for_item_at_a_time_providers(self):
-        from core.memory.optimization_batch import add_items
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.optimization_batch import add_items
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         class _LegacyProvider:
             """Only implements the item-at-a-time protocol."""

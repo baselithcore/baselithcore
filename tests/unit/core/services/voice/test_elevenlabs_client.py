@@ -15,8 +15,8 @@ import httpx
 import pytest
 from elevenlabs_rig import KEY, LEAK, TARGET, VOICE, client, error, speak
 
-from core.security.ssrf import SsrfError
-from core.services.voice import (
+from baselith.core.security.ssrf import SsrfError
+from baselith.core.services.voice import (
     VoiceInputError,
     VoiceKeyInvalidError,
     VoiceLimitError,
@@ -27,7 +27,7 @@ from core.services.voice import (
     VoiceTimeoutError,
     VoiceUnavailableError,
 )
-from core.services.voice._elevenlabs import parse_voices
+from baselith.core.services.voice._elevenlabs import parse_voices
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def fake(seconds: float) -> None:
         pauses.append(seconds)
 
-    monkeypatch.setattr("core.services.voice._elevenlabs.asyncio.sleep", fake)
+    monkeypatch.setattr("baselith.core.services.voice._elevenlabs.asyncio.sleep", fake)
     return pauses
 
 
@@ -441,9 +441,9 @@ def test_the_provider_pool_keeps_connections_alive(
         )
 
     monkeypatch.setattr(
-        "core.services.voice._elevenlabs.create_hardened_async_client", fake
+        "baselith.core.services.voice._elevenlabs.create_hardened_async_client", fake
     )
-    from core.services.voice._elevenlabs import ElevenLabsClient
+    from baselith.core.services.voice._elevenlabs import ElevenLabsClient
 
     ElevenLabsClient(
         base_url="https://api.elevenlabs.io",

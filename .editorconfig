@@ -50,7 +50,7 @@ indent_style = tab
 # under BASELITH_REQUIRE_SIGNED_PLUGINS. vite writes its .js.map files with no
 # trailing newline; adding one is exactly the drift that cost a green CI once
 # (see the end-of-file-fixer exclusion in .pre-commit-config.yaml).
-[plugins/*/ui/{dist,out,build}/**]
+[baselith/plugins/*/ui/{dist,out,build}/**]
 insert_final_newline = false
 trim_trailing_whitespace = false
 

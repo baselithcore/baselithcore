@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from core.config.mcp import MCPConfig
-from core.mcp.client_types import MCPToolInfo
-from core.mcp.declarative import make_mcp_tool_fns
+from baselith.core.config.mcp import MCPConfig
+from baselith.core.mcp.client_types import MCPToolInfo
+from baselith.core.mcp.declarative import make_mcp_tool_fns
 
 
 class _Pool:
@@ -37,7 +37,7 @@ def test_configured_server_keeps_its_declared_category(
             "w": {"url": "https://x.example.com/mcp", "autonomy_category": "mutating"}
         }
     )
-    monkeypatch.setattr("core.mcp.declarative.get_mcp_config", lambda: cfg)
+    monkeypatch.setattr("baselith.core.mcp.declarative.get_mcp_config", lambda: cfg)
     [d] = make_mcp_tool_fns(_Pool(), "w", _tools(MCPToolInfo("t", "d", {})))  # type: ignore[arg-type]
     assert d.category == "mutating"
 

@@ -3,7 +3,7 @@ title: Privacy & Data-Subject Requests
 description: GDPR access, portability, erasure, and retention across data providers
 ---
 
-The `core/privacy` module is a **data-subject-request (DSR) framework** for the
+The `baselith/core/privacy` module is a **data-subject-request (DSR) framework** for the
 GDPR Chapter III rights — access and portability (Art. 15/20), rectification
 (Art. 16), erasure (Art. 17), restriction (Art. 18) and objection (Art. 21) —
 plus storage limitation (Art. 5(1)(e)) and consent proof (Art. 7). It aggregates
@@ -45,7 +45,7 @@ failed. Unsupported providers are named in the report, never silently skipped.
 Each subsystem registers its provider at startup:
 
 ```python
-from core.privacy import register_data_provider, DictDataProvider
+from baselith.core.privacy import register_data_provider, DictDataProvider
 
 provider = DictDataProvider("feedback")   # or a real store-backed provider
 register_data_provider(provider)
@@ -90,7 +90,7 @@ whose **leading** column is `timestamp` — a composite that merely ends in
 
 | Table | Index | Created by |
 | --- | --- | --- |
-| `interactions` | `idx_interactions_timestamp` on `(timestamp)` | migration `005_retention_timestamp_index` (also in `core/storage/postgres.py` schema init) |
+| `interactions` | `idx_interactions_timestamp` on `(timestamp)` | migration `005_retention_timestamp_index` (also in `baselith/core/storage/postgres.py` schema init) |
 | `feedback` | `idx_feedback_interaction_id` on `(interaction_id)` — serves the `interaction_id IN (SELECT ...)` delete | migration `003_interactions_feedback_indexes` |
 | `chat_feedback` | `idx_chat_feedback_timestamp` on `(timestamp DESC)` | migration `001_initial_schema` |
 
@@ -110,7 +110,7 @@ no-op once the index exists.
 ## Operations
 
 ```python
-from core.privacy import get_data_subject_service
+from baselith.core.privacy import get_data_subject_service
 
 svc = get_data_subject_service()
 
@@ -147,7 +147,7 @@ controller. A boolean column set at signup proves nothing; a record of *what*
 was consented to, *when*, against *which notice version*, captured *how*, does.
 
 ```python
-from core.privacy import get_consent_service
+from baselith.core.privacy import get_consent_service
 
 consent = get_consent_service()
 await consent.grant("subject-123", "marketing", notice_version="v3",
@@ -177,7 +177,7 @@ request path does not block the event loop.
 Consent records are themselves personal data, so `ConsentService` implements the
 `DataProvider` protocol and is attached to the data-subject registry
 **automatically at startup** whenever `PRIVACY_ENABLED` is set
-(`core.api.startup_checks.register_consent_provider`, part of
+(`baselith.core.api.startup_checks.register_consent_provider`, part of
 `start_regulatory_subsystems`). Without that wiring an access or erasure request
 would complete successfully while leaving the consent log untouched — a gap that
 reads as compliance.
@@ -188,7 +188,7 @@ behind. Embedders that build their own application lifecycle instead of using
 the framework's can do the same by hand:
 
 ```python
-from core.privacy import get_consent_service, register_data_provider
+from baselith.core.privacy import get_consent_service, register_data_provider
 
 register_data_provider(get_consent_service())
 ```
@@ -203,7 +203,7 @@ consent grounds Art. 22(3) then requires at minimum the right to obtain **human
 intervention**, to **express a point of view**, and to **contest** the decision.
 
 ```python
-from core.privacy import (
+from baselith.core.privacy import (
     Art22Ground, AutomatedDecisionActivity, get_automated_decision_registry,
 )
 

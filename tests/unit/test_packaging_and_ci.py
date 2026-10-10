@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import yaml
 
-from core._version import __version__
+from baselith.core._version import __version__
 from scripts.ci_plan import FULL_PYTHONS, SCOPED_PYTHONS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,14 +45,14 @@ PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 # and `test_every_version_bearing_file_matches_the_source_of_truth` is what
 # says so.
 VERSION_BEARING_FILES = (
-    "core/_version.py",
+    "baselith/core/_version.py",
     "deploy/helm/baselithcore/Chart.yaml",
     "SECURITY.md",
     "sdk/python/baselith_sdk/version.py",
     "sdk/typescript/package.json",
     "sdk/typescript/src/client.ts",
     # info.version in the OpenAPI document; the openapi_drift gate regenerates
-    # it from core/_version.py, so a release that skips it reddens the next PR.
+    # it from baselith/core/_version.py, so a release that skips it reddens the next PR.
     "sdk/openapi.json",
     "mkdocs-site/docs/api/specs/openapi.json",
 )
@@ -61,7 +61,7 @@ VERSION_BEARING_FILES = (
 # purpose: its table carries the minor only, and
 # `test_security_policy_supports_the_current_minor` is what checks it.
 VERSION_PATTERNS = {
-    "core/_version.py": r'^__version__ = "([^"]+)"$',
+    "baselith/core/_version.py": r'^__version__ = "([^"]+)"$',
     "deploy/helm/baselithcore/Chart.yaml": r'^appVersion: "([^"]+)"$',
     "sdk/python/baselith_sdk/version.py": r'^__version__ = "([^"]+)"$',
     "sdk/typescript/src/client.ts": r"^const VERSION = '([^']+)';$",
@@ -122,7 +122,7 @@ def _triggers(workflow: dict[str, Any]) -> dict[str, Any]:
 def test_fixture_plugins_are_excluded_from_the_distribution() -> None:
     """`include = ["plugins*"]` swept the test fixtures into every install."""
     exclude = _pyproject()["tool"]["setuptools"]["packages"]["find"]["exclude"]
-    for fixture in ("plugins.example-plugin", "plugins.test-project"):
+    for fixture in ("baselith.plugins.example-plugin", "baselith.plugins.test-project"):
         assert fixture in exclude, (
             f"{fixture} is no longer excluded from the wheel. It is an in-repo "
             "fixture, not product; scripts/check_distribution_artifacts.py "
@@ -144,12 +144,15 @@ def test_source_maps_are_excluded_from_the_wheel() -> None:
 
 
 def test_fixture_plugins_are_excluded_from_the_container_image() -> None:
-    """The wheel exclusion does not cover `COPY plugins/ plugins/`."""
+    """The wheel exclusion does not cover `COPY baselith/plugins/ baselith/plugins/`."""
     ignored = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-    for fixture in ("plugins/example-plugin/", "plugins/test-project/"):
+    for fixture in (
+        "baselith/plugins/example-plugin/",
+        "baselith/plugins/test-project/",
+    ):
         assert fixture in ignored, (
             f"{fixture} reaches the container image. The released image copies "
-            "plugins/ verbatim, so excluding it from the wheel is not enough."
+            "baselith/plugins/ verbatim, so excluding it from the wheel is not enough."
         )
 
 
@@ -190,7 +193,7 @@ def test_typed_classifier_is_backed_by_a_py_typed_marker() -> None:
     """`Typing :: Typed` is a claim; py.typed is what makes it true."""
     classifiers = _pyproject()["project"]["classifiers"]
     assert "Typing :: Typed" in classifiers
-    assert (REPO_ROOT / "core" / "py.typed").is_file()
+    assert (REPO_ROOT / "baselith" / "core" / "py.typed").is_file()
     package_data = _pyproject()["tool"]["setuptools"]["package-data"]["*"]
     assert "py.typed" in package_data, (
         "py.typed exists but is not declared as package data, so the wheel "
@@ -250,7 +253,7 @@ def test_every_version_bearing_file_matches_the_source_of_truth() -> None:
 
     stale = {path: value for path, value in found.items() if value != __version__}
     assert not stale, (
-        f"these files disagree with core/_version.py ({__version__}): {stale}. "
+        f"these files disagree with baselith/core/_version.py ({__version__}): {stale}. "
         "Run .releaserc's prepareCmd in the release-prep pull request — the "
         "release job runs it too, but only on the runner, so an unbumped tree "
         "publishes a version it does not itself record."
@@ -303,7 +306,7 @@ def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
 # ---------------------------------------------------------------------------
 
 
-VITE_OUTPUT = "plugins/example-plugin/ui/dist/"
+VITE_OUTPUT = "baselith/plugins/example-plugin/ui/dist/"
 
 # Hooks that REWRITE the files they are given. Any one of them pointed at
 # VITE_OUTPUT wedges any byte-for-byte drift gate permanently.
@@ -351,7 +354,7 @@ def test_typescript_build_caches_are_not_tracked() -> None:
     git = shutil.which("git")
     assert git is not None, "git is required to check what is tracked"
     tracked = subprocess.run(
-        [git, "ls-files", "plugins/*/ui"],
+        [git, "ls-files", "baselith/plugins/*/ui"],
         capture_output=True,
         text=True,
         check=True,

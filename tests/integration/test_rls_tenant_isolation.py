@@ -31,8 +31,8 @@ from typing import Any
 
 import pytest
 
-from core.db.ddl import RLS_PROTECTED_TABLES
-from core.db.session_setup import SYSTEM_TENANT_ID
+from baselith.core.db.ddl import RLS_PROTECTED_TABLES
+from baselith.core.db.session_setup import SYSTEM_TENANT_ID
 
 pytestmark = [pytest.mark.integration]
 
@@ -47,6 +47,7 @@ def _migration_010() -> Any:
 
     path = (
         Path(__file__).resolve().parents[2]
+        / "baselith"
         / "core"
         / "db"
         / "migrations"
@@ -73,7 +74,7 @@ MARKER = "rls-itest"
 
 def _owner_conninfo() -> str:
     """The pool's target database, reached as the configured (owner) role."""
-    from core.config import get_storage_config
+    from baselith.core.config import get_storage_config
 
     config = get_storage_config()
     return (
@@ -104,7 +105,7 @@ def _pg_available() -> bool:
 
 def _runtime_conninfo() -> str:
     """The pool's target database, reached as the least-privilege role."""
-    from core.config import get_storage_config
+    from baselith.core.config import get_storage_config
 
     config = get_storage_config()
     return (

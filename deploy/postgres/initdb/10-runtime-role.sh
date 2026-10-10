@@ -6,7 +6,7 @@
 # SECURITY — which migration 008 deliberately does not set, so that migrations
 # and un-tenanted maintenance keep working. POSTGRES_USER is both a superuser
 # and the owner of everything Alembic creates, so a stack that runs the app as
-# it has DB_RLS_ENABLED=true and no isolation at all. `core.db.rls_posture`
+# it has DB_RLS_ENABLED=true and no isolation at all. `baselith.core.db.rls_posture`
 # refuses to boot past that in production; this script is the remedy.
 #
 # Runs from the postgres image's entrypoint, which executes

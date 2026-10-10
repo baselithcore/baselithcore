@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.skill_evolution.types import (
+from baselith.core.skill_evolution.types import (
     MAX_EVIDENCE,
     EvidenceRef,
     Pattern,

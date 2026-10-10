@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.cache import redis_sync
+from baselith.core.cache import redis_sync
 
 
 @pytest.fixture(autouse=True)

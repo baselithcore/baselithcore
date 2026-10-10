@@ -12,12 +12,12 @@ from typing import Any
 
 import pytest
 
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.plugin_updates.apply import _events
-from core.plugin_updates.apply import updater as updater_mod
-from core.plugin_updates.apply.models import ApplyRun, RunKind, RunState
-from core.plugin_updates.apply.store import RunStore
-from core.plugin_updates.apply.updater import (
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.plugin_updates.apply import _events
+from baselith.core.plugin_updates.apply import updater as updater_mod
+from baselith.core.plugin_updates.apply.models import ApplyRun, RunKind, RunState
+from baselith.core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.apply.updater import (
     UpdaterRefused,
     acquire_single_instance,
     build_executor,
@@ -226,7 +226,7 @@ async def test_stale_approvals_expire_on_every_tick(tmp_path: Path) -> None:
 async def test_serve_refuses_after_plugin_code_was_imported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(sys.modules, "plugins.fake", object())
+    monkeypatch.setitem(sys.modules, "baselith.plugins.fake", object())
     stop = asyncio.Event()
     store = RunStore(tmp_path)
     with pytest.raises(UpdaterRefused, match="plugin code"):
@@ -265,7 +265,7 @@ async def test_serve_drives_the_real_executor(env: Any) -> None:
 
 
 async def test_reconcile_resumes_a_real_activating_run(env: Any) -> None:
-    from core.plugin_updates.apply.reconcile import reconcile
+    from baselith.core.plugin_updates.apply.reconcile import reconcile
 
     await env.ex.execute(env.run)  # installed 1.2.0
     again = env.store.create(

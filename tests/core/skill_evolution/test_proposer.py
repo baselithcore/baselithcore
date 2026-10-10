@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.skill_evolution.proposer import SkillProposer
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import Pattern, PatternKind, PatternStatus
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.skill_evolution.proposer import SkillProposer
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import Pattern, PatternKind, PatternStatus
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 VALID_SKILL = """---
 name: avoid-utf8-assumption

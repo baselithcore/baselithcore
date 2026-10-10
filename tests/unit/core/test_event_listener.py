@@ -4,12 +4,12 @@ Unit Tests for the Event Listener.
 Tests for EventMetrics aggregation and the EventListener wiring on the bus.
 """
 
-from core.events import (
+from baselith.core.events import (
     EventNames,
     get_event_bus,
     reset_event_bus,
 )
-from core.events.listener import EventListener, EventMetrics
+from baselith.core.events.listener import EventListener, EventMetrics
 
 # ============================================================================
 # EventMetrics Tests

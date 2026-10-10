@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     RecordedRun,
     run_regression_async,
 )

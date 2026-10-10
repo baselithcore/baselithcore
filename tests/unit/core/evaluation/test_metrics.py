@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.evaluation.metrics import (
+from baselith.core.evaluation.metrics import (
     AnswerRelevancyEvaluator,
     BaseMetricWrapper,
     FaithfulnessEvaluator,
@@ -17,7 +17,7 @@ class TestEvaluationMetrics:
         assert result.score == 1.0
         assert wrapper.is_successful(result) is True
 
-    @patch("core.evaluation.metrics.DEEPEVAL_AVAILABLE", False)
+    @patch("baselith.core.evaluation.metrics.DEEPEVAL_AVAILABLE", False)
     def test_evaluators_when_deepeval_unavailable(self):
         # Faithfulness
         f_eval = FaithfulnessEvaluator()
@@ -29,9 +29,9 @@ class TestEvaluationMetrics:
         assert r_eval.metric is None
         assert r_eval.measure("q", "a") == 0.0
 
-    @patch("core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
-    @patch("core.evaluation.metrics.FaithfulnessMetric", create=True)
-    @patch("core.evaluation.metrics.LLMTestCase", create=True)
+    @patch("baselith.core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
+    @patch("baselith.core.evaluation.metrics.FaithfulnessMetric", create=True)
+    @patch("baselith.core.evaluation.metrics.LLMTestCase", create=True)
     def test_faithfulness_evaluator_measure(self, mock_test_case, mock_metric_class):
         mock_metric_instance = MagicMock()
         mock_metric_instance.score = 0.85
@@ -44,9 +44,9 @@ class TestEvaluationMetrics:
         assert score == 0.85
         mock_metric_instance.measure.assert_called_once()
 
-    @patch("core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
-    @patch("core.evaluation.metrics.AnswerRelevancyMetric", create=True)
-    @patch("core.evaluation.metrics.LLMTestCase", create=True)
+    @patch("baselith.core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
+    @patch("baselith.core.evaluation.metrics.AnswerRelevancyMetric", create=True)
+    @patch("baselith.core.evaluation.metrics.LLMTestCase", create=True)
     def test_answer_relevancy_evaluator_measure(
         self, mock_test_case, mock_metric_class
     ):
@@ -61,9 +61,9 @@ class TestEvaluationMetrics:
         assert score == 0.92
         mock_metric_instance.measure.assert_called_once()
 
-    @patch("core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
-    @patch("core.evaluation.metrics.FaithfulnessMetric", create=True)
-    @patch("core.evaluation.metrics.LLMTestCase", create=True)
+    @patch("baselith.core.evaluation.metrics.DEEPEVAL_AVAILABLE", True)
+    @patch("baselith.core.evaluation.metrics.FaithfulnessMetric", create=True)
+    @patch("baselith.core.evaluation.metrics.LLMTestCase", create=True)
     def test_evaluator_exception_handling(
         self, mock_test_case_class, mock_metric_class
     ):

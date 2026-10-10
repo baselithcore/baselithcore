@@ -5,7 +5,11 @@ from __future__ import annotations
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from core.auth.oauth import GrantType, build_jwks_document, build_metadata_document
+from baselith.core.auth.oauth import (
+    GrantType,
+    build_jwks_document,
+    build_metadata_document,
+)
 
 
 def test_metadata_advertises_issuer_and_endpoints() -> None:

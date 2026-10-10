@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client import MCPClient, MCPToolError
-from core.mcp.server import MCPServer
+from baselith.core.mcp.client import MCPClient, MCPToolError
+from baselith.core.mcp.server import MCPServer
 
 
 class _FakeWriter:
@@ -46,7 +46,7 @@ class _ScriptedReader:
 
 def _stdio_client(messages: list[dict[str, Any]], monkeypatch: Any) -> MCPClient:
     monkeypatch.setattr(
-        "core.mcp.client.get_mcp_config",
+        "baselith.core.mcp.client.get_mcp_config",
         lambda: SimpleNamespace(mcp_client_request_timeout=1.0),
     )
     client = MCPClient()

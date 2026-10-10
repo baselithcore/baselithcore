@@ -1,15 +1,15 @@
 """Fail when plugin code holds its own LLM provider client, host or key resolver.
 
 Model choice, provider credentials and failover are central: the framework's
-funnel (``core.services.llm.get_llm_service``), its per-plugin policy
-(``core.services.llm.resolve_governed_client_config``) and the credential seam
+funnel (``baselith.core.services.llm.get_llm_service``), its per-plugin policy
+(``baselith.core.services.llm.resolve_governed_client_config``) and the credential seam
 own them, and an operator pins a plugin's model from one console. A plugin that
 imports a provider SDK, calls a provider's API host or registers its own key
 resolver has a second, unreviewed path to a provider that the console, the cost
 ledger and the failover chain never see.
 
 Flagged (AST, so docstrings and comments never trip it) anywhere under
-``plugins/`` outside test and build trees::
+``baselith/plugins/`` outside test and build trees::
 
     import openai | anthropic | ollama          (also ``from X import ...``,
                                                  ``import X.sub``)
@@ -37,7 +37,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST_PATH = REPO_ROOT / "configs" / "plugin_llm_keys_allowlist.yaml"
-SCANNED_ROOT = "plugins"
+SCANNED_ROOT = "baselith/plugins"
 
 #: Provider SDKs a plugin must not import: the funnel owns the client.
 FORBIDDEN_MODULES = frozenset({"openai", "anthropic", "ollama"})
@@ -183,7 +183,7 @@ def check(root: Path = REPO_ROOT, allowlist: Path = ALLOWLIST_PATH) -> list[str]
         if prefix is None:
             problems.append(
                 f"{v.path}:{v.line}: {v.what} in a plugin — route the call through "
-                "core.services.llm (get_llm_service / resolve_governed_client_config) "
+                "baselith.core.services.llm (get_llm_service / resolve_governed_client_config) "
                 "so the central policy, credential vault and cost ledger apply"
             )
         else:
@@ -206,7 +206,7 @@ def main() -> int:
         print(f"\n{len(problems)} problem(s).", file=sys.stderr)
         return 1
     print(
-        "no plugin LLM provider SDK, API host or key resolver under plugins/ "
+        "no plugin LLM provider SDK, API host or key resolver under baselith/plugins/ "
         "(outside the allowlist)"
     )
     return 0

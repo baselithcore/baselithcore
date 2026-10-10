@@ -1,5 +1,5 @@
 """
-Tests for core/services/vectorstore/providers/qdrant_provider.py
+Tests for baselith/core/services/vectorstore/providers/qdrant_provider.py
 
 Tests QdrantProvider with mocked AsyncQdrant client.
 """
@@ -12,13 +12,17 @@ import pytest
 class TestQdrantProviderInit:
     """Tests for QdrantProvider initialization."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_init_with_defaults(self, mock_qdrant_client):
         """Verify provider initializes with default settings."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -33,7 +37,9 @@ class TestQdrantProviderInit:
         )
         assert provider.client is mock_client
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_embedded_with_path_persists_on_disk(self, mock_qdrant_client):
         """Regression: an on-disk embedded store was passed as ``location``,
         which qdrant_client treats as a URL — the provider then dialled a
@@ -41,30 +47,40 @@ class TestQdrantProviderInit:
         service not known". Persistence goes through ``path``."""
         mock_qdrant_client.return_value = AsyncMock()
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         QdrantProvider(mode="embedded", path="/app/data/qdrant")
 
         mock_qdrant_client.assert_called_once_with(path="/app/data/qdrant")
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_embedded_without_path_is_in_memory(self, mock_qdrant_client):
         mock_qdrant_client.return_value = AsyncMock()
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         QdrantProvider(mode="embedded")
 
         mock_qdrant_client.assert_called_once_with(location=":memory:")
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_init_with_auth_tls_and_timeout(self, mock_qdrant_client):
         """Managed/remote Qdrant needs an API key, TLS and a deadline: the
         client used to be built with none of the three, so a hung Qdrant
         stalled callers and a remote instance could not be used safely."""
         mock_qdrant_client.return_value = AsyncMock()
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         QdrantProvider(
             host="qdrant.example.com",
@@ -78,13 +94,17 @@ class TestQdrantProviderInit:
         assert kwargs["https"] is True
         assert kwargs["timeout"] == 12.5
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_init_with_custom_settings(self, mock_qdrant_client):
         """Verify provider initializes with custom settings."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider(
             host="qdrant.example.com",
@@ -98,13 +118,17 @@ class TestQdrantProviderInit:
         assert provider.grpc_port == 6335
         assert provider.prefer_grpc is True
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     def test_init_raises_on_connection_error(self, mock_qdrant_client):
         """Verify provider raises VectorStoreError on connection failure."""
         mock_qdrant_client.side_effect = Exception("Connection refused")
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         with pytest.raises(VectorStoreError) as exc_info:
             QdrantProvider()
@@ -116,13 +140,17 @@ class TestQdrantProviderInit:
 class TestQdrantProviderCreateCollection:
     """Tests for QdrantProvider.create_collection method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_create_collection_basic(self, mock_qdrant_client):
         """Verify create_collection creates collection with defaults."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         await provider.create_collection("test_collection", vector_size=384)
@@ -131,7 +159,9 @@ class TestQdrantProviderCreateCollection:
         call_kwargs = mock_client.create_collection.call_args[1]
         assert call_kwargs["collection_name"] == "test_collection"
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_create_collection_raises_on_error(self, mock_qdrant_client):
         """Verify create_collection raises VectorStoreError on generic failure."""
         mock_client = AsyncMock()
@@ -139,8 +169,10 @@ class TestQdrantProviderCreateCollection:
         mock_qdrant_client.return_value = mock_client
         mock_client.get_collections.return_value = MagicMock(collections=[])
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -149,7 +181,9 @@ class TestQdrantProviderCreateCollection:
 
         assert "Collection creation failed" in str(exc_info.value)
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_create_collection_idempotent(self, mock_qdrant_client):
         """Verify create_collection ignores 'already exists' errors."""
         mock_client = AsyncMock()
@@ -159,7 +193,9 @@ class TestQdrantProviderCreateCollection:
         mock_qdrant_client.return_value = mock_client
         mock_client.get_collections.return_value = MagicMock(collections=[])
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 
@@ -173,13 +209,17 @@ class TestQdrantProviderCreateCollection:
 class TestQdrantProviderUpsert:
     """Tests for QdrantProvider.upsert method."""
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_upsert_points(self, mock_qdrant_client):
         """Verify upsert inserts points correctly."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         points = [
@@ -194,13 +234,17 @@ class TestQdrantProviderUpsert:
         assert call_kwargs["collection_name"] == "test_collection"
         assert len(call_kwargs["points"]) == 2
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_upsert_with_wait_false(self, mock_qdrant_client):
         """Verify upsert respects wait parameter."""
         mock_client = AsyncMock()
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
         points = [{"id": 1, "vector": [0.1, 0.2, 0.3]}]
@@ -210,15 +254,19 @@ class TestQdrantProviderUpsert:
         call_kwargs = mock_client.upsert.call_args[1]
         assert call_kwargs["wait"] is False
 
-    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient"
+    )
     async def test_upsert_raises_on_error(self, mock_qdrant_client):
         """Verify upsert raises VectorStoreError on failure."""
         mock_client = AsyncMock()
         mock_client.upsert.side_effect = Exception("Insert failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.exceptions import VectorStoreError
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+        from baselith.core.services.vectorstore.exceptions import VectorStoreError
+        from baselith.core.services.vectorstore.providers.qdrant_provider import (
+            QdrantProvider,
+        )
 
         provider = QdrantProvider()
 

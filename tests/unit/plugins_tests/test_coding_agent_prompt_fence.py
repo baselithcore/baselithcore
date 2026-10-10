@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.coding_agent.prompts import (
+from baselith.plugins.coding_agent.prompts import (
     DATA_CLOSE,
     DATA_OPEN,
     DEFUSED,
@@ -15,8 +15,8 @@ from plugins.coding_agent.prompts import (
     fix_prompt,
     label,
 )
-from plugins.coding_agent.workspace import Workspace
-from plugins.coding_agent.workspace_prompts import workspace_fix_prompt
+from baselith.plugins.coding_agent.workspace import Workspace
+from baselith.plugins.coding_agent.workspace_prompts import workspace_fix_prompt
 
 
 def inner(fenced: str) -> str:

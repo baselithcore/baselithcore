@@ -3,7 +3,7 @@ title: Auto Fine-Tuning
 description: Automatic fine-tuning based on feedback and evaluation results
 ---
 
-**Modules**: `core/finetuning/` (pipeline) and `core/learning/auto_finetuning.py` (trigger)
+**Modules**: `baselith/core/finetuning/` (pipeline) and `baselith/core/learning/auto_finetuning.py` (trigger)
 
 Beyond continuous learning, the framework supports a full fine-tuning pipeline.
 When sufficient low-quality interaction data has been collected via the
@@ -15,7 +15,7 @@ JSONL dataset and triggers a `FineTuningPipeline` job on a base model.
 ## Module Structure
 
 ```text
-core/finetuning/
+baselith/core/finetuning/
 ├── __init__.py            # Public exports
 ├── pipeline.py            # FineTuningPipeline
 ├── dataset.py             # DatasetBuilder, DatasetFormat
@@ -23,10 +23,10 @@ core/finetuning/
 └── providers.py           # OpenAIProvider, TogetherProvider
 ```
 
-Public exports from `core.finetuning`:
+Public exports from `baselith.core.finetuning`:
 
 ```python
-from core.finetuning import (
+from baselith.core.finetuning import (
     FineTuningPipeline,
     DatasetBuilder,
     DatasetFormat,
@@ -39,8 +39,8 @@ from core.finetuning import (
 
 > [!NOTE]
 > The automated trigger is the `AutoFineTuningService` in
-> `core/learning/auto_finetuning.py`. The pipeline class it drives is
-> `FineTuningPipeline` (in `core/finetuning/pipeline.py`).
+> `baselith/core/learning/auto_finetuning.py`. The pipeline class it drives is
+> `FineTuningPipeline` (in `baselith/core/finetuning/pipeline.py`).
 
 ---
 
@@ -64,7 +64,7 @@ from core.finetuning import (
 ## Usage
 
 ```python
-from core.learning.auto_finetuning import (
+from baselith.core.learning.auto_finetuning import (
     AutoFineTuningService,
     AutoFineTuneConfig,
 )
@@ -106,7 +106,7 @@ buffer is empty or the pipeline is unavailable). `AutoFineTuneConfig` fields:
 
 Every sample's text fields (`query`, `response`, `expected_response`,
 `feedback`) pass through the same scrub step that gates eval-corpus
-promotion — `core.evaluation.promotion.scrub_text` (see
+promotion — `baselith.core.evaluation.promotion.scrub_text` (see
 [Evaluation › Promoting production runs](evaluation.md#promoting-production-runs-promotionpy))
 — **before** the sample may enter the buffer:
 
@@ -126,7 +126,7 @@ than behind a seam: a policy invariant, not a pluggable step.
 ## Driving the Pipeline Directly
 
 ```python
-from core.finetuning import FineTuningPipeline, FineTuneConfig, DatasetBuilder
+from baselith.core.finetuning import FineTuningPipeline, FineTuneConfig, DatasetBuilder
 
 pipeline = FineTuningPipeline()  # auto-loads provider API keys from config
 
@@ -153,7 +153,7 @@ when `start_training` is handed a `DatasetBuilder` both timestamp with
 
 ## Provider Support
 
-Providers live in `core/finetuning/providers.py`:
+Providers live in `baselith/core/finetuning/providers.py`:
 
 - **`OpenAIProvider`** — `SUPPORTED_MODELS`:
   `gpt-4o-mini-2024-07-18`, `gpt-4o-2024-08-06`, `gpt-4-0613`,
@@ -162,7 +162,7 @@ Providers live in `core/finetuning/providers.py`:
   `meta-llama/Llama-3-8b-hf`, `mistralai/Mistral-7B-v0.1`,
   `meta-llama/Llama-2-7b-hf`.
 
-Both read their API keys from `core.config.get_finetuning_config()`
+Both read their API keys from `baselith.core.config.get_finetuning_config()`
 (`openai_api_key` / `together_api_key`, stored as `SecretStr`). Each exposes
 `is_available`, `train()`, `get_status()`, `cancel()`, `list_jobs()`, and
 `client()` / `aclose()`.

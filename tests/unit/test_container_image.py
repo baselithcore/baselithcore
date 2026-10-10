@@ -197,7 +197,7 @@ def test_project_distribution_is_not_a_second_importable_copy() -> None:
     """/install-app precedes /app on PYTHONPATH, so a duplicate shadows it."""
     text = _without_comments(DOCKERFILE.read_text(encoding="utf-8"))
     assert re.search(r"rm -rf /install-app/lib/[^\n]*/core", text), (
-        "pip install . materialises core/ and plugins/ inside /install-app "
+        "pip install . materialises baselith/core/ and plugins/ inside /install-app "
         "alongside the console script, and /install-app comes BEFORE /app on "
         "PYTHONPATH -- so which copy wins depends on the working directory. "
         "`baselith plugin enable` writes configs/plugins.yaml, so the CLI run "
