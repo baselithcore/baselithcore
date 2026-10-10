@@ -7,11 +7,11 @@ Configures root logging with request ID tracking and sensitive data masking.
 import contextvars
 import logging
 import os
-import re
 import sys
 from typing import Any
 
 from core.config import get_app_config
+from core.observability.redaction import _mask_text
 
 _app_config = get_app_config()
 
@@ -52,20 +52,12 @@ class RequestIdFilter(logging.Filter):
 
 
 class SensitiveDataFilter(logging.Filter):
-    """
-    Redacts sensitive values (tokens, api keys, PII) from logs.
-    Uses regex for case-insensitive replacement and to find specific patterns (e.g., email).
-    """
+    """Redacts sensitive values (credentials, emails) from stdlib log records.
 
-    # Email regex (simplified)
-    EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
-
-    # Common key/token pattern regex (e.g., "api_key=xyz", "Bearer xyz")
-    # Captures: (marker)(=|:|\s+)(value)
-    # Example: "Authorization: Bearer xyz" -> "Authorization: [REDACTED]"
-    CREDENTIALS_REGEX = re.compile(
-        r"(?i)(api[-_]?key|authorization|bearer|token|secret|password|passwd)(?P<sep>[:=\s]+)(?P<val>[^\s]+)",
-    )
+    Applies the same value masking as the structlog processor
+    (:func:`core.observability.redaction.redact_sensitive`), so a handler
+    behind this filter cannot leak what the structlog pipeline masks.
+    """
 
     def filter(
         self, record: logging.LogRecord
@@ -79,26 +71,7 @@ class SensitiveDataFilter(logging.Filter):
         except Exception:  # silent-ok: logging.Filter; logging here recurses
             return True
 
-        # 1. Mask PII (Emails)
-        # Replaces emails with e***@domain.com
-        def mask_email(match: re.Match[str]) -> str:
-            email = match.group(0)
-            try:
-                user, domain = email.split("@")
-                if len(user) > 3:
-                    masked_user = user[:3] + "***"
-                else:
-                    masked_user = user[0] + "***"
-                return f"{masked_user}@{domain}"
-            except ValueError:
-                return "[EMAIL_REDACTED]"
-
-        msg = self.EMAIL_REGEX.sub(mask_email, msg)
-
-        # 2. Mask Credentials
-        msg = self.CREDENTIALS_REGEX.sub(r"\1\g<sep>[REDACTED]", msg)
-
-        record.msg = msg
+        record.msg = _mask_text(msg)
         record.args = ()
         return True
 

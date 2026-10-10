@@ -259,8 +259,22 @@ class TestPerformance:
             "0123456789abcdef" * 6250 + "z",
             "%41" * 33_000,
             "忘记" * 50_000,
+            "и " * 50_000,
+            "क ि " * 25_000,
+            "игн0 рo " * 12_500,
         ],
-        ids=["prose", "base64", "fullwidth-zw", "spaced", "hex", "percent", "cjk"],
+        ids=[
+            "prose",
+            "base64",
+            "fullwidth-zw",
+            "spaced",
+            "hex",
+            "percent",
+            "cjk",
+            "spaced-cyrillic",
+            "spaced-marks",
+            "mixed-cyrillic",
+        ],
     )
     def test_100kb_scales_linearly(self, big_guard: InputGuard, payload: str) -> None:
         tenth = self._cpu_best_of_three(big_guard, payload[: len(payload) // 10])

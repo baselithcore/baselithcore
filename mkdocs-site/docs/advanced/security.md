@@ -1581,8 +1581,8 @@ Flags](#hardening-environment-flags) above for the full list and defaults.
 Sensitive-data redaction is a **structlog processor** (`redact_sensitive`)
 installed in both the main pipeline and the foreign-log pre-chain, so it applies
 on the FastAPI/uvicorn path — not only the MCP server. It redacts secrets by key
-name (recursively) and masks emails / inline `key=secret` patterns in message
-strings. Gated by `LOG_MASKING_ENABLED` (default on). Connection strings are
+name (recursively) and masks emails, inline `key=secret` and JSON-shaped
+`"key": "secret"` patterns in message strings. Gated by `LOG_MASKING_ENABLED` (default on). Connection strings are
 scrubbed with `redact_url_credentials()` before logging. It fails closed: a
 URL it cannot parse (a bad port, a broken IPv6 host) still has its userinfo
 stripped, and if redaction itself fails the serialised config shows

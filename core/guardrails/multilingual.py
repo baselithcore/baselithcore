@@ -143,10 +143,15 @@ NON_LATIN_LANGUAGES: frozenset[str] = frozenset({"ru", "zh", "ja", "ar", "hi"})
 
 #: Languages whose script the ``deobfuscated`` views' confusables fold rewrites
 #: (Cyrillic/Greek to Latin). Their patterns would never match there, so the
-#: guard skips them on those views to keep the scan cost down. CJK, Arabic and
-#: Devanagari survive the fold, and ``deobfuscated`` is the only view that
-#: undoes their letter spacing (``忽 略 之 前 …``): their patterns must run there.
+#: guard skips them on those views and runs them on the ``native`` views
+#: instead, which collapse letter spacing without the fold. CJK, Arabic and
+#: Devanagari survive the fold, and ``deobfuscated`` undoes their letter
+#: spacing (``忽 略 之 前 …``): their patterns must run there.
 FOLDED_SCRIPT_LANGUAGES: frozenset[str] = frozenset({"ru"})
+
+# Whitespace and word-boundary tokens: what a whole-phrase (squashed) form of
+# a pattern drops.
+_SPACING_TOKEN_RE = re.compile(r"\\s[+*]?|\\b")
 
 
 def compile_multilingual(
@@ -171,13 +176,43 @@ def compile_multilingual(
     ]
 
 
+def squash_pattern(source: str) -> str:
+    r"""Whole-phrase form of a pattern, for letter-only (squashed) views.
+
+    Drops every whitespace (``\s``, ``\s+``, ``\s*``) and word-boundary
+    (``\b``) token, so ``забудь(те)?\s+(все\s+)?правила`` becomes
+    ``забудь(те)?(все)?правила`` — what that phrase reads like once
+    ``з а б у д ь в с е п р а в и л а`` has lost every gap.
+
+    Args:
+        source: Regex source of a word pattern.
+
+    Returns:
+        The same pattern with the spacing tokens removed.
+    """
+    return _SPACING_TOKEN_RE.sub("", source)
+
+
 #: Pre-compiled multilingual patterns, tagged with their language code.
 COMPILED_MULTILINGUAL_PATTERNS = compile_multilingual(MULTILINGUAL_INJECTION_PATTERNS)
 
+#: Whole-phrase forms of the non-Latin patterns that rely on whitespace, for
+#: the ``native-squashed`` view. The others (CJK) carry no whitespace, so the
+#: collapsed views already serve them.
+COMPILED_SQUASHED_MULTILINGUAL_PATTERNS = compile_multilingual(
+    {
+        lang: tuple(squash_pattern(p) for p in sources if r"\s" in p)
+        for lang, sources in MULTILINGUAL_INJECTION_PATTERNS.items()
+        if lang in NON_LATIN_LANGUAGES
+    }
+)
+
 __all__ = [
     "COMPILED_MULTILINGUAL_PATTERNS",
+    "COMPILED_SQUASHED_MULTILINGUAL_PATTERNS",
     "FOLDED_SCRIPT_LANGUAGES",
     "MULTILINGUAL_INJECTION_PATTERNS",
     "NON_LATIN_LANGUAGES",
     "compile_multilingual",
+    "squash_pattern",
 ]

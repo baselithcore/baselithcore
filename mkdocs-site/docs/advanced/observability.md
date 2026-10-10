@@ -440,9 +440,12 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0
 
 The SDK is initialized with `send_default_pii=False` and a `before_send`
 scrubber that redacts sensitive request headers (`Authorization`, `Cookie`,
-`X-API-Key`, …) and any keys whose name contains `password`, `token`,
-`secret`, `api_key`, `jwt`, or `session` from request payloads, contexts,
-extras, and exception frame variables before transmission.
+`X-API-Key`, …) and any keys whose name contains a credential keyword
+(`password`, `pwd`, `token`, `secret`, `api_key`, `private_key`, `jwt`,
+`session`, …) from request payloads, contexts, extras, and exception frame
+variables before transmission. It reads the same keyword list as log masking
+(see [Log masking](../core-modules/observability-module.md#log-masking)), so a
+name masked in the logs is masked in Sentry too.
 
 ### Advanced Usage
 

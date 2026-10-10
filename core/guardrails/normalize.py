@@ -24,6 +24,22 @@ The views, cheapest first:
 * ``squashed`` — letters only, produced only when letter-spacing was found:
   ``i g n o r e p r e v i o u s`` has no word boundaries left, so it is
   matched against a short list of whole-phrase patterns.
+* ``native`` — ``normalized`` with letter spacing collapsed but *without* the
+  confusables fold, for non-ASCII text, produced only when it differs from
+  ``normalized``. Inside a token that already holds a Cyrillic letter,
+  Latin lookalikes and leet digits are folded the other way, *into*
+  Cyrillic (``игнoрируй`` with a Latin ``o``, ``3абудь``). The ``deobfuscated``
+  view turns Russian into Latin lookalikes, so this is where the Russian
+  patterns see spaced-out or character-swapped Russian.
+* ``native-squashed`` — letters and combining marks of ``native`` (any
+  script, unfolded), produced only when letter-spacing was found in
+  non-ASCII text; matched against whole-phrase forms of the non-Latin
+  patterns (``и г н о р и р у й в с е …`` with no word gaps at all).
+
+Spacing collapse treats a combining mark (Unicode ``Mn``/``Mc``/``Me``) as
+part of the letter before it, and first removes a separator found in front
+of a mark — a mark never follows a space in real text — so Devanagari vowel
+signs and viramas rejoin their consonant (``प ि छ ल े`` → ``पिछले``).
 
 Every transform is a single linear pass; the input is capped at
 :data:`MAX_NORMALIZE_CHARS` (NFKC can expand a character up to 18x, so the
@@ -35,6 +51,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import cache
 
 #: Hard ceiling on the length of any derived view.
 MAX_NORMALIZE_CHARS = 1_000_000
@@ -70,12 +87,75 @@ _LEET_I = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s",
 _LEET_TOKEN_RE = re.compile(r"[A-Za-z0-9@$]+")
 _LEET_CHARS = frozenset("013457@$")
 
-# Three or more single letters each split by exactly one separator. Letters
-# and separators are disjoint classes, so the match is linear.
-_SPACED_RUN_RE = re.compile(
-    r"(?<!\w)(?:[^\W\d_][ .\-_*|/~+·,])(?:[^\W\d_][ .\-_*|/~+·,]){1,}[^\W\d_](?!\w)"
-)
+_SEPARATORS = r"[ .\-_*|/~+·,]"
+_SEPARATOR_RE = re.compile(_SEPARATORS)
 _NON_LETTER_RE = re.compile(r"[^a-z]+")
+
+# Latin lookalikes and leet digits folded *into* Cyrillic, applied only inside
+# a token that already holds a Cyrillic letter: the reverse of the
+# confusables fold, for the ``native`` view. ``3`` is ``з`` (its visual twin),
+# not ``е``: Russian has no use for a Latin-style ``3→e``.
+_CYRILLIC_UNFOLD = str.maketrans({
+    "a": "а", "c": "с", "e": "е", "h": "н", "k": "к", "m": "м", "o": "о",
+    "p": "р", "t": "т", "x": "х", "y": "у",
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М",
+    "O": "О", "P": "Р", "T": "Т", "X": "Х", "Y": "У",
+    "0": "о", "3": "з", "4": "ч", "6": "б", "@": "а",
+})  # fmt: skip
+_TOKEN_RE = re.compile(r"[\w@]+")
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04ff]")
+
+
+@cache
+def _mark_class() -> str:
+    """Character-class body for every BMP combining mark (``Mn``/``Mc``/``Me``).
+
+    Built from the interpreter's own Unicode database on first use, so ASCII
+    traffic never pays for it. Every script in the multilingual table lives
+    in the BMP; nothing below U+0300 is a mark.
+    """
+    ranges: list[tuple[int, int]] = []
+    for cp in range(0x300, 0x10000):
+        if unicodedata.category(chr(cp))[0] != "M":
+            continue
+        if ranges and ranges[-1][1] == cp - 1:
+            ranges[-1] = (ranges[-1][0], cp)
+        else:
+            ranges.append((cp, cp))
+    return "".join(chr(lo) if lo == hi else f"{chr(lo)}-{chr(hi)}" for lo, hi in ranges)
+
+
+@cache
+def _spaced_run_re() -> re.Pattern[str]:
+    """Three or more single letters each split by exactly one separator.
+
+    A unit is a letter with its trailing combining marks (``पि``). Letters,
+    marks and separators are disjoint classes, so the match is linear.
+    """
+    marks = _mark_class()
+    unit = rf"[^\W\d_][{marks}]*"
+    return re.compile(
+        rf"(?<![\w{marks}]){unit}{_SEPARATORS}"
+        rf"(?:{unit}{_SEPARATORS})+{unit}(?![\w{marks}])"
+    )
+
+
+@cache
+def _spaced_mark_re() -> re.Pattern[str]:
+    """One separator between a letter (or mark) and a combining mark.
+
+    A combining mark never follows a separator in real text — it belongs to
+    the character before it — so the separator is spacing to undo, even in
+    a two-character word (``क ो``).
+    """
+    marks = _mark_class()
+    return re.compile(rf"(?<=[\w{marks}]){_SEPARATORS}(?=[{marks}])")
+
+
+@cache
+def _non_letter_or_mark_re() -> re.Pattern[str]:
+    """Everything but letters and combining marks (for ``native-squashed``)."""
+    return re.compile(rf"(?:[^\w{_mark_class()}]|[\d_])+")
 
 
 @dataclass(frozen=True)
@@ -88,11 +168,15 @@ class MatchingView:
         text: The transformed text.
         squashed: Whether the view has no word boundaries left (match it
             against the whole-phrase patterns, not the word patterns).
+        native: Whether the view keeps the scripts the confusables fold
+            rewrites (Cyrillic/Greek) unfolded: their patterns, skipped on
+            the ``deobfuscated`` views, run here.
     """
 
     label: str
     text: str
     squashed: bool = False
+    native: bool = False
 
 
 def strip_format_chars(text: str) -> str:
@@ -145,15 +229,39 @@ def _deleet(text: str, table: dict[int, str]) -> str:
 
 
 def _collapse_spaced(text: str) -> tuple[str, bool]:
-    """Join single-letter runs split by one separator; report if any found."""
+    """Join single-letter runs split by one separator; report if any found.
+
+    Spaced-out combining marks are first reattached to their base, so a
+    Devanagari word spaced code point by code point (``प ि छ ल े``) is
+    first read as its letters (``पि छ ले``), then joined.
+    """
     found = False
+    if not text.isascii():
+        text, marks_rejoined = _spaced_mark_re().subn("", text)
+        found = marks_rejoined > 0
 
     def join(match: re.Match[str]) -> str:
         nonlocal found
         found = True
-        return match.group(0)[::2]
+        return _SEPARATOR_RE.sub("", match.group(0))
 
-    return _SPACED_RUN_RE.sub(join, text), found
+    return _spaced_run_re().sub(join, text), found
+
+
+def _unfold_to_cyrillic(text: str) -> str:
+    """Fold Latin lookalikes and leet digits into Cyrillic, per mixed token.
+
+    Only a token that already holds a Cyrillic letter is touched, so Latin
+    words, numbers and code in the same text are left alone.
+    """
+
+    def fix(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token.isascii() or not _CYRILLIC_RE.search(token):
+            return token
+        return token.translate(_CYRILLIC_UNFOLD)
+
+    return _TOKEN_RE.sub(fix, text)
 
 
 def matching_views(text: str) -> list[MatchingView]:
@@ -170,12 +278,14 @@ def matching_views(text: str) -> list[MatchingView]:
         is a no-op.
     """
     views: list[MatchingView] = []
-    seen = {(text, False)}
+    seen = {(text, False, False)}
 
-    def add(label: str, value: str, *, squashed: bool = False) -> None:
-        if value and (value, squashed) not in seen:
-            seen.add((value, squashed))
-            views.append(MatchingView(label, value, squashed))
+    def add(
+        label: str, value: str, *, squashed: bool = False, native: bool = False
+    ) -> None:
+        if value and (value, squashed, native) not in seen:
+            seen.add((value, squashed, native))
+            views.append(MatchingView(label, value, squashed, native))
 
     normalized = nfkc_clean(text)
     add("normalized", normalized)
@@ -185,6 +295,21 @@ def matching_views(text: str) -> list[MatchingView]:
     add("deobfuscated", collapsed)
     if spaced:
         add("squashed", _NON_LETTER_RE.sub("", collapsed.lower()), squashed=True)
+
+    if normalized.isascii():
+        return views
+    # The fold above rewrote Cyrillic/Greek into Latin lookalikes; collapse
+    # the spacing again on the unfolded text so those scripts' patterns see
+    # their own words. Collapse first, then fold into Cyrillic: a spaced-out
+    # Latin lookalike only shares a token with Cyrillic once rejoined. Skipped
+    # when identical to a view already scanned with those patterns.
+    native, native_spaced = _collapse_spaced(normalized)
+    native = _unfold_to_cyrillic(native)
+    if native not in (normalized, collapsed):
+        add("native", native, native=True)
+    if native_spaced and not native.isascii():
+        squashed_native = _non_letter_or_mark_re().sub("", native).lower()
+        add("native-squashed", squashed_native, squashed=True, native=True)
     return views
 
 

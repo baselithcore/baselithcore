@@ -29,8 +29,12 @@ from .config import (
     compile_patterns,
 )
 from .decode import scan_views
-from .multilingual import COMPILED_MULTILINGUAL_PATTERNS, FOLDED_SCRIPT_LANGUAGES
-from .normalize import COMPILED_SQUASHED_PATTERNS
+from .multilingual import (
+    COMPILED_MULTILINGUAL_PATTERNS,
+    COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
+    FOLDED_SCRIPT_LANGUAGES,
+)
+from .normalize import COMPILED_SQUASHED_PATTERNS, MatchingView
 
 logger = get_logger(__name__)
 
@@ -40,6 +44,10 @@ _TAXONOMY_INTENTS = frozenset({"in_scope", "out_of_scope", "jailbreak", "harmful
 #: Whole-phrase patterns for letter-only (``squashed``) views.
 _SQUASHED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("injection:squashed", p) for p in COMPILED_SQUASHED_PATTERNS
+]
+#: Whole-phrase forms of the non-Latin patterns, for ``native-squashed`` views.
+_NATIVE_SQUASHED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (f"injection:{lang}", p) for lang, p in COMPILED_SQUASHED_MULTILINGUAL_PATTERNS
 ]
 
 
@@ -55,8 +63,9 @@ class InputValidationResult:
         sanitized_input: Passed-through (valid) or truncated (too long) text.
         metadata: ``matched_variants`` maps each detected label to the text
             view it matched in — ``original``, ``normalized``,
-            ``deobfuscated``, ``squashed``, or a decoded payload such as
-            ``base64`` / ``base64:deobfuscated``.
+            ``deobfuscated``, ``squashed``, ``native``, ``native-squashed``,
+            or a decoded payload such as ``base64`` /
+            ``base64:deobfuscated``.
     """
 
     is_valid: bool
@@ -132,16 +141,19 @@ class InputGuard:
         # pattern is reported once, tagged with the first view it matched.
         matched: dict[str, str] = {}
         word_patterns = self._word_patterns(latin_only=False)
-        latin_patterns = self._word_patterns(latin_only=True)
         self._scan(text, "original", word_patterns, matched)
+        by_kind = {
+            "word": word_patterns,
+            "latin": self._word_patterns(latin_only=True),
+            "native": self._native_patterns(),
+            "squashed": _SQUASHED_PATTERNS,
+            "native-squashed": _NATIVE_SQUASHED_PATTERNS,
+        }
+        if not self.config.block_injection_patterns:
+            by_kind["squashed"] = by_kind["native-squashed"] = []
         for view in scan_views(text):
-            if view.squashed:
-                if self.config.block_injection_patterns:
-                    self._scan(view.text, view.label, _SQUASHED_PATTERNS, matched)
-            elif view.label.endswith("deobfuscated"):
-                self._scan(view.text, view.label, latin_patterns, matched)
-            else:
-                self._scan(view.text, view.label, word_patterns, matched)
+            patterns = by_kind[self._view_kind(view)]
+            self._scan(view.text, view.label, patterns, matched)
         detected.extend(matched)
 
         if detected:
@@ -167,9 +179,9 @@ class InputGuard:
         Args:
             latin_only: Drop the languages whose script the confusables
                 fold rewrites (Cyrillic/Greek) — for the ``deobfuscated``
-                views, where those letters are already Latin. CJK, Arabic
-                and Devanagari patterns still run there: that view is the
-                only one that undoes their letter spacing.
+                views, where those letters are already Latin; the ``native``
+                views run them instead. CJK, Arabic and Devanagari patterns
+                still run there: that view undoes their letter spacing.
         """
         patterns: list[tuple[str, re.Pattern[str]]] = []
         if self.config.block_injection_patterns:
@@ -181,6 +193,39 @@ class InputGuard:
             )
         if self.config.block_code_execution:
             patterns.extend(("code", p) for p in COMPILED_CODE_PATTERNS)
+        patterns.extend(("custom", p) for p in self._custom_patterns)
+        return patterns
+
+    @staticmethod
+    def _view_kind(view: MatchingView) -> str:
+        """Which pattern set a view is matched against.
+
+        ``squashed`` views have no word boundaries left, so they take the
+        whole-phrase patterns (the Latin set, or the non-Latin set when the
+        view is ``native``). ``deobfuscated`` views fold Cyrillic into Latin,
+        so they skip the folded-script languages; ``native`` views keep
+        those scripts and run exactly those languages.
+        """
+        if view.squashed:
+            return "native-squashed" if view.native else "squashed"
+        if view.native:
+            return "native"
+        return "latin" if view.label.endswith("deobfuscated") else "word"
+
+    def _native_patterns(self) -> list[tuple[str, re.Pattern[str]]]:
+        """Patterns for ``native`` views: the folded-script languages + custom.
+
+        Every other language already ran on a view that undid the same
+        spacing; code patterns are ASCII syntax the ``deobfuscated`` view
+        serves.
+        """
+        patterns: list[tuple[str, re.Pattern[str]]] = []
+        if self.config.block_injection_patterns:
+            patterns.extend(
+                (f"injection:{lang}", p)
+                for lang, p in COMPILED_MULTILINGUAL_PATTERNS
+                if lang in FOLDED_SCRIPT_LANGUAGES
+            )
         patterns.extend(("custom", p) for p in self._custom_patterns)
         return patterns
 

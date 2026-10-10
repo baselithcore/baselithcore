@@ -16,23 +16,43 @@ from core.config import get_app_config
 
 _REDACTED = "[REDACTED]"
 
-# Substrings that mark a structured field (or log kwarg) as a secret; the
-# value is replaced wholesale. Mirrors the Sentry scrubber's key set.
-_SENSITIVE_KEY_MARKERS: tuple[str, ...] = (
+# The one credential vocabulary. Every pass reads it: structured keys (log
+# kwargs, nested dicts, the Sentry scrubber), key=value pairs inside log
+# messages, and third-party free text (``redact_secrets``). A name added here
+# is masked by all three; a name missing here leaks from all three.
+_CREDENTIAL_KEYWORDS: tuple[str, ...] = (
     "password",
     "passwd",
+    "pwd",
     "secret",
+    "secret_key",
+    "secret-key",
+    "secretkey",
     "token",
     "api_key",
+    "api-key",
     "apikey",
+    "private_key",
+    "private-key",
+    "privatekey",
+    "access_key",
+    "access-key",
+    "accesskey",
     "authorization",
-    "session",
-    "jwt",
     "bearer",
     "credential",
-    "private_key",
-    "access_key",
+    "credentials",
+    "session",
+    "jwt",
+    "assertion",
+    "verifier",
 )
+
+# A structured field (or log kwarg) is a secret when its name *contains* a
+# keyword anywhere; the value is replaced wholesale. Deliberately broad
+# (``max_tokens`` is masked too): a key is a declared field, so over-masking
+# costs one readable value, while a missed key leaks the whole secret.
+_SENSITIVE_KEY_MARKERS: tuple[str, ...] = _CREDENTIAL_KEYWORDS
 _SENSITIVE_EXACT_KEYS = frozenset(
     {
         "cookie",
@@ -44,13 +64,72 @@ _SENSITIVE_EXACT_KEYS = frozenset(
     }
 )
 
-_EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-# marker (:|=|whitespace) value  →  redact the value, keep the marker. An
-# auth-scheme word (``Authorization: Bearer <t>``) belongs to the value: taken
-# alone it would be "redacted" while the credential after it stayed readable.
+# Anchored to the start of its character run, not to ``\b``: a word boundary
+# recurs inside ``a.a.a.…``, and every one of them restarted a scan to the end
+# of the run (quadratic; ``"a." * 50000`` cost seconds per log entry).
+_EMAIL_REGEX = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+)
+
+# --- key=value pairs inside free text ----------------------------------------
+#
+# A key in running text is a credential when one of its words *ends* in a
+# keyword: ``access_token``, ``clientSecret``, ``x-api-key``, ``db_pwd``,
+# ``token_type`` and ``passwordHash`` all qualify, ``tokenizer``,
+# ``secretary`` and ``max_tokens`` do not. The keyword is found by a lookahead confined to that word, so a key
+# of any length is seen, and a match only starts at a word boundary, so the
+# scan stays linear. Earlier forms either wrapped the keyword in unbounded
+# ``[\w-]*`` affixes (quadratic backtracking over keyword-like text) or
+# bounded them (a long key prefix skipped redaction).
+_KEYWORD_ALTERNATION = "|".join(
+    re.escape(k) for k in sorted(_CREDENTIAL_KEYWORDS, key=len, reverse=True)
+)
+# The keyword ends its word at a ``_``/``-``/non-word character, or at a
+# camelCase hump (``passwordHash``), matched case-sensitively so that
+# ``tokenizer`` stays readable under IGNORECASE.
+_KEYWORD_END = r"(?:(?![^\W_])|(?=(?-i:[A-Z])))"
+_CREDENTIAL_KEY = rf"(?=[\w-]*?(?:{_KEYWORD_ALTERNATION}){_KEYWORD_END})[\w-]+"
+# An auth-scheme word belongs to the value: taken alone it would be
+# "redacted" while the credential after it stayed readable.
+_SCHEME = r"(?:(?:bearer|basic|token)\s+)"
+# Quoted values (JSON, Python reprs): the quotes stay, the content goes. Each
+# alternative consumes one character or one escape, so they never overlap; a
+# missing closing quote masks to the end of the line (fail closed).
+_QUOTED = (
+    r'b?"(?:[^"\\\n]|\\.)*(?P<dq>")?'
+    r"|b?'(?:[^'\\\n]|\\.)*(?P<sq>')?"
+)
+_BARE = r"[^\s&,;\"'}\]]+"
+# ``password hunter2`` is masked, ``password policy`` is prose: a value that
+# follows only whitespace must carry a scheme word or look like a credential
+# (a digit or a symbol).
+_SHAPED = r"(?=[^\s&,;\"'}\]]*?[\d@#$%^&*_+=/~])"
+
+
+# ``<key>`` then ``:``/``=`` and any value, or whitespace and a
+# credential-shaped value. ``{key}`` is filled per pass below.
+_PAIR_TEMPLATE = (
+    r"(?<![\w-])(?P<k>{key})(?P<q>[\"']?)"
+    rf"(?:(?P<sep>\s*[:=]\s*)(?P<v>{_SCHEME}?(?:{_QUOTED}|{_BARE}))"
+    rf"|(?P<ws>[ \t]+)(?P<wv>{_SCHEME}{_BARE}|{_SHAPED}{_BARE}))"
+)
+
+
+def _mask_pair(m: re.Match[str], mask: str) -> str:
+    """Rebuild a matched pair with its value masked, quotes preserved."""
+    if m.group("sep") is None:
+        return f"{m.group('k')}{m.group('q')}{m.group('ws')}{mask}"
+    value = m.group("v")
+    prefix = "b" if value[:2] in ('b"', "b'") else ""
+    opening = value[len(prefix)] if value[len(prefix) :][:1] in ('"', "'") else ""
+    closing = m.group("dq") or m.group("sq") or ""
+    head = f"{m.group('k')}{m.group('q')}{m.group('sep')}"
+    return f"{head}{prefix}{opening}{mask}{closing}"
+
+
+# Log messages: the credential vocabulary.
 _CREDENTIALS_REGEX = re.compile(
-    r"(?i)(api[-_]?key|authorization|bearer|token|secret|password|passwd)"
-    r"(?P<sep>[:=\s]+)(?P<val>(?:(?:bearer|basic|token)\s+)?[^\s,;]+)"
+    _PAIR_TEMPLATE.replace("{key}", _CREDENTIAL_KEY), re.IGNORECASE
 )
 
 
@@ -73,8 +152,7 @@ def _mask_email(match: re.Match[str]) -> str:
 
 def _mask_text(value: str) -> str:
     value = _EMAIL_REGEX.sub(_mask_email, value)
-    value = _CREDENTIALS_REGEX.sub(r"\1\g<sep>[REDACTED]", value)
-    return value
+    return _mask_credentials(value, _CREDENTIALS_REGEX, _REDACTED)
 
 
 def _redact_value(value: Any) -> Any:
@@ -99,10 +177,13 @@ def redact_url_credentials(url: str) -> str:
 
     Connection strings (``redis://:pass@host``, ``postgres://u:p@host``) must
     never be logged verbatim — the password would land in logs/Sentry. Logs the
-    scheme/host/port/path only.
+    scheme/host/port/path only. Anything that is not a ``str`` comes back as
+    ``[REDACTED]``: there is no telling what it would print.
     """
     from urllib.parse import urlsplit, urlunsplit
 
+    if not isinstance(url, str):  # nothing safe to echo
+        return _REDACTED
     try:
         parts = urlsplit(url)
         if parts.username is None and parts.password is None:
@@ -111,8 +192,6 @@ def redact_url_credentials(url: str) -> str:
         # ``.port`` raises ValueError on a non-numeric or out-of-range port.
         if parts.port:
             host = f"{host}:{parts.port}"
-    except TypeError:  # not a str at all: nothing safe to echo
-        return "[REDACTED]"
     except ValueError:  # malformed URL (bad IPv6 netloc, bad port)
         # Fail closed: a URL urlsplit cannot parse may still carry userinfo,
         # and returning it unchanged would log the password.
@@ -147,8 +226,8 @@ def redact_sensitive(
        ``authorization``, ``password``…) has its value replaced with
        ``[REDACTED]``, recursively into nested dicts/lists.
     2. **By value** — remaining string values (including the message ``event``)
-       have emails masked and inline ``key=secret`` / ``Bearer <t>`` patterns
-       redacted.
+       have emails masked and inline ``key=secret``, JSON/repr
+       ``"key": "secret"``, ``Bearer <t>`` and JWT-looking values redacted.
 
     Gated on ``log_masking_enabled`` (default on). Installed in both the
     structlog pipeline and the foreign-log pre-chain by ``configure_logging``,
@@ -171,25 +250,14 @@ def redact_sensitive(
 
 # --- free text from third parties (provider error bodies, exception messages) ----
 #
-# The key-name pass above cannot see inside a string, and ``_CREDENTIALS_REGEX``
-# misses the JSON form (``"access_token": "x"``) and the OAuth ``code``. These
-# patterns are for text that may echo a credential back: a provider's error
-# body, a transport error carrying a URL with a query.
-# A key matches when it is one whole word holding a credential keyword
-# anywhere in it (or is exactly ``code``). The keyword is found by a lookahead
-# confined to that word, so a key of any length is seen, and a non-credential
-# pair is never matched — it cannot swallow a credential behind it
-# (``status=token=…``). Earlier forms either wrapped the keyword in unbounded
-# ``[\w-]*`` affixes (quadratic backtracking over keyword-like text) or bounded
-# them (a long key prefix skipped redaction). A match only starts at a word
-# boundary, so the scan stays linear.
-_KEY_NAMES = (
-    r"(?:(?=[\w-]*?(?:token|secret|password|passwd|api[-_]?key|authorization"
-    r"|assertion|verifier|credential|bearer|session))[\w-]+|code)"
-)
+# The key-name pass cannot see inside a string. These patterns are for text
+# that may echo a credential back: a provider's error body, a transport error
+# carrying a URL with a query. Same pairs as the log pass plus the OAuth
+# ``code`` (a numeric ``code`` — an HTTP/error status — is kept). A
+# non-credential pair is never matched, so it cannot swallow a credential
+# behind it (``status=token=…``).
 _SECRET_PAIR = re.compile(
-    rf"(?<![\w-])(?P<k>{_KEY_NAMES})(?P<q>[\"']?)(?P<sep>\s*[:=]\s*)"
-    r"(?P<v>(?:(?:Bearer|Basic|Token)\s+)?(?:\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\s&,;\"'}\]]+))",
+    _PAIR_TEMPLATE.replace("{key}", rf"(?:{_CREDENTIAL_KEY}|code(?![\w-]))"),
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
@@ -199,34 +267,38 @@ _JWT = re.compile(
 _MAX_FREE_TEXT = 4096
 
 
+def _mask_credentials(text: str, pairs: re.Pattern[str], mask: str) -> str:
+    """Mask credential pairs, standalone bearer tokens and JWT-like strings."""
+
+    def pair(m: re.Match[str]) -> str:
+        value = m.group("v") if m.group("sep") is not None else m.group("wv")
+        if m.group("k").lower() == "code" and value.strip("\"'").isdigit():
+            return m.group(0)
+        return _mask_pair(m, mask)
+
+    text = pairs.sub(pair, text)
+    text = _BEARER.sub(lambda m: f"{m.group(1)} {mask}", text)
+    return _JWT.sub(lambda _m: mask, text)
+
+
 def redact_secrets(
     text: str, secrets: Iterable[str] = (), *, mask: str = _REDACTED
 ) -> str:
     """Mask credentials in third-party free text (key=value, JSON, bearer, JWT).
 
-    Covers ``Authorization``/bearer values, any ``*token*``/``*secret*``/
-    ``password``/``api_key``/``verifier`` pair, and OAuth ``code`` values, in
-    ``key=value``, ``key: value`` and JSON (``"key": "value"``) forms, plus
-    standalone ``Bearer <token>`` and JWT-looking strings. A numeric ``code``
-    (an HTTP/error status) is kept. ``secrets`` are masked wherever they
-    appear, whatever surrounds them.
+    Covers every key the credential vocabulary names (``*_token``,
+    ``*secret``, ``password``/``pwd``, ``api_key``, ``private_key``,
+    ``Authorization``…) and OAuth ``code`` values, in ``key=value``,
+    ``key: value``, JSON and Python-repr (``"key": "value"``, ``'key': 'v'``)
+    forms, ``key <credential-shaped value>``, plus standalone
+    ``Bearer <token>`` and JWT-looking strings. A numeric ``code`` (an
+    HTTP/error status) is kept. ``secrets`` are masked wherever they appear,
+    whatever surrounds them.
     """
-
-    def pair(m: re.Match[str]) -> str:
-        value = m.group("v")
-        if m.group("k").lower() == "code" and value.strip("\"'").isdigit():
-            return m.group(0)
-        quote = m.group("q")
-        if value[:1] in ('"', "'"):
-            return f"{m.group('k')}{quote}{m.group('sep')}{value[0]}{mask}{value[0]}"
-        return f"{m.group('k')}{quote}{m.group('sep')}{mask}"
-
     for secret in secrets:
         if secret:
             text = text.replace(secret, mask)
-    text = _SECRET_PAIR.sub(pair, text)
-    text = _BEARER.sub(rf"\1 {mask}", text)
-    return _JWT.sub(mask, text)
+    return _mask_credentials(text, _SECRET_PAIR, mask)
 
 
 def safe_snippet(

@@ -29,7 +29,7 @@ import base64
 import binascii
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import unquote
 
 from .normalize import MatchingView, matching_views
@@ -163,7 +163,7 @@ def scan_views(text: str, *, decode: bool = True) -> list[MatchingView]:
                 label = f"{chain}>{encoding}" if chain else encoding
                 views.append(MatchingView(label, decoded))
                 views.extend(
-                    MatchingView(f"{label}:{v.label}", v.text, v.squashed)
+                    replace(v, label=f"{label}:{v.label}")
                     for v in matching_views(decoded)
                 )
                 next_frontier.append((label, decoded))

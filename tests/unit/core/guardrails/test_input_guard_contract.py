@@ -74,7 +74,10 @@ class TestLabels:
         assert result.is_valid is False
         variants = result.metadata["matched_variants"]
         assert any(label.startswith(f"injection:{lang}:") for label in variants)
-        assert set(variants.values()) == {"deobfuscated"}
+        # The whole-phrase form may also hit native-squashed; the word
+        # pattern must still hit the view that undid the spacing.
+        assert "deobfuscated" in set(variants.values())
+        assert set(variants.values()) <= {"deobfuscated", "native-squashed"}
 
     @pytest.mark.parametrize(
         "payload",

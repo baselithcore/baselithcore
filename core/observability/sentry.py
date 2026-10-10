@@ -14,45 +14,24 @@ from pydantic import SecretStr
 
 from core.config import get_app_config
 from core.observability.logging import get_logger
+from core.observability.redaction import _key_is_sensitive
 
 logger = get_logger(__name__)
 
-_SENSITIVE_HEADER_NAMES = frozenset(
-    {
-        "authorization",
-        "cookie",
-        "set-cookie",
-        "x-api-key",
-        "x-auth-token",
-        "x-admin-token",
-        "proxy-authorization",
-    }
-)
-_SENSITIVE_VALUE_KEYS = frozenset(
-    {
-        "password",
-        "passwd",
-        "secret",
-        "token",
-        "api_key",
-        "apikey",
-        "authorization",
-        "session",
-        "jwt",
-    }
-)
 _REDACTED = "[REDACTED]"
 
 
 def _scrub_mapping(payload: Any) -> None:
-    """In-place scrub of dict-like payloads. Replaces values with ``[REDACTED]``."""
+    """In-place scrub of dict-like payloads. Replaces values with ``[REDACTED]``.
+
+    A key is sensitive by the same rule log redaction applies to structured
+    fields (:func:`core.observability.redaction._key_is_sensitive`), so a
+    credential name masked in the logs is masked in Sentry too.
+    """
     if not isinstance(payload, dict):
         return
     for key, value in list(payload.items()):
-        lowered = key.lower() if isinstance(key, str) else ""
-        if lowered in _SENSITIVE_HEADER_NAMES or any(
-            marker in lowered for marker in _SENSITIVE_VALUE_KEYS
-        ):
+        if isinstance(key, str) and _key_is_sensitive(key):
             payload[key] = _REDACTED
         elif isinstance(value, dict):
             _scrub_mapping(value)

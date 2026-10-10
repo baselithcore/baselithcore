@@ -668,32 +668,71 @@ The structlog processor `redact_sensitive` runs on every log entry, on the
 structlog chain and the foreign-log pre-chain alike, while `LOG_MASKING_ENABLED`
 is on. A config that cannot be read keeps it on. It works in two passes. The
 first goes by key: a field whose name marks it a secret (`token`,
-`authorization`, `password`, …) is replaced whole, recursively through nested
-dicts, lists and tuples. The second goes by value: every remaining string has
-its emails masked to the first three characters of the local part, and inline
-`key=value` / `key: value` credentials redacted. An auth scheme counts as part
-of the value, so `Authorization: Bearer <token>` logs as
-`Authorization: [REDACTED]`, never with the token left after the scheme word.
-`redact_url_credentials(url)` drops the userinfo from a connection string,
-including a username-only token (`https://<token>@host`). When the URL cannot be
-parsed it still strips everything up to the authority's last `@`, for
-scheme-relative URLs (`//user:pw@host`) as well.
+`authorization`, `password`, `pwd`, `private_key`, …) is replaced whole,
+recursively through nested dicts, lists and tuples. The second goes by value:
+every remaining string has its emails masked to the first three characters of
+the local part, and the credentials inside it redacted:
+
+| Form in the message | Logged as |
+|---|---|
+| `password=hunter2`, `token: abc` | `password=[REDACTED]`, `token: [REDACTED]` |
+| `{"password": "x"}`, `'api_key': 'k'` (JSON, Python repr) | `{"password": "[REDACTED]"}`, `'api_key': '[REDACTED]'` — quotes kept |
+| `Authorization: Bearer <token>` | `Authorization: [REDACTED]` — the scheme word belongs to the value |
+| `password hunter2`, `Bearer abcdefgh123` | `password [REDACTED]`, `Bearer [REDACTED]` |
+| a JWT (`eyJ….….…`) anywhere | `[REDACTED]` |
+
+**One vocabulary.** The key pass, the message pass, the Sentry scrubber and
+`redact_secrets` below all read the same keyword list
+(`_CREDENTIAL_KEYWORDS` in `core/observability/redaction.py`): password,
+`passwd`, `pwd`, secret and `secret_key`, token, `api_key`, `private_key`,
+`access_key`, authorization, bearer, credential(s), session, `jwt`, assertion,
+verifier — with their `-`/`_`/camelCase spellings. A name added there is masked
+everywhere at once. They differ only in how a key is read:
+
+- **Structured keys** match when the keyword appears *anywhere* in the name, so
+  `max_tokens` is masked too. A key is a declared field: over-masking it costs
+  one readable value, missing it leaks the secret.
+- **Keys inside text** match when one of the key's words *ends* in a keyword;
+  a word ends at `_`, `-`, the end of the key or a camelCase hump —
+  `access_token`, `clientSecret`, `x-api-key`, `db_pwd`, `token_type` and
+  `passwordHash` qualify; `tokenizer=cl100k`, `max_tokens=4096` and
+  `secretary: Jane` do not.
+  A value after `:` or `=` is always masked. A value after a bare space is
+  masked only when it carries an auth scheme or looks like a credential (a
+  digit or a symbol), so `password hunter2` is masked and
+  `the password policy requires…` stays readable.
+
+A quoted value with no closing quote (a truncated message) is masked to the end
+of the line. Every pattern is linear on hostile input: the key lookahead is
+confined to one word, quoted values consume one character or one escape at a
+time, and the email pattern is anchored to the start of its character run —
+anchored to `\b` it restarted at every dot of `a.a.a.…`, and `"a." * 50000`
+cost seconds per log entry. `tests/unit/core/observability/test_redaction_vocabulary.py`
+pins the linearity.
+
+The stdlib `SensitiveDataFilter` (`core.observability.setup`) applies the same
+masking to the handlers it guards. `redact_url_credentials(url)` drops the
+userinfo from a connection string, including a username-only token
+(`https://<token>@host`). When the URL cannot be parsed it still strips
+everything up to the authority's last `@`, for scheme-relative URLs
+(`//user:pw@host`) as well. Anything that is not a `str` comes back as
+`[REDACTED]`.
 
 ## Redacting third-party text
 
 `core.observability.redaction.redact_secrets(text, secrets=())` and
 `safe_snippet(text, secrets=(), limit=200)` mask credentials in free text that
 may echo one back, such as a provider's error body or a transport error. They
-cover `Bearer`/`Authorization` values, `*token*`/`*secret*`/`password`/`api_key`/
-`verifier` pairs and OAuth `code` values in `key=value` and JSON forms, plus JWTs.
+apply the message pass above — the same vocabulary, the same `key=value`, JSON,
+Python-repr and `key <credential-shaped value>` forms, bearer tokens and JWTs —
+plus OAuth `code` values (a numeric `code`, an HTTP status, is kept).
 `safe_snippet` redacts before it truncates, collapses control characters to a
 single line and bounds the length. `core.connectors` builds every error message
 with them.
 
 The patterns run on text an outside party controls, so they are written to stay
-linear and complete: a key matches when it is one whole word holding a
-credential keyword anywhere in it, found by a lookahead confined to that word.
-So a key of any length is seen, a non-credential pair never swallows a
+linear and complete: the keyword is found by a lookahead confined to one word,
+so a key of any length is seen, a non-credential pair never swallows a
 credential behind it (`status=token=…`), and nothing backtracks quadratically.
 In addition
 callers bound the input first — `safe_snippet` cuts at 4096 characters, and

@@ -640,6 +640,7 @@ pytest_add_cli_args = ["--no-cov", "-p", "no:randomly", "-q", "-p", "no:cachepro
 pytest_add_cli_args_test_selection = [
   "tests/unit/core/observability/test_log_redaction.py",
   "tests/unit/core/observability/test_redaction_free_text.py",
+  "tests/unit/core/observability/test_redaction_vocabulary.py",
   "tests/unit/core/security/test_secrets.py",
   "tests/unit/core/guardrails/",
   "tests/unit/core/test_guardrails.py",

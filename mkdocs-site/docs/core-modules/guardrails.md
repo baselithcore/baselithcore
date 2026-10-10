@@ -208,7 +208,18 @@ only for matching — and each pattern is reported once, tagged in
 | `normalized` | Unicode NFKC (fullwidth, mathematical letters, ligatures) and removal of every format character — zero-width space/joiners, word joiner, BOM, soft hyphen, bidi controls | `ｉｇｎｏｒｅ previous instructions`, `ign`+U+200B+`ore …` |
 | `deobfuscated` | the above plus a Cyrillic/Greek → Latin confusables fold, leetspeak inside mixed letter/digit tokens (`0→o 1→i 3→e 4→a 5→s 7→t @→a $→s`, `11→ll`) and single letters split by one separator (`i.g.n.o.r.e`) | `1gn0r3 pr3v10us 1nstruct10ns`, `ignоre` with a Cyrillic `о` |
 | `squashed` | letters only — produced only when letter-spacing was found; matched against a short list of whole-phrase patterns | `i g n o r e p r e v i o u s i n s t r u c t i o n s` |
+| `native` | non-ASCII text only: letter spacing collapsed *without* the confusables fold, then, inside a token that already holds a Cyrillic letter, Latin lookalikes and leet digits folded *into* Cyrillic (`o→о`, `e→е`, `0→о`, `3→з`, `4→ч`, `6→б`, `@→а`); only the Russian and custom patterns run here | `и г н о р и р у й  в с е …`, `3абудь св0и правила`, `Игнoрируй …` with a Latin `o` |
+| `native-squashed` | letters and combining marks of `native` — produced only when letter-spacing was found in non-ASCII text; matched against whole-phrase forms of the Russian, Arabic and Hindi patterns (whitespace and `\b` tokens dropped) | `з а б у д ь с в о и п р а в и л а` |
 | `base64`, `hex`, `url` (and chains such as `base64>base64`, `base64:deobfuscated`) | decode-and-rescan of encoded segments; each decoded payload gets its own normalised views | `aWdub3JlIHByZXZpb3Vz…`, `72657665616c…`, `ignore%20all%20…` |
+
+Letter spacing is collapsed script-aware: a combining mark (Unicode
+`Mn`/`Mc`/`Me` — Devanagari vowel signs and viramas, Arabic harakat) counts as
+part of the letter before it, and a separator in front of a mark is removed
+first, since a mark never follows a space in real text. So `प ि छ ल े` is read as
+`पिछले`, whether the attacker spaced code points or whole clusters (`सि स् ट म`).
+Runs of three or more single letters are still the rule; two-letter words that
+stay apart (`स भी`, `н е`) are what the whole-phrase forms on `native-squashed`
+are for.
 
 Limits keep this bounded and ReDoS-free: every regex is linear (single
 character classes, bounded gaps); pure numbers are never de-leeted, so prices,
@@ -219,26 +230,31 @@ and text with 4+ percent escapes; it decodes at most 32 segments per level,
 it is valid, mostly printable UTF-8 — random base64-shaped identifiers and
 binary blobs are dropped, not blocked. At the 100 KB scale the whole scan
 stays around a tenth of a second (pinned by a performance test); the default
-10 000-character cap keeps it near a millisecond.
+10 000-character cap keeps it near a millisecond. ASCII input never builds
+the `native` views; for non-ASCII input they add one linear pass and a handful
+of patterns (5-25 % more scan time, measured on Russian and Hindi input).
 
 On the `deobfuscated` views the guard skips only the Cyrillic (`ru`) patterns,
-because the confusables fold has already turned those letters into Latin.
-Chinese, Japanese, Arabic and Hindi patterns still run there. That view is
-the only one that undoes letter spacing, so a spaced-out `忽 略 之 前 的 所 有 指 令`
-is caught. Spaced-out Russian and Hindi are not (see the limits below).
+because the confusables fold has already turned those letters into Latin; the
+`native` views run them instead, on Cyrillic that was never folded. Chinese,
+Japanese, Arabic and Hindi patterns still run on `deobfuscated`, so a
+spaced-out `忽 略 之 前 的 所 有 指 令` is caught there.
 
 The views apply to injection, code-execution **and** custom patterns;
 `block_injection_patterns=False` switches off every injection view, including
-`squashed`. `sanitize()` still redacts matches in the original text only.
+`squashed` and `native-squashed`. `sanitize()` still redacts matches in the
+original text only.
 
 ### What the regex layer does and does not catch
 
 Caught: the phrasings in the table above in English and the ten other
 languages, wrapped in leetspeak, invisible characters, homoglyphs, fullwidth or
-mathematical letters, letter spacing, or one or two layers of
-base64/hex/percent encoding — each class pinned by
-`tests/unit/core/guardrails/test_input_evasions.py` and the red-team corpus
-(`evals/red_team/obfuscation.yaml`).
+mathematical letters, letter spacing (Russian and Hindi included, with or
+without word gaps), Latin lookalikes or leet digits inside Russian words, or
+one or two layers of base64/hex/percent encoding — each class pinned by
+`tests/unit/core/guardrails/test_input_evasions.py`,
+`tests/unit/core/guardrails/test_input_native_views.py` and the red-team
+corpus (`evals/red_team/obfuscation.yaml`).
 
 Not caught, by design of a pattern layer:
 
@@ -250,10 +266,13 @@ Not caught, by design of a pattern layer:
   user defines in the prompt, payloads split across turns or messages;
 - **homoglyphs outside the short confusables map** (the full Unicode
   confusables table is not shipped) and leetspeak beyond the listed digits;
-- **letter spacing or leetspeak inside Russian or Hindi**. The confusables
-  fold turns Cyrillic into Latin lookalikes before the `ru` patterns could see
-  the joined word. The spacing collapse joins letters only, so it cannot rejoin
-  the Devanagari vowel signs that follow them;
+- **letter spacing combined with leetspeak** in any language — a spaced-out
+  digit (`i g n 0 r e`, `з а б у д ь  св0и` spaced) breaks the letter run before
+  either transform can apply — and leetspeak inside Hindi, Arabic or CJK text;
+- **a Russian keyword spelled entirely in Latin lookalikes** (`Bce` for
+  `все`): the fold into Cyrillic only touches a token that already holds a
+  Cyrillic letter, so Latin words, code and numbers next to Russian stay
+  intact;
 - **indirect injection** in fetched content — that is
   `IndirectInjectionScanner`'s job, not this guard's.
 
