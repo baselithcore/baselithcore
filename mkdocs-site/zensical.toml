@@ -155,6 +155,7 @@ nav = [
       { "Versioning & Deprecation" = "advanced/versioning-and-deprecation.md" },
       { "API Stability Tiers" = "advanced/api-stability.md" },
       { "Upgrade Notes"     = "advanced/upgrade-notes.md" },
+      { "Migrating to 1.0"  = "advanced/migrating-to-1-0.md" },
       { "Migration Guide"   = "advanced/migration-guide.md" },
       { "Runbooks"           = "advanced/runbooks.md" },
   ]},

@@ -63,9 +63,23 @@ def load_manifest(path: str) -> Manifest:
 ## The facade overrides everything
 
 A symbol re-exported by [`baselith`](../api/python.md) is `stable` whatever
-its package's tier. The facade is the contract; `core.*` is where the
-implementation happens to live today. `baselith.LoopBudget` is stable while
+its package's tier. The facade is the contract; `baselith.core.*` is where
+the implementation happens to live today. `baselith.LoopBudget` is stable while
 `baselith.core.orchestration`, the package defining it, stays `beta`.
+
+## One namespace since 1.0
+
+Since 1.0 every package lives under the single top-level `baselith` package:
+the tier keys are `baselith.core.*`. The `baselith` prefix does not pass the
+facade's promise down: `stability_of("baselith.core.x")` resolves through the
+`baselith.core.*` entries only, never through the facade's `stable`, so a
+module outside the table resolves to `experimental` whatever its import path.
+The bundled plugins (`baselith.plugins.*`) are plugins, not framework API, and
+resolve the same way.
+
+The old top-level names `core` and `plugins` are not part of the API at all.
+The optional `baselith-core-compat` distribution aliases them during a
+migration; see [Migrating to 1.0](migrating-to-1-0.md).
 
 ## Tiers only ratchet
 

@@ -1,0 +1,1 @@
+import baselith_core_compat; baselith_core_compat.install()

@@ -15,6 +15,32 @@ v0.4.0 module moves, see the [Migration Guide](migration-guide.md).
 
 ---
 
+## 1.0: one top-level package
+
+The `baselith-core` wheel now installs a single top-level package, `baselith`.
+`core.*` is `baselith.core.*` and `plugins.*` is `baselith.plugins.*`; the
+facade (`from baselith import Agent`) is unchanged. A project with its own
+`core` package (a Django app, typically) can now install the framework.
+
+**What can break:**
+
+- Deep imports. Rewrite them with the codemod (`--no-move` on your own
+  project), or install `baselith-core-compat` while you migrate.
+- Jobs queued by 0.x. Their function paths name the old modules, and the
+  dead-letter replay allowlist now defaults to `baselith.core.,baselith.plugins.`.
+  Drain the queues before upgrading.
+- Log filters, dashboards and alerts keyed on the old logger names.
+- Third-party plugins written for 0.x. They need the compat package or a 1.0
+  release that declares `min_core_version: 1.0.0`.
+- Container paths (`/app/baselith/core`), volume mounts of the repository's
+  plugins, a custom `alembic.ini`, and direct `python -m` calls to framework
+  modules.
+
+The full procedure, with the codemod, the compat package and the operator
+checklist, is in [Migrating to 1.0](migrating-to-1-0.md).
+
+---
+
 ## Security postures that are now fail-closed
 
 ### MCP tokens are bound to the MCP resource (RFC 8707)
