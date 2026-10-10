@@ -1,6 +1,6 @@
 name: goals
 description: Goal tracking and monitoring for agent workflows
-version: 0.1.0
+version: 0.2.0
 author: Baselith
 tags:
 - goals
@@ -15,5 +15,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: a20ec4f0e49d730d33fc6c636c8b1e1b04de7c1faefcfc0cf991bc640c8726f5
+integrity_sha256: 6ca90cf346004577423b955df7dbfcc34be92feeeeace48667fffa470a217d9a
 hash_surface_version: 5

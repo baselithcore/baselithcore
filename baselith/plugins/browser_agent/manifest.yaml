@@ -1,5 +1,5 @@
 name: browser_agent
-version: 0.1.0
+version: 0.2.0
 description: Browser automation and MCP browser tools powered by Playwright and VisionService
 author: Baselith
 tags:
@@ -26,5 +26,5 @@ permissions:
   - '*'
   secrets: []
   filesystem: []
-integrity_sha256: ac22e8d13bfddfdc010915d7824774ee8e6448fe44081e84349e1c342ae88602
+integrity_sha256: ad0c11ff0ac169dac74341d020c6e840c9553b74a75b516099409dd08ee3e0ce
 hash_surface_version: 5

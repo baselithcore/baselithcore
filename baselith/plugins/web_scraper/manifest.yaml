@@ -1,5 +1,5 @@
 name: web-scraper
-version: 0.1.1
+version: 0.2.0
 description: Web scraping, crawling, extractors, middleware and storage backends
 author: Baselith
 tags:
@@ -27,5 +27,5 @@ permissions:
   - '*'
   secrets: []
   filesystem: []
-integrity_sha256: 1fed3e80cad8776bd615252256666dc5b0f8f876269342e49252b73388e3788f
+integrity_sha256: cd261f3e8e047c3c0f84a9009b86c72e7ef72d2712538760df93d9d419ee7edf
 hash_surface_version: 5
