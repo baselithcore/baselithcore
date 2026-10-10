@@ -251,7 +251,8 @@ class SecurityConfig(BaseSettings):
 
     # === Secrets backend (resolution of credentials) ===
     # 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets),
-    # plus any backend registered via core.security.secrets.register_secrets_provider.
+    # plus any backend an installed package declares under the
+    # baselith.secrets_providers entry-point group (or registered in-process).
     secrets_backend: str = Field(default="env", alias="SECRETS_BACKEND")
     secrets_dir: str | None = Field(default=None, alias="SECRETS_DIR")
 

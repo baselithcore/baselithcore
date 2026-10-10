@@ -788,7 +788,7 @@ Declared in `core.config.security`.
 | `RATE_LIMIT_JOB_PER_MINUTE` | `int \| None` | *empty* |  |
 | `RATE_LIMIT_USER_PER_MINUTE` | `int \| None` | `60` |  |
 | `RATE_LIMIT_WINDOW_SECONDS` | `int` | `60` |  |
-| `SECRETS_BACKEND` | `str` | `env` | 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets), plus any backend registered via core.security.secrets.register_secrets_provider. |
+| `SECRETS_BACKEND` | `str` | `env` | 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets), plus any backend an installed package declares under the baselith.secrets_providers entry-point group (or registered in-process). |
 | `SECRETS_DIR` | `str \| None` | *empty* |  |
 | `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |

@@ -1,12 +1,16 @@
 """Unit tests for pluggable secret resolution."""
 
+import importlib.metadata
+
 import pytest
 from pydantic import SecretStr
 
 from core.security.secrets import (
+    ENTRY_POINT_GROUP,
     EnvSecretsProvider,
     FileSecretsProvider,
     SecretsProvider,
+    get_secret,
     get_secrets_provider,
     register_secrets_provider,
     reset_secrets_provider,
@@ -115,3 +119,155 @@ class TestFactoryAndRegistry:
         provider = get_secrets_provider()
         assert isinstance(provider, SecretsProvider)
         assert provider.get_secret("anything").get_secret_value() == "dummy"
+
+
+class _FakeDist:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeEntryPoint:
+    """Stands in for ``importlib.metadata.EntryPoint`` (name/value/dist/load)."""
+
+    def __init__(self, name, target, dist="acme-secrets"):
+        self.name = name
+        self.value = f"acme_secrets:{name}"
+        self.dist = _FakeDist(dist)
+        self._target = target
+
+    def load(self):
+        if isinstance(self._target, BaseException):
+            raise self._target
+        return self._target
+
+
+class _StaticProvider:
+    def __init__(self, value="from-entry-point"):
+        self._value = value
+
+    def get_secret(self, name):
+        return SecretStr(self._value)
+
+
+class TestEntryPointDiscovery:
+    @pytest.fixture(autouse=True)
+    def _isolate_registry(self, monkeypatch):
+        # Earlier tests register backends into the module-level dict; keep this
+        # class independent of test order (pytest-randomly).
+        monkeypatch.setattr("core.security.secrets._PROVIDER_FACTORIES", {})
+
+    @pytest.fixture
+    def entry_points(self, monkeypatch):
+        """Install fake entry points; record every group that was scanned."""
+        installed: list[_FakeEntryPoint] = []
+        calls: list[str] = []
+
+        def fake_entry_points(*, group):
+            calls.append(group)
+            return list(installed) if group == ENTRY_POINT_GROUP else []
+
+        monkeypatch.setattr(importlib.metadata, "entry_points", fake_entry_points)
+        return installed, calls
+
+    def test_discovered_backend_is_built(self, monkeypatch, entry_points):
+        installed, calls = entry_points
+        installed.append(_FakeEntryPoint("vault", _StaticProvider))
+        monkeypatch.setenv("SECRETS_BACKEND", "Vault")  # case-insensitive
+        provider = get_secrets_provider()
+        assert isinstance(provider, _StaticProvider)
+        assert provider.get_secret("X").get_secret_value() == "from-entry-point"
+        assert calls == [ENTRY_POINT_GROUP]
+
+    def test_explicit_registration_wins(self, monkeypatch, entry_points):
+        installed, calls = entry_points
+        installed.append(_FakeEntryPoint("vault", _StaticProvider))
+        register_secrets_provider("vault", lambda: _StaticProvider("registered"))
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        assert get_secrets_provider().get_secret("X").get_secret_value() == (
+            "registered"
+        )
+        assert calls == []  # registration short-circuits discovery
+
+    @pytest.mark.parametrize("builtin", ["env", "file", "ENV"])
+    def test_builtins_cannot_be_registered(self, builtin):
+        with pytest.raises(ValueError, match="built-in"):
+            register_secrets_provider(builtin, _StaticProvider)
+
+    @pytest.mark.parametrize(
+        ("backend", "expected"),
+        [("env", EnvSecretsProvider), ("file", FileSecretsProvider)],
+    )
+    def test_builtins_ignore_entry_points_and_skip_discovery(
+        self, monkeypatch, entry_points, backend, expected
+    ):
+        installed, calls = entry_points
+        installed.append(_FakeEntryPoint(backend, _StaticProvider))
+        monkeypatch.setenv("SECRETS_BACKEND", backend)
+        assert isinstance(get_secrets_provider(), expected)
+        assert calls == []  # the default path never scans package metadata
+
+    def test_load_failure_raises_with_name(self, monkeypatch, entry_points):
+        installed, _ = entry_points
+        installed.append(
+            _FakeEntryPoint("vault", ImportError("token=s.leaky-value missing"))
+        )
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(RuntimeError, match="'vault'") as info:
+            get_secrets_provider()
+        assert "ImportError" in str(info.value)
+        assert "leaky-value" not in str(info.value)  # no error text echoed
+        assert isinstance(info.value.__cause__, ImportError)
+
+    def test_factory_failure_raises(self, monkeypatch, entry_points):
+        def boom():
+            raise ConnectionError("vault unreachable")
+
+        installed, _ = entry_points
+        installed.append(_FakeEntryPoint("vault", boom))
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(RuntimeError, match="failed to load"):
+            get_secrets_provider()
+
+    def test_bad_return_type_raises(self, monkeypatch, entry_points):
+        installed, _ = entry_points
+        installed.append(_FakeEntryPoint("vault", lambda: object()))
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(TypeError, match="'vault'.*does not implement"):
+            get_secrets_provider()
+
+    def test_registered_factory_bad_return_type_raises(self, monkeypatch):
+        register_secrets_provider("broken", lambda: None)
+        monkeypatch.setenv("SECRETS_BACKEND", "broken")
+        with pytest.raises(TypeError, match="does not implement"):
+            get_secrets_provider()
+
+    def test_duplicate_names_raise(self, monkeypatch, entry_points):
+        installed, _ = entry_points
+        installed.append(_FakeEntryPoint("vault", _StaticProvider, dist="pkg-a"))
+        installed.append(_FakeEntryPoint("VAULT", _StaticProvider, dist="pkg-b"))
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(ValueError, match="Ambiguous") as info:
+            get_secrets_provider()
+        assert "pkg-a" in str(info.value) and "pkg-b" in str(info.value)
+
+    def test_unknown_backend_lists_discovered(self, monkeypatch, entry_points):
+        installed, _ = entry_points
+        installed.append(_FakeEntryPoint("aws-sm", _StaticProvider))
+        installed.append(_FakeEntryPoint("gcp-sm", _StaticProvider))
+        register_secrets_provider("local-test", _StaticProvider)
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(ValueError, match="Unknown secrets backend") as info:
+            get_secrets_provider()
+        message = str(info.value)
+        assert "['env', 'file']" in message
+        assert "['local-test']" in message
+        assert "['aws-sm', 'gcp-sm']" in message
+
+    def test_failure_is_not_cached(self, monkeypatch, entry_points):
+        """A failed build leaves no provider behind, so nothing reads env."""
+        installed, _ = entry_points
+        installed.append(_FakeEntryPoint("vault", lambda: object()))
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        for _ in range(2):
+            with pytest.raises(TypeError):
+                get_secret("ANY")

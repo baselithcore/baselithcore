@@ -946,10 +946,13 @@ from core.security import get_secret
 db_password = get_secret("DB_PASSWORD")   # SecretStr | None
 ```
 
-External managers (HashiCorp Vault, cloud KMS) are registered at startup via
-`register_secrets_provider("vault", factory)` and selected with
-`SECRETS_BACKEND=vault`. See
-[Security & Encryption](../core-modules/security.md#secret-resolution).
+External managers (HashiCorp Vault, cloud secret managers) ship as a package
+that declares a provider under the `baselith.secrets_providers` entry point:
+install it, set `SECRETS_BACKEND=vault`, done — no startup code. In-process
+registration via `register_secrets_provider("vault", factory)` remains for
+tests and embedding. An unknown, ambiguous or broken backend fails closed
+instead of falling back to the environment. See
+[Security & Encryption](../core-modules/security.md#external-backends-vault-cloud-secret-managers).
 
 ### Encryption at Rest
 
@@ -1398,7 +1401,7 @@ Before go-live, verify every point:
 
 - [x] No hardcoded secrets in code
 - [x] `.env` in `.gitignore`
-- [x] Secrets manager in production (Vault, AWS SM) — `SECRETS_BACKEND=file` or a registered backend
+- [x] Secrets manager in production (Vault, AWS SM) — `SECRETS_BACKEND=file` or an installed/registered backend
 - [x] Encryption at rest for PII/sensitive fields (`DATA_ENCRYPTION_KEYS`; the framework encrypts only webhook secrets itself — your columns call the encryptor)
 - [x] Documented key-rotation procedure
 

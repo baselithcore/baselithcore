@@ -18,15 +18,36 @@ also honours the widely used ``<NAME>_FILE`` indirection: if ``DB_PASSWORD`` is
 unset but ``DB_PASSWORD_FILE`` points at a path, the file's contents are used.
 This keeps plaintext secrets out of the environment and image layers.
 
-Registering external backends
------------------------------
+External backends
+-----------------
 Heavy or environment-specific providers (Vault, AWS/GCP/Azure) are kept out of
-``core`` to honour the Sacred Core rule. Register them at startup::
+``core`` to honour the Sacred Core rule. They arrive one of two ways, and are
+selected the same way: ``SECRETS_BACKEND=<name>``.
 
-    from core.security.secrets import register_secrets_provider
-    register_secrets_provider("vault", lambda: MyVaultProvider(...))
+1. **As an installed package** (the deployment path). A distribution declares
+   a zero-argument factory under the ``baselith.secrets_providers`` entry-point
+   group; installing it and setting the environment variable is all an
+   operator does::
 
-and select via ``SECRETS_BACKEND=vault``.
+       [project.entry-points."baselith.secrets_providers"]
+       vault = "acme_vault_secrets:VaultSecretsProvider"
+
+   The group is consulted lazily, only when the selected backend is neither a
+   built-in nor explicitly registered, so the default ``env`` path never
+   touches package metadata. This works even when the first secret read
+   happens during bootstrap, before any plugin has loaded.
+
+2. **Registered in-process** (tests, embedding)::
+
+       from core.security.secrets import register_secrets_provider
+       register_secrets_provider("vault", lambda: MyVaultProvider(...))
+
+Precedence: the built-ins ``env`` and ``file`` cannot be shadowed, an explicit
+registration beats an entry point. Resolution fails closed: an unknown name,
+two distributions claiming the same name, an entry point that fails to load,
+or a factory returning something that is not a :class:`SecretsProvider` all
+raise — never a silent fallback to ``env``, which would read credentials from
+the wrong place.
 """
 
 from __future__ import annotations
@@ -35,9 +56,12 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import SecretStr
+
+if TYPE_CHECKING:
+    from importlib.metadata import EntryPoint
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +147,14 @@ class FileSecretsProvider:
             return None
 
 
+#: Backends implemented here. They cannot be shadowed by a registration or
+#: an entry point: ``SECRETS_BACKEND=env`` must mean the environment, always.
+_BUILTIN_BACKENDS: frozenset[str] = frozenset({"env", "file"})
+
+#: Entry-point group through which installed packages contribute backends.
+#: Entry-point name = backend id; object = zero-argument provider factory.
+ENTRY_POINT_GROUP = "baselith.secrets_providers"
+
 #: Registry of named provider factories for externally-supplied backends.
 _PROVIDER_FACTORIES: dict[str, Callable[[], SecretsProvider]] = {}
 
@@ -137,17 +169,91 @@ def register_secrets_provider(
 
     Call during application startup, before :func:`get_secrets_provider`. The
     factory is invoked lazily the first time the matching backend is selected.
+    A registration takes precedence over an installed entry point of the same
+    name. Deployments should prefer shipping the provider as a package with a
+    ``baselith.secrets_providers`` entry point, which needs no startup code.
 
     Args:
         name: Backend identifier matched against ``SECRETS_BACKEND``.
         factory: Zero-argument callable returning a :class:`SecretsProvider`.
+
+    Raises:
+        ValueError: If ``name`` is a built-in backend (``env``, ``file``).
     """
-    _PROVIDER_FACTORIES[name.lower()] = factory
+    key = name.lower()
+    if key in _BUILTIN_BACKENDS:
+        raise ValueError(
+            f"Cannot register secrets backend {name!r}: it is a built-in "
+            f"({', '.join(sorted(_BUILTIN_BACKENDS))}) and cannot be shadowed."
+        )
+    _PROVIDER_FACTORIES[key] = factory
     logger.debug("Registered secrets provider backend %r", name)
 
 
+def _discovered_entry_points() -> list[EntryPoint]:
+    """Return every entry point in :data:`ENTRY_POINT_GROUP`.
+
+    ``importlib.metadata`` is imported here, not at module scope: it is only
+    needed when a non-built-in, unregistered backend is selected, and the
+    default ``env`` path must not pay for scanning package metadata.
+    """
+    import importlib.metadata
+
+    return list(importlib.metadata.entry_points(group=ENTRY_POINT_GROUP))
+
+
+def _entry_point_origin(entry_point: EntryPoint) -> str:
+    """Name the distribution that declared ``entry_point``, for error messages."""
+    dist = getattr(entry_point, "dist", None)
+    dist_name = getattr(dist, "name", None)
+    return f"{dist_name} ({entry_point.value})" if dist_name else entry_point.value
+
+
+def _ensure_provider(provider: object, source: str) -> SecretsProvider:
+    """Return ``provider`` if it satisfies :class:`SecretsProvider`, else raise."""
+    if not isinstance(provider, SecretsProvider):
+        raise TypeError(
+            f"Secrets backend {source} returned {type(provider).__name__}, "
+            "which does not implement SecretsProvider (get_secret(name) -> "
+            "SecretStr | None). Refusing to fall back to another backend."
+        )
+    return provider
+
+
+def _provider_from_entry_point(
+    backend: str, candidates: list[EntryPoint]
+) -> SecretsProvider:
+    """Load and build the single entry point named ``backend``; fail closed."""
+    matches = [ep for ep in candidates if ep.name.lower() == backend]
+    if len(matches) > 1:
+        origins = ", ".join(sorted(_entry_point_origin(ep) for ep in matches))
+        raise ValueError(
+            f"Ambiguous secrets backend {backend!r}: {len(matches)} installed "
+            f"packages declare it in the {ENTRY_POINT_GROUP!r} entry-point "
+            f"group ({origins}). Uninstall all but one, or register the "
+            "intended factory explicitly with register_secrets_provider()."
+        )
+    (entry_point,) = matches
+    source = f"entry point {entry_point.name!r} from {_entry_point_origin(entry_point)}"
+    try:
+        factory = entry_point.load()
+        provider = factory()
+    except Exception as exc:
+        # Only the exception type goes in the message: a provider's error text
+        # may carry an address or credential. The cause stays chained.
+        raise RuntimeError(
+            f"Secrets backend {source} failed to load "
+            f"({type(exc).__name__}). Refusing to fall back to another backend."
+        ) from exc
+    return _ensure_provider(provider, source)
+
+
 def _build_provider(backend: str, secrets_dir: str | None) -> SecretsProvider:
-    """Construct the provider for ``backend`` (built-ins + registered)."""
+    """Construct the provider for ``backend``.
+
+    Precedence: built-ins, then explicit registrations, then installed entry
+    points (looked up only when needed). Anything else raises.
+    """
     backend = backend.lower()
     if backend == "env":
         return EnvSecretsProvider()
@@ -155,10 +261,17 @@ def _build_provider(backend: str, secrets_dir: str | None) -> SecretsProvider:
         return FileSecretsProvider(secrets_dir)
     factory = _PROVIDER_FACTORIES.get(backend)
     if factory is not None:
-        return factory()
+        return _ensure_provider(factory(), f"registered backend {backend!r}")
+    candidates = _discovered_entry_points()
+    if any(ep.name.lower() == backend for ep in candidates):
+        return _provider_from_entry_point(backend, candidates)
+    discovered = sorted({ep.name.lower() for ep in candidates} - _BUILTIN_BACKENDS)
     raise ValueError(
-        f"Unknown secrets backend {backend!r}. Built-ins: 'env', 'file'. "
-        f"Registered: {sorted(_PROVIDER_FACTORIES)}."
+        f"Unknown secrets backend {backend!r}. "
+        f"Built-ins: {sorted(_BUILTIN_BACKENDS)}. "
+        f"Registered: {sorted(_PROVIDER_FACTORIES)}. "
+        f"Discovered via {ENTRY_POINT_GROUP!r} entry points: {discovered}. "
+        "Install the package providing it or fix SECRETS_BACKEND."
     )
 
 

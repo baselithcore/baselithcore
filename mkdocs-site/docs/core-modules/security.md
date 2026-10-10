@@ -237,6 +237,7 @@ credentials never leak via `repr()`, logs, or Sentry frames.
 |---|---|
 | `env` (default) | Process environment variables. Identical to current behaviour. |
 | `file` | Per-secret files under `SECRETS_DIR` (the Docker/Kubernetes secrets pattern, e.g. `/run/secrets`). Also honours the `<NAME>_FILE` indirection and falls back to the environment. |
+| any other name | A provider an installed package declares under the `baselith.secrets_providers` entry point, or one registered in-process (see [below](#external-backends-vault-cloud-secret-managers)). |
 
 ```python
 from core.security import get_secret
@@ -263,10 +264,59 @@ config are both cached for the process: a test that changes `SECRETS_BACKEND`
 must reset both (`reset_secrets_provider()` and
 `core.config.security._security_config = None`).
 
-### Registering an external backend (Vault, cloud KMS)
+### External backends (Vault, cloud secret managers)
 
 Heavy or environment-specific providers stay **out of `core`** (Sacred Core
-rule). Register them at startup and select via `SECRETS_BACKEND`:
+rule): `core` ships no vendor SDK and no Vault client. A provider only needs
+`get_secret(name) -> SecretStr | None`, and it reaches the runtime one of two
+ways — both selected the same way, with `SECRETS_BACKEND=<name>`.
+
+**Ship it as a package (recommended).** Declare a zero-argument factory under
+the `baselith.secrets_providers` entry-point group. The operator installs the
+package and sets `SECRETS_BACKEND=vault`; no startup code changes. This works
+even though the first secret read happens during bootstrap, before any plugin
+loads, because discovery is part of building the provider itself.
+
+```toml
+# pyproject.toml of your provider package
+[project.entry-points."baselith.secrets_providers"]
+vault = "acme_vault_secrets:VaultSecretsProvider"
+```
+
+```python
+# acme_vault_secrets.py — EXAMPLE ONLY, not part of BaselithCore.
+# A minimal HashiCorp Vault KV v2 provider. Each secret lives at
+# <mount>/data/<path> under a key equal to the secret name.
+import os
+
+import httpx
+from pydantic import SecretStr
+
+
+class VaultSecretsProvider:
+    def __init__(self) -> None:
+        self._addr = os.environ["VAULT_ADDR"].rstrip("/")
+        self._token = SecretStr(os.environ["VAULT_TOKEN"])  # never a plain str
+        self._mount = os.environ.get("VAULT_KV_MOUNT", "secret")
+        self._path = os.environ.get("VAULT_KV_PATH", "baselith")
+        self._client = httpx.Client(timeout=5.0)
+
+    def get_secret(self, name: str) -> SecretStr | None:
+        response = self._client.get(
+            f"{self._addr}/v1/{self._mount}/data/{self._path}",
+            headers={"X-Vault-Token": self._token.get_secret_value()},
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        value = response.json()["data"]["data"].get(name)
+        return SecretStr(value) if value is not None else None
+```
+
+A production provider would add caching, token renewal (or Kubernetes/AppRole
+auth) and TLS settings; the contract above is all the framework requires.
+
+**Register it in-process** (tests, or an application embedding the framework):
 
 ```python
 from core.security import register_secrets_provider
@@ -275,7 +325,25 @@ register_secrets_provider("vault", lambda: MyVaultProvider(addr=..., token=...))
 # then run with SECRETS_BACKEND=vault
 ```
 
-A provider only needs `get_secret(name) -> SecretStr | None`.
+**Precedence.** The built-ins `env` and `file` always win and cannot be
+shadowed (registering either raises `ValueError`; an entry point with either
+name is ignored). An explicit registration beats an entry point of the same
+name. The entry-point group is read lazily, only when the selected backend is
+neither a built-in nor registered, so the default `env` path never scans
+package metadata.
+
+**Fail closed.** A misconfigured backend stops the first secret read rather
+than silently reading credentials from the environment:
+
+| Situation | Error |
+|---|---|
+| Name is not a built-in, registered, or installed | `ValueError` listing the built-in, registered and discovered names |
+| Two installed packages declare the same name | `ValueError` ("Ambiguous …") naming both distributions |
+| The entry point fails to import, or its factory raises | `RuntimeError` naming the entry point; the original exception is chained, its text is not echoed |
+| The factory returns something without `get_secret` | `TypeError` naming the entry point (or registered backend) |
+
+A failed build is not cached, and no secret value ever appears in these
+messages or in the provider's log line (which records only the provider class).
 
 ### Per-caller secret guard
 
