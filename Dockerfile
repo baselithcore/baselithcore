@@ -352,31 +352,35 @@ PY
 #
 # The app still RUNS from /app, so this tree exists for its entry points, not
 # to be imported — and the `rm -rf` below is what makes that true rather than
-# merely intended. `pip install .` also materialises baselith/core/ and baselith/plugins/ inside
-# the prefix, and PYTHONPATH lists /install-app BEFORE /app, so which copy won
-# depended on the working directory. Measured on the built image:
+# merely intended. `pip install .` also materialises the whole baselith/
+# package (facade, core and the bundled plugins) inside the prefix, and
+# PYTHONPATH lists /install-app BEFORE /app, so which copy won depended on the
+# working directory. Measured on the built image (0.x, before the namespace
+# move, when the packages were still top-level `core` and `plugins`):
 #
 #   cwd=/      import core -> /install-app/lib/python3.12/site-packages/core
-#   cwd=/app   import core -> /app/baselith/core
+#   cwd=/app   import core -> the source tree copied into /app
 #
 # uvicorn runs from WORKDIR /app, so the API was always reading the right tree;
 # the `baselith` console script invoked from anywhere else was not. That split
 # matters because the CLI WRITES — `baselith plugin enable` rewrites
 # configs/plugins.yaml — so a command run from the wrong directory would have
-# edited a tree the API never reads. Deleting the packages leaves /app as the
-# only importable copy for every entry point, and takes 24.6MB of duplicate
-# source (17MB core, 7MB plugins) out of the image as a side effect.
+# edited a tree the API never reads. Deleting the package leaves /app as the
+# only importable copy for every entry point, and takes ~25MB of duplicate
+# source out of the image as a side effect. Since 1.0, core and plugins live
+# under baselith/, so the whole baselith/ package goes: a half-deleted copy
+# (facade left, core removed) would shadow /app/baselith and fail to import
+# baselith.core at all.
 #
 # The dist-info stays: it is what `importlib.metadata` resolves the installed
 # version from, and it carries the console script's entry point.
 FROM deps AS app
 
 COPY pyproject.toml README.md ./
-# `baselith/` is the public facade every downstream import goes through. It is
-# in `packages.find.include`, so the wheel built here needs its source present.
+# `baselith/` is the one top-level package: the public facade every downstream
+# import goes through, the core and the bundled plugins. It is what
+# `packages.find.include` selects, so the wheel built here needs it present.
 COPY baselith/ baselith/
-COPY baselith/core/ baselith/core/
-COPY baselith/plugins/ baselith/plugins/
 # The build itself needs these two: `[tool.setuptools] cmdclass` points
 # build_py at build_support/scaffold_templates.py, which copies the `baselith
 # init` starters out of templates/ into the wheel. Without them `pip install .`
@@ -388,8 +392,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps --prefix /install-app . \
     && PYTHONPATH=/install/lib/python3.12/site-packages:/install-app/lib/python3.12/site-packages \
        pip check \
-    && rm -rf /install-app/lib/python3.12/site-packages/core \
-              /install-app/lib/python3.12/site-packages/plugins \
+    && rm -rf /install-app/lib/python3.12/site-packages/baselith \
     && test -x /install-app/bin/baselith
 
 # ============================================================
@@ -539,13 +542,11 @@ COPY --from=app /install-app /install-app
 # state under its own directory.
 COPY --chown=appuser:appuser backend.py ./
 # Alembic config for the pre-deploy Job's `alembic upgrade head`. The scripts
-# themselves live in baselith/core/db/migrations (copied with baselith/core/ below); alembic.ini
+# themselves live in baselith/core/db/migrations (copied with baselith/ below); alembic.ini
 # points there relative to itself, and the in-app ensure_schema() and
 # `baselith db migrate` locate them through the package, not the cwd.
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser baselith/ baselith/
-COPY --chown=appuser:appuser baselith/core/ baselith/core/
-COPY --chown=appuser:appuser baselith/plugins/ baselith/plugins/
 COPY --chown=appuser:appuser configs/ configs/
 # --- Maintenance scripts: an explicit allowlist, not the directory ---
 # `COPY scripts/ scripts/` shipped the whole repository toolbox into the

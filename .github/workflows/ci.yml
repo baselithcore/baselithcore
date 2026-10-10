@@ -1342,15 +1342,15 @@ jobs:
           # project distribution is installed into /install-app for its entry
           # points, and pip also materialises baselith/core/ and baselith/plugins/ there; with
           # /install-app ahead of /app on PYTHONPATH, which copy won depended
-          # on the working directory. The Dockerfile deletes them, so `core`
-          # must resolve under /app from ANY cwd.
+          # on the working directory. The Dockerfile deletes them, so
+          # `baselith.core` must resolve under /app from ANY cwd.
           for wd in / /app /tmp; do
             RESOLVED="$(docker run --rm --workdir "$wd" --entrypoint python \
-              baselithcore:ci -c 'import core; print(core.__file__)')"
+              baselithcore:ci -c 'import baselith.core; print(baselith.core.__file__)')"
             echo "cwd=${wd} -> ${RESOLVED}"
             case "${RESOLVED}" in
               /app/baselith/core/*) ;;
-              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/baselith/core"; exit 1 ;;
+              *) echo "::error::baselith.core resolved to ${RESOLVED} with cwd=${wd}, expected /app/baselith/core"; exit 1 ;;
             esac
           done
 
