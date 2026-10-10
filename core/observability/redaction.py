@@ -45,10 +45,12 @@ _SENSITIVE_EXACT_KEYS = frozenset(
 )
 
 _EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-# marker (:|=|whitespace) value  →  redact the value, keep the marker.
+# marker (:|=|whitespace) value  →  redact the value, keep the marker. An
+# auth-scheme word (``Authorization: Bearer <t>``) belongs to the value: taken
+# alone it would be "redacted" while the credential after it stayed readable.
 _CREDENTIALS_REGEX = re.compile(
     r"(?i)(api[-_]?key|authorization|bearer|token|secret|password|passwd)"
-    r"(?P<sep>[:=\s]+)(?P<val>[^\s,;]+)"
+    r"(?P<sep>[:=\s]+)(?P<val>(?:(?:bearer|basic|token)\s+)?[^\s,;]+)"
 )
 
 
@@ -122,7 +124,9 @@ def _strip_userinfo(url: str) -> str:
     """Drop everything up to the last ``@`` of the authority, without parsing."""
     scheme, sep, rest = url.partition("://")
     if not sep:
-        scheme, rest = "", url
+        # Scheme-relative (``//user:pw@host``) still has an authority.
+        sep = "//" if url.startswith("//") else ""
+        scheme, rest = "", url[len(sep) :]
     authority, slash, tail = rest.partition("/")
     if "@" not in authority:
         return url

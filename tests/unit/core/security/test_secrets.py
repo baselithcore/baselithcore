@@ -14,6 +14,7 @@ from core.security.secrets import (
     get_secrets_provider,
     register_secrets_provider,
     reset_secrets_provider,
+    set_secret_guard,
 )
 
 
@@ -25,6 +26,7 @@ def _reset_provider(monkeypatch):
     reset_secrets_provider()
     yield
     reset_secrets_provider()
+    set_secret_guard(None)
 
 
 class TestEnvProvider:
@@ -271,3 +273,137 @@ class TestEntryPointDiscovery:
         for _ in range(2):
             with pytest.raises(TypeError):
                 get_secret("ANY")
+
+    def test_duplicate_origin_falls_back_to_entry_point_value(
+        self, monkeypatch, entry_points
+    ):
+        """An entry point without distribution metadata still gets named."""
+        installed, _ = entry_points
+        dist_none = _FakeEntryPoint("vault", _StaticProvider)
+        dist_none.dist = None
+        no_dist_attr = _FakeEntryPoint("vault", _StaticProvider)
+        del no_dist_attr.dist
+        installed.extend([dist_none, no_dist_attr])
+        monkeypatch.setenv("SECRETS_BACKEND", "vault")
+        with pytest.raises(ValueError, match="Ambiguous") as info:
+            get_secrets_provider()
+        assert "(acme_secrets:vault, acme_secrets:vault)" in str(info.value)
+
+    def test_registered_bad_return_names_backend_and_type(self, monkeypatch):
+        register_secrets_provider("broken", lambda: 42)
+        monkeypatch.setenv("SECRETS_BACKEND", "broken")
+        with pytest.raises(TypeError, match="registered backend 'broken' returned int"):
+            get_secrets_provider()
+
+
+class TestFileProviderContract:
+    def test_env_fallback_is_on_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ONLY_ENV", "env-val")
+        assert FileSecretsProvider(tmp_path).get_secret(
+            "ONLY_ENV"
+        ).get_secret_value() == ("env-val")
+
+    @pytest.mark.parametrize(
+        ("content", "secret"),
+        [(" pa ss \t\n", " pa ss \t"), ("tokenXX\n", "tokenXX")],
+    )
+    def test_only_trailing_newlines_are_stripped(self, tmp_path, content, secret):
+        # Whitespace and any other character are part of the secret.
+        (tmp_path / "PW").write_text(content)
+        assert FileSecretsProvider(tmp_path).get_secret("PW").get_secret_value() == (
+            secret
+        )
+
+    def test_reads_utf8(self, tmp_path):
+        (tmp_path / "PW").write_bytes("pässwörd€".encode())
+        assert FileSecretsProvider(tmp_path).get_secret("PW").get_secret_value() == (
+            "pässwörd€"
+        )
+
+    def test_precedence_dir_then_file_var_then_env(self, tmp_path, monkeypatch):
+        external = tmp_path / "external"
+        external.write_text("from-file-var")
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        monkeypatch.setenv("PREC", "from-env")
+        monkeypatch.setenv("PREC_FILE", str(external))
+        provider = FileSecretsProvider(secrets_dir)
+        assert provider.get_secret("PREC").get_secret_value() == "from-file-var"
+        (secrets_dir / "PREC").write_text("from-dir")
+        assert provider.get_secret("PREC").get_secret_value() == "from-dir"
+
+    @pytest.mark.parametrize(
+        ("exc", "reason"),
+        [
+            (PermissionError(13, "Permission denied"), "Permission denied"),
+            (OSError(), "OSError"),
+        ],
+    )
+    def test_unreadable_file_logs_reason_not_path(
+        self, tmp_path, monkeypatch, caplog, exc, reason
+    ):
+        (tmp_path / "DB_PASSWORD").write_text("x")
+
+        def deny(self, *args, **kwargs):
+            raise exc
+
+        monkeypatch.setattr("pathlib.Path.read_text", deny)
+        provider = FileSecretsProvider(tmp_path, fallback_env=False)
+        with caplog.at_level("WARNING", logger="core.security.secrets"):
+            assert provider.get_secret("DB_PASSWORD") is None
+        messages = [
+            r.getMessage() for r in caplog.records if r.name == "core.security.secrets"
+        ]
+        assert messages
+        assert all(reason in m for m in messages)
+        assert not any(str(tmp_path) in m or "DB_PASSWORD" in m for m in messages)
+
+
+class TestProviderSelection:
+    def test_file_backend_reads_the_configured_dir(self, monkeypatch, tmp_path):
+        (tmp_path / "DB_PASSWORD").write_text("from-secrets-dir\n")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.delenv("DB_PASSWORD_FILE", raising=False)
+        monkeypatch.setenv("SECRETS_BACKEND", "file")
+        monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
+        assert get_secret("DB_PASSWORD").get_secret_value() == "from-secrets-dir"
+
+    def test_logs_the_provider_class_only(self, monkeypatch, caplog):
+        monkeypatch.delenv("SECRETS_BACKEND", raising=False)
+        with caplog.at_level("INFO", logger="core.security.secrets"):
+            get_secrets_provider()
+        assert [
+            r.getMessage() for r in caplog.records if r.name == "core.security.secrets"
+        ] == ["Initialized provider: EnvSecretsProvider"]
+
+
+class TestSecretGuard:
+    def test_guard_sees_every_name_and_can_refuse(self, monkeypatch):
+        monkeypatch.delenv("SECRETS_BACKEND", raising=False)
+        monkeypatch.setenv("ALLOWED", "ok-value")
+        monkeypatch.setenv("FORBIDDEN", "must-not-leak")
+        seen: list[str] = []
+
+        def guard(name: str) -> None:
+            seen.append(name)
+            if name == "FORBIDDEN":
+                raise PermissionError(name)
+
+        set_secret_guard(guard)
+        assert get_secret("ALLOWED").get_secret_value() == "ok-value"
+        with pytest.raises(PermissionError):
+            get_secret("FORBIDDEN")
+        assert seen == ["ALLOWED", "FORBIDDEN"]
+
+    def test_clearing_the_guard_restores_reads(self, monkeypatch):
+        monkeypatch.delenv("SECRETS_BACKEND", raising=False)
+        monkeypatch.setenv("FORBIDDEN", "v")
+
+        def deny(name: str) -> None:
+            raise PermissionError(name)
+
+        set_secret_guard(deny)
+        with pytest.raises(PermissionError):
+            get_secret("FORBIDDEN")
+        set_secret_guard(None)
+        assert get_secret("FORBIDDEN").get_secret_value() == "v"

@@ -126,3 +126,113 @@ def test_installed_in_configure_logging_pipeline():
 
     src = inspect.getsource(logmod.configure_logging)
     assert src.count("redact_sensitive") >= 2
+
+
+# --- exact outputs: a redaction that half-works must fail, not just one that stops
+
+
+@pytest.mark.parametrize(
+    ("email", "masked"),
+    [
+        ("alice@example.com", "ali***@example.com"),
+        ("abcd@x.io", "abc***@x.io"),
+        ("bob@x.io", "b***@x.io"),
+        ("al@x.io", "a***@x.io"),
+    ],
+)
+def test_email_mask_keeps_at_most_three_chars(masking_on, email, masked):
+    # Longer than three: the first three survive; three or fewer: only one.
+    assert _run({"event": f"user {email} in"})["event"] == f"user {masked} in"
+
+
+def test_inline_credential_keeps_marker_and_separator(masking_on):
+    out = _run({"event": "password=hunter2 then token: abc"})
+    assert out["event"] == "password=[REDACTED] then token: [REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("message", "leak"),
+    [
+        ("Authorization: Bearer abc.def-123456", "abc.def-123456"),
+        ("authorization=Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+        ("api_key: Token tk_live_998877", "tk_live_998877"),
+    ],
+)
+def test_auth_scheme_does_not_shield_the_credential(masking_on, message, leak):
+    # Regression: the scheme word ("Bearer"/"Basic") was taken as the value,
+    # so the credential right after it was logged verbatim.
+    out = _run({"event": message})["event"]
+    assert leak not in out
+    assert out.endswith("[REDACTED]")
+
+
+def test_nested_values_are_recursed_not_blanked(masking_on):
+    out = _run(
+        {
+            "event": "req",
+            "headers": {"Host": "api.local", "Authorization": "x"},
+            "items": ["password=pw1", "plain"],
+            "pair": ("token=t1", "ok"),
+            "by_id": {1: "secret=s1"},
+        }
+    )
+    assert out["headers"] == {"Host": "api.local", "Authorization": "[REDACTED]"}
+    assert out["items"] == ["password=[REDACTED]", "plain"]
+    assert out["pair"] == ("token=[REDACTED]", "ok")
+    assert out["by_id"] == {1: "secret=[REDACTED]"}
+
+
+def test_masks_when_config_lacks_the_flag(monkeypatch):
+    # A config object without ``log_masking_enabled`` keeps masking on.
+    monkeypatch.setattr(redmod, "get_app_config", lambda: object())
+    assert _run({"event": "x", "token": "abc123"})["token"] == "[REDACTED]"
+
+
+def test_masks_when_config_is_unreadable(monkeypatch):
+    def boom():
+        raise RuntimeError("config broke")
+
+    monkeypatch.setattr(redmod, "get_app_config", boom)
+    out = _run({"event": "password=pw", "token": "abc123"})
+    assert out["token"] == "[REDACTED]"
+    assert out["event"] == "password=[REDACTED]"
+
+
+def test_redact_url_credentials_strips_username_only_token():
+    # ``https://<token>@host`` carries a credential with no password part.
+    assert (
+        redact_url_credentials("https://ghp_tok123@github.com/org/repo.git")
+        == "https://github.com/org/repo.git"
+    )
+
+
+@pytest.mark.parametrize(
+    "url", ["https://API.Example.COM/v1?q=1#f", "http://[::1]:8080/x"]
+)
+def test_redact_url_credentials_returns_clean_url_verbatim(url):
+    assert redact_url_credentials(url) == url
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # a password holding a raw '@': strip up to the *last* one
+        ("redis://user:p@ss@cache.host:99999/2", "redis://cache.host:99999/2"),
+        # a later '://' (in the query) is not the scheme separator
+        (
+            "redis://:sekret@cache.host:99999/2?r=http://x",
+            "redis://cache.host:99999/2?r=http://x",
+        ),
+        # an '@' in the path is not userinfo
+        ("redis://:s@h:99999/a@b/c", "redis://h:99999/a@b/c"),
+        ("redis://h:99999/a@b/c", "redis://h:99999/a@b/c"),
+        # scheme-relative still carries userinfo (regression: echoed verbatim)
+        ("//u:sekret@h:99999/x", "//h:99999/x"),
+    ],
+)
+def test_redact_url_credentials_malformed_strips_exactly_userinfo(url, expected):
+    assert redact_url_credentials(url) == expected
+
+
+def test_redact_url_credentials_withholds_non_string():
+    assert redact_url_credentials(bytearray(b"redis://:pw@h/0")) == "[REDACTED]"

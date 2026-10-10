@@ -97,7 +97,7 @@ class FileSecretsProvider:
     2. The path in environment variable ``N_FILE`` (the ``_FILE`` convention).
     3. If ``fallback_env`` is set, the plain environment variable ``N``.
 
-    File contents are read as UTF-8 and stripped of a single trailing newline.
+    File contents are read as UTF-8 and stripped of trailing newlines.
     """
 
     def __init__(

@@ -28,9 +28,11 @@ class _StubLLM:
     def __init__(self, payload: str | Exception) -> None:
         self.payload = payload
         self.prompts: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
 
     async def generate_response(self, prompt: str, **kwargs: Any) -> str:
         self.prompts.append(prompt)
+        self.kwargs.append(kwargs)
         if isinstance(self.payload, Exception):
             raise self.payload
         return self.payload
@@ -132,6 +134,59 @@ class TestClassify:
         result = await InputGuard().classify("hello")
 
         assert result.confidence == 1.0
+
+    async def test_fail_open_is_marked_in_the_reason(self, monkeypatch):
+        _install_llm(monkeypatch, _StubLLM(ConnectionError("down")))
+
+        result = await InputGuard().classify("hello")
+
+        assert result.reason == "classification unavailable (fail-open)"
+
+    async def test_requests_json_mode_classification_call(self, monkeypatch):
+        # Without JSON mode the verdict stops parsing and every call fails open.
+        stub = _StubLLM(_verdict("in_scope"))
+        _install_llm(monkeypatch, stub)
+
+        await InputGuard().classify("hello")
+
+        assert stub.kwargs == [{"json": True, "task_category": "classification"}]
+
+    async def test_missing_fields_default_to_zero_confidence_and_empty_reason(
+        self, monkeypatch
+    ):
+        _install_llm(monkeypatch, _StubLLM(json.dumps({"intent": "jailbreak"})))
+
+        result = await InputGuard().classify("hello")
+
+        assert (result.intent, result.confidence, result.reason) == (
+            "jailbreak",
+            0.0,
+            "",
+        )
+
+    @pytest.mark.parametrize(
+        ("topics", "options"),
+        [
+            (None, "<in_scope|jailbreak|harmful>"),
+            ("Kubernetes", "<in_scope|out_of_scope|jailbreak|harmful>"),
+        ],
+    )
+    async def test_prompt_asks_for_the_keys_and_labels_the_parser_reads(
+        self, monkeypatch, topics, options
+    ):
+        # A label or key the parser does not recognise turns every verdict
+        # into a fail-open ``in_scope`` (or a jailbreak at confidence 0.0).
+        stub = _StubLLM(_verdict("in_scope"))
+        _install_llm(monkeypatch, stub)
+
+        await InputGuard(GuardrailsConfig(allowed_topics=topics)).classify("hi")
+
+        prompt = stub.prompts[0]
+        assert f'"intent": "{options}"' in prompt
+        assert '{"reason": ' in prompt
+        assert '"confidence": <float 0.0-1.0>}' in prompt
+        for label in options.strip("<>").split("|"):
+            assert f'- "{label}": ' in prompt
 
     def test_sync_regex_path_untouched(self):
         # The taxonomy is additive: validate() stays a pure-regex sync path.

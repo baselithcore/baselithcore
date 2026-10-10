@@ -138,11 +138,15 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
 }
 
 
-#: Languages written in a non-Latin script. Their patterns are skipped on the
-#: ``deobfuscated`` views, whose confusables fold rewrites Cyrillic/Greek
-#: letters to Latin — they would never match there, and skipping them keeps
-#: the scan cost down.
+#: Languages written in a non-Latin script.
 NON_LATIN_LANGUAGES: frozenset[str] = frozenset({"ru", "zh", "ja", "ar", "hi"})
+
+#: Languages whose script the ``deobfuscated`` views' confusables fold rewrites
+#: (Cyrillic/Greek to Latin). Their patterns would never match there, so the
+#: guard skips them on those views to keep the scan cost down. CJK, Arabic and
+#: Devanagari survive the fold, and ``deobfuscated`` is the only view that
+#: undoes their letter spacing (``忽 略 之 前 …``): their patterns must run there.
+FOLDED_SCRIPT_LANGUAGES: frozenset[str] = frozenset({"ru"})
 
 
 def compile_multilingual(
@@ -172,6 +176,7 @@ COMPILED_MULTILINGUAL_PATTERNS = compile_multilingual(MULTILINGUAL_INJECTION_PAT
 
 __all__ = [
     "COMPILED_MULTILINGUAL_PATTERNS",
+    "FOLDED_SCRIPT_LANGUAGES",
     "MULTILINGUAL_INJECTION_PATTERNS",
     "NON_LATIN_LANGUAGES",
     "compile_multilingual",

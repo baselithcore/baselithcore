@@ -662,6 +662,23 @@ BASELITH_OTEL_ASGI_SUB_SPANS=false
 !!! tip "Zero-Dependency Fallback"
     If `structlog`, `prometheus_client`, or `opentelemetry` are not installed, all observability features degrade gracefully to stdlib equivalents. No exceptions are raised.
 
+## Log masking
+
+The structlog processor `redact_sensitive` runs on every log entry, on the
+structlog chain and the foreign-log pre-chain alike, while `LOG_MASKING_ENABLED`
+is on. A config that cannot be read keeps it on. It works in two passes. The
+first goes by key: a field whose name marks it a secret (`token`,
+`authorization`, `password`, …) is replaced whole, recursively through nested
+dicts, lists and tuples. The second goes by value: every remaining string has
+its emails masked to the first three characters of the local part, and inline
+`key=value` / `key: value` credentials redacted. An auth scheme counts as part
+of the value, so `Authorization: Bearer <token>` logs as
+`Authorization: [REDACTED]`, never with the token left after the scheme word.
+`redact_url_credentials(url)` drops the userinfo from a connection string,
+including a username-only token (`https://<token>@host`). When the URL cannot be
+parsed it still strips everything up to the authority's last `@`, for
+scheme-relative URLs (`//user:pw@host`) as well.
+
 ## Redacting third-party text
 
 `core.observability.redaction.redact_secrets(text, secrets=())` and

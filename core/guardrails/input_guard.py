@@ -29,7 +29,7 @@ from .config import (
     compile_patterns,
 )
 from .decode import scan_views
-from .multilingual import COMPILED_MULTILINGUAL_PATTERNS, NON_LATIN_LANGUAGES
+from .multilingual import COMPILED_MULTILINGUAL_PATTERNS, FOLDED_SCRIPT_LANGUAGES
 from .normalize import COMPILED_SQUASHED_PATTERNS
 
 logger = get_logger(__name__)
@@ -165,9 +165,11 @@ class InputGuard:
         """Labelled patterns for word-preserving views, per the config.
 
         Args:
-            latin_only: Drop non-Latin-script languages — for the
-                ``deobfuscated`` views, where the confusables fold has
-                already rewritten Cyrillic/Greek letters to Latin.
+            latin_only: Drop the languages whose script the confusables
+                fold rewrites (Cyrillic/Greek) — for the ``deobfuscated``
+                views, where those letters are already Latin. CJK, Arabic
+                and Devanagari patterns still run there: that view is the
+                only one that undoes their letter spacing.
         """
         patterns: list[tuple[str, re.Pattern[str]]] = []
         if self.config.block_injection_patterns:
@@ -175,7 +177,7 @@ class InputGuard:
             patterns.extend(
                 (f"injection:{lang}", p)
                 for lang, p in COMPILED_MULTILINGUAL_PATTERNS
-                if not (latin_only and lang in NON_LATIN_LANGUAGES)
+                if not (latin_only and lang in FOLDED_SCRIPT_LANGUAGES)
             )
         if self.config.block_code_execution:
             patterns.extend(("code", p) for p in COMPILED_CODE_PATTERNS)

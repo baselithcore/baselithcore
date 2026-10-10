@@ -221,6 +221,12 @@ binary blobs are dropped, not blocked. At the 100 KB scale the whole scan
 stays around a tenth of a second (pinned by a performance test); the default
 10 000-character cap keeps it near a millisecond.
 
+On the `deobfuscated` views the guard skips only the Cyrillic (`ru`) patterns,
+because the confusables fold has already turned those letters into Latin.
+Chinese, Japanese, Arabic and Hindi patterns still run there. That view is
+the only one that undoes letter spacing, so a spaced-out `忽 略 之 前 的 所 有 指 令`
+is caught. Spaced-out Russian and Hindi are not (see the limits below).
+
 The views apply to injection, code-execution **and** custom patterns;
 `block_injection_patterns=False` switches off every injection view, including
 `squashed`. `sanitize()` still redacts matches in the original text only.
@@ -244,6 +250,10 @@ Not caught, by design of a pattern layer:
   user defines in the prompt, payloads split across turns or messages;
 - **homoglyphs outside the short confusables map** (the full Unicode
   confusables table is not shipped) and leetspeak beyond the listed digits;
+- **letter spacing or leetspeak inside Russian or Hindi**. The confusables
+  fold turns Cyrillic into Latin lookalikes before the `ru` patterns could see
+  the joined word. The spacing collapse joins letters only, so it cannot rejoin
+  the Devanagari vowel signs that follow them;
 - **indirect injection** in fetched content — that is
   `IndirectInjectionScanner`'s job, not this guard's.
 
