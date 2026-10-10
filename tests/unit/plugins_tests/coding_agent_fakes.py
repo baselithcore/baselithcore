@@ -24,11 +24,23 @@ class LocalSandbox:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.mounts: list[tuple[dict[str, str] | None, bool]] = []
 
     async def execute_code_async(
-        self, code: str, language: str = "python", timeout: int | None = None
+        self,
+        code: str,
+        language: str = "python",
+        timeout: int | None = None,
+        mounts: dict[str, str] | None = None,
+        envs: Any = None,
+        budget: Any = None,
+        mounts_read_only: bool = False,
     ) -> Any:
         self.calls += 1
+        self.mounts.append((mounts, mounts_read_only))
+        # No container here: point the script at the host directory it would see mounted.
+        for host, container in (mounts or {}).items():
+            code = code.replace(repr(container), repr(host))
         started = time.monotonic()
         proc = await asyncio.to_thread(
             subprocess.run,

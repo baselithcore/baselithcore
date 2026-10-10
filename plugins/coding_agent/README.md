@@ -21,8 +21,15 @@ stall guard, `max_fix_attempts`). Only Python executes, and the sandbox image
 must contain pytest (`agent-sandbox:latest` built from
 `core/services/sandbox/Dockerfile.sandbox` does).
 
+Repository fixes: `fix_in_workspace(workspace, problem)` fixes one file of a
+repository with the files it imports as context; Python runs against the whole
+workspace on a read-only sandbox mount, other cases return an unverified
+proposal with the reason (`language`, `missing_dependency`, `too_large`,
+`sandbox_unavailable`, `probe_failed`).
+
 Benchmark: `python -m plugins.coding_agent.evals` (six real bugs, judged by
-hidden tests; exits 0 only at a 100% fix rate).
+hidden tests; exits 0 only at a 100% fix rate). Add `--workspace` for the
+repository cases.
 
 The plugin preserves backward compatibility through shims under
 `core/agents/coding*`. The full reference is the CodingAgent section of
@@ -37,15 +44,28 @@ read-only root filesystem and `/tmp` as the only writable path. One run writes
 pytest in-process; its report line carries a fresh random key, a report
 without the key is ignored and two with it fail the run. Code that reads
 `/proc`, calls `os._exit` or registers `atexit` hooks is refused before it
-runs. These checks raise the bar against code forging its own green report;
+runs, as is code that could reach the interpreter, the reporter or pytest's
+machinery (frames, `sys.modules`, `__import__`, `exec`, pytest plugins and
+hooks, `_pytest`). The screen reads the text NFKC-normalised, the canonical
+source and every string built from constants, so a name split into pieces or
+spelled with escapes is still caught. The report
+line is written with functions bound before any test code is imported; a
+skipped test, a session pytest ended early and a process that exits non-zero
+after its report are never green. Repository runs also import pytest before
+the workspace is on `sys.path`, and refuse conftest and pytest config files.
+These checks raise the bar against code forging its own green report;
 they are not a proof against code written deliberately to evade them, so the
 sandbox isolation and the deterministic security review
 (`core.guardrails.code_review`) still apply to every result.
 
 ## Input is data
 
-Code, errors and instructions pass `core.guardrails.scan_external_content` and
-are fenced in the prompt between `<<<DATA` and `DATA>>>`; data that spells a
-fence marker is defused before it is quoted. This lowers the risk of prompt
+Code, errors, test output, lessons from earlier attempts and instructions pass
+`core.guardrails.scan_external_content` and are fenced in the prompt between
+`<<<DATA` and `DATA>>>`; data that spells a fence marker (any case or spacing,
+lookalike brackets or letters, HTML entities, hidden characters, line breaks,
+or brackets that would join the real fence) is defused before it is quoted.
+Short values quoted inline (the language, repository file names) are reduced to
+one line without backticks, markers or hidden characters. This lowers the risk of prompt
 injection without removing it, which is why the tests and the security review
 decide what is returned.

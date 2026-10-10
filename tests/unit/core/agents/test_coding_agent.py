@@ -31,7 +31,8 @@ async def test_run_tests_reads_the_report_the_sandbox_printed(
         + '{"passed": 2, "failed": 1, "errors": 0, "collection_error": false, '
     )
     line += '"failures": [["test_x", "assert 1 == 2"]], "exit": 1}'
-    sandbox = _SandboxStub(result=_exec_result(stdout="noise\n" + line, exit_code=1))
+    # The harness process ends normally after its report, whatever the tests did.
+    sandbox = _SandboxStub(result=_exec_result(stdout="noise\n" + line, exit_code=0))
     coding_agent._sandbox = sandbox
 
     report = await coding_agent._run_tests("def f(): ...", "def test_x(): ...")

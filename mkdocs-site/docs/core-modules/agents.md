@@ -19,11 +19,13 @@ plugins/
 │   ├── flows.py           # fix / write / refactor / tests flows
 │   ├── loop.py            # Verified loop on core.loops.EngineeredLoop
 │   ├── harness.py         # pytest run in the sandbox, keyed report
+│   ├── screening.py       # What code and tests may not reach before they run
 │   ├── llm.py             # Typed answers via response_format
-│   ├── schemas.py         # CodeAnswer, CodeWithTests, TestsAnswer
+│   ├── schemas.py         # CodeAnswer, CodeWithTests, TestsAnswer, WorkspaceFix
 │   ├── prompts.py         # System prompts and fenced task prompts
 │   ├── compliance.py      # AI-system inventory, Art. 50 provenance
 │   ├── tools.py           # MCP tool definitions and adapters
+│   ├── workspace*.py      # fix_in_workspace: one file of a repository, verified
 │   ├── types.py           # CodeLanguage, CodingResult, CodeExecutionResult
 │   ├── evals/             # Fix-rate benchmark (python -m plugins.coding_agent.evals)
 │   └── plugin.py          # CodingAgentPlugin
@@ -171,33 +173,91 @@ Only Python executes; other languages get `explain_code`. The sandbox image
 must contain pytest: `agent-sandbox:latest` built from
 `core/services/sandbox/Dockerfile.sandbox` does.
 
+### Repository fixes
+
+`fix_in_workspace(workspace, problem)` fixes one file of a repository, with the
+files it imports as read-only context, and proves the fix with tests that
+import the module by its real path:
+
+```python
+ws = agent.workspace(
+    files={"pkg/util.py": util_src, "pkg/mod.py": mod_src},
+    target="pkg/mod.py",
+    test_path="pkg/test_mod.py",
+    roots=("", "src"),  # import roots: "" plus "src" for a src layout
+)
+result = await agent.fix_in_workspace(ws, "quad(1) returns 3, expected 4")
+print(result.verified, result.success, result.diff)
+```
+
+The files are staged in a private host directory, mounted **read-only** into
+the sandbox (`execute_code_async(..., mounts_read_only=True)`) and copied to
+`/tmp` before anything runs, so the code under test never writes back to the
+host. As with `fix_code`, tests that reproduce the problem come first and are
+frozen. A workspace never carries a `conftest.py` or a pytest config file, and
+pytest runs with `--noconftest` and an empty config.
+
+When the fix cannot run, the result is an **unverified proposal**
+(`verified=False`) with `unverified_reason`: `language` (not Python),
+`too_large` (over 1 MB), `sandbox_unavailable` (a provider without read-only
+mounts), `missing_dependency` (a third-party import the sandbox lacks) or
+`probe_failed` (the target does not import as it is). The repository's CI has
+to judge it. A withheld fix (security review) takes its diff with it.
+
 ### Test runs the code cannot forge
 
 One sandbox run writes `solution.py` and `test_solution.py` under a private
 `/tmp` directory and runs pytest in-process, printing one report line whose
-marker carries a fresh random key. A report without the key is ignored and two
-with it fail the run as tampering. Code or tests that read `/proc`, call
-`os._exit`, register `atexit` hooks or reach for the reporter (`__main__`,
-`sys._getframe`, `gc.get_referrers`, pytest's `pluginmanager`) are refused
-before anything runs. This raises the bar; it is not a proof against code
-written deliberately to evade it, so the sandbox isolation and the security
-review below apply to every result.
+marker carries a fresh random key. A report without the key is ignored, two
+with it fail the run as tampering, and so does a process that exits non-zero
+after its report (killed or exited after printing a forged line).
+
+Before anything runs, code and tests (and every repository file of a
+workspace run) are screened for what could reach the run key, the reporter or
+pytest's machinery: `/proc`, `sys.orig_argv`, `os._exit`, `atexit`,
+`__main__`, frames (`sys._getframe`, `inspect.currentframe`, `f_back`,
+`tb_frame`, `__globals__`), `gc` object walks, `sys.modules`, `__import__`,
+`importlib`, `exec`/`eval`/`compile`, process replacement (`os.exec*`,
+`os.system`), pytest plugins and hooks (`pytest_plugins`, `def pytest_*`,
+`hookimpl`, `.hook`), `_pytest` and pytest's node and report classes. The
+screen reads three views of each file (the text NFKC-normalised, the source as
+`ast.unparse` writes it back, and every string built from constants), so a
+name split into pieces (`"__ma" + "in__"`), spelled with escapes or in
+fullwidth letters is still caught. The `if __name__ == "__main__":` statement
+of a repository file is allowed.
+
+The run itself holds where the screen cannot see: the report line is written
+with functions bound before any test code is imported (a patched `print`,
+`json` or `sys.stdout` changes nothing), a skipped or xfailed test is never
+green, nor is a session pytest ended early (`KeyboardInterrupt`,
+`pytest.exit`), and a workspace run imports pytest before the workspace is on
+`sys.path`, so a repository file named `pytest.py` is not the pytest that runs.
+
+This raises the bar; it is not a proof against code written deliberately to
+evade it (a value computed at run time is out of a screen's reach), so the
+sandbox isolation and the security review below apply to every result.
 
 ### Input is data
 
-Code, error messages, instructions and the test reports fed back to the model
-pass `core.guardrails.scan_external_content` and are fenced in the prompt
-between `<<<DATA` and `DATA>>>`; data that itself spells a fence marker is
-defused before it is quoted. The fence lowers the risk of prompt injection
-without removing it, which is why the tests and the review decide what is
-returned.
+Code, error messages, instructions, the test reports and the lessons from
+earlier attempts fed back to the model pass
+`core.guardrails.scan_external_content` and are fenced in the prompt between
+`<<<DATA` and `DATA>>>`. Data that spells a fence marker is defused before it
+is quoted: any case or spacing, lookalike brackets or letters (fullwidth,
+Cyrillic, Greek), HTML entities, hidden characters, a marker split across
+lines, and brackets at the edge of the data that would join the real fence.
+Short values quoted inline (the language, repository file names) are reduced
+to one line without backticks, markers or hidden characters. The fence lowers
+the risk of prompt injection without removing it, which is why the tests and
+the review decide what is returned.
 
 ### Fix-rate benchmark
 
 `python -m plugins.coding_agent.evals` runs six real bugs through `fix_code`
 with the configured model and judges each by hidden tests the agent never
 sees; passing its own tests is not enough. It exits `0` only at a 100% fix
-rate.
+rate. `--workspace` runs the repository cases through `fix_in_workspace`
+instead; positional names select cases.
 
 ### Deterministic security review
 

@@ -33,6 +33,11 @@ _FALLBACK_HINTS: dict[str, str] = {
         "pytest file; then one short paragraph."
     ),
     "TestsAnswer": "Answer with the complete pytest file in one fenced block, then one sentence.",
+    "WorkspaceFix": (
+        "Answer with two fenced blocks: first the complete fixed file, then the complete test "
+        "file; then one short paragraph."
+    ),
+    "WorkspaceCode": "Answer with the complete fixed file in one fenced block, then one sentence.",
 }
 
 
@@ -49,7 +54,7 @@ def parse_fallback(text: str, model: type[M]) -> M:
     blocks = [b.strip() + "\n" for b in _FENCE.findall(text or "")]
     explanation = _outside(text or "")
     name = model.__name__
-    if name == "CodeWithTests":
+    if name in ("CodeWithTests", "WorkspaceFix"):
         if len(blocks) < 2:
             raise ValueError("the answer did not hold both the code and the tests")
         return model.model_validate(
@@ -75,7 +80,9 @@ def _json_payload(text: str) -> str:
     return text[start : end + 1] if 0 <= start < end else text
 
 
-async def _schema_bound(llm: Any, prompt: str, model: type[M], *, retries: int) -> M:
+async def _schema_bound(
+    llm: Any, prompt: str, model: type[M], *, retries: int, system: str = SYSTEM_PROMPT
+) -> M:
     """``model`` from the public ``generate(response_format=...)``, retried on a bad answer.
 
     The public method is used rather than ``core.services.llm.typed.generate_typed`` (which
@@ -92,7 +99,7 @@ async def _schema_bound(llm: Any, prompt: str, model: type[M], *, retries: int) 
         result = await llm.generate(
             attempt_prompt,
             response_format=response_format,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system,
             temperature=0.0,
         )
         text = getattr(result, "text", None) or getattr(result, "content", None) or ""
@@ -109,7 +116,14 @@ async def _schema_bound(llm: Any, prompt: str, model: type[M], *, retries: int) 
     )
 
 
-async def ask_typed(llm: Any, prompt: str, model: type[M], *, ask_text: TextAsk) -> M:
+async def ask_typed(
+    llm: Any,
+    prompt: str,
+    model: type[M],
+    *,
+    ask_text: TextAsk,
+    system: str = SYSTEM_PROMPT,
+) -> M:
     """A validated ``model`` for ``prompt``: schema-bound first, plain text second.
 
     Args:
@@ -117,9 +131,10 @@ async def ask_typed(llm: Any, prompt: str, model: type[M], *, ask_text: TextAsk)
         prompt: The task prompt (data already fenced).
         model: The Pydantic answer shape.
         ask_text: The agent's plain-text call, used for the fallback.
+        system: The system prompt of the schema-bound call.
     """
     try:
-        return await _schema_bound(llm, prompt, model, retries=1)
+        return await _schema_bound(llm, prompt, model, retries=1, system=system)
     except Exception as exc:
         logger.warning(
             "coding_typed_fallback", model=model.__name__, error_type=type(exc).__name__

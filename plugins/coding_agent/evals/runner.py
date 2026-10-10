@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from ..agent import CodingAgent
 from .cases import CASES, FixCase
+from .workspace_cases import WORKSPACE_CASES, WorkspaceCase
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,4 +73,38 @@ async def run_eval(agent: CodingAgent, cases: Sequence[FixCase] = CASES) -> Eval
     return EvalReport(tuple([await run_case(agent, case) for case in cases]))
 
 
-__all__ = ["CaseResult", "EvalReport", "run_case", "run_eval"]
+async def run_workspace_case(agent: CodingAgent, case: WorkspaceCase) -> CaseResult:
+    """Fix one repository file, then judge it with the hidden tests in the same workspace.
+
+    A case counts only when the fix was verified and the hidden tests pass on it.
+    """
+    started = time.monotonic()
+    ws = case.workspace
+    result = await agent.fix_in_workspace(ws, case.problem)
+    hidden = await agent._run_workspace_tests(ws, result.final_code, case.hidden)
+    return CaseResult(
+        name=case.name,
+        fixed=result.verified and hidden.green,
+        agent_success=result.success,
+        attempts=result.iterations,
+        loop_status=result.loop_status,
+        tests_reproduce_bug=result.tests_reproduce_bug,
+        seconds=time.monotonic() - started,
+    )
+
+
+async def run_workspace_eval(
+    agent: CodingAgent, cases: Sequence[WorkspaceCase] = WORKSPACE_CASES
+) -> EvalReport:
+    """Every workspace case, one after the other."""
+    return EvalReport(tuple([await run_workspace_case(agent, c) for c in cases]))
+
+
+__all__ = [
+    "CaseResult",
+    "EvalReport",
+    "run_case",
+    "run_eval",
+    "run_workspace_case",
+    "run_workspace_eval",
+]

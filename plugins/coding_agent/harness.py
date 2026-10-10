@@ -13,48 +13,41 @@ The script imports nothing the sandbox's static analysis flags (``subprocess``, 
 
 The code under test runs in the same process, so it could print a report of its own. Each run
 therefore carries a fresh random key in its marker (:func:`new_run_key`), a report without the key
-is ignored, and two reports with it are tampering. The key is in the interpreter's command line,
-so :func:`screen` refuses code that reads ``/proc``, exits the interpreter early or registers exit
-hooks before anything runs. This raises the bar; it is not a proof against deliberate tampering by
-code that runs inside the sandbox, which is why the security review still reads every result.
+is ignored, two reports with it are tampering, and a report followed by a non-zero process exit
+(the process killed or exited after a forged line) is too. The key is in the interpreter's command
+line, so :func:`~plugins.coding_agent.screening.screen` refuses code that could read it, reach the
+reporter or plug into pytest before anything runs; the report line is written with functions bound
+before any test code is imported, and a skipped test or a session pytest ended early is never
+green. This raises the bar; it is not a proof against deliberate tampering by code that runs
+inside the sandbox, which is why the security review still reads every result.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import secrets
 from dataclasses import dataclass, field
 
+from plugins.coding_agent.screening import screen, screen_texts
+
 MARKER = "@@CODING_AGENT_REPORT@@"
-#: What the code under test may not do: read the interpreter's command line or environment
-#: (where the run key is), end the process before the report, or print after it.
-_SCREENED = re.compile(
-    r"/proc\b|\b_exit\s*\(|\batexit\b|CODING_AGENT_REPORT|__main__"
-    r"|\bget_referrers\b|\bget_objects\b|\bsys\._getframe\b|\bpluginmanager\b"
-)
 #: Characters of one failure's traceback kept in the report.
 FAILURE_CHARS = 700
 #: Failures carried back in full; the rest are counted.
 MAX_FAILURES = 5
 
-_TEMPLATE = """\
-import json, os, sys, tempfile
-sys.dont_write_bytecode = True
-_root = tempfile.mkdtemp(prefix="coding-agent-", dir="/tmp")
-with open(os.path.join(_root, "solution.py"), "w", encoding="utf-8") as _f:
-    _f.write({code!r})
-with open(os.path.join(_root, "test_solution.py"), "w", encoding="utf-8") as _f:
-    _f.write({tests!r})
-os.chdir(_root)
-sys.path.insert(0, _root)
-import pytest
-
+#: The reporter and the entry point both harness scripts end with. ``{args}`` is pytest's argv.
+#: Everything the report line is made with is bound to a local before pytest imports any test
+#: code, and the counts are formatted as integers, never through ``json``: a test that patches
+#: ``print``, ``json``, ``int`` or ``sys.stdout`` changes nothing the line says. A skipped test,
+#: and a session pytest ended early (``KeyboardInterrupt``, ``pytest.exit``), are counted too.
+RUNNER = """\
 class _Report:
     def __init__(self):
         self.passed = 0
         self.failed = 0
         self.errors = 0
+        self.skipped = 0
         self.collection_error = False
         self.failures = []
 
@@ -63,36 +56,59 @@ class _Report:
             self.failures.append([name, str(longrepr)[-{failure_chars}:]])
 
     def pytest_runtest_logreport(self, report):
-        if report.when == "call" and report.passed:
-            self.passed += 1
-        elif report.failed:
+        if report.failed:
             if report.when == "call":
                 self.failed += 1
             else:
                 self.errors += 1
             self._keep(report.nodeid.split("::")[-1], report.longrepr)
+        elif report.skipped:
+            self.skipped += 1
+            self._keep(report.nodeid.split("::")[-1], "skipped")
+        elif report.when == "call" and report.passed:
+            self.passed += 1
 
     def pytest_collectreport(self, report):
         if report.failed:
             self.collection_error = True
             self._keep("collection", report.longrepr)
+        elif report.skipped:
+            self.skipped += 1
+            self._keep("collection", "skipped")
 
 def _main():
     # Locals only: the code under test finds no module global to rewrite.
+    write, dumps, num, out = os.write, json.dumps, int, os.dup(1)
     report = _Report()
-    code = pytest.main(
-        ["-q", "-p", "no:cacheprovider", "--no-header", "-o",
-         "console_output_style=classic", "test_solution.py"],
-        plugins=[report],
-    )
+    code = pytest.main({args}, plugins=[report])
     sys.stdout.flush()
-    print({marker!r} + json.dumps({{
-        "passed": report.passed, "failed": report.failed, "errors": report.errors,
-        "collection_error": report.collection_error, "failures": report.failures,
-        "exit": int(code),
-    }}))
+    ce = "true" if report.collection_error is True else "false"
+    # The failures come first: a later duplicate key wins, so a forged fragment cannot
+    # override the counts.
+    line = (
+        {marker!r} + '{{"failures": ' + dumps(report.failures)
+        + f', "passed": {{num(report.passed):d}}, "failed": {{num(report.failed):d}}'
+        + f', "errors": {{num(report.errors):d}}, "skipped": {{num(report.skipped):d}}'
+        + f', "collection_error": {{ce}}, "exit": {{num(code):d}}' + "}}\\n"
+    )
+    write(out, line.encode("utf-8"))
 
 _main()
+"""
+
+_TEMPLATE = """\
+import json, os, sys, tempfile
+sys.dont_write_bytecode = True
+os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+os.environ.pop("PYTEST_ADDOPTS", None)
+import pytest
+_root = tempfile.mkdtemp(prefix="coding-agent-", dir="/tmp")
+with open(os.path.join(_root, "solution.py"), "w", encoding="utf-8") as _f:
+    _f.write({code!r})
+with open(os.path.join(_root, "test_solution.py"), "w", encoding="utf-8") as _f:
+    _f.write({tests!r})
+os.chdir(_root)
+sys.path.insert(0, _root)
 """
 
 
@@ -106,6 +122,10 @@ class TestReport:
         errors: Tests whose setup or teardown failed.
         collection_error: The test file (or the code it imports) could not be collected.
         failures: ``(test name, traceback tail)`` for the first failures.
+        skipped: Tests (or a test file) pytest skipped or marked xfail: a skip proves nothing,
+            so a run with one is never green.
+        exit_status: pytest's exit status; anything but 0 with every test passing means the
+            session ended early (``KeyboardInterrupt``, ``pytest.exit``).
         problem: Why there is no report at all (timeout, crash), or "".
         seconds: Wall-clock time of the sandbox run.
     """
@@ -117,6 +137,8 @@ class TestReport:
     errors: int = 0
     collection_error: bool = False
     failures: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    skipped: int = 0
+    exit_status: int = 0
     problem: str = ""
     seconds: float = 0.0
 
@@ -127,12 +149,14 @@ class TestReport:
 
     @property
     def green(self) -> bool:
-        """At least one test ran and every one passed."""
+        """At least one test ran, every one passed, none was skipped and pytest ended cleanly."""
         return (
             not self.problem
             and not self.collection_error
             and self.total > 0
             and self.passed == self.total
+            and self.skipped == 0
+            and self.exit_status == 0
         )
 
     def evidence(self) -> str:
@@ -147,6 +171,10 @@ class TestReport:
             else "no test ran (no test_* function was collected)"
             if self.total == 0
             else f"{self.total - self.passed} of {self.total} tests failed"
+            if self.passed < self.total
+            else f"{self.skipped} tests were skipped; a skipped test proves nothing"
+            if self.skipped
+            else f"pytest ended the session early (exit status {self.exit_status})"
         )
         details = "\n".join(f"- {name}: {tail.strip()}" for name, tail in self.failures)
         return f"{head}\n{details}".strip()
@@ -162,23 +190,19 @@ def report_marker(key: str) -> str:
     return f"{MARKER[:-2]}:{key}@@"
 
 
-def screen(code: str, tests: str) -> str | None:
-    """Why ``code`` or ``tests`` may not run in the harness, or None."""
-    for label, text in (("code", code), ("tests", tests)):
-        found = _SCREENED.search(text or "")
-        if found:
-            return (
-                f"the {label} use {found.group(0)!r}, which could tamper with the test "
-                "report; write it without reading /proc, os._exit or atexit"
-            )
-    return None
-
-
 def build_test_script(code: str, tests: str, *, key: str) -> str:
     """The ``python -c`` script that runs ``tests`` against ``code`` (as ``solution.py``)."""
-    return _TEMPLATE.format(
-        code=code,
-        tests=tests,
+    return _TEMPLATE.format(code=code, tests=tests) + runner_source(
+        '["-q", "-p", "no:cacheprovider", "--no-header", "-o", '
+        '"console_output_style=classic", "test_solution.py"]',
+        key=key,
+    )
+
+
+def runner_source(args: str, *, key: str) -> str:
+    """:data:`RUNNER` for pytest argv ``args`` (Python source) and the run keyed ``key``."""
+    return RUNNER.format(
+        args=args,
         marker=report_marker(key),
         max_failures=MAX_FAILURES,
         failure_chars=FAILURE_CHARS,
@@ -200,20 +224,29 @@ def parse_report(
             problem="the run printed more than one report: the code under test tampered with it",
             seconds=seconds,
         )
+    if lines and exit_code != 0:
+        # The harness ends normally after its report: a process killed or exited with another
+        # status after it (or after a forged one) did not finish the run it reports.
+        return TestReport(
+            problem=f"the run exited with code {exit_code} after its report: the code under "
+            "test ended the process",
+            seconds=seconds,
+        )
     for line in lines:
-        if line.startswith(marker):
-            try:
-                data = json.loads(line[len(marker) :])
-                return TestReport(
-                    passed=int(data["passed"]),
-                    failed=int(data["failed"]),
-                    errors=int(data["errors"]),
-                    collection_error=bool(data["collection_error"]),
-                    failures=tuple((str(n), str(t)) for n, t in data["failures"]),
-                    seconds=seconds,
-                )
-            except (ValueError, KeyError, TypeError):
-                break
+        try:
+            data = json.loads(line[len(marker) :])
+            return TestReport(
+                passed=int(data["passed"]),
+                failed=int(data["failed"]),
+                errors=int(data["errors"]),
+                collection_error=bool(data["collection_error"]),
+                failures=tuple((str(n), str(t)) for n, t in data["failures"]),
+                skipped=int(data.get("skipped", 0)),
+                exit_status=int(data.get("exit", 0)),
+                seconds=seconds,
+            )
+        except (ValueError, KeyError, TypeError, AttributeError):
+            break
     if exit_code == 124:
         problem = "the run ran out of time in the sandbox"
     elif stderr and stderr.strip():
@@ -224,11 +257,15 @@ def parse_report(
 
 
 __all__ = [
+    "FAILURE_CHARS",
     "MARKER",
+    "MAX_FAILURES",
     "TestReport",
     "build_test_script",
     "new_run_key",
     "parse_report",
     "report_marker",
+    "runner_source",
     "screen",
+    "screen_texts",
 ]

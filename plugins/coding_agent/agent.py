@@ -22,7 +22,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -38,6 +38,8 @@ from .harness import TestReport, build_test_script, new_run_key, parse_report, s
 from .llm import ask_typed
 from .prompts import TEXT_SYSTEM_PROMPT, explain_prompt
 from .types import CodeExecutionResult, CodeLanguage, CodingResult
+from .workspace import Workspace, WorkspaceResult
+from .workspace_agent import run_workspace_tests, workspace_result
 
 logger = get_logger(__name__)
 
@@ -140,13 +142,24 @@ class CodingAgent:
             await self._get_llm(), prompt, model, ask_text=self._ask_llm
         )
 
-    async def _execute_code(self, code: str) -> CodeExecutionResult:
-        """Run ``code`` (a Python script) in the sandbox."""
+    async def _execute_code(
+        self, code: str, *, mounts: dict[str, str] | None = None
+    ) -> CodeExecutionResult:
+        """Run ``code`` (a Python script) in the sandbox; ``mounts`` are bound read-only."""
         sandbox = await self._get_sandbox()
         try:
-            result = await sandbox.execute_code_async(
-                code, language="python", timeout=self.execution_timeout
-            )
+            if mounts:
+                result = await sandbox.execute_code_async(
+                    code,
+                    language="python",
+                    timeout=self.execution_timeout,
+                    mounts=mounts,
+                    mounts_read_only=True,
+                )
+            else:
+                result = await sandbox.execute_code_async(
+                    code, language="python", timeout=self.execution_timeout
+                )
         except Exception as exc:
             # Sandbox infrastructure failure (e.g. Docker unavailable): a failed result the
             # loop reports as evidence, logged so a broken integration never hides.
@@ -325,6 +338,90 @@ class CodingAgent:
         return await self._verified(
             "fix", language, code, lambda k: flows.fix(k, code, error_message, context)
         )
+
+    def workspace(
+        self,
+        *,
+        files: Mapping[str, str],
+        target: str,
+        test_path: str,
+        roots: Sequence[str] = ("",),
+    ) -> Workspace:
+        """A :class:`Workspace` for :meth:`fix_in_workspace`, for callers that reach the agent
+        through the plugin registry and do not import this package."""
+        return Workspace(dict(files), target, test_path, tuple(roots))
+
+    async def _run_workspace_tests(
+        self, ws: Workspace, code: str, tests: str
+    ) -> TestReport:
+        """``tests`` against ``ws`` with ``code`` as its target, in the sandbox."""
+        return await run_workspace_tests(self, ws, code, tests)
+
+    async def fix_in_workspace(
+        self,
+        workspace: Workspace,
+        problem: str,
+        *,
+        language: str | CodeLanguage | None = None,
+    ) -> WorkspaceResult:
+        """Fix ``workspace.target`` and prove it with tests run against the workspace.
+
+        Python runs in the sandbox (``verified``): tests that reproduce the problem are
+        written first and frozen, then the fix is retried until they pass. Another language,
+        a third-party import the sandbox lacks, an oversize workspace or a sandbox without
+        read-only mounts returns an unverified proposal with ``unverified_reason``.
+        """
+        lang = self._resolve(language)
+        with agent_span(
+            "coding_agent.fix_workspace",
+            plugin=PLUGIN,
+            attributes={"coding.task": "fix_workspace", "coding.language": lang},
+        ) as span:
+            try:
+                result = await workspace_result(self, workspace, problem, lang)
+            except Exception as exc:
+                logger.error(
+                    "coding_task_error",
+                    task="fix_workspace",
+                    error_type=type(exc).__name__,
+                )
+                result = WorkspaceResult(
+                    success=False,
+                    original_code=workspace.files[workspace.target],
+                    final_code="",
+                    error=f"the coding agent failed ({type(exc).__name__}: {str(exc)[:200]})",
+                    loop_status="failed",
+                    target=workspace.target,
+                    test_path=workspace.test_path,
+                )
+            self._review_tests(self._apply_security_review(result))
+            withheld = result.final_code.startswith("Code withheld")
+            if withheld:
+                # The diff quotes the withheld code: it goes with it.
+                result.diff = ""
+            generated = result.final_code and result.final_code != result.original_code
+            if generated and not withheld:
+                result.provenance = mark_generated(result.final_code)
+            if span is not None:
+                span.set_attributes(
+                    {
+                        "coding.success": result.success,
+                        "coding.verified": result.verified,
+                        "coding.unverified_reason": result.unverified_reason,
+                        "coding.tests_passed": result.tests_passed,
+                        "coding.tests_total": result.tests_total,
+                    }
+                )
+            logger.info(
+                "coding_task_done",
+                task="fix_workspace",
+                success=result.success,
+                verified=result.verified,
+                reason=result.unverified_reason,
+                tests_passed=result.tests_passed,
+                tests_total=result.tests_total,
+            )
+            return result
 
     async def generate_code(
         self,

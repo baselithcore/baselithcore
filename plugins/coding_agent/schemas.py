@@ -37,4 +37,35 @@ class TestsAnswer(BaseModel):
     explanation: str = Field(description="One or two sentences: what the tests cover.")
 
 
-__all__ = ["CodeAnswer", "CodeWithTests", "TestsAnswer"]
+class WorkspaceFix(BaseModel):
+    """A fixed file of a repository and the test file that proves it."""
+
+    code: str = Field(description="The complete new text of the file being fixed.")
+    tests: str = Field(
+        description="A complete test file that imports the fixed module by its real import path."
+    )
+    explanation: str = Field(
+        description="Why the bug happened and what the fix changes."
+    )
+    changes: list[str] = Field(
+        default_factory=list, description="Each change as one short line."
+    )
+
+
+class WorkspaceCode(BaseModel):
+    """A fixed file of a repository; the tests are already fixed."""
+
+    code: str = Field(description="The complete new text of the file being fixed.")
+    explanation: str = Field(description="What the fix changes.")
+    changes: list[str] = Field(
+        default_factory=list, description="Each change as one short line."
+    )
+
+
+__all__ = [
+    "CodeAnswer",
+    "CodeWithTests",
+    "TestsAnswer",
+    "WorkspaceCode",
+    "WorkspaceFix",
+]

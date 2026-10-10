@@ -9,6 +9,7 @@ from .types import (
     CodingResult,
     CodingTaskType,
 )
+from .workspace import Workspace, WorkspaceResult
 
 __all__ = [
     "CodingAgent",
@@ -19,4 +20,6 @@ __all__ = [
     "CodeLanguage",
     "CodingResult",
     "CodingTaskType",
+    "Workspace",
+    "WorkspaceResult",
 ]
