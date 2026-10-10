@@ -120,7 +120,7 @@ Detection runs three complementary strategies in order, merging results:
 
 1. **Tag-based** (zero I/O): intersects `manifest.yaml` tags against known pattern aliases. A tag `"reasoning"` resolves to `baselith.ai/pattern-reasoning`.
 2. **Resource-based** (zero I/O): maps `required_resources` / `optional_resources` to known patterns. For example, declaring `llm` as a resource implies `baselith.ai/pattern-reasoning`.
-3. **Source-scan** (async, non-blocking): scans `.py` files in the plugin directory for `from core.X` / `import core.X` import statements, executed in an executor thread to avoid blocking the event loop.
+3. **Source-scan** (async, non-blocking): scans `.py` files in the plugin directory for `from baselith.core.X` / `import baselith.core.X` import statements, executed in an executor thread to avoid blocking the event loop.
 
 ### Detected Patterns
 

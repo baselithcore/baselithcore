@@ -4,7 +4,7 @@ CLAUDE.md: "Code and docs ship together — no merge with stale docs." This is
 the mechanical half of that rule. Every page is scanned for verifiable claims
 and each one is checked against the repository:
 
-- **imports** — ``from core.x import Y`` in Python fences must really import;
+- **imports** — ``from baselith.core.x import Y`` in Python fences must really import;
 - **paths** — ``baselith/core/…``, ``baselith/plugins/…``, ``tests/…`` references must exist
   (tutorial scaffolds listed in :data:`ILLUSTRATIVE_PATH_PREFIXES` are exempt);
 - **links** — relative ``.md`` links must resolve;

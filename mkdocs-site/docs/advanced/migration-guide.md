@@ -1,5 +1,12 @@
 # v0.3.x → v0.4.0 Migration Guide
 
+<!-- ns-migrate: skip-file (a historical guide: it quotes the 0.x module names) -->
+
+!!! note "Historical"
+    This guide covers the v0.3.x → v0.4.0 module moves and uses the module
+    names of that time. Since 1.0, `core` is `baselith.core` and `plugins` is
+    `baselith.plugins`; see [Migrating to 1.0](migrating-to-1-0.md).
+
 ## Overview
 
 BaselithCore v0.4.0 completes the architectural refactoring to enforce the **Sacred Core** principle. This guide helps users migrate plugins and applications from v0.3.x to v0.4.0.
@@ -10,22 +17,22 @@ BaselithCore v0.4.0 completes the architectural refactoring to enforce the **Sac
 
 ### Moved Modules
 
-The following modules have been moved from `baselith/core/` to `plugins/` to enforce architectural compliance:
+The following modules have been moved from `core/` to `plugins/` to enforce architectural compliance:
 
 | v0.3.x Location             | v0.4.0 Location            | Migration Impact |
 | --------------------------- | -------------------------- | ---------------- |
-| `baselith.core.agents.browser_agent` | `baselith.plugins.browser_agent`    | Update imports   |
-| `baselith.core.agents.coding`        | `baselith.plugins.coding_agent`     | Update imports   |
-| `baselith.core.doc_sources`          | `baselith.plugins.document_sources` | Update imports   |
-| `baselith.core.scraper`              | `baselith.plugins.web_scraper`      | Update imports   |
-| `baselith.core.routers.*`            | `baselith.plugins.api_routers`      | Update imports   |
+| `core.agents.browser_agent` | `plugins.browser_agent`    | Update imports   |
+| `core.agents.coding`        | `plugins.coding_agent`     | Update imports   |
+| `core.doc_sources`          | `plugins.document_sources` | Update imports   |
+| `core.scraper`              | `plugins.web_scraper`      | Update imports   |
+| `core.routers.*`            | `plugins.api_routers`      | Update imports   |
 
 Every old path is kept as a **deprecated compatibility shim** that re-exports the
-plugin module (for example `baselith/core/routers/tenant.py` registers itself as
-`baselith.plugins.api_routers.tenant` in `sys.modules`), so v0.3.x imports still resolve
-and point at the same objects. They are deprecated, not removed. `baselith.core.chat` and
-`baselith.core.personas` (including `baselith.core.personas.defaults.HELPFUL_ASSISTANT`) stay in
-`baselith/core/` and need no change.
+plugin module (for example `core/routers/tenant.py` registers itself as
+`plugins.api_routers.tenant` in `sys.modules`), so v0.3.x imports still resolve
+and point at the same objects. They are deprecated, not removed. `core.chat` and
+`core.personas` (including `core.personas.defaults.HELPFUL_ASSISTANT`) stay in
+`core/` and need no change.
 
 ---
 
@@ -34,23 +41,23 @@ and point at the same objects. They are deprecated, not removed. `baselith.core.
 ### Before (v0.3.x)
 
 ```python
-from baselith.core.agents.browser_agent import BrowserAgent
-from baselith.core.agents.coding.agent import CodingAgent
-from baselith.core.doc_sources.web import WebDocumentSource
-from baselith.core.doc_sources.readers import read_pdf
-from baselith.core.scraper import Scraper
-from baselith.core.routers.chat import router as chat_router
+from core.agents.browser_agent import BrowserAgent
+from core.agents.coding.agent import CodingAgent
+from core.doc_sources.web import WebDocumentSource
+from core.doc_sources.readers import read_pdf
+from core.scraper import Scraper
+from core.routers.chat import router as chat_router
 ```
 
 ### After (v0.4.0)
 
 ```python
-from baselith.plugins.browser_agent import BrowserAgent
-from baselith.plugins.coding_agent import CodingAgent
-from baselith.plugins.document_sources.web import WebDocumentSource
-from baselith.plugins.document_sources.readers import read_pdf
-from baselith.plugins.web_scraper import Scraper
-from baselith.plugins.api_routers.chat import router as chat_router
+from plugins.browser_agent import BrowserAgent
+from plugins.coding_agent import CodingAgent
+from plugins.document_sources.web import WebDocumentSource
+from plugins.document_sources.readers import read_pdf
+from plugins.web_scraper import Scraper
+from plugins.api_routers.chat import router as chat_router
 ```
 
 ---
@@ -59,7 +66,7 @@ from baselith.plugins.api_routers.chat import router as chat_router
 
 ### Plugin Configuration
 
-Functionality that used to be always-on in `baselith/core/` is now provided by plugins,
+Functionality that used to be always-on in `core/` is now provided by plugins,
 so enable the ones you use in `configs/plugins.yaml`. The file is a **mapping
 keyed by plugin name** (the plugin's directory name); each entry carries
 `enabled` plus the plugin's own settings at the same level (the shipped file
@@ -101,7 +108,7 @@ The `chandra` OCR backend has been replaced by [MinerU](https://github.com/opend
 
 ```python
 from fastapi import FastAPI
-from baselith.core.routers import chat, feedback, admin
+from core.routers import chat, feedback, admin
 
 app = FastAPI()
 app.include_router(chat.router)
@@ -110,11 +117,11 @@ app.include_router(admin.router)
 ```
 
 **v0.4.0** - Routers ship with the `api_routers` plugin (`create_app()` mounts
-them for you; `baselith.core.routers.*` stays importable as a deprecated re-export):
+them for you; `core.routers.*` stays importable as a deprecated re-export):
 
 ```python
 from fastapi import FastAPI
-from baselith.plugins.api_routers import chat, feedback, admin
+from plugins.api_routers import chat, feedback, admin
 
 app = FastAPI()
 app.include_router(chat.router)
@@ -128,7 +135,7 @@ app.include_router(admin.router)
 
 | Version     | Date    | Status                                                              |
 | ----------- | ------- | ------------------------------------------------------------------- |
-| **v0.3.0**  | 2026-03 | Last release with agents, doc sources, scraper and routers in `baselith/core/` |
+| **v0.3.0**  | 2026-03 | Last release with agents, doc sources, scraper and routers in `core/` |
 | **v0.4.0**  | 2026-03 | Sacred Core layout: modules moved to `plugins/`, `core.*` paths kept as shims |
 | **v0.30.0** | 2026-09 | The compatibility shims are still importable                        |
 | **v0.31.0** | 2026-09 | Current release; durable tool ledger, durable event stream, plugin permission enforcement |
@@ -143,17 +150,17 @@ mechanical import rewrite:
 1. **Find deprecated imports**:
 
    ```bash
-   grep -r "from baselith.core.agents" your_project/
-   grep -r "from baselith.core.doc_sources" your_project/
-   grep -r "from baselith.core.scraper" your_project/
-   grep -r "from baselith.core.routers" your_project/
+   grep -r "from core.agents" your_project/
+   grep -r "from core.doc_sources" your_project/
+   grep -r "from core.scraper" your_project/
+   grep -r "from core.routers" your_project/
    ```
 
 2. **Update imports** using find-replace:
-   - `from baselith.core.agents` → `from baselith.plugins.browser_agent` or `baselith.plugins.coding_agent`
-   - `from baselith.core.doc_sources` → `from baselith.plugins.document_sources`
-   - `from baselith.core.scraper` → `from baselith.plugins.web_scraper`
-   - `from baselith.core.routers` → `from baselith.plugins.api_routers`
+   - `from core.agents` → `from plugins.browser_agent` or `plugins.coding_agent`
+   - `from core.doc_sources` → `from plugins.document_sources`
+   - `from core.scraper` → `from plugins.web_scraper`
+   - `from core.routers` → `from plugins.api_routers`
 
 3. **Update plugin config**:
    - Add required plugins to `configs/plugins.yaml`
@@ -183,7 +190,7 @@ All v0.3.x plugins will continue to work in v0.4.0 with minimal changes:
 
 ```python
 # my_plugin/handler.py
-from baselith.core.agents.browser_agent import BrowserAgent
+from core.agents.browser_agent import BrowserAgent
 
 class MyHandler(FlowHandlerMixin):
     def __init__(self):
@@ -194,7 +201,7 @@ class MyHandler(FlowHandlerMixin):
 
 ```python
 # my_plugin/handler.py
-from baselith.plugins.browser_agent import BrowserAgent
+from plugins.browser_agent import BrowserAgent
 
 class MyHandler(FlowHandlerMixin):
     def __init__(self):
@@ -222,7 +229,7 @@ class MyHandler(FlowHandlerMixin):
 2. **Check imports**:
 
    ```bash
-   python -c "from baselith.plugins.browser_agent import BrowserAgent; print('OK')"
+   python -c "from plugins.browser_agent import BrowserAgent; print('OK')"
    ```
 
 3. **Verify plugin loading**:
@@ -244,16 +251,16 @@ class MyHandler(FlowHandlerMixin):
 
 ### Issue 1: Old imports still work
 
-**Symptom**: `from baselith.core.agents import BrowserAgent` keeps resolving after the
+**Symptom**: `from core.agents import BrowserAgent` keeps resolving after the
 upgrade, so nothing forces the rewrite.
 
-**Explanation**: that is the compatibility shim — `baselith.core.agents.browser_agent`
-imports `BrowserAgent` from `baselith.plugins.browser_agent.agent`, so both paths refer
+**Explanation**: that is the compatibility shim — `core.agents.browser_agent`
+imports `BrowserAgent` from `plugins.browser_agent.agent`, so both paths refer
 to the same class. Move to the plugin path anyway so your code does not depend
 on the deprecated layer:
 
 ```python
-from baselith.plugins.browser_agent import BrowserAgent
+from plugins.browser_agent import BrowserAgent
 ```
 
 ---
@@ -290,7 +297,7 @@ ImportError: cannot import name 'X' from partially initialized module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from baselith.plugins.browser_agent import BrowserAgent
+    from plugins.browser_agent import BrowserAgent
 ```
 
 ---

@@ -35,7 +35,7 @@ def _load(path: Path) -> dict:
 def test_chart_appversion_tracks_code_version() -> None:
     """``appVersion`` is the default image tag; it must be this release."""
     assert _load(CHART)["appVersion"] == __version__, (
-        f"Chart.yaml appVersion != core.__version__ ({__version__}). A plain "
+        f"Chart.yaml appVersion != baselith.core.__version__ ({__version__}). A plain "
         "`helm install` pulls appVersion as the image tag, so a stale value "
         "deploys the wrong release. The release commit should rewrite it "
         "(see .releaserc); bump it by hand if you are changing it out of band."

@@ -102,7 +102,7 @@ Operator hardening checklist:
 
 ## Scope
 
-In scope: the `baselith/core/` framework and the official plugins under `plugins/`.
+In scope: the `baselith/core/` framework and the official plugins under `baselith/plugins/`.
 
 Out of scope:
 
