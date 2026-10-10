@@ -72,7 +72,21 @@ for _ in $(seq 1 30); do
 done
 
 echo "    restoring..."
-$READER "$BACKUP_FILE" | docker exec -i "$CONTAINER" psql -U drill -d drill >/dev/null
+# psql carries on past a failed statement, so its exit status says nothing
+# about the restore: read the errors instead. The throwaway cluster has only
+# the `drill` role, so the dump's `ALTER ... OWNER TO <role>` lines are
+# expected to fail and are the one error tolerated; any other means the dump
+# does not restore, however many tables happened to land.
+RESTORE_LOG=$($READER "$BACKUP_FILE" \
+  | docker exec -i "$CONTAINER" psql -U drill -d drill 2>&1 >/dev/null)
+ROLE_ERRORS=$(grep -cE 'ERROR: +role ".*" does not exist' <<<"$RESTORE_LOG" || true)
+OTHER_ERRORS=$(grep -E 'ERROR:' <<<"$RESTORE_LOG" | grep -vE 'role ".*" does not exist' || true)
+if [[ -n "$OTHER_ERRORS" ]]; then
+  echo "  ✗ Restore drill hit SQL errors:" >&2
+  echo "$OTHER_ERRORS" | head -n 20 >&2
+  exit 1
+fi
+echo "    restored (${ROLE_ERRORS} ownership statement(s) skipped: owner roles absent here)"
 
 echo "    sanity query (count tables)..."
 TABLES=$(docker exec "$CONTAINER" psql -U drill -d drill -tAc \

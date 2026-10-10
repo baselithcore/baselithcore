@@ -45,6 +45,8 @@ cache/
 .coverage
 .coverage.*
 htmlcov/
+# mutmut's working copy (`mutmut run`, see [tool.mutmut] in pyproject.toml)
+mutants/
 nosetests.xml
 coverage.xml
 coverage.json

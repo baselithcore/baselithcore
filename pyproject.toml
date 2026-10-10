@@ -616,3 +616,30 @@ exclude_lines = [
   "raise NotImplementedError",
   "@overload",
 ]
+
+[tool.mutmut]
+# Mutation testing of the security-critical code, run by the nightly
+# `mutation_testing` job (.github/workflows/nightly.yml) and reported, never
+# gated. Line coverage says a test executed the redaction regex; only a
+# surviving mutant says no test would notice if the regex stopped matching.
+# Deliberately narrow: three modules and the unit tests that own them, so the
+# run fits its nightly budget. mutmut copies `source_paths` into ./mutants and
+# mutates only the files `only_mutate` names; the rest of core/ is copied as is
+# so the tests import a complete package.
+source_paths = ["core"]
+only_mutate = [
+  "core/observability/redaction.py",
+  "core/security/secrets.py",
+  "core/guardrails/input_guard.py",
+]
+also_copy = ["pytest.ini", "baselith"]
+# pytest.ini's addopts carry the repository-wide --cov-fail-under gate, which a
+# three-module test selection can never meet: it would fail every run, mutant
+# or not. Random order is off so a mutant's verdict does not depend on a seed.
+pytest_add_cli_args = ["--no-cov", "-p", "no:randomly", "-q", "-p", "no:cacheprovider"]
+pytest_add_cli_args_test_selection = [
+  "tests/unit/core/observability/test_log_redaction.py",
+  "tests/unit/core/security/test_secrets.py",
+  "tests/unit/core/guardrails/",
+  "tests/unit/core/test_guardrails.py",
+]

@@ -873,7 +873,8 @@ green.
 ### GitHub Actions
 
 Tests run in the `python_test` job of `.github/workflows/ci.yml` on a Python
-3.12 / 3.13 matrix (3.14 runs nightly, advisory, in `nightly.yml`). The job
+3.12 / 3.13 matrix (a pull request into `develop` runs 3.12 only; 3.13 and
+3.14 also run nightly, advisory, in `nightly.yml`). The job
 starts **no** service containers: `BASELITH_TEST_REAL_DB` is unset, so
 `tests/conftest.py` mocks psycopg, and the real-backend cases skip. The suite
 was verified green with ports 5432 and 6379 refused. Dependencies come from the
@@ -975,6 +976,38 @@ python -m build --wheel && python -m venv /tmp/v && /tmp/v/bin/pip install dist/
 APP_ENV=development SECRET_KEY=$(openssl rand -hex 32) DB_HOST=localhost DB_PORT=55433 \
   DB_NAME=test_db DB_USER=baselith DB_PASSWORD=password \
   /tmp/v/bin/python scripts/smoke_installed_wheel.py
+```
+
+### Nightly jobs
+
+`.github/workflows/nightly.yml` runs at 03:15 UTC (and on
+`workflow_dispatch`). Nothing in it gates a merge: a red job is information to
+act on in its own change.
+
+| Job | What it answers |
+| --- | --- |
+| `latest_toolchain` | does the tree still lint and typecheck with the newest ruff and mypy |
+| `forward_compat` | does the suite pass on Python 3.13 and 3.14 against `uv.lock` (matrix, `fail-fast: false`) |
+| `fresh_resolve_tests` | does the suite pass on 3.12 against freshly resolved dependencies |
+| `restore_drill` | does a backup taken the Helm CronJob's way restore into an identical database — see [Nightly restore drill](runbooks.md#nightly-restore-drill-ci) |
+| `mutation_testing` | which mutants of the security code survive the unit tests (report-only) |
+
+`mutation_testing` runs `mutmut` (pinned in the job, `3.8.0`) over three
+modules: `core/observability/redaction.py`, `core/security/secrets.py` and
+`core/guardrails/input_guard.py`, against their own unit tests only. The
+scope, the test selection and the pytest flags (`--no-cov`, because the
+repository-wide coverage gate cannot pass on a three-module selection) live in
+`[tool.mutmut]` in `pyproject.toml`. The job is `continue-on-error` and uploads
+a `mutation-report` artifact: the counts (`mutmut-cicd-stats.json`), the
+per-mutant status (`results.txt`) and every surviving mutant's diff
+(`survivors.diff`). A survivor is a change to security code that no test
+notices; the fix is the test that kills it. Run it locally the same way:
+
+```bash
+pip install mutmut==3.8.0
+mutmut run                      # writes ./mutants (gitignored)
+mutmut results                  # survivors and untested mutants
+mutmut show <mutant-name>       # the diff of one mutant
 ```
 
 ---
