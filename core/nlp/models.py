@@ -29,6 +29,7 @@ from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.cache.single_flight import LayeredSingleFlight, build_single_flight
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
 from core.nlp import _remote  # TEI-backed stand-ins when BASELITH_*_URL is set
+from core.nlp._model_meta import _count_tokens_sync, _model_name
 from core.nlp.roles import DOCUMENT, QUERY, cache_key, model_encoder, model_prompt
 from core.utils.concurrency import run_inference
 
@@ -44,19 +45,6 @@ EMBEDDING_OPERATION = "embeddings"
 EMBEDDING_SYSTEM = "sentence_transformers"
 
 
-def _model_name(model: Any) -> str:
-    """Best-effort model identifier for span/metric labels."""
-    card = getattr(model, "model_card_data", None)
-    for candidate in (
-        getattr(card, "base_model", None),
-        getattr(card, "model_name", None),
-        getattr(model, "model_name", None),
-    ):
-        if isinstance(candidate, str) and candidate:
-            return candidate
-    return type(model).__name__
-
-
 def _token_usage_enabled() -> bool:
     """Whether embedding spans should carry ``gen_ai.usage.input_tokens``."""
     try:
@@ -67,23 +55,6 @@ def _token_usage_enabled() -> bool:
         # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.debug("[embedder] token-usage setting unavailable: %s", exc)
         return False
-
-
-def _count_tokens_sync(model: Any, texts: list[str]) -> int | None:
-    """Blocking token count for *texts*, or ``None`` if unavailable."""
-    tokenizer = getattr(model, "tokenizer", None)
-    if tokenizer is None or not texts:
-        return None
-    try:
-        encoded = tokenizer(texts)
-        ids = encoded["input_ids"] if isinstance(encoded, dict) else encoded.input_ids
-        return sum(len(row) for row in ids)
-    except Exception as exc:  # telemetry must never break an embedding
-        # `exc` is a tokenizer failure, not a credential; the rule matches on
-        # "token" (NLP tokenization here, not an auth token).
-        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
-        logger.debug("[embedder] token count unavailable: %s", exc)
-        return None
 
 
 async def _count_input_tokens(model: Any, texts: list[str]) -> int | None:
