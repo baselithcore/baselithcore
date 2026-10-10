@@ -251,7 +251,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
-runs **11,991 tests** behind a **78% branch-coverage floor**, strict typing,
+runs **11,991 tests** behind a **83% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates.
 [GOVERNANCE.md](https://github.com/baselithcore/baselithcore/blob/main/GOVERNANCE.md) says how decisions get made and what needs a
 proposal before code; [CODE_OF_CONDUCT.md](https://github.com/baselithcore/baselithcore/blob/main/CODE_OF_CONDUCT.md) applies to every

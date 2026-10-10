@@ -71,7 +71,7 @@ addopts =
     --cov=core
     --cov-report=term-missing
     --cov-report=html:htmlcov
-    --cov-fail-under=78
+    --cov-fail-under=83
 timeout = 120
 timeout_method = thread
 markers =
@@ -89,7 +89,7 @@ What that means in practice:
   fixture) runs on the event loop without a marker.
 - **`--strict-markers`** — a marker that is not declared above fails
   collection; add new markers to `pytest.ini` first.
-- **Coverage is always on**, measured over `core/` only, with a **78 %
+- **Coverage is always on**, measured over `core/` only, with a **83 %
   branch** gate (`[tool.coverage.run] branch = true` in `pyproject.toml`).
 - **`timeout = 120`** — a hung test fails itself instead of stalling the job.
 
@@ -378,7 +378,7 @@ is the factory form; `TRANSIENT` and `SCOPED` lifetimes are covered in
 enforces the gate:
 
 ```bash
-# Full suite, gate enforced (78 % branch coverage over core/)
+# Full suite, gate enforced (83 % branch coverage over core/)
 pytest
 
 # Only unit tests
@@ -414,7 +414,7 @@ pytest --cov-report=term-missing
 
 ## Coverage Requirements
 
-There is a single enforced gate: **`--cov-fail-under=78`**, measured as
+There is a single enforced gate: **`--cov-fail-under=83`**, measured as
 **branch** coverage over `core/` (`pytest.ini`). Plugins, scripts and
 templates are reported when you ask for them but never gated.
 
@@ -914,7 +914,7 @@ python_test:
 ```
 
 `python_test` runs `pytest -n auto` (pytest-xdist) on top of the `pytest.ini`
-defaults, so the 78 % branch gate applies in CI exactly as it does locally.
+defaults, so the 83 % branch gate applies in CI exactly as it does locally.
 
 ### Real-backend integration run
 
