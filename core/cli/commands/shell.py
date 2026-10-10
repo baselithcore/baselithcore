@@ -6,6 +6,9 @@ import argparse
 from typing import Any
 
 from core.cli.ui import console, print_header
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def run_shell() -> int:
@@ -20,7 +23,7 @@ def run_shell() -> int:
 
             context["settings"] = get_core_config()
         except Exception:
-            pass
+            logger.debug("shell: core settings not pre-loaded", exc_info=True)
 
         try:
             from core.services.llm.service import LLMService, get_llm_service
@@ -28,14 +31,14 @@ def run_shell() -> int:
             context["LLMService"] = LLMService
             context["get_llm_service"] = get_llm_service
         except Exception:
-            pass
+            logger.debug("shell: LLM service not pre-loaded", exc_info=True)
 
         try:
             from core.services.vectorstore.interfaces import VectorStoreProtocol
 
             context["VectorStoreProtocol"] = VectorStoreProtocol
         except Exception:
-            pass
+            logger.debug("shell: vector store protocol not pre-loaded", exc_info=True)
 
     console.print("[dim]Pre-loaded into context:[/dim]")
     for k in context:

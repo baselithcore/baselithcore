@@ -141,22 +141,30 @@ class DistributedLock:
 
         Returns:
             True if this instance owned and deleted the key, False otherwise.
+
+        Raises:
+            asyncio.CancelledError: If the caller was cancelled while the
+                watchdog was being stopped — re-raised only after the key is
+                released, so a cancelled holder never strands the lock.
         """
         if self._token is None:
             return False
-        await self._cancel_renew()
+        caller_cancelled = await self._cancel_renew()
         token, self._token = self._token, None
         try:
             result = await self._redis.eval(_RELEASE_LUA, 1, self._key, token)
         except Exception as exc:
             logger.warning("Lock release failed for %s: %s", self._key, exc)
-            return False
-        released = bool(result)
-        if not released:
-            logger.warning(
-                "Lock %s was not owned at release (expired and re-acquired?)",
-                self._key,
-            )
+            released = False
+        else:
+            released = bool(result)
+            if not released:
+                logger.warning(
+                    "Lock %s was not owned at release (expired and re-acquired?)",
+                    self._key,
+                )
+        if caller_cancelled:
+            raise asyncio.CancelledError
         return released
 
     async def renew(self, ttl_ms: int | None = None) -> bool:
@@ -186,15 +194,33 @@ class DistributedLock:
         except asyncio.CancelledError:  # normal on release
             raise
 
-    async def _cancel_renew(self) -> None:
-        """Stop the watchdog task, if running."""
+    async def _cancel_renew(self) -> bool:
+        """Stop the watchdog task, if running.
+
+        Returns:
+            True when the *calling* task was itself cancelled while waiting for
+            the watchdog. The caller finishes its cleanup and then re-raises,
+            so the cancellation is deferred, never swallowed.
+        """
+        caller_cancelled = False
         if self._renew_task is not None:
+            current = asyncio.current_task()
+            # Compare against the count on entry: only a cancel request that
+            # arrives *during* this wait is ours to defer (a caller already
+            # unwinding a cancellation, or one that swallowed it, is not).
+            pending_before = current.cancelling() if current is not None else 0
             self._renew_task.cancel()
             try:
                 await self._renew_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except asyncio.CancelledError:
+                # The watchdog's own cancellation is expected; the caller's is not.
+                caller_cancelled = (
+                    current is not None and current.cancelling() > pending_before
+                )
+            except Exception:
+                logger.debug("Lock %s renew watchdog failed", self._key, exc_info=True)
             self._renew_task = None
+        return caller_cancelled
 
     async def __aenter__(self) -> DistributedLock:
         await self.acquire()

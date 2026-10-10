@@ -31,7 +31,7 @@ def _redis_url_is_unauthenticated(url: str) -> bool:
     """True for a plaintext ``redis://`` URL with no password (not ``rediss://``)."""
     try:
         parts = urlsplit(url)
-    except Exception:
+    except ValueError:
         return False
     if parts.scheme != "redis":
         return False  # rediss:// (TLS) or other schemes are considered fine here
@@ -63,8 +63,14 @@ def _redact_url(value: str | None) -> str | None:
         from core.observability.redaction import redact_url_credentials
 
         return redact_url_credentials(value)
-    except Exception:  # pragma: no cover - redaction must never break config
-        return value
+    except Exception as exc:  # pragma: no cover - redaction must never break config
+        # Never log the value itself: it is the credentialed URL.
+        logger.warning(
+            "URL redaction failed (%s); the connection string is withheld",
+            type(exc).__name__,
+        )
+        # Fail closed: the unredacted value is the credentialed URL.
+        return "[REDACTED]"
 
 
 class StorageConfig(BaseSettings):

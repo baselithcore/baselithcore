@@ -89,6 +89,36 @@ def test_redact_url_credentials_noop_without_userinfo():
     )
 
 
+def test_redact_url_credentials_fails_closed_on_malformed_url():
+    # ``.port`` raises ValueError on an out-of-range port, and urlsplit
+    # rejects a broken IPv6 netloc: neither may echo the password.
+    for url in (
+        "redis://:sekret@cache.host:99999/2",
+        "postgres://user:sekret@[::1/app",
+    ):
+        out = redact_url_credentials(url)
+        assert "sekret" not in out
+        assert "user" not in out
+
+
+def test_redact_url_credentials_malformed_keeps_host():
+    assert (
+        redact_url_credentials("redis://:sekret@cache.host:99999/2")
+        == "redis://cache.host:99999/2"
+    )
+
+
+def test_storage_url_redaction_withholds_value_when_redaction_fails(monkeypatch):
+    from core.config import storage
+    from core.observability import redaction
+
+    def boom(_url: str) -> str:
+        raise RuntimeError("redaction broke")
+
+    monkeypatch.setattr(redaction, "redact_url_credentials", boom)
+    assert storage._redact_url("redis://:sekret@cache.host:6379/0") == "[REDACTED]"
+
+
 def test_installed_in_configure_logging_pipeline():
     # Both the structlog chain and the foreign pre-chain must include the
     # redaction processor so the FastAPI/uvicorn path is covered.

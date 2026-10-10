@@ -49,6 +49,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -343,6 +347,7 @@ class PromptEvaluator:
 
             return get_llm_service()
         except Exception:
+            logger.warning("prompt_eval_llm_service_unavailable", exc_info=True)
             return None
 
 

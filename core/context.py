@@ -9,9 +9,13 @@ across asynchronous call stacks without passing it explicitly through every func
 from __future__ import annotations
 
 import contextvars
+import logging
 from collections.abc import Callable
 
 from core.config import get_app_config
+
+# Stdlib logger: this module sits below the observability layer in the import graph.
+_logger = logging.getLogger(__name__)
 
 
 class TenantContextError(Exception):
@@ -360,6 +364,12 @@ def resolve_plugin_tenancy_mode(plugin_name: str, declared_mode: str) -> str:
     try:
         override = resolver(plugin_name)
     except Exception:
+        _logger.warning(
+            "Plugin tenancy override lookup failed for %r; using declared mode %r",
+            plugin_name,
+            declared_mode,
+            exc_info=True,
+        )
         return declared_mode
     if override in (TENANCY_SHARED, TENANCY_PERSONAL):
         return override  # type: ignore[return-value]

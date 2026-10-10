@@ -68,7 +68,7 @@ def status_local_plugins(name: str | None = None, json_output: bool = False) -> 
         try:
             with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as cf:
                 yaml_config = yaml.safe_load(cf) or {}
-        except Exception:
+        except (OSError, ValueError, yaml.YAMLError):
             pass
 
     for plugin in sorted(plugins):
@@ -123,7 +123,7 @@ def status_local_plugins(name: str | None = None, json_output: bool = False) -> 
                 components = [
                     c.capitalize() for c in tags if c in ["agent", "router", "graph"]
                 ]
-            except Exception:
+            except (OSError, ValueError, AttributeError, TypeError, yaml.YAMLError):
                 pass
 
         if not components and plugin_file.exists():
@@ -159,7 +159,7 @@ def status_local_plugins(name: str | None = None, json_output: bool = False) -> 
                     with open(manifest_path, encoding="utf-8") as mf:
                         m_data = json.load(mf)
                 readiness = m_data.get("readiness", "stable")
-            except Exception:
+            except (OSError, ValueError, AttributeError, yaml.YAMLError):
                 pass
 
         # Config alignment
@@ -286,7 +286,7 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
                 with open(manifest_path, encoding="utf-8") as mf:
                     manifest_data = json.load(mf)
             desc = manifest_data.get("description", desc)
-        except Exception:
+        except (OSError, ValueError, AttributeError, yaml.YAMLError):
             pass
     else:
         plugin_file = plugin_dir / "plugin.py"
@@ -297,7 +297,7 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
                 doc = ast.get_docstring(tree)
                 if doc:
                     desc = doc.strip()
-            except Exception:
+            except (SyntaxError, ValueError):  # unparsable plugin.py: keep default
                 pass
 
     details.append("Description:\n", style="bold cyan")
@@ -333,7 +333,7 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
             if envs:
                 details.append("Required Envs: ", style="bold cyan")
                 details.append(f"{', '.join(envs)}\n")
-        except Exception:
+        except (OSError, ValueError, AttributeError, TypeError, yaml.YAMLError):
             pass
 
     if json_output:

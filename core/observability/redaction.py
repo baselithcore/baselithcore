@@ -103,14 +103,31 @@ def redact_url_credentials(url: str) -> str:
 
     try:
         parts = urlsplit(url)
-    except Exception:
-        return url
-    if parts.username is None and parts.password is None:
-        return url
-    host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
+        if parts.username is None and parts.password is None:
+            return url
+        host = parts.hostname or ""
+        # ``.port`` raises ValueError on a non-numeric or out-of-range port.
+        if parts.port:
+            host = f"{host}:{parts.port}"
+    except TypeError:  # not a str at all: nothing safe to echo
+        return "[REDACTED]"
+    except ValueError:  # malformed URL (bad IPv6 netloc, bad port)
+        # Fail closed: a URL urlsplit cannot parse may still carry userinfo,
+        # and returning it unchanged would log the password.
+        return _strip_userinfo(url)
     return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+
+
+def _strip_userinfo(url: str) -> str:
+    """Drop everything up to the last ``@`` of the authority, without parsing."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        scheme, rest = "", url
+    authority, slash, tail = rest.partition("/")
+    if "@" not in authority:
+        return url
+    host = authority.rsplit("@", 1)[1]
+    return f"{scheme}{sep}{host}{slash}{tail}"
 
 
 def redact_sensitive(
@@ -136,7 +153,8 @@ def redact_sensitive(
     try:
         if not getattr(get_app_config(), "log_masking_enabled", True):
             return event_dict
-    except Exception:
+    # Unreadable config: keep masking on (the safe default).
+    except Exception:  # silent-ok: structlog processor; logging here recurses
         pass
 
     for key in list(event_dict.keys()):

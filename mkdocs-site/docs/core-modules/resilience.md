@@ -477,6 +477,9 @@ Correctness guarantees:
   caller still owns the unique token, so an expired-then-reacquired lock is never
   released by the previous holder.
 - **Auto-renew** — optional watchdog extends the TTL at ~⅓ of `ttl_ms`.
+- **Cancellation-safe release** — a caller cancelled while `release()` stops
+  the watchdog still deletes the key first, then gets its `CancelledError`;
+  the cancellation is deferred, never swallowed, and the lock is never stranded.
 
 `DistributedLock` is covered by the core strict-typing ratchet
 (`scripts/check_core_strict_typing.py`, which checks the whole `core.resilience`

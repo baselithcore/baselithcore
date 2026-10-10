@@ -41,7 +41,7 @@ def _load_all_manifests() -> dict[str, dict]:
                         else:
                             data = json.load(f)
                     manifests[plugin_dir.name] = data
-                except Exception:
+                except (OSError, ValueError, yaml.YAMLError):
                     manifests[plugin_dir.name] = {}
                 break
         else:

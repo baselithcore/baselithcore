@@ -157,7 +157,11 @@ class HealthMixin:
                     await plugin.initialize(old_config)
                 self.register_all_components(plugin)
             except Exception:
-                pass  # nosec B110
+                logger.error(
+                    "Failed to restore plugin '%s' after a failed reload",
+                    plugin_name,
+                    exc_info=True,
+                )
             return False
 
     def health_check(self, plugin_name: str | None = None) -> dict[str, Any]:

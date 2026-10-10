@@ -329,6 +329,11 @@ and its body contains no call, `raise`, `await` or `yield`.
 - a baselined file may shrink but never grow;
 - once a file reaches zero its entry must be deleted.
 
+The baseline is now **empty**: `core/` has no silent handler left, so any new
+one fails the build outright. The few deliberate ones (inside the logging
+pipeline, where logging the failure would recurse, and on SQLite `close()`
+paths) carry a `silent-ok:` reason.
+
 ```bash
 python scripts/check_exception_hygiene.py --list             # every site
 python scripts/check_exception_hygiene.py --update-baseline  # after fixing sites

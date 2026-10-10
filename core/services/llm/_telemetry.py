@@ -119,7 +119,7 @@ def report_tokens_to_middleware(count: int, model: str) -> None:
             try:
                 sink(count, model)
             except Exception:
-                pass
+                logger.debug("token_sink_failed", exc_info=True)
 
 
 #: Model ids the funnel uses to mean "these were prompt tokens" (paired with a
@@ -251,7 +251,7 @@ def record_genai_metrics(
                 if cost > 0:
                     GEN_AI_COST_USD.labels(provider, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests
-        pass
+        logger.debug("gen_ai_metrics_record_failed", exc_info=True)
 
 
 __all__ = [

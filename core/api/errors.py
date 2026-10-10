@@ -120,7 +120,7 @@ def _current_request_id() -> str | None:
     """Best-effort fetch of the active request id (set by RequestIdMiddleware)."""
     try:
         return request_id_ctx.get(None)
-    except Exception:
+    except LookupError:
         return None
 
 

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import os
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def _is_production_env() -> bool:
     """Whether the runtime environment is production (lazy import, testable)."""
@@ -39,6 +43,7 @@ def _redis_backend_declared() -> bool:
 
         return getattr(get_storage_config(), "cache_backend", "") == "redis"
     except Exception:  # pragma: no cover - config unavailable in minimal envs
+        logger.debug("Storage config unavailable; Redis not declared", exc_info=True)
         return False
 
 

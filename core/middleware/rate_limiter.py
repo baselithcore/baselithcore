@@ -131,6 +131,7 @@ def _resolve_fail_mode(configured: str | None) -> str:
 
         redis_declared = getattr(get_storage_config(), "cache_backend", "") == "redis"
     except Exception:  # pragma: no cover - config unavailable in minimal envs
+        logger.debug("Storage config unavailable; Redis not declared", exc_info=True)
         redis_declared = False
     return "closed" if redis_declared else "open"
 

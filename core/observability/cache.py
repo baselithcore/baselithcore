@@ -119,7 +119,10 @@ class RedisCache(AsyncCacheBackend):
 
                 url = get_storage_config().cache_redis_url
             except Exception:
-                pass
+                logger.debug(
+                    "Storage config unavailable; using the default cache URL",
+                    exc_info=True,
+                )
 
             self._url = url or "redis://redis:6379/1"
         else:

@@ -404,6 +404,11 @@ Provide a detailed response, incorporating relevant memories and relationship da
             )
             return answer
         except Exception as e:
+            logger.warning(
+                "swarm_agent_llm_call_failed",
+                extra={"agent": agent.name},
+                exc_info=True,
+            )
             return f"[{agent.name}] Error: {e!s}"
 
     async def _synthesize_results(

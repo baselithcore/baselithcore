@@ -63,7 +63,12 @@ def _resolve_key(provider: str) -> str | None:
     for resolver in _key_resolvers:
         try:
             value = resolver(provider)
-        except Exception:
+        except Exception as exc:
+            # Type name only: a key resolver's error may carry credential detail.
+            logger.debug(
+                "vision_api_key_resolver_failed",
+                extra={"provider": provider, "error": type(exc).__name__},
+            )
             continue
         if value:
             return value

@@ -341,7 +341,8 @@ class SemanticCacheVectorBacked(SemanticCache):
                     collection_name=self.collection_name
                 )
             except Exception:
-                pass  # nosec B110 - Collection may already exist
+                # Usually benign: the collection already exists.
+                logger.debug("semantic_cache_create_collection_failed", exc_info=True)
 
     async def get_response(self, prompt: str, **kwargs: Any) -> str | None:
         """

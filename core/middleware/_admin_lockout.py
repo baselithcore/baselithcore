@@ -235,7 +235,11 @@ class AdminLockoutMixin:
             try:
                 await redis_client.delete(key)
             except Exception:
-                pass
+                # The in-process counter is already cleared; the shared one
+                # expires on its own TTL. Identifier omitted (user/IP).
+                logger.warning(
+                    "Failed to clear the shared admin lockout counter", exc_info=True
+                )
 
 
 __all__ = ["AdminLockoutMixin"]

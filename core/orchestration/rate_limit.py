@@ -85,9 +85,8 @@ class ToolRateLimiter:
                     from core.observability.metrics import TOOL_RATE_LIMITED_TOTAL
 
                     TOOL_RATE_LIMITED_TOTAL.labels(tool_name=tool_name).inc()
-                except (
-                    Exception
-                ):  # pragma: no cover - silent-ok: metrics never block a limit decision
+                # A failed metric emit must never block the limit decision below.
+                except Exception:  # pragma: no cover - silent-ok: metric is advisory
                     pass
                 raise ToolRateLimitExceededError(
                     tool_name, self._max_calls, self._window

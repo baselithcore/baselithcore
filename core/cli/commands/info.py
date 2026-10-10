@@ -44,7 +44,7 @@ def run_info(json_output: bool = False) -> int:
                     if line.startswith("name = "):
                         project_name = line.split("=")[1].strip().strip('"').strip("'")
                         break
-            except Exception:
+            except (OSError, ValueError):  # unreadable or non-UTF-8 pyproject
                 project_name = "Unknown"
 
         # Count plugins — directories that hold one, not every directory:

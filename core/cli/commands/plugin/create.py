@@ -84,9 +84,9 @@ def _create_interactive() -> int:
     plugin_path = Path("plugins") / name
     manifest_path = plugin_path / "manifest.yaml"
     if manifest_path.exists():
-        try:
-            import yaml
+        import yaml
 
+        try:
             with open(manifest_path, encoding="utf-8") as f:
                 manifest = yaml.safe_load(f) or {}
             manifest["description"] = description
@@ -102,7 +102,9 @@ def _create_interactive() -> int:
                     allow_unicode=True,
                     sort_keys=False,
                 )
-        except Exception:
+        except (OSError, ValueError, TypeError, yaml.YAMLError):
+            # The template manifest stays as generated; the plugin itself
+            # was already created, so a failed enrichment is not fatal.
             pass
 
     # Register in plugins.yaml

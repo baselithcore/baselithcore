@@ -167,6 +167,10 @@ def _load_tiktoken_encoder() -> Any:
                 _encoder = tiktoken.encoding_for_model("gpt-4")
                 _tiktoken_available = True
             except Exception:
+                logger.debug(
+                    "tiktoken_unavailable; using the heuristic counter",
+                    exc_info=True,
+                )
                 _tiktoken_available = False
     return _encoder
 
@@ -334,7 +338,8 @@ def estimate_tokens(text: str, model: str | None = None) -> int:
         try:
             return max(1, round(len(encoder.encode(text)) * factor))
         except Exception:
-            pass  # Fall through to heuristic
+            # Fall through to heuristic (e.g. special-token text tiktoken rejects).
+            logger.debug("tiktoken_encode_failed", exc_info=True)
 
     return max(1, round(_heuristic_token_count(text) * factor))
 

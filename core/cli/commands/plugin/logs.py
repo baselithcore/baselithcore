@@ -142,7 +142,7 @@ def plugin_logs(
                             continue
 
                     matching_entries.append(parsed)
-        except Exception:
+        except OSError:  # unreadable log file: skip it, read the others
             continue
 
     # Take the last N entries

@@ -40,6 +40,10 @@ def _resolve_backend() -> str:
 
             return "postgres" if get_storage_config().postgres_enabled else "memory"
         except Exception:  # pragma: no cover - storage config unavailable
+            logger.warning(
+                "checkpoint_backend_auto_resolution_failed; using memory",
+                exc_info=True,
+            )
             return "memory"
     return backend
 

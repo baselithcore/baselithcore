@@ -25,6 +25,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 __all__ = [
     "SubAppApi",
     "build_subapp_api_definition",
@@ -72,6 +76,11 @@ def discover_subapp_apis(routes: Iterable[Any] | None) -> dict[str, SubAppApi]:
         try:
             document = openapi_fn()
         except Exception:
+            logger.warning(
+                "OpenAPI generation failed for mounted sub-app %s; skipped",
+                name,
+                exc_info=True,
+            )
             continue
         if not isinstance(document, dict) or not document.get("paths"):
             continue

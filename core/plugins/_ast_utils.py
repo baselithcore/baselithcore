@@ -55,7 +55,7 @@ def literal_return_value(class_node: ast.ClassDef, method_name: str) -> Any | No
         if isinstance(stmt, ast.Return) and stmt.value is not None:
             try:
                 return static_eval(stmt.value)
-            except Exception:
+            except (ValueError, TypeError, RecursionError):  # non-literal return
                 return None
     return None
 

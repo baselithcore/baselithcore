@@ -58,7 +58,8 @@ def _stop_log_listener() -> None:
     if _log_listener is not None:
         try:
             _log_listener.stop()
-        except Exception:  # never let logging teardown raise
+        # Tearing down the log pipeline itself: there is nowhere left to report.
+        except Exception:  # silent-ok: log pipeline teardown, no sink left
             pass
         _log_listener = None
 
@@ -82,7 +83,7 @@ def add_otel_context(
         if ctx.is_valid:
             event_dict["trace_id"] = f"{ctx.trace_id:032x}"
             event_dict["span_id"] = f"{ctx.span_id:016x}"
-    except Exception:
+    except Exception:  # silent-ok: structlog processor; logging here recurses
         pass
     return event_dict
 
@@ -179,7 +180,13 @@ def configure_logging(
                         import ast
 
                         record.msg = ast.literal_eval(record.msg)
-                    except Exception:
+                    except (
+                        ValueError,
+                        TypeError,
+                        SyntaxError,
+                        MemoryError,
+                        RecursionError,
+                    ):  # the documented literal_eval failures: keep the raw text
                         pass
             formatted: str = super().format(record)
             return formatted

@@ -293,6 +293,9 @@ def resolve_native_mode(agent: ReActAgent) -> bool:
     try:
         provider = getattr(llm, "provider", None)
     except Exception:  # provider construction may fail (e.g. missing key)
+        logger.debug(
+            "LLM provider unavailable; native tool calling disabled", exc_info=True
+        )
         return False
     return getattr(provider, "supports_native_tools", False) is True
 

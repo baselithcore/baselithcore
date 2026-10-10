@@ -174,6 +174,7 @@ class ToolExecutionMixin(ToolLedgerMixin):
             budget = get_active_budget()
             remaining = budget.remaining_seconds() if budget is not None else None
         except Exception:
+            logger.debug("Ambient LoopBudget unreadable; static timeout", exc_info=True)
             remaining = None
         if remaining is None:
             return self._tool_timeout
@@ -190,6 +191,7 @@ class ToolExecutionMixin(ToolLedgerMixin):
 
             return get_active_budget()
         except Exception:
+            logger.debug("Ambient LoopBudget unreadable", exc_info=True)
             return None
 
     async def _enforce_tool_gates(

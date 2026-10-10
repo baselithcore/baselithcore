@@ -279,6 +279,7 @@ class Tracer:
                 ).start_as_current_span(name)
                 otel_span = otel_cm.__enter__()
             except Exception:  # pragma: no cover - defensive
+                logger.debug("OTel span start failed for %s", name, exc_info=True)
                 otel_span = otel_cm = None
 
         try:
@@ -309,7 +310,7 @@ class Tracer:
                 try:
                     otel_cm.__exit__(None, None, None)
                 except Exception:  # pragma: no cover - defensive
-                    pass
+                    logger.debug("OTel span end failed for %s", name, exc_info=True)
 
             # Export if batch is large enough
             if len(self._completed_spans) >= 10:
@@ -346,7 +347,7 @@ class Tracer:
                 )
             )
         except Exception:
-            pass
+            logger.debug("Span %s not emitted to sinks", span.name, exc_info=True)
 
     @staticmethod
     def _mirror_to_otel(otel_span: Any, span: Span) -> None:
@@ -360,7 +361,7 @@ class Tracer:
                     {k: _coerce_attr(v) for k, v in event["attributes"].items()},
                 )
         except Exception:  # pragma: no cover - defensive
-            pass
+            logger.debug("Span %s not mirrored to OTel", span.name, exc_info=True)
 
     @staticmethod
     def _mark_otel_error(otel_span: Any, exc: Exception) -> None:
@@ -371,7 +372,7 @@ class Tracer:
             otel_span.record_exception(exc)
             otel_span.set_status(Status(StatusCode.ERROR, str(exc)))
         except Exception:  # pragma: no cover - defensive
-            pass
+            logger.debug("OTel span error status not recorded", exc_info=True)
 
     def flush(self) -> None:
         """Export all completed spans."""

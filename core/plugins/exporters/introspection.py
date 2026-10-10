@@ -12,9 +12,12 @@ import asyncio
 import inspect
 from pathlib import Path
 
+from core.observability.logging import get_logger
 from core.plugins.interface import Plugin, PluginMetadata
 
 from .patterns import RESOURCE_TO_PATTERN, TAG_ALIASES, scan_source_files
+
+logger = get_logger(__name__)
 
 __all__ = [
     "detect_from_resources",
@@ -33,6 +36,11 @@ def resolve_plugin_dir(plugin: Plugin) -> Path | None:
             return None
         return Path(plugin_module.__file__).parent  # type: ignore[arg-type]
     except Exception:
+        logger.debug(
+            "Plugin directory unresolvable for %s",
+            type(plugin).__name__,
+            exc_info=True,
+        )
         return None
 
 

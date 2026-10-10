@@ -113,6 +113,7 @@ def build_default_replay_guard() -> Any:
         if getattr(storage, "cache_backend", "") == "redis":
             redis_url = getattr(storage, "cache_redis_url", "") or ""
     except Exception:  # pragma: no cover - config unavailable in minimal envs
+        logger.debug("ap2_replay_guard_storage_config_unavailable", exc_info=True)
         redis_url = ""
 
     if redis_url:
@@ -138,7 +139,7 @@ def build_default_replay_guard() -> Any:
                 "used, or pass an explicit shared replay_guard to verify_chain."
             )
     except Exception:  # pragma: no cover - advisory only
-        pass
+        logger.debug("ap2_replay_guard_env_check_failed", exc_info=True)
 
     return InMemoryReplayGuard()
 

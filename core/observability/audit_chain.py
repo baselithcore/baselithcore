@@ -452,7 +452,7 @@ class SQLiteAuditSink:
             try:
                 self._conn.close()
             except Exception:  # close must never raise
-                pass
+                logger.debug("Audit chain connection close failed", exc_info=True)
 
 
 __all__ = [

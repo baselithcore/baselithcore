@@ -137,6 +137,7 @@ def _active_budget() -> Any | None:
 
         return get_active_budget()
     except Exception:
+        logger.debug("Ambient LoopBudget unreadable", exc_info=True)
         return None
 
 

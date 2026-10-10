@@ -17,6 +17,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.context import reset_plugin_context, set_plugin_context
 from core.middleware._plugin_route import matched_plugin_route
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 _MOUNT_MAP_ATTR = "_plugin_ctx_mount_map"
 
@@ -33,12 +36,14 @@ def _mounted_plugins(app: object) -> dict[str, str]:
             if isinstance(route, Mount) and route.name and route.path:
                 mapping[route.path.rstrip("/")] = route.name
     except Exception:
+        logger.debug("Could not map plugin mounts from app routes", exc_info=True)
         mapping = {}
     try:
         if state is not None:
             setattr(state, _MOUNT_MAP_ATTR, mapping)
     except Exception:
-        pass
+        # Cache write only: the map is recomputed on the next request.
+        logger.debug("Could not cache the plugin mount map on app.state", exc_info=True)
     return mapping
 
 

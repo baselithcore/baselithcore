@@ -27,7 +27,7 @@ def _otel_active() -> bool:
         from core.observability.otel import is_initialized
 
         return is_initialized()
-    except Exception:  # pragma: no cover - defensive
+    except ImportError:  # pragma: no cover - defensive
         return False
 
 

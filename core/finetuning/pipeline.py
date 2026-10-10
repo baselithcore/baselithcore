@@ -326,6 +326,12 @@ class FineTuningPipeline:
                     correct += 1
                 total += 1
             except Exception:
+                # Scored as a miss; the prompt itself is user data, never logged.
+                logger.warning(
+                    "finetune_eval_sample_failed",
+                    extra={"model_id": model_id},
+                    exc_info=True,
+                )
                 total += 1
 
         accuracy = correct / max(total, 1)

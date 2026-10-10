@@ -246,6 +246,11 @@ class EventBus:
             tenant_id = get_current_tenant_id()
         except Exception:
             # Fallback if somehow not present in error boundary
+            logger.debug(
+                "event_tenant_unavailable",
+                extra={"event_name": event_name},
+                exc_info=True,
+            )
             tenant_id = "default"
         # Capture the emitting identity so handlers (which may run detached)
         # resolve the same per-user tenant via resolve_plugin_tenant.

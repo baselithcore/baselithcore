@@ -23,7 +23,7 @@ from . import code_graph, linking, operations, query_builder, retrieval
 
 try:  # pragma: no cover - optional dependency
     from redis import Redis
-except Exception:  # pragma: no cover - redis not available
+except ImportError:  # pragma: no cover - redis not available
     Redis = None  # type: ignore[assignment,misc]
 
 logger = get_logger(__name__)

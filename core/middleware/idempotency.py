@@ -229,6 +229,7 @@ class IdempotencyMiddleware:
 
                 self._token_lifetime = int(get_security_config().access_token_lifetime)
             except Exception:  # pragma: no cover - config unavailable
+                logger.debug("No security config; 3600s token lifetime", exc_info=True)
                 self._token_lifetime = 3600
         return self._token_lifetime
 
@@ -241,6 +242,7 @@ class IdempotencyMiddleware:
         try:
             tenant = get_current_tenant_id() or "default"
         except Exception:
+            logger.debug("Tenant unresolved for idempotency key scope", exc_info=True)
             tenant = "default"
         identity = self._identity_scope(scope)
         if identity is None:
@@ -491,7 +493,7 @@ class IdempotencyMiddleware:
         try:
             await self._redis.delete(lock_key)
         except Exception:  # pragma: no cover
-            pass
+            logger.warning("Idempotency lock %s not released; held until TTL", lock_key)
 
 
 __all__ = ["IdempotencyMiddleware"]

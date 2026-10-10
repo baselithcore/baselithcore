@@ -450,6 +450,11 @@ def _scan_body(body: str, skill_name: str) -> str:
 
         return scan_external_content(body, source=f"skill:{skill_name}")
     except Exception:  # pragma: no cover - guardrails must never block skills
+        logger.warning(
+            "Injection scan failed for skill %s; body served unscanned",
+            skill_name,
+            exc_info=True,
+        )
         return body
 
 

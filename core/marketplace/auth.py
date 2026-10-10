@@ -294,7 +294,7 @@ class AuthService:
         if response.status_code != 200:
             try:
                 detail = response.json().get("detail", response.text)
-            except Exception:
+            except (ValueError, AttributeError):  # non-JSON / non-object body
                 detail = response.text
             return {
                 "status": "error",

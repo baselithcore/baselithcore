@@ -42,7 +42,7 @@ def _resolve_service_version() -> str:
         from core._version import __version__
 
         return f"{__version__}"
-    except Exception:
+    except ImportError:
         return "0.0.0"
 
 

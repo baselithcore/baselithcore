@@ -24,7 +24,7 @@ def _sync_config_enabled(plugin_name: str, enabled: bool) -> bool:
         try:
             with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
-        except Exception:
+        except (OSError, ValueError, yaml.YAMLError):
             return False
     if not isinstance(config, dict):
         return False
@@ -42,7 +42,7 @@ def _sync_config_enabled(plugin_name: str, enabled: bool) -> bool:
             yaml.dump(
                 config, f, default_flow_style=False, allow_unicode=True, sort_keys=False
             )
-    except Exception:
+    except (OSError, yaml.YAMLError):
         return False
     return True
 

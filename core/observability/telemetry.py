@@ -27,7 +27,7 @@ try:  # pragma: no cover
     from prometheus_client import Counter as PrometheusCounter
 
     _PrometheusCounterType: type[Any] | None = PrometheusCounter
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _PrometheusCounterType = None
 
 

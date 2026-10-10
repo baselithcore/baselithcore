@@ -89,6 +89,12 @@ class MCPToolAdapter:
         try:
             hints = get_type_hints(func)
         except Exception:
+            # Unresolvable forward refs etc.: fall back to untyped parameters.
+            logger.debug(
+                "mcp_tool_type_hints_unresolved",
+                func=getattr(func, "__qualname__", repr(func)),
+                exc_info=True,
+            )
             hints = {}
 
         sig = inspect.signature(func)

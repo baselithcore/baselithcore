@@ -12,6 +12,10 @@ from typing import Any, cast
 
 from starlette.types import Scope
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 _SCOPE_KEY = "_plugin_route_match"
 _UNSET = object()
 
@@ -29,6 +33,7 @@ def matched_plugin_route(scope: Scope, registry: Any, path: str) -> str | None:
     try:
         matched = registry.match_plugin_route(path)
     except Exception:
+        logger.debug("Plugin route lookup failed; treating as no match", exc_info=True)
         matched = None
     result = str(matched) if matched else None
     scope[_SCOPE_KEY] = result

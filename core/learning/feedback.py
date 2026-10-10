@@ -272,6 +272,11 @@ class FeedbackCollector:
             feedback = await self._store.load_by_agent(agent_id)
         except Exception:
             # Fallback to cache
+            logger.warning(
+                "feedback_store_load_failed; using the in-memory cache",
+                extra={"agent_id": agent_id},
+                exc_info=True,
+            )
             feedback = [f for f in self._cache if f.agent_id == agent_id]
 
         if not feedback:

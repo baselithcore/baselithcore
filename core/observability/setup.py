@@ -33,7 +33,7 @@ def _record_factory(
     if not hasattr(record, "request_id"):
         try:
             record.request_id = request_id_ctx.get("-")
-        except Exception:
+        except Exception:  # silent-ok: LogRecord factory; logging here recurses
             record.request_id = "-"
     return record
 
@@ -75,7 +75,8 @@ class SensitiveDataFilter(logging.Filter):
 
         try:
             msg = str(record.getMessage())
-        except Exception:
+        # A bad format arg is the handler's to report; this filter passes it on.
+        except Exception:  # silent-ok: logging.Filter; logging here recurses
             return True
 
         # 1. Mask PII (Emails)

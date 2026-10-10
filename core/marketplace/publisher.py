@@ -240,7 +240,7 @@ class PluginPublisher:
             else:
                 try:
                     error_msg = response.json().get("detail", response.text)
-                except Exception:
+                except (ValueError, AttributeError):  # non-JSON / non-object body
                     error_msg = response.text
                 return {
                     "status": "error",

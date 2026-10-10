@@ -29,6 +29,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 __all__ = [
     "SpanRecord",
     "SpanSink",
@@ -123,4 +127,6 @@ def emit_span(record: SpanRecord) -> None:
         try:
             sink(record)
         except Exception:
-            pass
+            logger.debug(
+                "Span sink %r raised; span skipped for it", sink, exc_info=True
+            )

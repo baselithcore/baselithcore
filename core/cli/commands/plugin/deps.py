@@ -51,7 +51,7 @@ def _load_manifest(plugin_dir: Path) -> dict | None:
                     else:
                         manifest = json.load(f)
                     return manifest
-            except Exception:
+            except (OSError, ValueError, yaml.YAMLError):
                 return None
     return None
 

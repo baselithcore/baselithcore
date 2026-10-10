@@ -145,6 +145,7 @@ class WorkerMonitor:
             self._conn.ping()
             redis_ok = True
         except Exception:
+            logger.debug("task_queue_redis_ping_failed", exc_info=True)
             redis_ok = False
 
         workers = self.get_workers()

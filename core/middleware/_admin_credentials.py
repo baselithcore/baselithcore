@@ -44,7 +44,7 @@ def verify_pbkdf2_sha256(encoded: str, candidate: str) -> bool:
         iterations = int(iter_str)
         salt = bytes.fromhex(salt_hex)
         digest = bytes.fromhex(hash_hex)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):  # malformed encoded hash
         return False
 
     if iterations < PBKDF2_MIN_ITERATIONS:

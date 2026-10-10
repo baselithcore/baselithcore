@@ -141,7 +141,13 @@ def _build_nonce_ledger() -> _NonceLedger | _RedisNonceLedger:
         from core.cache.redis_sync import create_sync_redis_client
 
         return _RedisNonceLedger(create_sync_redis_client(redis_url), fallback=fallback)
-    except Exception:  # pragma: no cover - config/redis unavailable
+    except Exception as exc:  # pragma: no cover - config/redis unavailable
+        # Type name only: a Redis error message can echo the credentialed URL.
+        logger.warning(
+            "a2a_nonce_ledger_redis_unavailable: falling back to the "
+            "process-local ledger (%s)",
+            type(exc).__name__,
+        )
         return fallback
 
 

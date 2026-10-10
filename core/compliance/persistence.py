@@ -117,7 +117,7 @@ class _SQLiteJsonStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:  # close must never raise
+            except Exception:  # silent-ok: SQLite teardown; nothing left to recover
                 pass
 
 

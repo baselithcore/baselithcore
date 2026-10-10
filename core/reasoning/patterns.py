@@ -42,6 +42,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Pattern enum
 # ---------------------------------------------------------------------------
@@ -338,7 +342,10 @@ class PatternSelector:
                     )
                     return SelectionResult(pattern=p, confidence=0.90, reason=reason)
         except Exception:
-            pass
+            logger.debug(
+                "LLM pattern selection failed; using heuristic selection",
+                exc_info=True,
+            )
         return self.select(task)
 
 

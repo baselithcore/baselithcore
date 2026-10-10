@@ -110,6 +110,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
                         )
                     )
             except Exception:  # pragma: no cover - config unavailable
+                logger.debug("context_folding_config_unavailable", exc_info=True)
                 context_folder = None
         self.context_folder = context_folder
         # The working-memory buffers are class-level tenant-scoped descriptors

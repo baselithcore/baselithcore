@@ -17,6 +17,9 @@ from core.middleware.cost_control import (
     _cost_context,
     cost_controller,
 )
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 __all__ = ["TrackingAsyncCursor", "TrackingCursor", "_track_db_query"]
 
@@ -42,7 +45,7 @@ def _track_db_query(query: Any) -> None:
         raise
     except Exception:
         # Tracking must never break real queries.
-        pass
+        logger.debug("sql_query_tracking_failed", exc_info=True)
 
 
 class TrackingCursor(Cursor):

@@ -107,6 +107,10 @@ def install_span_sink_bridge(provider: Any) -> bool:
                 try:
                     record = readable_span_to_record(span)
                 except Exception:
+                    logger.debug(
+                        "Span not forwarded to sinks: conversion failed",
+                        exc_info=True,
+                    )
                     return
                 if record is not None:
                     emit_span(record)

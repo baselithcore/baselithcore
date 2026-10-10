@@ -4,10 +4,14 @@ Cache configuration settings.
 Configuration for Local, Redis, and Semantic caches.
 """
 
+import logging
 from typing import Any
 
 from pydantic import Field, field_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Direct stdlib logger: config modules load before observability is set up.
+logger = logging.getLogger(__name__)
 
 
 def _redact_url(value: str | None) -> str | None:
@@ -23,7 +27,12 @@ def _redact_url(value: str | None) -> str | None:
         from core.observability.redaction import redact_url_credentials
 
         return redact_url_credentials(value)
-    except Exception:  # pragma: no cover - redaction must never break config
+    except Exception as exc:  # pragma: no cover - redaction must never break config
+        # Never log the value itself: it is the credentialed URL.
+        logger.warning(
+            "URL redaction failed (%s); the connection string is serialised as-is",
+            type(exc).__name__,
+        )
         return value
 
 

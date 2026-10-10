@@ -13,6 +13,10 @@ from redis import Redis
 from rq import get_current_job
 from rq.job import Job
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class TaskStatus(str, Enum):
     """Task execution status."""
@@ -144,7 +148,7 @@ class TaskTracker:
             if key == "result":
                 try:
                     result[key] = json.loads(val)
-                except Exception:
+                except (ValueError, TypeError):  # not JSON: keep the raw value
                     result[key] = val
             elif key == "progress":
                 result[key] = float(val)
@@ -277,6 +281,7 @@ def get_job_status(job_id: str) -> dict[str, Any] | None:
     try:
         job = Job.fetch(job_id, connection=conn)
     except Exception:
+        logger.debug(f"RQ job {job_id} unavailable", exc_info=True)
         job = None
 
     tracker_status = get_task_tracker().get_status(job_id)

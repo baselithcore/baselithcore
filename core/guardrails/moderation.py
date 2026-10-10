@@ -158,7 +158,12 @@ def get_moderator() -> Any | None:
         key = config.openai_api_key or (
             config.api_key if config.provider == "openai" else None
         )
-    except Exception:  # config unavailable in exotic contexts
+    except Exception as exc:  # config unavailable in exotic contexts
+        # No exc_info: a settings validation error can echo the key's value.
+        logger.debug(
+            "moderation_llm_config_unavailable",
+            extra={"error": type(exc).__name__},
+        )
         key = None
     if not key:
         logger.warning(

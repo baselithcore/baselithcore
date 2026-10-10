@@ -180,6 +180,7 @@ class TreeOfThoughts:
 
             cache = get_thought_cache()
         except Exception:
+            logger.debug("Thought cache unavailable; scoring uncached", exc_info=True)
             cache = None
 
         try:
@@ -379,6 +380,7 @@ class TreeOfThoughts:
                             result.stdout if result.exit_code == 0 else result.stderr
                         )
                     except Exception as e:
+                        logger.warning("ToT sandbox execution raised", exc_info=True)
                         tool_output = f"Error: {e}"
 
                     thought_content += f"\n[RESULT]\n{tool_output}\n[/RESULT]"

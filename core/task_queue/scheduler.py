@@ -371,6 +371,7 @@ class TaskScheduler:
                 "meta": job.meta,
             }
         except Exception:
+            logger.debug(f"Job status unavailable for {job_id}", exc_info=True)
             return None
 
 
