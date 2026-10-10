@@ -173,6 +173,19 @@ repos:
         entry: python scripts/check_architecture_boundaries.py
         language: system
         pass_filenames: false
+      # Since 1.0 the only top-level package is `baselith`. An import, dotted
+      # string or path that still names the old top-level `core`/`plugins`
+      # (a stale mock.patch target, an RQ job path, a Dockerfile COPY) is
+      # exactly what scripts/migrate_namespace.py would rewrite, so its
+      # --check mode is the gate. language: python because it needs libcst,
+      # which the CI job's bare interpreter does not have.
+      - id: namespace-check
+        name: namespace-check
+        entry: python scripts/migrate_namespace.py --check --quiet
+        language: python
+        pass_filenames: false
+        additional_dependencies:
+          - libcst==1.9.0
       # Embedding, rerank and Qdrant are core services; a plugin that builds
       # its own model or client carries GiB per worker. Allowlist in
       # configs/inprocess_ml_allowlist.yaml only shrinks.
