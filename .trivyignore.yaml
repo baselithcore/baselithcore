@@ -144,9 +144,13 @@ vulnerabilities:
       trust boundary the codebase already draws around model loading with
       LLM_HUGGINGFACE_TRUST_REMOTE_CODE (default false), which grants a
       strictly stronger capability (RCE) than this arbitrary-file-read.
+      Re-argued 2026-10-11: still no patched version. The advisory range is
+      still "<= 1.14.0" with no fix, both upstream PRs remain closed unmerged,
+      and 1.15.0 is still the latest release, without them. Reachability and
+      blast radius are unchanged.
       Re-argue at expiry: check the advisory for a first patched version and
       re-lock to it the day one exists.
-    expired_at: 2026-10-09
+    expired_at: 2026-11-10
 
   # ----------------------------------------------------------------
   # pip's own vendored tree — visible only since pip 26 ships an SBOM
