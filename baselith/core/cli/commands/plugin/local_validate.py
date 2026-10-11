@@ -5,12 +5,12 @@ Validation logic for local plugins.
 import ast
 import json
 import os
-from pathlib import Path
 
 import yaml
 from rich.table import Table
 
 from baselith.core.cli.ui import print_error, print_success, print_warning
+from baselith.core.config.plugins import plugins_root
 
 from .local_shared import console
 
@@ -27,7 +27,7 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
     - Python dependency importability check
     - Plugin dependency existence check
     """
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         print_error(f"Local plugin '{plugin_name}' not found.")
@@ -198,10 +198,8 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         # 6. Plugin dependency check
         plugin_deps = manifest_data.get("plugin_dependencies", [])
         if plugin_deps:
-            plugins_root = plugin_dir.parent
-            missing_plugins = [
-                d for d in plugin_deps if not (plugins_root / d).is_dir()
-            ]
+            parent_dir = plugin_dir.parent
+            missing_plugins = [d for d in plugin_deps if not (parent_dir / d).is_dir()]
             if missing_plugins:
                 checks.append(
                     {

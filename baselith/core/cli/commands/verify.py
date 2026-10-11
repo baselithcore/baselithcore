@@ -10,6 +10,7 @@ from pathlib import Path
 from rich.table import Table
 
 from baselith.core.cli.ui import Timer, console, print_header, print_timing
+from baselith.core.config.plugins import plugins_root
 
 
 def run_verify(json_output: bool = False) -> int:
@@ -148,7 +149,7 @@ def run_verify(json_output: bool = False) -> int:
 
         # Check directories
         directories = [
-            Path("plugins"),
+            plugins_root(),
             Path("data"),
             Path("documents"),
             Path("configs"),

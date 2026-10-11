@@ -291,6 +291,31 @@ def _inject_global_format(parser: argparse.ArgumentParser) -> None:
                 _inject_global_format(sub)
 
 
+def _register_plugin_clis(subparsers: Any, formatter_class: Any) -> None:
+    """Add the subcommands of every plugin that ships a ``cli.py``.
+
+    Scans the plugin root the app reads (``baselith/plugins`` in a checkout
+    since 1.0, never a cwd-relative ``plugins``) and imports each
+    ``baselith.plugins.<name>.cli``; a plugin that fails to import is skipped.
+    """
+    from baselith.core.config.plugins import plugins_root
+
+    plugins_dir = plugins_root()
+    if not plugins_dir.is_dir():
+        return
+    for plugin_path in sorted(plugins_dir.iterdir()):
+        if not (plugin_path.is_dir() and (plugin_path / "cli.py").is_file()):
+            continue
+        try:
+            plugin_module = importlib.import_module(
+                f"baselith.plugins.{plugin_path.name}.cli"
+            )
+            if hasattr(plugin_module, "register_parser"):
+                plugin_module.register_parser(subparsers, formatter_class)
+        except Exception as e:
+            _debug_log(f"failed to register plugin CLI '{plugin_path.name}': {e!r}")
+
+
 def main() -> int:
     """Main CLI entry point."""
     # Before anything else: if we are standing in a source checkout but the
@@ -352,34 +377,8 @@ def main() -> int:
             _debug_log(f"failed to register command '{cmd_name}': {e!r}")
 
     # Dynamic Plugin CLI registration
-    from pathlib import Path
-
-    base_dir = Path.cwd()
-    plugins_dir = base_dir / "plugins" if (base_dir / "plugins").is_dir() else base_dir
-
-    if plugins_dir.name == "plugins" and "plugin-updater" not in sys.argv:
-        # Add cwd to sys.path once for the whole scan, and only remove it if we
-        # were the ones who added it (don't clobber a pre-existing entry).
-        base_dir_str = str(base_dir)
-        path_added = base_dir_str not in sys.path
-        if path_added:
-            sys.path.insert(0, base_dir_str)
-        try:
-            for plugin_path in plugins_dir.iterdir():
-                if plugin_path.is_dir() and (plugin_path / "cli.py").is_file():
-                    try:
-                        plugin_module = importlib.import_module(
-                            f"baselith.plugins.{plugin_path.name}.cli"
-                        )
-                        if hasattr(plugin_module, "register_parser"):
-                            plugin_module.register_parser(subparsers, formatter_class)
-                    except Exception as e:
-                        _debug_log(
-                            f"failed to register plugin CLI '{plugin_path.name}': {e!r}"
-                        )
-        finally:
-            if path_added and base_dir_str in sys.path:
-                sys.path.remove(base_dir_str)
+    if "plugin-updater" not in sys.argv:
+        _register_plugin_clis(subparsers, formatter_class)
 
     # Make --format usable before or after any (sub)command token.
     _inject_global_format(parser)

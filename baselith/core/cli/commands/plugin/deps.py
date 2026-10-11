@@ -25,6 +25,7 @@ from baselith.core.cli.ui import (
     print_success,
     print_warning,
 )
+from baselith.core.config.plugins import plugins_root
 
 
 def _is_valid_requirement(spec: object) -> bool:
@@ -81,7 +82,7 @@ def _check_python_dep(package: str) -> bool:
 
 def _local_plugin_names() -> list[str]:
     """Return visible local plugin names."""
-    plugins_dir = Path("plugins")
+    plugins_dir = plugins_root()
     if not plugins_dir.exists():
         return []
     return [
@@ -95,7 +96,7 @@ def _local_plugin_names() -> list[str]:
 
 def _check_plugin_dep(plugin_name: str) -> bool:
     """Check if a sibling plugin exists locally."""
-    return (Path("plugins") / plugin_name).is_dir()
+    return (plugins_root() / plugin_name).is_dir()
 
 
 def _check_env_var(var: str) -> bool:
@@ -151,7 +152,7 @@ def deps_check(
     Returns:
         Exit code (0 = all satisfied, 1 = issues found).
     """
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         print_error(f"Plugin '{plugin_name}' not found.")
@@ -297,7 +298,7 @@ def deps_check_all(json_output: bool = False, python_only: bool = False) -> int:
     results: list[_DependencySummary] = []
     all_ok = True
     for plugin_name in plugin_names:
-        plugin_dir = Path("plugins") / plugin_name
+        plugin_dir = plugins_root() / plugin_name
         manifest = _load_manifest(plugin_dir)
         if manifest is None:
             continue
@@ -356,7 +357,7 @@ def deps_check_all(json_output: bool = False, python_only: bool = False) -> int:
 
 def _missing_python_deps(plugin_name: str) -> tuple[list[str], list[str] | None]:
     """Return missing Python deps and an optional error list for one plugin."""
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         return [], [f"Plugin '{plugin_name}' not found."]
 
@@ -446,7 +447,7 @@ def deps_install_all(yes: bool = False, dry_run: bool = False) -> int:
     failed: list[str] = []
     pending: dict[str, list[str]] = {}
     for plugin_name in plugin_names:
-        plugin_dir = Path("plugins") / plugin_name
+        plugin_dir = plugins_root() / plugin_name
         manifest = _load_manifest(plugin_dir)
         if manifest is None:
             continue

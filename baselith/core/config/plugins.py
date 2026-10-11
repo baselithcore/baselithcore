@@ -66,6 +66,20 @@ def resolve_plugins_root(path: Path | str | None = None) -> Path:
     return in_cwd
 
 
+def plugins_root() -> Path:
+    """The plugin root every reader scans, resolved now.
+
+    ``PLUGIN_PLUGINS_PATH`` and the cwd are read at call time (a fresh
+    :class:`PluginConfig`, not the cached one), so a CLI command sees the same
+    directory the app would see if it started here: ``./plugins`` when it
+    exists, else the installed package (``baselith/plugins`` in a checkout).
+
+    Returns:
+        The resolved plugin root; it may not exist.
+    """
+    return Path(PluginConfig().plugins_path)
+
+
 def plugin_install_root(config: "PluginConfig | None" = None) -> Path:
     """Where marketplace and CLI installs write plugins.
 

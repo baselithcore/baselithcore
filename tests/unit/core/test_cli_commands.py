@@ -6,7 +6,7 @@ from baselith.core.cli.commands.verify import run_verify
 
 
 class TestCLIPlugins:
-    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.plugins_root")
     @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_no_dir(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = False
@@ -17,7 +17,7 @@ class TestCLIPlugins:
             for call in mock_console.print.call_args_list
         )
 
-    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.plugins_root")
     @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_empty(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = True
@@ -30,7 +30,7 @@ class TestCLIPlugins:
             for call in mock_console.print.call_args_list
         )
 
-    @patch("baselith.core.cli.commands.plugin.local_status.Path")
+    @patch("baselith.core.cli.commands.plugin.local_status.plugins_root")
     @patch("baselith.core.cli.commands.plugin.local_status.console")
     def test_list_plugins_success(self, mock_console, mock_path):
         mock_path.return_value.exists.return_value = True
@@ -107,7 +107,7 @@ class TestCLIPlugins:
         mock_err.assert_called_once()
         assert "already exists" in mock_err.call_args[0][0]
 
-    @patch("baselith.core.cli.commands.plugin.local_manage.Path")
+    @patch("baselith.core.cli.commands.plugin.local_manage.plugins_root")
     @patch("baselith.core.cli.commands.plugin.local_manage.shutil")
     @patch("builtins.input", return_value="y")
     def test_delete_plugin_success(self, mock_input, mock_shutil, mock_path):
@@ -126,7 +126,7 @@ class TestCLIPlugins:
 
     # Without this the sync writes the checkout's configs/plugins.yaml.
     @patch("baselith.core.cli.commands.plugin.local_manage._sync_config_enabled")
-    @patch("baselith.core.cli.commands.plugin.local_manage.Path")
+    @patch("baselith.core.cli.commands.plugin.local_manage.plugins_root")
     def test_disable_plugin_success(self, mock_path, mock_sync):
         from baselith.core.cli.commands.plugin import disable_local_plugin
 

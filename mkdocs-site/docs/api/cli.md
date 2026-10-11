@@ -379,6 +379,15 @@ baselith --format json verify   # Machine-readable JSON for CI
 
 ## Plugin
 
+The commands that act on plugins already present (`list`, `status`, `info`,
+`validate`, `tree`, `deps`, `enable`/`disable`, `export-manifest`,
+`schema-init`, and the subcommands a plugin adds through its own `cli.py`) read
+the same plugin root the application loads: `PLUGIN_PLUGINS_PATH` when set,
+else `./plugins` when the current directory has one, else the installed
+`baselith/plugins` package. A source checkout therefore works from its root
+with no `plugins/` directory of its own. `create` and `add` still write into
+`./plugins` (or `PLUGIN_PLUGINS_PATH`).
+
 ### `plugin list` / `plugin status` - List & Status
 
 Show all available plugins with health, readiness, and config alignment.

@@ -3,7 +3,6 @@ Status and info commands for local plugins.
 """
 
 import json
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -12,6 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from baselith.core.cli.ui import print_error
+from baselith.core.config.plugins import plugins_root
 
 from .local_shared import PLUGINS_CONFIG_PATH, console
 
@@ -20,7 +20,7 @@ def status_local_plugins(name: str | None = None, json_output: bool = False) -> 
     """
     Display comprehensive status for local plugins.
     """
-    plugins_dir = Path("plugins")
+    plugins_dir = plugins_root()
     if not plugins_dir.exists():
         console.print("[yellow]No plugins directory found[/yellow]")
         return 0
@@ -238,7 +238,7 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
     """
     import ast
 
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         print_error(f"Local plugin '{plugin_name}' not found.")

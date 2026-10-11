@@ -3,12 +3,12 @@ Management commands for local plugins (enable, disable, delete).
 """
 
 import shutil
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from baselith.core.cli.ui import print_error, print_success
+from baselith.core.config.plugins import plugins_root
 
 from .local_shared import PLUGINS_CONFIG_PATH, console
 
@@ -76,7 +76,7 @@ def delete_local_plugin(plugin_name: str, force: bool = False) -> int:
     """
     Delete a local plugin directory.
     """
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         print_error(f"Local plugin '{plugin_name}' not found.")
@@ -115,7 +115,7 @@ def disable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
         print_error("Provide a plugin name or use --all.")
         return 1
 
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         bundled = _toggle_bundled(plugin_name, False)
@@ -167,7 +167,7 @@ def enable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
         print_error("Provide a plugin name or use --all.")
         return 1
 
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         bundled = _toggle_bundled(plugin_name, True)
@@ -206,7 +206,7 @@ def enable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
 
 def _bulk_toggle(enable: bool) -> int:
     """Enable or disable all installed plugins."""
-    plugins_dir = Path("plugins")
+    plugins_dir = plugins_root()
     if not plugins_dir.exists():
         print_error("No plugins directory found.")
         return 1

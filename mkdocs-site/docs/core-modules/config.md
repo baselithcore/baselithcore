@@ -327,7 +327,7 @@ Constructing `CoreConfig` creates no directories: every subsystem that writes
 under `data/` (bootstrap state, SQLite stores, checkpoints, fine-tuning exports)
 creates its own parent directory on first write. `CORE_PLUGIN_DIR`,
 `CORE_DOCUMENTS_DIR` and `CORE_MAX_WORKERS` bind but are **Deprecated, no
-effect**: nothing reads them — the plugin loader reads `PLUGIN_PLUGINS_PATH`. Thread pools are sized by
+effect**: nothing reads them — the plugin loader reads `PLUGIN_PLUGINS_PATH`, resolved by `baselith.core.config.plugins.plugins_root()` (the variable, else `./plugins`, else the installed `baselith/plugins`), which the `baselith plugin` commands share. Thread pools are sized by
 `BASELITH_INFERENCE_THREADS` (model inference) and `OMP_NUM_THREADS` (math
 libraries, split across web workers automatically — see
 [Runtime tuning](../advanced/runtime-tuning.md)).

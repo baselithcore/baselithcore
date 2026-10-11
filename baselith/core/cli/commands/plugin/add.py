@@ -18,6 +18,7 @@ from baselith.core.cli.ui import (
     print_success,
     print_warning,
 )
+from baselith.core.config.plugins import plugins_root
 
 from .deps import deps_check, deps_install
 from .local_manage import enable_local_plugin
@@ -210,7 +211,7 @@ def _install_plugin_dependencies(
             if _prepare_docker_dependency(source, dep_name, seen) != 0:
                 return False
             continue
-        if (Path("plugins") / dep_name).is_dir():
+        if (plugins_root() / dep_name).is_dir():
             if enable_local_plugin(dep_name) != 0:
                 print_error(f"Could not enable plugin dependency '{dep_name}'.")
                 return False

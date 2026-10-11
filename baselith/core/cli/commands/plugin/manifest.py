@@ -4,9 +4,9 @@ Export manifest command for plugins.
 
 import importlib.util
 import sys
-from pathlib import Path
 
 from baselith.core.cli.ui import console, print_error, print_success
+from baselith.core.config.plugins import plugins_root
 from baselith.core.plugins.interface import Plugin
 
 
@@ -14,7 +14,7 @@ def export_manifest_cmd(plugin_name: str) -> int:
     """
     Generate a manifest.json file from a plugin's Python metadata definition.
     """
-    plugin_dir = Path("plugins") / plugin_name
+    plugin_dir = plugins_root() / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
         print_error(f"Local plugin '{plugin_name}' not found.")
@@ -41,12 +41,12 @@ def export_manifest_cmd(plugin_name: str) -> int:
     module_name = f"baselith.plugins.{plugin_name}.plugin"
 
     # Ensure plugins parent package exists in sys.modules
-    plugins_root = plugin_dir.parent
+    parent_dir = plugin_dir.parent
     if "baselith.plugins" not in sys.modules:
         import types
 
         pkg = types.ModuleType("baselith.plugins")
-        pkg.__path__ = [str(plugins_root)]
+        pkg.__path__ = [str(parent_dir)]
         pkg.__package__ = "baselith.plugins"
         sys.modules["baselith.plugins"] = pkg
 

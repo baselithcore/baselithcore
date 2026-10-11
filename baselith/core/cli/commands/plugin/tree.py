@@ -6,18 +6,18 @@ showing inter-plugin relationships and satisfaction status.
 """
 
 import json
-from pathlib import Path
 
 import yaml
 from rich.text import Text
 from rich.tree import Tree
 
 from baselith.core.cli.ui import console, print_error
+from baselith.core.config.plugins import plugins_root
 
 
 def _load_all_manifests() -> dict[str, dict]:
     """Load manifests for all installed plugins."""
-    plugins_dir = Path("plugins")
+    plugins_dir = plugins_root()
     manifests: dict[str, dict] = {}
 
     if not plugins_dir.exists():
@@ -166,7 +166,7 @@ def plugin_tree(plugin_name: str | None = None, json_output: bool = False) -> in
             tags = manifest.get("tags", [])
 
             # Determine status
-            is_disabled = (Path("plugins") / name / "plugin.disabled").exists()
+            is_disabled = (plugins_root() / name / "plugin.disabled").exists()
             if is_disabled:
                 icon = "⏸️"
                 name_style = "dim"
