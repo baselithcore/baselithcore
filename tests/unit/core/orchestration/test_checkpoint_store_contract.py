@@ -366,3 +366,33 @@ async def test_the_owner_still_writes_and_an_unowned_run_stays_writable(open_sto
     await store.save(free)
     stored = await store.load(run_id)
     assert stored is not None and stored.plugin_data["after_release"] == 2
+
+
+async def test_a_stale_manager_that_reloads_the_run_is_still_fenced(open_store):
+    """The realistic bypass: a reloaded copy carries the *new* owner's name.
+
+    The store fences on the owner the document names, so the manager stamps
+    its own identity on every write; a manager that lost its lease cannot
+    pass the fence just by reloading the run.
+    """
+    store = open_store()
+    run_id = f"stale-mgr-{uuid.uuid4().hex[:8]}"
+    await store.save(Checkpoint(run_id=run_id, query="q"))
+    claimed = await store.claim(run_id, "worker-a", 30.0, now=time.time() - 60)
+    assert claimed is not None
+    manager = CheckpointManager(store, claimed, owner="worker-a", lease_seconds=30.0)
+    assert await open_store().claim(run_id, "worker-b", 30.0)
+
+    reloaded = await store.load(run_id)
+    assert reloaded is not None and reloaded.owner == "worker-b"
+    manager.checkpoint = reloaded  # what a naive "refresh and retry" would do
+
+    async def _tool() -> dict[str, int]:
+        return {"value": 1}
+
+    with pytest.raises(CheckpointConflictError):
+        await manager.run_step("lookup", {"n": 1}, _tool)
+
+    stored = await store.load(run_id)
+    assert stored is not None
+    assert stored.owner == "worker-b" and not stored.steps

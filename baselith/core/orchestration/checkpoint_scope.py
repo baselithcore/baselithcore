@@ -143,6 +143,13 @@ class ScopeHost(_ScopeFactory):
         if self._write_lock is None:
             self._write_lock = asyncio.Lock()
         async with self._write_lock:
+            # The store fences writes on the owner the *document* names, so the
+            # writer's own identity goes on the copy first: a manager that lost
+            # its lease and reloaded the run would otherwise carry the new
+            # owner's name and pass the fence.
+            owner = getattr(self, "owner", None)
+            if owner is not None:
+                self.checkpoint.owner = owner
             save_step = getattr(self.store, "save_step", None)
             if step is not None and save_step is not None:
                 key, entry, trajectory_entry = step

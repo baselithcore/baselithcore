@@ -1047,7 +1047,11 @@ version; anything else gets `CheckpointConflictError` and nothing is written.
 The owner fence matters for a replica that lost its lease and reloads the run:
 its version is current again, but it still cannot write over the new owner's
 state or take the run back by writing its own name. Taking a run over goes
-through `claim`, which checks the lease and bumps the version. The
+through `claim`, which checks the lease and bumps the version. The store
+fences on the owner the document names, so `CheckpointManager` stamps its own
+lease identity on the checkpoint before every write: a reloaded copy carries
+the new owner's name, and without the stamp it would pass the fence. Code that
+writes through a store directly (outside a manager) must set `owner` itself. The
 orchestrator turns a conflict into an error result
 (`{"error": true, "checkpoint_conflict": true}`) and **stops** — it does not
 call `fail()`, which would clobber the newer state. A fresh run whose `run_id`
