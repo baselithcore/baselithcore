@@ -37,8 +37,11 @@ class ReasoningAgent:
             self.llm_service = service.llm_service
 
         if not self.llm_service:
-            # Fallback for demo purposes if not injected
-            self.llm_service = LLMService()
+            # No service injected: use the central policy-aware funnel so an
+            # operator's per-plugin LLM pin is honoured, not a bare LLMService().
+            from baselith.core.services.llm import get_llm_service
+
+            self.llm_service = get_llm_service()
 
         # Update to Async Engine
         self.tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)

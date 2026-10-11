@@ -1,5 +1,5 @@
 name: reasoning-agent
-version: 0.2.1
+version: 0.3.0
 description: Agent capable of complex reasoning using Tree of Thoughts.
 author: System
 dependencies:
@@ -13,5 +13,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: 58e6e0b826ec87693f3b23edeef48cf3b4a04c7ad0c703d62925ce91ec7b12f8
+integrity_sha256: 3ceb9b2f0aca354704ae03381a8f03c978873cdb245d3e5dc92b462c9cc709d5
 hash_surface_version: 5

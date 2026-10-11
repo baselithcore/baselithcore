@@ -100,3 +100,105 @@ def test_export_validates_body(service):
     # Empty subject_id rejected by validation (422).
     r = _client(ADMIN, service).post("/privacy/export", json={"subject_id": ""})
     assert r.status_code == 422
+
+
+# --- Art. 16 / 18 / 21 and Art. 7 consent routes ------------------------------
+
+
+@pytest.fixture
+def consent(monkeypatch):
+    from baselith.core.privacy.consent import ConsentService
+
+    svc = ConsentService()
+    monkeypatch.setattr(pr, "get_consent_service", lambda: svc)
+    return svc
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("post", "/privacy/rectify", {"subject_id": "s1", "corrections": {"q": "x"}}),
+        ("post", "/privacy/restrict", {"subject_id": "s1"}),
+        ("post", "/privacy/object", {"subject_id": "s1", "direct_marketing": True}),
+        ("get", "/privacy/consent/s1", None),
+        ("post", "/privacy/consent/grant", {"subject_id": "s1", "purpose": "news"}),
+        ("post", "/privacy/consent/withdraw", {"subject_id": "s1", "purpose": "news"}),
+    ],
+)
+def test_rights_routes_require_the_scope(service, consent, method, path, body):
+    client = _client(NOSCOPE, service)
+    kwargs = {"json": body} if body is not None else {}
+    response = getattr(client, method)(path, **kwargs)
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_scope"
+
+
+def test_rectify_reports_per_provider(service):
+    r = _client(SCOPED, service).post(
+        "/privacy/rectify", json={"subject_id": "s1", "corrections": {"q": "fixed"}}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["subject_id"] == "s1"
+    assert body["rectified"]["feedback"] == 1
+    assert body["total"] == 1
+
+
+def test_rectify_needs_corrections(service):
+    r = _client(ADMIN, service).post(
+        "/privacy/rectify", json={"subject_id": "s1", "corrections": {}}
+    )
+    assert r.status_code == 422
+
+
+def test_restrict_and_release(service):
+    client = _client(ADMIN, service)
+    restricted = client.post("/privacy/restrict", json={"subject_id": "s1"})
+    assert restricted.status_code == 200
+    assert restricted.json()["restricted"] is True
+    released = client.post(
+        "/privacy/restrict", json={"subject_id": "s1", "restricted": False}
+    )
+    assert released.json()["restricted"] is False
+
+
+def test_direct_marketing_objection_is_upheld(service):
+    r = _client(ADMIN, service).post(
+        "/privacy/object",
+        json={
+            "subject_id": "s1",
+            "direct_marketing": True,
+            "override_grounds": "legitimate interest",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["subject_id"] == "s1"
+
+
+def test_consent_grant_prove_withdraw(service, consent):
+    client = _client(ADMIN, service)
+    granted = client.post(
+        "/privacy/consent/grant",
+        json={"subject_id": "s1", "purpose": "news", "notice_version": "v2"},
+    )
+    assert granted.status_code == 201
+
+    proof = client.get("/privacy/consent/s1").json()
+    assert proof["active_purposes"] == ["news"]
+    assert len(proof["history"]) == 1
+
+    withdrawn = client.post(
+        "/privacy/consent/withdraw", json={"subject_id": "s1", "purpose": "news"}
+    )
+    assert withdrawn.status_code == 200
+    proof = client.get("/privacy/consent/s1").json()
+    assert proof["active_purposes"] == []
+    # Withdrawal appends to the proof chain; it never deletes the grant.
+    assert len(proof["history"]) == 2
+
+
+def test_withdraw_without_consent_is_404(service, consent):
+    r = _client(ADMIN, service).post(
+        "/privacy/consent/withdraw", json={"subject_id": "s1", "purpose": "none"}
+    )
+    assert r.status_code == 404

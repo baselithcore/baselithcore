@@ -254,6 +254,12 @@ at `/privacy`, gated by the `privacy:manage`
 | `POST /privacy/export`        | Export all data for a subject        |
 | `POST /privacy/erase`         | Erase all data for a subject         |
 | `POST /privacy/retention/sweep` | Purge records older than N days    |
+| `POST /privacy/rectify`       | Correct a subject's data (Art. 16); providers that cannot rectify are listed in `unsupported` |
+| `POST /privacy/restrict`      | Restrict or release processing (Art. 18) |
+| `POST /privacy/object`        | Record an objection (Art. 21); a direct-marketing objection is always upheld |
+| `GET /privacy/consent/{subject_id}` | Active purposes and the consent proof chain (Art. 7(1)) |
+| `POST /privacy/consent/grant` | Record a consent (`201`) |
+| `POST /privacy/consent/withdraw` | Withdraw a consent (Art. 7(3)); appends a record, `404` without an active consent |
 
 Every request is audit-logged with the subject id and affected record counts.
 

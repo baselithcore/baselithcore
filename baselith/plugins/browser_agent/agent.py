@@ -27,6 +27,7 @@ from baselith.core.services.vision.models import (
 )
 from baselith.core.services.vision.service import VisionService
 
+from ._shortcuts import BrowserShortcutsMixin
 from .actions import build_action as _build_action
 from .actions import clamp_wait_seconds as _clamp_wait_seconds
 from .actions import normalize_selector as _normalize_selector
@@ -46,7 +47,7 @@ from .types import BrowserAction, BrowserActionType, BrowserAgentResult, PageSta
 logger = get_logger(__name__)
 
 
-class BrowserAgent:
+class BrowserAgent(BrowserShortcutsMixin):
     """
     Autonomous browser agent with visual reasoning.
 
@@ -432,10 +433,17 @@ Respond ONLY with valid JSON matching one of the schemas above."""
                         screenshots=screenshots[-3:],
                     )
                 if action.action_type == BrowserActionType.EXTRACT:
-                    fields = action.value.split(",") if action.value else []
-                    for field_name in fields:
-                        extracted_data[field_name.strip()] = (
-                            f"[extracted from {state.url}]"
+                    # The model returns the ACTUAL extracted values in
+                    # ``action.data`` (see the EXTRACT schema in
+                    # SYSTEM_PROMPT). Merge them so later extractions augment
+                    # earlier keys; never fabricate placeholder values.
+                    if action.data:
+                        extracted_data.update(action.data)
+                    else:
+                        logger.warning(
+                            "browser_extract_no_data",
+                            url=state.url,
+                            value=action.value,
                         )
                     continue
 
@@ -475,24 +483,3 @@ Respond ONLY with valid JSON matching one of the schemas above."""
 
         await self._page.goto(url, wait_until="domcontentloaded")
         return await self.get_page_state()
-
-    async def screenshot(self) -> str:
-        """Take a screenshot and return base64."""
-        state = await self.get_page_state()
-        return state.screenshot_base64
-
-    async def click(self, selector: str) -> bool:
-        """Click an element by selector."""
-        return await self.execute_action(
-            BrowserAction(action_type=BrowserActionType.CLICK, selector=selector)
-        )
-
-    async def type_text(self, selector: str, text: str) -> bool:
-        """Type text into an element."""
-        return await self.execute_action(
-            BrowserAction(
-                action_type=BrowserActionType.TYPE,
-                selector=selector,
-                value=text,
-            )
-        )
