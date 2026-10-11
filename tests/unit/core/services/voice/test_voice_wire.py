@@ -281,14 +281,20 @@ class TestService:
     def test_capabilities_with_openai_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        config = VoiceConfig(
-            _env_file=None, openai_api_key=SecretStr("sk-test-key-0000")
-        )
-        # Patch the namespace VoiceService actually reads, not a dotted path
-        # re-resolved through sys.modules: in the full CI run that patch did not
-        # reach the service, which saw the real, keyless config.
-        monkeypatch.setitem(
-            VoiceService.__init__.__globals__, "get_voice_config", lambda: config
+        for var in (
+            "OPENAI_API_KEY",
+            "VOICE_PROVIDER",
+            "VOICE_STT_BASE_URL",
+            "VOICE_TTS_BASE_URL",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        # Through the env name: the field binds only its aliases, so an
+        # ``openai_api_key=`` kwarg is ignored and the test passed only where a
+        # local .env supplied a key.
+        monkeypatch.setenv("VOICE_OPENAI_API_KEY", "sk-test-key-0000")
+        config = VoiceConfig(_env_file=None)
+        monkeypatch.setattr(
+            "baselith.core.services.voice.service.get_voice_config", lambda: config
         )
         caps = VoiceService().capabilities()
         assert (caps.stt_provider, caps.tts_provider) == ("openai", "openai")

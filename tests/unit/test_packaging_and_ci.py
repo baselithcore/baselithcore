@@ -279,10 +279,24 @@ def test_contributing_documents_conventional_commits_as_mandatory() -> None:
     assert "mandatory" in text.lower()
     release_rules = _plugin_config(_releaserc(), "@semantic-release/commit-analyzer")
     for rule in release_rules["releaseRules"]:
+        if "type" not in rule:
+            continue
         assert f"`{rule['type']}`" in text, (
             f"commit type {rule['type']!r} has a release rule in .releaserc but "
             "is not documented in CONTRIBUTING.md's allowed-types table."
         )
+
+
+def test_a_breaking_change_cuts_a_major_release() -> None:
+    """CONTRIBUTING.md promises a breaking change forces a major release.
+
+    commit-analyzer falls back to its default rules (where a breaking change
+    means major) only when no custom rule matches, so the custom ``feat`` ->
+    ``minor`` rule alone turned ``feat!:`` into a minor release.
+    """
+    assert "forces\na **major** release" in CONTRIBUTING.read_text(encoding="utf-8")
+    release_rules = _plugin_config(_releaserc(), "@semantic-release/commit-analyzer")
+    assert {"breaking": True, "release": "major"} in release_rules["releaseRules"]
 
 
 def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
