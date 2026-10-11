@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.util
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -59,6 +60,14 @@ class _Op:
         self._cur.execute(sql)
 
 
+def _skip_or_fail(reason: str) -> None:
+    """Skip locally; fail in the integration_test job, which promises a DB."""
+    strict = os.environ.get("BASELITH_TEST_INTEGRATION_STRICT", "").strip().lower()
+    if strict in {"1", "true", "yes", "on"}:
+        pytest.fail(f"skipped under BASELITH_TEST_INTEGRATION_STRICT=1: {reason}")
+    pytest.skip(reason)
+
+
 @contextlib.contextmanager
 def _postgres_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     from tests.integration.test_tool_ledger_postgres import (
@@ -68,9 +77,9 @@ def _postgres_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     )
 
     if not _real_db_enabled():
-        pytest.skip("set BASELITH_TEST_REAL_DB=1 to run against a real Postgres")
+        _skip_or_fail("set BASELITH_TEST_REAL_DB=1 to run against a real Postgres")
     if not _pg_available():
-        pytest.skip("PostgreSQL not reachable (docker compose up -d postgres)")
+        _skip_or_fail("PostgreSQL not reachable (docker compose up -d postgres)")
 
     import psycopg
 

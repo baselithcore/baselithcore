@@ -1193,7 +1193,7 @@ jobs:
         # test creates for itself.
         run: python -m baselith.core.db.migrate
       - name: Run integration suite
-        # The three real-database modules outside tests/integration/ are
+        # The four real-database modules outside tests/integration/ are
         # named explicitly; they fail rather than skip under
         # BASELITH_TEST_INTEGRATION_STRICT. --no-cov: the coverage floor
         # belongs to python_test's full run.
@@ -1202,6 +1202,7 @@ jobs:
             tests/core/skill_evolution/test_store_postgres.py \
             tests/unit/core/orchestration/test_checkpoint_store_contract.py \
             tests/unit/core/orchestration/test_checkpoint_lease_clock.py \
+            tests/unit/mcp/test_mcp_task_durability.py \
             -m "not slow" --no-cov -q -rs
 
   # ============================================================

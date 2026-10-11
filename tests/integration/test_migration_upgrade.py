@@ -138,6 +138,26 @@ SEEDS: dict[str, dict[str, Any]] = {
             "created_at": 1.0,
         },
     },
+    "online_eval_results": {
+        "key": "id",
+        "row": {
+            "id": MARKER,
+            "intent": "qa",
+            "source": "checks",
+            "score": 1.0,
+            "quality": "good",
+            "created_at": 1.0,
+        },
+    },
+    "mcp_tasks": {
+        "key": "task_id",
+        "row": {
+            "task_id": MARKER,
+            "status": "working",
+            "expires_at": 1.0,
+            "updated_at": 1.0,
+        },
+    },
 }
 
 #: Tables at head that deliberately carry no seed row.
