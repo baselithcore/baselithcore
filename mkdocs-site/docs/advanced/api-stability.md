@@ -26,8 +26,8 @@ The current split:
 
 | Tier | Packages |
 | --- | --- |
-| `stable` | `baselith`, `baselith.core.agent`, `baselith.core.api`, `baselith.core.config`, `baselith.core.plugins` |
-| `beta` | 40 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.auth`, `baselith.core.services`, … |
+| `stable` | `baselith`, `baselith.core.agent`, `baselith.core.api`, `baselith.core.auth`, `baselith.core.config`, `baselith.core.events`, `baselith.core.guardrails`, `baselith.core.lifecycle`, `baselith.core.middleware`, `baselith.core.models`, `baselith.core.observability`, `baselith.core.plugins`, `baselith.core.security` |
+| `beta` | 32 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.task_queue`, `baselith.core.services`, … |
 | `experimental` | 19 packages — the cognitive and research surface: `baselith.core.swarm`, `baselith.core.meta`, `baselith.core.planning`, `baselith.core.skill_evolution`, … |
 | `deprecated` | `baselith.core.doc_sources`, `baselith.core.routers`, `baselith.core.scraper` — the domain shims frozen by the Sacred Core rule |
 
@@ -92,6 +92,14 @@ itself a breaking change. The gate enforces this against the tiers recorded in
 Promotion is a deliberate line in a diff, and it is earned: a package is
 promoted when its shape has held across releases, it is documented, and it is
 covered by tests.
+
+1.0 promoted eight packages on that evidence: `auth`, `events`, `guardrails`,
+`lifecycle`, `middleware`, `models`, `observability` and `security`. Each
+removed no public symbol in the releases since mid-September 2026, each has
+its own reference page, each is at or above 85% branch coverage, and together
+they are most of what the bundled plugins import. The packages that 1.0 work
+is still reshaping (`orchestration` and `task_queue` around durable execution,
+`mcp` with its specification) or that sit below the coverage bar stay `beta`.
 
 ## Announcing a deprecation
 
